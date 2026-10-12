@@ -345,6 +345,16 @@ class AdminSessionChangedError extends Error {
   }
 }
 
+type AppConnectionScope = { accountId: string; productSpaceId: string }
+type AppConnectionSelection = { connectionSlug: string; model?: string }
+let productSpaceAppConnectionResolver: ((scope: AppConnectionScope) => Promise<AppConnectionSelection>) | null = null
+
+/** Installed by the trusted Admin session owner, never supplied by a renderer. */
+export async function resolveProductSpaceAppConnection(scope: AppConnectionScope): Promise<AppConnectionSelection> {
+  if (!productSpaceAppConnectionResolver) throw new Error('Admin session owner is unavailable')
+  return productSpaceAppConnectionResolver(scope)
+}
+
 /**
  * Serializes trusted Admin session transitions. The session generation, login
  * attempt, and ending snapshot are advanced only by code running under
@@ -741,6 +751,21 @@ export function registerAdminHandlers(
   const sessions = new AdminSessionCoordinator(
     closeCatalogAuthorizationForAccount,
   )
+  productSpaceAppConnectionResolver = async scope => {
+    if (!isRuntimeFenceBoundToAccount(scope.accountId)
+      || getRuntimeActiveProductSpace() !== scope.productSpaceId
+      || isSwitchInProgress() || isRuntimeOfflineReadOnly()
+      || isRuntimeProductSpaceRestricted(scope.productSpaceId)) {
+      throw new Error('Original App space is not active')
+    }
+    const synced = await syncAdminConnections({
+      adminUrl: requireAdminUrl(), manager: getCredentialManager(), sessions, deps,
+      requiredScope: scope,
+    })
+    if (!synced.defaultConnection) throw new Error('Space compute is not ready')
+    return { connectionSlug: synced.defaultConnection, model: synced.defaultModel }
+  }
+
 
   // One-shot trusted credential restore for the synchronous authenticated-
   // account mirror: reads the persisted Admin credentials once and commits
@@ -3362,7 +3387,9 @@ async function syncAdminConnections(args: {
   sessions: AdminSessionCoordinator
   session?: AdminSessionSnapshot
   deps?: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>
+  requiredScope?: AppConnectionScope
 }): Promise<{
+  defaultModel?: string
   configVersion: string
   connectionCount: number
   defaultConnection: string | null
@@ -3386,6 +3413,20 @@ async function syncAdminConnections(args: {
     session = tokens.session
   }
   const requestContext: AdminRequestContext = { session }
+  const fenceGeneration = getRuntimeFenceGeneration()
+  const activeSpaceId = isRuntimeFenceBoundToAccount(session.tokens.userId)
+    ? getRuntimeActiveProductSpace() : null
+  const requestedSpaceId = args.requiredScope?.productSpaceId ?? activeSpaceId
+  const assertScope = () => {
+    if (getRuntimeFenceGeneration() !== fenceGeneration
+      || args.requiredScope && (session.tokens.userId !== args.requiredScope.accountId
+        || !isRuntimeFenceBoundToAccount(args.requiredScope.accountId)
+        || getRuntimeActiveProductSpace() !== args.requiredScope.productSpaceId
+        || isSwitchInProgress() || isRuntimeOfflineReadOnly() || isRuntimeProductSpaceRestricted(args.requiredScope.productSpaceId))) {
+      throw new AdminSessionChangedError()
+    }
+  }
+  assertScope()
   try {
     const client = createAuthenticatedAdminClient(
       args.adminUrl,
@@ -3395,11 +3436,25 @@ async function syncAdminConnections(args: {
     )
     const response = await client.getLlmConnections(
       requestContext.session.tokens.accessToken,
+      requestedSpaceId ?? undefined,
     )
+    assertScope()
+    const wrongRequestedScope = args.requiredScope && response.productSpaceId !== requestedSpaceId
+    const wrongScopedConnection = response.productSpaceId && (
+      (requestedSpaceId && response.productSpaceId !== requestedSpaceId)
+      || response.connections.some(connection => connection.slug !== `polo-space-${response.productSpaceId}`)
+      || (response.defaultConnection !== null && response.defaultConnection !== `polo-space-${response.productSpaceId}`)
+    )
+    if (wrongRequestedScope || wrongScopedConnection) {
+      throw new AdminError('Compute configuration belongs to another ProductSpace', 'FORBIDDEN')
+    }
     const applied = await args.sessions.mutateIfCurrent(
       args.manager,
       requestContext.session,
-      async () => {
+      // Global lock order is Admin session → ProductSpace switch, matching
+      // account replacement. Network I/O stays outside both mutation locks.
+      async () => withSwitchLock(async () => {
+        assertScope()
         const incomingSlugs = new Set(
           response.connections.map(connection => connection.slug),
         )
@@ -3430,13 +3485,14 @@ async function syncAdminConnections(args: {
           setDefaultLlmConnection(response.defaultConnection)
         }
         setAdminConfigVersion(response.configVersion)
-      },
+      }, { phase: 'compute-connection-commit', productSpaceId: requestedSpaceId }),
     )
     if (!applied.applied) throw new AdminSessionChangedError()
     return {
       configVersion: response.configVersion,
       connectionCount: response.connections.length,
       defaultConnection: response.defaultConnection,
+      ...(response.productSpaceId ? { defaultModel: response.connections.find(connection => connection.slug === response.defaultConnection)?.defaultModel } : {}),
       session: requestContext.session,
     }
   } catch (error) {

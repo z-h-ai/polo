@@ -199,8 +199,8 @@ class MockAdminClient {
     return adminClientBehavior.logout(accessToken)
   }
 
-  async getLlmConnections(accessToken: string) {
-    adminClientCalls.push({ method: 'getLlmConnections', args: [accessToken], accessToken })
+  async getLlmConnections(accessToken: string, productSpaceId?: string) {
+    adminClientCalls.push({ method: 'getLlmConnections', args: productSpaceId ? [accessToken, productSpaceId] : [accessToken], accessToken })
     return adminClientBehavior.getLlmConnections(accessToken)
   }
 
@@ -341,6 +341,9 @@ const mockCredentialManager = {
   list: listStoredCredentials,
   delete: deleteStoredCredential,
 }
+
+// This suite exercises Admin ownership; installation journal I/O has its own tests.
+mock.module('../../runtime/native-installations', () => ({ setNativeInstallationTransport: () => {} }))
 
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
@@ -561,6 +564,7 @@ mock.module('../../runtime/product-space-catalog-authority-commit', commitModule
 const {
   readApiKey,
   registerAdminHandlers,
+  resolveProductSpaceAppConnection,
   __bumpProductSpaceCatalogSyncFenceForTests,
   __latestProductSpaceCatalogSyncInvocationForTests,
   __productSpaceCatalogSyncScopeCountForTests,
@@ -5249,5 +5253,68 @@ describe('registerAdminHandlers', () => {
       expect.stringContaining('continuing fail-closed cleanup'),
       'runtime cleanup failed',
     )
+  })
+})
+
+
+describe('ProductSpace App dedicated compute resolution', () => {
+  async function setup() {
+    const harness = createHarness()
+    await harness.login({ clientId: 'client-1', workspaceId: null, webContentsId: null }, 'admin', 'secret')
+    setRuntimeActiveProductSpaceAccount('user-1')
+    setRuntimeActiveProductSpace('space-a')
+    const response = {
+      productSpaceId: 'space-a', configVersion: 'space-a-v1', defaultConnection: 'polo-space-space-a',
+      connections: [adminConnection({ slug: 'polo-space-space-a', apiKey: encryptedApiKey('dedicated-a'), defaultModel: 'space-model' })],
+    }
+    adminClientBehavior.getLlmConnections = async () => response
+    return response
+  }
+
+  it('gets the active space key and model instead of the old global connection', async () => {
+    await setup()
+    expect(await resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-a' }))
+      .toEqual({ connectionSlug: 'polo-space-space-a', model: 'space-model' })
+    expect(adminClientCalls.at(-1)?.args).toEqual(['access-token', 'space-a'])
+    expect(managerState.llmApiKeys.get('polo-space-space-a')).toBe('dedicated-a')
+    expect(managerState.llmApiKeys.has('admin-anthropic')).toBe(false)
+    expect(configState.connections.some(c => 'apiKey' in c)).toBe(false)
+  })
+
+  it('refuses another account or inactive space before fetching credentials', async () => {
+    await setup()
+    const before = adminClientCalls.length
+    await expect(resolveProductSpaceAppConnection({ accountId: 'user-2', productSpaceId: 'space-a' })).rejects.toThrow()
+    await expect(resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-b' })).rejects.toThrow()
+    expect(adminClientCalls.length).toBe(before)
+  })
+
+  it('refuses a server response for another space without installing its key', async () => {
+    const response = await setup()
+    response.productSpaceId = 'space-b'
+    await expect(resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-a' })).rejects.toThrow()
+    expect(managerState.llmApiKeys.has('polo-space-space-a')).toBe(false)
+  })
+
+  it('drops a delayed response after a space switch including A-B-A', async () => {
+    const response = await setup()
+    const wait = createDeferred<any>()
+    const entered = createDeferred<void>()
+    adminClientBehavior.getLlmConnections = async () => { entered.resolve(); return wait.promise }
+    const result = resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-a' })
+    await entered.promise
+    setRuntimeActiveProductSpace('space-b')
+    setRuntimeActiveProductSpace('space-a')
+    wait.resolve(response)
+    await expect(result).rejects.toThrow()
+    expect(managerState.llmApiKeys.has('polo-space-space-a')).toBe(false)
+  })
+
+  it('does not fall back to legacy credentials when scope compute is unready', async () => {
+    const response = await setup()
+    adminClientBehavior.getLlmConnections = async () => ({ ...response, defaultConnection: null, connections: [] })
+    await expect(resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-a' })).rejects.toThrow('Space compute is not ready')
+    expect(configState.connections).toHaveLength(0)
+    expect(managerState.llmApiKeys.has('admin-anthropic')).toBe(false)
   })
 })

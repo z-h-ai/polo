@@ -109,6 +109,8 @@ export interface AdminTransitEncryptedApiKey {
 }
 
 export interface AdminLlmConnectionsResponse {
+  /** Server-authorized space owning these dedicated compute credentials. */
+  productSpaceId?: string;
   configVersion: string;
   connections: AdminLlmConnection[];
   defaultConnection: string | null;

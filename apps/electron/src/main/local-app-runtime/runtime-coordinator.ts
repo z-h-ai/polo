@@ -78,6 +78,8 @@ export interface RuntimeCoordinatorAdapters {
     defaults?: { defaultLlmConnection?: string; model?: string }
   } | undefined | null
   getDefaultLlmConnection(): string | null
+  /** Trusted production resolver; never fall back after scoped resolution fails. */
+  resolveRuntimeConnection?(identity: ProductSpaceAppRuntimeIdentity): Promise<{ connectionSlug: string; model?: string }>
   sinks?: {
     reportResult?(input: Record<string, unknown>): Promise<{ revision: number }>
     reportFile?(input: Record<string, unknown>): Promise<{ revision: number }>
@@ -1357,13 +1359,16 @@ export class LocalAppRuntimeCoordinator {
     try {
       rootPath = await this.adapters.resolveWorkspaceRoot(runtime.workspaceId)
       if (!rootPath) return this.failAdmittedQuery(capGen, runId, requestId, 'host_configuration_unavailable')
-      const workspaceConfig = this.adapters.loadWorkspaceConfig(rootPath)
-      connectionSlug = workspaceConfig?.defaults?.defaultLlmConnection
+      const scoped = this.adapters.resolveRuntimeConnection
+        ? await this.adapters.resolveRuntimeConnection(runtime.identity)
+        : null
+      const workspaceConfig = scoped ? null : this.adapters.loadWorkspaceConfig(rootPath)
+      connectionSlug = scoped?.connectionSlug ?? workspaceConfig?.defaults?.defaultLlmConnection
         ?? this.adapters.getDefaultLlmConnection()
       if (!connectionSlug) {
         return this.failAdmittedQuery(capGen, runId, requestId, 'host_configuration_unavailable')
       }
-      model = workspaceConfig?.defaults?.model
+      model = scoped?.model ?? workspaceConfig?.defaults?.model
     } catch {
       return this.failAdmittedQuery(capGen, runId, requestId, 'host_failed')
     }

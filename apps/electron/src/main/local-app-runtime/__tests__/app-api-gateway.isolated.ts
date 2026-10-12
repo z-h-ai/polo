@@ -17,6 +17,8 @@ const IDENTITY = {
 }
 
 interface FixtureOptions {
+  resolveRuntimeConnection?: (identity: typeof IDENTITY) => Promise<{ connectionSlug: string; model?: string }>
+  onExecutorOptions?: (options: { connectionSlug: string; model?: string }) => void
   onStart?: () => void | Promise<void>
   onUsage?: () => void | Promise<void>
   onFinish?: () => void | Promise<void>
@@ -113,7 +115,9 @@ function createFixture(options: FixtureOptions = {}) {
         await options.onFinish?.()
       },
     },
-    createExecutor: () => {
+    ...(options.resolveRuntimeConnection ? { resolveRuntimeConnection: options.resolveRuntimeConnection } : {}),
+    createExecutor: executorOptions => {
+      options.onExecutorOptions?.(executorOptions)
       executorCounter += 1
       if (options.executorFactoryThrows) {
         throw new Error('executor factory exploded')
@@ -2371,5 +2375,41 @@ describe('POO-54 R14 shutdown multi-failure evidence preservation', () => {
       .toBeInstanceOf(Error)
     expect(((rejection as { cause?: Error }).cause)?.message).toBe('only-stop')
     expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
+  })
+})
+
+
+describe('scoped App connection selection', () => {
+  it('uses the trusted space connection and model instead of stale workspace defaults', async () => {
+    const options: unknown[] = []
+    const fixture = createFixture({
+      resolveRuntimeConnection: async identity => {
+        expect(identity).toEqual(IDENTITY)
+        return { connectionSlug: 'polo-space-a', model: 'space-model' }
+      },
+      onExecutorOptions: input => options.push(input),
+      executorResults: [() => completed('real result')],
+    })
+    try {
+      const runId = await startRun(fixture)
+      const result = await fixture.post('/ai/query', { runId, requestId: uuid(), prompt: 'hello', maxOutputTokens: 16, timeoutMs: 2000 })
+      expect(result.status).toBe(200)
+      expect(options).toEqual([{ connectionSlug: 'polo-space-a', model: 'space-model' }])
+    } finally { await fixture.coordinator.shutdown() }
+  })
+
+  it('refuses execution when scoped compute lookup fails rather than using a global key', async () => {
+    let executions = 0
+    const fixture = createFixture({
+      resolveRuntimeConnection: async () => { throw new Error('scope changed') },
+      onExecutorOptions: () => { executions++ },
+      executorResults: [() => completed('must not execute')],
+    })
+    try {
+      const runId = await startRun(fixture)
+      const result = await fixture.post('/ai/query', { runId, requestId: uuid(), prompt: 'hello', maxOutputTokens: 16, timeoutMs: 2000 })
+      expect(result.status).toBe(502)
+      expect(executions).toBe(0)
+    } finally { await fixture.coordinator.shutdown() }
   })
 })

@@ -443,8 +443,9 @@ export class AdminClient {
     });
   }
 
-  getLlmConnections(accessToken: string): Promise<AdminLlmConnectionsResponse> {
-    return this.request('/api/llm-connections', {
+  getLlmConnections(accessToken: string, productSpaceId?: string): Promise<AdminLlmConnectionsResponse> {
+    const suffix = productSpaceId ? `?productSpaceId=${encodeURIComponent(productSpaceId)}` : '';
+    return this.request(`/api/llm-connections${suffix}`, {
       method: 'GET',
       accessToken,
     });

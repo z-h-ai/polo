@@ -8,7 +8,8 @@ import {
 } from '@polo-ai/shared/config'
 import { loadWorkspaceConfig } from '@polo-ai/shared/workspaces'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
-import { createSessionlessHostLlmExecutor } from '@polo-ai/shared/agent/host-llm-executor'
+import { createElectronAppLlmExecutor } from './host-executor'
+import { resolveProductSpaceAppConnection } from '@polo-ai/server-core/handlers/rpc/admin'
 import { mainLog } from '../logger'
 import { AppBillingOutbox } from './app-billing-outbox'
 import { LocalAppRuntimeManager } from './manager'
@@ -103,7 +104,8 @@ export function getLocalAppRuntimeCoordinator(): LocalAppRuntimeCoordinator {
           return client.finishAppRun(await trustedAccessToken(options?.accountId, options?.adminOrigin), runId, input, options)
         },
       },
-      createExecutor: ({ connectionSlug, model, beforeSend }) => createSessionlessHostLlmExecutor({
+      resolveRuntimeConnection: identity => resolveProductSpaceAppConnection(identity),
+      createExecutor: ({ connectionSlug, model, beforeSend }) => createElectronAppLlmExecutor({
         connectionSlug,
         ...(beforeSend ? { beforeSend } : {}),
         ...(model ? { model } : {}),

@@ -38,7 +38,10 @@ export function productSpaceSwitchToken(productSpaceId: string): ProductSpaceSwi
 export type TestHolderToken = { phase: 'test-holder' }
 export type TestThrowingToken = { phase: 'test-throwing' }
 
+export type ComputeConnectionCommitToken = { phase: 'compute-connection-commit'; productSpaceId: string | null }
+
 export type SwitchLockToken =
+  | ComputeConnectionCommitToken
   | CatalogAuthorityCommitToken
   | CatalogAuthorityRevokeToken
   | RuntimePublicMutexToken
