@@ -3480,7 +3480,9 @@ describe('local app production status projection (R34-3)', () => {
     expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledTimes(1)
     // The result never exposes the capability token or the gateway URL.
     expect(JSON.stringify(result)).not.toContain('capability-token')
-    expect(JSON.stringify(result)).not.toContain('127.0.0.1')
+    expect(result).toMatchObject({ uiUrl: 'http://127.0.0.1:9876' })
+    expect(JSON.stringify(result)).not.toContain('http://127.0.0.1:9/local-app-api/v1')
+    expect(JSON.stringify(result)).not.toContain('POLO_APP_API_TOKEN')
     // The active projection is published through the single center.
     const { getAppRuntimeCenter } = await import('@polo-ai/server-core/runtime')
     const projection = getAppRuntimeCenter().findByIdentity({

@@ -52,7 +52,7 @@ function ClientHomeSurface({
 }
 
 export function TabContent({ renderPolo, onReauthenticateRequest }: TabContentProps) {
-  const { activeTab, openTabs } = useTabShell()
+  const { activeTab, openTabs, backgroundTabs = [] } = useTabShell()
   const activeType = activeTab.type
 
   return (
@@ -63,7 +63,7 @@ export function TabContent({ renderPolo, onReauthenticateRequest }: TabContentPr
 
       {activeType === 'home' && <ClientHomeSurface onReauthenticateRequest={onReauthenticateRequest} />}
 
-      {openTabs
+      {[...openTabs, ...backgroundTabs]
         .filter((tab) => tab.type === 'webapp')
         .map((tab) => (
           <WebTabLayer key={tab.id} tab={tab} active={activeTab.id === tab.id} />

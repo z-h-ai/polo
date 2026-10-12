@@ -35,6 +35,11 @@ export interface TabInstance {
   favicon?: string
   isLoading?: boolean
   url?: string
+  /** Ephemeral ProductSpace App tab. Its local UI URL must never be persisted/restored. */
+  productSpaceApp?: { accountId: string; productSpaceId: string; contextVersion: number }
+  runtimeError?: string
+  /** Explicit background choice hides the tab while retaining its guest. */
+  background?: boolean
 }
 
 export const HOME_TAB_ID = 'home'

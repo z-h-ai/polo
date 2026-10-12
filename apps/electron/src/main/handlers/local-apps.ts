@@ -1637,6 +1637,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   const startAndRegisterLocalApp = async (
     scope: CatalogLocalAppScope,
     startRuntime: () => Promise<{
+      url?: string
       version: string
       appId?: string
       runtimeKind?: 'python' | 'js' | 'static'
@@ -1927,6 +1928,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       return rollbackStarted
     }
     let start: {
+      url?: string
       version: string
       appId?: string
       runtimeKind?: 'python' | 'js' | 'static'
@@ -2105,6 +2107,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       runtimeGeneration: start.runtimeGeneration ?? 0,
       scopeGeneration: start.scopeGeneration ?? 0,
       runtimeKind: start.runtimeKind ?? 'static',
+      uiUrl: start.url,
       platformApi: start.runtimeKind && start.runtimeKind !== 'static'
         ? { status: 'available' as const }
         : { status: 'unavailable' as const, reason: 'static_runtime_unsupported' as const },

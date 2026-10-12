@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useTabShell } from '@/context/TabShellContext'
 import type { TabInstance } from '../../../shared/tab-browser-types'
 
@@ -32,6 +33,7 @@ function callWebviewMethod(webview: WebviewElement | null, method: 'goBack' | 'g
 }
 
 export function WebAppView({ tab }: WebAppViewProps) {
+  const { t } = useTranslation()
   const webviewRef = useRef<WebviewElement | null>(null)
   const { registerWebAppNavigation, updateTabInfo, webAppPartition } = useTabShell()
   const [canGoBack, setCanGoBack] = useState(false)
@@ -95,7 +97,7 @@ export function WebAppView({ tab }: WebAppViewProps) {
       webview.removeEventListener('page-favicon-updated', faviconUpdated)
       webview.removeEventListener('new-window', newWindow)
     }
-  }, [tab.id, updateTabInfo])
+  }, [tab.id, tab.url, updateTabInfo])
 
   const goBack = useCallback(() => {
     callWebviewMethod(webviewRef.current, 'goBack')
@@ -124,6 +126,12 @@ export function WebAppView({ tab }: WebAppViewProps) {
   }, [navigationControls, registerWebAppNavigation, tab.id])
 
   const url = tab.url || ''
+
+  if (tab.productSpaceApp && !url) return (
+    <div className="flex h-full items-center justify-center p-6 text-muted-foreground" role="status">
+      {tab.runtimeError ?? t('common.loading')}
+    </div>
+  )
 
   return (
     <div className="h-full min-h-0 bg-background">

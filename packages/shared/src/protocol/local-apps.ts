@@ -439,6 +439,8 @@ export interface ProductSpaceAppRuntimeStartResult {
   runtimeGeneration: number
   scopeGeneration: number
   runtimeKind: LocalAppRuntimeKind
+  /** Public loopback App UI from this exact start; never the capability gateway. Session-memory only. */
+  uiUrl?: string
   platformApi:
     | { status: 'available' }
     | { status: 'unavailable'; reason: 'static_runtime_unsupported' }
