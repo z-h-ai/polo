@@ -3532,10 +3532,14 @@ async function syncAdminConnections(args: {
     const cleaned = await args.sessions.mutateIfCurrent(
       args.manager,
       requestContext.session,
-      async () => {
+      // A rejected lookup still belongs to its original scope. Hold the
+      // same session → switch locks as a successful commit so an old error
+      // cannot erase credentials installed by a newer ProductSpace.
+      async () => withSwitchLock(async () => {
+        assertScope()
         setAdminConfigVersion(undefined)
         await deleteAdminManagedConnections(args.manager)
-      },
+      }, { phase: 'compute-connection-commit', productSpaceId: requestedSpaceId }),
     )
     if (!cleaned.applied) throw new AdminSessionChangedError()
     throw error

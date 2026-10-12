@@ -5312,6 +5312,43 @@ describe('ProductSpace App dedicated compute resolution', () => {
     expect(managerState.llmApiKeys.has('polo-space-space-a')).toBe(false)
   })
 
+  for (const returnToA of [false, true]) {
+    it(`preserves current credentials when old A lookup rejects after ${returnToA ? 'A-B-A' : 'A-B'} and a successful current sync`, async () => {
+      const responseA = await setup()
+      const delayed = createDeferred<any>()
+      const entered = createDeferred<void>()
+      adminClientBehavior.getLlmConnections = async () => { entered.resolve(); return delayed.promise }
+      const stale = resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-a' })
+        .then(() => null, error => error)
+      await entered.promise
+      setRuntimeActiveProductSpace('space-b')
+      if (returnToA) setRuntimeActiveProductSpace('space-a')
+      const currentSpace = returnToA ? 'space-a' : 'space-b'
+      const slug = `polo-space-${currentSpace}`
+      adminClientBehavior.getLlmConnections = async () => ({
+        ...responseA, productSpaceId: currentSpace, configVersion: 'current-version', defaultConnection: slug,
+        connections: [adminConnection({ slug, apiKey: encryptedApiKey('current-dedicated-key'), defaultModel: 'current-model' })],
+      })
+      await resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: currentSpace })
+      const installed = structuredClone(configState)
+      delayed.reject(new TestAdminError('old A network failed', 'NETWORK_ERROR'))
+      const failure = await stale
+      expect(configState).toEqual(installed)
+      expect(managerState.llmApiKeys.get(slug)).toBe('current-dedicated-key')
+      expect(failure?.name).toBe('AdminSessionChangedError')
+    })
+  }
+
+  it('still removes stale credentials when the current scope lookup fails', async () => {
+    await setup()
+    await resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-a' })
+    adminClientBehavior.getLlmConnections = async () => { throw new TestAdminError('current network failed', 'NETWORK_ERROR') }
+    await expect(resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-a' })).rejects.toThrow('current network failed')
+    expect(configState.connections).toHaveLength(0)
+    expect(configState.adminConfigVersion).toBeUndefined()
+    expect(managerState.llmApiKeys.has('polo-space-space-a')).toBe(false)
+  })
+
   it('does not fall back to legacy credentials when scope compute is unready', async () => {
     const response = await setup()
     adminClientBehavior.getLlmConnections = async () => ({ ...response, defaultConnection: null, connections: [] })
@@ -5331,7 +5368,7 @@ describe('Current-space payment browser handoff', () => {
   it('uses the current authenticated personal space and puts no credential in the browser URL', async () => {
     const h = await setup()
     adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal' }] })
-    const result = await h.paymentHandoff({})
+    const result = await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })
     expect(result).toMatchObject({ success: true, accountId: 'user-1', productSpaceId: 'space-a' })
     expect(new URL(result.url).pathname).toBe('/pay/space-a/credits/consumption')
     expect(new URL(result.url).search).toBe('')
@@ -5339,7 +5376,7 @@ describe('Current-space payment browser handoff', () => {
   it('denies current enterprise member even if another listed enterprise is owned', async () => {
     const h = await setup()
     adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'enterprise', role: 'member' }, { id: 'space-b', kind: 'enterprise', role: 'owner' }] })
-    expect(await h.paymentHandoff({})).toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
+    expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
   })
   it('discards a payment destination when the space changes during authority verification', async () => {
     const h = await setup()
@@ -5347,6 +5384,6 @@ describe('Current-space payment browser handoff', () => {
       setRuntimeActiveProductSpace('space-b'); setRuntimeActiveProductSpace('space-a')
       return { productSpaces: [{ id: 'space-a', kind: 'personal' }] }
     }
-    expect(await h.paymentHandoff({})).toMatchObject({ success: false })
+    expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false })
   })
 })
