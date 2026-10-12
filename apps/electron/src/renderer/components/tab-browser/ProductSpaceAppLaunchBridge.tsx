@@ -2,7 +2,7 @@ import { useEffect, useInsertionEffect, useLayoutEffect, useRef, useState } from
 import { useStore } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getAppCatalogApps } from '@polo-ai/shared/admin'
+import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
 import type { ProductSpaceAppRuntimeStartResult } from '@polo-ai/shared/protocol'
 import { useOptionalMemberCatalog } from '@/context/MemberCatalogContext'
 import { useOptionalProductSpaceContext, useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
