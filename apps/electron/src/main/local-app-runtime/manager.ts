@@ -318,6 +318,18 @@ export interface LocalAppRuntimeLogger {
   error(message: string, details?: unknown): void
 }
 
+/** Main-owned, per-install authority. Never serialized into renderer IPC or metadata. */
+export interface LocalAppDownloadTransport {
+  assertCurrent(): void
+  fetch(request: LocalAppInstallRequest, signal: AbortSignal): Promise<Response>
+}
+
+export interface LocalAppInstallOptions {
+  signal?: AbortSignal
+  nativeInstallationAdmissionId?: string
+  downloadTransport?: LocalAppDownloadTransport
+}
+
 export interface LocalAppRuntimeManagerOptions {
   rootDir: string
   platform?: LocalAppPlatform
@@ -524,7 +536,7 @@ export class LocalAppRuntimeManager {
 
   install(
     request: LocalAppInstallRequest,
-    options: { signal?: AbortSignal; nativeInstallationAdmissionId?: string } = {},
+    options: LocalAppInstallOptions = {},
   ): Promise<LocalAppInstalledApp> {
     const validated = this.validateInstallRequest(request)
     if (this.shuttingDown) {
@@ -573,7 +585,7 @@ export class LocalAppRuntimeManager {
     )
     if (options.signal?.aborted) abortFromCaller()
     else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
-    const promise = this.performInstall(validated, controller.signal, options.nativeInstallationAdmissionId)
+    const promise = this.performInstall(validated, controller.signal, options.nativeInstallationAdmissionId, options.downloadTransport)
       .finally(() => {
         clearTimeout(timeout)
         options.signal?.removeEventListener('abort', abortFromCaller)
@@ -1397,8 +1409,11 @@ export class LocalAppRuntimeManager {
     request: LocalAppInstallRequest,
     signal: AbortSignal,
     nativeInstallationAdmissionId?: string,
+    downloadTransport?: LocalAppDownloadTransport,
   ): Promise<LocalAppInstalledApp> {
+    downloadTransport?.assertCurrent()
     await this.initialize()
+    downloadTransport?.assertCurrent()
     const existingMetadata = await this.readMetadata(request.appId)
     const existingVersion = existingMetadata?.versions[request.version]
     if (existingVersion && existingVersion.checksum !== request.checksum) {
@@ -1429,6 +1444,7 @@ export class LocalAppRuntimeManager {
       if (!installed) {
         throw new LocalAppRuntimeError('NOT_INSTALLED', `Metadata for ${request.appId} is incomplete`)
       }
+      downloadTransport?.assertCurrent()
       return installed
     }
 
@@ -1437,7 +1453,8 @@ export class LocalAppRuntimeManager {
     const extractedPath = join(stagingRoot, 'bundle')
     try {
       this.setInstallProgress(request, 'downloading', 0)
-      await this.downloadBundle(request, archivePath, signal)
+      await this.downloadBundle(request, archivePath, signal, downloadTransport)
+      downloadTransport?.assertCurrent()
       this.throwIfCancelled(signal)
 
       this.setInstallProgress(request, 'verifying', request.sizeBytes)
@@ -1469,6 +1486,7 @@ export class LocalAppRuntimeManager {
 
       const nextMetadata = await this.enqueueLifecycle(request.appId, async () => {
         this.throwIfCancelled(signal)
+        downloadTransport?.assertCurrent()
         const appDir = this.getAppDir(request.appId)
         const versionsDir = join(appDir, 'versions')
         const targetDir = this.getVersionDir(request.appId, request.version)
@@ -1506,6 +1524,7 @@ export class LocalAppRuntimeManager {
             ? { availableRelease: metadata.availableRelease }
             : {}),
         }
+        downloadTransport?.assertCurrent()
         await this.writeMetadata(committedMetadata)
         return committedMetadata
       })
@@ -1555,13 +1574,14 @@ export class LocalAppRuntimeManager {
     request: LocalAppInstallRequest,
     destination: string,
     signal: AbortSignal,
+    downloadTransport?: LocalAppDownloadTransport,
   ): Promise<void> {
     let response: Response
     try {
-      response = await this.fetchImpl(request.downloadUrl, {
-        signal,
-        redirect: 'follow',
-      })
+      downloadTransport?.assertCurrent()
+      response = downloadTransport
+        ? await downloadTransport.fetch(request, signal)
+        : await this.fetchImpl(request.downloadUrl, { signal, redirect: 'follow' })
     } catch (error) {
       if (signal.aborted) {
         throw this.getAbortError(
@@ -1594,6 +1614,7 @@ export class LocalAppRuntimeManager {
     try {
       for await (const rawChunk of response.body as unknown as AsyncIterable<Uint8Array>) {
         this.throwIfCancelled(signal)
+        downloadTransport?.assertCurrent()
         const chunk = Buffer.from(rawChunk)
         downloaded += chunk.length
         if (downloaded > request.sizeBytes) {

@@ -16,6 +16,7 @@ import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
 import { normalizeCatalogSemVer } from '@polo-ai/shared/admin/semver'
 import {
   LocalAppRuntimeManager,
+  type LocalAppInstallOptions,
   type ExactVersionStartHooks,
   type ExactVersionStartResult,
   type LocalAppRuntimeLogger,
@@ -215,7 +216,7 @@ export class ScopedLocalAppRuntimeRegistry {
 
   async install(
     request: ScopedCatalogInstallRequest,
-    options: { signal?: AbortSignal; nativeInstallationAdmissionId?: string } = {},
+    options: LocalAppInstallOptions = {},
   ): Promise<LocalAppInstalledApp> {
     if (!normalizeCatalogSemVer(request.version)) {
       throw new LocalAppRuntimeError(

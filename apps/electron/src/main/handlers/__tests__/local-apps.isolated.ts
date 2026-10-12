@@ -138,7 +138,7 @@ const resolveProductSpaceLaunch = mock(async () => ({
   payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-a' },
   delivery: {
     kind: 'bundle' as const,
-    downloadUrl: 'https://catalog.example/product-space-app.zip',
+    downloadUrl: 'https://admin.example.com/api/product-spaces/organization-a/artifacts/artifact-instance-a/versions/version-a/download?launch=issued-nonce-123456',
     expiresAt: '2099-01-01T00:10:00.000Z',
     checksum: 'b'.repeat(64),
     sizeBytes: 456,
@@ -786,6 +786,40 @@ describe('local app main-process authorization boundary', () => {
       appId: 'artifact-instance-a',
       currentVersion: '2.3.4',
     })
+  })
+
+  it('rejects a server download grant on a different origin before install', async () => {
+    const launch = await resolveProductSpaceLaunch()
+    resolveProductSpaceLaunch.mockImplementationOnce(async () => ({
+      ...launch, delivery: { ...launch.delivery, downloadUrl: launch.delivery.downloadUrl.replace('admin.example.com', 'attacker.example') },
+    }))
+    await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!(context, { app: productSpaceAppIdentity() }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedInstall).not.toHaveBeenCalled()
+  })
+
+  it('rejects an A→B→A scope transition while resolve-launch is in flight', async () => {
+    const launch = await resolveProductSpaceLaunch()
+    resolveProductSpaceLaunch.mockImplementationOnce(async () => {
+      setRuntimeActiveProductSpace('organization-b')
+      setRuntimeActiveProductSpace('organization-a')
+      return launch
+    })
+    await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!(context, { app: productSpaceAppIdentity() }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedInstall).not.toHaveBeenCalled()
+  })
+
+  it('rejects same-account replacement while resolve-launch is in flight', async () => {
+    const launch = await resolveProductSpaceLaunch()
+    resolveProductSpaceLaunch.mockImplementationOnce(async () => {
+      setSyncTrustedProductSpaceAccountId('account-b')
+      setSyncTrustedProductSpaceAccountId('account-a')
+      return launch
+    })
+    await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!(context, { app: productSpaceAppIdentity() }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedInstall).not.toHaveBeenCalled()
   })
 
   it('fails closed before install when an artifact version tuple is stale', async () => {

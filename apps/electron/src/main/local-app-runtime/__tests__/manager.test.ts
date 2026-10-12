@@ -2487,3 +2487,32 @@ describe('POO-54 R14 shutdown orchestration (coordinator AggregateError stays a 
     expect(managerShutdownCalls).toBe(1)
   })
 })
+
+
+describe('authenticated ProductSpace bundle byte boundary', () => {
+  it('uses the per-install bodyless POST transport instead of generic unauthenticated GET', async () => {
+    const appId = 'demo.authenticated-download'
+    const archive = await archiveBundle(await writeBundle(appId, '1.0.0', {}, { 'dist/index.html': 'ok' }), 'authenticated')
+    const url = 'https://admin.example/api/personal-entitlements/artifacts/app/versions/version/download?space=space&launch=issued-nonce-123456'
+    const calls: RequestInit[] = []
+    const bytes = async (_url: unknown, init?: RequestInit) => {
+      calls.push(init ?? {})
+      return init?.method === 'POST' && new Headers(init.headers).get('authorization') === 'Bearer business-session'
+        ? new Response(new Uint8Array(archive), { headers: { 'content-length': String(archive.length) } })
+        : new Response('Use authenticated POST', { status: 400 })
+    }
+    manager = new LocalAppRuntimeManager({ rootDir: join(testRoot, 'runtime'), fetch: bytes as typeof fetch })
+    const downloadTransport = {
+      assertCurrent() {},
+      fetch: (request: LocalAppInstallRequest, signal: AbortSignal) => bytes(request.downloadUrl, {
+        method: 'POST', headers: { Authorization: 'Bearer business-session' }, redirect: 'error', signal,
+      }),
+    }
+    const installed = await manager.install(requestFor(appId, '1.0.0', url, archive), { downloadTransport })
+    expect(installed.currentVersion).toBe('1.0.0')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.method).toBe('POST')
+    expect(calls[0]!.body).toBeUndefined()
+    expect(calls[0]!.redirect).toBe('error')
+  })
+})
