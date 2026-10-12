@@ -696,6 +696,7 @@ export interface ElectronAPI {
   adminValidate(): Promise<AdminValidateResult>
   adminLogout(): Promise<SessionLogoutResult>
   adminGetStatus(): Promise<AdminStatusResult>
+  adminPaymentHandoff(): Promise<{ success: true; url: string; accountId: string; productSpaceId: string } | { success: false; errorCode: string; message: string }>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
   adminSyncAppCatalog(
     organizationId: string,

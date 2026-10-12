@@ -2231,6 +2231,8 @@
   "toolbar.escapeToInterrupt": "Naciśnij <kbd>Esc</kbd> ponownie, aby przerwać",
   "topbar.account.label": "Konto",
   "topbar.account.logout": "Wyloguj się",
+  "topbar.account.payment": "Kredyty i użycie",
+  "topbar.account.paymentError": "Nie można otworzyć rozliczeń tej przestrzeni. Spróbuj ponownie.",
   "topbar.account.preferences": "Konto i preferencje",
   "topbar.account.toggleTheme": "Przełącz motyw",
   "topbar.account.workspaces": "Workspaces",

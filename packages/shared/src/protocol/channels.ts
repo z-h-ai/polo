@@ -211,6 +211,7 @@ export const RPC_CHANNELS = {
     LOGOUT: 'admin:logout',
     GET_STATUS: 'admin:getStatus',
     SYNC_CONNECTIONS: 'admin:syncConnections',
+    PAYMENT_HANDOFF: 'admin:paymentHandoff',
     SYNC_APP_CATALOG: 'admin:syncAppCatalog',
     LIST_ORGANIZATIONS: 'admin:listOrganizations',
     LIST_PRODUCT_SPACES: 'admin:listProductSpaces',

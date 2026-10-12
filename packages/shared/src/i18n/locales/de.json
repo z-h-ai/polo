@@ -2231,6 +2231,8 @@
   "toolbar.escapeToInterrupt": "Drücken Sie <kbd>Esc</kbd> erneut, um zu unterbrechen",
   "topbar.account.label": "Konto",
   "topbar.account.logout": "Abmelden",
+  "topbar.account.payment": "Guthaben und Nutzung",
+  "topbar.account.paymentError": "Die Abrechnung für diesen Bereich konnte nicht geöffnet werden. Bitte erneut versuchen.",
   "topbar.account.preferences": "Konto & Einstellungen",
   "topbar.account.toggleTheme": "Design wechseln",
   "topbar.account.workspaces": "Workspaces",

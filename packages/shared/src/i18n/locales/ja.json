@@ -2231,6 +2231,8 @@
   "toolbar.escapeToInterrupt": "<kbd>Esc</kbd>を再度押して中断",
   "topbar.account.label": "アカウント",
   "topbar.account.logout": "ログアウト",
+  "topbar.account.payment": "クレジットと使用量",
+  "topbar.account.paymentError": "このスペースの請求情報を開けませんでした。もう一度お試しください。",
   "topbar.account.preferences": "アカウントと設定",
   "topbar.account.toggleTheme": "テーマを切り替え",
   "topbar.account.workspaces": "Workspaces",

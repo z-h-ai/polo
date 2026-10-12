@@ -2231,6 +2231,8 @@
   "toolbar.escapeToInterrupt": "Nyomd meg az <kbd>Esc</kbd> gombot ismét a megszakításhoz",
   "topbar.account.label": "Fiók",
   "topbar.account.logout": "Kijelentkezés",
+  "topbar.account.payment": "Kreditek és használat",
+  "topbar.account.paymentError": "A tér számlázása nem nyitható meg. Próbálja újra.",
   "topbar.account.preferences": "Fiók és beállítások",
   "topbar.account.toggleTheme": "Téma váltása",
   "topbar.account.workspaces": "Workspaces",

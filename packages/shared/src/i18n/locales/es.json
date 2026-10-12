@@ -2231,6 +2231,8 @@
   "toolbar.escapeToInterrupt": "Presiona <kbd>Esc</kbd> de nuevo para interrumpir",
   "topbar.account.label": "Cuenta",
   "topbar.account.logout": "Cerrar sesión",
+  "topbar.account.payment": "Créditos y uso",
+  "topbar.account.paymentError": "No se pudo abrir la facturación de este espacio. Inténtalo de nuevo.",
   "topbar.account.preferences": "Cuenta y preferencias",
   "topbar.account.toggleTheme": "Cambiar tema",
   "topbar.account.workspaces": "Workspaces",

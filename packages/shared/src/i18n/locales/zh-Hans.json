@@ -2231,6 +2231,8 @@
   "toolbar.escapeToInterrupt": "再次按 <kbd>Esc</kbd> 以中断",
   "topbar.account.label": "账号",
   "topbar.account.logout": "退出登录",
+  "topbar.account.payment": "积分与用量",
+  "topbar.account.paymentError": "无法打开当前空间账单，请重试。",
   "topbar.account.preferences": "账号与偏好",
   "topbar.account.toggleTheme": "切换主题",
   "topbar.account.workspaces": "工作区",

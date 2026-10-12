@@ -20,8 +20,9 @@ import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbench
  * the new scope's own tabs hydrate (Review R33 fail-closed boundary).
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useInsertionEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import * as Icons from "lucide-react"
 import { useAtomValue } from "jotai"
 import { sessionMetaMapAtom } from "@/atoms/sessions"
@@ -122,6 +123,29 @@ export function TopBar() {
   const [runtimeDialogOpen, setRuntimeDialogOpen] = useState(false)
   const accountId = productSpace?.accountId ?? null
   const activeProductSpaceId = productSpace?.activeProductSpaceId ?? null
+  const paymentScope = useRef(productSpace)
+  useInsertionEffect(() => {
+    paymentScope.current = productSpace
+    return () => { paymentScope.current = null }
+  }, [productSpace])
+  const canOpenPayment = productSpace && !productSpace.pendingSwitch && (
+    productSpace.activeProductSpace.kind === 'personal' || productSpace.activeProductSpace.role === 'owner'
+  )
+  const openPayment = async () => {
+    const scope = paymentScope.current
+    if (!scope || scope.pendingSwitch) return
+    try {
+      const result = await window.electronAPI.adminPaymentHandoff()
+      const current = paymentScope.current
+      if (!current || current.accountId !== scope.accountId || current.activeProductSpaceId !== scope.activeProductSpaceId
+        || current.contextVersion !== scope.contextVersion || current.pendingSwitch) return
+      if (!result.success || result.accountId !== current.accountId || result.productSpaceId !== current.activeProductSpaceId) {
+        toast.error(t("topbar.account.paymentError")); return
+      }
+      await window.electronAPI.openUrl(result.url)
+    } catch { if (paymentScope.current === scope) toast.error(t("topbar.account.paymentError")) }
+  }
+
 
   // Trusted ProductSpace active-execution registry: the count and the runtime
   // dialog read ONLY from productSpaceListActiveExecutions (never from the
@@ -487,6 +511,10 @@ export function TopBar() {
                 <StyledDropdownMenuSeparator />
               </>
             )}
+            {canOpenPayment && <StyledDropdownMenuItem data-testid="topbar-payment" onClick={() => { void openPayment() }}>
+              <Icons.Coins className="h-4 w-4" />
+              {t("topbar.account.payment")}
+            </StyledDropdownMenuItem>}
             <ProductSpaceSwitcher />
             {theme && (
               <StyledDropdownMenuItem

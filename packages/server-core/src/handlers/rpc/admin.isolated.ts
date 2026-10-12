@@ -617,6 +617,7 @@ function createHarness() {
   registerAuthHandlers(server, deps, adminSessions)
 
   return {
+    paymentHandoff: requiredHandler(handlers, RPC_CHANNELS.admin.PAYMENT_HANDOFF),
     login: requiredHandler(handlers, RPC_CHANNELS.admin.LOGIN),
     getAuthConfig: requiredHandler(handlers, RPC_CHANNELS.admin.GET_AUTH_CONFIG),
     getPhoneAuthChallengeConfig: requiredHandler(
@@ -1894,6 +1895,7 @@ describe('registerAdminHandlers', () => {
       'listOrganizations',
       'login',
       'logout',
+      'paymentHandoff',
       'previewOrganizationJoin',
       'productSpaceCatalog',
       'productSpaceResolveLaunch',
@@ -5316,5 +5318,35 @@ describe('ProductSpace App dedicated compute resolution', () => {
     await expect(resolveProductSpaceAppConnection({ accountId: 'user-1', productSpaceId: 'space-a' })).rejects.toThrow('Space compute is not ready')
     expect(configState.connections).toHaveLength(0)
     expect(managerState.llmApiKeys.has('admin-anthropic')).toBe(false)
+  })
+})
+
+describe('Current-space payment browser handoff', () => {
+  async function setup() {
+    const h = createHarness()
+    await h.login({ clientId: 'client-1', workspaceId: null, webContentsId: null }, 'admin', 'secret')
+    setRuntimeActiveProductSpaceAccount('user-1'); setRuntimeActiveProductSpace('space-a')
+    return h
+  }
+  it('uses the current authenticated personal space and puts no credential in the browser URL', async () => {
+    const h = await setup()
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal' }] })
+    const result = await h.paymentHandoff({})
+    expect(result).toMatchObject({ success: true, accountId: 'user-1', productSpaceId: 'space-a' })
+    expect(new URL(result.url).pathname).toBe('/pay/space-a/credits/consumption')
+    expect(new URL(result.url).search).toBe('')
+  })
+  it('denies current enterprise member even if another listed enterprise is owned', async () => {
+    const h = await setup()
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'enterprise', role: 'member' }, { id: 'space-b', kind: 'enterprise', role: 'owner' }] })
+    expect(await h.paymentHandoff({})).toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
+  })
+  it('discards a payment destination when the space changes during authority verification', async () => {
+    const h = await setup()
+    adminClientBehavior.listProductSpaces = async () => {
+      setRuntimeActiveProductSpace('space-b'); setRuntimeActiveProductSpace('space-a')
+      return { productSpaces: [{ id: 'space-a', kind: 'personal' }] }
+    }
+    expect(await h.paymentHandoff({})).toMatchObject({ success: false })
   })
 })

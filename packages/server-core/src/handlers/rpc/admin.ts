@@ -1,3 +1,4 @@
+import { paymentHandoffUrl } from './payment-handoff'
 import {
   AdminClient,
   AdminError,
@@ -2064,6 +2065,27 @@ export function registerAdminHandlers(
         }
       },
     )
+  })
+
+  server.handle(RPC_CHANNELS.admin.PAYMENT_HANDOFF, async () => {
+    return callOrganization('paymentHandoff', async (client, accessToken, accountId) => {
+      const productSpaceId = getRuntimeActiveProductSpace()
+      const generation = getRuntimeFenceGeneration()
+      const assertCurrent = () => {
+        if (!productSpaceId || !isRuntimeFenceBoundToAccount(accountId)
+          || getRuntimeActiveProductSpace() !== productSpaceId
+          || getRuntimeFenceGeneration() !== generation || isSwitchInProgress()
+          || isRuntimeOfflineReadOnly()) throw new AdminSessionChangedError()
+      }
+      assertCurrent()
+      const list = await client.listProductSpaces(accessToken)
+      assertCurrent()
+      const space = list.productSpaces.find(item => item.id === productSpaceId)
+      if (!space || space.kind === 'enterprise' && space.role !== 'owner') {
+        throw new AdminError('Only the current space payer may open billing', 'FORBIDDEN')
+      }
+      return { url: paymentHandoffUrl(requireAdminUrl(), space), accountId, productSpaceId: space.id }
+    })
   })
 
   server.handle(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES, async () => {

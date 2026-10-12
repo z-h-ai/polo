@@ -31,10 +31,13 @@ const personal = { id: 'personal', kind: 'personal', name: '我的空间', acces
 const enterprise = { id: 'enterprise', kind: 'enterprise', enterpriseId: 'org-a', name: '合法企业', accessMode: 'active', role: 'member', payer: { kind: 'enterprise', enterpriseId: 'org-a' } } as ProductSpaceSummary
 const restricted = { ...enterprise, id: 'restricted', enterpriseId: 'org-b', name: '受限企业', accessMode: 'read_only', restrictionCode: 'billing_restricted' } as ProductSpaceSummary
 const select = mock(() => {})
+const paymentHandoff = mock(async () => ({ success: true, accountId: 'account-a', productSpaceId: 'personal', url: 'https://admin.example.com/pay/personal/credits/consumption' }))
+const openPaymentUrl = mock(async (_url: string) => {})
 function tree(active: ProductSpaceSummary, productSpaces = [personal, enterprise, restricted]) {
   // All execution reads stay on the real current account/space tuple.
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: {
     productSpaceListActiveExecutions: async () => ({ success: true, executions: [] }),
+    adminPaymentHandoff: paymentHandoff, openUrl: openPaymentUrl,
   } })
   return createElement(I18nextProvider, { i18n }, createElement(ProductSpaceProvider, {
     children: createElement(TopBar),
@@ -48,7 +51,7 @@ function tree(active: ProductSpaceSummary, productSpaces = [personal, enterprise
     },
   }))
 }
-afterEach(() => { cleanup(); select.mockClear(); selectLocalWorkspace.mockClear(); themeMode = 'light' })
+afterEach(() => { cleanup(); select.mockClear(); selectLocalWorkspace.mockClear(); themeMode = 'light'; paymentHandoff.mockClear(); openPaymentUrl.mockClear() })
 
 async function openSpaces() {
   const user = userEvent.setup()
@@ -108,4 +111,38 @@ describe('TopBar real account-menu ProductSpace entry', () => {
     expect(menu.style.getPropertyValue('--font-sans')).toBe('')
   })
 
+})
+
+
+describe('Account payment entry', () => {
+  it('opens the main-authorized personal payment page only after a click', async () => {
+    render(tree(personal))
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('topbar-account'))
+    expect(paymentHandoff).not.toHaveBeenCalled()
+    await user.click(screen.getByTestId('topbar-payment'))
+    await waitFor(() => expect(openPaymentUrl).toHaveBeenCalledWith('https://admin.example.com/pay/personal/credits/consumption'))
+  })
+  it('hides financial entry from enterprise members even if another enterprise is owned', async () => {
+    const owner = { ...enterprise, id: 'other', role: 'owner' } as ProductSpaceSummary
+    render(tree(enterprise, [personal, enterprise, owner]))
+    await userEvent.setup().click(screen.getByTestId('topbar-account'))
+    expect(screen.queryByTestId('topbar-payment')).toBeNull()
+    expect(paymentHandoff).not.toHaveBeenCalled()
+  })
+})
+
+
+it('drops a delayed browser handoff when the visible account space changes', async () => {
+  let resolveHandoff!: (value: any) => void
+  paymentHandoff.mockImplementationOnce(() => new Promise(resolve => { resolveHandoff = resolve }))
+  const view = render(tree(personal))
+  const user = userEvent.setup()
+  await user.click(screen.getByTestId('topbar-account'))
+  await user.click(screen.getByTestId('topbar-payment'))
+  await waitFor(() => expect(resolveHandoff).toBeDefined())
+  view.rerender(tree(enterprise))
+  resolveHandoff({ success: true, accountId: 'account-a', productSpaceId: personal.id, url: 'https://admin.example.com/pay/personal/credits/consumption' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(openPaymentUrl).not.toHaveBeenCalled()
 })
