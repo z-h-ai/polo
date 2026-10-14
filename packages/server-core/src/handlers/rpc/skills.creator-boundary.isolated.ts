@@ -37,7 +37,8 @@ await mkdir(workspaceOne.rootPath)
 await mkdir(workspaceTwo.rootPath)
 await mkdir(workspaceCaseCollision.rootPath)
 await mkdir(process.env.POLO_AI_CONFIG_DIR, {recursive:true})
-await writeFile(join(process.env.POLO_AI_CONFIG_DIR,'config.json'),JSON.stringify({workspaces:[workspaceOne,workspaceTwo,workspaceCaseCollision],activeWorkspaceId:workspaceOne.id,activeSessionId:null,authType:'api_key'}))
+await writeFile(join(process.env.POLO_AI_CONFIG_DIR,'config.json'),JSON.stringify({workspaces:[workspaceOne,workspaceTwo,workspaceCaseCollision],activeWorkspaceId:workspaceOne.id,activeSessionId:null,authType:'api_key',adminUrl:'https://admin.example.com'}))
+await writeFile(join(process.env.POLO_AI_CONFIG_DIR,'config-defaults.json'),JSON.stringify({defaults:{adminUrl:'https://admin.example.com'}}))
 let workspaceOrder = [workspaceOne, workspaceTwo, workspaceCaseCollision]
 const sessionId = 'session-one'
 const secondSessionId = 'session-two'

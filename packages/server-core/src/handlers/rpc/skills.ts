@@ -2,7 +2,7 @@ import { basename, dirname, join, resolve, sep } from 'path'
 import { constants as fsConstants, existsSync, readdirSync, statSync } from 'fs'
 import { access, realpath, stat } from 'node:fs/promises'
 import { RPC_CHANNELS, type SkillFile } from '@polo-ai/shared/protocol'
-import { getAdminUrl, getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { getAdminUrl } from '@polo-ai/shared/config'
 import {
   CLIENT_CREATOR_SKILL_COMMIT_CHECK,
   pushTyped,
@@ -558,20 +558,15 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.productSpace.UNINSTALL_SKILL, uninstallCanonical)
 
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
-  server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
+  server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, _workingDirectory?: string) => {
     await requireTrustedSkillsScope()
-    deps.platform.logger?.info(`SKILLS_GET: Loading skills for workspace: ${workspaceId}${workingDirectory ? `, workingDirectory: ${workingDirectory}` : ''}`)
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) {
-      deps.platform.logger?.error(`SKILLS_GET: Workspace not found: ${workspaceId}`)
-      return []
-    }
+    if (isRuntimeOfflineReadOnly()) return [] // No fresh permission; restored UI history remains separate.
+    const workspace = getBoundWorkspace(_ctx, workspaceId, deps)
+    if (!workspace) return []
     await ensureRecovered(workspace.rootPath)
-    // Validate workingDirectory exists on this server — a thin client may pass
-    // its local path which doesn't exist on the remote server's filesystem.
-    const effectiveWorkingDir = workingDirectory && existsSync(workingDirectory)
-      ? workingDirectory
-      : undefined
+    const activeSessionId = getClientActiveSession(_ctx.clientId, workspace.id)
+    const effectiveWorkingDir = activeSessionId
+      ? await deriveSessionWorkingDirectory(deps, workspace, activeSessionId) : undefined
     const skills = await loadSkillsWithCreatorState(workspace.rootPath, effectiveWorkingDir)
     deps.platform.logger?.info(`SKILLS_GET: Loaded ${skills.length} skills from ${workspace.rootPath}`)
     return skills
@@ -580,31 +575,21 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   // Get files in a skill directory
   server.handle(RPC_CHANNELS.skills.GET_FILES, async (_ctx, workspaceId: string, skillSlug: string) => {
     await requireTrustedSkillsScope()
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) {
-      deps.platform.logger?.error(`SKILLS_GET_FILES: Workspace not found: ${workspaceId}`)
-      return []
-    }
-
-    const { getWorkspaceSkillsPath } = await import('@polo-ai/shared/workspaces')
-
-    const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
-    let skillDir = join(skillsDir, skillSlug)
-    if (skillSlug.startsWith('canonical-')) {
-      const bound = getBoundWorkspace(_ctx, workspaceId, deps)
-      if (!bound) return []
-      const scope = { ...await requireTrustedSkillsScope(), fenceGeneration: getRuntimeFenceGeneration() }
-      const skill = (await loadCallableCanonicalSkills(bound.rootPath, scope)).find(skill => skill.slug === skillSlug)
-      await assertOriginalNativeSkillScope(scope, scope.fenceGeneration)
-      if (!skill) return []
-      skillDir = skill.path
-    }
+    const input = DeleteSkillRpcInputSchema.safeParse({workspaceId,skillSlug})
+    if (!input.success) return []
+    const workspace = getBoundWorkspace(_ctx, input.data.workspaceId, deps)
+    if (!workspace) return []
+    const activeSessionId = getClientActiveSession(_ctx.clientId, workspace.id)
+    const workingDirectory = activeSessionId ? await deriveSessionWorkingDirectory(deps,workspace,activeSessionId) : undefined
+    const skill = (await loadSkillsWithCreatorState(workspace.rootPath,workingDirectory)).find(row => row.slug === skillSlug)
+    if (!skill) return []
+    const skillDir = skill.path
 
     function scanDirectory(dirPath: string): SkillFile[] {
       try {
         const entries = readdirSync(dirPath, { withFileTypes: true })
         return entries
-          .filter(entry => !entry.name.startsWith('.')) // Skip hidden files
+          .filter(entry => !entry.name.startsWith('.') && !entry.isSymbolicLink() && (entry.isDirectory() || entry.isFile()))
           .map(entry => {
             const fullPath = join(dirPath, entry.name)
             if (entry.isDirectory()) {
@@ -1026,31 +1011,25 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     return { success: true }
   })
 
-  // Open skill SKILL.md in editor
-  server.handle(RPC_CHANNELS.skills.OPEN_EDITOR, async (_ctx, workspaceId: string, skillSlug: string) => {
+  const resolveVisibleSkill = async (ctx: RequestContext, workspaceId: string, skillSlug: string) => {
     await requireTrustedSkillsScope()
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) throw new Error('Workspace not found')
-    if (workspace.remoteServer) throw new Error('Open in editor is not available for remote workspaces')
-
-    const { getWorkspaceSkillsPath } = await import('@polo-ai/shared/workspaces')
-
-    const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
-    const skillFile = join(skillsDir, skillSlug, 'SKILL.md')
-    await deps.platform.openPath?.(skillFile)
+    const input = DeleteSkillRpcInputSchema.safeParse({workspaceId,skillSlug})
+    const workspace = input.success ? getBoundWorkspace(ctx,input.data.workspaceId,deps) : null
+    if (!workspace) throw new Error('Skill workspace context is unavailable')
+    if (workspace.remoteServer) throw new Error('Host open is not available for remote workspaces')
+    const activeSessionId = getClientActiveSession(ctx.clientId,workspace.id)
+    const workingDirectory = activeSessionId ? await deriveSessionWorkingDirectory(deps,workspace,activeSessionId) : undefined
+    const skill = (await loadSkillsWithCreatorState(workspace.rootPath,workingDirectory)).find(row => row.slug === skillSlug)
+    if (!skill) throw new Error('Skill is unavailable in the current ProductSpace')
+    return skill
+  }
+  server.handle(RPC_CHANNELS.skills.OPEN_EDITOR, async (ctx, workspaceId: string, skillSlug: string) => {
+    const skill = await resolveVisibleSkill(ctx,workspaceId,skillSlug)
+    if (skill.canonicalInstallation) throw new Error('Managed Skill instructions are read-only')
+    await deps.platform.openPath?.(join(skill.path,'SKILL.md'))
   })
-
-  // Open skill folder in Finder/Explorer
-  server.handle(RPC_CHANNELS.skills.OPEN_FINDER, async (_ctx, workspaceId: string, skillSlug: string) => {
-    await requireTrustedSkillsScope()
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) throw new Error('Workspace not found')
-    if (workspace.remoteServer) throw new Error('Show in Finder is not available for remote workspaces')
-
-    const { getWorkspaceSkillsPath } = await import('@polo-ai/shared/workspaces')
-
-    const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
-    const skillDir = join(skillsDir, skillSlug)
-    await deps.platform.showItemInFolder?.(skillDir)
+  server.handle(RPC_CHANNELS.skills.OPEN_FINDER, async (ctx, workspaceId: string, skillSlug: string) => {
+    const skill = await resolveVisibleSkill(ctx,workspaceId,skillSlug)
+    await deps.platform.showItemInFolder?.(skill.path)
   })
 }
