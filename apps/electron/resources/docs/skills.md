@@ -103,6 +103,12 @@ the desktop space, authorization, your enable/disable setting and preparing the
 current version on this device are separate states. Open **Manage skills** from
 the Polo assistant card to enable a distributed skill and download or update it.
 
+For ordinary requests, the assistant receives the names, descriptions and file
+conditions of eligible skills prepared in the current space. Selected descriptions
+are kept complete; when many skills exceed a turn's discovery budget, the assistant
+prioritizes relevant skills and states that others remain available by explicit
+selection. Discovery alone does not read instructions or authorize execution.
+
 ### globs (optional)
 Array of glob patterns. When a file matching these patterns is being worked on,
 the skill may be automatically suggested or activated.

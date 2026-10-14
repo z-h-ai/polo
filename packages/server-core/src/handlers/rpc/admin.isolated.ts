@@ -13,6 +13,7 @@ import type { HandlerDeps } from '../handler-deps'
 import {
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceAccount,
+  isRuntimeProductSpaceRestricted,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
@@ -5570,4 +5571,23 @@ it('Home full Catalog refresh retains management fence for verified read-only me
   expect(await h.productSpaceListSkills(ctx,'space-a')).toMatchObject({success:true,entries:[{enabled:true}]})
   adminClientBehavior.setProductSpaceSkillEnablement=async()=>({mutation:{productSpaceId:'space-a',artifactInstanceId:'skill-k',enabled:false},catalog:{contractVersion:1,productSpaceId:'space-a',catalogRevision:'off',entries:[{...skill,enabled:false}]}})
   expect(await h.productSpaceSetSkillEnablement(ctx,'space-a','skill-k',false)).toMatchObject({success:true,mutation:{enabled:false}})
+})
+
+it('a delayed read-only response cannot revoke newer current-space App authority', async () => {
+  failAuthorityRevoke=false;failAuthorityRecord=false;observeAuthorityRevoke=null
+  authorityRecordCalls.length=0;authorityRevokeCalls.length=0
+  const h=createHarness();const ctx={clientId:'renderer',workspaceId:null,webContentsId:null}
+  await h.login(ctx,'admin','secret')
+  setRuntimeActiveProductSpaceAccount('user-1');setRuntimeActiveProductSpace('space-a')
+  const pending=createDeferred<any>();const started=createDeferred<void>()
+  adminClientBehavior.listProductSpaces=async()=>{started.resolve();return pending.promise}
+  const old=h.productSpaceCatalog(ctx,'space-a');await started.promise
+  adminClientBehavior.listProductSpaces=async()=>({productSpaces:[{id:'space-a',kind:'enterprise',accessMode:'active'}]})
+  adminClientBehavior.getProductSpaceCatalog=async()=>({contractVersion:1,productSpaceId:'space-a',catalogRevision:'new-active',entries:[]})
+  expect(await h.productSpaceCatalog(ctx,'space-a')).toMatchObject({success:true})
+  pending.resolve({productSpaces:[{id:'space-a',kind:'enterprise',accessMode:'read_only'}]})
+  expect(await old).toMatchObject({success:false,errorCode:'REQUEST_SUPERSEDED'})
+  expect(authorityRevokeCalls).toEqual([])
+  expect(authorityRecordCalls).toHaveLength(1)
+  expect(isRuntimeProductSpaceRestricted('space-a')).toBe(false)
 })

@@ -96,6 +96,8 @@ import {
   isRuntimeFenceBoundToAccount,
   isRuntimeOfflineReadOnly,
   isRuntimeProductSpaceRestricted,
+  setRuntimeProductSpaceRestricted,
+  stopRegisteredProductSpaceExecutionsForSpace,
   isSwitchInProgress,
   revokeRuntimeProductSpaceFence,
   revokeRuntimeProductSpaceFenceIfBoundLocked,
@@ -2177,7 +2179,15 @@ export function registerAdminHandlers(
       // Fence generation observed at scope entry — the revocation only
       // applies while the live fence is still EXACTLY this one.
       let fenceGenerationAtEntry: number | null = null
-      return callOrganization(
+      type RestrictedCommit = {
+        accountId: string
+        productSpaceId: string
+        fenceGeneration: number
+        scopeKey: string
+        invocation: number
+      }
+      let restrictedCommit: RestrictedCommit | null = null
+      const response = await callOrganization(
         'getProductSpaceCatalog',
         async (client, accessToken, userId) => {
           // The fence registration happens the moment the request enters the
@@ -2203,7 +2213,7 @@ export function registerAdminHandlers(
             const context = list.productSpaces.find(
               space => space.id === requestedSpaceId.data,
             )
-            if (!context || context.accessMode !== 'active') {
+            if (!context) {
               throw new AdminError(
                 'The requested ProductSpace is not available for this account',
                 'FORBIDDEN',
@@ -2214,6 +2224,25 @@ export function registerAdminHandlers(
                 'The requested ProductSpace is not available for this account',
                 'FORBIDDEN',
               )
+            }
+
+            if (context.accessMode === 'read_only') {
+              if (!isLatestProductSpaceCatalogSync(catalogSyncKey, syncInvocation)) {
+                return supersededCatalogResult()
+              }
+              return {
+                __restrictedCommit: {
+                  accountId: userId,
+                  productSpaceId: context.id,
+                  fenceGeneration: fenceGenerationAtEntry!,
+                  scopeKey: catalogSyncKey,
+                  invocation: syncInvocation,
+                },
+                success: false,
+                errorCode: 'SPACE_RESTRICTED',
+                message: 'This ProductSpace is read-only',
+                accessMode: 'denied',
+              } as never
             }
 
             const result = await client.getProductSpaceCatalog(
@@ -2270,6 +2299,37 @@ export function registerAdminHandlers(
         },
         {
           onCurrentSuccess: result => {
+            const restricted = (result as { __restrictedCommit?: RestrictedCommit }).__restrictedCommit
+            if (restricted) {
+              delete (result as { __restrictedCommit?: RestrictedCommit }).__restrictedCommit
+              return withSwitchLock(async () => {
+                if (!isLatestProductSpaceCatalogSync(restricted.scopeKey, restricted.invocation)) {
+                  Object.assign(result, {
+                    success: false,
+                    errorCode: 'REQUEST_SUPERSEDED',
+                    message: 'A newer Catalog request replaced this one',
+                  })
+                  return
+                }
+                if (getRuntimeActiveProductSpace() !== restricted.productSpaceId
+                  || !isRuntimeFenceBoundToAccount(restricted.accountId)
+                  || getRuntimeFenceGeneration() !== restricted.fenceGeneration
+                  || isRuntimeOfflineReadOnly() || isSwitchInProgress()) {
+                  throw new AdminSessionChangedError()
+                }
+                // Fence new execution first. Read-only membership retains only
+                // the current management scope; it creates no launch authority.
+                setRuntimeProductSpaceRestricted(restricted.productSpaceId, true)
+                restrictedCommit = restricted
+                revokeProductSpaceCatalogAuthority(restricted.accountId, restricted.productSpaceId)
+              }, {
+                phase: 'catalog-authority-revoke',
+                accountId: restricted.accountId,
+                productSpaceId: restricted.productSpaceId,
+                invocation: restricted.invocation,
+              })
+            }
+
             const commit = (result as {
               __authorityCommit?: {
               scopeKey: string
@@ -2374,13 +2434,33 @@ export function registerAdminHandlers(
           },
         },
       )
+      // Runtime shutdown may finish a Skill via the Admin coordinator. Do
+      // this after its session-current commit lock has been released.
+      const restricted = restrictedCommit as RestrictedCommit | null
+      if (restricted && getRuntimeActiveProductSpace() === restricted.productSpaceId
+        && isRuntimeFenceBoundToAccount(restricted.accountId)
+        && getRuntimeFenceGeneration() === restricted.fenceGeneration
+        && isRuntimeProductSpaceRestricted(restricted.productSpaceId)) {
+        const stopped = await stopRegisteredProductSpaceExecutionsForSpace(
+          restricted.accountId, restricted.productSpaceId,
+        )
+        if (!stopped.ok) return {
+          success: false as const,
+          errorCode: 'runtime_stop_failed',
+          message: 'The space remains restricted while executions finish',
+        }
+      }
+      return response
     })
 
-  const skillTurnCall = async <T>(scope: import('../../runtime/canonical-skills').CanonicalSkillScope, label: string, operation: (client: AdminClient, accessToken: string) => Promise<T>): Promise<T> => {
+  const skillTurnCall = async <T>(scope: import('../../runtime/canonical-skills').CanonicalSkillScope, operationKind: 'begin' | 'authorize' | 'finish', operation: (client: AdminClient, accessToken: string) => Promise<T>): Promise<T> => {
     const assertScope = () => {
-      if (getRuntimeActiveProductSpace() !== scope.productSpaceId || !isRuntimeFenceBoundToAccount(scope.accountId) || getRuntimeFenceGeneration() !== scope.fenceGeneration || isRuntimeOfflineReadOnly() || isRuntimeProductSpaceRestricted(scope.productSpaceId) || isSwitchInProgress()) throw new ProductSpaceDenialError('Original Skill turn scope changed', 'FORBIDDEN', 'local_scope_guard')
+      // Terminal cleanup consumes only the original immutable receipt. A
+      // read-only transition blocks begin/renew, while allowing that receipt
+      // to be finished under every other original account/session/fence guard.
+      if (getRuntimeActiveProductSpace() !== scope.productSpaceId || !isRuntimeFenceBoundToAccount(scope.accountId) || getRuntimeFenceGeneration() !== scope.fenceGeneration || isRuntimeOfflineReadOnly() || (operationKind !== 'finish' && isRuntimeProductSpaceRestricted(scope.productSpaceId)) || isSwitchInProgress()) throw new ProductSpaceDenialError('Original Skill turn scope changed', 'FORBIDDEN', 'local_scope_guard')
     }
-    const result = await callOrganization(label, async (client, accessToken, accountId, authority) => {
+    const result = await callOrganization(`skillTurn:${operationKind}`, async (client, accessToken, accountId, authority) => {
       assertScope()
       if (accountId !== scope.accountId) throw new ProductSpaceDenialError('Original Skill turn account changed', 'FORBIDDEN', 'local_scope_guard')
       const value = await operation(client, accessToken)
@@ -2395,8 +2475,8 @@ export function registerAdminHandlers(
     return result.value as T
   }
   bindCanonicalSkillTurnAuthority({
-    begin: (scope, input) => skillTurnCall(scope, 'beginSkillTurn', (client, token) => client.beginSkillTurn(token, scope.accountId, scope.productSpaceId, input)),
-    operate: (scope, receipt, operation) => skillTurnCall(scope, `skillTurn:${operation}`, (client, token) => client.operateSkillTurn(token, receipt, operation)),
+    begin: (scope, input) => skillTurnCall(scope, 'begin', (client, token) => client.beginSkillTurn(token, scope.accountId, scope.productSpaceId, input)),
+    operate: (scope, receipt, operation) => skillTurnCall(scope, operation, (client, token) => client.operateSkillTurn(token, receipt, operation)),
   })
 
   // This read projection grants no App launch or Skill execution authority.
