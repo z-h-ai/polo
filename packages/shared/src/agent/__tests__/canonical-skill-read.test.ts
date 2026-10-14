@@ -26,7 +26,7 @@ it('BaseAgent real chat resolves isolated native SKILL.md and registered prerequ
   expect(await agent.check('Read', { file_path: join(skill.path, 'SKILL.md') })).toContain('unavailable')
   expect(await agent.check('Bash', { command: 'echo instructions from this selected Skill' })).toContain('unavailable')
   expect(checks).toBeGreaterThanOrEqual(5)
-  await turn.return()
+  await turn.return(undefined as never)
   expect(await agent.check('Read', { file_path: join(skill.path, 'SKILL.md') })).toContain('no current')
 }))
 it('cold canonical paths and SDK plugin Skill cannot borrow ordinary workspace or global slug authority', async () => own(async (root, skill) => {
@@ -36,7 +36,7 @@ it('cold canonical paths and SDK plugin Skill cannot borrow ordinary workspace o
   const turn = bound.chat('Ordinary message'); await turn.next()
   expect(await bound.check('Skill', { skill: skill.slug })).toContain('Read-before-execute')
   expect(await bound.check('Read', { file_path: join(root, 'skills/ordinary/SKILL.md') })).toBeNull()
-  await turn.return()
+  await turn.return(undefined as never)
 }))
 
 it('cold unmentioned paths normalize double-slash, relative and symlink aliases before direct Read/Bash authorization', async () => own(async (root, skill) => {
@@ -57,8 +57,8 @@ it('actual chat generator uses one original UUID for every tool and finishes it 
   const first = agent.chat(`[skill:${skill.slug}] use it`); await first.next()
   await agent.check('Read', { file_path: join(skill.path, 'SKILL.md') })
   expect(new Set(calls).size).toBe(1); expect(calls[0]).toMatch(/^[a-f0-9-]{36}$/)
-  await first.return(); expect(finished).toEqual([calls[0]!])
-  const second = agent.chat(`[skill:${skill.slug}] new turn`); await second.next(); await second.return()
+  await first.return(undefined as never); expect(finished).toEqual([calls[0]!])
+  const second = agent.chat(`[skill:${skill.slug}] new turn`); await second.next(); await second.return(undefined as never)
   expect(finished[1]).not.toBe(finished[0])
   const deniedFinish: string[] = []
   const denied = new Consumer(createMockBackendConfig({ workspace: createMockWorkspace({ rootPath: root }), canonicalSkills: { load: async () => [skill], authorize: async () => { throw new Error('revoked') }, finish: async id => { deniedFinish.push(id) } } }))

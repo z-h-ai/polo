@@ -2316,5 +2316,20 @@
   "workspace.selectWorkspaceDesc": "选择此服务器上的 Workspace 或创建新的。",
   "workspace.selectWorkspacePlaceholder": "选择 Workspace...",
   "workspace.serverAuthToken": "服务器认证令牌",
-  "workspace.underDefaultFolder": ".polo-ai 文件夹下"
+  "workspace.underDefaultFolder": ".polo-ai 文件夹下",
+  "productSpaceSkills.title": "管理技能",
+  "productSpaceSkills.description": "先为自己启用技能，再在本设备准备当前版本。",
+  "productSpaceSkills.loading": "正在加载技能…",
+  "productSpaceSkills.failed": "无法确认技能状态，请检查连接后重试。",
+  "productSpaceSkills.retry": "重试",
+  "productSpaceSkills.empty": "当前空间没有可用技能。",
+  "productSpaceSkills.unavailable": "授权不可用",
+  "productSpaceSkills.enabled": "本人已启用",
+  "productSpaceSkills.disabled": "本人已停用",
+  "productSpaceSkills.prepared": "当前版本已准备",
+  "productSpaceSkills.unprepared": "当前版本未准备",
+  "productSpaceSkills.enable": "启用",
+  "productSpaceSkills.disable": "停用",
+  "productSpaceSkills.prepare": "下载 / 更新",
+  "productSpaceSkills.processing": "正在处理…"
 }

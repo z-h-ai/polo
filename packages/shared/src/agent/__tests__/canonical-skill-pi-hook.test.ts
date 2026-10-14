@@ -13,7 +13,7 @@ it('actual Pi PreToolUse never borrows B receipt after A automation wait and rej
   const root = await mkdtemp(join(tmpdir(), 'canonical-pi-turn-'))
   const path = join(root, '.polo/canonical-skills', 'a'.repeat(64), 'skills/slug')
   const checks: string[] = [], finished: string[] = []
-  const authority = { load: async () => [{ slug: `canonical-${'a'.repeat(64)}`, metadata: { name: 'slug', description: 'unit' }, content: 'instructions', path, source: 'workspace' as const }], authorize: async (_: string[], id: string) => { checks.push(id) }, finish: async (id: string) => { finished.push(id) } }
+  const authority = { load: async () => [{ slug: `canonical-${'a'.repeat(64)}`, metadata: { name: 'slug', description: 'unit' }, content: 'instructions', path, source: 'workspace' as const }], authorize: async (_: readonly string[], id: string) => { checks.push(id) }, finish: async (id: string) => { finished.push(id) } }
   const agent = new PausedPi(createMockBackendConfig({ provider: 'pi', workspace: createMockWorkspace({ rootPath: root }), session: createMockSession({ id: 'pi-turn-unit', workspaceRootPath: root, workingDirectory: root }), canonicalSkills: authority }))
   const internals = agent as unknown as { send: (r: Record<string, unknown>) => void; emitAutomationEvent: () => Promise<void>; handlePreToolUseRequest: (r: Record<string, unknown>) => Promise<void>; handleToolExecuteRequest: (r: Record<string, unknown>) => Promise<void>; routeToolCall: () => Promise<{content:string;isError:boolean}>; handleLine: (r: string) => void; handleSubprocessEvent: () => void }
   const sent: Record<string, unknown>[] = []; internals.send = r => { sent.push(r) }
@@ -22,7 +22,7 @@ it('actual Pi PreToolUse never borrows B receipt after A automation wait and rej
     const a = agent.chat(`[skill:canonical-${'a'.repeat(64)}] first`); await a.next(); const aId = checks[0]!
     const arrived = deferred(), release = deferred(); internals.emitAutomationEvent = async () => { arrived.resolve(); await release.promise }
     const oldRequest = internals.handlePreToolUseRequest({ requestId: 'old-A', canonicalTurnId: aId, toolName: 'Read', input: { file_path: join(path, 'SKILL.md') } })
-    await arrived.promise; await a.return(); expect(finished).toEqual([aId])
+    await arrived.promise; await a.return(undefined as never); expect(finished).toEqual([aId])
     const b = agent.chat(`[skill:canonical-${'a'.repeat(64)}] second`); await b.next(); const bId = checks.at(-1)!
     const bChecks = checks.filter(id => id === bId).length
     release.resolve(); await oldRequest
@@ -41,6 +41,6 @@ it('actual Pi PreToolUse never borrows B receipt after A automation wait and rej
     expect(forwarded).toBe(0)
     internals.handleLine(JSON.stringify({ type: 'event', canonicalTurnId: bId, event: { type: 'agent_end' } }))
     expect(forwarded).toBe(1)
-    await b.return()
+    await b.return(undefined as never)
   } finally { agent.destroy(); await rm(root, { recursive: true, force: true }) }
 })

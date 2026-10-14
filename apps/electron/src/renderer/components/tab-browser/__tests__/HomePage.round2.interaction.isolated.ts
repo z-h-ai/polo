@@ -771,7 +771,8 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
     expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
     expect(screen.queryByTestId('home-directory-no-match') === null).toBe(true)
-    fireEvent.click(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button'))
+    expect(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button', { name: i18n.t('productSpaceSkills.title') })).toBeTruthy()
+    fireEvent.click(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button', { name: i18n.t('homeApps.home.openAssistant') }))
     expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
     const workSource = Array.from(source.querySelectorAll('option')).find(option => option.value !== 'all' && option.value !== builtin.value)!
     fireEvent.change(source, { target: { value: workSource.value } })

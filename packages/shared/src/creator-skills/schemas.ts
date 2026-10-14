@@ -77,7 +77,7 @@ const creatorArtifactBaseSchema = z.object({
   id: entityId,
   organizationId: entityId,
   name: nullableOptional(z.string().max(512)),
-  summary: nullableOptional(z.string().max(8_192)),
+  summary: nullableOptional(z.string().refine(value => Array.from(value).length <= 8_192, 'Summary must be at most 8192 characters')),
   displayIcon: nullableOptional(z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('emoji'), value: z.string().min(1).max(64) }),
     z.object({ kind: z.literal('image'), url: z.string().url().max(8_192) }),

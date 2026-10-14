@@ -45,7 +45,7 @@ it('actual Claude resized-input early return still reauthorizes selected Skill a
   const path = join(root, '.polo/canonical-skills', 'b'.repeat(64), 'skills/slug')
   let allowed = true, resized = 0, loaded = 0, queried = 0
   const ids: string[] = []
-  const authority = { load: async () => { loaded++; return [{ slug: `canonical-${'b'.repeat(64)}`, metadata: { name: 'slug', description: 'unit' }, content: 'unit', path, source: 'workspace' as const }] }, authorize: async (_: string[], id: string) => { ids.push(id); if (!allowed) throw new Error('revoked') }, finish: async () => {} }
+  const authority = { load: async () => { loaded++; return [{ slug: `canonical-${'b'.repeat(64)}`, metadata: { name: 'slug', description: 'unit' }, content: 'unit', path, source: 'workspace' as const }] }, authorize: async (_: readonly string[], id: string) => { ids.push(id); if (!allowed) throw new Error('revoked') }, finish: async () => {} }
   const agent = new ClaudeAgent({ ...createMockBackendConfig({ workspace: createMockWorkspace({ rootPath: root }), session: createMockSession({ id: 'claude-resize-unit', workspaceRootPath: root, workingDirectory: root }), canonicalSkills: authority }), sessionCallbackOwnerToken: 'resize-owner', onImageResize: async () => { resized++; allowed = false; return join(root, 'resized.png') } })
   // Isolate the whole-hook contract from the separate constructor-copy defect.
   // The actual query and hook still come from the production ClaudeAgent.

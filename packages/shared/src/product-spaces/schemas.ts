@@ -130,7 +130,7 @@ export const CatalogSourceSchema = z.discriminatedUnion('kind', [
 const CatalogEntryBaseSchema = z.object({
   catalogEntryId: CatalogEntryIdSchema,
   name: nonBlankString(512),
-  description: z.string().max(8_192),
+  description: z.string().refine(value => Array.from(value).length <= 8_192, 'Description must be at most 8192 characters'),
   iconUrl: httpUrl.optional(),
   availability: CatalogEntryAvailabilitySchema,
   unavailableReason: CatalogEntryUnavailableReasonSchema.optional(),

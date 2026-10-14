@@ -60,6 +60,7 @@ async function main(): Promise<void> {
 
   for (const filename of [
     'archive.d.ts',
+    'canonical.d.ts',
     'fixtures.cjs',
     'fixtures.d.ts',
     'index.cjs',

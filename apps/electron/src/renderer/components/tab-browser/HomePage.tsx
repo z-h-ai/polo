@@ -21,6 +21,7 @@ import { useOptionalMemberCircles } from '@/context/MemberCircleResourceContext'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import { useMemberAppActions } from '@/hooks/useMemberAppActions'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
+import { ProductSpaceSkillsDialog } from '@/components/product-space/ProductSpaceSkillsDialog'
 import { useTabShell } from '@/context/TabShellContext'
 import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
 import { POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
@@ -190,6 +191,7 @@ export function homeAppMatchesQuery(
 // ─── The page ────────────────────────────────────────────────────────────────
 
 export function HomePage() {
+  const [skillsOpen, setSkillsOpen] = useState(false)
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
   const { openApp } = useTabShell()
@@ -262,10 +264,8 @@ export function HomePage() {
   )
   const phase = directory.phase
 
-  // The Polo assistant card and its launch action stay on the existing code
-  // path (P70-HOME-02). The prototype's 管理技能 entry targets the deferred
-  // skills page — an unbuilt entry must not pretend to succeed, so it is NOT
-  // rendered this batch.
+  // Skill authorization, personal enablement and native preparation are
+  // managed from the existing assistant card in the current ProductSpace.
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
   }
@@ -668,6 +668,9 @@ export function HomePage() {
               {t('homeApps.home.poloDescription')}
             </p>
             <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+              <button type="button" className={clientWorkbenchButtonClassName} onClick={event => { event.stopPropagation(); setSkillsOpen(true) }}>
+                {t('productSpaceSkills.title', { defaultValue: 'Manage skills' })}
+              </button>
               {/* Prototype `.home-app-grid .assistant-card
               .home-primary-action`: solid accent, weight 650, lifts with
               shadow-middle on hover. */}
@@ -683,6 +686,7 @@ export function HomePage() {
               </button>
             </div>
           </article>}
+          {skillsOpen && <ProductSpaceSkillsDialog onClose={() => setSkillsOpen(false)} />}
           {phase === 'loading' && !catalog.state.catalog ? (
             <div
               className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface"

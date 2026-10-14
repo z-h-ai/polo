@@ -90,6 +90,19 @@ Display name for the skill. Shown in the UI and skill list.
 ### description (required)
 Brief description (1-2 sentences) explaining what the skill does.
 
+For uploaded Creator and enterprise packages, `description` may include
+multi-line instructions describing when to use the skill, up to 8,192 Unicode
+characters. Keep detailed execution steps in the Markdown body. Upload preview,
+server validation, the space catalog and the desktop installer use the same
+limit. File conditions use the existing `globs` array; arbitrary extra metadata
+does not create a new automatic-condition engine or grant additional permissions.
+
+Uploaded packages use a single lowercase kebab-case folder whose `SKILL.md`
+`name` matches that folder. Local workspace skills may use a display name. In
+the desktop space, authorization, your enable/disable setting and preparing the
+current version on this device are separate states. Open **Manage skills** from
+the Polo assistant card to enable a distributed skill and download or update it.
+
 ### globs (optional)
 Array of glob patterns. When a file matching these patterns is being worked on,
 the skill may be automatically suggested or activated.

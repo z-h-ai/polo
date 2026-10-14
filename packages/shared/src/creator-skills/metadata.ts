@@ -2,7 +2,9 @@ import { parseDocument } from 'yaml'
 
 export const CREATOR_SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 export const CREATOR_SKILL_NAME_MAX_LENGTH = 64
-export const CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1_024
+// Trigger guidance belongs in description and must survive upload, catalog,
+// install and assistant loading. Match the public package/catalog capacity.
+export const CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 8_192
 export const CREATOR_SKILL_MAX_METADATA_ITEMS = 1_000
 export const CREATOR_SKILL_ICON_MAX_LENGTH = 64
 export const CREATOR_SKILL_GLOB_MAX_LENGTH = 2_048
@@ -244,7 +246,7 @@ export function validateCreatorSkillMetadata(
     issues.push(metadataIssue('invalid_skill_content', path, 'Creator Skill name must use strict kebab-case (for example, polo-test)', 'name'))
   }
   if (unicodeCodePointLength(description) > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
-    issues.push(metadataIssue('invalid_skill_content', path, 'Creator Skill description must be at most 1024 characters', 'description'))
+    issues.push(metadataIssue('invalid_skill_content', path, `Creator Skill description must be at most ${CREATOR_SKILL_DESCRIPTION_MAX_LENGTH} characters`, 'description'))
   }
   if (rootDirectory !== undefined && validName && name !== rootDirectory) {
     issues.push(metadataIssue('invalid_skill_content', path, `Creator Skill name '${name}' must match root directory '${rootDirectory}'`, 'name', `Use 'name: ${rootDirectory}' or rename the root directory`))

@@ -6255,7 +6255,7 @@ function parseDocument(source, options = {}) {
 // src/creator-skills/metadata.ts
 var CREATOR_SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 var CREATOR_SKILL_NAME_MAX_LENGTH = 64;
-var CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+var CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 8192;
 var CREATOR_SKILL_MAX_METADATA_ITEMS = 1e3;
 var CREATOR_SKILL_ICON_MAX_LENGTH = 64;
 var CREATOR_SKILL_GLOB_MAX_LENGTH = 2048;
@@ -6413,7 +6413,7 @@ function validateCreatorSkillMetadata(value, path, rootDirectory) {
     issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill name must use strict kebab-case (for example, polo-test)", "name"));
   }
   if (unicodeCodePointLength(description) > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
-    issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill description must be at most 1024 characters", "description"));
+    issues.push(metadataIssue("invalid_skill_content", path, `Creator Skill description must be at most ${CREATOR_SKILL_DESCRIPTION_MAX_LENGTH} characters`, "description"));
   }
   if (rootDirectory !== void 0 && validName && name !== rootDirectory) {
     issues.push(metadataIssue("invalid_skill_content", path, `Creator Skill name '${name}' must match root directory '${rootDirectory}'`, "name", `Use 'name: ${rootDirectory}' or rename the root directory`));

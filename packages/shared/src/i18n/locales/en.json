@@ -2316,5 +2316,20 @@
   "workspace.selectWorkspaceDesc": "Choose a workspace on this server, or create a new one.",
   "workspace.selectWorkspacePlaceholder": "Select a workspace...",
   "workspace.serverAuthToken": "Server authentication token",
-  "workspace.underDefaultFolder": "under .polo-ai folder"
+  "workspace.underDefaultFolder": "under .polo-ai folder",
+  "productSpaceSkills.title": "Manage skills",
+  "productSpaceSkills.description": "Enable a skill for yourself, then prepare its current version on this device.",
+  "productSpaceSkills.loading": "Loading skills…",
+  "productSpaceSkills.failed": "Could not confirm the skill state. Check your connection and retry.",
+  "productSpaceSkills.retry": "Retry",
+  "productSpaceSkills.empty": "No skills are available in this space.",
+  "productSpaceSkills.unavailable": "Authorization unavailable",
+  "productSpaceSkills.enabled": "Enabled for me",
+  "productSpaceSkills.disabled": "Disabled for me",
+  "productSpaceSkills.prepared": "Current version prepared",
+  "productSpaceSkills.unprepared": "Current version not prepared",
+  "productSpaceSkills.enable": "Enable",
+  "productSpaceSkills.disable": "Disable",
+  "productSpaceSkills.prepare": "Download / update",
+  "productSpaceSkills.processing": "Processing…"
 }

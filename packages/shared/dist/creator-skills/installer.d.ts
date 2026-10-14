@@ -2,6 +2,8 @@ import { type CreatorSkillsLedgerWriteDependencies } from './ledger.ts';
 import { type CreatorSkillBackup, type CreatorSkillInstallInput, type CreatorSkillOperationProgress, type CreatorSkillOperationResult, type InstalledCreatorSkill } from './types.ts';
 export type CreatorSkillJournalState = 'preparing' | 'prepared' | 'old_backed_up' | 'new_installed' | 'ledger_committed' | 'detaching' | 'committed';
 export interface CreatorSkillInstallerDependencies {
+    /** Main-owned archive already downloaded once; full validation runs again in the transaction. */
+    preparedArchivePath?: string;
     nativeInstallationAdmissionId?: string;
     /** Trusted native evidence hooks run under the existing workspace/slug locks. */
     beforeNativeMutation?: (installed: InstalledCreatorSkill | undefined) => Promise<void>;
@@ -34,6 +36,16 @@ export interface CreatorSkillInstallerDependencies {
 }
 export type CreatorSkillUninstallerDependencies = Pick<CreatorSkillInstallerDependencies, 'beforeNativeMutation' | 'onNativeCommitted' | 'beforeCommitSnapshot' | 'onJournalPersisted' | 'syncJournalDirectory' | 'onCleanupStep' | 'onLedgerMutationLocked' | 'onLedgerMutationLockContended' | 'ledgerWriteDependencies' | 'onError'>;
 export type CreatorSkillMetadataUpdateDependencies = Pick<CreatorSkillInstallerDependencies, 'onLedgerMutationLocked' | 'onLedgerMutationLockContended' | 'ledgerWriteDependencies'>;
+export declare function downloadCreatorSkillArchive(args: {
+    url: string;
+    /** Canonical resolve-launch bundles use bodyless POST; legacy grants stay GET. */
+    method?: 'GET' | 'POST';
+    outputPath: string;
+    maxBytes: number;
+    signal: AbortSignal;
+    fetchImpl: typeof fetch;
+    onChunk: (downloaded: number, total?: number) => void;
+}): Promise<void>;
 export declare function hasPendingCreatorSkillForceDelete(workspaceRoot: string, slug: string): Promise<boolean>;
 export declare function installCreatorSkill(workspaceRoot: string, input: CreatorSkillInstallInput, dependencies?: CreatorSkillInstallerDependencies): Promise<CreatorSkillOperationResult>;
 export declare function cancelCreatorSkillOperation(workspaceRoot: string, ownerId: string, operationId: string): Promise<boolean>;

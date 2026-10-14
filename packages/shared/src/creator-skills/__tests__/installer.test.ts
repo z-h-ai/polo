@@ -114,7 +114,7 @@ function deferred<T = void>() {
 }
 
 function responseFetch(bytes: Uint8Array): typeof fetch {
-  return (async (_url, init) => {
+  return (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
     expect(init?.method).toBe('GET')
     expect(init?.redirect).toBe('error')
     expect(init?.body).toBeUndefined()

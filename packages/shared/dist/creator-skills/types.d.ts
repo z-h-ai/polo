@@ -136,6 +136,19 @@ export interface CreatorSkillDownloadGrant {
     manifest: CreatorSkillManifestEntry[];
     validationPolicy: SkillArchivePolicy;
 }
+/** Main-owned canonical source; never derived from a package slug or organization. */
+export interface CanonicalSkillSource {
+    accountId: string;
+    productSpaceId: string;
+    subjectKind: 'personal_artifact' | 'enterprise_instance';
+    subjectId: string;
+    versionId: string;
+}
+export type CanonicalSkillDownloadGrant = Omit<CreatorSkillDownloadGrant, 'organizationId'> & {
+    canonicalSource: CanonicalSkillSource;
+    organizationId?: never;
+};
+export type ManagedSkillDownloadGrant = CreatorSkillDownloadGrant | CanonicalSkillDownloadGrant;
 export interface CreatorSkillSafetyStatus {
     artifactId: string;
     version: string;
@@ -151,7 +164,8 @@ export interface InstalledCreatorSkill {
     /** Trusted Main/server admission captured before this native commit. */
     nativeInstallationAdmissionId?: string;
     artifactId: string;
-    organizationId: string;
+    organizationId?: string;
+    canonicalSource?: CanonicalSkillSource;
     slug: string;
     version: string;
     archiveChecksum: string;
@@ -161,6 +175,14 @@ export interface InstalledCreatorSkill {
     lastCheckedAt?: string;
     ignoredVersion?: string;
 }
+export type LegacyInstalledCreatorSkill = InstalledCreatorSkill & {
+    organizationId: string;
+    canonicalSource?: never;
+};
+export type CanonicalInstalledSkill = InstalledCreatorSkill & {
+    organizationId?: never;
+    canonicalSource: CanonicalSkillSource;
+};
 export type CreatorSkillOperationStage = 'download' | 'validate' | 'prepare' | 'commit' | 'refresh';
 export interface CreatorSkillOperationProgress {
     operationId: string;
@@ -187,7 +209,7 @@ export interface CreatorSkillInstallInput {
     /** Server-derived project directory; never accepted from renderer RPC input. */
     workingDirectory?: string;
     operationId: string;
-    grant: CreatorSkillDownloadGrant;
+    grant: ManagedSkillDownloadGrant;
     replaceExisting?: boolean;
     confirmGlobalOverride?: boolean;
     backupLocalChanges?: boolean;

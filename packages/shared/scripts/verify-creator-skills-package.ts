@@ -32,6 +32,7 @@ const requiredEntries = [
   'dist/admin/creator-app-publishing.browser.cjs',
   'dist/admin/creator-app-publishing.d.ts',
   'dist/creator-skills/archive.d.ts',
+  'dist/creator-skills/canonical.d.ts',
   'dist/creator-skills/fixtures.cjs',
   'dist/creator-skills/fixtures.d.ts',
   'dist/creator-skills/index.cjs',

@@ -777,10 +777,30 @@ export declare const CreatorSkillSafetyStatusBatchSchema: z.ZodObject<{
         safeVersion: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
+export declare const CanonicalSkillSourceSchema: z.ZodObject<{
+    accountId: z.ZodString;
+    productSpaceId: z.ZodString;
+    subjectKind: z.ZodEnum<{
+        personal_artifact: "personal_artifact";
+        enterprise_instance: "enterprise_instance";
+    }>;
+    subjectId: z.ZodString;
+    versionId: z.ZodString;
+}, z.core.$strict>;
 export declare const InstalledCreatorSkillSchema: z.ZodObject<{
     nativeInstallationAdmissionId: z.ZodOptional<z.ZodString>;
     artifactId: z.ZodString;
-    organizationId: z.ZodString;
+    organizationId: z.ZodOptional<z.ZodString>;
+    canonicalSource: z.ZodOptional<z.ZodObject<{
+        accountId: z.ZodString;
+        productSpaceId: z.ZodString;
+        subjectKind: z.ZodEnum<{
+            personal_artifact: "personal_artifact";
+            enterprise_instance: "enterprise_instance";
+        }>;
+        subjectId: z.ZodString;
+        versionId: z.ZodString;
+    }, z.core.$strict>>;
     slug: z.ZodString;
     version: z.ZodString;
     archiveChecksum: z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>;
@@ -799,7 +819,17 @@ export declare const CreatorSkillsLedgerSchema: z.ZodObject<{
     installed: z.ZodArray<z.ZodObject<{
         nativeInstallationAdmissionId: z.ZodOptional<z.ZodString>;
         artifactId: z.ZodString;
-        organizationId: z.ZodString;
+        organizationId: z.ZodOptional<z.ZodString>;
+        canonicalSource: z.ZodOptional<z.ZodObject<{
+            accountId: z.ZodString;
+            productSpaceId: z.ZodString;
+            subjectKind: z.ZodEnum<{
+                personal_artifact: "personal_artifact";
+                enterprise_instance: "enterprise_instance";
+            }>;
+            subjectId: z.ZodString;
+            versionId: z.ZodString;
+        }, z.core.$strict>>;
         slug: z.ZodString;
         version: z.ZodString;
         archiveChecksum: z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>;
