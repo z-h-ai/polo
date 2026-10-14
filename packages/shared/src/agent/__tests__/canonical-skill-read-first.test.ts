@@ -39,3 +39,18 @@ it('enterprise discovery never falls back to personal local Skills when canonica
     expect(agent.chatCalls).toHaveLength(0)
   } finally {await rm(root,{recursive:true,force:true})}
 })
+
+it('enterprise direct Read, literal Bash and symlink alias cannot load personal Skill instructions',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'polo-enterprise-local-read-'))
+  try{
+    const privatePath=join(root,'skills/private-helper/SKILL.md');await mkdir(join(privatePath,'..'),{recursive:true});await writeFile(privatePath,'private instructions')
+    const {symlink}=await import('node:fs/promises');const alias=join(root,'project-guide.md');await symlink(privatePath,alias)
+    const agent=new Consumer(createMockBackendConfig({workspace:createMockWorkspace({rootPath:root}),canonicalSkills:{allowLocalSkills:async()=>false,load:async()=>[],authorize:async()=>{},finish:async()=>{}}}))
+    const turn=agent.chat('Prepare enterprise report');await turn.next()
+    expect(await agent.check('Read',{file_path:privatePath})).toContain('Personal')
+    expect(await agent.check('Bash',{command:`cat "${privatePath}"`})).toContain('Personal')
+    expect(await agent.check('Read',{file_path:alias})).toContain('Personal')
+    expect(await agent.check('Read',{file_path:join(root,'ordinary-project.md')})).toBeNull()
+    await turn.return(undefined as never)
+  }finally{await rm(root,{recursive:true,force:true})}
+})
