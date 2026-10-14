@@ -8,10 +8,79 @@ import {
   stopRegisteredProductSpaceExecutionsForSpace,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
+  unregisterProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
   stopRegisteredExecutionsOnce,
   type RegisteredProductSpaceExecution,
 } from './product-space-executions'
+
+describe('runtime owner teardown completion', () => {
+  function runtime(stop: () => Promise<'stopped' | 'failed'>, isActive: () => boolean): RegisteredProductSpaceExecution {
+    return { ...executionWithNeverResolvingStop(), kind: 'local_app', scope: {
+      ...executionWithNeverResolvingStop().scope, executionId: 'self-teardown',
+    } as never, stop, isActive }
+  }
+
+  it('accepts a healthy runtime that unregisters itself during its real stop', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+    let active = true
+    registerProductSpaceExecution(runtime(async () => {
+      active = false
+      unregisterProductSpaceExecution('self-teardown')
+      return 'stopped'
+    }, () => active))
+    expect(await stopRegisteredProductSpaceExecutionsForSpace('account-a', 'space-a'))
+      .toEqual({ ok: true, failedExecutionIds: [] })
+    expect(getRegisteredProductSpaceExecution('self-teardown')).toBeUndefined()
+  })
+
+  for (const outcome of ['failed', 'rejected'] as const) {
+    it(`keeps a ${outcome} stop failed even if teardown already unregistered`, async () => {
+      resetProductSpaceExecutionRegistryForTests()
+      let active = true
+      let release!: () => void
+      const acknowledged = new Promise<void>(resolve => { release = resolve })
+      registerProductSpaceExecution(runtime(async () => {
+        active = false
+        unregisterProductSpaceExecution('self-teardown')
+        await acknowledged
+        if (outcome === 'rejected') throw undefined
+        return 'failed'
+      }, () => active))
+      let settled = false
+      const pending = stopRegisteredProductSpaceExecutionsForSpace('account-a', 'space-a')
+        .then(result => { settled = true; return result })
+      try {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        // Disappearance/liveness alone cannot certify the owner's result.
+        expect(settled).toBe(false)
+      } finally { release() }
+      expect(await pending).toEqual({ ok: false, failedExecutionIds: ['self-teardown'] })
+    })
+  }
+
+  it('retains supersession when a replacement appears and disappears while the removed owner acknowledges', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+    let active = true
+    let stopStarted!: () => void
+    const started = new Promise<void>(resolve => { stopStarted = resolve })
+    let acknowledge!: () => void
+    const acknowledged = new Promise<void>(resolve => { acknowledge = resolve })
+    registerProductSpaceExecution(runtime(async () => {
+      active = false
+      unregisterProductSpaceExecution('self-teardown')
+      stopStarted()
+      await acknowledged
+      return 'stopped'
+    }, () => active))
+    const pending = stopRegisteredProductSpaceExecutionsForSpace('account-a', 'space-a')
+    await started
+    registerProductSpaceExecution(runtime(async () => 'stopped', () => false))
+    unregisterProductSpaceExecution('self-teardown')
+    acknowledge()
+    expect(await pending).toEqual({ ok: false, failedExecutionIds: ['self-teardown'] })
+  })
+})
 
 function executionWithNeverResolvingStop(): RegisteredProductSpaceExecution {
   return {

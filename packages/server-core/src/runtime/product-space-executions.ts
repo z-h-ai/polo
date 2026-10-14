@@ -32,6 +32,10 @@ export interface RegisteredProductSpaceExecution {
 }
 
 const registry = new Map<string, RegisteredProductSpaceExecution>()
+type StopOwnershipObservation = { generation: number; superseded: boolean }
+// History is needed only while an old stop is in flight. A replacement may
+// itself disappear before that stop resumes; an empty slot is then ambiguous.
+const stopOwnershipObservers = new Map<string, Set<StopOwnershipObservation>>()
 
 /** Monotonic registration generation source (R33-4). */
 let registrationSequence = 0
@@ -54,6 +58,9 @@ export function registerProductSpaceExecution(
     generation: ++registrationSequence,
   }
   registry.set(owned.scope.executionId, owned)
+  for (const observation of stopOwnershipObservers.get(owned.scope.executionId) ?? []) {
+    if (observation.generation !== owned.generation) observation.superseded = true
+  }
   return owned
 }
 
@@ -237,55 +244,75 @@ export async function stopRegisteredExecutionsOnce(
   // Resolve to the registry-owned entry (a fresh immutable object created at
   // registration) and capture entry + generation BEFORE any await: the drain
   // below can outlive this ownership.
-  const owned = entries.map(entry => ({
-    entry: registry.get(entry.scope.executionId) ?? entry,
-    capturedGeneration: (registry.get(entry.scope.executionId) ?? entry).generation,
-  }))
+  const owned = entries.map(entry => {
+    const captured = registry.get(entry.scope.executionId) ?? entry
+    const observation = { generation: captured.generation, superseded: false }
+    const observers = stopOwnershipObservers.get(captured.scope.executionId) ?? new Set<StopOwnershipObservation>()
+    observers.add(observation)
+    stopOwnershipObservers.set(captured.scope.executionId, observers)
+    return { entry: captured, capturedGeneration: captured.generation, observation }
+  })
 
-  // One stop request per execution, dispatched concurrently. The requests
-  // are bounded by the shared deadline but are NOT awaited as a group — a
-  // hung stop must not delay sibling confirmations.
-  for (const { entry } of owned) {
-    void withStopDeadline(
-      entry.stop().catch(() => undefined),
-      deadline,
-    )
-  }
+  // One stop request per execution, dispatched concurrently. Keep each
+  // owner's acknowledgement: teardown can unregister even when stopping
+  // the real process failed, so disappearance alone is not success.
+  const acknowledgements = owned.map(({ entry }) => withStopDeadline(
+    Promise.resolve().then(() => entry.stop()).catch(() => 'failed' as const),
+    deadline,
+  ))
 
   // Per-entry confirmation, concurrent, all under the same deadline.
-  const results = await Promise.all(owned.map(async ({ entry, capturedGeneration }) => {
-    const terminal = await withStopDeadline(
-      drainExecutionUntilTerminal(entry, deadline),
-      deadline,
-    )
-    if (terminal === true) {
-      // R33-4/R34-4 generation CAS: only the CAPTURED registration may be
-      // deleted. A same-ID replacement registered while this stop awaited
-      // its terminal probe is a new registry-owned generation — it stays
-      // registered and keeps the execution visible to cleanup/switching.
-      const current = registry.get(entry.scope.executionId)
-      if (current === entry && current.generation === capturedGeneration) {
-        registry.delete(entry.scope.executionId)
+  try {
+    const results = await Promise.all(owned.map(async ({ entry, capturedGeneration, observation }, index) => {
+      const terminal = await withStopDeadline(drainExecutionUntilTerminal(entry, deadline), deadline)
+      if (terminal === true) {
+        // R33-4/R34-4 generation CAS: only the CAPTURED registration may be
+        // deleted. A same-ID replacement registered while this stop awaited
+        // its terminal probe is a new registry-owned generation — it stays
+        // registered and keeps the execution visible to cleanup/switching.
+        const current = registry.get(entry.scope.executionId)
+        if (!observation.superseded && current === entry && current.generation === capturedGeneration) {
+          registry.delete(entry.scope.executionId)
+          return {
+            executionId: entry.scope.executionId,
+            status: 'stopped' as const,
+          }
+        }
+        // The captured owner may have already removed its own terminal slot
+        // (the normal App teardown path). Only an actual replacement is
+        // superseded. A removed owner's acknowledgement must certify success;
+        // failed teardown also removes its slot. Recheck after the await.
+        if (!current && !observation.superseded) {
+          const acknowledged = await acknowledgements[index]
+          if (observation.superseded || registry.has(entry.scope.executionId)) {
+            return { executionId: entry.scope.executionId, status: 'stopped' as const, superseded: true }
+          }
+          return acknowledged === 'stopped'
+            ? { executionId: entry.scope.executionId, status: 'stopped' as const }
+            : { executionId: entry.scope.executionId, status: 'failed' as const, errorCode: 'runtime_stop_failed' }
+        }
+        // The slot outlived this registration's ownership: the replacement is
+        // untouched and the stale completion is reported as superseded.
         return {
           executionId: entry.scope.executionId,
           status: 'stopped' as const,
+          superseded: true,
         }
       }
-      // The slot outlived this registration's ownership: the replacement is
-      // untouched and the stale completion is reported as superseded.
       return {
         executionId: entry.scope.executionId,
-        status: 'stopped' as const,
-        superseded: true,
+        status: 'failed' as const,
+        errorCode: 'runtime_stop_failed',
       }
+    }))
+    return results
+  } finally {
+    for (const { entry, observation } of owned) {
+      const observers = stopOwnershipObservers.get(entry.scope.executionId)
+      observers?.delete(observation)
+      if (observers?.size === 0) stopOwnershipObservers.delete(entry.scope.executionId)
     }
-    return {
-      executionId: entry.scope.executionId,
-      status: 'failed' as const,
-      errorCode: 'runtime_stop_failed',
-    }
-  }))
-  return results
+  }
 }
 
 /**
@@ -315,6 +342,7 @@ export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
 
 export function resetProductSpaceExecutionRegistryForTests(): void {
   registry.clear()
+  stopOwnershipObservers.clear()
   registrationSequence = 0
   lastCommittedSwitch = null
   prepareIntentSequence = 0
