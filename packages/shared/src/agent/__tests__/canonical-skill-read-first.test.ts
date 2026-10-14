@@ -54,3 +54,18 @@ it('enterprise direct Read, literal Bash and symlink alias cannot load personal 
     await turn.return(undefined as never)
   }finally{await rm(root,{recursive:true,force:true})}
 })
+
+it('ordinary user requests expose complete eligible trigger metadata without admitting or reading the Skill',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'polo-trigger-discovery-'))
+ try {
+  const description='Use only after the team confirms the quote. '+ 'Detailed condition. '.repeat(90)+'TAIL_QUOTE_APPROVAL_CONDITION'
+  const skill={slug:'canonical-'+ 'a'.repeat(64),metadata:{name:'Quote helper',description,globs:['**/*.xlsx']},content:'Secret instruction body must not be prefetched into discovery.',path:join(root,'.polo/canonical-skills','a'.repeat(64),'skills/quote-helper'),source:'workspace' as const}
+  let admissions=0;const agent=new Consumer(createMockBackendConfig({workspace:createMockWorkspace({rootPath:root}),canonicalSkills:{allowLocalSkills:async()=>false,load:async()=>[skill],authorize:async()=>{admissions++},finish:async()=>{}}}))
+  for await(const event of agent.chat('整理这份报价表')){}
+  expect(agent.chatCalls[0]!.message).toContain(description)
+  expect(agent.chatCalls[0]!.message).toContain('**/*.xlsx')
+  expect(agent.chatCalls[0]!.message).toContain(join(skill.path,'SKILL.md'))
+  expect(agent.chatCalls[0]!.message).not.toContain(skill.content)
+  expect(admissions).toBe(0)
+ }finally{await rm(root,{recursive:true,force:true})}
+})
