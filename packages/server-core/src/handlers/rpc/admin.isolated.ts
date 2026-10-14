@@ -5540,3 +5540,20 @@ describe('Skill-only projection does not grant App authority', () => {
     expect(await h.productSpaceListSkills(ctx,'space-a')).toMatchObject({success:false})
   })
 })
+
+it('Home full Catalog refresh retains management fence for verified read-only membership',async()=>{
+  const h=createHarness();const ctx={clientId:'renderer',workspaceId:null,webContentsId:null};await h.login(ctx,'admin','secret')
+  setRuntimeActiveProductSpaceAccount('user-1');setRuntimeActiveProductSpace('space-a')
+  adminClientBehavior.listProductSpaces=async()=>({productSpaces:[{id:'space-a',kind:'enterprise',accessMode:'read_only'}]})
+  const response=await h.productSpaceCatalog(ctx,'space-a') as any
+  expect(response).toMatchObject({success:false,errorCode:'SPACE_RESTRICTED'})
+  expect(getRuntimeActiveProductSpace()).toBe('space-a')
+  expect(getRuntimeActiveProductSpaceAccount()).toBe('user-1')
+  expect(authorityRevokeCalls.at(-1)).toEqual({accountId:'user-1',productSpaceId:'space-a'})
+  expect(authorityRecordCalls.filter(row=>row.productSpaceId==='space-a')).toEqual([])
+  const skill={kind:'skill',artifactInstanceId:'skill-k',catalogEntryId:'entry-k',enabled:true,availability:'unavailable',unavailableReason:'space_restricted'}
+  adminClientBehavior.getProductSpaceCatalog=async()=>({contractVersion:1,productSpaceId:'space-a',catalogRevision:'readonly',entries:[skill]})
+  expect(await h.productSpaceListSkills(ctx,'space-a')).toMatchObject({success:true,entries:[{enabled:true}]})
+  adminClientBehavior.setProductSpaceSkillEnablement=async()=>({mutation:{productSpaceId:'space-a',artifactInstanceId:'skill-k',enabled:false},catalog:{contractVersion:1,productSpaceId:'space-a',catalogRevision:'off',entries:[{...skill,enabled:false}]}})
+  expect(await h.productSpaceSetSkillEnablement(ctx,'space-a','skill-k',false)).toMatchObject({success:true,mutation:{enabled:false}})
+})
