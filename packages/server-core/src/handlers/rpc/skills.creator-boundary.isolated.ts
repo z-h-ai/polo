@@ -621,3 +621,16 @@ it('enterprise Skill enumeration excludes every inherited workspace Skill',async
   const rows=await handlers.get(RPC_CHANNELS.skills.GET)!(ctx,workspaceOne.id) as any[]
   expect(rows.some(row=>row.slug==='personal-helper')).toBe(false)
 })
+
+it('Skill files and host-open RPCs refuse traversal and enterprise inherited personal rows',async()=>{
+  const {bindCanonicalSkillContextResolver}=await import('../../runtime/canonical-skills')
+  bindCanonicalSkillContextResolver(async scope=>({id:scope.productSpaceId,kind:'enterprise',accessMode:'active'} as any))
+  const foreign=join(workspaceOne.rootPath,'.polo/canonical-skills','f'.repeat(64),'skills/other-space')
+  await mkdir(foreign,{recursive:true});await writeFile(join(foreign,'private-source.txt'),'other space private')
+  const files=handlers.get(RPC_CHANNELS.skills.GET_FILES)!
+  expect(await files(ctx,workspaceOne.id,`../.polo/canonical-skills/${'f'.repeat(64)}/skills/other-space`)).toEqual([])
+  expect(await files(ctx,workspaceOne.id,'personal-helper')).toEqual([])
+  expect(await handlers.get(RPC_CHANNELS.skills.GET)!(ctx,workspaceTwo.id)).toEqual([])
+  await expect(handlers.get(RPC_CHANNELS.skills.OPEN_EDITOR)!(ctx,workspaceOne.id,'../foreign')).rejects.toThrow()
+  await expect(handlers.get(RPC_CHANNELS.skills.OPEN_FINDER)!(ctx,workspaceOne.id,'personal-helper')).rejects.toThrow()
+})
