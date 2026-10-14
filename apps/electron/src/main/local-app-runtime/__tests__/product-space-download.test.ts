@@ -22,7 +22,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
   let generation = 1
   let calls = 0
   const options = {
-    app, kind: 'personal' as const, adminUrl: origin, downloadUrl: personalUrl,
+    app, kind: 'personal' as const, adminUrl: origin, downloadUrl: personalUrl, expectedManifestAppId: app.artifactInstanceId,
     assertCurrent() { if (generation !== 1) throw new Error('stale context generation') },
     readCredentials: async () => account,
     fetch: (async () => { calls++; return new Response('bytes') }) as unknown as typeof fetch,

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AdminEntityIdSchema } from '../admin/schemas.ts'
 import {
   AccountIdSchema,
   ArtifactInstanceIdSchema,
@@ -218,6 +219,9 @@ export const LaunchDeliverySchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('bundle'), downloadUrl: httpUrl, checksum,
     sizeBytes: z.number().int().min(0), runtime: z.enum(['static', 'python', 'js']),
+    // Verified original package identity; enterprise instance IDs identify
+    // authorization/storage, and may differ from polo-app.json appId.
+    expectedManifestAppId: AdminEntityIdSchema.optional(),
   }).strict(),
 ])
 export const ResolveLaunchResponseSchema = z.object({

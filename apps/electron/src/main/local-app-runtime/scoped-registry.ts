@@ -52,6 +52,8 @@ export interface ScopedLocalAppRuntimeRegistryOptions {
 
 export interface ScopedCatalogInstallRequest {
   scope: CatalogLocalAppScope
+  /** Main-owned resolve result; never accepted from a renderer request. */
+  expectedManifestAppId?: string
   version: string
   downloadUrl: string
   checksum: string
@@ -235,7 +237,7 @@ export class ScopedLocalAppRuntimeRegistry {
         const managerRequest: LocalAppInstallRequest = {
           ...release,
           appId: runtimeAppId,
-          expectedManifestAppId: scope.catalogAppId,
+          expectedManifestAppId: request.expectedManifestAppId ?? scope.catalogAppId,
         }
         const installed = await manager.install(
           managerRequest,

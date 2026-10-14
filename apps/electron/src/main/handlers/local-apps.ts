@@ -1213,8 +1213,13 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'This ProductSpace App does not use bundle installation',
         )
       }
+      // Only the freshly validated server resolve owns this value. Keep
+      // instance identity for the account/space registry and download nonce.
+      // Older servers used that same ID inside their original App bundles.
+      const expectedManifestAppId = launch.delivery.expectedManifestAppId ?? app.artifactInstanceId
       const downloadTransport = createProductSpaceDownloadTransport({
         app, kind: loaded.context.kind, adminUrl: adminUrl!, downloadUrl: launch.delivery.downloadUrl,
+        expectedManifestAppId,
         assertCurrent: assertDownloadCurrent,
         readCredentials: () => getCredentialManager().getAdminTokens(),
       })
@@ -1227,6 +1232,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       const registry = getScopedLocalAppRuntimeRegistry()
       const installed = await registry.install({
         scope: productSpaceBundleScope(app),
+        expectedManifestAppId,
         version: launch.subject.version,
         downloadUrl: launch.delivery.downloadUrl,
         checksum: launch.delivery.checksum,

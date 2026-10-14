@@ -8,6 +8,7 @@ export function createProductSpaceDownloadTransport(options: {
   kind: 'personal' | 'enterprise'
   adminUrl: string
   downloadUrl: string
+  expectedManifestAppId: string
   assertCurrent(): void
   readCredentials(): Promise<{ userId: string; accessToken: string } | null>
   fetch?: typeof globalThis.fetch
@@ -28,13 +29,14 @@ export function createProductSpaceDownloadTransport(options: {
     || !nonce || nonce.length < 16 || nonce.length > 64
     || (options.kind === 'personal' && url.searchParams.get('space') !== app.productSpaceId)) deny()
   const trustedUrl = options.downloadUrl
+  const expectedManifestAppId = options.expectedManifestAppId
   const fetchBytes = options.fetch ?? globalThis.fetch
   return {
     assertCurrent: options.assertCurrent,
     async fetch(request, signal) {
       signal.throwIfAborted()
       options.assertCurrent()
-      if (request.downloadUrl !== trustedUrl || request.expectedManifestAppId !== app.artifactInstanceId
+      if (request.downloadUrl !== trustedUrl || request.expectedManifestAppId !== expectedManifestAppId
         || request.version !== app.version) deny()
       const credentials = await options.readCredentials()
       signal.throwIfAborted()

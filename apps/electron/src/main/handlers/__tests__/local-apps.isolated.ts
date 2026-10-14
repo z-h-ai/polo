@@ -788,6 +788,18 @@ describe('local app main-process authorization boundary', () => {
     })
   })
 
+  it('takes the original package App ID only from the fresh resolve, never the renderer', async () => {
+    const launch=await resolveProductSpaceLaunch()
+    resolveProductSpaceLaunch.mockImplementationOnce(async()=>({...launch,delivery:{...launch.delivery,expectedManifestAppId:'original-publisher-app'}}))
+    await handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!(context,{
+      app:productSpaceAppIdentity(),expectedManifestAppId:'renderer-forged-app',
+    })
+    expect(scopedInstall).toHaveBeenCalledWith(expect.objectContaining({
+      expectedManifestAppId:'original-publisher-app',
+      scope:expect.objectContaining({catalogAppId:'artifact-instance-a'}),
+    }),expect.anything())
+  })
+
   it('rejects a server download grant on a different origin before install', async () => {
     const launch = await resolveProductSpaceLaunch()
     resolveProductSpaceLaunch.mockImplementationOnce(async () => ({
