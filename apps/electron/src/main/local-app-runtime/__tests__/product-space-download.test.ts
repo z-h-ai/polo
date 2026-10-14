@@ -36,6 +36,29 @@ function fixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe('trusted ProductSpace bundle transport', () => {
+  it('preserves the signed package App identity while storing it under the enterprise instance scope', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-enterprise-package-identity-')); roots.push(root)
+    const source = join(root, 'source'); await mkdir(join(source, 'dist'), { recursive: true })
+    const packageAppId = 'original-publisher-app'
+    await writeFile(join(source, 'polo-app.json'), JSON.stringify({ schemaVersion: 1, appId: packageAppId, version: app.version, runtime: 'static', entry: ['dist'], healthcheck: '/health', permissions: [] }))
+    await writeFile(join(source, 'dist/index.html'), 'original enterprise package bytes')
+    const path = join(root, 'bundle.tar.gz'); await tar.c({ cwd: source, file: path, gzip: true }, ['.'])
+    const archive = await readFile(path)
+    const f = fixture({ kind: 'enterprise', downloadUrl: enterpriseUrl, expectedManifestAppId: packageAppId,
+      fetch: async () => new Response(archive, { headers: { 'content-length': String(archive.length) } }) })
+    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir: join(root, 'runtime') })
+    const scope = { kind: 'catalog' as const, accountId: app.accountId, organizationId: app.productSpaceId, catalogAppId: app.artifactInstanceId }
+    const request = { scope, expectedManifestAppId: packageAppId, version: app.version, downloadUrl: enterpriseUrl,
+      checksum: createHash('sha256').update(archive).digest('hex'), sizeBytes: archive.length,
+      platform: process.platform as 'darwin', arch: process.arch as 'arm64' }
+    const installed = await registry.install(request, { downloadTransport: createProductSpaceDownloadTransport(f.options) })
+    expect(installed.scope).toEqual(scope)
+    expect(installed.currentVersion).toBe(app.version)
+    // A substituted package ID still fails before any archive is fetched.
+    const substituted = fixture({kind:'enterprise',downloadUrl:enterpriseUrl,expectedManifestAppId:packageAppId})
+    await expect(createProductSpaceDownloadTransport(substituted.options).fetch({ ...substituted.request, expectedManifestAppId: 'unrelated-publisher-app' },new AbortController().signal)).rejects.toThrow('authority')
+    expect(substituted.calls()).toBe(0)
+  })
   for (const kind of ['personal', 'enterprise'] as const) it(`installs real ${kind} archive through registry and manager with authenticated bodyless POST`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-download-boundary-')); roots.push(root)
     const source = join(root, 'source'); await mkdir(join(source, 'dist'), { recursive: true })
