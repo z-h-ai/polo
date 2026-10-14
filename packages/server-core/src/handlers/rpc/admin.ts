@@ -100,7 +100,7 @@ import {
   revokeRuntimeProductSpaceFence,
   revokeRuntimeProductSpaceFenceIfBoundLocked,
 } from '../../runtime/product-space-executions'
-import { bindCanonicalSkillResolver, bindCanonicalSkillTurnAuthority } from '../../runtime/canonical-skills'
+import { bindCanonicalSkillResolver, bindCanonicalSkillTurnAuthority, bindCanonicalSkillContextResolver } from '../../runtime/canonical-skills'
 import { withSwitchLock } from '../../runtime/switch-lock-internal'
 import { revokeProductSpaceCatalogAuthority } from '../../runtime/product-space-catalog-authority'
 // INTERNAL commit entry: the ONLY grant-capable mutator, reachable solely
@@ -645,7 +645,11 @@ export function registerAdminHandlers(
   // This remembers only previously observed Skill IDs for convergence-to-off.
   // It grants no installation or invocation permission and starts empty on
   // process restart. Enable always requires a new complete server Catalog.
+  type SkillEntry = Extract<import('@polo-ai/shared/product-spaces').TrustedProductSpaceCatalog['entries'][number], {kind:'skill'}>
   const seenSkillTuples = new Map<string, Set<string>>()
+  const seenSkillEntries = new Map<string, Map<string, SkillEntry>>()
+  const latestSkillRead = new Map<string,number>()
+  let skillReadSequence = 0
   const skillTupleScopeKey = (accountId: string, productSpaceId: string) =>
     JSON.stringify(['member-skill', accountId, productSpaceId])
   const rememberSkillTuples = (
@@ -657,7 +661,13 @@ export function registerAdminHandlers(
     for (const entry of entries) {
       if (entry.kind !== 'skill') continue
       const parsed = ArtifactInstanceIdSchema.safeParse(entry.artifactInstanceId)
-      if (parsed.success) ids.add(parsed.data)
+      if (parsed.success) {
+        ids.add(parsed.data)
+        const facts = seenSkillEntries.get(key) ?? new Map<string, SkillEntry>()
+        facts.set(parsed.data, entry as SkillEntry)
+        while (facts.size > 10_000) facts.delete(facts.keys().next().value!)
+        seenSkillEntries.set(key, facts)
+      }
     }
     while (ids.size > 10_000) ids.delete(ids.values().next().value!)
     seenSkillTuples.set(key, ids)
@@ -2389,6 +2399,61 @@ export function registerAdminHandlers(
     operate: (scope, receipt, operation) => skillTurnCall(scope, `skillTurn:${operation}`, (client, token) => client.operateSkillTurn(token, receipt, operation)),
   })
 
+  // This read projection grants no App launch or Skill execution authority.
+  // It allows current members to converge previously observed opt-ins to off.
+  const readSkillContext = async (scope: {accountId:string;productSpaceId:string;fenceGeneration:number}) => {
+    const assertCurrent = (accountId:string) => {
+      if(accountId !== scope.accountId || !isRuntimeFenceBoundToAccount(accountId) || getRuntimeActiveProductSpace() !== scope.productSpaceId || getRuntimeFenceGeneration() !== scope.fenceGeneration || isRuntimeOfflineReadOnly() || isSwitchInProgress()) throw new AdminSessionChangedError()
+    }
+    const result = await callOrganization('readSkillContext', async (client, token, accountId) => {
+      assertCurrent(accountId)
+      const list = await client.listProductSpaces(token); assertCurrent(accountId)
+      const context = list.productSpaces.find(space => space.id === scope.productSpaceId)
+      if (!context) throw new AdminError('ProductSpace membership is unavailable','FORBIDDEN')
+      return {context}
+    })
+    if (!result.success) throw new AdminError(result.message ?? 'Skill context unavailable','FORBIDDEN')
+    assertCurrent(scope.accountId)
+    return result.context
+  }
+  bindCanonicalSkillContextResolver(readSkillContext)
+  server.handle(RPC_CHANNELS.productSpace.LIST_SKILLS, async (_ctx, rawId: unknown) => {
+    const id = ProductSpaceIdSchema.safeParse(rawId)
+    if (!id.success) return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Skill scope invalid' }
+    const generation = getRuntimeFenceGeneration()
+    let invocation: number | null = null
+    let scopeKey: string | null = null
+    const assertCurrent = (accountId: string) => {
+      if (!isRuntimeFenceBoundToAccount(accountId) || getRuntimeActiveProductSpace() !== id.data
+        || getRuntimeFenceGeneration() !== generation || isRuntimeOfflineReadOnly() || isSwitchInProgress()
+        || (scopeKey !== null && latestSkillRead.get(scopeKey) !== invocation)) throw new AdminSessionChangedError()
+    }
+    return callOrganization('listProductSpaceSkills', async (client, token, accountId) => {
+      assertCurrent(accountId)
+      scopeKey = skillTupleScopeKey(accountId, id.data)
+      invocation = ++skillReadSequence
+      latestSkillRead.set(scopeKey, invocation)
+      const list = await client.listProductSpaces(token)
+      assertCurrent(accountId)
+      const context = list.productSpaces.find(space => space.id === id.data)
+      if (!context) throw new AdminError('ProductSpace membership is unavailable', 'FORBIDDEN')
+      const catalog = await client.getProductSpaceCatalog(token, context)
+      assertCurrent(accountId)
+      if ('notModified' in catalog) throw new AdminError('A complete Skill catalog is required', 'SERVER_ERROR')
+      const entries = catalog.entries.filter((entry): entry is SkillEntry => entry.kind === 'skill')
+      const currentIds = new Set(entries.map(entry => entry.artifactInstanceId))
+      // These withdrawn values describe the previous choice, never current
+      // permission or a launch grant. Only convergence-to-off is offered.
+      const withdrawnEntries = [...seenSkillEntries.get(scopeKey)?.values() ?? []]
+        .filter(entry => entry.enabled && !currentIds.has(entry.artifactInstanceId))
+        .map(entry => ({ ...entry, availability: 'unavailable' as const, unavailableReason: 'authorization_ended' as const }))
+      return { productSpaceId: id.data, entries, withdrawnEntries, accessMode: context.accessMode }
+    }, { onCurrentSuccess: (result, session) => withSwitchLock(async () => {
+      assertCurrent(session.tokens.userId)
+      rememberSkillTuples(session.tokens.userId, id.data, result.entries)
+    }, { phase: 'skill-read-commit', accountId: session.tokens.userId, productSpaceId: id.data }) })
+  })
+
   bindCanonicalSkillResolver(async (scope, selector) => {
     let requestingSpaceAuthority = true
     const assertScope = () => {
@@ -2477,6 +2542,8 @@ export function registerAdminHandlers(
         onCurrentSuccess: (result, session) => withSwitchLock(async () => {
           assertScope(session.tokens.userId)
           rememberSkillTuples(session.tokens.userId, productSpaceId.data, result.catalog.entries)
+          latestSkillRead.set(skillTupleScopeKey(session.tokens.userId,productSpaceId.data),++skillReadSequence)
+          if (!result.mutation.enabled) seenSkillEntries.get(skillTupleScopeKey(session.tokens.userId,productSpaceId.data))?.delete(result.mutation.artifactInstanceId)
         }, { phase: 'skill-enablement-commit', accountId: session.tokens.userId, productSpaceId: productSpaceId.data }),
         catalogScope: {
           productSpaceId: productSpaceId.data,

@@ -149,3 +149,8 @@ it('a server-authorized package above the default limit remains installable with
   expect((await install(root,source,content)).result.success).toBe(true)
   expect(await readCanonicalSkillInstallations(root,source)).toHaveLength(1)
 }))
+
+it('absolute native archive caps remain enforced for canonical server grants', async () => owned(async root => {
+  await expect(install(root,source,bytes(),{sizeBytes:100*1024*1024+1})).rejects.toThrow('bundle is invalid')
+  expect(await readCanonicalSkillInstallations(root,source)).toEqual([])
+}))

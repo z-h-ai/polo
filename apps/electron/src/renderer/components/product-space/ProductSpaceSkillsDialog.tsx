@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ProductSpaceCatalogResponseSchema } from '@polo-ai/shared/product-spaces'
+import { ProductSpaceCatalogResponseSchema, ProductSpaceCatalogEntrySchema } from '@polo-ai/shared/product-spaces'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { clientWorkbenchButtonClassName, clientWorkbenchDialogClassName } from '@/components/ui/client-workbench'
 
 type SkillEntry = Extract<ReturnType<typeof ProductSpaceCatalogResponseSchema.parse>['entries'][number], { kind: 'skill' }>
-type View = { scope: string; entries: SkillEntry[]; prepared: Record<string, string>; loading: boolean; error: string | null }
+type View = { scope: string; withdrawn?: string[]; entries: SkillEntry[]; prepared: Record<string, string>; loading: boolean; error: string | null }
 
 /** Authorization, personal enablement and native preparation remain separate.
  * Main owns account identity, fresh grants and installation; this view only
@@ -40,19 +40,19 @@ export function ProductSpaceSkillsDialog({ onClose }: { onClose: () => void }) {
     }
     setView(old => ({ ...old, scope, loading: true, error: null, ...(old.scope !== scope ? { entries: [], prepared: {} } : {}) }))
     try {
-      const result = await window.electronAPI.productSpaceGetCatalog(active.id)
+      const result = await window.electronAPI.productSpaceListSkills(active.id)
       if (!isCurrent()) return
       if (!result.success) throw new Error(result.errorCode)
-      const catalog = ProductSpaceCatalogResponseSchema.parse({ contractVersion: result.contractVersion, productSpaceId: result.productSpaceId, catalogRevision: result.catalogRevision, entries: result.entries })
-      if (catalog.productSpaceId !== active.id) throw new Error('catalog_scope_invalid')
-      const installed = await window.electronAPI.getSkills(workspace.id)
+      if (result.productSpaceId !== active.id) throw new Error('catalog_scope_invalid')
+      const entries = [...result.entries,...result.withdrawnEntries].map(entry => ProductSpaceCatalogEntrySchema.parse(entry)).filter((entry):entry is SkillEntry => entry.kind === 'skill')
+      const installed = result.accessMode === 'active' ? await window.electronAPI.getSkills(workspace.id) : []
       if (!isCurrent()) return
       const prepared: Record<string, string> = {}
       for (const skill of installed) {
         const native = skill.canonicalInstallation
         if (native?.canonicalSource.accountId === context.accountId && native.canonicalSource.productSpaceId === active.id) prepared[native.canonicalSource.subjectId] = native.canonicalSource.versionId
       }
-      setView({ scope, entries: catalog.entries.filter((entry): entry is SkillEntry => entry.kind === 'skill'), prepared, loading: false, error: null })
+      setView({ scope, entries, withdrawn: result.withdrawnEntries.map(entry => String(entry.artifactInstanceId)), prepared, loading: false, error: null })
     } catch (error) {
       if (!isCurrent()) return
       // Authority failures clear old private metadata; transient failures are
@@ -63,7 +63,7 @@ export function ProductSpaceSkillsDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => { void read() }, [read])
   const mutate = async (entry: SkillEntry, action: 'toggle' | 'prepare') => {
     if (pending.current || view.scope !== scope || view.loading || view.error || !active || !workspace) return
-    if (active.accessMode !== 'active' || entry.availability !== 'available') return
+    if ((action === 'prepare' || !entry.enabled) && (active.accessMode !== 'active' || entry.availability !== 'available')) return
     if (action === 'prepare' && !entry.enabled) return
     pending.current = true
     const invocation = ++generation.current
@@ -100,10 +100,11 @@ export function ProductSpaceSkillsDialog({ onClose }: { onClose: () => void }) {
       {visible.entries.map(entry => <article key={entry.artifactInstanceId} data-testid="product-space-skill-row" className="rounded-xl border border-border p-4">
         <h3 className="font-semibold break-words">{entry.name}</h3>
         <p className="mt-1 text-sm text-muted-foreground break-words whitespace-pre-wrap">{entry.description}</p>
+        {visible.withdrawn?.includes(entry.artifactInstanceId) && <p className="mt-2 text-sm">{t('productSpaceSkills.withdrawn', {defaultValue:'Authorization ended. You can clear your previous enablement choice.'})}</p>}
         <p className="mt-2 text-xs text-muted-foreground">{entry.sources.map(source => source.name).join(' · ')} · {entry.version.version}</p>
         <p className="mt-2 text-sm">{entry.availability !== 'available' ? t('productSpaceSkills.unavailable', { defaultValue: 'Authorization unavailable' }) : entry.enabled ? t('productSpaceSkills.enabled', { defaultValue: 'Enabled for me' }) : t('productSpaceSkills.disabled', { defaultValue: 'Disabled for me' })} · {visible.prepared[entry.artifactInstanceId] === entry.version.versionId ? t('productSpaceSkills.prepared', { defaultValue: 'Current version prepared' }) : t('productSpaceSkills.unprepared', { defaultValue: 'Current version not prepared' })}</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button className={clientWorkbenchButtonClassName} disabled={!!busy || visible.loading || !!visible.error || active?.accessMode !== 'active' || entry.availability !== 'available'} onClick={() => { void mutate(entry, 'toggle') }}>{t(entry.enabled ? 'productSpaceSkills.disable' : 'productSpaceSkills.enable', { defaultValue: entry.enabled ? 'Disable' : 'Enable' })}</Button>
+          <Button className={clientWorkbenchButtonClassName} disabled={!!busy || visible.loading || !!visible.error || (!entry.enabled && (active?.accessMode !== 'active' || entry.availability !== 'available'))} onClick={() => { void mutate(entry, 'toggle') }}>{t(entry.enabled ? 'productSpaceSkills.disable' : 'productSpaceSkills.enable', { defaultValue: entry.enabled ? 'Disable' : 'Enable' })}</Button>
           <Button className={clientWorkbenchButtonClassName} disabled={!!busy || visible.loading || !!visible.error || !entry.enabled || active?.accessMode !== 'active' || entry.availability !== 'available'} onClick={() => { void mutate(entry, 'prepare') }}>{busy === entry.artifactInstanceId ? t('productSpaceSkills.processing', { defaultValue: 'Processing…' }) : t('productSpaceSkills.prepare', { defaultValue: 'Download / update' })}</Button>
         </div>
       </article>)}

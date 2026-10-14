@@ -171,6 +171,8 @@ const { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvid
 const trustedBoundaryAccountId = 'boundary-account'
 
 beforeEach(async () => {
+  const {bindCanonicalSkillContextResolver}=await import('../../runtime/canonical-skills')
+  bindCanonicalSkillContextResolver(async scope=>({id:scope.productSpaceId,kind:'personal',accessMode:'active'} as any))
   setTrustedProductSpaceAccountProvider(async () => trustedBoundaryAccountId)
   // R32-2: the session fence reads the SYNCHRONOUS trusted account mirror.
   setSyncTrustedProductSpaceAccountId(trustedBoundaryAccountId)
@@ -609,4 +611,13 @@ describe('Canonical Skill native production RPC', () => {
     for (const extra of [{ accountId: 'foreign' }, { organizationId: 'fake' }, { grant: installInput.grant }, { path: '/foreign' }]) expect(await install(ctx, { workspaceId: workspaceOne.id, catalogEntryId: 'entry', operationId: crypto.randomUUID(), ...extra })).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' })
     expect(await install(ctx, { workspaceId: workspaceTwo.id, catalogEntryId: 'entry', operationId: crypto.randomUUID() })).toMatchObject({ success: false, errorCode: 'workspace_context_mismatch' })
   })
+})
+
+it('enterprise Skill enumeration excludes every inherited workspace Skill',async()=>{
+  const {bindCanonicalSkillContextResolver}=await import('../../runtime/canonical-skills')
+  bindCanonicalSkillContextResolver(async scope=>({id:scope.productSpaceId,kind:'enterprise',accessMode:'active'} as any))
+  await mkdir(join(workspaceOne.rootPath,'skills/personal-helper'),{recursive:true})
+  await writeFile(join(workspaceOne.rootPath,'skills/personal-helper/SKILL.md'),'---\nname: personal-helper\ndescription: Personal only.\n---\nPrivate instructions.')
+  const rows=await handlers.get(RPC_CHANNELS.skills.GET)!(ctx,workspaceOne.id) as any[]
+  expect(rows.some(row=>row.slug==='personal-helper')).toBe(false)
 })

@@ -40,7 +40,7 @@ import {
   uninstallCreatorSkill,
   updateCreatorSkillInstallationMetadata,
 } from '@polo-ai/shared/creator-skills'
-import { resolveCanonicalSkill, canonicalSkillSourceFromLaunch, loadCallableCanonicalSkills } from '../../runtime/canonical-skills'
+import { resolveCanonicalSkill, canonicalSkillSourceFromLaunch, loadCallableCanonicalSkills, resolveCanonicalSkillContext } from '../../runtime/canonical-skills'
 import { readCanonicalSkillInstallations, installCanonicalSkill, canonicalSkillRoot, canonicalSkillIdentity, listCanonicalSkillRoots, recoverCanonicalSkillOperations } from '@polo-ai/shared/creator-skills'
 import { CatalogEntryIdSchema } from '@polo-ai/shared/product-spaces'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
@@ -436,9 +436,10 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         : skill
     })
     const scope = { ...await requireTrustedSkillsScope(), fenceGeneration: getRuntimeFenceGeneration() }
+    const context = await resolveCanonicalSkillContext(scope)
     const canonical = await loadCallableCanonicalSkills(workspaceRoot, scope)
     await assertOriginalNativeSkillScope(scope, scope.fenceGeneration)
-    return [...local, ...canonical]
+    return [...(context.kind === 'personal' && context.accessMode === 'active' ? local : []), ...canonical]
   }
 
   const broadcastSkillsChanged = async (workspaceId: string, workspaceRoot: string) => {

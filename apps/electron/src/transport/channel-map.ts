@@ -185,6 +185,7 @@ export const CHANNEL_MAP = {
   productSpaceResolveLaunch: invoke(RPC_CHANNELS.productSpace.RESOLVE_LAUNCH),
   productSpaceInstallSkill: invoke(RPC_CHANNELS.productSpace.INSTALL_SKILL),
   productSpaceUninstallSkill: invoke(RPC_CHANNELS.productSpace.UNINSTALL_SKILL),
+  productSpaceListSkills: invoke(RPC_CHANNELS.productSpace.LIST_SKILLS),
   productSpaceSetSkillEnablement: invoke(RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT),
   productSpacePrepareSwitch: invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH),
   productSpaceStopSwitchExecutions: invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS),

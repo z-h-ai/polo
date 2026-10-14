@@ -186,6 +186,8 @@ export interface BackendHostRuntimeContext {
 export interface CoreBackendConfig {
   /** Main-owned canonical Skill discovery and per-use permission; absent means unavailable. */
   canonicalSkills?: {
+    /** Fresh Main-owned ProductSpace policy. Enterprise never inherits personal/global Skills. */
+    allowLocalSkills?: () => Promise<boolean>;
     load: () => Promise<import('../../skills/types.ts').LoadedSkill[]>;
     authorize: (paths: readonly string[], turnId: string) => Promise<void>;
     finish: (turnId: string) => Promise<void>;

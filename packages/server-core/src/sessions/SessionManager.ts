@@ -1,7 +1,7 @@
 import type { EventSink, RpcServer } from '@polo-ai/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@polo-ai/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@polo-ai/server-core/handlers'
-import { loadCallableCanonicalSkills, createCanonicalSkillTurnController } from '../runtime/canonical-skills'
+import { loadCallableCanonicalSkills, createCanonicalSkillTurnController, resolveCanonicalSkillContext, loadProductSpaceSkills } from '../runtime/canonical-skills'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@polo-ai/server-core/runtime'
@@ -115,7 +115,7 @@ import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId } from '@polo-ai/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@polo-ai/shared/utils'
-import { loadAllSkills, invalidateSkillsCache, type LoadedSkill } from '@polo-ai/shared/skills'
+import { invalidateSkillsCache, type LoadedSkill } from '@polo-ai/shared/skills'
 import { invalidateContextFileCache } from '@polo-ai/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@polo-ai/shared/config'
 import { getDefaultSummarizationModel } from '@polo-ai/shared/config/models'
@@ -747,7 +747,8 @@ async function resolveToolDisplayMeta(
       if (skillSlug) {
         // Load skills and find the one being invoked
         try {
-          const skills = loadAllSkills(workspaceRootPath)
+          const scope = getRuntimeActiveProductSpaceScope()
+          const skills = scope ? await loadProductSpaceSkills(workspaceRootPath, {...scope,fenceGeneration:getRuntimeFenceGeneration()}).catch(() => []) : []
           const skill = skills.find(s => s.slug === skillSlug)
           if (skill) {
             // Try file-based icon first, fall back to emoji icon from metadata
@@ -2243,14 +2244,12 @@ export class SessionManager implements ISessionManager {
       },
       onSkillsListChange: async (skills) => {
         sessionLog.info(`Skills list changed in ${workspaceRootPath} (${skills.length} skills)`)
-        this.broadcastSkillsChanged(workspaceId, skills)
+        await this.broadcastSkillsChanged(workspaceId, workspaceRootPath)
       },
       onSkillChange: async (slug, skill) => {
         sessionLog.info(`Skill '${slug}' changed:`, skill ? 'updated' : 'deleted')
         // Broadcast updated list to UI
-        const { loadAllSkills } = await import('@polo-ai/shared/skills')
-        const skills = loadAllSkills(workspaceRootPath)
-        this.broadcastSkillsChanged(workspaceId, skills)
+        await this.broadcastSkillsChanged(workspaceId, workspaceRootPath)
       },
 
       // Session metadata changes (edits to session.jsonl headers).
@@ -2425,9 +2424,19 @@ export class SessionManager implements ISessionManager {
     this.eventSink(RPC_CHANNELS.llmConnections.CHANGED, { to: 'all' })
   }
 
-  private broadcastSkillsChanged(workspaceId: string, skills: import('@polo-ai/shared/skills').LoadedSkill[]): void {
+  private async broadcastSkillsChanged(workspaceId: string, workspaceRoot: string): Promise<void> {
     if (!this.eventSink) return
-    sessionLog.info(`Broadcasting skills changed (${skills.length} skills)`)
+    const original = getRuntimeActiveProductSpaceScope()
+    const generation = getRuntimeFenceGeneration()
+    if (!original) {
+      this.eventSink(RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, [])
+      return
+    }
+    let skills: LoadedSkill[] = []
+    try { skills = await loadProductSpaceSkills(workspaceRoot, { ...original, fenceGeneration: generation }) }
+    catch { /* Unavailable authority grants no metadata or invocation permission. */ }
+    const current = getRuntimeActiveProductSpaceScope()
+    if (!current || current.accountId !== original.accountId || current.productSpaceId !== original.productSpaceId || getRuntimeFenceGeneration() !== generation) return
     this.eventSink(RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, skills)
   }
 
@@ -5219,6 +5228,15 @@ export class SessionManager implements ISessionManager {
         coreConfig: {
         workspace: managed.workspace,
         canonicalSkills: {
+          allowLocalSkills: this.guardManagedCallback(managed, 'backend.canonicalSkills.allowLocalSkills', async () => {
+            const original = this.managedTrustedScope(managed)
+            if (!original) return false
+            const generation = getRuntimeFenceGeneration()
+            const context = await resolveCanonicalSkillContext({...original,fenceGeneration:generation})
+            const current = this.managedTrustedScope(managed)
+            if (!current || current.accountId !== original.accountId || current.productSpaceId !== original.productSpaceId || getRuntimeFenceGeneration() !== generation) throw new Error('Skill session scope changed')
+            return context.kind === 'personal' && context.accessMode === 'active'
+          }),
           load: this.guardManagedCallback(managed, 'backend.canonicalSkills.load', async () => {
             const original = this.managedTrustedScope(managed)
             if (!original) throw new Error('Canonical Skill session scope is unavailable')
@@ -11422,7 +11440,7 @@ export class SessionManager implements ISessionManager {
     }
 
     // Resolve @mentions to source/skill slugs
-    const resolved = mentions ? this.resolveAutomationMentions(workspaceRootPath, mentions) : undefined
+    const resolved = mentions ? await this.resolveAutomationMentions(workspaceRootPath, mentions) : undefined
 
     // Ensure labels exist in workspace config before assigning to session
     const resolvedLabels = labels?.length
@@ -11489,9 +11507,10 @@ export class SessionManager implements ISessionManager {
   /**
    * Resolve @mentions in automation prompts to source and skill slugs
    */
-  private resolveAutomationMentions(workspaceRootPath: string, mentions: string[]): { sourceSlugs: string[]; skillSlugs: string[] } | undefined {
+  private async resolveAutomationMentions(workspaceRootPath: string, mentions: string[]): Promise<{ sourceSlugs: string[]; skillSlugs: string[] } | undefined> {
     const sources = loadWorkspaceSources(workspaceRootPath)
-    const skills = loadAllSkills(workspaceRootPath)
+    const scope = getRuntimeActiveProductSpaceScope()
+    const skills = scope ? await loadProductSpaceSkills(workspaceRootPath, {...scope,fenceGeneration:getRuntimeFenceGeneration()}).catch(() => []) : []
     const sourceSlugs: string[] = []
     const skillSlugs: string[] = []
 

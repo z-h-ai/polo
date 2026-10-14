@@ -42,6 +42,7 @@ type AdminPreloadApi = Pick<
   | 'productSpaceGetRestrictionState'
   | 'productSpaceGetCatalog'
   | 'productSpaceResolveLaunch'
+  | 'productSpaceListSkills'
   | 'productSpaceSetSkillEnablement'
   | 'productSpaceInstallSkill'
   | 'productSpaceUninstallSkill'
@@ -60,6 +61,7 @@ export function buildAdminPreloadApi(
   challengeDependencies?: PhoneAuthChallengeDependencies,
 ): AdminPreloadApi {
   return {
+    productSpaceListSkills: spaceId => client.invoke(RPC_CHANNELS.productSpace.LIST_SKILLS,spaceId),
     productSpaceSetSkillEnablement: (spaceId, instanceId, enabled) =>
       client.invoke(RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT, spaceId, instanceId, enabled),
     productSpaceInstallSkill: input => client.invoke(RPC_CHANNELS.productSpace.INSTALL_SKILL, input),

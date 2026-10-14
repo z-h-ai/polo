@@ -2331,5 +2331,6 @@
   "productSpaceSkills.enable": "启用",
   "productSpaceSkills.disable": "停用",
   "productSpaceSkills.prepare": "下载 / 更新",
+  "productSpaceSkills.withdrawn": "授权已结束；可清除之前的启用选择。",
   "productSpaceSkills.processing": "正在处理…"
 }

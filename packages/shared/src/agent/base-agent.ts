@@ -68,7 +68,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
-import { loadAllSkills } from '../skills/storage.ts';
+import { loadAllSkills, GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../skills/storage.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -910,6 +910,7 @@ ${formattedMessages}
    *   - missingSkills: Array of skill slugs that were mentioned but not found
    */
   private canonicalSkillPaths: string[] = [];
+  private localSkillsAllowed = true;
   private activeCanonicalSkillPaths: string[] = [];
   private canonicalTurnId: string | null = null;
 
@@ -943,9 +944,13 @@ ${formattedMessages}
       // claim to resolve arbitrary variable/command substitution programs.
       for (const token of input.command.match(/"[^"\n]*"|'[^'\n]*'|[^\s;|&]+/g) ?? []) candidates.push(token.replace(/^['"]|['"]$/g, ''));
     }
+    const personalRoots = [join(this.config.workspace.rootPath, 'skills'), GLOBAL_AGENT_SKILLS_DIR,
+      join(workingDirectory, PROJECT_AGENT_SKILLS_DIR)];
+    const privateRoots = personalRoots.flatMap(root => [resolve(root), canonicalize(root)]);
     for (const candidate of candidates) {
       const path = canonicalize(candidate);
       const lexical = resolve(expandPath(candidate, workingDirectory));
+      if (!this.localSkillsAllowed && privateRoots.some(root => [path, lexical].some(value => value === root || value.startsWith(`${root}${sep}`)))) return 'Personal and global Skill instructions are unavailable in this ProductSpace';
       const inside = (value: string) => [protectedRoot, lexicalProtectedRoot].some(root => value === root || value.startsWith(`${root}${sep}`));
       if (!inside(path) && !inside(lexical)) continue;
       if (/^(?:Write|Edit|MultiEdit)$/.test(toolName)) return 'Canonical Skill native instruction files are managed and cannot be edited through a model tool';
@@ -959,6 +964,7 @@ ${formattedMessages}
     let canonicalPluginRequest = false;
     if (toolName === 'Skill') {
       const slug = typeof input.skill === 'string' ? input.skill : typeof input.name === 'string' ? input.name : '';
+      if (slug && !this.localSkillsAllowed && !slug.includes('canonical-')) return 'Personal and global Skills are unavailable in this ProductSpace';
       if (slug.includes('canonical-')) {
         canonicalPluginRequest = true;
         const path = this.canonicalSkillPaths.find(path => path.includes(slug.split(':').pop()!.replace(/^canonical-/, '')));
@@ -968,18 +974,26 @@ ${formattedMessages}
     }
     if (paths.size === 0) return null;
     if (!this.config.canonicalSkills || !this.canonicalTurnId) return 'Canonical Skill permission authority is unavailable outside an active turn';
-    try { await this.config.canonicalSkills.authorize([...paths], expectedTurnId!); if (stale()) return 'The original tool turn is no longer active'; return canonicalPluginRequest ? `Canonical Skills use the existing Read-before-execute path. Read ${[...paths].join(', ')} instead of the SDK plugin Skill tool.` : null; }
+    try {
+      await this.config.canonicalSkills.authorize([...paths], expectedTurnId!);
+      if (stale()) return 'The original tool turn is no longer active';
+      // A model can discover and Read instructions without an explicit user
+      // mention. Once admitted, that Skill participates in this original
+      // turn and must be reauthorized before every subsequent tool action.
+      this.activeCanonicalSkillPaths = [...new Set([...this.activeCanonicalSkillPaths, ...paths])];
+      return canonicalPluginRequest ? `Canonical Skills use the existing Read-before-execute path. Read ${[...paths].join(', ')} instead of the SDK plugin Skill tool.` : null;
+    }
     catch { return 'Canonical Skill is unavailable for this account, ProductSpace or current version'; }
   }
 
-  protected extractSkillPaths(message: string, canonical: import('../skills/types.ts').LoadedSkill[] = []): {
+  protected extractSkillPaths(message: string, canonical: import('../skills/types.ts').LoadedSkill[] = [], allowLocal = true): {
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
   } {
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
-    const skills = [...loadAllSkills(workspaceRoot, projectRoot), ...canonical];
+    const skills = [...(allowLocal ? loadAllSkills(workspaceRoot, projectRoot) : []), ...canonical];
     const skillSlugs = skills.map(s => s.slug);
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);
@@ -1061,7 +1075,9 @@ ${formattedMessages}
     try {
     const canonical = await this.config.canonicalSkills?.load().catch(() => []) ?? [];
     this.canonicalSkillPaths = canonical.map(skill => join(skill.path, 'SKILL.md'));
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, canonical);
+    const allowLocal = this.config.canonicalSkills ? await this.config.canonicalSkills.allowLocalSkills?.().catch(() => false) ?? false : true;
+    this.localSkillsAllowed = allowLocal;
+    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, canonical, allowLocal);
     this.activeCanonicalSkillPaths = [...skillPaths.values()].filter(path => this.canonicalSkillPaths.includes(path));
     if (this.activeCanonicalSkillPaths.length) {
       const denied = await this.checkCanonicalSkillUse('Skill', {});

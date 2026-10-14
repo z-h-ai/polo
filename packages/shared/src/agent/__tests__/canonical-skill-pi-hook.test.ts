@@ -44,3 +44,20 @@ it('actual Pi PreToolUse never borrows B receipt after A automation wait and rej
     await b.return(undefined as never)
   } finally { agent.destroy(); await rm(root, { recursive: true, force: true }) }
 })
+
+it('actual Pi Read-first hook rechecks a revoked Skill before a later unrelated Bash', async () => {
+  const root=await mkdtemp(join(tmpdir(),'canonical-pi-read-first-'));const path=join(root,'.polo/canonical-skills','d'.repeat(64),'skills/slug')
+  let allowed=true;const ids:string[]=[]
+  const agent=new PausedPi(createMockBackendConfig({provider:'pi',workspace:createMockWorkspace({rootPath:root}),session:createMockSession({id:'pi-read-first',workspaceRootPath:root,workingDirectory:root}),canonicalSkills:{load:async()=>[{slug:`canonical-${'d'.repeat(64)}`,metadata:{name:'slug',description:'unit'},content:'unit',path,source:'workspace' as const}],authorize:async(_paths,id)=>{ids.push(id);if(!allowed)throw new Error('revoked')},finish:async()=>{}}}))
+  const native=agent as unknown as {send:(input:any)=>void;emitAutomationEvent:()=>Promise<void>;handlePreToolUseRequest:(input:any)=>Promise<void>;getCanonicalTurnId:()=>string}
+  const responses:any[]=[];native.send=input=>{responses.push(input)};native.emitAutomationEvent=async()=>{}
+  try {
+    await mkdir(path,{recursive:true});await writeFile(join(path,'SKILL.md'),'---\nname: slug\ndescription: unit\n---\nunit')
+    const turn=agent.chat('Prepare a team report');await turn.next();const id=native.getCanonicalTurnId()
+    await native.handlePreToolUseRequest({requestId:'read',canonicalTurnId:id,toolName:'Read',input:{file_path:join(path,'SKILL.md')}})
+    expect(responses.at(-1).action).not.toBe('block');allowed=false
+    await native.handlePreToolUseRequest({requestId:'bash',canonicalTurnId:id,toolName:'Bash',input:{command:'echo continue'}})
+    expect(responses.at(-1).action).toBe('block');expect(ids.every(value=>value===id)).toBe(true)
+    await turn.return(undefined as never)
+  } finally {agent.destroy();await rm(root,{recursive:true,force:true})}
+})

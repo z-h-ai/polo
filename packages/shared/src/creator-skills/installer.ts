@@ -551,7 +551,7 @@ function parseBackupMetadata(
     || typeof metadata.createdAt !== 'string'
     || Number.isNaN(Date.parse(metadata.createdAt))
     || (metadata.version !== undefined
-      && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(metadata.version))
+      && (typeof metadata.version !== 'string' || metadata.version.trim().length === 0 || metadata.version.length > 64))
   ) {
     throw invalidBackupPath('Creator Skill backup metadata is invalid')
   }
@@ -762,7 +762,7 @@ function validateJournalShape(
       || typeof journal.backupCreatedAt !== 'string'
       || Number.isNaN(Date.parse(journal.backupCreatedAt))
       || (journal.backupVersion !== undefined
-        && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(journal.backupVersion))
+        && (typeof journal.backupVersion !== 'string' || journal.backupVersion.trim().length === 0 || journal.backupVersion.length > 64))
     ))
   ) {
     throw invalidOperationPath('Creator Skill recovery journal is invalid')
@@ -1764,6 +1764,7 @@ export async function installCreatorSkill(
       const previous = conflictState.existing
       const ignoredVersion = (
         previous
+        && !('canonicalSource' in input.grant)
         && previous.artifactId === input.grant.artifactId
         && compareStableSemver(input.grant.version, previous.version) < 0
       ) ? previous.version : undefined

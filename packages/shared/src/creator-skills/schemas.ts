@@ -254,14 +254,18 @@ export const InstalledCreatorSkillSchema = z.object({
   organizationId: entityId.optional(),
   canonicalSource: CanonicalSkillSourceSchema.optional(),
   slug: skillSlug,
-  version: stableSemver,
+  version: z.string().trim().min(1).max(64),
   archiveChecksum: checksum,
   contentDigest: checksum,
   installedAt: isoDate,
   lastKnownStatus: z.enum(['active', 'revoked', 'archived']).optional(),
   lastCheckedAt: isoDate.optional(),
-  ignoredVersion: stableSemver.optional(),
+  ignoredVersion: z.string().trim().min(1).max(64).optional(),
 }).superRefine((row, ctx) => {
+  if (row.canonicalSource?.subjectKind !== 'enterprise_instance' && (!stableSemver.safeParse(row.version).success || (row.ignoredVersion !== undefined && !stableSemver.safeParse(row.ignoredVersion).success))) {
+    ctx.addIssue({code:z.ZodIssueCode.custom,message:'Legacy Creator Skill versions require stable semver'})
+  }
+
   if (row.canonicalSource ? (row.organizationId !== undefined || row.artifactId !== row.canonicalSource.subjectId) : !row.organizationId) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Managed Skill provenance must be canonical or legacy, never ambiguous' })
   }

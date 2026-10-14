@@ -32,7 +32,7 @@ it('BaseAgent real chat resolves isolated native SKILL.md and registered prerequ
 it('cold canonical paths and SDK plugin Skill cannot borrow ordinary workspace or global slug authority', async () => own(async (root, skill) => {
   const cold = new Consumer(createMockBackendConfig({ workspace: createMockWorkspace({ rootPath: root }) }))
   expect(await cold.check('Read', { file_path: join(skill.path, 'SKILL.md') })).toContain('no current')
-  const bound = new Consumer(createMockBackendConfig({ workspace: createMockWorkspace({ rootPath: root }), canonicalSkills: { load: async () => [skill], authorize: async () => {}, finish: async () => {} } }))
+  const bound = new Consumer(createMockBackendConfig({ workspace: createMockWorkspace({ rootPath: root }), canonicalSkills: { allowLocalSkills: async () => true, load: async () => [skill], authorize: async () => {}, finish: async () => {} } }))
   const turn = bound.chat('Ordinary message'); await turn.next()
   expect(await bound.check('Skill', { skill: skill.slug })).toContain('Read-before-execute')
   expect(await bound.check('Read', { file_path: join(root, 'skills/ordinary/SKILL.md') })).toBeNull()

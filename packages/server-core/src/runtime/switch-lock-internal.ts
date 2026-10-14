@@ -23,6 +23,7 @@ export type CatalogAuthorityRevokeToken = {
   productSpaceId: string
   invocation: number
 }
+export type SkillReadCommitToken = { phase: 'skill-read-commit'; accountId: string; productSpaceId: string }
 export type SkillEnablementCommitToken = { phase: 'skill-enablement-commit'; accountId: string; productSpaceId: string }
 export type RuntimePublicMutexToken = { phase: 'runtime-public-mutex' }
 export type RuntimeRevokeFenceToken = { phase: 'runtime-revoke-fence' }
@@ -45,6 +46,7 @@ export type SwitchLockToken =
   | ComputeConnectionCommitToken
   | CatalogAuthorityCommitToken
   | CatalogAuthorityRevokeToken
+  | SkillReadCommitToken
   | SkillEnablementCommitToken
   | RuntimePublicMutexToken
   | RuntimeRevokeFenceToken

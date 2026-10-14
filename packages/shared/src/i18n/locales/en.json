@@ -2331,5 +2331,6 @@
   "productSpaceSkills.enable": "Enable",
   "productSpaceSkills.disable": "Disable",
   "productSpaceSkills.prepare": "Download / update",
+  "productSpaceSkills.withdrawn": "Authorization ended. You can clear your previous enablement choice.",
   "productSpaceSkills.processing": "Processing…"
 }

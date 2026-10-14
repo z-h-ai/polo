@@ -1063,6 +1063,10 @@ export interface ElectronAPI {
     | { success: true; result: import('@polo-ai/shared/product-spaces').StopAllExecutionsResult }
     | { success: false; errorCode: string; message: string }
   >
+  productSpaceListSkills(productSpaceId:string):Promise<
+    | {success:true;productSpaceId:string;accessMode:string;entries:ReadonlyArray<Record<string,unknown>>;withdrawnEntries:ReadonlyArray<Record<string,unknown>>}
+    | {success:false;errorCode:string;message:string}
+  >
   productSpaceGetCatalog(
     productSpaceId: string,
     knownRevision?: string,

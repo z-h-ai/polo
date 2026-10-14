@@ -26392,14 +26392,17 @@ var InstalledCreatorSkillSchema = external_exports.object({
   organizationId: entityId.optional(),
   canonicalSource: CanonicalSkillSourceSchema.optional(),
   slug: skillSlug,
-  version: stableSemver,
+  version: external_exports.string().trim().min(1).max(64),
   archiveChecksum: checksum,
   contentDigest: checksum,
   installedAt: isoDate,
   lastKnownStatus: external_exports.enum(["active", "revoked", "archived"]).optional(),
   lastCheckedAt: isoDate.optional(),
-  ignoredVersion: stableSemver.optional()
+  ignoredVersion: external_exports.string().trim().min(1).max(64).optional()
 }).superRefine((row, ctx) => {
+  if (row.canonicalSource?.subjectKind !== "enterprise_instance" && (!stableSemver.safeParse(row.version).success || row.ignoredVersion !== void 0 && !stableSemver.safeParse(row.ignoredVersion).success)) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Legacy Creator Skill versions require stable semver" });
+  }
   if (row.canonicalSource ? row.organizationId !== void 0 || row.artifactId !== row.canonicalSource.subjectId : !row.organizationId) {
     ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Managed Skill provenance must be canonical or legacy, never ambiguous" });
   }
@@ -27931,7 +27934,7 @@ function parseBackupMetadata(raw, expected) {
     throw invalidBackupPath("Creator Skill backup metadata is invalid");
   }
   const metadata = raw;
-  if (metadata.schemaVersion !== 1 || metadata.slug !== expected.slug || metadata.backupId !== expected.backupId || !isBackupOperation(metadata.operation) || typeof metadata.createdAt !== "string" || Number.isNaN(Date.parse(metadata.createdAt)) || metadata.version !== void 0 && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(metadata.version)) {
+  if (metadata.schemaVersion !== 1 || metadata.slug !== expected.slug || metadata.backupId !== expected.backupId || !isBackupOperation(metadata.operation) || typeof metadata.createdAt !== "string" || Number.isNaN(Date.parse(metadata.createdAt)) || metadata.version !== void 0 && (typeof metadata.version !== "string" || metadata.version.trim().length === 0 || metadata.version.length > 64)) {
     throw invalidBackupPath("Creator Skill backup metadata is invalid");
   }
   return metadata;
@@ -28066,7 +28069,7 @@ function validateJournalShape(journal, expectedOperationId) {
     "ledger_committed",
     "detaching",
     "committed"
-  ].includes(journal.state) || journal.oldLedger !== null && typeof journal.oldLedger !== "string" || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES || journal.promotedDirectoryIdentity !== void 0 && !/^[0-9]+:[0-9]+:[0-9]+$/.test(journal.promotedDirectoryIdentity) || !hasValidForceDeleteConfirmation || forceDeleteConfirmation !== void 0 && (journal.action !== "uninstall" || journal.preserveBackupPath !== void 0) || hasAnyBackupMetadata && (!isBackupOperation(journal.backupOperation) || typeof journal.backupCreatedAt !== "string" || Number.isNaN(Date.parse(journal.backupCreatedAt)) || journal.backupVersion !== void 0 && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(journal.backupVersion))) {
+  ].includes(journal.state) || journal.oldLedger !== null && typeof journal.oldLedger !== "string" || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES || journal.promotedDirectoryIdentity !== void 0 && !/^[0-9]+:[0-9]+:[0-9]+$/.test(journal.promotedDirectoryIdentity) || !hasValidForceDeleteConfirmation || forceDeleteConfirmation !== void 0 && (journal.action !== "uninstall" || journal.preserveBackupPath !== void 0) || hasAnyBackupMetadata && (!isBackupOperation(journal.backupOperation) || typeof journal.backupCreatedAt !== "string" || Number.isNaN(Date.parse(journal.backupCreatedAt)) || journal.backupVersion !== void 0 && (typeof journal.backupVersion !== "string" || journal.backupVersion.trim().length === 0 || journal.backupVersion.length > 64))) {
     throw invalidOperationPath("Creator Skill recovery journal is invalid");
   }
 }
@@ -28812,7 +28815,7 @@ async function installCreatorSkill(workspaceRoot, input, dependencies = {}) {
         }
       }
       const previous = conflictState.existing;
-      const ignoredVersion = previous && previous.artifactId === input.grant.artifactId && compareStableSemver(input.grant.version, previous.version) < 0 ? previous.version : void 0;
+      const ignoredVersion = previous && !("canonicalSource" in input.grant) && previous.artifactId === input.grant.artifactId && compareStableSemver(input.grant.version, previous.version) < 0 ? previous.version : void 0;
       const installation = {
         ...dependencies.nativeInstallationAdmissionId ? { nativeInstallationAdmissionId: dependencies.nativeInstallationAdmissionId } : {},
         artifactId: input.grant.artifactId,
@@ -29555,7 +29558,7 @@ async function installCanonicalSkill(workspaceRoot, input, dependencies = {}) {
   const incoming = (0, import_node_path4.join)(root, `.incoming-${(0, import_node_crypto3.randomUUID)()}`);
   const checksum2 = input.checksum.replace(/^sha256:/, "").toLowerCase();
   if (!Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.now()) throw new Error("Canonical Skill download grant expired");
-  if (!/^[a-f0-9]{64}$/.test(checksum2) || !Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > DEFAULT_SKILL_ARCHIVE_POLICY.maxArchiveBytes) throw new Error("Canonical Skill bundle is invalid");
+  if (!/^[a-f0-9]{64}$/.test(checksum2) || !Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes) throw new Error("Canonical Skill bundle is invalid");
   const ledgerFile = await (0, import_promises4.readFile)((0, import_node_path4.join)(root, "creator-skills.json"), "utf8").catch((error48) => {
     if (error48.code === "ENOENT") return null;
     throw error48;
@@ -29578,7 +29581,7 @@ async function installCanonicalSkill(workspaceRoot, input, dependencies = {}) {
       }
     });
     if ((await (0, import_promises4.stat)(archive)).size !== input.sizeBytes) throw new Error("Canonical Skill bundle size differs from the grant");
-    const validated = await validateCreatorSkillArchive({ archivePath: archive, expectedArchiveChecksum: checksum2 });
+    const validated = await validateCreatorSkillArchive({ archivePath: archive, expectedArchiveChecksum: checksum2, policy: HARD_SKILL_ARCHIVE_POLICY });
     const witnessRoot = (0, import_node_path4.join)(root, ".archives");
     try {
       await (0, import_promises4.mkdir)(witnessRoot, { mode: 448 });
@@ -29595,7 +29598,7 @@ async function installCanonicalSkill(workspaceRoot, input, dependencies = {}) {
     }
     const witnessFile = await (0, import_promises4.lstat)(witness);
     if (!witnessFile.isFile() || witnessFile.isSymbolicLink() || await (0, import_promises4.realpath)(witness) !== witness) throw new Error("Canonical Skill witness is unsafe");
-    await validateCreatorSkillArchive({ archivePath: witness, slug: validated.slug, expectedArchiveChecksum: checksum2, expectedContentDigest: validated.contentDigest });
+    await validateCreatorSkillArchive({ archivePath: witness, slug: validated.slug, expectedArchiveChecksum: checksum2, expectedContentDigest: validated.contentDigest, policy: HARD_SKILL_ARCHIVE_POLICY });
     await ensureCanonicalRecovery(root);
     const hooks = await dependencies.onValidated?.(root, validated.slug);
     return await installCreatorSkill(root, {
@@ -29615,7 +29618,7 @@ async function installCanonicalSkill(workspaceRoot, input, dependencies = {}) {
         archiveChecksum: checksum2,
         contentDigest: validated.contentDigest,
         manifest: validated.manifest,
-        validationPolicy: DEFAULT_SKILL_ARCHIVE_POLICY
+        validationPolicy: HARD_SKILL_ARCHIVE_POLICY
       }
     }, { ...dependencies, ...hooks, preparedArchivePath: archive });
   } finally {
@@ -29662,7 +29665,7 @@ async function readCanonicalSkillInstallations(workspaceRoot, scope, options2 = 
           const witness = (0, import_node_path4.join)(isolated, ".archives", `${row.archiveChecksum}.zip`);
           const witnessFile = await (0, import_promises4.lstat)(witness);
           if (!witnessFile.isFile() || witnessFile.isSymbolicLink() || await (0, import_promises4.realpath)(witness) !== witness) continue;
-          const original = await validateCreatorSkillArchive({ archivePath: witness, slug: row.slug, expectedArchiveChecksum: row.archiveChecksum });
+          const original = await validateCreatorSkillArchive({ archivePath: witness, slug: row.slug, expectedArchiveChecksum: row.archiveChecksum, policy: HARD_SKILL_ARCHIVE_POLICY });
           const bytes = await scanCreatorSkillDirectory(path);
           if (bytes.contentDigest !== original.contentDigest || row.contentDigest !== original.contentDigest) continue;
         }

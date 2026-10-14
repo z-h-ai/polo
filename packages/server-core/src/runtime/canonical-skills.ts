@@ -9,6 +9,12 @@ export interface CanonicalSkillLaunch { context: TrustedProductSpaceSummary; lau
 export type CanonicalSkillSelector = { catalogEntryId: string } | { subjectId: string }
 type Resolver = (scope: CanonicalSkillScope, selector: CanonicalSkillSelector) => Promise<CanonicalSkillLaunch>
 let resolver: Resolver | null = null
+let contextResolver: ((scope: CanonicalSkillScope) => Promise<TrustedProductSpaceSummary>) | null = null
+export function bindCanonicalSkillContextResolver(next: NonNullable<typeof contextResolver>): void { contextResolver = next }
+export async function resolveCanonicalSkillContext(scope: CanonicalSkillScope): Promise<TrustedProductSpaceSummary> {
+  if (!contextResolver) throw new Error('Skill ProductSpace authority unavailable')
+  return contextResolver(scope)
+}
 /** Registered only by the production Admin coordinator, never renderer input. */
 export function bindCanonicalSkillResolver(next: Resolver): void { resolver = next }
 export async function resolveCanonicalSkill(scope: CanonicalSkillScope, selector: CanonicalSkillSelector): Promise<CanonicalSkillLaunch> {
@@ -126,4 +132,16 @@ export function createCanonicalSkillTurnController(workspaceRoot: string) {
       })
     },
   }
+}
+
+/** Current-space discovery shared by RPC and file-watcher publications. */
+export async function loadProductSpaceSkills(workspaceRoot: string, scope: CanonicalSkillScope, workingDirectory?: string): Promise<LoadedSkill[]> {
+  const context = await resolveCanonicalSkillContext(scope)
+  const canonical = await loadCallableCanonicalSkills(workspaceRoot, scope)
+  const { loadAllSkills } = await import('@polo-ai/shared/skills')
+  const local = context.kind === 'personal' && context.accessMode === 'active'
+    ? loadAllSkills(workspaceRoot, workingDirectory) : []
+  const current = await resolveCanonicalSkillContext(scope)
+  if (current.kind !== context.kind || current.accessMode !== context.accessMode) throw new Error('Skill ProductSpace policy changed during discovery')
+  return [...local, ...canonical]
 }

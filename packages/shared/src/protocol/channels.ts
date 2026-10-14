@@ -329,6 +329,7 @@ export const RPC_CHANNELS = {
     LIST: 'product-space:list',
     CATALOG: 'product-space:catalog',
     RESOLVE_LAUNCH: 'product-space:resolveLaunch',
+    LIST_SKILLS: 'product-space:listSkills',
     SET_SKILL_ENABLEMENT: 'product-space:setSkillEnablement',
     INSTALL_SKILL: 'product-space:installSkill',
     UNINSTALL_SKILL: 'product-space:uninstallSkill',

@@ -1,6 +1,6 @@
 import * as realSkillTurnContract from '../../../../shared/src/admin/skill-turn-contract'
 import * as realNativeInstallationContract from '../../../../shared/src/admin/native-installations-contract'
-import { resolveCanonicalSkill, beginCanonicalSkillTurn, operateCanonicalSkillTurn } from '../../runtime/canonical-skills'
+import { resolveCanonicalSkill, beginCanonicalSkillTurn, operateCanonicalSkillTurn, resolveCanonicalSkillContext } from '../../runtime/canonical-skills'
 import { getRuntimeFenceGeneration } from '../../runtime/product-space-executions'
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { createCipheriv, hkdfSync } from 'node:crypto'
@@ -657,6 +657,7 @@ function createHarness() {
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
     syncAppCatalog: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_APP_CATALOG),
     productSpaceCatalog: requiredHandler(handlers, RPC_CHANNELS.productSpace.CATALOG),
+    productSpaceListSkills: requiredHandler(handlers, RPC_CHANNELS.productSpace.LIST_SKILLS),
     productSpaceSetSkillEnablement: requiredHandler(handlers, RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT),
     productSpaceResolveLaunch: requiredHandler(handlers, RPC_CHANNELS.productSpace.RESOLVE_LAUNCH),
     listOrganizations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
@@ -1923,6 +1924,7 @@ describe('registerAdminHandlers', () => {
       'paymentHandoff',
       'previewOrganizationJoin',
       'productSpaceCatalog',
+      'productSpaceListSkills',
       'productSpaceResolveLaunch',
       'productSpaceSetSkillEnablement',
       'removeOrganizationMember',
@@ -5494,4 +5496,47 @@ describe('Canonical member Skill Main producer uses original account and fresh s
     expect(managerState.tokens?.userId).toBe('user-1')
   })
 
+})
+
+describe('Skill-only projection does not grant App authority', () => {
+  const ctx={clientId:'renderer',workspaceId:null,webContentsId:null}
+  const skill={kind:'skill',artifactInstanceId:'skill-k',catalogEntryId:'entry-k',enabled:true,availability:'available',name:'Team helper',description:'Use for reports',version:{versionId:'v1',version:'release-1'},sources:[{kind:'enterprise_import',name:'Company'}],permissions:[]}
+  async function setup() {
+    const h=createHarness();await h.login(ctx,'admin','secret');setRuntimeActiveProductSpaceAccount('user-1');setRuntimeActiveProductSpace('space-a')
+    adminClientBehavior.listProductSpaces=async()=>({productSpaces:[{id:'space-a',kind:'enterprise',accessMode:'read_only'}]})
+    adminClientBehavior.getProductSpaceCatalog=async()=>({contractVersion:1,productSpaceId:'space-a',catalogRevision:'read',entries:[{...skill,availability:'unavailable',unavailableReason:'space_restricted'}]})
+    return h
+  }
+  it('fresh read-only metadata preserves disable addressing without granting a launch authority record',async()=>{
+    const h=await setup();const before=authorityRecordCalls.length
+    expect(await h.productSpaceListSkills(ctx,'space-a')).toMatchObject({success:true,accessMode:'read_only',entries:[{enabled:true}]})
+    expect(authorityRecordCalls).toHaveLength(before)
+    expect((await resolveCanonicalSkillContext({accountId:'user-1',productSpaceId:'space-a',fenceGeneration:getRuntimeFenceGeneration()})).kind).toBe('enterprise')
+  })
+  it('withdrawn facts are off-only and disappear after a confirmed off mutation',async()=>{
+    const h=await setup();await h.productSpaceListSkills(ctx,'space-a')
+    adminClientBehavior.getProductSpaceCatalog=async()=>({contractVersion:1,productSpaceId:'space-a',catalogRevision:'withdrawn',entries:[]})
+    expect(await h.productSpaceListSkills(ctx,'space-a')).toMatchObject({success:true,entries:[],withdrawnEntries:[{artifactInstanceId:'skill-k',unavailableReason:'authorization_ended'}]})
+    adminClientBehavior.setProductSpaceSkillEnablement=async(...args)=>{expect(args[4]).toBe(false);expect((args[5] as Set<string>).has('skill-k')).toBe(true);return {mutation:{productSpaceId:'space-a',artifactInstanceId:'skill-k',enabled:false},catalog:{contractVersion:1,productSpaceId:'space-a',catalogRevision:'off',entries:[]}}}
+    expect(await h.productSpaceSetSkillEnablement(ctx,'space-a','skill-k',false)).toMatchObject({success:true,mutation:{enabled:false}})
+    expect(await h.productSpaceListSkills(ctx,'space-a')).toMatchObject({success:true,withdrawnEntries:[]})
+  })
+  it('a read awaiting an old Catalog cannot re-create an opt-in after confirmed disable', async () => {
+    const h = await setup()
+    await h.productSpaceListSkills(ctx, 'space-a')
+    const pending = createDeferred<any>(), started = createDeferred<void>()
+    adminClientBehavior.getProductSpaceCatalog = async () => { started.resolve(); return pending.promise }
+    const oldRead = h.productSpaceListSkills(ctx, 'space-a')
+    await started.promise
+    adminClientBehavior.getProductSpaceCatalog = async () => ({contractVersion:1,productSpaceId:'space-a',catalogRevision:'off',entries:[]})
+    adminClientBehavior.setProductSpaceSkillEnablement = async () => ({mutation:{productSpaceId:'space-a',artifactInstanceId:'skill-k',enabled:false},catalog:{contractVersion:1,productSpaceId:'space-a',catalogRevision:'off',entries:[]}})
+    expect(await h.productSpaceSetSkillEnablement(ctx,'space-a','skill-k',false)).toMatchObject({success:true})
+    pending.resolve({contractVersion:1,productSpaceId:'space-a',catalogRevision:'old',entries:[skill]})
+    expect(await oldRead).toMatchObject({success:false})
+    expect(await h.productSpaceListSkills(ctx,'space-a')).toMatchObject({success:true,withdrawnEntries:[]})
+  })
+  it('an A→B→A response cannot publish private Skill metadata',async()=>{
+    const h=await setup();adminClientBehavior.getProductSpaceCatalog=async()=>{setRuntimeActiveProductSpace('space-b');setRuntimeActiveProductSpace('space-a');return {productSpaceId:'space-a',entries:[skill]}}
+    expect(await h.productSpaceListSkills(ctx,'space-a')).toMatchObject({success:false})
+  })
 })

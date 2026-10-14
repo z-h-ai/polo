@@ -4,7 +4,7 @@ import { join, resolve, sep } from 'node:path'
 import { validateCreatorSkillArchive, scanCreatorSkillDirectory } from './archive.ts'
 import { downloadCreatorSkillArchive, installCreatorSkill, recoverCreatorSkillOperations, type CreatorSkillInstallerDependencies } from './installer.ts'
 import { CreatorSkillsLedgerSchema, CanonicalSkillSourceSchema } from './schemas.ts'
-import { DEFAULT_SKILL_ARCHIVE_POLICY, type CanonicalSkillSource, type CreatorSkillOperationResult, type CanonicalInstalledSkill } from './types.ts'
+import { HARD_SKILL_ARCHIVE_POLICY, type CanonicalSkillSource, type CreatorSkillOperationResult, type CanonicalInstalledSkill } from './types.ts'
 
 export const CANONICAL_SKILLS_DIRECTORY = '.polo/canonical-skills'
 const recoveryByRoot = new Map<string, Promise<void>>()
@@ -58,7 +58,7 @@ export async function installCanonicalSkill(workspaceRoot: string, input: Canoni
   const incoming = join(root, `.incoming-${randomUUID()}`)
   const checksum = input.checksum.replace(/^sha256:/, '').toLowerCase()
   if (!Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.now()) throw new Error('Canonical Skill download grant expired')
-  if (!/^[a-f0-9]{64}$/.test(checksum) || !Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > DEFAULT_SKILL_ARCHIVE_POLICY.maxArchiveBytes) throw new Error('Canonical Skill bundle is invalid')
+  if (!/^[a-f0-9]{64}$/.test(checksum) || !Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes) throw new Error('Canonical Skill bundle is invalid')
   const ledgerFile = await readFile(join(root, 'creator-skills.json'), 'utf8').catch(error => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw error
@@ -73,7 +73,7 @@ export async function installCanonicalSkill(workspaceRoot: string, input: Canoni
     await downloadCreatorSkillArchive({ url: input.downloadUrl, method: 'POST', outputPath: archive, maxBytes: input.sizeBytes,
       signal: dependencies.signal ?? new AbortController().signal, fetchImpl: dependencies.fetch ?? fetch, onChunk: () => {} })
     if ((await stat(archive)).size !== input.sizeBytes) throw new Error('Canonical Skill bundle size differs from the grant')
-    const validated = await validateCreatorSkillArchive({ archivePath: archive, expectedArchiveChecksum: checksum })
+    const validated = await validateCreatorSkillArchive({ archivePath: archive, expectedArchiveChecksum: checksum, policy: HARD_SKILL_ARCHIVE_POLICY })
     const witnessRoot = join(root, '.archives')
     try { await mkdir(witnessRoot, { mode: 0o700 }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
     const witnessInfo = await lstat(witnessRoot)
@@ -82,7 +82,7 @@ export async function installCanonicalSkill(workspaceRoot: string, input: Canoni
     try { await copyFile(archive, witness, 1) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
     const witnessFile = await lstat(witness)
     if (!witnessFile.isFile() || witnessFile.isSymbolicLink() || await realpath(witness) !== witness) throw new Error('Canonical Skill witness is unsafe')
-    await validateCreatorSkillArchive({ archivePath: witness, slug: validated.slug, expectedArchiveChecksum: checksum, expectedContentDigest: validated.contentDigest })
+    await validateCreatorSkillArchive({ archivePath: witness, slug: validated.slug, expectedArchiveChecksum: checksum, expectedContentDigest: validated.contentDigest, policy: HARD_SKILL_ARCHIVE_POLICY })
     await ensureCanonicalRecovery(root)
     const hooks = await dependencies.onValidated?.(root, validated.slug)
     return await installCreatorSkill(root, { workspaceId: input.workspaceId, operationId: input.operationId,
@@ -91,7 +91,7 @@ export async function installCanonicalSkill(workspaceRoot: string, input: Canoni
       // manifest proves the already SHA-bound ZIP, not a new server contract.
       grant: { canonicalSource: input.source, artifactId: input.source.subjectId, slug: validated.slug, version: input.version,
         url: input.downloadUrl, expiresAt: input.expiresAt, archiveChecksum: checksum,
-        contentDigest: validated.contentDigest, manifest: validated.manifest, validationPolicy: DEFAULT_SKILL_ARCHIVE_POLICY },
+        contentDigest: validated.contentDigest, manifest: validated.manifest, validationPolicy: HARD_SKILL_ARCHIVE_POLICY },
     }, { ...dependencies, ...hooks, preparedArchivePath: archive })
   } finally { await rm(incoming, { recursive: true, force: true }) }
 }
@@ -134,7 +134,7 @@ export async function readCanonicalSkillInstallations(workspaceRoot: string, sco
           const witness = join(isolated, '.archives', `${row.archiveChecksum}.zip`)
           const witnessFile = await lstat(witness)
           if (!witnessFile.isFile() || witnessFile.isSymbolicLink() || await realpath(witness) !== witness) continue
-          const original = await validateCreatorSkillArchive({ archivePath: witness, slug: row.slug, expectedArchiveChecksum: row.archiveChecksum })
+          const original = await validateCreatorSkillArchive({ archivePath: witness, slug: row.slug, expectedArchiveChecksum: row.archiveChecksum, policy: HARD_SKILL_ARCHIVE_POLICY })
           const bytes = await scanCreatorSkillDirectory(path)
           if (bytes.contentDigest !== original.contentDigest || row.contentDigest !== original.contentDigest) continue
         }

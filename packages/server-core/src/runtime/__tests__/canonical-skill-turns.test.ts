@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { strToU8, zipSync } from 'fflate'
 import { installCanonicalSkill, canonicalSkillRoot } from '@polo-ai/shared/creator-skills'
 import type { SkillTurnReceipt } from '@polo-ai/shared/admin'
-import { bindCanonicalSkillResolver, bindCanonicalSkillTurnAuthority, createCanonicalSkillTurnController, type CanonicalSkillLaunch } from '../canonical-skills'
+import { bindCanonicalSkillContextResolver, loadProductSpaceSkills, bindCanonicalSkillResolver, bindCanonicalSkillTurnAuthority, createCanonicalSkillTurnController, type CanonicalSkillLaunch } from '../canonical-skills'
 
 it('real native paths stay pinned during a turn, new turns require current, every use revalidates server receipt and original scope', async () => {
  const root = await realpath(await mkdtemp(join(tmpdir(), 'canonical-skill-turn-')))
@@ -45,4 +45,18 @@ it('real native paths stay pinned during a turn, new turns require current, ever
   await controller.finish(newTurn);expect(operations.filter(op=>op==='finish')).toHaveLength(2)
   expect([...admitted.values()].every(row=>row.state==='finished')).toBe(true)
  } finally { await rm(root,{recursive:true,force:true}) }
+})
+
+it('actual discovery used by file-watcher publications excludes personal instructions in enterprise scope',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'polo-skill-watch-scope-')))
+ try {
+  const {mkdir}=await import('node:fs/promises');await mkdir(join(root,'skills/private-helper'),{recursive:true});await writeFile(join(root,'skills/private-helper/SKILL.md'),'---\nname: private-helper\ndescription: Personal only.\n---\nPrivate instructions.')
+  const scope={accountId:randomUUID(),productSpaceId:randomUUID(),fenceGeneration:1};let kind='enterprise',mode='active'
+  bindCanonicalSkillContextResolver(async()=>({id:scope.productSpaceId,kind,accessMode:mode} as any))
+  expect((await loadProductSpaceSkills(root,scope)).some(row=>row.slug==='private-helper')).toBe(false)
+  kind='personal';expect((await loadProductSpaceSkills(root,scope)).some(row=>row.slug==='private-helper')).toBe(true)
+  mode='read_only';expect((await loadProductSpaceSkills(root,scope)).some(row=>row.slug==='private-helper')).toBe(false)
+  let reads=0;mode='active';bindCanonicalSkillContextResolver(async()=>({id:scope.productSpaceId,kind:'personal',accessMode:++reads===1?'active':'read_only'} as any))
+  await expect(loadProductSpaceSkills(root,scope)).rejects.toThrow('policy changed')
+ }finally{await rm(root,{recursive:true,force:true})}
 })

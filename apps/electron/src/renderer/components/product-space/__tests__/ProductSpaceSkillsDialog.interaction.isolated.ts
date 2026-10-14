@@ -21,7 +21,7 @@ beforeEach(() => {
   getCatalog = async () => catalog
   setEnabled = async (_space, instance, enabled) => { catalog.entries[1] = { ...catalog.entries[1], enabled }; return { success: true, mutation: { productSpaceId: 'personal', artifactInstanceId: instance, enabled }, catalog } }
   prepare = async () => ({ success: true })
-  Object.assign(window, { electronAPI: { productSpaceGetCatalog: (id: string) => getCatalog(id), getSkills: async () => [], productSpaceSetSkillEnablement: (...args: any[]) => setEnabled(...args), productSpaceInstallSkill: (...args: any[]) => prepare(...args) } })
+  Object.assign(window, { electronAPI: { productSpaceListSkills: async (id:string) => {const result=await getCatalog(id);return {...result,accessMode:context.activeProductSpace.accessMode,withdrawnEntries:[],entries:result.entries.filter((entry:any)=>entry.kind==='skill')}}, getSkills: async () => [], productSpaceSetSkillEnablement: (...args: any[]) => setEnabled(...args), productSpaceInstallSkill: (...args: any[]) => prepare(...args) } })
 })
 afterEach(cleanup)
 it('keeps authorization, my enablement and device preparation distinct', async () => {

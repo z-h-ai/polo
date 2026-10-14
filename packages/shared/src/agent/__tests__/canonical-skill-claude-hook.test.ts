@@ -102,3 +102,19 @@ it('actual Claude image stat/authority await cannot resize after its original qu
     await drain(agent.chat(`[skill:canonical-${'c'.repeat(64)}] test`))
   } finally { duringQuery = undefined; agent.destroy(); await rm(root, { recursive: true, force: true }) }
 })
+
+it('actual Claude Read-first hook rechecks a revoked Skill before a later unrelated Bash',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'canonical-claude-read-first-'));const path=join(root,'.polo/canonical-skills','e'.repeat(64),'skills/slug')
+  let allowed=true;const ids:string[]=[]
+  const agent=new ClaudeAgent({...createMockBackendConfig({workspace:createMockWorkspace({rootPath:root}),session:createMockSession({id:'claude-read-first',workspaceRootPath:root,workingDirectory:root}),canonicalSkills:{load:async()=>[{slug:`canonical-${'e'.repeat(64)}`,metadata:{name:'slug',description:'unit'},content:'unit',path,source:'workspace' as const}],authorize:async(_paths,id)=>{ids.push(id);if(!allowed)throw new Error('revoked')},finish:async()=>{}}}),sessionCallbackOwnerToken:'read-first-owner'})
+  try {
+    await mkdir(path,{recursive:true});await writeFile(join(path,'SKILL.md'),'---\nname: slug\ndescription: unit\n---\nunit')
+    duringQuery=async options=>{
+      const hook=options.hooks!.PreToolUse![0]!.hooks[0]!
+      expect((await hook({hook_event_name:'PreToolUse',tool_name:'Read',tool_use_id:'read',tool_input:{file_path:join(path,'SKILL.md')}},'read',{})).continue).toBe(true)
+      allowed=false
+      expect((await hook({hook_event_name:'PreToolUse',tool_name:'Bash',tool_use_id:'bash',tool_input:{command:'echo continue'}},'bash',{})).continue).toBe(false)
+    }
+    await drain(agent.chat('Prepare a team report'));expect(ids.length).toBeGreaterThanOrEqual(2);expect(new Set(ids).size).toBe(1)
+  }finally{duringQuery=undefined;agent.destroy();await rm(root,{recursive:true,force:true})}
+})

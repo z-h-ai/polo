@@ -8,9 +8,10 @@ describe('ProductSpace Skill native controls reach Main', () => {
     const api = buildAdminPreloadApi({ invoke: mock(async (...args: unknown[]) => { calls.push(args); return { success: true } }), on: mock(() => () => {}) }) as any
     const install = { workspaceId: 'workspace', catalogEntryId: 'entry', operationId: '00000000-0000-4000-8000-000000000001' }
     const uninstall = { workspaceId: 'workspace', subjectKind: 'enterprise_instance', subjectId: 'instance', versionId: 'version', operationId: '00000000-0000-4000-8000-000000000002' }
+    await api.productSpaceListSkills('space')
     await api.productSpaceSetSkillEnablement('space', 'instance', true)
     await api.productSpaceInstallSkill(install)
     await api.productSpaceUninstallSkill(uninstall)
-    expect(calls).toEqual([[RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT, 'space', 'instance', true], [RPC_CHANNELS.productSpace.INSTALL_SKILL, install], [RPC_CHANNELS.productSpace.UNINSTALL_SKILL, uninstall]])
+    expect(calls).toEqual([[RPC_CHANNELS.productSpace.LIST_SKILLS,'space'],[RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT, 'space', 'instance', true], [RPC_CHANNELS.productSpace.INSTALL_SKILL, install], [RPC_CHANNELS.productSpace.UNINSTALL_SKILL, uninstall]])
   })
 })
