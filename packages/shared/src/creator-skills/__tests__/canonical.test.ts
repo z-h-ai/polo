@@ -132,3 +132,20 @@ it('canonical native ledger lock revalidates the original permission after waiti
  const result=await installCanonicalSkill(root,{workspaceId:'workspace-a',operationId:randomUUID(),source,version:'1.0.0',downloadUrl:'https://authority.example/download',expiresAt:'2030-01-01T00:00:00.000Z',checksum:createHash('sha256').update(content).digest('hex'),sizeBytes:content.length},{fetch:(async()=>new Response(content)) as unknown as typeof fetch,assertCommitAllowed:async()=>{checks++;if(!allowed)throw new Error('Original authority revoked')},onLedgerMutationLocked:async()=>{allowed=false}})
  expect(checks).toBe(2);expect(result.success).toBe(false);expect(await readCanonicalSkillInstallations(root,source)).toEqual([])
 }))
+
+it('enterprise display versions survive native ledger reload and uninstall backup', async () => owned(async root => {
+  const enterprise = { ...source, subjectKind: 'enterprise_instance' as const }
+  expect((await install(root, enterprise, bytes(), {version:'release-1'})).result.success).toBe(true)
+  const rows = await readCanonicalSkillInstallations(root, source)
+  expect(rows).toHaveLength(1)
+  expect(rows[0]!.installation.version).toBe('release-1')
+  const removed = await uninstallCreatorSkill({workspaceRoot:canonicalSkillRoot(root,enterprise),workspaceId:'workspace-a',operationId:randomUUID(),slug:'same-slug'})
+  expect(removed.success).toBe(true)
+  const { listCreatorSkillBackups } = await import('../installer.ts')
+  expect((await listCreatorSkillBackups(canonicalSkillRoot(root,enterprise)))[0]?.version).toBe('release-1')
+}))
+it('a server-authorized package above the default limit remains installable within absolute native safety caps', async () => owned(async root => {
+  const content = zipSync({'same-slug/SKILL.md':strToU8('---\nname: same-slug\ndescription: Large approved package.\n---\nInstructions.'),'same-slug/references/data.bin':new Uint8Array(21*1024*1024)},{level:0})
+  expect((await install(root,source,content)).result.success).toBe(true)
+  expect(await readCanonicalSkillInstallations(root,source)).toHaveLength(1)
+}))

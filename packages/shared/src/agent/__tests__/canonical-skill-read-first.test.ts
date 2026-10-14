@@ -27,3 +27,15 @@ it('an automatically discovered Skill Read stays authorized for all later tools 
     await turn.return(undefined as never)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+it('enterprise discovery never falls back to personal local Skills when canonical authority fails', async () => {
+  const root=await mkdtemp(join(tmpdir(),'polo-enterprise-skill-isolation-'))
+  try {
+    await mkdir(join(root,'skills/private-helper'),{recursive:true})
+    await writeFile(join(root,'skills/private-helper/SKILL.md'),'---\nname: private-helper\ndescription: Personal only.\n---\nPrivate instructions.')
+    const agent=new Consumer(createMockBackendConfig({workspace:createMockWorkspace({rootPath:root}),canonicalSkills:{allowLocalSkills:async()=>false,load:async()=>{throw new Error('Enterprise catalog unavailable')},authorize:async()=>{},finish:async()=>{}}} as any))
+    const events=[];for await(const event of agent.chat('[skill:private-helper] make a report')) events.push(event)
+    expect(events.some(event=>event.type==='error' && event.message.includes('not found'))).toBe(true)
+    expect(agent.chatCalls).toHaveLength(0)
+  } finally {await rm(root,{recursive:true,force:true})}
+})

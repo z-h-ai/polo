@@ -70,3 +70,11 @@ it('shows failed preparation without claiming the new version is installed', asy
   expect(screen.queryByText('Current version prepared')).toBeNull()
   expect(screen.getByText(/Current version not prepared/)).toBeTruthy()
 })
+
+it('permits disabling a known enabled Skill in a read-only space while download remains forbidden', async () => {
+  context.activeProductSpace.accessMode='read_only';catalog.entries[1]={...skill,enabled:true,availability:'unavailable',unavailableReason:'space_restricted'}
+  let writes=0;setEnabled=async (_space,instance,enabled)=>{writes++;expect(enabled).toBe(false);catalog.entries[1].enabled=false;return {success:true,mutation:{productSpaceId:'personal',artifactInstanceId:instance,enabled:false},catalog}}
+  render(createElement(ProductSpaceSkillsDialog,{onClose(){}}));await screen.findByText('Team helper')
+  fireEvent.click(screen.getByRole('button',{name:'Disable'}));await waitFor(()=>expect(writes).toBe(1))
+  expect((screen.getByRole('button',{name:'Download / update'}) as HTMLButtonElement).disabled).toBe(true)
+})
