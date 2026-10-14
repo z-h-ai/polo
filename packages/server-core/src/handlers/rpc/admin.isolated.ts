@@ -5542,11 +5542,25 @@ describe('Skill-only projection does not grant App authority', () => {
 })
 
 it('Home full Catalog refresh retains management fence for verified read-only membership',async()=>{
+  failAuthorityRevoke=false;failAuthorityRecord=false;observeAuthorityRevoke=null;authorityRecordCalls.length=0;authorityRevokeCalls.length=0
   const h=createHarness();const ctx={clientId:'renderer',workspaceId:null,webContentsId:null};await h.login(ctx,'admin','secret')
   setRuntimeActiveProductSpaceAccount('user-1');setRuntimeActiveProductSpace('space-a')
+  const scope={accountId:'user-1',productSpaceId:'space-a',fenceGeneration:getRuntimeFenceGeneration()}
+  const receipt={contractVersion:1,turnId:'00000000-0000-4000-8000-000000000001',subjectKind:'enterprise_instance',subjectId:'00000000-0000-4000-8000-000000000002',versionId:'00000000-0000-4000-8000-000000000003',checksum:`sha256:${'a'.repeat(64)}`,accountId:'user-1',productSpaceId:'space-a',receiptId:'00000000-0000-4000-8000-000000000004',version:'release-1',state:'active',issuedAt:'2026-01-01T00:00:00.000Z',expiresAt:'2030-01-01T00:00:00.000Z'} as const
+  let active=true;let finished=false
+  adminClientBehavior.operateSkillTurn=async(_token,_receipt,operation)=>{
+    expect(operation).toBe('finish');finished=true;return {...receipt,state:'finished'}
+  }
+  registerProductSpaceExecution({scope:{contractVersion:1,executionId:'readonly-stop',accountId:'user-1',productSpaceId:'space-a',workspaceId:'ws-a',subject:{kind:'built_in_app',builtInAppId:'polo_assistant'}} as never,kind:'assistant_session',name:'Assistant',ref:'readonly-stop',generation:0,isActive:()=>active,stop:async()=>{
+    await operateCanonicalSkillTurn(scope,receipt,'finish');active=false;return 'stopped' as const
+  }})
   adminClientBehavior.listProductSpaces=async()=>({productSpaces:[{id:'space-a',kind:'enterprise',accessMode:'read_only'}]})
   const response=await h.productSpaceCatalog(ctx,'space-a') as any
   expect(response).toMatchObject({success:false,errorCode:'SPACE_RESTRICTED'})
+  expect(finished).toBe(true)
+  await expect(operateCanonicalSkillTurn(scope,receipt,'authorize')).rejects.toThrow()
+  await expect(beginCanonicalSkillTurn(scope,receipt)).rejects.toThrow()
+  expect(adminClientCalls.filter(call=>call.method==='operateSkillTurn')).toHaveLength(1)
   expect(getRuntimeActiveProductSpace()).toBe('space-a')
   expect(getRuntimeActiveProductSpaceAccount()).toBe('user-1')
   expect(authorityRevokeCalls.at(-1)).toEqual({accountId:'user-1',productSpaceId:'space-a'})
