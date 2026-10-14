@@ -129,8 +129,8 @@ export const CatalogSourceSchema = z.discriminatedUnion('kind', [
 ])
 const CatalogEntryBaseSchema = z.object({
   catalogEntryId: CatalogEntryIdSchema,
-  name: nonBlankString(256),
-  description: z.string().max(4_096),
+  name: nonBlankString(512),
+  description: z.string().max(8_192),
   iconUrl: httpUrl.optional(),
   availability: CatalogEntryAvailabilitySchema,
   unavailableReason: CatalogEntryUnavailableReasonSchema.optional(),

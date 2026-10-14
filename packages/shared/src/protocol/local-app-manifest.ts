@@ -166,7 +166,7 @@ export function validatePoloAppManifestContract(
       invalid(`polo-app.json requests unsupported permission "${permission}"`)
     }
   }
-  const name = raw.name == null ? undefined : requireString(raw.name, 'name', { maxLength: 200 })
+  const name = raw.name == null ? undefined : requireString(raw.name, 'name', { maxLength: 512 })
   let startTimeoutMs: number | undefined
   if (raw.startTimeoutMs != null) {
     if (
@@ -188,7 +188,7 @@ export function validatePoloAppManifestContract(
     runtime: runtime as PoloAppManifest['runtime'],
     entry,
     healthcheck: validateHttpPath(raw.healthcheck, 'healthcheck'),
-    webPath: validateHttpPath(raw.webPath, 'webPath'),
+    webPath: validateHttpPath(raw.webPath === undefined ? '/' : raw.webPath, 'webPath'),
     permissions,
     ...(platforms ? { platforms } : {}),
     ...(architectures ? { architectures } : {}),

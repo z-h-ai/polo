@@ -80,7 +80,14 @@
       "import": "./dist/admin/creator-app-publishing.cjs",
       "default": "./dist/admin/creator-app-publishing.cjs"
     },
-    "./product-spaces": "./src/product-spaces/index.ts",
+    "./product-spaces": {
+      "bun": "./src/product-spaces/index.ts",
+      "types": "./dist/product-spaces/index.d.ts",
+      "browser": "./dist/product-spaces/index.browser.mjs",
+      "import": "./dist/product-spaces/index.cjs",
+      "require": "./dist/product-spaces/index.cjs",
+      "default": "./dist/product-spaces/index.cjs"
+    },
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/toolNames": "./src/utils/toolNames.ts",
