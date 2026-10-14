@@ -11,6 +11,7 @@ import type {
 import type { HandlerDeps } from '../handler-deps'
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'creator-skill-rpc-'))
+process.env.POLO_AI_CONFIG_DIR = join(temporaryRoot, 'private-config')
 const workspaceOne: Workspace = {
   id: '11111111-1111-4111-8111-111111111111',
   name: '22222222-2222-4222-8222-22222222abcd',
@@ -35,6 +36,8 @@ const workspaceCaseCollision: Workspace = {
 await mkdir(workspaceOne.rootPath)
 await mkdir(workspaceTwo.rootPath)
 await mkdir(workspaceCaseCollision.rootPath)
+await mkdir(process.env.POLO_AI_CONFIG_DIR, {recursive:true})
+await writeFile(join(process.env.POLO_AI_CONFIG_DIR,'config.json'),JSON.stringify({workspaces:[workspaceOne,workspaceTwo,workspaceCaseCollision],activeWorkspaceId:workspaceOne.id,activeSessionId:null,authType:'api_key'}))
 let workspaceOrder = [workspaceOne, workspaceTwo, workspaceCaseCollision]
 const sessionId = 'session-one'
 const secondSessionId = 'session-two'
