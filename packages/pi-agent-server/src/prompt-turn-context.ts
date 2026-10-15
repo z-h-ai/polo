@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { AgentSession } from '@mariozechner/pi-coding-agent';
 
 export interface PromptTurnContext { readonly turnId: string; closed: boolean }
 
@@ -9,13 +10,18 @@ export class PromptTurnContexts {
   private tail: Promise<void> = Promise.resolve();
   private active: PromptTurnContext | null = null;
 
-  run<T>(turnId: string, operation: () => Promise<T>): Promise<T> {
+  run<T>(turnId: string, operation: () => Promise<T>, settle?: () => Promise<void>): Promise<T> {
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(turnId)) return Promise.reject(new Error('Missing original prompt turn identity'));
     const context = { turnId, closed: false };
     this.contexts.add(context);
     const result = this.tail.then(() => this.storage.run(context, async () => {
       try { this.assert(context); this.active = context; return await operation(); }
-      finally { context.closed = true; this.contexts.delete(context); if (this.active === context) this.active = null; }
+      finally {
+        // SDK prompt completion can precede its queued terminal events. Keep
+        // this original identity and FIFO slot until that producer is drained.
+        try { await settle?.(); }
+        finally { context.closed = true; this.contexts.delete(context); if (this.active === context) this.active = null; }
+      }
     }));
     this.tail = result.then(() => {}, () => {});
     return result;
@@ -44,4 +50,41 @@ export class PromptTurnContexts {
     this.tail = Promise.allSettled([this.tail, draining]).then(() => {});
     await draining;
   }
+}
+
+/** Pi 0.73.1 has no public event-queue drain. Its prompt()/abort() await core
+ * generation, while AgentSession asynchronously dispatches/persists its events.
+ * Keep this pinned private compatibility boundary narrow and fail closed when
+ * an SDK upgrade changes it. Construct before prompting to observe deferred
+ * compaction/retry continuations; call once in the original turn's finally. */
+export function createPiPromptEventDrain(session: Pick<AgentSession, 'agent' | 'subscribe'>): () => Promise<void> {
+  const queue = (): PromiseLike<unknown> => {
+    const value = (session as unknown as { _agentEventQueue?: PromiseLike<unknown> })._agentEventQueue;
+    if (!value || typeof value.then !== 'function') throw new Error('Pinned Pi SDK event queue is unavailable');
+    return value;
+  };
+  queue();
+  let continuation = false, retry = false;
+  let wake: (() => void) | undefined;
+  const unsubscribe = session.subscribe(event => {
+    if (event.type === 'compaction_end') continuation = event.willRetry && !event.aborted;
+    if (event.type === 'agent_start') continuation = false;
+    if (event.type === 'auto_retry_start') retry = true;
+    if (event.type === 'auto_retry_end') retry = false;
+    const notify = wake; wake = undefined; notify?.();
+  });
+  return async () => {
+    try {
+      for (;;) {
+        const pending = queue();
+        await pending;
+        await session.agent.waitForIdle();
+        // Events or a continuation can enqueue during either await. A single
+        // snapshot (or the first agent_end) is not the producer's final drain.
+        if (pending !== queue()) continue;
+        if (!continuation && !retry) return;
+        await new Promise<void>(resolve => { wake = resolve; });
+      }
+    } finally { unsubscribe(); }
+  };
 }

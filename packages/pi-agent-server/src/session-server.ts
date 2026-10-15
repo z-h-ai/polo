@@ -18,7 +18,7 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { PromptTurnContexts, type PromptTurnContext } from './prompt-turn-context.ts';
+import { PromptTurnContexts, createPiPromptEventDrain, type PromptTurnContext } from './prompt-turn-context.ts';
 
 // Pi SDK
 import {
@@ -1255,14 +1255,21 @@ async function waitForCompaction(session: { isCompacting: boolean }, timeoutMs =
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
   // The SDK followUp queue can return before a queued prompt executes. Admit
   // FIFO here so each SDK invocation and its tools retain their own context.
-  try { await promptTurns.run(msg.canonicalTurnId, () => handleAdmittedPrompt(msg)); }
+  let drainEvents: (() => Promise<void>) | undefined;
+  try {
+    await promptTurns.run(msg.canonicalTurnId, () => handleAdmittedPrompt(msg, session => {
+      // Capture this invocation's producer before it starts; never consult a
+      // later global session/turn while draining its asynchronous SDK events.
+      drainEvents = createPiPromptEventDrain(session);
+    }), async () => { await drainEvents?.(); });
+  }
   catch (error) {
     send({ type: 'error', canonicalTurnId: msg.canonicalTurnId, message: error instanceof Error ? error.message : String(error), code: 'prompt_error' });
     send({ type: 'event', canonicalTurnId: msg.canonicalTurnId, event: { type: 'agent_end', messages: [] } });
   }
 }
 
-async function handleAdmittedPrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
+async function handleAdmittedPrompt(msg: Extract<InboundMessage, { type: 'prompt' }>, bindProducer: (session: AgentSession) => void): Promise<void> {
   currentUserMessage = msg.message;
 
   try {
@@ -1281,6 +1288,7 @@ async function handleAdmittedPrompt(msg: Extract<InboundMessage, { type: 'prompt
 
     const session = await ensureSession();
     promptTurns.assert(promptTurns.capture());
+    bindProducer(session);
 
     // Force the Polo AI-built system prompt onto the Pi session. Direct assignment
     // to `state.systemPrompt` is wiped on every `session.prompt()` call by the Pi
