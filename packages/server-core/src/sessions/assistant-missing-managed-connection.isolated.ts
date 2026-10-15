@@ -9,7 +9,7 @@ process.env.POLO_AI_CONFIG_DIR = root
 const workspace = { id: 'owned', slug: 'owned', name: 'Owned', rootPath: root, createdAt: 1 }
 const custom = { slug: 'custom', name: 'Custom', providerType: 'pi_compat', authType: 'api_key_with_endpoint', createdAt: 1, defaultModel: 'custom-model', models: ['custom-model'], baseUrl: 'https://owned.invalid/v1', customEndpoint: { api: 'openai-completions' } }
 const canonical = { ...custom, slug: 'polo-space-enterprise', managedBy: 'admin', defaultModel: 'enterprise-model', models: ['enterprise-model'] }
-const writeConfig = (includeCanonical = false) => writeFileSync(join(root, 'config.json'), JSON.stringify({ llmConnections: includeCanonical ? [custom, canonical] : [custom], defaultLlmConnection: 'custom', adminUrl: 'https://admin.owned.invalid' }))
+const writeConfig = (includeCanonical = false) => writeFileSync(join(root, 'config.json'), JSON.stringify({ workspaces: [], llmConnections: includeCanonical ? [custom, canonical] : [custom], defaultLlmConnection: 'custom', adminUrl: 'https://admin.owned.invalid' }))
 writeConfig()
 let unavailable = false, calls = 0, factoryCalls: string[] = []
 const resolve = async () => { calls++; if (unavailable) throw new Error('Owned compute unavailable'); writeConfig(true); return { connectionSlug: canonical.slug, model: canonical.defaultModel } }
