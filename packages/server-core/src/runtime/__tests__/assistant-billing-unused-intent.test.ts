@@ -16,9 +16,9 @@ for (const outcome of ['no_charge', 'pending', 'lost', 'mismatch', 'malformed'] 
       let startedRun = '', finishes = 0
       const coordinator = new AssistantBillingCoordinator(outbox, () => ({
         start: async (_scope, input) => { startedRun = input.runId; return {} },
-        admit: async () => { throw new AdminError('Serialization failure', 'internal_error', { status: 500 }) },
+        admit: async () => { throw new AdminError('Serialization failure', 'SERVER_ERROR', { status: 500 }) },
         report: async () => { throw new Error('No provider request was sent') },
-        inspect: async () => { throw new AdminError('No admission', 'not_found', { status: 404 }) },
+        inspect: async () => { throw new AdminError('No admission', 'NOT_FOUND', { status: 404 }) },
         finish: async (original, runId) => {
           expect(original).toEqual(scope); expect(runId).toBe(startedRun); finishes++
           if (outcome === 'lost') throw new Error('Lost finish response')

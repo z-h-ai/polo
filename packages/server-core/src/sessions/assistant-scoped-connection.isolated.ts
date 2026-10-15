@@ -11,11 +11,11 @@ process.env.POLO_AI_CONFIG_DIR = root
 const workspaceRoot = join(root, 'workspace')
 const { mkdirSync, copyFileSync } = await import('node:fs')
 mkdirSync(workspaceRoot)
-const workspace = { id: 'ws_owned', name: 'Owned', rootPath: workspaceRoot, createdAt: 1 }
+const workspace = { id: 'ws_owned', slug: 'ws-owned', name: 'Owned', rootPath: workspaceRoot, createdAt: 1 }
 const personal = 'polo-space-personal', enterprise = 'polo-space-enterprise'
 const connections = [
   { slug: personal, managedBy: 'admin', defaultModel: 'personal-model', models: ['personal-model'] },
-  { slug: enterprise, managedBy: 'admin', defaultModel: 'enterprise-model', models: ['enterprise-model', 'enterprise-choice'] },
+  { slug: enterprise, managedBy: 'admin', defaultModel: 'enterprise-model', models: ['enterprise-choice', 'enterprise-model'] },
   { slug: 'user-endpoint', defaultModel: 'user-model', models: ['user-model'] },
 ].map(c => ({ ...c, name: c.slug, providerType: 'pi_compat', authType: 'api_key_with_endpoint', createdAt: 1, baseUrl: 'https://owned.invalid/v1', customEndpoint: { api: 'openai-completions' } }))
 const writeConfig = () => {
@@ -47,7 +47,7 @@ beforeEach(() => {
   setTrustedProductSpaceAccountProvider(async () => 'account-owned')
   setSyncTrustedProductSpaceAccountId('account-owned')
   setRuntimeActiveProductSpaceAccount('account-owned'); setRuntimeActiveProductSpace('enterprise')
-  sm = new SessionManager({ runtimeWorkspace: workspace })
+  sm = new SessionManager({ workspace })
   managed = createManagedSession({ id: 'owned-session', name: 'Owned', model: 'personal-model', llmConnection: personal, messages: [] }, workspace, { messagesLoaded: true })
   Object.assign(managed, { accountId: 'account-owned', productSpaceId: 'enterprise', llmConnection: personal, model: 'personal-model', messagesLoaded: true, messages: [{ id: 'user-owned', role: 'user', content: 'hello', timestamp: 1 }] })
   sm.sessions.set(managed.id, managed)
