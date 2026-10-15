@@ -23,7 +23,7 @@ for (const outcome of ['no_charge', 'pending', 'lost', 'mismatch', 'malformed'] 
           expect(original).toEqual(scope); expect(runId).toBe(startedRun); finishes++
           if (outcome === 'lost') throw new Error('Lost finish response')
           if (outcome === 'malformed') return { settlement: 'no_charge' }
-          return { run: { runId: outcome === 'mismatch' ? randomUUID() : runId, status: 'failed' }, idempotent: false, settlement: outcome === 'pending' ? 'pending' : 'no_charge' }
+          return { runId: outcome === 'mismatch' ? randomUUID() : runId, status: 'failed', settlement: outcome === 'pending' ? 'pending' : 'no_charge' }
         },
       }))
       await expect(coordinator.hooks(scope, () => true).beforeSend({ model: 'owned-model', hostRequestId: `host-${randomUUID()}`, transportBaseUrl: 'https://provider.owned.invalid/v1', credentialFingerprint: 'a'.repeat(64) })).rejects.toThrow('Serialization failure')
