@@ -1,10 +1,19 @@
 import { randomUUID } from 'node:crypto'
+import type { z } from 'zod'
+import type { AdminFinishAppRunResponse } from '@polo-ai/shared/admin'
 import { join } from 'node:path'
 import { CONFIG_DIR } from '@polo-ai/shared/config'
 import { AdminError } from '@polo-ai/shared/admin'
 import { BillingOutbox, type AssistantBillingJournalScope } from '@polo-ai/shared/admin/billing-outbox'
 import { billingRuntimeAdmissionResponseSchema, billingRuntimeFinishResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
 import type { ManagedBillingHooks, ManagedBillingResult } from '@polo-ai/shared/credentials/managed-billing-observation'
+
+// AdminClient validates the HTTP envelope and returns this flat DTO. Derive
+// its fields from the canonical wire schema; do not require wire idempotent
+// or invent another status/settlement enum at the transport consumer.
+const assistantFinishResponseSchema = billingRuntimeFinishResponseSchema.shape.run.extend({
+  settlement: billingRuntimeFinishResponseSchema.shape.settlement,
+}) satisfies z.ZodType<AdminFinishAppRunResponse>
 
 export interface AssistantBillingTransport {
   start(scope: AssistantBillingJournalScope, input: { subjectKind: 'polo_assistant'; productSpaceId: string; runId: string }): Promise<unknown>
@@ -69,9 +78,9 @@ export class AssistantBillingCoordinator {
           // finish authoritatively with no charge. Retire only that exact run's
           // validated terminal acknowledgement, never a 404 or missing receipt.
           const finished = await transport.finish(scope, runId, { status: 'failed' })
-            .then(value => billingRuntimeFinishResponseSchema.safeParse(value))
+            .then(value => assistantFinishResponseSchema.safeParse(value))
             .catch(() => null)
-          if (started && finished?.success && finished.data.run.runId === runId
+          if (started && finished?.success && finished.data.runId === runId
             && finished.data.settlement === 'no_charge') this.outbox.discardRejectedAdmission(key)
         }
         throw error
