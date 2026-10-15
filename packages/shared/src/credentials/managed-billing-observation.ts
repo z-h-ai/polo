@@ -41,10 +41,11 @@ export async function readManagedRequest(request: IncomingMessage, upstream: URL
 export class ManagedBillingObservation {
   private pending = ''
   private decoder = new TextDecoder()
-  private usage?: Pick<ManagedBillingResult, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'provenance'>
+  private usage?: Pick<ManagedBillingResult, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>
   private model?: string
   private usable = false
   private invalid = false
+  private providerEnded = false
   private readonly streaming: boolean
   readonly providerObservation: ManagedBillingResult['providerObservation']
   constructor(upstream: IncomingMessage, private readonly requestModel?: string) {
@@ -76,7 +77,8 @@ export class ManagedBillingObservation {
     if (this.pending.length > 1024 * 1024) { this.invalid = true; this.pending = ''; this.usage = undefined }
   }
   private consume(text: string): void {
-    if (!text || text === '[DONE]') return
+    if (text === '[DONE]') { this.providerEnded = true; return }
+    if (!text) return
     try {
       const row = JSON.parse(text)
       if (!this.requestModel && typeof row.model === 'string' && row.model.length <= 128) this.model = row.model
@@ -90,11 +92,12 @@ export class ManagedBillingObservation {
       const cacheWrite = usage.cache_creation_input_tokens ?? 0
       const input = usage.prompt_tokens - cacheRead - cacheWrite, output = usage.completion_tokens
       if (![input, output, cacheRead, cacheWrite].every(n => Number.isSafeInteger(n) && n >= 0)) return
-      this.usage = { inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, provenance: 'provider_final' }
+      this.usage = { inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite }
     } catch { /* Invalid wire data cannot become provider-final usage. */ }
   }
   result(ended: boolean): ManagedBillingResult {
     return { inputTokens: 0, outputTokens: 0, ...this.usage,
+      ...(this.usage && !this.invalid && (this.streaming ? this.providerEnded : ended) ? { provenance: 'provider_final' as const } : {}),
       ...(this.model ? { actualModel: this.model } : {}), providerObservation: this.providerObservation,
       outputDisposition: this.usable ? 'usable' : ended && !this.invalid ? 'no_output' : 'unknown',
       terminalReason: ended ? 'transport_complete' : 'transport_interrupted' }
