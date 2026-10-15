@@ -13,7 +13,7 @@ test('a definitive pre-start credit denial does not permanently exhaust the dura
     const scope: AssistantBillingJournalScope = { subjectKind: 'polo_assistant', accountId: randomUUID(), productSpaceId: randomUUID(), adminOrigin: 'https://admin.example' }
     const outbox = new BillingOutbox<AssistantBillingJournalScope>(dir)
     let finishes = 0
-    const coordinator = new AssistantBillingCoordinator(outbox, () => ({ start: async () => { throw new AdminError('No credit', 'insufficient_credit', 403) }, admit: async () => { throw new Error('must not admit') }, report: async () => { throw new Error('must not bill') }, inspect: async () => { throw new Error('does not exist') }, finish: async () => { finishes++; throw new Error('no run exists') } }))
+    const coordinator = new AssistantBillingCoordinator(outbox, () => ({ start: async () => { throw new AdminError('No credit', 'insufficient_credit', { status: 409 }) }, admit: async () => { throw new Error('must not admit') }, report: async () => { throw new Error('must not bill') }, inspect: async () => { throw new Error('does not exist') }, finish: async () => { finishes++; throw new Error('no run exists') } }))
     await expect(coordinator.hooks(scope, () => true).beforeSend({ model: 'deepseek-chat', hostRequestId: `host-${randomUUID()}`, transportBaseUrl: 'https://provider.example/v1', credentialFingerprint: 'a'.repeat(64) })).rejects.toThrow('No credit')
     expect(outbox.entries(scope.accountId, scope.adminOrigin)).toHaveLength(0)
     expect(finishes).toBe(0)
