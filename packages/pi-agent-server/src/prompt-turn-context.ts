@@ -57,7 +57,7 @@ export class PromptTurnContexts {
  * Keep this pinned private compatibility boundary narrow and fail closed when
  * an SDK upgrade changes it. Construct before prompting to observe deferred
  * compaction/retry continuations; call once in the original turn's finally. */
-export function createPiPromptEventDrain(session: Pick<AgentSession, 'agent' | 'subscribe'>): () => Promise<void> {
+export function createPiPromptEventDrain(session: Pick<AgentSession, 'agent' | 'subscribe' | 'clearQueue' | 'abortCompaction'>, assertActive?: () => void): () => Promise<void> {
   const queue = (): PromiseLike<unknown> => {
     const value = (session as unknown as { _agentEventQueue?: PromiseLike<unknown> })._agentEventQueue;
     if (!value || typeof value.then !== 'function') throw new Error('Pinned Pi SDK event queue is unavailable');
@@ -66,13 +66,33 @@ export function createPiPromptEventDrain(session: Pick<AgentSession, 'agent' | '
   queue();
   let continuation = false, retry = false;
   let wake: (() => void) | undefined;
+  const notify = () => { const listener = wake; wake = undefined; listener?.(); };
   const unsubscribe = session.subscribe(event => {
-    if (event.type === 'compaction_end') continuation = event.willRetry && !event.aborted;
+    if (event.type === 'compaction_end') {
+      // Pi also schedules continue after successful threshold compaction when
+      // steer/follow-up arrived during compaction, even with willRetry=false.
+      continuation = Boolean(event.result) && !event.aborted && (event.willRetry || session.agent.hasQueuedMessages());
+    }
     if (event.type === 'agent_start') continuation = false;
     if (event.type === 'auto_retry_start') retry = true;
     if (event.type === 'auto_retry_end') retry = false;
-    const notify = wake; wake = undefined; notify?.();
+    notify();
   });
+  const originalContinue = session.agent.continue;
+  const guardedContinue: typeof originalContinue = function (this: AgentSession['agent'], ...args) {
+    try { assertActive?.(); }
+    catch (error) {
+      // SDK abort() does not cancel its already scheduled continuation timer.
+      // Reject that original timer before it can dispatch another model call,
+      // then release its FIFO slot. Never restore early and let it borrow B.
+      session.abortCompaction();
+      session.clearQueue();
+      continuation = false; retry = false; notify();
+      return Promise.reject(error);
+    }
+    return originalContinue.apply(this, args);
+  };
+  session.agent.continue = guardedContinue;
   return async () => {
     try {
       for (;;) {
@@ -85,6 +105,9 @@ export function createPiPromptEventDrain(session: Pick<AgentSession, 'agent' | '
         if (!continuation && !retry) return;
         await new Promise<void>(resolve => { wake = resolve; });
       }
-    } finally { unsubscribe(); }
+    } finally {
+      unsubscribe();
+      if (session.agent.continue === guardedContinue) session.agent.continue = originalContinue;
+    }
   };
 }

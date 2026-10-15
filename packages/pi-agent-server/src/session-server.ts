@@ -1260,7 +1260,8 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     await promptTurns.run(msg.canonicalTurnId, () => handleAdmittedPrompt(msg, session => {
       // Capture this invocation's producer before it starts; never consult a
       // later global session/turn while draining its asynchronous SDK events.
-      drainEvents = createPiPromptEventDrain(session);
+      const originalTurn = promptTurns.capture();
+      drainEvents = createPiPromptEventDrain(session, () => promptTurns.assert(originalTurn));
     }), async () => { await drainEvents?.(); });
   }
   catch (error) {
@@ -1378,7 +1379,13 @@ async function handleAbort(canonicalTurnId?: string): Promise<void> {
     pendingPreToolUse.clear();
     prefetchCache.clear();
     if (piSession) {
-      try { await piSession.abort(); }
+      try {
+        // The matching original turn was closed above. Remove only its SDK
+        // queues before B can enter; abort() alone leaves compaction/timers.
+        piSession.abortCompaction();
+        piSession.clearQueue();
+        await piSession.abort();
+      }
       catch (error) { debugLog(`Abort failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
   });
