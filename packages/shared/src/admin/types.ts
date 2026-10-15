@@ -506,6 +506,8 @@ export type AdminErrorCode =
   | 'checksum_mismatch'
   | 'content_digest_mismatch'
   | 'insufficient_credit'
+  | 'quota_exhausted'
+  | 'budget_exhausted'
   | 'run_finalized'
   | 'account_transition_pending'
   | PhoneAuthErrorCode;

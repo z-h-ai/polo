@@ -184,6 +184,8 @@ export interface BackendHostRuntimeContext {
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
 export interface CoreBackendConfig {
+  /** Host-owned admission and metering for managed Polo model requests. */
+  managedBilling?: import('../../credentials/managed-billing-observation').ManagedBillingHooks;
   /** Main-owned canonical Skill discovery and per-use permission; absent means unavailable. */
   canonicalSkills?: {
     /** Fresh Main-owned ProductSpace policy. Enterprise never inherits personal/global Skills. */

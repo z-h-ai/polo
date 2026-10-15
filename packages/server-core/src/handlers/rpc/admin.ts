@@ -28,6 +28,7 @@ import {
 } from '@polo-ai/shared/admin'
 import { z } from 'zod'
 import { setNativeInstallationTransport } from '../../runtime/native-installations'
+import { setAssistantBillingTransport } from '../../runtime/assistant-billing'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -876,15 +877,16 @@ export function registerAdminHandlers(
   // Only this coordinator owns the token snapshot. Reports for account A
   // remain queued during account B's session; the AdminClient methods disable
   // mutable credential refresh and cannot transplant B's token into A's work.
-  const installationSession = async (accountId: string) => {
+  const installationSession = async (accountId: string, originalOrigin?: string) => {
     const adminUrl = requireAdminUrl(), manager = getCredentialManager()
+    if (originalOrigin !== undefined && adminUrl !== originalOrigin) throw new Error('Original billing origin changed')
     const snapshot = await sessions.capture(manager)
     if (!snapshot || snapshot.tokens.userId !== accountId || !await sessions.isCurrent(manager,snapshot)) {
       throw new Error('Original installation account is not the current trusted session')
     }
     const refreshed = await ensureValidTokens(adminUrl, manager, sessions, deps, snapshot)
     if (!refreshed.tokens || !refreshed.session || refreshed.tokens.userId !== accountId
-      || !await sessions.isCurrent(manager, refreshed.session)) {
+      || !await sessions.isCurrent(manager, refreshed.session) || requireAdminUrl() !== adminUrl) {
       throw new Error('Original installation session changed during token recovery')
     }
     return { client: new AdminClient(adminUrl), accessToken: refreshed.tokens.accessToken }
@@ -892,6 +894,21 @@ export function registerAdminHandlers(
   setNativeInstallationTransport({
     admit: async (accountId,input) => { const session = await installationSession(accountId); return session.client.admitNativeInstallation(session.accessToken,input) },
     report: async (accountId,input) => { const session = await installationSession(accountId); return session.client.reportNativeInstallation(session.accessToken,input) },
+  })
+  const billingSession = async (scope: { accountId: string; adminOrigin: string }) => installationSession(scope.accountId, scope.adminOrigin)
+  const billingOptions = () => ({ signal: AbortSignal.timeout(5_000) })
+  setAssistantBillingTransport({
+    start: async (scope, input) => { const s = await billingSession(scope); return s.client.startAssistantRun(s.accessToken, input, billingOptions()) },
+    admit: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.admitAppRequest(s.accessToken, runId, input, billingOptions()) },
+    report: async (scope, input) => { const s = await billingSession(scope); return s.client.recordAppUsage(s.accessToken, input, billingOptions()) },
+    inspect: async (scope, runId, requestId) => { const s = await billingSession(scope); return s.client.getAppRequest(s.accessToken, runId, requestId, billingOptions()) },
+    finish: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.finishAppRun(s.accessToken, runId, input, billingOptions()) },
+  }, async () => {
+    const manager = getCredentialManager(), adminOrigin = getAdminUrl()
+    if (!adminOrigin) return null
+    const snapshot = await sessions.capture(manager)
+    if (!snapshot || !await sessions.isCurrent(manager, snapshot)) return null
+    return { accountId: snapshot.tokens.userId, adminOrigin }
   })
 
   // The Main-side switch transaction verifies the target space against the

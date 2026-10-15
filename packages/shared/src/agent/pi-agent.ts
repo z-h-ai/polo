@@ -525,7 +525,7 @@ export class PiAgent extends BaseAgent {
       awsEnv,
       sessionDir,
       debug: debugEnv === '1',
-      stripCredentialEnv: isCustomEndpointMode,
+      stripCredentialEnv: isCustomEndpointMode || !!this.config.managedBilling,
     });
 
     // Spawn the subprocess
@@ -849,7 +849,7 @@ export class PiAgent extends BaseAgent {
     piAuth: Awaited<ReturnType<PiAgent['getPiAuth']>>;
     credentialProxy?: { baseUrl: string; capability: string };
   }> {
-    if (this.sessionStorage.owner !== 'cli') {
+    if (this.sessionStorage.owner !== 'cli' && !this.config.managedBilling) {
       return { apiKey: legacyApiKey || '', piAuth };
     }
     if (piAuth?.credential.type === 'iam') {
@@ -886,6 +886,7 @@ export class PiAgent extends BaseAgent {
         credentialHeaders,
       }, {
         capability: this.createInvocationCapability(provider, credential),
+        billing: this.config.managedBilling,
       });
     }
     const capability = this.invocationCredentialProxy.capability;

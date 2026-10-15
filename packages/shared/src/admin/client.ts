@@ -202,6 +202,8 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'checksum_mismatch',
   'content_digest_mismatch',
   'insufficient_credit',
+  'quota_exhausted',
+  'budget_exhausted',
   'run_finalized',
 ]);
 
@@ -274,7 +276,9 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   checksum_mismatch: 'The downloaded ZIP failed its checksum check',
   content_digest_mismatch: 'The extracted Skill content failed its integrity check',
   account_transition_pending: 'The previous account is still shutting down. Retry the sign-in.',
-  insufficient_credit: 'This App has insufficient credit for the request',
+  insufficient_credit: 'Insufficient credit for this request',
+  quota_exhausted: 'Compute quota blocks this request',
+  budget_exhausted: 'Budget limit blocks this request',
   run_finalized: 'This App run is already finalized',
 };
 
@@ -1219,6 +1223,22 @@ export class AdminClient {
   async startAppRun(
     accessToken: string,
     input: AdminStartAppRunInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminStartAppRunResponse> {
+    return this.startBillingRun(accessToken, input, options);
+  }
+
+  async startAssistantRun(
+    accessToken: string,
+    input: { runId: string; productSpaceId: string; subjectKind: 'polo_assistant' },
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminStartAppRunResponse> {
+    return this.startBillingRun(accessToken, input, options);
+  }
+
+  private async startBillingRun(
+    accessToken: string,
+    input: AdminStartAppRunInput | { runId: string; productSpaceId: string; subjectKind: 'polo_assistant' },
     options?: { signal?: AbortSignal },
   ): Promise<AdminStartAppRunResponse> {
     const response = await this.request<unknown>('/api/billing/runs', {

@@ -2,6 +2,7 @@ import type { EventSink, RpcServer } from '@polo-ai/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@polo-ai/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@polo-ai/server-core/handlers'
 import { loadCallableCanonicalSkills, createCanonicalSkillTurnController, resolveCanonicalSkillContext, loadProductSpaceSkills } from '../runtime/canonical-skills'
+import { createAssistantBillingHooks } from '../runtime/assistant-billing'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@polo-ai/server-core/runtime'
@@ -22,7 +23,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@polo-ai/shared/agent/backend'
-import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
+import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
@@ -1778,6 +1779,21 @@ export class SessionManager implements ISessionManager {
       productSpaceId: runtimeScope.productSpaceId,
       workspaceId: managed.workspace.id,
     }
+  }
+
+  private assistantBillingFor(managed: ManagedSession, connection: { slug: string; managedBy?: 'admin' } | null | undefined) {
+    if (connection?.managedBy !== 'admin') return undefined
+    const original = this.managedTrustedScope(managed), adminOrigin = getAdminUrl()
+    if (!original || !adminOrigin || isRuntimeOfflineReadOnly()) throw new Error('Trusted assistant billing scope is unavailable')
+    const fence = getRuntimeFenceGeneration(), accountGeneration = getTrustedAccountGeneration()
+    return createAssistantBillingHooks({ subjectKind: 'polo_assistant', adminOrigin, accountId: original.accountId, productSpaceId: original.productSpaceId }, () => {
+      const current = this.managedTrustedScope(managed)
+      return !!current && current.accountId === original.accountId && current.productSpaceId === original.productSpaceId
+        && getRuntimeFenceGeneration() === fence && getTrustedAccountGeneration() === accountGeneration
+        && getAdminUrl() === adminOrigin && !isRuntimeOfflineReadOnly()
+        && getLlmConnection(connection.slug)?.managedBy === 'admin'
+        && this.sessions.get(managed.id) === managed
+    })
   }
 
   /**
@@ -5227,6 +5243,7 @@ export class SessionManager implements ISessionManager {
         hostRuntime: buildBackendHostRuntimeContext(),
         coreConfig: {
         workspace: managed.workspace,
+        managedBilling: this.assistantBillingFor(managed, backendContext.connection),
         canonicalSkills: {
           allowLocalSkills: this.guardManagedCallback(managed, 'backend.canonicalSkills.allowLocalSkills', async () => {
             const original = this.managedTrustedScope(managed)
@@ -6941,6 +6958,7 @@ export class SessionManager implements ISessionManager {
 
         agent = createBackendFromConnection(managed.llmConnection, {
           workspace: managed.workspace,
+          managedBilling: this.assistantBillingFor(managed, connection),
           miniModel: resolvedMiniModel,
           session: {
             id: `title-${managed.id}`,
@@ -10574,6 +10592,7 @@ export class SessionManager implements ISessionManager {
 
         agent = createBackendFromConnection(managed.llmConnection, {
           workspace: managed.workspace,
+          managedBilling: this.assistantBillingFor(managed, connection),
           miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
           session: {
             id: `title-${managed.id}`,
@@ -11567,6 +11586,7 @@ export class SessionManager implements ISessionManager {
       hostRuntime: buildBackendHostRuntimeContext(),
       coreConfig: {
         workspace: managed.workspace,
+        managedBilling: this.assistantBillingFor(managed, backendContext.connection),
         sessionStorage: this.sessionStorage,
         session: {
           id: `${managed.id}-remote-transfer-summary`,
