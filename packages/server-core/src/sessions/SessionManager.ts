@@ -3,6 +3,7 @@ import { CLIENT_BROWSER_INVOKE } from '@polo-ai/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@polo-ai/server-core/handlers'
 import { loadCallableCanonicalSkills, createCanonicalSkillTurnController, resolveCanonicalSkillContext, loadProductSpaceSkills } from '../runtime/canonical-skills'
 import { createAssistantBillingHooks } from '../runtime/assistant-billing'
+import { resolveProductSpaceConnection } from '../handlers/rpc/admin'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@polo-ai/server-core/runtime'
@@ -1781,6 +1782,75 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /** Resolve managed compute from its original trusted space, rather than a
+   * workspace's historical default. The Admin owner alone refreshes credentials;
+   * this consumer only selects its canonical connection and allowed model. */
+  private async resolveAssistantBackendContext(
+    args: Parameters<typeof resolveBackendContext>[0],
+    scope: { accountId: string; productSpaceId: string } | null,
+    isCurrent: () => boolean,
+  ): Promise<ReturnType<typeof resolveBackendContext>> {
+    const initial = resolveBackendContext(args)
+    const requestedSlug = args.sessionConnectionSlug || args.workspaceDefaultConnectionSlug
+    // Failed Admin synchronization removes cached managed metadata. A persisted
+    // platform slug must still fail closed through its trusted space owner;
+    // an existing user-managed connection keeps its existing semantics.
+    const missingManaged = !!requestedSlug?.startsWith('polo-space-') && !getLlmConnection(requestedSlug)
+    if (initial.connection?.managedBy !== 'admin' && !missingManaged) return initial
+    const origin = getAdminUrl()
+    if (!scope || !origin || !isCurrent()) throw new Error('Original assistant compute scope is unavailable')
+    const selection = await resolveProductSpaceConnection({ accountId: scope.accountId, productSpaceId: scope.productSpaceId })
+    if (!isCurrent() || getAdminUrl() !== origin) throw new Error('Original assistant compute scope changed')
+    const connection = getLlmConnection(selection.connectionSlug)
+    if (selection.connectionSlug !== `polo-space-${scope.productSpaceId}` || connection?.managedBy !== 'admin') {
+      throw new Error('Admin compute response changed its original ProductSpace')
+    }
+    const requestedModel = args.managedModel
+    const allowedModels = connection.models?.map(model => typeof model === 'string' ? model : model.id) ?? []
+    const model = requestedModel === 'fast'
+      ? (getMiniModel(connection) ?? selection.model ?? connection.defaultModel)
+      : requestedModel && requestedModel !== 'default' && allowedModels.includes(requestedModel)
+        ? requestedModel : selection.model ?? connection.defaultModel
+    return resolveBackendContext({ sessionConnectionSlug: connection.slug, managedModel: model })
+  }
+
+  private async resolveManagedAssistantBackendContext(managed: ManagedSession, workspaceModelFallback = false): Promise<ReturnType<typeof resolveBackendContext>> {
+    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
+    const original = this.managedTrustedScope(managed)
+    const fence = getRuntimeFenceGeneration(), accountGeneration = getTrustedAccountGeneration()
+    const owner = this.sessions.get(managed.id)
+    const connectionSlug = managed.llmConnection, model = managed.model, locked = managed.connectionLocked
+    const workspaceId = managed.workspace.id, workspaceRoot = managed.workspace.rootPath
+    const current = () => {
+      const scope = this.managedTrustedScope(managed)
+      return !!original && !!scope && scope.accountId === original.accountId && scope.productSpaceId === original.productSpaceId
+        && getRuntimeFenceGeneration() === fence && getTrustedAccountGeneration() === accountGeneration
+        && this.sessions.get(managed.id) === owner && (!owner || owner === managed)
+        && managed.workspace.id === workspaceId && managed.workspace.rootPath === workspaceRoot
+        && managed.llmConnection === connectionSlug && managed.model === model && managed.connectionLocked === locked
+    }
+    const context = await this.resolveAssistantBackendContext({
+      sessionConnectionSlug: connectionSlug,
+      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
+      managedModel: model || (workspaceModelFallback ? workspaceConfig?.defaults?.model : undefined),
+    }, original, current)
+    if (context.connection?.managedBy === 'admin') {
+      // No awaited work between the final CAS and publication of selection.
+      if (!current()) throw new Error('Original assistant compute selection changed')
+      if (managed.llmConnection !== context.connection.slug || managed.model !== context.resolvedModel) {
+        managed.llmConnection = context.connection.slug
+        managed.model = context.resolvedModel
+        this.persistSession(managed)
+        this.sendEvent({ type: 'connection_changed', sessionId: managed.id,
+          connectionSlug: context.connection.slug, supportsBranching: resolveSupportsBranching(managed) }, workspaceId)
+        if (model !== context.resolvedModel) {
+          this.sendEvent({ type: 'session_model_changed', sessionId: managed.id, model: context.resolvedModel }, workspaceId)
+        }
+      }
+    }
+    return context
+  }
+
   private assistantBillingFor(managed: ManagedSession, connection: { slug: string; managedBy?: 'admin' } | null | undefined) {
     if (connection?.managedBy !== 'admin') return undefined
     const original = this.managedTrustedScope(managed), adminOrigin = getAdminUrl()
@@ -3373,11 +3443,11 @@ export class SessionManager implements ISessionManager {
     }
 
     // Resolve backend target early for branching policy checks.
-    const targetBackendContext = resolveBackendContext({
+    const targetBackendContext = await this.resolveAssistantBackendContext({
       sessionConnectionSlug: options?.llmConnection,
       workspaceDefaultConnectionSlug: wsConfig?.defaults?.defaultLlmConnection,
-      managedModel: resolvedModelOption,
-    })
+      managedModel: options?.model === 'fast' || options?.model === 'default' ? options.model : resolvedModelOption,
+    }, trustedScope, () => !!publicationToken && isTrustedPublicationTokenCurrent(publicationToken))
     const targetProviderType = targetBackendContext.connection?.providerType
       ?? (targetBackendContext.provider === 'pi' ? 'pi' : 'anthropic')
     const targetPiAuthProvider = targetBackendContext.connection?.piAuthProvider
@@ -3746,7 +3816,7 @@ export class SessionManager implements ISessionManager {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       model: resolvedModel,
-      llmConnection: options?.llmConnection,
+      llmConnection: targetBackendContext.connection?.managedBy === 'admin' ? targetBackendContext.connection.slug : options?.llmConnection,
       productSpaceId: trustedScope?.productSpaceId,
       accountId: trustedScope?.accountId,
       thinkingLevel: defaultThinkingLevel,
@@ -4800,7 +4870,7 @@ export class SessionManager implements ISessionManager {
    * lifecycle lock (`tryRefreshAgentRuntime` wraps it; `getOrCreateAgent`
    * calls it inside its own settlement→construction critical section).
    */
-  private async refreshAgentRuntimeUnlocked(managed: ManagedSession, reason: string): Promise<void> {
+  private async refreshAgentRuntimeUnlocked(managed: ManagedSession, reason: string, resolvedContext?: ReturnType<typeof resolveBackendContext>): Promise<void> {
     // R47: the incomplete-disposal settlement happens INSIDE the per-session
     // refresh critical section, BEFORE the no-agent early return — a strict
     // disposal whose pool/MCP faces failed leaves `managed.agent` null with
@@ -4810,12 +4880,7 @@ export class SessionManager implements ISessionManager {
 
     if (!managed.agent) return
 
-    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
-    const backendContext = resolveBackendContext({
-      sessionConnectionSlug: managed.llmConnection,
-      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
-      managedModel: managed.model,
-    })
+    const backendContext = resolvedContext ?? await this.resolveManagedAssistantBackendContext(managed)
     const connection = backendContext.connection
     const sigInput = {
       connection,
@@ -4958,8 +5023,9 @@ export class SessionManager implements ISessionManager {
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
     return this.withAgentRuntimeLifecycleLock(managed, async () => {
       await this.settlePendingRuntimeDisposal(managed, 'agent creation')
-      await this.refreshAgentRuntimeUnlocked(managed, 'send-path refresh')
-      return this.constructAgentUnlocked(managed)
+      const context = await this.resolveManagedAssistantBackendContext(managed)
+      await this.refreshAgentRuntimeUnlocked(managed, 'send-path refresh', context)
+      return this.constructAgentUnlocked(managed, context)
     })
   }
 
@@ -4971,14 +5037,9 @@ export class SessionManager implements ISessionManager {
    * replace the successor mid-construction, and the retained faces from an
    * earlier partial disposal were already settled at the lock's head.
    */
-  private async constructAgentUnlocked(managed: ManagedSession): Promise<AgentInstance> {
+  private async constructAgentUnlocked(managed: ManagedSession, resolvedContext?: ReturnType<typeof resolveBackendContext>): Promise<AgentInstance> {
     sessionLog.debug(`Constructing agent runtime for session ${managed.id} (owner ${this.ownerTokenFingerprint(managed)})`)
-    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
-    const backendContext = resolveBackendContext({
-      sessionConnectionSlug: managed.llmConnection,
-      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
-      managedModel: managed.model,
-    })
+    const backendContext = resolvedContext ?? await this.resolveManagedAssistantBackendContext(managed)
     const connection = backendContext.connection
     const sigInput = {
       connection,
@@ -6953,10 +7014,11 @@ export class SessionManager implements ISessionManager {
 
     if (!agent && managed.llmConnection) {
       try {
-        const connection = getLlmConnection(managed.llmConnection)
+        const context = await this.resolveManagedAssistantBackendContext(managed)
+        const connection = context.connection
         const resolvedMiniModel = connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined
 
-        agent = createBackendFromConnection(managed.llmConnection, {
+        agent = createBackendFromConnection(context.connection?.slug ?? managed.llmConnection!, {
           workspace: managed.workspace,
           managedBilling: this.assistantBillingFor(managed, connection),
           miniModel: resolvedMiniModel,
@@ -10588,9 +10650,10 @@ export class SessionManager implements ISessionManager {
     // If still no agent, create a temporary one using the session's connection
     if (!agent && managed.llmConnection) {
       try {
-        const connection = getLlmConnection(managed.llmConnection)
+        const context = await this.resolveManagedAssistantBackendContext(managed)
+        const connection = context.connection
 
-        agent = createBackendFromConnection(managed.llmConnection, {
+        agent = createBackendFromConnection(context.connection?.slug ?? managed.llmConnection!, {
           workspace: managed.workspace,
           managedBilling: this.assistantBillingFor(managed, connection),
           miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
@@ -11564,13 +11627,7 @@ export class SessionManager implements ISessionManager {
     if (messages.length === 0) return null
 
     const workspaceRootPath = managed.workspace.rootPath
-    const wsConfig = loadWorkspaceConfig(workspaceRootPath)
-    const defaultModel = wsConfig?.defaults?.model
-    const backendContext = resolveBackendContext({
-      sessionConnectionSlug: managed.llmConnection,
-      workspaceDefaultConnectionSlug: wsConfig?.defaults?.defaultLlmConnection,
-      managedModel: managed.model || defaultModel,
-    })
+    const backendContext = await this.resolveManagedAssistantBackendContext(managed, true)
 
     const miniModel = backendContext.connection
       ? (getMiniModel(backendContext.connection) ?? backendContext.connection.defaultModel ?? getDefaultSummarizationModel())

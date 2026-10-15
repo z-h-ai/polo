@@ -352,15 +352,18 @@ class AdminSessionChangedError extends Error {
   }
 }
 
-type AppConnectionScope = { accountId: string; productSpaceId: string }
-type AppConnectionSelection = { connectionSlug: string; model?: string }
-let productSpaceAppConnectionResolver: ((scope: AppConnectionScope) => Promise<AppConnectionSelection>) | null = null
+type ProductSpaceConnectionScope = { accountId: string; productSpaceId: string }
+type ProductSpaceConnectionSelection = { connectionSlug: string; model?: string }
+let productSpaceAppConnectionResolver: ((scope: ProductSpaceConnectionScope) => Promise<ProductSpaceConnectionSelection>) | null = null
 
 /** Installed by the trusted Admin session owner, never supplied by a renderer. */
-export async function resolveProductSpaceAppConnection(scope: AppConnectionScope): Promise<AppConnectionSelection> {
+export async function resolveProductSpaceConnection(scope: ProductSpaceConnectionScope): Promise<ProductSpaceConnectionSelection> {
   if (!productSpaceAppConnectionResolver) throw new Error('Admin session owner is unavailable')
   return productSpaceAppConnectionResolver(scope)
 }
+
+/** Compatibility name for the existing App runtime consumer. */
+export const resolveProductSpaceAppConnection = resolveProductSpaceConnection
 
 /**
  * Serializes trusted Admin session transitions. The session generation, login
@@ -794,7 +797,7 @@ export function registerAdminHandlers(
       || getRuntimeActiveProductSpace() !== scope.productSpaceId
       || isSwitchInProgress() || isRuntimeOfflineReadOnly()
       || isRuntimeProductSpaceRestricted(scope.productSpaceId)) {
-      throw new Error('Original App space is not active')
+      throw new Error('Original ProductSpace is not active')
     }
     const synced = await syncAdminConnections({
       adminUrl: requireAdminUrl(), manager: getCredentialManager(), sessions, deps,
@@ -3736,7 +3739,7 @@ async function syncAdminConnections(args: {
   sessions: AdminSessionCoordinator
   session?: AdminSessionSnapshot
   deps?: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>
-  requiredScope?: AppConnectionScope
+  requiredScope?: ProductSpaceConnectionScope
 }): Promise<{
   defaultModel?: string
   configVersion: string
