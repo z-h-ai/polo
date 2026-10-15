@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { CONFIG_DIR } from '@polo-ai/shared/config'
 import { AdminError } from '@polo-ai/shared/admin'
 import { BillingOutbox, type AssistantBillingJournalScope } from '@polo-ai/shared/admin/billing-outbox'
-import { billingRuntimeAdmissionResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
+import { billingRuntimeAdmissionResponseSchema, billingRuntimeFinishResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
 import type { ManagedBillingHooks, ManagedBillingResult } from '@polo-ai/shared/credentials/managed-billing-observation'
 
 export interface AssistantBillingTransport {
@@ -64,9 +64,15 @@ export class AssistantBillingCoordinator {
           || error.status !== undefined && error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status))
         if (!started && definitivelyDenied) this.outbox.discardRejectedAdmission(key)
         else {
-          let finished = false
-          await transport.finish(scope, runId, { status: 'failed' }).then(() => { finished = true }).catch(() => {})
-          if (started && definitivelyDenied && finished) this.outbox.discardRejectedAdmission(key)
+          // This catch precedes the return of the send ticket: no provider
+          // request can have been sent. A transient admission failure can still
+          // finish authoritatively with no charge. Retire only that exact run's
+          // validated terminal acknowledgement, never a 404 or missing receipt.
+          const finished = await transport.finish(scope, runId, { status: 'failed' })
+            .then(value => billingRuntimeFinishResponseSchema.safeParse(value))
+            .catch(() => null)
+          if (started && finished?.success && finished.data.run.runId === runId
+            && finished.data.settlement === 'no_charge') this.outbox.discardRejectedAdmission(key)
         }
         throw error
       }
