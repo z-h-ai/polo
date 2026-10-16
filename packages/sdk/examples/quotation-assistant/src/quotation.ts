@@ -80,3 +80,10 @@ export function exportCsv(quote: Quote): string {
   return '\uFEFF' + [['项目', '数量', '单价（分）', '小计（分）', '说明'], ...quote.items.map(i => [i.name, String(i.quantity), String(i.unitPriceCents), String(i.quantity * i.unitPriceCents), i.note]), ['合计', '', '', String(totalCents(quote)), 'CNY']].map(row => row.map(safeCell).join(',')).join('\r\n')
 }
 export function exportJson(quote: Quote): string { return JSON.stringify({ ...quote, totalCents: totalCents(quote) }, null, 2) }
+
+export function formatMoney(cents: number): string {
+  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('金额须为非负安全整数分。')
+  const amount = BigInt(cents)
+  const yuan = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(amount / 100n)
+  return `${yuan}.${String(amount % 100n).padStart(2, '0')}`
+}

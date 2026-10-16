@@ -1,11 +1,11 @@
 import { polo, PoloError, type PoloTask } from '@polo-ai/sdk'
-import { csvItems, exportCsv, exportJson, readSelectedFile, totalCents, validateQuote, validateSuggestedPrices, type Quote } from './quotation'
+import { csvItems, exportCsv, exportJson, formatMoney, readSelectedFile, totalCents, validateQuote, validateSuggestedPrices, type Quote } from './quotation'
 import './style.css'
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 const input = $<HTMLTextAreaElement>('requirements'), file = $<HTMLInputElement>('file'), rate = $<HTMLInputElement>('rate')
 const generate = $<HTMLButtonElement>('generate'), cancel = $<HTMLButtonElement>('cancel')
 let selected: ReturnType<typeof csvItems> = [], quote: Quote | undefined, active: PoloTask | undefined, fileGeneration = 0, partial = false
-const money = (cents: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(cents / 100)
+const money = formatMoney
 const status = (text: string) => { $('status').textContent = text }
 function canExport() { return !!quote && !partial && !active && $<HTMLInputElement>('confirm').checked }
 function refresh() {

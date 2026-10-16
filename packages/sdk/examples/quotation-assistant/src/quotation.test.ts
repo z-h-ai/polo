@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { csvItems, exportCsv, exportJson, readSelectedFile, totalCents, validateQuote, validateSuggestedPrices } from './quotation'
+import { csvItems, exportCsv, exportJson, formatMoney, readSelectedFile, totalCents, validateQuote, validateSuggestedPrices } from './quotation'
 const quote = { currency: 'CNY', items: [{ name: '设计', quantity: 3, unitPriceCents: 101, note: '<script>alert(1)</script>' }] }
 test('strict schema and deterministic integer money reject malformed or unbounded suggestions', () => {
   expect(totalCents(validateQuote(quote))).toBe(303)
@@ -21,4 +21,10 @@ test('CSV prevents spreadsheet formulas while JSON preserves text and recomputes
     const q = validateQuote({ ...quote, items: [{ ...quote.items[0], name }] })
     expect(exportCsv(q)).toContain('"\''); expect(JSON.parse(exportJson(q)).items[0].name).toBe(name); expect(JSON.parse(exportJson(q)).totalCents).toBe(303)
   }
+})
+
+test('display preserves exact cents throughout the supported safe-integer range', () => {
+  expect(formatMoney(9000000000000001)).toBe('¥90,000,000,000,000.01')
+  expect(formatMoney(101)).toBe('¥1.01')
+  expect(formatMoney(0)).toBe('¥0.00')
 })
