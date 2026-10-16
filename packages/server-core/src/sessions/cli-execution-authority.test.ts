@@ -99,3 +99,36 @@ test('an async core callback cannot return a result after its generation is repl
     await expect(result).rejects.toThrow('CLI_EXECUTION_GENERATION_REVOKED')
   } finally { f.close() }
 })
+
+for (const replacement of ['token', 'map'] as const) {
+  for (const event of ['tool_start', 'terminal'] as const) {
+    test(`CLI ${event} continuation rejects ${replacement} replacement across await`, async () => {
+      const f = fixture()
+      try {
+        f.authority.assertClient('global', 'client')
+        const manager = new SessionManager({ profile: 'cli-one-shot', workspace: f.bootstrap.workspace, sessionStorage: f.authority.storage, cliAuthority: f.authority }) as any
+        const managed = { id: 'root-session', workspace: f.bootstrap.workspace, runtimeOwnerToken: 'original', messages: [], messageQueue: [], isProcessing: true }
+        manager.sessions.set(managed.id, managed)
+        manager.monotonic = () => 1
+        manager.setProcessing = () => {}
+        manager.isSessionBeingViewed = () => false
+        manager.getLastFinalAssistantMessageId = () => undefined
+        manager.persistSession = () => { throw new Error('stale persistence') }
+        let resume!: () => void
+        const barrier = new Promise<void>(r => { resume = r })
+        manager.getBrowserPaneManagerForSession = () => event === 'terminal' ? { clearVisualsForSession: () => barrier, unbindAllForSession() {} } : undefined
+        const pushed: unknown[] = []
+        manager.setEventSink((...args: unknown[]) => pushed.push(args))
+        const pending = event === 'terminal'
+          ? manager.onProcessingStopped(managed.id, 'complete')
+          : manager.processEvent(managed, { type: 'tool_start', toolName: 'Read', toolUseId: 'old-tool', input: { file_path: '/tmp/old-runtime-data' } })
+        if (replacement === 'map') manager.sessions.set(managed.id, { ...managed, runtimeOwnerToken: 'successor', messages: [] })
+        else managed.runtimeOwnerToken = 'successor'
+        resume()
+        await pending.catch((error: Error) => { expect(error.message).toContain('CLI_EXECUTION_GENERATION_REVOKED') })
+        expect(pushed).toHaveLength(0)
+        expect(managed.messages).toHaveLength(0)
+      } finally { f.close() }
+    })
+  }
+}
