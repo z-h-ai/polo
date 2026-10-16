@@ -10,6 +10,7 @@ const accountId = crypto.randomUUID(), personal = crypto.randomUUID(), enterpris
 let space = personal, denied = false, receiptFailure = false, hold = false, providerCalls = 0
 const missingRoutes: string[] = []
 const providerBodies: any[] = [], billing: any[] = [], caps: string[] = []
+let allowedModels = ['test-model']
 let requestsInTurn = 0
 let computeBarrier: Promise<void> | undefined, releaseCompute: (() => void) | undefined, enteredCompute: (() => void) | undefined
 let executionState: () => unknown[] = () => []
@@ -55,7 +56,7 @@ const admin = Bun.serve({ port: 0, async fetch(req) {
     { id: enterprise, kind: 'enterprise', enterpriseId, name: 'Fixture Enterprise', role: 'member', accessMode: 'active', payer: { kind: 'enterprise', enterpriseId } },
   ] })
   if (url.pathname === '/api/llm-connections' && computeBarrier) { enteredCompute?.(); await computeBarrier }
-  if (url.pathname === '/api/llm-connections') { const computeSpace = url.searchParams.get('productSpaceId') || space; return Response.json({ productSpaceId: computeSpace, configVersion: 'fixture-1', defaultConnection: `polo-space-${computeSpace}`, connections: [{ slug: `polo-space-${computeSpace}`, name: 'Polo fixture', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key', baseUrl: `http://127.0.0.1:${provider.port}/v1`, customEndpoint: { api: 'openai-completions' }, models: ['test-model'], defaultModel: 'test-model', apiKey: 'fixture-upstream-key' }] }) }
+  if (url.pathname === '/api/llm-connections') { const computeSpace = url.searchParams.get('productSpaceId') || space; return Response.json({ productSpaceId: computeSpace, configVersion: 'fixture-1', defaultConnection: `polo-space-${computeSpace}`, connections: [{ slug: `polo-space-${computeSpace}`, name: 'Polo fixture', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key', baseUrl: `http://127.0.0.1:${provider.port}/v1`, customEndpoint: { api: 'openai-completions' }, models: allowedModels, defaultModel: 'test-model', apiKey: 'fixture-upstream-key' }] }) }
   if (url.pathname === '/api/billing/runs') {
     if (denied) return Response.json({ error: 'insufficient_credit', message: 'insufficient credit' }, { status: 409 })
     billing.push({ kind: 'start', input }); return Response.json({ run: { runId: input.runId, status: 'running' }, idempotent: false })
@@ -104,6 +105,7 @@ await server.listen()
 const { writeElectronRuntimeDiscovery } = await import('@polo-ai/shared/runtime-discovery')
 writeElectronRuntimeDiscovery({ pid: process.pid, url: `ws://127.0.0.1:${server.port}`, token, version: '0.10.0' })
 control = async value => {
+  if (value.allowAlternateModel) allowedModels = ['test-model', 'alternate-model']
   if (value.denied !== undefined) denied = value.denied
   if (value.receiptFailure !== undefined) receiptFailure = value.receiptFailure
   if (value.hold !== undefined) hold = value.hold
