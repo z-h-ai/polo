@@ -16,7 +16,7 @@ function fixture(script: string): TerminalIntegrationOptions {
   mkdirSync(join(root, 'home'), { recursive: true })
   writeFileSync(join(bin, 'polo'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
   return { platform: 'darwin', homeDir: join(root, 'home'), shell, resourcesPath,
-    appExecutable: join(root, 'App.app', 'Contents', 'MacOS', 'App'), appVersion: '0.16.3', shellTimeoutMs: 1000 }
+    appExecutable: join(root, 'App.app', 'Contents', 'MacOS', 'App'), appVersion: '0.16.3', shellTimeoutMs: 3000 }
 }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
@@ -42,7 +42,7 @@ describe('asynchronous terminal integration', () => {
 
   it('times out and kills slow shell descendants without blocking timers', async () => {
     const options = fixture('/bin/sleep 30 &\nprintf "%s" "$!" > "$HOME/child.pid"\nwait')
-    options.shellTimeoutMs = 150
+    options.shellTimeoutMs = 2000
     let beats = 0
     const timer = setInterval(() => beats++, 10)
     let result

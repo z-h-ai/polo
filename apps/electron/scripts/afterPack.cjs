@@ -22,6 +22,7 @@ const { createHash } = require('crypto');
 const {
   packagedResourcesDir,
   validatePackagedCliLayout,
+  validateMacMainNativePayload,
 } = require('./packaged-cli-layout.cjs');
 
 function validatePackagedCli(context) {
@@ -106,6 +107,7 @@ function validatePackagedCli(context) {
     platform: context.electronPlatformName,
     expectedVersion: appVersion,
   });
+  if (isMac) validateMacMainNativePayload(resourcesDir, expectedArch);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   if (manifest.version !== appVersion) {
     throw new Error(`POO-14 unpacked CLI/App version mismatch: ${manifest.version} vs ${appVersion}`);

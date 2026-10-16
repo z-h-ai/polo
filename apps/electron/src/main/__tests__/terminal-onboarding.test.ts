@@ -53,6 +53,23 @@ function status(overrides?: Partial<TerminalIntegrationStatus>): TerminalIntegra
 }
 
 describe('terminal onboarding', () => {
+  it('waits for asynchronous startup status and installation before declaring readiness', async () => {
+    const dialogs: MessageBoxOptions[] = []
+    const ready = status({ installed: true, pathReady: true, statusCode: 'ready' })
+    const result = await runTerminalOnboarding({
+      terminalOptions, copy, formatError,
+      showMessageBox: async options => { dialogs.push(options); return { response: 0 } },
+      dependencies: {
+        getStatus: async () => { await new Promise(resolve => setTimeout(resolve, 10)); return status() },
+        install: async () => { await new Promise(resolve => setTimeout(resolve, 10)); return ready },
+        wasDismissed: () => false,
+        setDismissed: () => {},
+      },
+    })
+    expect(result).toBe(ready)
+    expect(dialogs.map(dialog => dialog.title)).toEqual(['Complete setup', 'Complete'])
+  })
+
   it('does readiness detection without writing on later startup', async () => {
     let installs = 0
     let dialogs = 0

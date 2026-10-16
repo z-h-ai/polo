@@ -256,9 +256,12 @@ already running. CLI Threads are stored separately from Electron sessions.
 
 ### Installation
 
-- macOS: launch Polo once and choose **Complete Now** when asked to complete
-  setup. The same actions are available later under **Settings → Polo terminal
-  features**.
+- macOS: the App includes the CLI, Bun runtime, server, and Agent worker; no
+  separate npm package or install script is needed. Choose **Enable command**
+  at first launch or in **Settings → Polo terminal features** for the optional
+  `polo` PATH shortcut. Without that shortcut, invoke the bundled CLI directly:
+  `"/Applications/Polo AI.app/Contents/MacOS/Polo AI" --polo-cli exec "Hello"`.
+  Use your actual App path; the desktop window can remain closed.
 - Linux and Windows: the app installer creates `polo` and adds its managed
   directory to the user PATH.
 - `polo-ai` remains a compatibility shim until Polo 1.0.

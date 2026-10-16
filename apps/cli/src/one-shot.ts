@@ -479,7 +479,7 @@ export async function resolveConnection(
       args,
       connection.piAuthProvider ?? connection.providerType,
       selectedConnection,
-      hasExplicitIdentity,
+      true,
     )
     return {
       connection,
@@ -493,11 +493,20 @@ export async function resolveConnection(
   const effectiveProvider = provider || 'anthropic'
   const slug = saved?.slug || `cli-${record.metadata.threadId}`
   const retainSavedConnectionShape = !!saved && !hasExplicitConnectionOverride
+  // A saved slug identifies a credential only while its configured route and
+  // auth type still match the immutable Thread snapshot. An unmatched explicit
+  // endpoint must never borrow the previous connection's secret.
+  const savedCredentialIdentity = retainSavedConnectionShape && savedIdentity
+    && savedIdentity.authType === saved.authType
+    && connectionMatchesInvocationIdentity(savedIdentity, { provider: effectiveProvider })
+    && canonicalConnectionBaseUrl(savedIdentity.baseUrl) === canonicalConnectionBaseUrl(baseUrl)
+    ? savedIdentity
+    : undefined
   const credential = await resolveInvocationCredential(
     args,
     effectiveProvider,
-    savedIdentity,
-    hasExplicitIdentity,
+    savedCredentialIdentity,
+    !!savedCredentialIdentity,
   )
   return {
     connection: makeInvocationConnection({

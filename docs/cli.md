@@ -3,8 +3,26 @@
 `polo` is the terminal entry point for Polo AI. The package also installs
 `polo-ai` as a compatibility alias; both names execute the same CLI.
 
-The desktop installer bundles the CLI, server artifact, and Bun runtime. Open a
-new terminal after installation, then verify it:
+The Mac App already contains the CLI, headless server, Bun runtime, and Agent
+worker. No separate npm package or installation script is needed. You can use
+it directly, including while the desktop App is closed:
+
+```bash
+"/Applications/Polo AI.app/Contents/MacOS/Polo AI" --polo-cli --version
+"/Applications/Polo AI.app/Contents/MacOS/Polo AI" --polo-cli exec "Explain this directory"
+```
+
+Use your actual App path if it is installed elsewhere. To enable the shorter
+`polo` command on macOS, accept the first-launch terminal prompt or open
+**Settings → Polo terminal features → Enable command**. This optional step adds
+a managed launcher in `~/.local/bin` and a PATH block in your shell profile;
+it does not download the CLI. Repair/remove actions preserve unrelated shell
+configuration and refuse to overwrite another command named `polo`.
+Readiness checks run asynchronously with a bounded timeout. A timeout keeps
+terminal readiness unconfirmed; other settings remain usable.
+
+Linux and Windows installers manage their existing terminal PATH setup. Open a
+new terminal after enabling the command, then verify it:
 
 ```bash
 polo --version
@@ -76,7 +94,11 @@ final assistant message and one newline; progress and errors use stderr.
 `--json` stdout is JSONL only.
 
 Provider, model, endpoint, and API key overrides apply only to that invocation.
-They do not create shared connections or change Electron defaults. Secrets are
+They do not create shared connections or change Electron defaults. The selected
+configured connection supplies its existing credential. A resumed Thread only
+reuses that credential while its provider, endpoint, and authentication type
+still match the configured identity; an unmatched endpoint override must supply
+its own credential. Secrets are
 not stored in Thread metadata, session JSONL, or CLI JSONL.
 
 ### Resume and Thread management

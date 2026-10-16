@@ -146,6 +146,7 @@ import {
 } from './local-app-runtime/quit-guard'
 import {
   getTerminalIntegrationStatus,
+  shutdownTerminalIntegration,
   installTerminalIntegration,
   setTerminalSetupDismissed,
   toTerminalIntegrationErrorPayload,
@@ -265,7 +266,17 @@ if (poloCliArgIndex >= 0) {
   }
   const result = spawnSync(bun, ['run', entry, ...process.argv.slice(poloCliArgIndex + 1)], {
     stdio: 'inherit',
-    env: process.env,
+    // Match the self-relative packaged launcher: CLI snapshots need bundled
+    // defaults before normal desktop initialization calls setBundledAssetsRoot.
+    env: {
+      ...process.env,
+      ...(app.isPackaged ? {
+        POLO_AI_RESOURCES_PATH: join(app.getAppPath(), 'dist', 'resources'),
+        POLO_AI_BUNDLED_ASSETS_ROOT: join(app.getAppPath(), 'dist'),
+        POLO_AI_IS_PACKAGED: 'true',
+      } : {}),
+      POLO_AI_CLI_JSON_ONLY: process.env.POLO_AI_CLI_JSON_ONLY ?? '1',
+    },
     cwd: process.cwd(),
   })
   process.exit(result.status ?? 1)
@@ -314,12 +325,12 @@ function terminalIntegrationOptions(): TerminalIntegrationOptions {
   }
 }
 
-function terminalIntegrationIpcResult(
+async function terminalIntegrationIpcResult(
   operation: TerminalIntegrationOperation,
   run: () => ReturnType<typeof getTerminalIntegrationStatus>,
-): TerminalIntegrationResult {
+): Promise<TerminalIntegrationResult> {
   try {
-    return { success: true, status: run() }
+    return { success: true, status: await run() }
   } catch (error) {
     mainLog.error(`[terminal-integration] ${operation} failed`, error)
     return {
@@ -607,7 +618,7 @@ app.whenReady().then(async () => {
       return
     }
     try {
-      const status = executeTerminalIntegrationCommand(
+      const status = await executeTerminalIntegrationCommand(
         terminalIntegrationCommand!,
         terminalIntegrationOptions(),
       )
@@ -820,14 +831,14 @@ app.whenReady().then(async () => {
       terminalIntegrationIpcResult('status', () =>
         getTerminalIntegrationStatus(terminalIntegrationOptions())))
     ipcMain.handle('terminal-integration:install', () =>
-      terminalIntegrationIpcResult('install', () => {
-        const result = installTerminalIntegration(terminalIntegrationOptions())
+      terminalIntegrationIpcResult('install', async () => {
+        const result = await installTerminalIntegration(terminalIntegrationOptions())
         setTerminalSetupDismissed(terminalIntegrationOptions(), false)
         return result
       }))
     ipcMain.handle('terminal-integration:uninstall', () =>
-      terminalIntegrationIpcResult('uninstall', () => {
-        const result = uninstallTerminalIntegration(terminalIntegrationOptions())
+      terminalIntegrationIpcResult('uninstall', async () => {
+        const result = await uninstallTerminalIntegration(terminalIntegrationOptions())
         setTerminalSetupDismissed(terminalIntegrationOptions(), true)
         return result
       }))
@@ -1566,6 +1577,7 @@ function captureAndSaveWindowState(reason: 'before-quit' | 'pre-update'): number
 }
 
 // Save window state and clean up resources before quitting.
+app.on('will-quit', shutdownTerminalIntegration)
 app.on('before-quit', (event) => {
   if (beforeQuitCleanup.isExitAllowed()) return
   const mustStopLocalApps = hasLocalAppRuntimeManager()

@@ -2,12 +2,29 @@ import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  executeTerminalIntegrationCommand,
   parseTerminalIntegrationCommand,
   TERMINAL_INTEGRATION_COMMAND_ERROR_CODE,
   TerminalIntegrationCommandParseError,
 } from '../terminal-integration-command'
 
 describe('terminal integration command entrypoint', () => {
+  it('awaits asynchronous status for the pre-window command', async () => {
+    const result = executeTerminalIntegrationCommand('status', {
+      platform: 'darwin',
+      homeDir: `/tmp/polo-command-${crypto.randomUUID()}`,
+      resourcesPath: '/nonexistent/Polo.app/Contents/Resources',
+      appExecutable: '/nonexistent/Polo',
+      appVersion: '0.16.3',
+      commandLookup: async () => {
+        await new Promise(resolve => setTimeout(resolve, 10))
+        return null
+      },
+    })
+    expect(result).toBeInstanceOf(Promise)
+    expect((await result).statusCode).toBe('not_installed')
+  })
+
   it.each(['install', 'repair', 'uninstall', 'status'] as const)(
     'parses %s',
     (command) => {

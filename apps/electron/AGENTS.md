@@ -30,6 +30,8 @@ cd apps/electron && bun run typecheck  # tsc --noEmit
 # Tests (bun:test)
 bun test                          # All tests across monorepo
 bun test src/transport/__tests__/ws-rpc.test.ts  # Single test file
+# Terminal setup (must finish with 0 fail; covers slow-shell event-loop and cleanup)
+bun test apps/electron/src/main/__tests__/terminal-integration*.test.ts apps/electron/src/main/__tests__/terminal-onboarding.test.ts
 
 # Distribution
 bun run electron:dist:mac         # macOS DMG (arm64)

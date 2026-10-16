@@ -57,14 +57,14 @@ afterEach(() => {
 })
 
 describe('macOS terminal integration', () => {
-  it('installs an idempotent managed launcher and PATH block', () => {
+  it('installs an idempotent managed launcher and PATH block', async () => {
     const options = setup()
-    const first = installTerminalIntegration(options)
+    const first = await installTerminalIntegration(options)
     const profile = first.profilePath!
     const firstProfile = readFileSync(profile, 'utf8')
     const firstLauncher = readFileSync(first.launcherPath, 'utf8')
 
-    const second = installTerminalIntegration(options)
+    const second = await installTerminalIntegration(options)
     expect(readFileSync(profile, 'utf8')).toBe(firstProfile)
     expect(readFileSync(second.launcherPath, 'utf8')).toBe(firstLauncher)
     expect(firstProfile.match(/# >>> Polo CLI >>>/g)?.length).toBe(1)
@@ -87,13 +87,13 @@ describe('macOS terminal integration', () => {
     })
   })
 
-  it('backs up and preserves existing shell configuration', () => {
+  it('backs up and preserves existing shell configuration', async () => {
     const options = setup('/bin/bash')
     const profile = join(options.homeDir!, '.bash_profile')
     mkdirSync(options.homeDir!, { recursive: true })
     writeFileSync(profile, 'export EDITOR=vim\n')
 
-    installTerminalIntegration(options)
+    await installTerminalIntegration(options)
     const next = readFileSync(profile, 'utf8')
     expect(next).toContain('export EDITOR=vim')
     expect(next).toContain('# >>> Polo CLI >>>')
@@ -102,7 +102,7 @@ describe('macOS terminal integration', () => {
     expect(backups.length).toBe(1)
   })
 
-  it('rejects a user-owned shell-profile symlink without changing its target', () => {
+  it('rejects a user-owned shell-profile symlink without changing its target', async () => {
     const options = setup()
     const profile = join(options.homeDir!, '.zprofile')
     const userProfile = join(options.homeDir!, 'user-zprofile')
@@ -110,7 +110,7 @@ describe('macOS terminal integration', () => {
     writeFileSync(userProfile, 'export USER_PROFILE=1\n')
     symlinkSync(userProfile, profile)
 
-    const status = installTerminalIntegration(options)
+    const status = await installTerminalIntegration(options)
 
     expect(status.conflict).toEqual({ code: 'profile_conflict', path: profile })
     expect(lstatSync(profile).isSymbolicLink()).toBe(true)
@@ -118,7 +118,7 @@ describe('macOS terminal integration', () => {
     expect(readFileSync(userProfile, 'utf8')).toBe('export USER_PROFILE=1\n')
   })
 
-  it('preserves macOS shell profiles across regular, symlink, rename, and content races', () => {
+  it('preserves macOS shell profiles across regular, symlink, rename, and content races', async () => {
     for (const race of [
       'regular_publish',
       'symlink_publish',
@@ -153,7 +153,7 @@ describe('macOS terminal integration', () => {
 
       let thrown: unknown
       try {
-        installTerminalIntegration(options)
+        await installTerminalIntegration(options)
       } catch (error) {
         thrown = error
       }
@@ -183,7 +183,7 @@ describe('macOS terminal integration', () => {
     }
   })
 
-  it('restores the claimed shell profile when a local publication step fails', () => {
+  it('restores the claimed shell profile when a local publication step fails', async () => {
     const options = setup()
     const profile = join(options.homeDir!, '.zprofile')
     const original = 'export ORIGINAL_PROFILE=1\n'
@@ -195,30 +195,30 @@ describe('macOS terminal integration', () => {
       }
     }
 
-    expect(() => installTerminalIntegration(options)).toThrow(TerminalIntegrationOperationError)
+    await expect(installTerminalIntegration(options)).rejects.toThrow(TerminalIntegrationOperationError)
     expect(readFileSync(profile, 'utf8')).toBe(original)
     expect(existsSync(join(options.homeDir!, '.local', 'bin', 'polo'))).toBe(false)
     expect(readdirSync(options.homeDir!).some(name => name.includes('.polo-claim-'))).toBe(false)
     expect(readdirSync(options.homeDir!).some(name => name.includes('.polo-tmp-'))).toBe(false)
   })
 
-  it('keeps the managed launcher current across app version upgrades', () => {
+  it('keeps the managed launcher current across app version upgrades', async () => {
     const options = setup()
-    installTerminalIntegration(options)
+    await installTerminalIntegration(options)
 
     const upgraded = {
       ...options,
       appVersion: '0.11.0',
       commandValidator: () => ({ ok: true, output: '0.11.0' }),
     }
-    const status = getTerminalIntegrationStatus(upgraded)
+    const status = await getTerminalIntegrationStatus(upgraded)
     expect(status.installed).toBe(true)
     expect(status.needsRepair).toBe(false)
   })
 
-  it('repairs a managed symlink after the app bundle moves', () => {
+  it('repairs a managed symlink after the app bundle moves', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const movedRoot = join(dirname(dirname(dirname(options.resourcesPath))), 'Polo Moved.app')
     const movedResources = join(movedRoot, 'Contents', 'Resources')
     mkdirSync(join(movedResources, 'app', 'resources', 'bin'), { recursive: true })
@@ -230,34 +230,34 @@ describe('macOS terminal integration', () => {
       resourcesPath: movedResources,
     }
 
-    const beforeRepair = getTerminalIntegrationStatus(movedOptions)
+    const beforeRepair = await getTerminalIntegrationStatus(movedOptions)
     expect(beforeRepair.installed).toBe(true)
     expect(beforeRepair.needsRepair).toBe(true)
 
-    const repaired = installTerminalIntegration(movedOptions)
+    const repaired = await installTerminalIntegration(movedOptions)
     expect(repaired.pathReady).toBe(true)
     expect(readlinkSync(installed.launcherPath)).toBe(movedLauncher)
   })
 
-  it('requires the managed launcher to remain executable', () => {
+  it('requires the managed launcher to remain executable', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     chmodSync(installed.launcherPath, 0o644)
 
-    const status = getTerminalIntegrationStatus(options)
+    const status = await getTerminalIntegrationStatus(options)
     expect(status.installed).toBe(true)
     expect(status.pathReady).toBe(false)
     expect(status.needsRepair).toBe(true)
 
     chmodSync(installed.launcherTarget!, 0o755)
-    const repaired = installTerminalIntegration(options)
+    const repaired = await installTerminalIntegration(options)
     expect(repaired.pathReady).toBe(true)
     expect(repaired.needsRepair).toBe(false)
   })
 
-  it('requires the exact managed PATH block content', () => {
+  it('requires the exact managed PATH block content', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const invalidBlock = [
       '# >>> Polo CLI >>>',
       'export PATH="/tmp/not-polo:$PATH"',
@@ -266,12 +266,12 @@ describe('macOS terminal integration', () => {
     ].join('\n')
     writeFileSync(installed.profilePath!, invalidBlock)
 
-    const status = getTerminalIntegrationStatus(options)
+    const status = await getTerminalIntegrationStatus(options)
     expect(status.installed).toBe(true)
     expect(status.pathReady).toBe(false)
     expect(status.needsRepair).toBe(true)
 
-    const repaired = installTerminalIntegration(options)
+    const repaired = await installTerminalIntegration(options)
     expect(repaired.pathReady).toBe(true)
     expect(repaired.needsRepair).toBe(false)
     expect(readFileSync(installed.profilePath!, 'utf8')).toContain(
@@ -279,23 +279,23 @@ describe('macOS terminal integration', () => {
     )
   })
 
-  it('marks command validation failures for repair', () => {
+  it('marks command validation failures for repair', async () => {
     const options = setup()
-    installTerminalIntegration(options)
+    await installTerminalIntegration(options)
     options.commandValidator = () => ({ ok: false })
 
-    const status = getTerminalIntegrationStatus(options)
+    const status = await getTerminalIntegrationStatus(options)
     expect(status.pathReady).toBe(false)
     expect(status.needsRepair).toBe(true)
   })
 
-  it('does not overwrite an existing non-Polo launcher', () => {
+  it('does not overwrite an existing non-Polo launcher', async () => {
     const options = setup()
     const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
     mkdirSync(join(launcher, '..'), { recursive: true })
     writeFileSync(launcher, '#!/bin/sh\necho other\n')
 
-    const status = installTerminalIntegration(options)
+    const status = await installTerminalIntegration(options)
     expect(status.conflict).toEqual({
       code: 'launcher_conflict',
       path: launcher,
@@ -303,7 +303,7 @@ describe('macOS terminal integration', () => {
     expect(readFileSync(launcher, 'utf8')).toContain('echo other')
   })
 
-  it('does not overwrite a regular file or symlink created after launcher validation', () => {
+  it('does not overwrite a regular file or symlink created after launcher validation', async () => {
     for (const kind of ['regular', 'symlink'] as const) {
       const options = setup()
       const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
@@ -320,7 +320,7 @@ describe('macOS terminal integration', () => {
         }
       }
 
-      const status = installTerminalIntegration(options)
+      const status = await installTerminalIntegration(options)
 
       expect(status.conflict).toEqual({ code: 'launcher_conflict', path: launcher })
       expect(existsSync(join(options.homeDir!, '.polo-ai', 'terminal-integration.json'))).toBe(false)
@@ -335,10 +335,10 @@ describe('macOS terminal integration', () => {
     }
   })
 
-  it('restores an existing launcher race without replacing the user command', () => {
+  it('restores an existing launcher race without replacing the user command', async () => {
     for (const kind of ['regular', 'symlink'] as const) {
       const options = setup()
-      const installed = installTerminalIntegration(options)
+      const installed = await installTerminalIntegration(options)
       const movedResources = join(
         dirname(dirname(dirname(options.resourcesPath))),
         `Polo Launcher Race ${kind}.app`,
@@ -367,7 +367,7 @@ describe('macOS terminal integration', () => {
 
       let thrown: unknown
       try {
-        installTerminalIntegration(racedOptions)
+        await installTerminalIntegration(racedOptions)
       } catch (error) {
         thrown = error
       }
@@ -383,9 +383,9 @@ describe('macOS terminal integration', () => {
     }
   })
 
-  it('restores the managed launcher when a local repair step fails after claim', () => {
+  it('restores the managed launcher when a local repair step fails after claim', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const originalTarget = readlinkSync(installed.launcherPath)
     const movedResources = join(
       dirname(dirname(dirname(options.resourcesPath))),
@@ -406,7 +406,7 @@ describe('macOS terminal integration', () => {
       },
     }
 
-    expect(() => installTerminalIntegration(failedOptions)).toThrow(
+    await expect(installTerminalIntegration(failedOptions)).rejects.toThrow(
       TerminalIntegrationOperationError,
     )
     expect(readlinkSync(installed.launcherPath)).toBe(originalTarget)
@@ -414,27 +414,27 @@ describe('macOS terminal integration', () => {
       .some(name => name.includes('.polo-claim-'))).toBe(false)
   })
 
-  it('does not own or uninstall a user-created symlink to the packaged target', () => {
+  it('does not own or uninstall a user-created symlink to the packaged target', async () => {
     const options = setup()
     const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
     const target = join(options.resourcesPath, 'app', 'resources', 'bin', 'polo')
     mkdirSync(dirname(launcher), { recursive: true })
     symlinkSync(target, launcher)
 
-    const before = getTerminalIntegrationStatus(options)
+    const before = await getTerminalIntegrationStatus(options)
     expect(before.installed).toBe(false)
     expect(before.conflict).toEqual({ code: 'launcher_conflict', path: launcher })
 
-    const after = uninstallTerminalIntegration(options)
+    const after = await uninstallTerminalIntegration(options)
     expect(lstatSync(launcher).isSymbolicLink()).toBe(true)
     expect(readlinkSync(launcher)).toBe(target)
     expect(after.conflict).toEqual({ code: 'launcher_conflict', path: launcher })
   })
 
-  it('preserves the launcher when ownership state is missing or corrupt', () => {
+  it('preserves the launcher when ownership state is missing or corrupt', async () => {
     for (const stateContent of [null, '{broken json', '{"schemaVersion":2}']) {
       const options = setup()
-      const installed = installTerminalIntegration(options)
+      const installed = await installTerminalIntegration(options)
       const state = join(options.homeDir!, '.polo-ai', 'terminal-integration.json')
       if (stateContent === null) {
         rmSync(state)
@@ -442,7 +442,7 @@ describe('macOS terminal integration', () => {
         writeFileSync(state, stateContent)
       }
 
-      uninstallTerminalIntegration(options)
+      await uninstallTerminalIntegration(options)
       expect(lstatSync(installed.launcherPath).isSymbolicLink()).toBe(true)
       if (stateContent !== null) {
         expect(readFileSync(state, 'utf8')).toBe(stateContent)
@@ -450,9 +450,9 @@ describe('macOS terminal integration', () => {
     }
   })
 
-  it('preserves the launcher when the recorded ownership identity is tampered', () => {
+  it('preserves the launcher when the recorded ownership identity is tampered', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const statePath = join(options.homeDir!, '.polo-ai', 'terminal-integration.json')
     const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>
     writeFileSync(statePath, `${JSON.stringify({
@@ -460,7 +460,7 @@ describe('macOS terminal integration', () => {
       launcherIdentity: '0'.repeat(64),
     })}\n`)
 
-    const status = uninstallTerminalIntegration(options)
+    const status = await uninstallTerminalIntegration(options)
     expect(lstatSync(installed.launcherPath).isSymbolicLink()).toBe(true)
     expect(status.conflict).toEqual({
       code: 'launcher_conflict',
@@ -469,22 +469,22 @@ describe('macOS terminal integration', () => {
     expect(existsSync(statePath)).toBe(true)
   })
 
-  it('preserves a managed path whose symlink identity was replaced by the user', () => {
+  it('preserves a managed path whose symlink identity was replaced by the user', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const userTarget = join(options.homeDir!, 'user-polo')
     writeFileSync(userTarget, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
     rmSync(installed.launcherPath)
     symlinkSync(userTarget, installed.launcherPath)
 
-    uninstallTerminalIntegration(options)
+    await uninstallTerminalIntegration(options)
     expect(readlinkSync(installed.launcherPath)).toBe(userTarget)
   })
 
-  it('does not delete a user command that races a managed launcher uninstall', () => {
+  it('does not delete a user command that races a managed launcher uninstall', async () => {
     for (const kind of ['regular', 'symlink'] as const) {
       const options = setup()
-      const installed = installTerminalIntegration(options)
+      const installed = await installTerminalIntegration(options)
       const userTarget = join(options.homeDir!, `uninstall-user-polo-${kind}`)
       const userContent = `#!/bin/sh\necho uninstall-${kind}\n`
       writeFileSync(userTarget, userContent, { mode: 0o755 })
@@ -498,7 +498,7 @@ describe('macOS terminal integration', () => {
         }
       }
 
-      uninstallTerminalIntegration(options)
+      await uninstallTerminalIntegration(options)
 
       if (kind === 'regular') {
         expect(readFileSync(installed.launcherPath, 'utf8')).toBe(userContent)
@@ -510,9 +510,9 @@ describe('macOS terminal integration', () => {
     }
   })
 
-  it('migrates a verified historical ownership state during App path repair', () => {
+  it('migrates a verified historical ownership state during App path repair', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const statePath = join(options.homeDir!, '.polo-ai', 'terminal-integration.json')
     writeFileSync(statePath, `${JSON.stringify({
       schemaVersion: 2,
@@ -533,7 +533,7 @@ describe('macOS terminal integration', () => {
     writeFileSync(movedTarget, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
     const movedOptions = { ...options, resourcesPath: movedResources, appVersion: '0.11.0' }
 
-    const repaired = installTerminalIntegration(movedOptions)
+    const repaired = await installTerminalIntegration(movedOptions)
     expect(readlinkSync(repaired.launcherPath)).toBe(movedTarget)
     expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
       schemaVersion: 3,
@@ -543,27 +543,27 @@ describe('macOS terminal integration', () => {
       launcherTarget: movedTarget,
     })
 
-    uninstallTerminalIntegration(movedOptions)
+    await uninstallTerminalIntegration(movedOptions)
     expect(existsSync(repaired.launcherPath)).toBe(false)
   })
 
-  it('removes only Polo-managed content', () => {
+  it('removes only Polo-managed content', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const profile = installed.profilePath!
     const content = readFileSync(profile, 'utf8')
     writeFileSync(profile, `export EDITOR=nano\n${content}`)
 
-    const status = uninstallTerminalIntegration(options)
+    const status = await uninstallTerminalIntegration(options)
     expect(existsSync(installed.launcherPath)).toBe(false)
     expect(readFileSync(profile, 'utf8')).toContain('export EDITOR=nano')
     expect(readFileSync(profile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
     expect(status.installed).toBe(false)
   })
 
-  it('keeps the launcher and restores the profile when uninstall publication fails', () => {
+  it('keeps the launcher and restores the profile when uninstall publication fails', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const profile = installed.profilePath!
     const before = readFileSync(profile, 'utf8')
     options.onBeforeTransactionStep = (step, path) => {
@@ -572,7 +572,7 @@ describe('macOS terminal integration', () => {
       }
     }
 
-    expect(() => uninstallTerminalIntegration(options)).toThrow(
+    await expect(uninstallTerminalIntegration(options)).rejects.toThrow(
       TerminalIntegrationOperationError,
     )
     expect(readFileSync(profile, 'utf8')).toBe(before)
@@ -580,24 +580,24 @@ describe('macOS terminal integration', () => {
     expect(existsSync(join(options.homeDir!, '.polo-ai', 'terminal-integration.json'))).toBe(true)
   })
 
-  it('repairs and uninstalls profiles left by a previous default shell', () => {
+  it('repairs and uninstalls profiles left by a previous default shell', async () => {
     const zshOptions = setup('/bin/zsh')
-    const installed = installTerminalIntegration(zshOptions)
+    const installed = await installTerminalIntegration(zshOptions)
     const zprofile = installed.profilePath!
     const bashOptions = { ...zshOptions, shell: '/bin/bash' }
 
-    const repaired = installTerminalIntegration(bashOptions)
+    const repaired = await installTerminalIntegration(bashOptions)
     const bashProfile = repaired.profilePath!
     expect(bashProfile).toEndWith('.bash_profile')
     expect(readFileSync(zprofile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
     expect(readFileSync(bashProfile, 'utf8')).toContain('# >>> Polo CLI >>>')
 
-    uninstallTerminalIntegration({ ...bashOptions, shell: '/opt/homebrew/bin/fish' })
+    await uninstallTerminalIntegration({ ...bashOptions, shell: '/opt/homebrew/bin/fish' })
     expect(readFileSync(bashProfile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
     expect(existsSync(repaired.launcherPath)).toBe(false)
   })
 
-  it('reports a bounded structured timeout from login-shell detection', () => {
+  it('reports a bounded structured timeout from login-shell detection', async () => {
     const options = setup()
     options.commandLookup = undefined
     options.commandValidator = undefined
@@ -608,7 +608,7 @@ describe('macOS terminal integration', () => {
       output: 'x'.repeat(limits.outputLimit + 10),
     })
 
-    const status = getTerminalIntegrationStatus(options)
+    const status = await getTerminalIntegrationStatus(options)
     expect(status.shellCheck).toEqual({
       status: 'timeout',
       timeoutMs: 5_000,
@@ -617,7 +617,7 @@ describe('macOS terminal integration', () => {
     expect(status.pathReady).toBe(false)
   })
 
-  it('kills a real login-shell probe at the configured timeout', () => {
+  it('kills a real login-shell probe at the configured timeout', async () => {
     const options = setup()
     const slowShell = join(options.homeDir!, 'slow-shell')
     mkdirSync(options.homeDir!, { recursive: true })
@@ -628,38 +628,38 @@ describe('macOS terminal integration', () => {
     options.shellTimeoutMs = 50
 
     const startedAt = Date.now()
-    const status = getTerminalIntegrationStatus(options)
+    const status = await getTerminalIntegrationStatus(options)
     expect(Date.now() - startedAt).toBeLessThan(1_000)
     expect(status.shellCheck?.status).toBe('timeout')
     expect(status.pathReady).toBe(false)
   })
 
-  it('reports command-name conflicts', () => {
+  it('reports command-name conflicts', async () => {
     const options = setup()
     options.commandLookup = () => '/opt/tools/polo'
-    const status = getTerminalIntegrationStatus(options)
+    const status = await getTerminalIntegrationStatus(options)
     expect(status.conflict).toEqual({
       code: 'command_conflict',
       path: '/opt/tools/polo',
     })
   })
 
-  it('accepts a managed launcher path with redundant separators', () => {
+  it('accepts a managed launcher path with redundant separators', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     options.commandLookup = () => installed.launcherPath.replace(
       '/.local/bin/polo',
       '//.local/bin/polo',
     )
 
-    const status = getTerminalIntegrationStatus(options)
+    const status = await getTerminalIntegrationStatus(options)
 
     expect(status.conflict).toBeUndefined()
     expect(status.pathReady).toBe(true)
     expect(status.statusCode).toBe('ready')
   })
 
-  it('does not treat the packaged wrapper symlink target as a user command conflict', () => {
+  it('does not treat the packaged wrapper symlink target as a user command conflict', async () => {
     const options = setup()
     const packagedWrapper = join(
       options.resourcesPath,
@@ -670,20 +670,20 @@ describe('macOS terminal integration', () => {
     )
     options.commandLookup = () => packagedWrapper
 
-    const status = installTerminalIntegration(options)
+    const status = await installTerminalIntegration(options)
 
     expect(status.conflict).toBeUndefined()
     expect(status.installed).toBe(true)
   })
 
-  it('does not modify malformed managed profile markers', () => {
+  it('does not modify malformed managed profile markers', async () => {
     const options = setup()
     const profile = join(options.homeDir!, '.zprofile')
     mkdirSync(options.homeDir!, { recursive: true })
     const malformed = 'export EDITOR=vim\n# <<< Polo CLI <<<\n# >>> Polo CLI >>>\n'
     writeFileSync(profile, malformed)
 
-    const status = installTerminalIntegration(options)
+    const status = await installTerminalIntegration(options)
     expect(readFileSync(profile, 'utf8')).toBe(malformed)
     expect(status.conflict).toEqual({
       code: 'profile_conflict',
@@ -691,11 +691,11 @@ describe('macOS terminal integration', () => {
     })
   })
 
-  it('exposes a safe structured code for unsupported platform errors', () => {
+  it('exposes a safe structured code for unsupported platform errors', async () => {
     const options = { ...setup(), platform: 'linux' as const }
     let thrown: unknown
     try {
-      installTerminalIntegration(options)
+      await installTerminalIntegration(options)
     } catch (error) {
       thrown = error
     }
@@ -706,15 +706,15 @@ describe('macOS terminal integration', () => {
     })
   })
 
-  it('maps malformed uninstall profiles to a safe path parameter', () => {
+  it('maps malformed uninstall profiles to a safe path parameter', async () => {
     const options = setup()
-    const installed = installTerminalIntegration(options)
+    const installed = await installTerminalIntegration(options)
     const malformed = '# <<< Polo CLI <<<\n# >>> Polo CLI >>>\n'
     writeFileSync(installed.profilePath!, malformed)
 
     let thrown: unknown
     try {
-      uninstallTerminalIntegration(options)
+      await uninstallTerminalIntegration(options)
     } catch (error) {
       thrown = error
     }
