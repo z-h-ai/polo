@@ -184,6 +184,8 @@ export interface BackendHostRuntimeContext {
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
 export interface CoreBackendConfig {
+  /** Minted only from verified CLI desktop authority; independent of permission mode. */
+  toolExecutionPolicy?: import('../tool-execution-policy').ToolExecutionPolicy;
   /** Trusted standalone bootstrap preserves user global Skills despite private HOME. */
   localGlobalSkillsRoot?: string;
   /** Host-owned local execution lease; independent of managed billing admission. */

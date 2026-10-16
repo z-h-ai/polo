@@ -1,3 +1,4 @@
+import { MANAGED_TOOL_UNSUPPORTED, isManagedFileTool } from './tool-execution-policy';
 /**
  * Pi Backend (Subprocess RPC Client)
  *
@@ -378,10 +379,13 @@ export class PiAgent extends BaseAgent {
   // Constructor
   // ============================================================
 
+  private readonly managedFileOnly: boolean;
+
   constructor(config: BackendConfig) {
     const resolvedModel = config.model || '';
     const modelDef = getModelById(resolvedModel);
     super(config, resolvedModel, modelDef?.contextWindow);
+    this.managedFileOnly = config.toolExecutionPolicy === 'managed-file-only';
 
     this._supportsBranching = true;
 
@@ -596,6 +600,7 @@ export class PiAgent extends BaseAgent {
       piAuth: proxyAuth.piAuth,
       credentialProxy: proxyAuth.credentialProxy,
       credentialIsolation: this.sessionStorage.owner === 'cli',
+      toolExecutionPolicy: this.managedFileOnly ? 'managed-file-only' : undefined,
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
@@ -632,7 +637,7 @@ export class PiAgent extends BaseAgent {
    * Send pool's proxy tool defs to subprocess for model visibility.
    */
   private registerPoolToolsWithSubprocess(): void {
-    if (!this.mcpPool) return;
+    if (this.managedFileOnly || !this.mcpPool) return;
     const proxyDefs = this.mcpPool.getProxyToolDefs();
     if (proxyDefs.length > 0) {
       this.send({
@@ -653,6 +658,7 @@ export class PiAgent extends BaseAgent {
    * - `browser_tool` is hidden when the built-in browser tool is disabled.
    */
   private buildSessionToolDefs(): SessionToolProxyDef[] {
+    if (this.managedFileOnly) return [];
     let sessionToolDefs = getSessionToolProxyDefs({
       allowRequestUserInput: this.allowRequestUserInput,
     });
@@ -1397,6 +1403,10 @@ export class PiAgent extends BaseAgent {
     input: Record<string, unknown>;
   }): Promise<void> {
     const { requestId, toolName, toolCallId, input } = req;
+    if (this.managedFileOnly && !isManagedFileTool(toolName)) {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: MANAGED_TOOL_UNSUPPORTED });
+      return;
+    }
     try { this.config.assertExecutionCurrent?.(); } catch {
       this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'CLI_EXECUTION_OWNER_REVOKED' });
       return;
@@ -1642,6 +1652,10 @@ export class PiAgent extends BaseAgent {
     toolName: string;
     args: Record<string, unknown>;
   }): Promise<void> {
+    if (this.managedFileOnly) {
+      this.send({ type: 'tool_execute_response', requestId: request.requestId, result: { content: MANAGED_TOOL_UNSUPPORTED, isError: true } });
+      return;
+    }
     const denied = await this.checkCanonicalSkillUse(request.toolName, request.args, request.canonicalTurnId ?? null);
     if (denied) { this.send({ type: 'tool_execute_response', requestId: request.requestId, result: { content: denied, isError: true } }); return; }
     // Prerequisite check: block source tools until guide.md is read
@@ -1688,6 +1702,7 @@ export class PiAgent extends BaseAgent {
     toolName: string,
     args: Record<string, unknown>
   ): Promise<{ content: string; isError: boolean }> {
+    if (this.managedFileOnly) return { content: MANAGED_TOOL_UNSUPPORTED, isError: true };
     // Session-scoped tools — strip mcp__session__ prefix added by the Pi SDK
     // registration (tools are registered as mcp__session__SubmitPlan, etc.)
     const strippedName = toolName.startsWith('mcp__session__')
@@ -2537,6 +2552,7 @@ export class PiAgent extends BaseAgent {
     apiServers: Record<string, unknown>,
     intendedSlugs?: string[]
   ): Promise<void> {
+    if (this.managedFileOnly) return;
     // BaseAgent.setSourceServers() handles:
     //   1. SourceManager state tracking (active slugs)
     //   2. McpClientPool sync (connecting/disconnecting MCP + API sources)

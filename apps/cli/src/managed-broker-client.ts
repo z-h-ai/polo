@@ -1,5 +1,5 @@
 import { readElectronRuntimeDiscovery } from '@polo-ai/shared/runtime-discovery'
-import { sameDesktopManagedOwner, type DesktopManagedDescriptor, type DesktopManagedOwner } from '@polo-ai/shared/config'
+import { hasManagedCliMarkers, sameDesktopManagedOwner, type DesktopManagedDescriptor, type DesktopManagedOwner } from '@polo-ai/shared/config'
 import { version } from '../package.json'
 import { CliRpcClient } from './client'
 import type { CliThreadRecord, CliThreadLease } from './cli-thread-store'
@@ -20,7 +20,7 @@ export async function currentManagedOwner(): Promise<DesktopManagedOwner | undef
 }
 export async function assertManagedThreadAccess(record: CliThreadRecord, args: ExecutionArgs): Promise<void> {
   if (!record.metadata.managedOwner) {
-    if (record.metadata.connection?.provenance?.kind === 'managed' || record.metadata.connection?.slug?.startsWith('polo-space-')) throw new Error('POLO_THREAD_OWNER_UNKNOWN')
+    if (hasManagedCliMarkers(record.metadata.connection)) throw new Error('POLO_THREAD_OWNER_UNKNOWN')
     return
   }
   if (args.provider && args.provider !== 'polo' || args.apiKey || args.baseUrl || process.env.LLM_API_KEY || process.env.LLM_BASE_URL) throw new Error('POLO_THREAD_COMPUTE_SOURCE_MISMATCH')

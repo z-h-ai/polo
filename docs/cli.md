@@ -249,7 +249,7 @@ billing outbox and is not presented as a confirmed charge.
 
 The CLI still owns its Agent, tools and Thread storage. The desktop registers
 only an active execution so switch, logout, account replacement and quit can
-revoke the lease and wait for the actual runtime/tool process group to stop.
+revoke the lease and wait for the restricted runtime and worker process group to stop.
 A failed stop blocks switching or quitting. Desktop/owner death, socket loss,
 lease expiry and Ctrl-C cancel execution; there is no automatic model retry or
 fallback to a cached managed key or another endpoint. JSONL `thread.started`
@@ -259,11 +259,28 @@ Managed Threads save only non-secret original account, ProductSpace and Admin
 origin provenance. Resume requires that same current owner; another account,
 space or owned provider cannot receive the history. Listing hides inaccessible
 managed history, including old managed Threads whose owner cannot be proven.
-Start a new Thread when changing compute ownership. `--workspace` selects local
+An owned Thread (including an ephemeral resume clone) keeps its saved connection
+when the current default changes to Polo compute. The Broker refuses upgrading
+owned or unknown historical Threads in place; start a new Polo Thread instead.
+`--workspace` selects local
 configuration and `-C` the file directory; neither grants ProductSpace access.
 
 This version supports the existing OpenAI chat-completions managed transport on
-macOS/Linux. Managed sources and Skills are not enabled: no enterprise Skill is
+macOS/Linux. Managed execution provides AI plus the native Read, Write, Edit and
+Ls tools. Without OS process containment, Bash, grep/find subprocesses, script
+agents, web tools and session/MCP/Source/Skill execution are unavailable. The
+verified desktop authority fixes this policy in both host and worker; `--yolo`
+only changes the original file-write approval rules and cannot add tools. Safe
+mode still denies writes. Denied tools produce failed tool results, with the
+stable `POLO_MANAGED_TOOL_UNSUPPORTED` limitation shown on stderr.
+
+Managed workers do not evaluate cwd/global Pi extensions, resolve settings
+packages or install their hooks, including during resume and utility queries.
+This is a restriction on Agent capabilities, not an OS file sandbox: existing
+file paths and permissions retain their rules. Owned CLI and ordinary desktop
+Agents retain their original tools and Pi resource loading.
+
+Managed sources and Skills are not enabled: no enterprise Skill is
 copied into local discovery or made free by CLI ownership. Owned local Skills
 retain their existing rules. Windows managed process supervision is unsupported
 and fails closed. No browser or full desktop-session RPC is exposed by a CLI

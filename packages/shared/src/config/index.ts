@@ -18,5 +18,5 @@ export {
   type ConfigWatcherCallbacks,
 } from './watcher.ts';
 
-export { assertOwnedCliConnection, type CliConnectionProvenance } from './cli-connection-policy'
+export { hasManagedCliMarkers, assertOwnedCliConnection, type CliConnectionProvenance } from './cli-connection-policy'
 export { desktopManagedConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor } from './desktop-managed'

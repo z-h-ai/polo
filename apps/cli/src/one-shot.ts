@@ -1,3 +1,4 @@
+import { MANAGED_TOOL_UNSUPPORTED } from '../../../packages/shared/src/agent/tool-execution-policy'
 import { beginManagedExecution, assertManagedThreadAccess, currentManagedOwner } from './managed-broker-client'
 import { desktopManagedConnection, sameDesktopManagedOwner } from '@polo-ai/shared/config'
 import {
@@ -19,6 +20,7 @@ import { constants as osConstants, homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import {
   loadStoredConfigReadonly,
+  hasManagedCliMarkers,
   assertOwnedCliConnection,
   type LlmConnection,
   type Workspace,
@@ -1070,9 +1072,9 @@ export async function executeTurn(
     const selectedSlug = await loadWorkspaceConnectionDefault(scope) || configured?.defaultLlmConnection
     const selected = configured?.llmConnections?.find(c => c.slug === selectedSlug) ?? configured?.llmConnections?.[0]
     const managed = !!record.metadata.managedOwner || args.provider === 'polo'
-      || record.metadata.connection?.provenance?.kind === 'managed'
+      || hasManagedCliMarkers(record.metadata.connection)
       || !args.provider && !args.baseUrl && (args.kind !== 'resume' || !record.metadata.connection)
-        && (selected?.managedBy === 'admin' || selectedSlug?.startsWith('polo-space-'))
+        && (hasManagedCliMarkers(selected) || hasManagedCliMarkers({ slug: selectedSlug }))
     if (args.space && !managed) throw new UsageError('--space requires Polo compute')
     const snapshotRoot = await createConfigurationSnapshot(record, scope, managed)
     await completeStage('snapshot')
@@ -1098,7 +1100,7 @@ export async function executeTurn(
       const broker = managedBroker
       managedHeartbeat = setInterval(() => { void broker.client.invoke('cliManaged.heartbeat', { leaseId: descriptor.leaseId }).catch(revoked) }, 2000)
       managedHeartbeat.unref()
-      process.stderr.write(`Polo compute · ${descriptor.spaceName} · ${descriptor.model}\n`)
+      process.stderr.write(`Polo compute · ${descriptor.spaceName} · ${descriptor.model}\n${MANAGED_TOOL_UNSUPPORTED}\n`)
     } else resolvedConnection = await resolveConnection(args, record, scope)
     await throwIfInterrupted()
     // A normal resume borrows the original Thread and its saved connection.
@@ -1501,7 +1503,7 @@ async function listSessionsCommand(args: ExecutionArgs): Promise<number> {
   const managedOwner = await currentManagedOwner()
   const records = (await listCliThreads()).filter(record =>
     (!record.metadata.managedOwner
-      ? record.metadata.connection?.provenance?.kind !== 'managed' && !record.metadata.connection?.slug?.startsWith('polo-space-')
+      ? !hasManagedCliMarkers(record.metadata.connection)
       : !!managedOwner && sameDesktopManagedOwner(record.metadata.managedOwner, managedOwner))
     && record.metadata.origin === 'cli-exec'
     && record.metadata.persistence === 'persistent'

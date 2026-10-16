@@ -1,10 +1,10 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { z } from 'zod'
-import { getAdminUrl, getLlmConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor, type LlmConnection } from '@polo-ai/shared/config'
+import { hasManagedCliMarkers, getAdminUrl, getLlmConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor, type LlmConnection } from '@polo-ai/shared/config'
 import { getCredentialManager, startInvocationCredentialProxy, type InvocationCredentialProxy } from '@polo-ai/shared/credentials'
 import { RootedSessionStorage } from '@polo-ai/shared/sessions'
 import { processIdentityMatches } from '@polo-ai/shared/utils'
@@ -46,8 +46,9 @@ function processTable(): Array<{ pid: number; ppid: number; pgid: number; state:
 }
 function runtimeGone(runtime?: Runtime): boolean {
   if (!runtime) return true
-  // The managed runtime owns an OS process group. Orphaned tool/worker
-  // descendants in that group keep the execution active after root exit.
+  // Managed CLI permits only in-process file tools and disables Pi extensions/
+  // package resolution and host proxies. This checks that restricted runtime,
+  // not arbitrary shell descendants (which could escape its process group).
   return !processIdentityMatches(runtime.pid, runtime.birth)
     && !processTable().some(row => row.pgid === runtime.pid && !row.state.startsWith('Z'))
 }
@@ -119,7 +120,10 @@ export class CliManagedBroker {
       } catch { return false }
     }
     if (!ownerCurrent()) throw new Error('POLO_MANAGED_OWNER_REJECTED')
-    return { metadata, ownerCurrent }
+    // Only a genuinely unused Thread can acquire its first managed identity.
+    storage.assertSafeFilePath(join(root, 'sessions'), false)
+    const hasHistory = readdirSync(join(root, 'sessions')).length > 0
+    return { metadata, ownerCurrent, hasHistory }
   }
   async begin(ctx: RequestContext, raw: unknown): Promise<DesktopManagedDescriptor> {
     socketOnly(ctx)
@@ -128,9 +132,17 @@ export class CliManagedBroker {
     const input = beginSchema.parse(raw)
     if ([...this.leases.values()].some(l => l.input.threadId === input.threadId && l.active)) throw new Error('POLO_MANAGED_THREAD_BUSY')
     const proof = this.ownerProof(input)
+    if (!proof.metadata.managedOwner) {
+      if (hasManagedCliMarkers(proof.metadata.connection)) throw new Error('POLO_THREAD_OWNER_UNKNOWN')
+      const connection = proof.metadata.connection
+      const initialSelectionOnly = !connection || (
+        Object.keys(connection).every(key => ['provider', 'model'].includes(key))
+        && (!connection.provider || connection.provider === 'polo')
+      )
+      if (!initialSelectionOnly || proof.metadata.mainSessionId || proof.hasHistory || proof.metadata.status) throw new Error('POLO_THREAD_COMPUTE_SOURCE_MISMATCH: start a new Polo Thread')
+    }
     const captured = await captureContext(input.expectedSpace)
     if (proof.metadata.managedOwner && !sameDesktopManagedOwner(proof.metadata.managedOwner, captured.owner)) throw new Error('POLO_THREAD_OWNER_MISMATCH')
-    if (proof.metadata.connection?.provenance?.kind === 'managed' && !proof.metadata.managedOwner) throw new Error('POLO_THREAD_OWNER_UNKNOWN')
     const selection = await resolveProductSpaceConnection(captured.owner)
     if (!captured.current() || !proof.ownerCurrent() || ctx.signal?.aborted) throw new Error('POLO_MANAGED_REVOKED')
     const connection = getLlmConnection(selection.connectionSlug)

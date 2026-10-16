@@ -1,3 +1,4 @@
+import { MANAGED_TOOL_UNSUPPORTED } from '../../../shared/src/agent/tool-execution-policy'
 import { CliExecutionAuthority } from './cli-execution-authority'
 import type { EventSink, RpcServer } from '@polo-ai/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@polo-ai/server-core/transport'
@@ -2599,6 +2600,7 @@ export class SessionManager implements ISessionManager {
    * If agent is null (session hasn't sent any messages), skip - fresh build happens on next message.
    */
   private async reloadSessionSources(managed: ManagedSession): Promise<void> {
+    if (this.cliAuthority?.desktopManaged) return
     if (!managed.agent) return  // No agent = nothing to update (fresh build on next message)
 
     const workspaceRootPath = managed.workspace.rootPath
@@ -3024,8 +3026,8 @@ export class SessionManager implements ISessionManager {
     if (result.success && result.sourceSlug && managed.agent) {
       const workspaceRootPath = managed.workspace.rootPath
       const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, managed.id)
-      const enabledSlugs = managed.enabledSourceSlugs || []
-      const allSources = loadAllSources(workspaceRootPath)
+      const enabledSlugs = this.cliAuthority?.desktopManaged ? [] : managed.enabledSourceSlugs || []
+      const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
       const enabledSources = allSources.filter(s =>
         enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
       )
@@ -5187,17 +5189,17 @@ export class SessionManager implements ISessionManager {
       // ============================================================
 
       const sessionPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, managed.id)
-      const enabledSlugs = managed.enabledSourceSlugs || []
-      const allSources = loadAllSources(managed.workspace.rootPath)
+      const enabledSlugs = this.cliAuthority?.desktopManaged ? [] : managed.enabledSourceSlugs || []
+      const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(managed.workspace.rootPath)
       const enabledSources = allSources.filter(s =>
         enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
       )
 
       // Build server configs for enabled sources
-      const { mcpServers, apiServers } = await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager)
+      const { mcpServers, apiServers } = this.cliAuthority?.desktopManaged ? { mcpServers: {}, apiServers: {} } : await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager)
 
       // Create centralized MCP client pool (all backends use it)
-      managed.mcpPool = new McpClientPool({
+      if (!this.cliAuthority?.desktopManaged) managed.mcpPool = new McpClientPool({
         debug: (msg) => sessionLog.debug(msg),
         workspaceRootPath: managed.workspace.rootPath,
         sessionPath,
@@ -5207,7 +5209,7 @@ export class SessionManager implements ISessionManager {
 
       // Backends that run as external subprocesses need an HTTP pool server
       let poolServerUrl: string | undefined
-      if (backendContext.capabilities.needsHttpPoolServer) {
+      if (managed.mcpPool && backendContext.capabilities.needsHttpPoolServer) {
         managed.poolServer = new McpPoolServer(managed.mcpPool, { debug: (msg) => sessionLog.debug(msg) })
         managed.mcpPool.onToolsChanged = () => managed.poolServer?.notifyToolsChanged()
         poolServerUrl = await managed.poolServer.start()
@@ -5377,6 +5379,7 @@ export class SessionManager implements ISessionManager {
         coreConfig: {
         workspace: managed.workspace,
         localGlobalSkillsRoot: this.cliAuthority?.bootstrap.globalSkillsRoot,
+        toolExecutionPolicy: this.cliAuthority?.desktopManaged ? 'managed-file-only' : undefined,
         assertExecutionCurrent: this.cliAuthority ? this.guardManagedCallback(managed, 'backend.assertExecutionCurrent', () => {
           this.assertCliSessionOwned(managed.id)
           this.cliAuthority!.assertConnection(backendContext.connection)
@@ -6216,6 +6219,7 @@ export class SessionManager implements ISessionManager {
       // the authoritative guard inventory — Claude and Pi invoke it directly,
       // bypassing activateSourceInSessionFn, so the guard must live here.
       managed.agent.onSourceActivationRequest = this.guardManagedCallback(managed, 'agent.onSourceActivationRequest', async (sourceSlug: string): Promise<boolean> => {
+        if (this.cliAuthority?.desktopManaged) return false
         sessionLog.info(`Source activation request for session ${managed.id}:`, sourceSlug)
 
         const workspaceRootPath = managed.workspace.rootPath
@@ -6823,6 +6827,7 @@ export class SessionManager implements ISessionManager {
    * Otherwise, servers will be built fresh on next message.
    */
   async setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void> {
+    if (this.cliAuthority?.desktopManaged) throw new Error(MANAGED_TOOL_UNSUPPORTED)
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session not found: ${sessionId}`)
@@ -6858,7 +6863,7 @@ export class SessionManager implements ISessionManager {
       }
 
       // Set all sources for context (agent sees full list with descriptions, including built-ins)
-      const allSources = loadAllSources(workspaceRootPath)
+      const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
       managed.agent.setAllSources(allSources)
 
       // Set active source servers (tools are only available from these)
@@ -8213,7 +8218,7 @@ export class SessionManager implements ISessionManager {
     try {
 
     const workspaceRootPath = managed.workspace.rootPath
-    const enabledSlugs = managed.enabledSourceSlugs ?? []
+    const enabledSlugs = this.cliAuthority?.desktopManaged ? [] : managed.enabledSourceSlugs ?? []
     const hasSources = enabledSlugs.length > 0
 
     // Load enabled sources up-front so we can refresh tokens BEFORE getOrCreateAgent
@@ -8292,7 +8297,7 @@ export class SessionManager implements ISessionManager {
       }
 
       // Always set all sources for context (even if none are enabled), including built-ins
-      const allSources = loadAllSources(workspaceRootPath)
+      const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
       agent.setAllSources(allSources)
       sendSpan.mark('sources.loaded')
 
@@ -10970,7 +10975,7 @@ export class SessionManager implements ISessionManager {
         const workspaceRootPath = managed.workspace.rootPath
         let toolDisplayMeta: ToolDisplayMeta | undefined
         if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
-          const allSources = loadAllSources(workspaceRootPath)
+          const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
           toolDisplayMeta = await resolveToolDisplayMeta(event.toolName, formattedToolInput, workspaceRootPath, allSources)
           assertCurrent()
         }
