@@ -9,7 +9,7 @@ const money = formatMoney
 const status = (text: string) => { $('status').textContent = text }
 function canExport() { return !!quote && !partial && !active && $<HTMLInputElement>('confirm').checked }
 function refresh() {
-  generate.disabled = !!active || !input.value.trim() || input.value.length > 200_000
+  generate.disabled = !!active || !input.value.trim()
   cancel.disabled = !active
   for (const id of ['file','rate','requirements','example','clear']) ($<HTMLInputElement>(id)).disabled = !!active
   $('preview').textContent = input.value || '输入需求或主动选择一个文件，确认预览后再生成。'
