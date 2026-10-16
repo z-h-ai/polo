@@ -77,6 +77,14 @@ export function resolveBunExecutable(): string {
 }
 
 function inferPackagedEnvironment(serverEntry: string): Record<string, string> {
+  if (serverEntry.endsWith(join('packages', 'server', 'src', 'index.ts'))) {
+    const sourceRoot = resolve(serverEntry, '..', '..', '..', '..')
+    return {
+      POLO_AI_APP_ROOT: process.env.POLO_AI_APP_ROOT || sourceRoot,
+      POLO_AI_BUNDLED_ASSETS_ROOT: process.env.POLO_AI_BUNDLED_ASSETS_ROOT || join(sourceRoot, 'apps', 'electron'),
+      POLO_AI_IS_PACKAGED: 'false',
+    }
+  }
   if (!serverEntry.endsWith(join('dist', 'server', 'polo-server.js'))) return {}
   const appRoot = resolve(serverEntry, '..', '..', '..')
   const bundledAssetsRoot = join(appRoot, 'dist')

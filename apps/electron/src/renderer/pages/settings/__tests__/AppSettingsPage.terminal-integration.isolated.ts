@@ -145,7 +145,7 @@ describe('App settings terminal integration status failures', () => {
       expect(screen.getByText('Checking...')).toBeTruthy()
       expect(screen.getByText('Network')).toBeTruthy()
     })
-    expect(screen.queryByText('Terminal features installed')).toBeNull()
+    expect(screen.queryByText('Command enabled')).toBeNull()
     finish({ success: false, errorCode: 'status_failed' })
     await screen.findByRole('button', { name: 'Retry' })
   })
@@ -207,8 +207,8 @@ describe('App settings terminal integration status failures', () => {
     await user.click(await screen.findByRole('button', { name: 'Retry' }))
 
     await waitFor(() => {
-      expect(screen.getByText('Terminal features installed')).toBeTruthy()
-      expect(screen.getByText('Polo terminal features are ready.')).toBeTruthy()
+      expect(screen.getByText('Command enabled')).toBeTruthy()
+      expect(screen.getByText('The polo terminal command is ready.')).toBeTruthy()
     })
     expect(reads).toBe(2)
     expect(screen.queryByText(

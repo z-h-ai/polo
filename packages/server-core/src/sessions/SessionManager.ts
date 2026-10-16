@@ -1,3 +1,4 @@
+import { CliExecutionAuthority } from './cli-execution-authority'
 import type { EventSink, RpcServer } from '@polo-ai/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@polo-ai/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@polo-ai/server-core/handlers'
@@ -1338,11 +1339,13 @@ function managedToSession(
 const DELTA_BATCH_INTERVAL_MS = 50  // Flush batched deltas every 50ms
 
 interface PendingDelta {
+  cliOwnerToken?: string
   delta: string
   turnId?: string
 }
 
 export class SessionManager implements ISessionManager {
+  private readonly cliAuthority?: CliExecutionAuthority
   private readonly runtimeProfile: 'default' | 'cli-one-shot'
   private readonly runtimeWorkspace?: Workspace
   /**
@@ -1389,9 +1392,17 @@ export class SessionManager implements ISessionManager {
    */
   private guardManagedCallback<F extends (...args: any[]) => any>(managed: ManagedSession, name: string, fn: F): F {
     this.recordManagedCallbackInventory(managed, name)
+    const ownerToken = this.runtimeOwnerTokenOf(managed)
     const guarded = ((...args: any[]) => {
-      if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
-      return fn(...args)
+      this.assertExecutionCallbackAllowed(managed, name, ownerToken)
+      const result = fn(...args)
+      if (this.cliAuthority && result && typeof result.then === 'function') {
+        return Promise.resolve(result).then(value => {
+          this.assertExecutionCallbackAllowed(managed, name, ownerToken)
+          return value
+        })
+      }
+      return result
     }) as F
     return guarded
   }
@@ -1426,11 +1437,10 @@ export class SessionManager implements ISessionManager {
    * stale, legacy, replaced or in-transition callers.
    */
   private installManagedSessionCallbackGuard(managed: ManagedSession): void {
+    const ownerToken = this.runtimeOwnerTokenOf(managed)
     installSessionScopedToolCallbackGuard(managed.id, (callbackName: string) => {
-      if (!this.managedTrustedScope(managed)) {
-        throw new Error(`SESSION_OUT_OF_TRUSTED_SCOPE (${callbackName})`)
-      }
-    }, this.runtimeOwnerTokenOf(managed))
+      this.assertExecutionCallbackAllowed(managed, callbackName, ownerToken)
+    }, ownerToken)
   }
 
   /**
@@ -1816,6 +1826,12 @@ export class SessionManager implements ISessionManager {
 
   private async resolveManagedAssistantBackendContext(managed: ManagedSession, workspaceModelFallback = false): Promise<ReturnType<typeof resolveBackendContext>> {
     const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
+    if (this.cliAuthority) {
+      this.assertCliSessionOwned(managed.id)
+      const context = resolveBackendContext({ sessionConnectionSlug: managed.llmConnection, managedModel: managed.model })
+      this.cliAuthority.assertConnection(context.connection)
+      return context
+    }
     const original = this.managedTrustedScope(managed)
     const fence = getRuntimeFenceGeneration(), accountGeneration = getTrustedAccountGeneration()
     const owner = this.sessions.get(managed.id)
@@ -1947,11 +1963,46 @@ export class SessionManager implements ISessionManager {
   constructor(options?: {
     profile?: 'default' | 'cli-one-shot'
     sessionStorage?: SessionStorage
+    cliAuthority?: CliExecutionAuthority
     workspace?: Workspace
   }) {
     this.runtimeProfile = options?.profile ?? 'default'
+    this.cliAuthority = options?.cliAuthority
     this.runtimeWorkspace = options?.workspace
     this.sessionStorage = options?.sessionStorage ?? new WorkspaceSessionStorage()
+  }
+
+  /** Shared execution policy for CLI RPCs, callbacks, events and provider selection. */
+  assertCliSessionOwned(sessionId: string): void {
+    const authority = this.cliAuthority
+    if (this.runtimeProfile !== 'cli-one-shot' || !authority || this.sessionStorage.owner !== 'cli'
+      || this.runtimeWorkspace?.id !== authority.bootstrap.workspace.id
+      || this.runtimeWorkspace?.rootPath !== authority.bootstrap.workspace.rootPath
+      || this.sessionStorage.getSessionsRoot(this.runtimeWorkspace.rootPath) !== authority.bootstrap.sessionsRoot) {
+      throw new Error('CLI_EXECUTION_AUTHORITY_REQUIRED')
+    }
+    authority.assertSession(sessionId)
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.accountId || managed.productSpaceId
+      || managed.workspace.id !== authority.bootstrap.workspace.id
+      || managed.workspace.rootPath !== authority.bootstrap.workspace.rootPath) throw new Error('CLI_EXECUTION_SESSION_REQUIRED')
+    this.sessionStorage.getSessionPath(managed.workspace.rootPath, sessionId)
+  }
+
+  private isOwnedCliSession(managed: ManagedSession): boolean {
+    if (!this.cliAuthority) return false
+    try { this.assertCliSessionOwned(managed.id); return this.sessions.get(managed.id) === managed }
+    catch { return false }
+  }
+
+  private assertExecutionCallbackAllowed(managed: ManagedSession, name: string, ownerToken: string): void {
+    if (this.cliAuthority) {
+      this.assertCliSessionOwned(managed.id)
+      if (this.sessions.get(managed.id) !== managed || managed.runtimeOwnerToken !== ownerToken) throw new Error('CLI_EXECUTION_GENERATION_REVOKED')
+      this.cliAuthority.assertCallback(managed.id, name)
+      return
+    }
+    if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
   }
 
   private getRuntimeWorkspaces(): Workspace[] {
@@ -2684,6 +2735,8 @@ export class SessionManager implements ISessionManager {
         const wsDefaultWorkingDir = wsConfig?.defaults?.workingDirectory
 
         for (const meta of sessionMetadata) {
+          if (this.cliAuthority && meta.id !== this.cliAuthority.bootstrap.expectedSessionId) continue
+          if (this.cliAuthority && (meta.accountId || meta.productSpaceId)) throw new Error('CLI_EXECUTION_SESSION_REQUIRED')
           // Create managed session from metadata only (messages lazy-loaded on demand)
           // This dramatically reduces memory usage at startup - messages are loaded
           // when getSession() is called for a specific session
@@ -2710,6 +2763,11 @@ export class SessionManager implements ISessionManager {
           }
 
           this.sessions.set(meta.id, managed)
+          if (this.cliAuthority) {
+            this.assertCliSessionOwned(meta.id)
+            this.cliAuthority.assertConnection(managed.llmConnection ? getLlmConnection(managed.llmConnection) : null)
+            this.installManagedSessionCallbackGuard(managed)
+          }
 
           // Initialize session metadata in AutomationSystem for diffing
           const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -3366,6 +3424,7 @@ export class SessionManager implements ISessionManager {
   }
 
   async createSession(workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions): Promise<Session> {
+    this.cliAuthority?.assertActive()
     // R46/R50: retry the cleanup of any quarantined unpublished candidate and
     // any timed-out runtime disposal first — no-ops while empty.
     await this.sweepQuarantinedUnpublishedRuntimes()
@@ -4882,6 +4941,7 @@ export class SessionManager implements ISessionManager {
 
     const backendContext = resolvedContext ?? await this.resolveManagedAssistantBackendContext(managed)
     const connection = backendContext.connection
+    if (this.cliAuthority) { this.assertCliSessionOwned(managed.id); this.cliAuthority.assertConnection(connection) }
     const sigInput = {
       connection,
       provider: backendContext.provider,
@@ -5041,6 +5101,7 @@ export class SessionManager implements ISessionManager {
     sessionLog.debug(`Constructing agent runtime for session ${managed.id} (owner ${this.ownerTokenFingerprint(managed)})`)
     const backendContext = resolvedContext ?? await this.resolveManagedAssistantBackendContext(managed)
     const connection = backendContext.connection
+    if (this.cliAuthority) { this.assertCliSessionOwned(managed.id); this.cliAuthority.assertConnection(connection) }
     const sigInput = {
       connection,
       provider: backendContext.provider,
@@ -5298,15 +5359,22 @@ export class SessionManager implements ISessionManager {
       // the guard by identity.
       managed.constructionCallbackGuardLease = getSessionScopedToolCallbackGuard(managed.id)
 
+      const cliConstructionOwnerToken = managed.runtimeOwnerToken!
       const canonicalSkillTurns = createCanonicalSkillTurnController(managed.workspace.rootPath)
       createdAgent = createBackendFromResolvedContext({
         context: backendContext,
         hostRuntime: buildBackendHostRuntimeContext(),
         coreConfig: {
         workspace: managed.workspace,
+        localGlobalSkillsRoot: this.cliAuthority?.bootstrap.globalSkillsRoot,
+        assertExecutionCurrent: this.cliAuthority ? this.guardManagedCallback(managed, 'backend.assertExecutionCurrent', () => {
+          this.assertCliSessionOwned(managed.id)
+          this.cliAuthority!.assertConnection(backendContext.connection)
+        }) : undefined,
         managedBilling: this.assistantBillingFor(managed, backendContext.connection),
         canonicalSkills: {
           allowLocalSkills: this.guardManagedCallback(managed, 'backend.canonicalSkills.allowLocalSkills', async () => {
+            if (this.isOwnedCliSession(managed)) return true
             const original = this.managedTrustedScope(managed)
             if (!original) return false
             const generation = getRuntimeFenceGeneration()
@@ -5316,6 +5384,7 @@ export class SessionManager implements ISessionManager {
             return context.kind === 'personal' && context.accessMode === 'active'
           }),
           load: this.guardManagedCallback(managed, 'backend.canonicalSkills.load', async () => {
+            if (this.isOwnedCliSession(managed)) return []
             const original = this.managedTrustedScope(managed)
             if (!original) throw new Error('Canonical Skill session scope is unavailable')
             const generation = getRuntimeFenceGeneration()
@@ -5325,6 +5394,10 @@ export class SessionManager implements ISessionManager {
             return skills
           }),
           authorize: this.guardManagedCallback(managed, 'backend.canonicalSkills.authorize', async (paths: readonly string[], turnId: string) => {
+            if (this.isOwnedCliSession(managed)) {
+              if (paths.length) throw new Error('CLI_CANONICAL_SKILLS_UNSUPPORTED')
+              return
+            }
             const original = this.managedTrustedScope(managed)
             if (!original) throw new Error('Canonical Skill session scope is unavailable')
             const generation = getRuntimeFenceGeneration()
@@ -5353,6 +5426,7 @@ export class SessionManager implements ISessionManager {
         // can never re-bind over a successor's lease.
         onSessionCallbackLeaseChanged: (lease: SessionScopedToolCallbackLease) => {
           if (this.sessions.get(managed.id) !== managed) return
+          if (this.cliAuthority && !this.isOwnedCliSession(managed)) return
           if (managed.runtimeOwnerToken === undefined) return
           if (lease.ownerToken !== managed.runtimeOwnerToken) {
             sessionLog.warn(`Ignored callback lease notification for session ${managed.id}: lease owner ${this.ownerTokenFingerprintOf(lease.ownerToken)} is not the live runtime owner`)
@@ -5389,6 +5463,7 @@ export class SessionManager implements ISessionManager {
             const result = await resizeImageForAPI(buffer, { maxSizeBytes })
             if (!result) return null
 
+            if (this.cliAuthority) this.assertExecutionCallbackAllowed(managed, 'backend.onImageResize', cliConstructionOwnerToken)
             // Write to session tmp directory (cleaned up with session)
             const sessionTmpDir = join(sessionPath, 'tmp')
             await mkdir(sessionTmpDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
@@ -5397,6 +5472,7 @@ export class SessionManager implements ISessionManager {
             }
             const ext = result.format === 'jpeg' ? 'jpg' : 'png'
             const outPath = join(sessionTmpDir, `resized-${randomUUID()}.${ext}`)
+            if (this.cliAuthority) this.assertExecutionCallbackAllowed(managed, 'backend.onImageResize', cliConstructionOwnerToken)
             await writeFile(outPath, result.buffer, {
               mode: this.sessionStorage.owner === 'cli' ? PRIVATE_FILE_MODE : undefined,
             })
@@ -5405,6 +5481,7 @@ export class SessionManager implements ISessionManager {
             }
 
             sessionLog.info(`Image resized for Read: ${(buffer.length / 1024 / 1024).toFixed(1)}MB → ${(result.buffer.length / 1024 / 1024).toFixed(1)}MB (→ ${result.width}×${result.height})`)
+            if (this.cliAuthority) this.assertExecutionCallbackAllowed(managed, 'backend.onImageResize', cliConstructionOwnerToken)
             return outPath
           } catch (err) {
             sessionLog.error('Image resize failed:', err)
@@ -5475,6 +5552,7 @@ export class SessionManager implements ISessionManager {
       // Unified auth callback — replaces per-backend onChatGptAuthRequired/onGithubAuthRequired
       // R38-2: registered through the authoritative guard inventory.
       managed.agent.onBackendAuthRequired = this.guardManagedCallback(managed, 'agent.onBackendAuthRequired', (reason: string) => {
+        if (this.cliAuthority) throw new Error(`CLI_AUTHENTICATION_REQUIRED: ${reason}`)
         sessionLog.warn(`Backend auth required for session ${managed.id}: ${reason}`)
         this.sendEvent({
           type: 'info',
@@ -5845,6 +5923,10 @@ export class SessionManager implements ISessionManager {
         commandHash?: string;
         approvalTtlSeconds?: number;
       }) => {
+        if (this.isOwnedCliSession(managed)) {
+          managed.agent?.respondToPermission(request.requestId, false, false)
+          return
+        }
         sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
         let brokerMetadata: {
           commandHash?: string
@@ -5946,6 +6028,7 @@ export class SessionManager implements ISessionManager {
       // Wire up onPlanSubmitted to add plan message to conversation
       // R38-2: registered through the authoritative guard inventory.
       managed.agent.onPlanSubmitted = this.guardManagedCallback(managed, 'agent.onPlanSubmitted', async (planPath) => {
+        if (this.isOwnedCliSession(managed)) throw new Error('CLI_INTERACTIVE_REQUEST_UNSUPPORTED')
         sessionLog.info(`Plan submitted for session ${managed.id}:`, planPath)
         try {
           // Read the plan file content
@@ -6011,6 +6094,7 @@ export class SessionManager implements ISessionManager {
       // Wire up onAuthRequest to add auth message to conversation and pause execution
       // R38-2: registered through the authoritative guard inventory.
       managed.agent.onAuthRequest = this.guardManagedCallback(managed, 'agent.onAuthRequest', (request) => {
+        if (this.isOwnedCliSession(managed)) throw new Error('CLI_INTERACTIVE_REQUEST_UNSUPPORTED')
         sessionLog.info(`Auth request for session ${managed.id}:`, request.type, request.sourceSlug)
 
         // Create auth-request message
@@ -6093,9 +6177,10 @@ export class SessionManager implements ISessionManager {
       // out-of-scope (stale/replaced/split-fence/in-transition) caller
       // fails closed and the rejection surfaces to the model as a tool
       // error instead of a dangling handoff.
-      managed.agent.onQuestionRequested = this.guardManagedCallback(managed, 'agent.onQuestionRequested', (questions, generationAtRequest) =>
-        this.routeAgentQuestionRequested(managed, questions, generationAtRequest)
-      )
+      managed.agent.onQuestionRequested = this.guardManagedCallback(managed, 'agent.onQuestionRequested', (questions, generationAtRequest) => {
+        if (this.cliAuthority) throw new Error('CLI_INTERACTIVE_REQUEST_UNSUPPORTED')
+        return this.routeAgentQuestionRequested(managed, questions, generationAtRequest)
+      })
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls.
       // R37-2: the handler delegates to ONE guarded private implementation so
@@ -8222,6 +8307,7 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('prep.failed')
       sessionLog.error(`Pre-chat preparation failed for session ${sessionId}:`, prepError)
       if (managed.isProcessing && managed.processingGeneration === myGeneration) {
+        if (this.cliAuthority) this.sendEvent({ type: 'error', sessionId, error: prepError instanceof Error ? prepError.message : 'Agent preparation failed' }, managed.workspace.id)
         await this.onProcessingStopped(sessionId, 'error')
       }
       throw prepError
@@ -8314,10 +8400,13 @@ export class SessionManager implements ISessionManager {
       }
 
       sendSpan.mark('chat.starting')
+      if (this.cliAuthority) { this.assertCliSessionOwned(managed.id); this.cliAuthority.assertConnection(messageBackendContext.connection) }
+      const cliTurnOwnerToken = managed.runtimeOwnerToken
       const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
       sessionLog.info('Got chat iterator, starting iteration...')
 
       for await (const event of chatIterator) {
+        if (this.cliAuthority && (!this.isOwnedCliSession(managed) || managed.runtimeOwnerToken !== cliTurnOwnerToken)) throw new Error('CLI_EXECUTION_GENERATION_REVOKED')
         // Log events (skip noisy text_delta)
         if (event.type !== 'text_delta') {
           if (event.type === 'tool_start') {
@@ -8510,6 +8599,7 @@ export class SessionManager implements ISessionManager {
       sendSpan.end()
       if (managed.processingGeneration === myGeneration) {
         sessionLog.error('Error during pre-agent send bootstrap:', error)
+        if (this.cliAuthority) this.sendEvent({ type: 'error', sessionId, error: error instanceof Error ? error.message : 'Agent bootstrap failed' }, managed.workspace.id)
         this.onProcessingStopped(sessionId, 'error')
       } else {
         sessionLog.warn('Pre-agent send failure superseded by a newer send; releasing owned execution only')
@@ -8636,6 +8726,10 @@ export class SessionManager implements ISessionManager {
     workspaceId: string,
     failureErrorCode?: string,
   ): boolean {
+    // A standalone invocation holds an immutable credential snapshot. Refreshing
+    // desktop/shared credentials cannot repair an API key and must not race a
+    // terminal event into a false success or mutate the user's real config.
+    if (this.cliAuthority) return false
     if (managed.authRetryAttempted || !managed.lastSentMessage) return false
 
     sessionLog.info(`Auth error detected, attempting token refresh and retry for session ${sessionId}`)
@@ -10631,6 +10725,9 @@ export class SessionManager implements ISessionManager {
    * If no agent exists, creates a temporary one using the session's connection.
    */
   private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
+    // One-shot execution has no title UI. Do not start an auxiliary runtime
+    // outside the root agent's owner/generation lifecycle.
+    if (this.cliAuthority) return
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
 
     // Use existing agent or create temporary one
@@ -10725,6 +10822,7 @@ export class SessionManager implements ISessionManager {
   }
 
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
+    if (this.cliAuthority && !this.isOwnedCliSession(managed)) throw new Error('CLI_EXECUTION_GENERATION_REVOKED')
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
 
@@ -11415,6 +11513,15 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    if (this.cliAuthority) {
+      if (!('sessionId' in event)) return
+      const managed = this.sessions.get(event.sessionId)
+      if (!managed || !this.isOwnedCliSession(managed) || workspaceId !== managed.workspace.id) return
+      const clientId = this.cliAuthority.eventClientId
+      if (clientId) this.eventSink(RPC_CHANNELS.sessions.EVENT, { to: 'client', clientId }, event)
+      return
+    }
+
     // Space fence on the event boundary: a session event may only reach a
     // client while its ProductSpace is the committed active space. A null
     // fence means the business surface is not ready — nothing is delivered.
@@ -11451,7 +11558,7 @@ export class SessionManager implements ISessionManager {
       if (turnId) existing.turnId = turnId
     } else {
       // Start new batch
-      this.pendingDeltas.set(sessionId, { delta, turnId })
+      this.pendingDeltas.set(sessionId, { delta, turnId, cliOwnerToken: this.cliAuthority ? this.sessions.get(sessionId)?.runtimeOwnerToken : undefined })
     }
 
     // Schedule flush if not already scheduled
@@ -11477,6 +11584,7 @@ export class SessionManager implements ISessionManager {
 
     // Send batched delta if any
     const pending = this.pendingDeltas.get(sessionId)
+    if (this.cliAuthority && pending && pending.cliOwnerToken !== this.sessions.get(sessionId)?.runtimeOwnerToken) { this.pendingDeltas.delete(sessionId); return }
     if (pending && pending.delta) {
       this.sendEvent({
         type: 'text_delta',

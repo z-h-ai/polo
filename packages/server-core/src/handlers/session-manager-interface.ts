@@ -30,6 +30,9 @@ import type { SessionBundle, DispatchMode } from '@polo-ai/shared/sessions'
 import type { EventSink } from '../transport'
 
 export interface ISessionManager {
+  /** Present only on the execution host; CLI RPC registration fails closed without it. */
+  assertCliSessionOwned?(sessionId: string): void
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------

@@ -56,3 +56,5 @@ export function registerCoreRpcHandlers(
   registerWorkspaceCoreHandlers(server, deps)
   registerMessagingHandlers(server, deps)
 }
+
+export { registerCliExecutionHandlers } from './cli-execution'

@@ -18,6 +18,7 @@
 - 开发：`bun run electron:dev`。
 - 构建：`bun run electron:build`。
 - 测试：`bun run test`；单文件检查可用 `bun test <test-file>`。
+- CLI runtime：`bun test apps/cli/src/runtime*.test.ts apps/cli/src/managed-provenance.integration.test.ts packages/server-core/src/sessions/cli-execution-authority.test.ts`（真实 server + Pi worker；应为 0 fail）。
 - 类型检查：`bun run typecheck:all`。
 - Lint：`bun run lint`。
 

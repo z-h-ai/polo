@@ -20,7 +20,7 @@ import {
   getProcessBirthIdentity,
   processIdentityMatches,
 } from '@polo-ai/shared/utils'
-import type { LlmConnection } from '@polo-ai/shared/config'
+import type { CliConnectionProvenance, LlmConnection } from '@polo-ai/shared/config'
 
 export { getProcessBirthIdentity, processIdentityMatches } from '@polo-ai/shared/utils'
 
@@ -42,6 +42,7 @@ export interface CliThreadMetadata {
   persistence: CliThreadPersistence
   status?: CliThreadStatus
   connection?: {
+    provenance?: CliConnectionProvenance
     slug?: string
     provider?: string
     model?: string

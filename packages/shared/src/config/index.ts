@@ -17,3 +17,5 @@ export {
   createConfigWatcher,
   type ConfigWatcherCallbacks,
 } from './watcher.ts';
+
+export { assertOwnedCliConnection, type CliConnectionProvenance } from './cli-connection-policy'

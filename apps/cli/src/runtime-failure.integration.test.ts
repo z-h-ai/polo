@@ -7,7 +7,7 @@ test('standalone pre-chat bootstrap errors cannot race complete into success', a
   const root = await mkdtemp(join(tmpdir(), 'polo-failure-'))
   try {
     await writeFile(join(root, 'config.json'), JSON.stringify({ workspaces: [], defaultLlmConnection: 'invalid', llmConnections: [{ slug: 'invalid', name: 'Invalid', providerType: 'anthropic', defaultModel: 'claude-opus-4-7', authType: 'api_key', createdAt: 1 }] }))
-    const child = Bun.spawn([process.execPath, resolve('apps/cli/src/index.ts'), 'exec', '--json', '-C', root, 'hello'], { env: { ...process.env, HOME: root, POLO_AI_CONFIG_DIR: root, LLM_API_KEY: 'controlled-key' }, stdout: 'pipe', stderr: 'pipe' })
+    const child = Bun.spawn([process.execPath, resolve('apps/cli/src/index.ts'), 'exec', '--json', '-C', root, 'hello'], { env: { ...process.env, HOME: root, POLO_AI_CONFIG_DIR: root, LLM_API_KEY: 'controlled-key', POLO_AI_APP_ROOT: join(root, 'missing-native-runtime') }, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
     expect(code).not.toBe(0)
     expect(stdout).not.toContain('"turn.completed"')

@@ -215,8 +215,8 @@ export function invalidateSkillsCache(): void {
  * @param workspaceRoot - Absolute path to workspace root
  * @param projectRoot - Optional project root (working directory) for project-level skills
  */
-export function loadAllSkills(workspaceRoot: string, projectRoot?: string): LoadedSkill[] {
-  const cacheKey = `${workspaceRoot}::${projectRoot ?? ''}`;
+export function loadAllSkills(workspaceRoot: string, projectRoot?: string, globalSkillsRoot = GLOBAL_AGENT_SKILLS_DIR): LoadedSkill[] {
+  const cacheKey = JSON.stringify([workspaceRoot, projectRoot ?? '', globalSkillsRoot]);
   const now = Date.now();
   const cached = skillsCache.get(cacheKey);
   if (cached && now - cached.ts < SKILLS_CACHE_TTL) {
@@ -226,7 +226,7 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
   const skillsBySlug = new Map<string, LoadedSkill>();
 
   // 1. Global skills (lowest priority): ~/.agents/skills/
-  for (const skill of loadSkillsFromDir(GLOBAL_AGENT_SKILLS_DIR, 'global')) {
+  for (const skill of loadSkillsFromDir(globalSkillsRoot, 'global')) {
     skillsBySlug.set(skill.slug, skill);
   }
 

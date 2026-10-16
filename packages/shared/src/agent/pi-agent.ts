@@ -887,6 +887,7 @@ export class PiAgent extends BaseAgent {
       }, {
         capability: this.createInvocationCapability(provider, credential),
         billing: this.config.managedBilling,
+        assertExecutionCurrent: this.config.assertExecutionCurrent,
       });
     }
     const capability = this.invocationCredentialProxy.capability;
@@ -1396,11 +1397,19 @@ export class PiAgent extends BaseAgent {
     input: Record<string, unknown>;
   }): Promise<void> {
     const { requestId, toolName, toolCallId, input } = req;
+    try { this.config.assertExecutionCurrent?.(); } catch {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'CLI_EXECUTION_OWNER_REVOKED' });
+      return;
+    }
     const originalTurnId = req.canonicalTurnId ?? null;
     const respond = async (response: Record<string, unknown>) => {
       if (response.action === 'allow' || response.action === 'modify') {
         const denied = await this.checkCanonicalSkillUse(toolName, (response.input as Record<string, unknown> | undefined) ?? input, originalTurnId);
         if (denied) { this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: denied }); return; }
+      }
+      try { this.config.assertExecutionCurrent?.(); } catch {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'CLI_EXECUTION_OWNER_REVOKED' });
+        return;
       }
       this.send(response);
     };

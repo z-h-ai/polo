@@ -920,6 +920,7 @@ ${formattedMessages}
 
   /** Runs in both SDK tool hooks, including direct Read/Bash/Skill input. */
   protected async checkCanonicalSkillUse(toolName: string, input: Record<string, unknown>, expectedTurnId: string | null = this.canonicalTurnId): Promise<string | null> {
+    try { this.config.assertExecutionCurrent?.(); } catch { return 'CLI_EXECUTION_OWNER_REVOKED'; }
     const stale = () => !!this.config.canonicalSkills && (!expectedTurnId || this.canonicalTurnId !== expectedTurnId);
     if (stale()) return 'Canonical Skill files have no current native authority: the original tool turn is no longer active';
     const paths = new Set(this.activeCanonicalSkillPaths);
@@ -945,7 +946,7 @@ ${formattedMessages}
       // claim to resolve arbitrary variable/command substitution programs.
       for (const token of input.command.match(/"[^"\n]*"|'[^'\n]*'|[^\s;|&]+/g) ?? []) candidates.push(token.replace(/^['"]|['"]$/g, ''));
     }
-    const personalRoots = [join(this.config.workspace.rootPath, 'skills'), GLOBAL_AGENT_SKILLS_DIR,
+    const personalRoots = [join(this.config.workspace.rootPath, 'skills'), this.config.localGlobalSkillsRoot ?? GLOBAL_AGENT_SKILLS_DIR,
       join(workingDirectory, PROJECT_AGENT_SKILLS_DIR)];
     const privateRoots = personalRoots.flatMap(root => [resolve(root), canonicalize(root)]);
     for (const candidate of candidates) {
@@ -994,7 +995,7 @@ ${formattedMessages}
   } {
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
-    const skills = [...(allowLocal ? loadAllSkills(workspaceRoot, projectRoot) : []), ...canonical];
+    const skills = [...(allowLocal ? loadAllSkills(workspaceRoot, projectRoot, this.config.localGlobalSkillsRoot) : []), ...canonical];
     const skillSlugs = skills.map(s => s.slug);
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);

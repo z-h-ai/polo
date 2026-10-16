@@ -64,6 +64,7 @@ export interface InvocationCredentialProxy {
 }
 
 export interface InvocationCredentialProxyOptions {
+  assertExecutionCurrent?: () => void
   billing?: ManagedBillingHooks
   /**
    * Some provider SDKs parse non-secret routing claims from their auth value
@@ -391,6 +392,7 @@ export async function startInvocationCredentialProxy(
       return
     }
     try {
+      options.assertExecutionCurrent?.()
       const upstreamUrl = resolveUpstreamUrl(
         targetSnapshot.upstreamBaseUrl,
         request.url || '/',
@@ -411,6 +413,7 @@ export async function startInvocationCredentialProxy(
         headers[correlation.header] = correlation.nonce
         privateCorrelation = correlation.nonce
       }
+      options.assertExecutionCurrent?.()
       const upstream = await requestUpstream(
         upstreamUrl,
         request,

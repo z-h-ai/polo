@@ -17,6 +17,7 @@ import { constants as osConstants, homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import {
   loadStoredConfigReadonly,
+  assertOwnedCliConnection,
   type LlmConnection,
   type Workspace,
 } from '@polo-ai/shared/config'
@@ -449,6 +450,12 @@ export async function resolveConnection(
     : undefined
   const selectedConnection = explicitIdentity
     ?? (!hasExplicitIdentity ? savedIdentity ?? defaultConnection : undefined)
+  // Validate ORIGINAL identities before reading any stored credential or rebuilding a synthetic route.
+  if (!hasExplicitIdentity) {
+    assertOwnedCliConnection(saved, saved?.provenance)
+    if (!saved && defaultSlug?.startsWith('polo-space-')) assertOwnedCliConnection({ slug: defaultSlug })
+  }
+  assertOwnedCliConnection(selectedConnection)
   const provider = args.provider
     ?? (!hasExplicitIdentity ? saved?.provider : undefined)
     ?? selectedConnection?.piAuthProvider
@@ -491,7 +498,7 @@ export async function resolveConnection(
   if (!needsSyntheticConnection) return { model }
 
   const effectiveProvider = provider || 'anthropic'
-  const slug = saved?.slug || `cli-${record.metadata.threadId}`
+  const slug = (!hasExplicitConnectionOverride ? saved?.slug : undefined) || `cli-${record.metadata.threadId}`
   const retainSavedConnectionShape = !!saved && !hasExplicitConnectionOverride
   // A saved slug identifies a credential only while its configured route and
   // auth type still match the immutable Thread snapshot. An unmatched explicit
@@ -1049,6 +1056,7 @@ export async function executeTurn(
     if (resolvedConnection.connection && ownsNewThread) {
       await updateCliThread(record, {
         connection: {
+          provenance: { kind: 'owned', originalSlug: resolvedConnection.connection.slug },
           slug: resolvedConnection.connection.slug,
           provider: resolvedConnection.connection.piAuthProvider || 'anthropic',
           model: resolvedConnection.model,
@@ -1078,7 +1086,8 @@ export async function executeTurn(
       env: {
         POLO_AI_RUNTIME_PROFILE: 'cli-one-shot',
         POLO_AI_CONFIG_DIR: snapshotRoot,
-        POLO_AI_SHARED_CREDENTIALS_DIR: configRoot(),
+        // Only the selected credential travels in the private stdin bootstrap.
+        POLO_AI_SHARED_CREDENTIALS_DIR: snapshotRoot,
         HOME: snapshotRoot,
         USERPROFILE: snapshotRoot,
       },
@@ -1088,6 +1097,12 @@ export async function executeTurn(
       ],
       bootstrapPayload: {
         runtimeConfig: {
+          threadId: record.metadata.threadId,
+          globalSkillsRoot: join(homedir(), '.agents', 'skills'),
+          threadRoot: record.directory,
+          expectedSessionId: record.metadata.mainSessionId,
+          origin: record.metadata.origin,
+          connectionProvenance: { kind: 'owned', originalSlug: resolvedConnection.connection?.slug },
           sessionsRoot: record.sessionsRoot,
           controlledRoot: getCliSessionsRoot(),
           workspace,

@@ -206,3 +206,25 @@ polo listen <channel>
 ```
 
 For a TLS server, use a `wss://` URL and optionally `--tls-ca <path>`.
+
+## Standalone execution authority
+
+The bundled one-shot runtime supports user-owned connections. Before listening,
+its server verifies the parent process birth identity, exclusive Thread lease,
+private snapshot and rooted session storage. It grants only one root session
+and one CLI client the execution RPCs; callbacks, model transports, tools and
+session events use the same revocable owner generation. Passing `origin=cli`
+or selecting a runtime profile grants no authority. Desktop ProductSpace
+admission, account permissions and managed billing retain their existing rules.
+
+Local workspace/project Skills and normal file tools remain available under
+`safe`, `ask` and `allow-all`. Non-interactive permission prompts are denied;
+UI-only plan/auth/question handoffs and cross-session/browser/business actions
+are unsupported. `--yolo` explicitly enables the existing `allow-all` mode.
+
+Admin-managed connections, `polo-space-*` routes and managed historical Thread
+provenance fail with `CLI_MANAGED_CONTEXT_REQUIRED`, before stored credentials
+are borrowed. Synthetic/resumed connections cannot remove that provenance.
+Polo platform/enterprise compute requires a future trusted ProductSpace broker
+with admission, metering and revocation; this standalone path does not establish
+support for that compute. Provider authentication failures exit nonzero.
