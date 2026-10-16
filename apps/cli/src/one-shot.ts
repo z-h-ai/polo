@@ -1331,6 +1331,10 @@ Options:
   --send-timeout <ms>    Legacy run turn timeout (default: 300000)
   --stdin                Read stdin even when a prompt is present
   --provider/--model/--api-key/--base-url
+  --space <id>          Assert the current Polo ProductSpace
+
+Polo compute: --provider polo requires a running, signed-in App; API-key and
+base-URL overrides are forbidden. The Agent and Thread remain independent.
   -h, --help             Show help
   -V, --version          Show version
 `)
@@ -1350,7 +1354,8 @@ Options:
   --dangerously-bypass-approvals-and-sandbox
   --json                  Emit stable JSONL events
   -m, --model <id>        Invocation-only model override
-  --provider <name>       Invocation-only provider override
+  --provider <name>       Invocation-only provider (polo uses the current App space)
+  --space <id>            Assert the current Polo ProductSpace
   --api-key <key>         Invocation-only credential override
   --base-url <url>        Invocation-only endpoint override
   --ephemeral             Resume from a temporary copy
@@ -1404,7 +1409,8 @@ Options:
   --dangerously-bypass-approvals-and-sandbox
   --json                  Emit stable JSONL events
   -m, --model <id>        Invocation-only model
-  --provider <name>       Invocation-only provider
+  --provider <name>       Invocation-only provider (polo uses the current App space)
+  --space <id>            Assert the current Polo ProductSpace
   --api-key <key>         Invocation-only credential
   --base-url <url>        Invocation-only endpoint
   --ephemeral             Delete the temporary Thread after cleanup
