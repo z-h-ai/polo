@@ -25,7 +25,7 @@ test('managed yolo cannot execute detached Bash, proxy scripts or prefetch, or e
     await writeFile(join(work, '.pi/extensions/review-probe.ts'), probe)
     await writeFile(join(work, 'probe-package/index.ts'), probe.replace('extension-evaluated', 'package-evaluated'))
     await writeFile(join(work, 'probe-package/package.json'), JSON.stringify({ name: 'local-review-probe', version: '1.0.0', pi: { extensions: ['./index.ts'] }, scripts: { postinstall: `touch ${join(work, 'install-ran.txt')}` } }))
-    await writeFile(join(work, '.pi/settings.json'), JSON.stringify({ packages: ['./probe-package'], extensions: ['./extensions/review-probe.ts'] }))
+    await writeFile(join(work, '.pi/settings.json'), JSON.stringify({ packages: ['../probe-package'], extensions: ['./extensions/review-probe.ts'] }))
     const run = async (prompt: string, yolo = true) => {
       const child = Bun.spawn([process.execPath, resolve('apps/cli/src/index.ts'), 'exec', '--provider', 'polo', '--json', ...(yolo ? ['--yolo'] : []), '-C', work, prompt], { env: { ...process.env, HOME: root, POLO_AI_CONFIG_DIR: root, POLO_AI_RUNTIME_DISCOVERY_FILE: join(root, 'runtime/electron.json'), LLM_API_KEY: '', LLM_BASE_URL: '' }, stdout: 'pipe', stderr: 'pipe' })
       const deadline = setTimeout(() => child.kill('SIGTERM'), 35000)
