@@ -1106,7 +1106,7 @@ export async function executeTurn(
     // them here would silently change every later no-argument resume. New
     // Threads (including resume --ephemeral clones) own their metadata and
     // may safely record the effective non-secret connection snapshot.
-    if (resolvedConnection.connection && (ownsNewThread || managedBroker)) {
+    if (resolvedConnection.connection && ownsNewThread) {
       await updateCliThread(record, {
         connection: {
           provenance: { kind: managedBroker ? 'managed' : 'owned', originalSlug: resolvedConnection.connection.slug },
