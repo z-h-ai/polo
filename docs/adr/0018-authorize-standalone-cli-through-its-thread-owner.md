@@ -40,8 +40,10 @@ cross-session capabilities receive no implicit grant.
 ## Consequences
 
 An owned connection can run independently of Electron without fabricating a
-personal ProductSpace. A future managed broker must implement trusted account,
-space, admission/receipt/finish and revocation coordination; adding identifiers
+personal ProductSpace. The separate managed broker in [ADR 0019](0019-broker-managed-cli-compute-through-the-desktop.md) implements trusted account,
+space, admission/receipt/finish and revocation coordination. Adding identifiers
 to this bootstrap does not grant those rights. Controlled-provider evidence
 proves the runtime transport and tools only; a real authenticated provider run,
 independent review and formal product acceptance remain separate gates.
+
+The owned-route decisions above remain scoped to the original owned runtime repair; managed routing follows ADR 0019 and never receives this owned-only admission.

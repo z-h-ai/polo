@@ -19,3 +19,4 @@ export {
 } from './watcher.ts';
 
 export { assertOwnedCliConnection, type CliConnectionProvenance } from './cli-connection-policy'
+export { desktopManagedConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor } from './desktop-managed'

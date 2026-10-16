@@ -35,6 +35,8 @@ export function registerCliExecutionHandlers(server: RpcServer, deps: HandlerDep
     if (options.llmConnection !== authority.bootstrap.connection?.slug || (options.model != null && typeof options.model !== 'string')) throw new Error('CLI_EXECUTION_CONNECTION_REQUIRED')
     const workingDirectory = await directory(options.workingDirectory)
     caller(ctx)
+    authority.assertModel(options.model)
+    if (authority.desktopManaged && options.enabledSourceSlugs?.length) throw new Error('POLO_MANAGED_SOURCES_UNSUPPORTED')
     authority.beginCreate()
     const session = await sm.createSession(workspaceId, {
       permissionMode: options.permissionMode, enabledSourceSlugs: options.enabledSourceSlugs,
@@ -89,6 +91,7 @@ export function registerCliExecutionHandlers(server: RpcServer, deps: HandlerDep
   server.handle(RPC_CHANNELS.sessions.SET_MODEL, async (ctx, sessionId: string, workspaceId: string, model: string | null, connection?: string) => {
     caller(ctx, sessionId)
     if (workspaceId !== authority.bootstrap.workspace.id || connection !== authority.bootstrap.connection?.slug || (model !== null && typeof model !== 'string')) throw new Error('CLI_EXECUTION_CONNECTION_REQUIRED')
+    authority.assertModel(model)
     return sm.updateSessionModel(sessionId, workspaceId, model, connection)
   })
 }

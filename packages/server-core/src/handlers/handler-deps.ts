@@ -38,6 +38,8 @@ export interface HandlerDeps<
   sessionManager: TSessionManager
   /** Runtime-owned path resolver for every session artifact. */
   sessionStorage?: SessionStorage
+  /** Enabled only by the running desktop host, never by a renderer. */
+  desktopManagedCli?: boolean
   platform: PlatformServices
   windowManager?: TWindowManager
   browserPaneManager?: TBrowserPaneManager

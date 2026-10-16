@@ -1,6 +1,7 @@
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
+import { registerCliManagedHandlers } from '../../runtime/cli-managed-broker'
 import { registerAdminHandlers } from './admin'
 import { registerAuthHandlers } from './auth'
 import { registerAutomationsHandlers } from './automations'
@@ -35,6 +36,7 @@ export function registerCoreRpcHandlers(
   serverCtx?: ServerHandlerContext,
 ): void {
   const adminSessions = registerAdminHandlers(server, deps)
+  if (deps.desktopManagedCli) registerCliManagedHandlers(server)
   registerAuthHandlers(server, deps, adminSessions)
   registerAutomationsHandlers(server, deps)
   registerFilesHandlers(server, deps)

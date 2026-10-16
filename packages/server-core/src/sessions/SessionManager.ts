@@ -1801,6 +1801,11 @@ export class SessionManager implements ISessionManager {
     isCurrent: () => boolean,
   ): Promise<ReturnType<typeof resolveBackendContext>> {
     const initial = resolveBackendContext(args)
+    if (this.cliAuthority?.desktopManaged) {
+      this.cliAuthority.assertConnection(initial.connection)
+      this.cliAuthority.assertModel(initial.resolvedModel)
+      return initial
+    }
     const requestedSlug = args.sessionConnectionSlug || args.workspaceDefaultConnectionSlug
     // Failed Admin synchronization removes cached managed metadata. A persisted
     // platform slug must still fail closed through its trusted space owner;
@@ -1868,6 +1873,11 @@ export class SessionManager implements ISessionManager {
   }
 
   private assistantBillingFor(managed: ManagedSession, connection: { slug: string; managedBy?: 'admin' } | null | undefined) {
+    if (this.cliAuthority?.desktopManaged) {
+      this.assertCliSessionOwned(managed.id)
+      this.cliAuthority.assertConnection(getLlmConnection(connection?.slug ?? ''))
+      return undefined // The verified desktop proxy owns every HTTP billing attempt.
+    }
     if (connection?.managedBy !== 'admin') return undefined
     const original = this.managedTrustedScope(managed), adminOrigin = getAdminUrl()
     if (!original || !adminOrigin || isRuntimeOfflineReadOnly()) throw new Error('Trusted assistant billing scope is unavailable')
@@ -5374,7 +5384,7 @@ export class SessionManager implements ISessionManager {
         managedBilling: this.assistantBillingFor(managed, backendContext.connection),
         canonicalSkills: {
           allowLocalSkills: this.guardManagedCallback(managed, 'backend.canonicalSkills.allowLocalSkills', async () => {
-            if (this.isOwnedCliSession(managed)) return true
+            if (this.isOwnedCliSession(managed)) return !this.cliAuthority?.desktopManaged
             const original = this.managedTrustedScope(managed)
             if (!original) return false
             const generation = getRuntimeFenceGeneration()
@@ -6471,13 +6481,15 @@ export class SessionManager implements ISessionManager {
   async setSessionStatus(sessionId: string, sessionStatus: SessionStatus): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      const source = { managed, token: managed.runtimeOwnerToken, generation: managed.processingGeneration }
       managed.sessionStatus = sessionStatus
       this.setMetadataWriteGuard(managed)
       // Persist in-memory state directly to avoid race with pending queue writes
       this.persistSession(managed)
       await this.flushSession(managed.id)
+      if (!this.isCliEventSourceCurrent(source)) return
       // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_status_changed', sessionId, sessionStatus }, managed.workspace.id)
+      this.sendEvent({ type: 'session_status_changed', sessionId, sessionStatus }, managed.workspace.id, undefined, source)
       // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
       // directories created after the watcher started.
       // https://github.com/oven-sh/bun/issues/15939
@@ -8186,6 +8198,7 @@ export class SessionManager implements ISessionManager {
     // Capture the generation to detect if a new request supersedes this one.
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
+    let cliChatOwnerToken: string | undefined
 
 
     // Start perf span for entire sendMessage flow
@@ -8402,6 +8415,7 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('chat.starting')
       if (this.cliAuthority) { this.assertCliSessionOwned(managed.id); this.cliAuthority.assertConnection(messageBackendContext.connection) }
       const cliTurnOwnerToken = managed.runtimeOwnerToken
+      cliChatOwnerToken = cliTurnOwnerToken
       const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
       sessionLog.info('Got chat iterator, starting iteration...')
 
@@ -8420,6 +8434,7 @@ export class SessionManager implements ISessionManager {
 
         // Process the event first
         await this.processEvent(managed, event)
+        if (this.cliAuthority && (!this.isOwnedCliSession(managed) || managed.runtimeOwnerToken !== cliTurnOwnerToken)) return
 
         // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
         // Primary capture happens in getOrCreateAgent() via onSdkSessionIdUpdate callback,
@@ -8537,6 +8552,7 @@ export class SessionManager implements ISessionManager {
         sessionLog.info('Chat loop exited unexpectedly')
       }
     } catch (error) {
+      if (this.cliAuthority && (error instanceof Error && error.message === 'CLI_EXECUTION_GENERATION_REVOKED' || managed.runtimeOwnerToken !== cliChatOwnerToken || this.sessions.get(managed.id) !== managed || managed.processingGeneration !== myGeneration || !this.isOwnedCliSession(managed))) return
       // Check if this is an abort error (expected when interrupted)
       const isAbortError = error instanceof Error && (
         error.name === 'AbortError' ||
@@ -8582,7 +8598,8 @@ export class SessionManager implements ISessionManager {
       // Only handle cleanup for unexpected exits (loop break without complete event)
       // Normal completion returns early after calling onProcessingStopped
       // Errors are handled in catch block
-      if (managed.isProcessing && managed.processingGeneration === myGeneration) {
+      if (managed.isProcessing && managed.processingGeneration === myGeneration
+        && (!this.cliAuthority || this.sessions.get(managed.id) === managed && managed.runtimeOwnerToken === cliChatOwnerToken)) {
         sessionLog.info('Finally block cleanup - unexpected exit')
         sendSpan.mark('chat.unexpected_exit')
         sendSpan.end()
@@ -8824,6 +8841,8 @@ export class SessionManager implements ISessionManager {
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) return
+    const source = { managed, token: managed.runtimeOwnerToken, generation: managed.processingGeneration }
+    const current = () => this.isCliEventSourceCurrent(source)
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
 
@@ -8832,6 +8851,9 @@ export class SessionManager implements ISessionManager {
     managed.stopRequested = false  // Reset for next turn
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
+    // Revoked owners still release their own processing state. They cannot
+    // publish terminal events or continue metadata work.
+    if (!current()) return
 
     // Clear agent control overlay between turns. The session keeps browser
     // ownership (boundSessionId) — only the visual overlay is removed.
@@ -8839,6 +8861,7 @@ export class SessionManager implements ISessionManager {
     const turnBpm = this.getBrowserPaneManagerForSession(sessionId)
     if (turnBpm) {
       await turnBpm.clearVisualsForSession(sessionId)
+      if (!current()) return
     }
 
     // 2. Handle unread state based on whether user is viewing this session
@@ -8854,6 +8877,7 @@ export class SessionManager implements ISessionManager {
       if (isViewing) {
         // User is watching - mark as read immediately
         await this.markSessionRead(sessionId)
+      if (!current()) return
       } else {
         // User is not watching - mark as unread for NEW badge
         if (!managed.hasUnread) {
@@ -8864,6 +8888,7 @@ export class SessionManager implements ISessionManager {
             { hasUnread: true },
             this.sessionStorage,
           )
+          if (!current()) return
           this.emitUnreadSummaryChanged()
         }
       }
@@ -8875,6 +8900,7 @@ export class SessionManager implements ISessionManager {
     if (reason === 'complete' && managed.systemPromptPreset === 'mini' && managed.sessionStatus !== 'done') {
       sessionLog.info(`Auto-completing mini agent session ${sessionId}`)
       await this.setSessionStatus(sessionId, 'done')
+      if (!current()) return
     }
 
     // 4. Apply deferred external metadata updates captured while processing.
@@ -8896,6 +8922,7 @@ export class SessionManager implements ISessionManager {
       const doneBpm = this.getBrowserPaneManagerForSession(sessionId)
       if (doneBpm) {
         await doneBpm.clearVisualsForSession(sessionId)
+      if (!current()) return
         doneBpm.unbindAllForSession(sessionId)
       }
 
@@ -8905,7 +8932,7 @@ export class SessionManager implements ISessionManager {
         sessionId,
         tokenUsage: managed.tokenUsage,
         hasUnread: managed.hasUnread,  // Propagate unread state to renderer
-      }, managed.workspace.id)
+      }, managed.workspace.id, undefined, source)
     }
 
     // 6. Always persist
@@ -10823,6 +10850,11 @@ export class SessionManager implements ISessionManager {
 
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
     if (this.cliAuthority && !this.isOwnedCliSession(managed)) throw new Error('CLI_EXECUTION_GENERATION_REVOKED')
+    const source = { managed, token: managed.runtimeOwnerToken, generation: managed.processingGeneration }
+    const assertCurrent = () => {
+      if (!this.isCliEventSourceCurrent(source)) throw new Error('CLI_EXECUTION_GENERATION_REVOKED')
+    }
+    const emit = (event: SessionEvent, workspaceId?: string) => { assertCurrent(); this.sendEvent(event, workspaceId, undefined, source) }
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
 
@@ -10866,6 +10898,8 @@ export class SessionManager implements ISessionManager {
             }
           }
 
+          assertCurrent()
+
           // Pi branch-cutoff support: remember the SDK message id → Polo AI
           // assistant message id mapping. The actual anchor arrives as a
           // separate `pi_turn_anchor` event one microtask later — the SDK
@@ -10886,7 +10920,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        emit({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -10938,6 +10972,7 @@ export class SessionManager implements ISessionManager {
         if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
           const allSources = loadAllSources(workspaceRootPath)
           toolDisplayMeta = await resolveToolDisplayMeta(event.toolName, formattedToolInput, workspaceRootPath, allSources)
+          assertCurrent()
         }
 
         // Check if a message with this toolUseId already exists FIRST
@@ -11027,7 +11062,7 @@ export class SessionManager implements ISessionManager {
         // Send event to renderer on first occurrence OR when input data is updated
         if (shouldSendEvent) {
           const timestamp = existingStartMsg?.timestamp ?? this.monotonic()
-          this.sendEvent({
+          emit({
             type: 'tool_start',
             sessionId,
             toolName: event.toolName,
@@ -11089,6 +11124,7 @@ export class SessionManager implements ISessionManager {
           const fallbackWorkspaceRootPath = managed.workspace.rootPath
           const fallbackSources = loadAllSources(fallbackWorkspaceRootPath)
           const fallbackToolDisplayMeta = await resolveToolDisplayMeta(toolName, undefined, fallbackWorkspaceRootPath, fallbackSources)
+          assertCurrent()
 
           const toolMessage: Message = {
             id: generateMessageId(),
@@ -11112,7 +11148,7 @@ export class SessionManager implements ISessionManager {
         if (!wasAlreadyComplete || resultChanged) {
           // Use existing tool message timestamp, or fallback message timestamp for ordering
           const toolResultTimestamp = existingToolMsg?.timestamp ?? (managed.messages.find(m => m.toolUseId === event.toolUseId)?.timestamp)
-          this.sendEvent({
+          emit({
             type: 'tool_result',
             sessionId,
             toolUseId: event.toolUseId,
@@ -11138,7 +11174,7 @@ export class SessionManager implements ISessionManager {
             child.toolStatus = 'completed'
             child.toolResult = child.toolResult || ''
             sessionLog.info(`CHILD AUTO-COMPLETED: toolUseId=${child.toolUseId}, toolName=${child.toolName} (parent ${toolName} completed)`)
-            this.sendEvent({
+            emit({
               type: 'tool_result',
               sessionId,
               toolUseId: child.toolUseId!,
@@ -11156,7 +11192,7 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'status':
-        this.sendEvent({
+        emit({
           type: 'status',
           sessionId,
           message: event.message,
@@ -11194,7 +11230,7 @@ export class SessionManager implements ISessionManager {
           // Emit usage_update so the context count badge refreshes immediately
           // after compaction, without waiting for the next message
           if (managed.tokenUsage) {
-            this.sendEvent({
+            emit({
               type: 'usage_update',
               sessionId,
               tokenUsage: {
@@ -11205,7 +11241,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({
+        emit({
           type: 'info',
           sessionId,
           message: event.message,
@@ -11250,7 +11286,7 @@ export class SessionManager implements ISessionManager {
           timestamp: this.monotonic()
         }
         managed.messages.push(errorMessage)
-        this.sendEvent({ type: 'error', sessionId, error: event.message, timestamp: errorMessage.timestamp }, workspaceId)
+        emit({ type: 'error', sessionId, error: event.message, timestamp: errorMessage.timestamp }, workspaceId)
         break
       }
 
@@ -11300,7 +11336,7 @@ export class SessionManager implements ISessionManager {
         }
         managed.messages.push(typedErrorMessage)
         // Send typed_error event with full structure for renderer to handle
-        this.sendEvent({
+        emit({
           type: 'typed_error',
           sessionId,
           error: {
@@ -11319,7 +11355,7 @@ export class SessionManager implements ISessionManager {
       case 'task_backgrounded':
       case 'task_progress':
         // Forward background task events directly to renderer
-        this.sendEvent({
+        emit({
           ...event,
           sessionId,
         }, workspaceId)
@@ -11349,7 +11385,7 @@ export class SessionManager implements ISessionManager {
           }
         }
         // Forward to renderer for UI update
-        this.sendEvent({
+        emit({
           ...event,
           sessionId,
         }, workspaceId)
@@ -11362,7 +11398,7 @@ export class SessionManager implements ISessionManager {
           sessionLog.info(`Stored command for shell ${event.shellId}: ${event.command.slice(0, 50)}...`)
         }
         // Forward to renderer
-        this.sendEvent({
+        emit({
           ...event,
           sessionId,
         }, workspaceId)
@@ -11376,7 +11412,7 @@ export class SessionManager implements ISessionManager {
         // longer fires its own auto_retry (see processor.ts).
         sessionLog.info(`Source "${event.sourceSlug}" activated for session ${sessionId}, scheduling auto-retry`)
 
-        this.sendEvent({
+        emit({
           type: 'source_activated',
           sessionId,
           sourceSlug: event.sourceSlug,
@@ -11478,7 +11514,7 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send to renderer for immediate UI update
-          this.sendEvent({
+          emit({
             type: 'usage_update',
             sessionId: managed.id,
             tokenUsage: {
@@ -11502,7 +11538,13 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  private sendEvent(event: SessionEvent, workspaceId?: string, sessionProductSpaceId?: string | null): void {
+  private isCliEventSourceCurrent(source: { managed: ManagedSession; token: string | undefined; generation?: number }): boolean {
+    return !this.cliAuthority || (this.sessions.get(source.managed.id) === source.managed
+      && source.managed.runtimeOwnerToken === source.token && source.managed.processingGeneration === source.generation && this.isOwnedCliSession(source.managed))
+  }
+
+  private sendEvent(event: SessionEvent, workspaceId?: string, sessionProductSpaceId?: string | null, source?: { managed: ManagedSession; token: string | undefined; generation?: number }): void {
+    if (source && !this.isCliEventSourceCurrent(source)) return
     if (!this.eventSink) {
       sessionLog.warn('Cannot send event - no event sink')
       return

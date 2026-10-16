@@ -1886,6 +1886,7 @@
   "settings.terminalFeatures.status.profileConflict": "Die Polo-Terminalkonfiguration in {{path}} ist fehlerhaft. Polo hat sie nicht geändert.",
   "settings.terminalFeatures.status.ready": "Der Terminalbefehl polo ist bereit.",
   "settings.terminalFeatures.status.repairRequired": "Der Terminalbefehl polo muss repariert werden.",
+  "settings.terminalFeatures.status.shellTimeout": "Die CLI ist enthalten. Die Prüfung des Terminalbefehls hat das Zeitlimit überschritten. Bitte erneut prüfen.",
   "settings.terminalFeatures.statusUnavailable": "Status der Terminalfunktionen nicht verfügbar",
   "settings.terminalFeatures.title": "Polo-Terminalfunktionen",
   "settings.terminalFeatures.uninstall": "Befehl deaktivieren",

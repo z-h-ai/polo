@@ -3,6 +3,7 @@
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
+import { disconnectCliManagedClient, shutdownCliManagedBrokers } from '@polo-ai/server-core/runtime/cli-managed-broker'
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, powerMonitor, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
@@ -980,6 +981,7 @@ app.whenReady().then(async () => {
             },
           })
           return {
+            desktopManagedCli: true,
             sessionManager: sm,
             sessionStorage: sm.sessionStorage,
             platform: p,
@@ -1084,6 +1086,7 @@ app.whenReady().then(async () => {
           if (webContentsId != null) clientMap.set(webContentsId, clientId)
         },
         cleanupClientResources: (clientId) => {
+          disconnectCliManagedClient(clientId)
           for (const [wcId, cId] of clientMap) {
             if (cId === clientId) { clientMap.delete(wcId); break }
           }
@@ -1622,6 +1625,12 @@ app.on('before-quit', (event) => {
         mainLog.error('Quit cancelled because local app runtimes were not fully stopped')
         return false
       }
+    }
+
+    if (!await shutdownCliManagedBrokers()) {
+      windowManager?.setAppQuitting(false)
+      mainLog.error('Quit cancelled because managed CLI runtimes were not fully stopped')
+      return false
     }
 
     // Flush all pending session writes before quitting

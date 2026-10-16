@@ -1886,6 +1886,7 @@
   "settings.terminalFeatures.status.profileConflict": "{{path}} の Polo ターミナル設定が不正です。Polo は変更しませんでした。",
   "settings.terminalFeatures.status.ready": "polo ターミナルコマンドは利用可能です。",
   "settings.terminalFeatures.status.repairRequired": "polo ターミナルコマンドの修復が必要です。",
+  "settings.terminalFeatures.status.shellTimeout": "CLI はアプリに同梱されています。ターミナルコマンドの確認がタイムアウトしました。再確認してください。",
   "settings.terminalFeatures.statusUnavailable": "ターミナル機能の状態を確認できません",
   "settings.terminalFeatures.title": "Polo ターミナル機能",
   "settings.terminalFeatures.uninstall": "コマンドを無効化",

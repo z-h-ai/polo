@@ -1,11 +1,13 @@
+import type { DesktopManagedBootstrap } from '../runtime/cli-managed-client'
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { RootedSessionStorage } from '@polo-ai/shared/sessions'
 import { processIdentityMatches } from '@polo-ai/shared/utils'
 import type { LlmConnection, Workspace } from '@polo-ai/shared/config'
-import { assertOwnedCliConnection, type CliConnectionProvenance } from '@polo-ai/shared/config'
+import { assertOwnedCliConnection, desktopManagedConnection, sameDesktopManagedOwner, type DesktopManagedDescriptor, type CliConnectionProvenance } from '@polo-ai/shared/config'
 
 export interface CliExecutionBootstrap {
+  desktopManaged?: DesktopManagedBootstrap
   threadId: string
   /** Explicit parent-owned local discovery root; never an enterprise Skill grant. */
   globalSkillsRoot?: string
@@ -64,13 +66,28 @@ export class CliExecutionAuthority {
   private sessionId?: string
   private clientId?: string
   private creating = false
-  private constructor(bootstrap: CliExecutionBootstrap, owner: CliExecutionOwner, readonly storage: RootedSessionStorage) {
+  private constructor(bootstrap: CliExecutionBootstrap, owner: CliExecutionOwner, readonly storage: RootedSessionStorage, readonly desktopManaged?: { descriptor: DesktopManagedDescriptor; assertCurrent(): void }) {
     this.bootstrap = freezeTree(structuredClone(bootstrap))
     this.owner = Object.freeze({ ...owner })
     this.sessionId = bootstrap.expectedSessionId
   }
 
   static fromParent(bootstrap: CliExecutionBootstrap, owner: CliExecutionOwner): CliExecutionAuthority {
+    if (bootstrap.desktopManaged) throw new Error('POLO_MANAGED_BROKER_REQUIRED')
+    return this.validateParent(bootstrap, owner)
+  }
+
+  static fromDesktopBroker(bootstrap: CliExecutionBootstrap, owner: CliExecutionOwner, lease: { descriptor: DesktopManagedDescriptor; assertCurrent(): void }): CliExecutionAuthority {
+    lease.assertCurrent()
+    const execution = lease.descriptor.execution
+    if (!execution || bootstrap.threadId !== execution.threadId
+      || bootstrap.threadRoot !== join(bootstrap.controlledRoot, execution.configurationScopeId, 'executions', execution.threadId)
+      || owner.pid !== execution.ownerPid || owner.processIdentity !== execution.ownerBirth || owner.leaseId !== execution.ownerLease) throw new Error('POLO_MANAGED_THREAD_REJECTED')
+    if (JSON.stringify(bootstrap.connection) !== JSON.stringify(desktopManagedConnection(lease.descriptor))) throw new Error('POLO_MANAGED_ROUTE_REJECTED')
+    return this.validateParent(bootstrap, owner, { descriptor: freezeTree(structuredClone(lease.descriptor)), assertCurrent: () => lease.assertCurrent() })
+  }
+
+  private static validateParent(bootstrap: CliExecutionBootstrap, owner: CliExecutionOwner, managed?: { descriptor: DesktopManagedDescriptor; assertCurrent(): void }): CliExecutionAuthority {
     const fail = () => { throw new Error('CLI_EXECUTION_BOOTSTRAP_REJECTED') }
     if (!owner || !Number.isInteger(owner.pid) || owner.pid <= 0 || process.ppid !== owner.pid
       || !owner.leaseId || !owner.processIdentity || !processIdentityMatches(owner.pid, owner.processIdentity)) fail()
@@ -82,15 +99,20 @@ export class CliExecutionAuthority {
       || bootstrap.sessionsRoot !== join(bootstrap.threadRoot, 'sessions')
       || bootstrap.workspace.rootPath !== join(bootstrap.threadRoot, 'config-snapshot')
       || owner.ownerFile !== join(bootstrap.threadRoot, 'owner.json')) fail()
-    assertOwnedCliConnection(bootstrap.connection, bootstrap.connectionProvenance)
+    if (!managed) assertOwnedCliConnection(bootstrap.connection, bootstrap.connectionProvenance)
     const storage = new RootedSessionStorage(bootstrap.sessionsRoot, { controlledRoot: bootstrap.controlledRoot })
     for (const path of [bootstrap.threadRoot, bootstrap.workspace.rootPath, owner.ownerFile]) storage.assertSafeFilePath(path, false)
     storage.assertSafeFilePath(join(bootstrap.threadRoot, 'thread.json'), false)
     const metadata = JSON.parse(readFileSync(join(bootstrap.threadRoot, 'thread.json'), 'utf8'))
     if (metadata.threadId !== bootstrap.threadId || metadata.origin !== bootstrap.origin || metadata.mainSessionId !== bootstrap.expectedSessionId) fail()
     if (bootstrap.threadRoot !== join(bootstrap.controlledRoot, metadata.configurationScopeId, 'executions', bootstrap.threadId)) fail()
-    assertOwnedCliConnection(metadata.connection, metadata.connection?.provenance)
-    const authority = new CliExecutionAuthority(bootstrap, owner, storage)
+    if (managed) {
+      if (!metadata.managedOwner || !sameDesktopManagedOwner(metadata.managedOwner, managed.descriptor.owner)) fail()
+    } else {
+      if (metadata.managedOwner) fail()
+      assertOwnedCliConnection(metadata.connection, metadata.connection?.provenance)
+    }
+    const authority = new CliExecutionAuthority(bootstrap, owner, storage, managed)
     authority.assertActive()
     return authority
   }
@@ -99,6 +121,7 @@ export class CliExecutionAuthority {
 
   assertActive(): void {
     try {
+      this.desktopManaged?.assertCurrent()
       if (!this.active || process.ppid !== this.owner.pid) throw new Error()
       this.storage.assertSafeFilePath(this.owner.ownerFile, false)
       this.storage.assertSafeFilePath(this.bootstrap.workspace.rootPath, false)
@@ -133,8 +156,16 @@ export class CliExecutionAuthority {
   }
   assertConnection(connection: LlmConnection | null | undefined): void {
     this.assertActive()
+    if (this.desktopManaged) {
+      if (JSON.stringify(connection) !== JSON.stringify(this.bootstrap.connection)) throw new Error('POLO_MANAGED_ROUTE_REJECTED')
+      return
+    }
     assertOwnedCliConnection(connection, this.bootstrap.connectionProvenance)
     if (!connection || connection.slug !== this.bootstrap.connection?.slug) throw new Error('CLI_EXECUTION_CONNECTION_REQUIRED')
+  }
+  assertModel(model: string | null | undefined): void {
+    this.assertActive()
+    if (this.desktopManaged && model && !this.desktopManaged.descriptor.allowedModels.includes(model)) throw new Error('POLO_MODEL_NOT_ALLOWED')
   }
   assertCallback(sessionId: string, name: string): void {
     this.assertSession(sessionId)

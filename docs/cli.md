@@ -5,7 +5,8 @@
 
 The Mac App already contains the CLI, headless server, Bun runtime, and Agent
 worker. No separate npm package or installation script is needed. You can use
-it directly, including while the desktop App is closed:
+it directly. Owned connections work while the desktop App is closed; Polo
+managed compute uses a running, signed-in App as its authorization broker:
 
 ```bash
 "/Applications/Polo AI.app/Contents/MacOS/Polo AI" --polo-cli --version
@@ -222,9 +223,67 @@ Local workspace/project Skills and normal file tools remain available under
 UI-only plan/auth/question handoffs and cross-session/browser/business actions
 are unsupported. `--yolo` explicitly enables the existing `allow-all` mode.
 
-Admin-managed connections, `polo-space-*` routes and managed historical Thread
-provenance fail with `CLI_MANAGED_CONTEXT_REQUIRED`, before stored credentials
-are borrowed. Synthetic/resumed connections cannot remove that provenance.
-Polo platform/enterprise compute requires a future trusted ProductSpace broker
-with admission, metering and revocation; this standalone path does not establish
-support for that compute. Provider authentication failures exit nonzero.
+### Polo personal and enterprise compute
+
+```bash
+polo exec --provider polo --model <allowed-model> -C ./work "Read input.csv and report the total"
+polo exec --provider polo --space <current-space-id> --yolo -C ./work "Write the result to result.json"
+polo exec resume <thread-id> --provider polo "Continue"
+```
+
+`--provider polo` uses the running desktop App's current, online personal or
+enterprise ProductSpace. A default managed connection follows the same route.
+`--space` asserts the current desktop space; it never changes it. The model must
+be in that space's canonical model allowlist. `--api-key`, `--base-url`,
+`LLM_API_KEY` and `LLM_BASE_URL` cannot override managed compute. Selecting a
+provider explicitly never launders a managed connection into an owned route.
+
+The desktop verifies its current Admin session and online space access, then
+resolves the canonical compute connection. Its loopback credential proxy owns
+every actual HTTP attempt's existing `polo_assistant` start/admission, usage
+observation, receipt and finish. Payer, price and amounts remain Admin rules.
+No real provider key or Admin token enters the CLI; the short-lived proxy
+capability reaches the independent runtime over private stdin and is never
+saved to a Thread. Pending settlement stays in the desktop's original-account
+billing outbox and is not presented as a confirmed charge.
+
+The CLI still owns its Agent, tools and Thread storage. The desktop registers
+only an active execution so switch, logout, account replacement and quit can
+revoke the lease and wait for the actual runtime/tool process group to stop.
+A failed stop blocks switching or quitting. Desktop/owner death, socket loss,
+lease expiry and Ctrl-C cancel execution; there is no automatic model retry or
+fallback to a cached managed key or another endpoint. JSONL `thread.started`
+includes `compute_source: "desktop-managed"`; stderr names the space/model.
+
+Managed Threads save only non-secret original account, ProductSpace and Admin
+origin provenance. Resume requires that same current owner; another account,
+space or owned provider cannot receive the history. Listing hides inaccessible
+managed history, including old managed Threads whose owner cannot be proven.
+Start a new Thread when changing compute ownership. `--workspace` selects local
+configuration and `-C` the file directory; neither grants ProductSpace access.
+
+This version supports the existing OpenAI chat-completions managed transport on
+macOS/Linux. Managed sources and Skills are not enabled: no enterprise Skill is
+copied into local discovery or made free by CLI ownership. Owned local Skills
+retain their existing rules. Windows managed process supervision is unsupported
+and fails closed. No browser or full desktop-session RPC is exposed by a CLI
+execution runtime.
+
+Stable failures include `POLO_APP_REQUIRED`, `POLO_LOGIN_REQUIRED`,
+`POLO_SPACE_REQUIRED`, `POLO_SPACE_MISMATCH`, `POLO_ONLINE_REQUIRED`,
+`POLO_SPACE_ACCESS_DENIED`, `POLO_MODEL_NOT_ALLOWED`,
+`POLO_INSUFFICIENT_CREDIT`, `POLO_BILLING_UNAVAILABLE`,
+`POLO_MANAGED_OVERRIDE_FORBIDDEN`, `POLO_THREAD_OWNER_MISMATCH`,
+`POLO_THREAD_OWNER_UNKNOWN` and `POLO_MANAGED_REVOKED`. They fail before new
+unauthorized provider work. A protocol completion without final text or a
+successful tool outcome fails with `CLI_EMPTY_RESULT`; it is not retried.
+
+### Release resource preparation
+
+The existing `prepare-platform-runtime.ts` release path prepares Mac sharp and
+libvips for the requested arm64/x64 target. It derives exact versions from the
+installed, lock-matched sharp manifest and verifies downloaded tarballs against
+`bun.lock` integrity. The existing final App payload gate remains mandatory.
+Host-only optional dependency installation is not evidence for the other CPU's
+release. Complete native package, real provider/billing and product Acceptance
+results must be reported separately from controlled fixtures.

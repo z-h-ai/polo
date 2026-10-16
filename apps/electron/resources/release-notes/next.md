@@ -15,6 +15,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Polo compute for independent CLI Threads** — Use `--provider polo` with the running, signed-in App's active personal or enterprise space. The desktop retains credentials, validates each model request through existing Assistant billing, and revokes CLI work on space/account changes or quit. Managed history stays bound to its original account and space; owned connections remain independent. Empty model responses now fail clearly, stale tool/terminal events cannot reach a successor runtime, and Mac release preparation stages lock-matched sharp/libvips for both CPU targets.
+
 - **Unified Polo terminal command** — Desktop releases now include a version-matched CLI, packaged headless server, and Bun runtime behind the cross-platform `polo` command. The CLI discovers a running App securely, `polo run` works without a source checkout, and macOS can install, repair, or remove terminal support from the App. (POO-14) (`cd05b2d`)
 - **Focused built-in App launcher** — Remove the Kanban and AirDrop shortcuts from the desktop App's built-in launcher, leaving Polo 助手 as the only built-in App. (POO-34)
 

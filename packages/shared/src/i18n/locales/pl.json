@@ -1886,6 +1886,7 @@
   "settings.terminalFeatures.status.profileConflict": "Konfiguracja terminala Polo w pliku {{path}} jest nieprawidłowa. Polo jej nie zmieniło.",
   "settings.terminalFeatures.status.ready": "Polecenie terminala polo jest gotowe.",
   "settings.terminalFeatures.status.repairRequired": "Polecenie terminala polo wymaga naprawy.",
+  "settings.terminalFeatures.status.shellTimeout": "CLI jest dołączone do aplikacji. Sprawdzanie polecenia przekroczyło limit czasu. Spróbuj ponownie.",
   "settings.terminalFeatures.statusUnavailable": "Stan funkcji terminala jest niedostępny",
   "settings.terminalFeatures.title": "Funkcje terminala Polo",
   "settings.terminalFeatures.uninstall": "Wyłącz polecenie",

@@ -2,12 +2,15 @@
 
 import { $ } from 'bun'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   chmodSync,
   copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
 } from 'node:fs'
@@ -74,6 +77,53 @@ async function ensureSdkBinaryPackage(options: PreparePlatformRuntimeOptions): P
     cpSync(packageRoot, destination, { recursive: true, dereference: true })
   } finally {
     rmSync(tempDir, { recursive: true, force: true })
+  }
+}
+
+type NativePackageInstaller = (name: string, version: string, integrity: string, destination: string) => Promise<void>
+
+const installLockedNativePackage: NativePackageInstaller = async (name, version, integrity, destination) => {
+  const staging = mkdtempSync(join(dirname(destination), '.sharp-prepare-'))
+  try {
+    await $`npm pack ${`${name}@${version}`} --pack-destination ${staging}`.quiet()
+    const tarball = readdirSync(staging).find(file => file.endsWith('.tgz'))
+    if (!tarball) throw new Error(`Missing native package tarball: ${name}`)
+    const archive = join(staging, tarball)
+    const actual = `sha512-${createHash('sha512').update(readFileSync(archive)).digest('base64')}`
+    if (actual !== integrity) throw new Error(`Locked native package integrity mismatch: ${name}`)
+    await $`tar -xzf ${archive} -C ${staging}`.quiet()
+    // Validate before replacing an existing target; an interrupted download
+    // cannot destroy a previously prepared architecture.
+    const manifest = JSON.parse(readFileSync(join(staging, 'package/package.json'), 'utf8'))
+    if (manifest.name !== name || manifest.version !== version) throw new Error(`Native package identity mismatch: ${name}`)
+    rmSync(destination, { recursive: true, force: true })
+    cpSync(join(staging, 'package'), destination, { recursive: true, dereference: true })
+  } finally { rmSync(staging, { recursive: true, force: true }) }
+}
+
+/** npm optional dependencies follow the host CPU. Release preparation must
+ * explicitly materialize both target native packages using bun.lock integrity. */
+export async function prepareMacSharpRuntime(rootDir: string, arch: Arch, install: NativePackageInstaller = installLockedNativePackage): Promise<void> {
+  const lock = Bun.JSON5.parse(readFileSync(join(rootDir, 'bun.lock'), 'utf8')) as { packages: Record<string, [string, string, unknown, string]> }
+  const sharp = JSON.parse(readFileSync(join(rootDir, 'node_modules/sharp/package.json'), 'utf8'))
+  if (lock.packages.sharp?.[0] !== `sharp@${sharp.version}`) throw new Error('Installed sharp does not match bun.lock')
+  for (const name of [`@img/sharp-darwin-${arch}`, `@img/sharp-libvips-darwin-${arch}`]) {
+    const version = sharp.optionalDependencies?.[name]
+    const entry = lock.packages[name]
+    if (!version || entry?.[0] !== `${name}@${version}` || !entry[3]?.startsWith('sha512-')) throw new Error(`Missing locked sharp native dependency: ${name}`)
+    const destination = join(rootDir, 'node_modules', name)
+    const valid = () => {
+      try {
+        const manifest = JSON.parse(readFileSync(join(destination, 'package.json'), 'utf8'))
+        return manifest.name === name && manifest.version === version && manifest.os?.includes('darwin') && manifest.cpu?.includes(arch)
+          && (name.includes('libvips') ? existsSync(join(destination, 'lib/index.js')) && readdirSync(join(destination, 'lib')).some(file => /^libvips.*\.dylib$/.test(file)) : existsSync(join(destination, 'lib', `sharp-darwin-${arch}.node`)))
+      } catch { return false }
+    }
+    if (!valid()) {
+      mkdirSync(dirname(destination), { recursive: true })
+      await install(name, version, entry[3], destination)
+    }
+    if (!valid()) throw new Error(`Prepared sharp native payload is invalid: ${name}`)
   }
 }
 
@@ -154,6 +204,10 @@ export async function preparePlatformRuntime(
     electronDir: resolve(options.electronDir),
   }
 
+  // Minimal runtime-only consumers need not depend on sharp. The Electron
+  // release root declares sharp and must prepare its target native payload.
+  const rootPackage = await Bun.file(join(config.rootDir, 'package.json')).json()
+  if (options.platform === 'darwin' && (rootPackage.dependencies?.sharp || rootPackage.optionalDependencies?.[`@img/sharp-darwin-${options.arch}`])) await prepareMacSharpRuntime(config.rootDir, options.arch)
   await ensureSdkBinaryPackage(options)
   await stageBun(config, options.bunSource)
   const uvPath = await stageUvRuntime(config, options.uvSource)

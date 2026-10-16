@@ -1886,6 +1886,7 @@
   "settings.terminalFeatures.status.profileConflict": "A(z) {{path}} fájlban lévő Polo terminálkonfiguráció hibás. A Polo nem módosította.",
   "settings.terminalFeatures.status.ready": "A polo terminálparancs használatra kész.",
   "settings.terminalFeatures.status.repairRequired": "A polo terminálparancs javításra szorul.",
+  "settings.terminalFeatures.status.shellTimeout": "A CLI az alkalmazás része. A terminálparancs ellenőrzése túllépte az időkorlátot; próbáld újra.",
   "settings.terminalFeatures.statusUnavailable": "A terminálfunkciók állapota nem érhető el",
   "settings.terminalFeatures.title": "Polo terminálfunkciók",
   "settings.terminalFeatures.uninstall": "Parancs letiltása",

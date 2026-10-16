@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { attachDesktopManagedRuntime } from '@polo-ai/server-core/runtime/cli-managed-client'
 /**
  * @polo-ai/server — standalone headless Polo AI server.
  *
@@ -53,7 +54,7 @@ if (process.argv.includes('--generate-token')) {
 }
 import type { WsRpcTlsOptions } from '@polo-ai/server-core/transport'
 import { registerCoreRpcHandlers, registerCliExecutionHandlers, cleanupSessionFileWatchForClient } from '@polo-ai/server-core/handlers/rpc'
-import { type CliExecutionAuthority, ownedCliExecutionBroker, type CliExecutionBootstrap, SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
+import { CliExecutionAuthority, ownedCliExecutionBroker, type CliExecutionBootstrap, SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
 import { initModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
 import { setSearchPlatform, setImageProcessor } from '@polo-ai/server-core/services'
 import type { HandlerDeps } from '@polo-ai/server-core/handlers'
@@ -62,6 +63,7 @@ process.env.POLO_AI_IS_PACKAGED ??= 'false'
 
 type CliRuntimeConfig = CliExecutionBootstrap
 let cliAuthority: CliExecutionAuthority | undefined
+let managedRuntimeLink: Awaited<ReturnType<typeof attachDesktopManagedRuntime>> | undefined
 
 const isCliOneShot = process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot'
 if (isCliOneShot && process.platform !== 'win32') {
@@ -126,7 +128,11 @@ if (isCliOneShot) {
   }
   cliRuntimeConfig = runtimeConfig
   try {
-    cliAuthority = ownedCliExecutionBroker.admit(runtimeConfig, cliOwnerConfig!)
+    if (runtimeConfig.desktopManaged) {
+      managedRuntimeLink = await attachDesktopManagedRuntime(runtimeConfig.desktopManaged)
+      cliAuthority = CliExecutionAuthority.fromDesktopBroker(runtimeConfig, cliOwnerConfig!, managedRuntimeLink)
+      cliInvocationCredential = { value: managedRuntimeLink.descriptor.capability }
+    } else cliAuthority = ownedCliExecutionBroker.admit(runtimeConfig, cliOwnerConfig!)
     void cliParentDeath?.then(() => cliAuthority?.revoke(), () => cliAuthority?.revoke())
   } catch (error) {
     console.error(error instanceof Error ? error.message : 'Invalid CLI authority')
@@ -478,6 +484,7 @@ const shutdown = (): Promise<void> => {
       }
     }
     await instance.stop()
+    managedRuntimeLink?.close()
   })()
   return shutdownPromise
 }

@@ -30,6 +30,7 @@ export interface SpawnedServer {
 }
 
 export interface SpawnServerOptions {
+  detached?: boolean
   /** Path to the server entry file. Auto-detected from monorepo root if omitted. */
   serverEntry?: string
   /** Extra env vars to pass to the server process. */
@@ -132,6 +133,7 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
         POLO_AI_RPC_PORT: '0',
         POLO_AI_RPC_HOST: '127.0.0.1',
       }),
+      detached: opts?.detached,
       stdout: 'pipe',
       stderr: 'pipe',
       stdin: 'pipe',
