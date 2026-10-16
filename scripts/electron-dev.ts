@@ -428,7 +428,7 @@ async function main(): Promise<void> {
   if (existsSync(toolbarPreloadCjsPath)) rmSync(toolbarPreloadCjsPath);
 
   // Build main and preload entries in parallel
-  const [mainResult, preloadResult, toolbarPreloadResult] = await Promise.all([
+  const [mainResult, preloadResult, toolbarPreloadResult, sdkPreloadResult] = await Promise.all([
     runEsbuild(
       "apps/electron/src/main/index.ts",
       "apps/electron/dist/main.cjs",
@@ -444,6 +444,7 @@ async function main(): Promise<void> {
       "apps/electron/src/preload/browser-toolbar.ts",
       "apps/electron/dist/browser-toolbar-preload.cjs"
     ),
+    runEsbuild("apps/electron/src/preload/app-sdk.ts", "apps/electron/dist/app-sdk-preload.cjs"),
   ]);
 
   if (!mainResult.success) {
@@ -451,6 +452,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  if (!sdkPreloadResult.success) throw new Error(sdkPreloadResult.error || "SDK preload build failed");
   if (!preloadResult.success) {
     console.error("❌ Preload build failed:", preloadResult.error);
     process.exit(1);
@@ -548,6 +550,13 @@ async function main(): Promise<void> {
   await preloadContext.watch();
   esbuildContexts.push(preloadContext);
   console.log("👀 Watching preload...");
+
+  const sdkPreloadContext = await esbuild.context({
+    entryPoints: [join(ROOT_DIR, "apps/electron/src/preload/app-sdk.ts")], bundle: true, platform: "node", format: "cjs",
+    outfile: join(DIST_DIR, "app-sdk-preload.cjs"), external: ["electron"],
+  });
+  await sdkPreloadContext.watch();
+  esbuildContexts.push(sdkPreloadContext);
 
   // 4. Browser toolbar preload watcher (dedicated browser window bridge)
   const toolbarPreloadContext = await esbuild.context({

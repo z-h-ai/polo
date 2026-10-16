@@ -235,6 +235,8 @@ export class LocalAppRuntimeCoordinator {
   readonly capabilities = new AppApiCapabilityRegistry()
   readonly runState: AppApiRunState
   private gateway?: AppApiGateway
+  private readonly browserRuns = new Set<string>()
+  private readonly cleanupRuns = new Map<string, Promise<void>>()
   private readonly active = new Map<string, ActiveRuntime>()
   private readonly inFlight = new Map<string, InFlightQuery>()
   private readonly inFlightStarts = new Map<string, InFlightStart>()
@@ -425,15 +427,14 @@ export class LocalAppRuntimeCoordinator {
     const identityKey = createProductSpaceAppRuntimeIdentityKey(input.identity)
     const gatewayUrl = this.gateway?.url
     if (!gatewayUrl) throw new Error('gateway is not started')
-    const issued = this.capabilities.issue({
+    const issued = this.issueCapability({
       identityKey,
       identity: input.identity,
       workspaceId: input.workspaceId,
       executionId: input.executionId,
       runtimeGeneration: input.runtimeGeneration,
       scopeGeneration: input.scopeGeneration,
-    }, this.now())
-    this.armCapabilityExpiry(issued)
+    })
     const existing = this.active.get(identityKey)
     if (existing && existing.capabilityGeneration === undefined) {
       existing.capabilityGeneration = issued.capabilityGeneration
@@ -447,6 +448,46 @@ export class LocalAppRuntimeCoordinator {
       },
       sensitiveValues: [issued.token],
     }
+  }
+
+  private issueCapability(bindings: import('./app-api-capabilities').CapabilityBindings) {
+    if (this.shuttingDown) throw new Error('coordinator is shutting down')
+    const issued = this.capabilities.issue(bindings, this.now())
+    this.armCapabilityExpiry(issued)
+    return issued
+  }
+
+  /** Main-only issuance. The discarded token never reaches static content. */
+  issueBrowserCapability(input: Omit<ActiveRuntime, 'controller' | 'identityKey' | 'billingAdminOrigin' | 'capabilityGeneration'>): number {
+    return this.issueCapability({ ...input, identityKey: createProductSpaceAppRuntimeIdentityKey(input.identity) }).capabilityGeneration
+  }
+
+  async verifyBrowserRuntime(runtime: ActiveRuntime): Promise<boolean> {
+    if (this.shuttingDown || runtime.controller.signal.aborted || this.active.get(runtime.identityKey) !== runtime) return false
+    if (runtime.capabilityGeneration === undefined || !this.capabilities.verifyGeneration(runtime.capabilityGeneration, runtime, this.now())) return false
+    if (this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) return false
+    return !runtime.controller.signal.aborted && this.active.get(runtime.identityKey) === runtime
+      && !!this.capabilities.verifyGeneration(runtime.capabilityGeneration, runtime, this.now())
+  }
+
+  /** Narrow Main dispatch; never exposes report/file routes to the browser. */
+  async dispatchBrowser(runtime: ActiveRuntime, route: '/run/start' | '/ai/query', body: Record<string, unknown>, signal: AbortSignal, current: () => Promise<boolean>) {
+    if (signal.aborted || !await this.verifyBrowserRuntime(runtime) || !await current()) return { errorCode: 'capability_invalid' as const }
+    if (route !== '/run/start') return this.handleAiQuery(runtime, body, signal, current)
+    const key = `${runtime.capabilityGeneration}:${body.runId}`
+    this.browserRuns.add(key)
+    try { return await this.handleRunStart(runtime, body, signal) }
+    finally {
+      const record = this.runState.getRun(capabilityGenerationOf(runtime), String(body.runId))
+      if (!record || record.status === 'terminal') this.browserRuns.delete(key)
+    }
+  }
+
+  /** Original-run cleanup, independent of the caller's aborted signal/scope. */
+  async cleanupBrowserRun(runtime: ActiveRuntime, runId: string, status: 'completed' | 'failed' | 'cancelled' | 'unknown') {
+    await this.runCleanupLane(runtime, status, runId)
+    const run = this.runState.getRun(capabilityGenerationOf(runtime), runId)
+    return { finished: run?.status === 'terminal', settlement: run?.settlement }
   }
 
   /**
@@ -517,12 +558,17 @@ export class LocalAppRuntimeCoordinator {
     return undefined
   }
 
+  private dropBrowserRunMarkers(generation: number): void {
+    for (const key of this.browserRuns) if (key.startsWith(`${generation}:`)) this.browserRuns.delete(key)
+  }
+
   /** Revokes a capability whose post-hook start failed. */
   revokeSignedCapability(capabilityGeneration: number): void {
     this.cancelCapabilityExpiry(capabilityGeneration)
     this.capabilities.revoke(capabilityGeneration)
     this.runState.releaseCapability(capabilityGeneration)
     this.capabilities.forget(capabilityGeneration)
+    this.dropBrowserRunMarkers(capabilityGeneration)
   }
 
   /** Manager observer for an unexpected process exit of an exact runtime. */
@@ -712,6 +758,7 @@ export class LocalAppRuntimeCoordinator {
     if (runtime.capabilityGeneration !== undefined) {
       this.runState.releaseCapability(runtime.capabilityGeneration)
       this.capabilities.forget(runtime.capabilityGeneration)
+      this.dropBrowserRunMarkers(runtime.capabilityGeneration)
     }
     if (this.active.get(runtime.identityKey) === runtime) {
       this.active.delete(runtime.identityKey)
@@ -868,19 +915,37 @@ export class LocalAppRuntimeCoordinator {
    * bounded by min(5s, remaining total budget) with a Promise.race fallback,
    * so a hung adapter can never extend the teardown beyond its budgets.
    */
-  private async runCleanupLane(
+  private async runCleanupLane(runtime: ActiveRuntime, finalStatus: 'completed' | 'cancelled' | 'failed' | 'unknown', onlyRunId?: string): Promise<void> {
+    const capGen = runtime.capabilityGeneration
+    if (capGen === undefined) return
+    const deadline = Date.now() + CLEANUP_TOTAL_BUDGET_MS
+    const runs = onlyRunId === undefined ? this.runState.runsForCapability(capGen).map(r => r.runId) : [onlyRunId]
+    for (const runId of runs) {
+      const key = `${capGen}:${runId}`
+      let cleanup = this.cleanupRuns.get(key)
+      if (!cleanup) {
+        cleanup = this.performRunCleanup(runtime, finalStatus, runId, deadline)
+        this.cleanupRuns.set(key, cleanup)
+        void cleanup.finally(() => { if (this.cleanupRuns.get(key) === cleanup) this.cleanupRuns.delete(key) }).catch(() => {})
+      }
+      await cleanup
+    }
+  }
+
+  private async performRunCleanup(
     runtime: ActiveRuntime,
-    finalStatus: 'cancelled' | 'failed' | 'unknown',
+    finalStatus: 'completed' | 'cancelled' | 'failed' | 'unknown',
+    onlyRunId: string,
+    deadline: number,
   ): Promise<void> {
     const capabilityGeneration = runtime.capabilityGeneration
     if (capabilityGeneration === undefined || !this.gateway) return
-    const deadline = this.now() + CLEANUP_TOTAL_BUDGET_MS
     const controller = new AbortController()
     const runBounded = async (
       operation: (signal: AbortSignal) => Promise<unknown>,
     ): Promise<boolean> => {
-      if (this.now() >= deadline || controller.signal.aborted) return false
-      const remaining = deadline - this.now()
+      if (Date.now() >= deadline || controller.signal.aborted) return false
+      const remaining = deadline - Date.now()
       const budget = Math.max(0, Math.min(CLEANUP_REQUEST_BUDGET_MS, remaining))
       const timer = setTimeout(() => controller.abort(), budget)
       try {
@@ -900,6 +965,7 @@ export class LocalAppRuntimeCoordinator {
     const admin = this.adapters.admin
     const runs = this.runState.runsForCapability(capabilityGeneration)
     for (const { runId, record } of runs) {
+      if (onlyRunId !== undefined && runId !== onlyRunId) continue
       try {
         if (record.status === 'start_unconfirmed') {
           const confirmed = await runBounded(signal =>
@@ -926,24 +992,26 @@ export class LocalAppRuntimeCoordinator {
             }
           }
         }
-        if (record.status === 'finishing' || record.status === 'finish_unconfirmed') {
-          const finishOk = await runBounded(signal =>
-            admin.finishAppRun(runId, {
-              status: record.requestedFinishStatus ?? finalStatus,
-            }, this.originalAdminOptions(runtime, signal)))
-          if (!finishOk) return
-        } else if (this.runState.canFinishRun(capabilityGeneration, runId)) {
-          const finishOk = await runBounded(signal =>
-            admin.finishAppRun(runId, { status: finalStatus } satisfies AdminFinishAppRunInput, this.originalAdminOptions(runtime, signal)))
-          if (!finishOk) return
-        } else {
-          // Not cleanly finishable: leave reconciliation to the POL-102
-          // server timeout instead of fabricating a terminal state.
-          continue
+        const startWasConfirmed = record.status === 'running'
+        if (record.status !== 'finishing' && record.status !== 'finish_unconfirmed') {
+          if (!this.runState.canFinishRun(capabilityGeneration, runId)) continue
+          const outcome = this.runState.queriesForRun(capabilityGeneration, runId).find(q => q.record.outcome)?.record.outcome
+          const browserOutcome = this.browserRuns.has(`${capabilityGeneration}:${runId}`) ? outcome : undefined
+          const factStatus = browserOutcome?.kind === 'success' ? 'completed' : browserOutcome?.kind === 'error' ? (browserOutcome.code === 'request_cancelled' ? 'cancelled' : 'failed') : finalStatus
+          this.runState.beginFinish(capabilityGeneration, runId, factStatus, fingerprint({ runId, status: factStatus }))
+        }
+        const finishOk = await runBounded(async signal => {
+          const ack = await admin.finishAppRun(runId, { status: record.requestedFinishStatus ?? finalStatus }, this.originalAdminOptions(runtime, signal)) as { settlement?: 'pending' | 'confirmed' | 'no_charge' }
+          if (admin.admitAppRequest && !ack?.settlement) throw new Error('Canonical finish acknowledgement is unavailable')
+          record.settlement = ack?.settlement
+        })
+        if (!finishOk) {
+          this.runState.noteFinishUnconfirmed(capabilityGeneration, runId)
+          return
         }
         // Explicit reconciliation outcome: the start was confirmed (running)
         // and the terminal finish succeeded.
-        const startWasConfirmed = record.status === 'running'
+        this.browserRuns.delete(`${capabilityGeneration}:${runId}`)
         this.runState.markTerminal(capabilityGeneration, runId, 'cleanup')
         this.runState.releaseRun(capabilityGeneration, runId)
         if (startWasConfirmed) {
@@ -1332,6 +1400,7 @@ export class LocalAppRuntimeCoordinator {
     runtime: ActiveRuntime,
     body: Record<string, unknown>,
     signal: AbortSignal,
+    current: () => Promise<boolean> = async () => true,
   ): Promise<{ data?: unknown; errorCode?: AppApiStableErrorCode }> {
     const parsed = AppAiQuerySchema.safeParse(body)
     if (!parsed.success) return { errorCode: 'invalid_request' }
@@ -1372,7 +1441,7 @@ export class LocalAppRuntimeCoordinator {
     } catch {
       return this.failAdmittedQuery(capGen, runId, requestId, 'host_failed')
     }
-    if (runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) return this.failAdmittedQuery(capGen, runId, requestId, 'request_cancelled')
+    if (runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || !await current() || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) return this.failAdmittedQuery(capGen, runId, requestId, 'request_cancelled')
     const controller = new AbortController()
     const abortForward = () => controller.abort()
     if (signal.aborted) abortForward()
@@ -1387,14 +1456,14 @@ export class LocalAppRuntimeCoordinator {
     try {
       executor = this.adapters.createExecutor({ connectionSlug, model,
         ...(this.adapters.admin.admitAppRequest ? { beforeSend: async (facts: HostLlmBeforeSendFacts): Promise<HostLlmAdmissionDecision> => {
-          if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
+          if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || !await current() || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
           if (!this.adapters.billingOutbox) throw new Error('Durable App billing journal is unavailable')
           journalScope = this.journalScope(runtime)
           const body = { productSpaceId: runtime.identity.productSpaceId, requestId, ...facts }
           journalKey = this.adapters.billingOutbox.stageAdmission(journalScope, runId, body)
           const response = await this.adapters.admin.admitAppRequest!(runId, body, this.originalAdminOptions(runtime, controller.signal))
           admitted = true
-          if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
+          if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || !await current() || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
           return { providerCorrelation: response.request.providerCorrelation }
         } } : {}),
       })

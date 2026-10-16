@@ -292,6 +292,14 @@
         "@types/node": "^22.0.0",
       },
     },
+    "packages/sdk": {
+      "name": "@polo-ai/sdk",
+      "version": "0.1.0",
+      "devDependencies": {
+        "esbuild": "^0.25.0",
+        "typescript": "^5.0.0",
+      },
+    },
     "packages/server": {
       "name": "@polo-ai/server",
       "version": "0.16.3",
@@ -1041,6 +1049,8 @@
     "@polo-ai/public-api": ["@polo-ai/public-api@workspace:apps/public-api"],
 
     "@polo-ai/server": ["@polo-ai/server@workspace:packages/server"],
+
+    "@polo-ai/sdk": ["@polo-ai/sdk@workspace:packages/sdk"],
 
     "@polo-ai/server-core": ["@polo-ai/server-core@workspace:packages/server-core"],
 

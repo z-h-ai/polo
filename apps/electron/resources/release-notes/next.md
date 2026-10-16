@@ -31,3 +31,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Breaking Changes
 
 - **Standalone terminal execution** — Bound bundled CLI execution to its private Thread owner and lease so owned connections can run without a desktop ProductSpace. Managed platform connections remain unavailable through this path. Terminal settings now distinguish an included CLI from a command that has not been enabled.
+
+- 新增创作者浏览器 SDK 候选：获授权本地 App 可调用 Polo AI 单次查询、观察状态并取消，无需自建后端或持有 Provider 密钥；附可构建报价助手与随包创作者 Skill。依赖包含 bridge v1 的宿主构建，既有发布版兼容性未声明。

@@ -442,6 +442,6 @@ export interface ProductSpaceAppRuntimeStartResult {
   /** Public loopback App UI from this exact start; never the capability gateway. Session-memory only. */
   uiUrl?: string
   platformApi:
-    | { status: 'available' }
+    | { status: 'available'; transport?: 'browser_bridge' | 'process_http' }
     | { status: 'unavailable'; reason: 'static_runtime_unsupported' }
 }

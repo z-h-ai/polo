@@ -455,12 +455,12 @@
   "default_story": "UI-refinement",
   "design": {
     "revision": "poo70-client-design-r2-20261004",
-    "sha256": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+    "sha256": "129d9151934df0ecc8e1581aab6e0a815fc4a97dd8bba76a6a40e4c791acef2c",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {
         "path": "docs/client-journey-review/spec.md",
-        "sha256": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6"
+        "sha256": "269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -45483,7 +45483,7 @@
       "label": "当前唯一客户端产品说明",
       "path": "docs/client-journey-review/spec.md",
       "revision": "master-r15-closure（2026-10-03）",
-      "sha256": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6"
+      "sha256": "269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7"
     },
     {
       "id": "skill-terminology-review-r11",
@@ -45581,7 +45581,7 @@
       "path": ".agents/skills/polo-ai-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
       "revision": "poo70-client-design-r2-20261004",
-      "sha256": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4"
+      "sha256": "e78ebed5a1edd898558dfa6fbed7f33509ceb65f22d333db4208c00248cef457"
     },
     {
       "id": "client-design-foundations",

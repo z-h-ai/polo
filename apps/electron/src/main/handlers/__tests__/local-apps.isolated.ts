@@ -278,6 +278,8 @@ const scopedStopExact = mock(async (
 })
 
 const runtimeCoordinator = {
+  issueBrowserCapability: mock(() => 12),
+  verifyBrowserRuntime: mock(async () => true),
   ensureGateway: mock(async () => 'http://127.0.0.1:9/local-app-api/v1'),
   signCapability: mock((input: Record<string, unknown>) => {
     void input
@@ -425,6 +427,8 @@ const scopedRegistry = {
   getRetainedManagementLogs: scopedRetainedManagementLogs,
   isInstalledAndReady,
 }
+
+mock.module('../../app-sdk-service', () => ({ getAppSdkBridge: () => ({ registerLaunch: () => {} }) }))
 
 mock.module('@polo-ai/shared/admin', () => ({
   ...nativeInstallationContract,
@@ -3921,7 +3925,7 @@ describe('local app production status projection (R34-3)', () => {
     expect(scopedStart).toHaveBeenCalledTimes(1)
   })
 
-  it('POO-54 R5: static runtimes register without a capability and STOP/RESTART resolve them', async () => {
+  it('POO-54 R5: static runtimes register a Main-only browser capability and STOP/RESTART resolve them', async () => {
     // A static exact start: startExact reports runtimeKind 'static' and the
     // manager never calls the capability hook.
     scopedStartExact.mockImplementation((async (
@@ -3944,18 +3948,19 @@ describe('local app production status projection (R34-3)', () => {
     expect(result).toMatchObject({
       runtimeKind: 'static',
       runtimeGeneration: 41,
-      platformApi: { status: 'unavailable', reason: 'static_runtime_unsupported' },
+      platformApi: { status: 'available', transport: 'browser_bridge' },
     })
     // Generation-exact liveness is TRUE for the static runtime (the exact
     // generation was recorded before coordinator registration).
     const staticExecutions = listRegisteredProductSpaceExecutions()
       .filter(execution => execution.kind === 'local_app')
     expect(await staticExecutions[0]!.isActive()).toBe(true)
-    // The coordinator has an active runtime for the static identity (without
-    // any capability) — the execution handle resolves through STOP.
+    // The coordinator has an active runtime for the static identity (with
+    // a Main-only browser capability) — the execution handle resolves through STOP.
     expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
         runtimeKind: 'static',
+        capabilityGeneration: 12,
         runtimeGeneration: 41,
       }),
     )

@@ -52,6 +52,8 @@ const electronMock = {
   },
 }
 
+mock.module('../app-sdk-service', () => ({ getAppSdkBridge: () => ({ prepareGuest: () => {}, attachGuest: () => {} }), setAppSdkWorkspaceResolver: () => {} }))
+
 mock.module('electron', () => electronMock)
 mock.module('../browser-pane-manager', () => ({
   BROWSER_PANE_SESSION_PARTITION: 'persist:browser-pane',

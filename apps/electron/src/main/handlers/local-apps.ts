@@ -1,3 +1,4 @@
+import { getAppSdkBridge } from '../app-sdk-service'
 import {
   AdminClient,
   getAppCatalogAccessMode,
@@ -196,6 +197,7 @@ async function throwOriginalAfterRollback(
  */
 interface RuntimeRegistrationHooks {
   executionId: string
+  publishUiBinding?: (url?: string) => void
   subject: {
     kind: 'artifact_instance'
     artifactType: 'app'
@@ -1725,6 +1727,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         throw fenceError
       }
       await registerLocalAppExecution(scope, result.version, workspaceId, gate.accountId, runtime)
+      runtime?.publishUiBinding?.(result.url)
       return result
     })
   }
@@ -2009,14 +2012,12 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           },
         })
         if (result.runtimeKind === 'static') {
-          // The manager deliberately never calls processEnvironment for
-          // static runtimes: register WITHOUT a capability so STOP/RESTART/
-          // shutdown can still resolve this identity. The exact generation is
-          // recorded BEFORE registration so liveness and any rollback can
-          // locate the coordinator runtime by execution/generation.
+          // Static browser capability remains Main-only; no token/env enters the page.
           startedRuntimeGeneration = result.runtimeGeneration
           try {
+            signedCapability = coordinator.issueBrowserCapability({ identity: runtimeIdentity, executionId, workspaceId, runtimeKind: 'static', runtimeGeneration: result.runtimeGeneration, scopeGeneration: result.scopeGeneration })
             coordinator.registerActiveRuntime({
+              capabilityGeneration: signedCapability,
               identity: runtimeIdentity,
               executionId,
               runtimeGeneration: result.runtimeGeneration,
@@ -2047,6 +2048,12 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       workspaceId,
       {
         executionId,
+        publishUiBinding: url => {
+          if (!url || !ctx.webContentsId) return
+          const active = coordinator.getActiveRuntimeByExecution(executionId)
+          if (!active || active.controller.signal.aborted) throw new Error('SDK runtime unavailable')
+          getAppSdkBridge().registerLaunch(ctx.webContentsId, active, url)
+        },
         subject: {
           kind: 'artifact_instance' as const,
           artifactType: 'app' as const,
@@ -2114,9 +2121,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       scopeGeneration: start.scopeGeneration ?? 0,
       runtimeKind: start.runtimeKind ?? 'static',
       uiUrl: start.url,
-      platformApi: start.runtimeKind && start.runtimeKind !== 'static'
-        ? { status: 'available' as const }
-        : { status: 'unavailable' as const, reason: 'static_runtime_unsupported' as const },
+      platformApi: { status: 'available' as const, transport: start.runtimeKind === 'static' ? 'browser_bridge' as const : 'process_http' as const },
     }
   }
 

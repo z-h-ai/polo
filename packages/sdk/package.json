@@ -1,0 +1,18 @@
+{
+  "name": "@polo-ai/sdk",
+  "version": "0.1.0",
+  "description": "Browser-only single-query AI SDK for trusted Polo static Apps",
+  "type": "module",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" } },
+  "files": ["dist", "README.md", "skills", "examples/quotation-assistant/src", "examples/quotation-assistant/scripts", "examples/quotation-assistant/package.json", "examples/quotation-assistant/index.html", "examples/quotation-assistant/fixtures"],
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=browser --format=esm --outfile=dist/index.js && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test src/*.test.ts examples/quotation-assistant/src/*.test.ts"
+  },
+  "devDependencies": { "typescript": "^5.0.0", "esbuild": "^0.25.0" }
+}

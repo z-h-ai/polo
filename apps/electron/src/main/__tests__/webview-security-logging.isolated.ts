@@ -7,6 +7,8 @@ const capture = (...args: unknown[]) => {
   logEntries.push(args)
 }
 
+mock.module('../app-sdk-service', () => ({ getAppSdkBridge: () => ({ prepareGuest: () => {}, attachGuest: () => {} }), setAppSdkWorkspaceResolver: () => {} }))
+
 mock.module('electron', () => ({
   app: {
     on: mock((event: string, listener: (...args: unknown[]) => void) => {
