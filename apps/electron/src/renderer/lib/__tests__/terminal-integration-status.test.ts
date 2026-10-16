@@ -113,3 +113,14 @@ describe('terminal integration status i18n', () => {
     }
   })
 })
+
+it('a timed-out shell probe explains that the bundled CLI is present and the command check is unconfirmed', async () => {
+  for (const [language, locale] of Object.entries(LOCALE_REGISTRY)) {
+    const instance = createInstance()
+    await instance.init({ lng: language, fallbackLng: false, resources: { [language]: { translation: locale.messages } } })
+    const value = { ...status('repair_required'), shellCheck: { status: 'timeout' as const, timeoutMs: 4000 } }
+    const message = getTerminalIntegrationStatusMessage(value, instance.t)
+    expect(message).toBe(instance.t('settings.terminalFeatures.status.shellTimeout'))
+    expect(message).not.toContain('settings.terminalFeatures.status.')
+  }
+})
