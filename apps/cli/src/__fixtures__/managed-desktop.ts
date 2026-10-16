@@ -46,6 +46,9 @@ const admin = Bun.serve({ port: 0, async fetch(req) {
   }
   if (req.headers.get('authorization') !== 'Bearer fixture-admin-token') return Response.json({ error: 'UNAUTHORIZED', message: 'fixture auth required' }, { status: 401 })
   const input = ['POST', 'PATCH'].includes(req.method) ? await req.json() as any : undefined
+  if (url.pathname === '/api/me/circles') return Response.json({ circles: [] })
+  if (url.pathname === '/api/me/circle-memberships') return Response.json({ memberships: [] })
+  if (/^\/api\/product-spaces\/[^/]+\/catalog$/.test(url.pathname)) return Response.json({ contractVersion: 1, productSpaceId: url.pathname.split('/')[3], catalogRevision: 'fixture-catalog-1', entries: [{ catalogEntryId: 'polo-assistant', kind: 'built_in_app', builtInAppId: 'polo_assistant', name: 'Polo Assistant', description: '', availability: 'available' }] })
   if (url.pathname === '/api/auth/validate') return Response.json({ valid: true, user: { id: accountId, username: 'fixture', displayName: 'Fixture', role: 'user', groupIds: [] }, configVersion: 'fixture-1' })
   if (url.pathname === '/api/me/product-spaces') return Response.json({ contractVersion: 1, personalProductSpaceId: personal, productSpaces: [
     { id: personal, kind: 'personal', name: '我的空间', accessMode: 'active', payer: { kind: 'account' } },
@@ -68,7 +71,7 @@ const admin = Bun.serve({ port: 0, async fetch(req) {
   return Response.json({ error: 'NOT_FOUND', message: url.pathname }, { status: 404 })
 } })
 await mkdir(join(root, 'work'), { recursive: true })
-await writeFile(join(root, 'config.json'), JSON.stringify({ workspaces: [], llmConnections: [], adminUrl: `http://127.0.0.1:${admin.port}` }))
+await writeFile(join(root, 'config.json'), JSON.stringify({ workspaces: [], activeSessionId: '', llmConnections: [], adminUrl: `http://127.0.0.1:${admin.port}` }))
 await writeFile(join(root, 'config-defaults.json'), await readFile(resolve('apps/electron/resources/config-defaults.json')))
 const { getCredentialManager } = await import('@polo-ai/shared/credentials')
 await getCredentialManager().setAdminTokens({ accessToken: 'fixture-admin-token', refreshToken: 'fixture-refresh-token', expiresAt: Date.now() + 3600000, userId: accountId, username: 'fixture' })

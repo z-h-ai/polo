@@ -1068,9 +1068,11 @@ export async function executeTurn(
 
     const configured = loadStoredConfigReadonly()
     const selectedSlug = await loadWorkspaceConnectionDefault(scope) || configured?.defaultLlmConnection
-    const selected = configured?.llmConnections?.find(c => c.slug === selectedSlug)
+    const selected = configured?.llmConnections?.find(c => c.slug === selectedSlug) ?? configured?.llmConnections?.[0]
     const managed = !!record.metadata.managedOwner || args.provider === 'polo'
-      || !args.provider && !args.baseUrl && (selected?.managedBy === 'admin' || selectedSlug?.startsWith('polo-space-') || record.metadata.connection?.provenance?.kind === 'managed')
+      || record.metadata.connection?.provenance?.kind === 'managed'
+      || !args.provider && !args.baseUrl && (args.kind !== 'resume' || !record.metadata.connection)
+        && (selected?.managedBy === 'admin' || selectedSlug?.startsWith('polo-space-'))
     if (args.space && !managed) throw new UsageError('--space requires Polo compute')
     const snapshotRoot = await createConfigurationSnapshot(record, scope, managed)
     await completeStage('snapshot')

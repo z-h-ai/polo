@@ -4,11 +4,11 @@ import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { z } from 'zod'
-import { getAdminUrl, getLlmConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor } from '@polo-ai/shared/config'
+import { getAdminUrl, getLlmConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor, type LlmConnection } from '@polo-ai/shared/config'
 import { getCredentialManager, startInvocationCredentialProxy, type InvocationCredentialProxy } from '@polo-ai/shared/credentials'
 import { RootedSessionStorage } from '@polo-ai/shared/sessions'
 import { processIdentityMatches } from '@polo-ai/shared/utils'
-import { PRODUCT_SPACE_CONTRACT_VERSION, ProductSpaceExecutionScopeSchema } from '@polo-ai/shared/product-spaces'
+import { PRODUCT_SPACE_CONTRACT_VERSION, ProductSpaceIdSchema, ProductSpaceExecutionScopeSchema } from '@polo-ai/shared/product-spaces'
 import type { RpcServer, RequestContext } from '../transport/types'
 import { resolveProductSpaceConnection } from '../handlers/rpc/admin'
 import { fetchTrustedProductSpaceList } from '../handlers/rpc/trusted-product-space-account'
@@ -17,7 +17,7 @@ import { createAssistantBillingHooks } from './assistant-billing'
 import { getRuntimeActiveProductSpace, getRuntimeFenceGeneration, getRegisteredProductSpaceExecution, registerProductSpaceExecution, unregisterProductSpaceExecution, isRuntimeOfflineReadOnly, isRuntimeProductSpaceRestricted, isSwitchInProgress, runUnderSwitchMutex, type RegisteredProductSpaceExecution } from './product-space-executions'
 
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/)
-const beginSchema = z.object({ threadId: id, configurationScopeId: id, ownerPid: z.number().int().positive(), ownerBirth: z.string().min(1).max(256), ownerLease: z.string().min(1).max(256), expectedSpace: z.string().uuid().optional(), model: z.string().min(1).max(128).optional() }).strict()
+const beginSchema = z.object({ threadId: id, configurationScopeId: id, ownerPid: z.number().int().positive(), ownerBirth: z.string().min(1).max(256), ownerLease: z.string().min(1).max(256), expectedSpace: ProductSpaceIdSchema.optional(), model: z.string().min(1).max(128).optional() }).strict()
 const attachSchema = z.object({ leaseId: z.string().min(32).max(128), pid: z.number().int().positive(), birth: z.string().min(1).max(256) }).strict()
 const leaseSchema = z.object({ leaseId: z.string().min(32).max(128) }).strict()
 type Begin = z.infer<typeof beginSchema>
@@ -76,6 +76,17 @@ async function captureContext(expectedSpace?: string) {
   return { owner, space, current }
 }
 
+/** Identity of authorized compute, excluding harmless UI/usage timestamps.
+ * Admin sync rebuilds objects and createdAt; those are not a new grant. */
+export function managedConnectionFingerprint(connection: LlmConnection | null | undefined): string {
+  if (!connection) return ''
+  return JSON.stringify({ slug: connection.slug, managedBy: connection.managedBy, providerType: connection.providerType,
+    type: connection.type, piAuthProvider: connection.piAuthProvider, authType: connection.authType, baseUrl: connection.baseUrl,
+    api: connection.customEndpoint?.api, supportsImages: connection.customEndpoint?.supportsImages,
+    models: connection.models?.map(model => typeof model === 'string' ? model : model.id).sort(),
+    defaultModel: connection.defaultModel, adminConfigVersion: connection.adminConfigVersion })
+}
+
 const brokers = new Set<CliManagedBroker>()
 export class CliManagedBroker {
   private leases = new Map<string, Lease>()
@@ -130,10 +141,10 @@ export class CliManagedBroker {
     if (!model || !allowedModels.includes(model)) throw new Error('POLO_MODEL_NOT_ALLOWED')
     const credential = await getCredentialManager().getLlmApiKey(connection.slug)
     if (!credential) throw new Error('POLO_COMPUTE_UNAVAILABLE')
-    const fingerprint = JSON.stringify(connection)
+    const fingerprint = managedConnectionFingerprint(connection)
     let lease: Lease | undefined
     const current = () => !this.closed && !!lease && !lease.revoked && Date.now() <= lease.expiresAt && proof.ownerCurrent() && captured.current()
-      && JSON.stringify(getLlmConnection(connection.slug)) === fingerprint
+      && managedConnectionFingerprint(getLlmConnection(connection.slug)) === fingerprint
     const hooks = createAssistantBillingHooks({ subjectKind: 'polo_assistant', accountId: captured.owner.accountId, productSpaceId: captured.owner.productSpaceId, adminOrigin: captured.owner.adminOrigin }, current)
     const proxy = await startInvocationCredentialProxy({ upstreamBaseUrl: connection.baseUrl, credential, credentialHeaders: [{ name: 'authorization', format: 'bearer' }] }, {
       managedPolicy: { allowedModels }, assertExecutionCurrent: () => { if (!current()) throw new Error('POLO_MANAGED_REVOKED') },
