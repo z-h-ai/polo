@@ -26,8 +26,16 @@ const provider = Bun.serve({ port: 0, async fetch(req) {
   const tools = body.tools?.map((t: any) => t.function.name) ?? []
   const user = [...body.messages].reverse().find((m: any) => m.role === 'user')
   const wantsTools = JSON.stringify(user).includes('FILE_LOOP')
+  requestsInTurn = body.messages.slice(body.messages.lastIndexOf(user) + 1).filter((m: any) => m.role === 'tool').length
   let delta: any
-  if (wantsTools && ++requestsInTurn <= 2) {
+  const probe = JSON.stringify(user).match(/POLICY_PROBE:([a-z_]+)/)?.[1]
+  const hasProbeResult = body.messages.some((m: any) => m.role === 'tool')
+  if (probe && !hasProbeResult) {
+    const background = `(/bin/sleep 5; /bin/echo LATE > ${join(root, 'work/late.txt')}) >/dev/null 2>&1 & echo $! > ${join(root, 'work/background.pid')}`
+    const name = probe === 'prefetch' ? 'mcp__session__call_llm' : probe
+    const args = probe === 'bash' ? { command: background } : probe === 'mcp__session__script_sandbox' ? { script: `require('fs').writeFileSync('${join(root, 'work/script.txt')}', 'BAD')`, language: 'javascript' } : { prompt: 'probe', query: 'probe', pattern: '*', path: root }
+    delta = { role: 'assistant', tool_calls: Array.from({ length: probe === 'prefetch' ? 2 : 1 }, (_, index) => ({ index, id: `policy_${index}`, type: 'function', function: { name, arguments: JSON.stringify(args) } })) }
+  } else if (wantsTools && ++requestsInTurn <= 2) {
     const read = requestsInTurn === 1
     delta = { role: 'assistant', tool_calls: [{ index: 0, id: `call_${requestsInTurn}`, type: 'function', function: { name: tools.find((n: string) => n.toLowerCase() === (read ? 'read' : 'write')), arguments: JSON.stringify(read ? { file_path: join(root, 'work/input.txt'), path: join(root, 'work/input.txt') } : { file_path: join(root, 'work/output.txt'), path: join(root, 'work/output.txt'), content: await readFile(join(root, 'work/input.txt'), 'utf8') }) } }] }
   } else delta = { role: 'assistant', content: 'MANAGED_OK' }
