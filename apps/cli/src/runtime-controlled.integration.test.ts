@@ -13,9 +13,9 @@ test('standalone owned CLI completes a real Pi read/write tool loop and resumes 
   const requests: any[] = []
   const model = Bun.serve({ port: 0, async fetch(req) {
     const body = await req.json() as any
-    requests.push(body)
     const tools = body.tools?.map((t: any) => t.function.name) ?? []
-    const index = requests.length
+    if (tools.length) requests.push(body)
+    const index = tools.length ? requests.length : 100
     let delta: any
     if (index <= 2) {
       const name = tools.find((n: string) => n === (index === 1 ? 'Read' : 'Write') || n === (index === 1 ? 'read' : 'write'))
@@ -42,11 +42,11 @@ test('standalone owned CLI completes a real Pi read/write tool loop and resumes 
     expect(await readFile(join(work, 'output.txt'), 'utf8')).toBe(nonce)
     expect(requests.length).toBeGreaterThanOrEqual(3)
     expect(requests[1].messages.some((m: any) => m.role === 'tool' && JSON.stringify(m.content).includes(nonce))).toBe(true)
-    expect(stdout).toContain('tool')
+    expect(stdout).toContain('command_execution')
     const events = stdout.trim().split('\n').map(line => JSON.parse(line))
     const threadId = events.find(e => e.type === 'thread.started')?.thread_id
     expect(threadId).toBeTruthy()
-    const resumed = await run(['resume', threadId, '--json', 'Reply DONE again.'])
+    const resumed = await run(['exec', 'resume', threadId, '--json', 'Reply DONE again.'])
     expect(resumed).toContain(nonce)
     expect(resumed).toContain(threadId)
   } finally { model.stop(true); await rm(root, { recursive: true, force: true }) }
