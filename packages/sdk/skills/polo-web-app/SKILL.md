@@ -26,9 +26,18 @@ The creator needs Node 20+ (or compatible Bun), npm and the example's declared b
 In an isolated project, install the supplied tarball, then copy `node_modules/@polo-ai/sdk/examples/quotation-assistant` to a working directory. In that directory, run `npm install /absolute/path/to/polo-ai-sdk-0.1.0.tgz` (the absolute tarball path is chosen locally, not embedded in source), followed by:
 
 ```sh
-POLO_APP_ID=<published-package-id> POLO_APP_VERSION=1.0.0 npm run build
+POLO_APP_ID="<published-package-id>" POLO_APP_VERSION=1.0.0 npm run build
 npm run package
 ```
+
+For an unpublished local trial, use this directly executable alternative in the copied example:
+
+```sh
+POLO_APP_ID=local-trial-quotation-unpublished POLO_APP_VERSION=0.0.0-local npm run build
+npm run package
+```
+
+The placeholder only validates the build and ZIP structure; it cannot install the App in Polo or grant authorization. Real publication and delivery require replacing it with the ID/version matching the Catalog artifact and rebuilding.
 
 Choose the package ID/version matching the real published artifact; do not invent a user's artifact-instance or entitlement identity. `polo-payload.zip` has `polo-app.json` at its root and `web/` assets, `runtime: static`, `entry: ["web"]`, `healthcheck: "/healthz"`, `webPath: "/"` and `permissions: []`. Build commands are relative to the copied example and do not depend on a monorepo/workspace. SDK runtime/types must stay browser-only.
 

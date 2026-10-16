@@ -71,7 +71,7 @@ generate.onclick = async () => {
     } finally { off() }
   } catch (error) {
     quote = undefined
-    const codes: Record<string, string> = { host_unavailable: '请从 Polo 有权应用目录中打开以使用 AI。', unsupported_host: '当前 Polo 不支持此 SDK，请使用包含 bridge v1 的版本。', request_cancelled: '调用已取消。', insufficient_credit: '当前空间积分不足。处理后由你主动重试。', metering_unconfirmed: '计量状态未确认，请勿自动重复生成。', request_in_progress: '当前页面已有调用，请等待或取消。', capability_invalid: '运行权限已失效，请从 Polo 目录重新打开。' }
+    const codes: Record<string, string> = { host_unavailable: '请在 Polo 中打开此应用后再生成报价。', unsupported_host: '当前 Polo 版本无法生成报价，请更新 Polo 后重新打开此应用。', request_cancelled: '调用已取消。', insufficient_credit: '当前空间积分不足。处理后由你主动重试。', metering_unconfirmed: '计量状态未确认，请勿自动重复生成。', request_in_progress: '当前页面已有调用，请等待或取消。', capability_invalid: '此应用暂时无法生成报价，请在 Polo 中重新打开后再试。' }
     status(error instanceof PoloError ? codes[error.code] ?? `调用失败（${error.code}），请检查后主动重试。` : `未采用本次建议：${(error as Error).message}`)
   } finally { active = undefined; render() }
 }

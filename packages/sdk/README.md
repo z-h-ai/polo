@@ -49,9 +49,18 @@ npm install /path/to/polo-ai-sdk-0.1.0.tgz
 cp -R node_modules/@polo-ai/sdk/examples/quotation-assistant ./quote-app
 cd quote-app
 npm install /path/to/polo-ai-sdk-0.1.0.tgz
-POLO_APP_ID=<published-package-id> POLO_APP_VERSION=1.0.0 npm run build
+POLO_APP_ID="<published-package-id>" POLO_APP_VERSION=1.0.0 npm run build
 npm run package
 ```
+
+For an unpublished local trial, after the same install/copy steps, run this in `quote-app`:
+
+```sh
+POLO_APP_ID=local-trial-quotation-unpublished POLO_APP_VERSION=0.0.0-local npm run build
+npm run package
+```
+
+This placeholder example only validates the build and ZIP structure. It cannot install the App in Polo or grant authorization. For real publication and delivery, replace the placeholder with the ID/version matching the Catalog artifact and rebuild.
 
 Node 20+ (or compatible Bun), npm and declared esbuild/fflate dev dependencies are creator build requirements. The output `polo-payload.zip` is rootless: `polo-app.json`, `web/index.html`, `web/app.js`, `web/app.css`. Supply it to the existing creator publication/catalog delivery workflow. There is no new local ZIP import or entitlement bypass. Do not publish or grant access without authorization. Real use needs the authorized Catalog/version/download and valid space/provider/billing services.
 
