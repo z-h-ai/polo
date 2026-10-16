@@ -19,8 +19,9 @@ for (const trigger of ['cancel', 'owner-death', 'desktop-death', 'quit'] as cons
     const state = async () => (await (await fetch(fixture.admin + '/fixture/state')).json()) as any
     const control = async (value: unknown) => (await (await fetch(fixture.admin + '/fixture/control', { method: 'POST', body: JSON.stringify(value) })).json()) as any
     await control({ hold: true })
-    child = Bun.spawn([process.execPath, resolve('apps/cli/src/index.ts'), 'exec', '--provider', 'polo', '--json', '-C', join(root, 'work'), 'Wait for lifecycle cancellation.'], { env: { ...process.env, HOME: root, POLO_AI_CONFIG_DIR: root, POLO_AI_RUNTIME_DISCOVERY_FILE: join(root, 'runtime/electron.json'), LLM_API_KEY: '', LLM_BASE_URL: '' }, stdout: 'pipe', stderr: 'pipe' })
-    const output = new Response(child.stdout).text(), error = new Response(child.stderr).text()
+    const spawned = Bun.spawn([process.execPath, resolve('apps/cli/src/index.ts'), 'exec', '--provider', 'polo', '--json', '-C', join(root, 'work'), 'Wait for lifecycle cancellation.'], { env: { ...process.env, HOME: root, POLO_AI_CONFIG_DIR: root, POLO_AI_RUNTIME_DISCOVERY_FILE: join(root, 'runtime/electron.json'), LLM_API_KEY: '', LLM_BASE_URL: '' }, stdout: 'pipe', stderr: 'pipe' })
+    child = spawned
+    const output = new Response(spawned.stdout).text(), error = new Response(spawned.stderr).text()
     for (let i = 0; i < 120 && (await state()).providerCalls === 0; i++) await new Promise(r => setTimeout(r, 50))
     expect((await state()).providerCalls).toBe(1)
     const threads = await readdir(join(root, 'cli-sessions/global/executions'))

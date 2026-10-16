@@ -13,9 +13,10 @@ test('a managed resume model override is invocation-only and leaves the original
     const fixture = JSON.parse(ready.split('\n')[0]!)
     await fetch(fixture.admin + '/fixture/control', { method: 'POST', body: JSON.stringify({ allowAlternateModel: true }) })
     const run = async (args: string[]) => {
-      child = Bun.spawn([process.execPath, resolve('apps/cli/src/index.ts'), ...args], { env: { ...process.env, HOME: root, POLO_AI_CONFIG_DIR: root, POLO_AI_RUNTIME_DISCOVERY_FILE: join(root, 'runtime/electron.json'), LLM_API_KEY: '', LLM_BASE_URL: '' }, stdout: 'pipe', stderr: 'pipe' })
+      const spawned = Bun.spawn([process.execPath, resolve('apps/cli/src/index.ts'), ...args], { env: { ...process.env, HOME: root, POLO_AI_CONFIG_DIR: root, POLO_AI_RUNTIME_DISCOVERY_FILE: join(root, 'runtime/electron.json'), LLM_API_KEY: '', LLM_BASE_URL: '' }, stdout: 'pipe', stderr: 'pipe' })
+      child = spawned
       const deadline = setTimeout(() => child?.kill('SIGTERM'), 30000)
-      const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]); clearTimeout(deadline)
+      const [code, out, err] = await Promise.all([child.exited, new Response(spawned.stdout).text(), new Response(spawned.stderr).text()]); clearTimeout(deadline)
       if (code !== 0) throw new Error(`CLI ${code}: ${err}\n${out}`)
       return out
     }
