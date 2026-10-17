@@ -24,10 +24,12 @@ describe('GenUI form schema (POO-103)', () => {
     const parsed = RenderUiSchema.safeParse({ components: [formComponent()] })
     expect(parsed.success).toBe(true)
     if (parsed.success) {
-      const form = parsed.data.components[0]
+      const form = parsed.data.components[0]!
       expect(form.type).toBe('form')
-      // Default field type applies.
-      expect(form.fields[0]!.type).toBe('text')
+      if (form.type === 'form') {
+        // Default field type applies.
+        expect(form.fields[0]!.type).toBe('text')
+      }
     }
   })
 

@@ -26,7 +26,7 @@
  */
 
 import { readFileSync, realpathSync, statSync } from 'node:fs'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { mainLog } from './logger'
 import { getDeepLinkCallbackBridge, type DeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import type { UiCardRegistry } from './ui-card-registry'
@@ -91,7 +91,14 @@ export function parseUiEventDeepLink(rawUrl: string): UiEventParseResult {
   if (pathParts.length !== 2 || pathParts[0] !== GENUI_UI_EVENT_ACTION) {
     return { ok: false, code: 'invalid_payload', message: 'ui-event URL must be poloai://action/ui-event/{sessionId}' }
   }
-  const sessionId = decodeURIComponent(pathParts[1] ?? '')
+  let sessionId: string
+  try {
+    sessionId = decodeURIComponent(pathParts[1] ?? '')
+  } catch {
+    // e.g. a malformed percent escape (%zz) — report it, never throw out of
+    // the parser (the card would get no verdict at all).
+    return { ok: false, code: 'invalid_payload', message: 'ui-event sessionId is malformed' }
+  }
   try {
     validateSessionId(sessionId)
   } catch {
@@ -204,15 +211,25 @@ export interface UiEventValidationContext {
 }
 
 /**
- * Steps 2–6 of proposal §7.2 (step 1's URL-shape half happens in the parser;
- * the session-alive half is the first check here). Each failure maps onto
- * exactly one §7.3 error code.
+ * Steps 0 and 2–6 of proposal §7.2 (step 1's URL-shape half happens in the
+ * parser; the session-alive half is the first check here). Each failure maps
+ * onto exactly one §7.3 error code — except step 0, which collapses every
+ * unknown-sender rejection into a uniform `not_authorized` so untrusted
+ * senders can't probe the registry.
  */
 export function validateUiEvent(
   parsed: ParsedUiEventUrl,
   senderWebContentsId: number,
   ctx: UiEventValidationContext,
 ): UiEventVerdict {
+  // Step 0 — the sender must be a webContents Main saw attach as a genui
+  // guest. Anything else (tab webviews, browser-pane pages, spoofed handles)
+  // gets one uniform code with no oracle about which sessions are live or
+  // which cards are registered.
+  if (!ctx.registry.isKnownGuest(senderWebContentsId)) {
+    return { ok: false, code: 'not_authorized', message: `ui-event sender ${senderWebContentsId} is not a canvas card guest` }
+  }
+
   // Step 1 — the session must still be alive in this desktop main.
   if (!ctx.hasLiveSession(parsed.sessionId)) {
     return { ok: false, code: 'session_not_found', message: `Session not found: ${parsed.sessionId}` }
@@ -287,7 +304,7 @@ function resolveUiEventPayload(
     } catch {
       return { ok: false, code: 'session_not_found', message: 'Session data directory is unavailable' }
     }
-    if (!(realCandidate === realBoundary || realCandidate.startsWith(realBoundary.endsWith('/') ? realBoundary : `${realBoundary}/`))) {
+    if (!isWithinRealPath(realBoundary, realCandidate)) {
       return { ok: false, code: 'invalid_payload', message: 'payloadSrc escapes the session data directory' }
     }
     let raw: string
@@ -316,6 +333,16 @@ function resolveUiEventPayload(
 
   // A button-click without payload is legitimate; treat it as an empty object.
   return { ok: true, payload: {} }
+}
+
+/**
+ * Separator-aware containment in real-path space (path.relative semantics, so
+ * no sibling-prefix bypass and Windows backslashes compare correctly) —
+ * mode-manager.ts `isWithin` precedent.
+ */
+function isWithinRealPath(base: string, target: string): boolean {
+  const rel = relative(base, target)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
 function parsePayloadObject(raw: string): UiEventVerdict {
@@ -437,7 +464,10 @@ export function handleUiEventUrl(rawUrl: string, senderWebContentsId: number): v
   bridge.bindCallbackToSession(parsed.callbackId, senderWebContentsId, parsed.sessionId)
 
   // widgetState three-way split (§8 GENUI-09). modelContext: hard 2KB cap,
-  // truncated — never rejected — and queued one-shot into the next turn.
+  // truncated — never rejected — and queued one-shot into the next turn. The
+  // queue is bounded; if a teardown race dropped the entry (queue returns
+  // false), the event is still acked — the ack means "event accepted", not
+  // "state will reach the model".
   let modelContextTruncated = false
   const rawModelContext = (verdict.payload as { modelContext?: unknown }).modelContext
   if (rawModelContext !== undefined && rawModelContext !== null) {

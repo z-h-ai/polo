@@ -82,6 +82,16 @@ describe('UiCardRegistry.registerCard', () => {
     expect(register(registry, { cardId: 'card-a' })).toMatchObject({ ok: true })
     expect(registry.getCard('session-a', 'card-a')?.capabilities).toEqual(['ui-event'])
   })
+
+  it('isKnownGuest tracks the attach record that gates step 0 of ui-event validation', () => {
+    const registry = new UiCardRegistry()
+    expect(registry.isKnownGuest(101)).toBe(false)
+    attach(registry)
+    expect(registry.isKnownGuest(101)).toBe(true)
+    expect(registry.isKnownGuest(999)).toBe(false)
+    registry.noteGuestDetached(101)
+    expect(registry.isKnownGuest(101)).toBe(false)
+  })
 })
 
 describe('UiCardRegistry lifecycle', () => {

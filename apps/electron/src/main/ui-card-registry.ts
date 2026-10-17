@@ -160,6 +160,16 @@ export class UiCardRegistry {
     return this.cards.get(sessionId)?.get(cardId)
   }
 
+  /**
+   * Whether Main ever observed this webContents attaching as a genui guest.
+   * Senders that fail this can't be canvas cards at all (tab webviews, browser
+   * panes) and get the uniform rejection before any session/card detail is
+   * disclosed to them.
+   */
+  isKnownGuest(webContentsId: number): boolean {
+    return this.guests.has(webContentsId)
+  }
+
   /** Touch a card's activity timestamp (ui-event acceptance). */
   touchCard(sessionId: string, cardId: string): void {
     const entry = this.cards.get(sessionId)?.get(cardId)

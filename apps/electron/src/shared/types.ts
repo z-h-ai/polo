@@ -377,6 +377,8 @@ export interface GenUiCardUnregisterRequest {
 
 export interface GenUiCardUnregisterResult {
   ok: boolean
+  /** Set when a card exists but belongs to a different window. */
+  error?: string
 }
 
 export interface AdminRpcErrorPayload {

@@ -229,12 +229,18 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
     }
   })
 
-  server.handle(RPC_CHANNELS.genui.UNREGISTER_UI_CARD, async (_ctx, request: GenUiCardUnregisterRequest): Promise<GenUiCardUnregisterResult> => {
+  server.handle(RPC_CHANNELS.genui.UNREGISTER_UI_CARD, async (ctx, request: GenUiCardUnregisterRequest): Promise<GenUiCardUnregisterResult> => {
     try {
       if (!request || typeof request !== 'object') throw new Error('Invalid unregister request')
       const { sessionId, cardId } = request
       if (typeof sessionId !== 'string' || sessionId.length === 0) throw new Error('Missing session id')
       if (typeof cardId !== 'string' || cardId.length === 0 || cardId.length > 128) throw new Error('Invalid card id')
+      // Only the window that registered a card may unregister it — one
+      // renderer cannot drop another window's card out of the loop.
+      const existing = registry.getCard(sessionId, cardId)
+      if (existing && existing.hostWebContentsId !== ctx.webContentsId) {
+        return { ok: false, error: 'Card belongs to a different window' }
+      }
       registry.unregisterCard(sessionId, cardId)
       // Unregistration is idempotent — a missed unmount (window closed before
       // the RPC) is already covered by the guest-destroyed hook Main-side.

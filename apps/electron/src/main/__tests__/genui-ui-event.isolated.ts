@@ -99,6 +99,12 @@ describe('parseUiEventDeepLink', () => {
     if (!result.ok) expect(result.code).toBe('invalid_payload')
   })
 
+  it('rejects a malformed percent escape instead of throwing', () => {
+    const result = parseUiEventDeepLink('poloai://action/ui-event/%zz?cardId=c&eventId=e&type=submit&callbackId=callback-1')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.code).toBe('invalid_payload')
+  })
+
   it('rejects unknown and duplicated parameters', () => {
     const unknown = parseUiEventDeepLink(`${buildUiEventUrl()}&runTool=bash`)
     expect(unknown.ok).toBe(false)
@@ -180,6 +186,16 @@ describe('validateUiEvent — the six §7.2 steps', () => {
     liveSessions.delete(SESSION_ID)
     const verdict = validateUiEvent(parsedPayload(), 101, ctx())
     expect(verdict).toMatchObject({ ok: false, code: 'session_not_found' })
+  })
+
+  it('step 0: a sender Main never saw attach as a genui guest gets the uniform not_authorized — no session/card oracle', () => {
+    // WebContents 999 is a browser-pane page or tab webview: no attach record.
+    // Even quoting a LIVE session and a REGISTERED card, it must not learn
+    // which step would have failed.
+    expect(validateUiEvent(parsedPayload(), 999, ctx())).toMatchObject({ ok: false, code: 'not_authorized' })
+    // Same uniform answer when the session is dead too — step 0 fires first.
+    liveSessions.delete(SESSION_ID)
+    expect(validateUiEvent(parsedPayload(), 999, ctx())).toMatchObject({ ok: false, code: 'not_authorized' })
   })
 
   it('step 2: unregistered card in a session with other cards → card_not_registered; empty session → session_not_found', () => {
