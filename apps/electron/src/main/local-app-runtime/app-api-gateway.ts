@@ -86,6 +86,7 @@ export class AppApiGateway {
     if (this.server) return Promise.resolve()
     const server = createServer((request, response) => {
       void this.handle(request, response).catch(() => {
+        if (response.destroyed || response.writableEnded) return
         if (!response.headersSent) {
           this.sendError(response, 'host_failed')
         } else {
@@ -183,38 +184,51 @@ export class AppApiGateway {
     ) {
       return fail('unsupported_media_type')
     }
-    const body = await this.readBody(request, limit)
-    if (body === null) return fail('request_too_large', true)
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(body)
-    } catch {
-      return fail('invalid_request')
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return fail('invalid_request')
-    }
     const controller = new AbortController()
-    request.once('close', () => {
+    const onResponseClose = () => {
       if (!response.writableEnded) controller.abort()
-    })
-    const outcome = await this.options.delegate.handle(
-      route,
-      parsed as Record<string, unknown>,
-      capability,
-      controller.signal,
-    )
-    if (outcome.errorCode !== undefined) {
-      this.sendError(response, outcome.errorCode)
-      return
     }
-    response.statusCode = 200
-    response.setHeader('Content-Type', 'application/json; charset=utf-8')
-    response.end(JSON.stringify({
-      contractVersion: LOCAL_APP_API_CONTRACT_VERSION,
-      ok: true,
-      data: outcome.data ?? null,
-    }))
+    // Register before readBody's await so disconnects cannot fall between body
+    // completion and delegation. This controller belongs to this request only.
+    response.on('close', onResponseClose)
+    try {
+      const body = await this.readBody(request, limit)
+      if (body === null) return fail('request_too_large', true)
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(body)
+      } catch {
+        return fail('invalid_request')
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return fail('invalid_request')
+      }
+      // IncomingMessage.close also fires for a fully read, valid Node request.
+      // Only a premature response close represents cancellation of this call.
+      if (response.destroyed || controller.signal.aborted) return
+      const outcome = await this.options.delegate.handle(
+        route,
+        parsed as Record<string, unknown>,
+        capability,
+        controller.signal,
+      )
+      // Keep awaiting the delegate so Host receipts/settlement and asynchronous
+      // cleanup finish, but never publish its late outcome to a disconnected peer.
+      if (response.destroyed || controller.signal.aborted) return
+      if (outcome.errorCode !== undefined) {
+        this.sendError(response, outcome.errorCode)
+        return
+      }
+      response.statusCode = 200
+      response.setHeader('Content-Type', 'application/json; charset=utf-8')
+      response.end(JSON.stringify({
+        contractVersion: LOCAL_APP_API_CONTRACT_VERSION,
+        ok: true,
+        data: outcome.data ?? null,
+      }))
+    } finally {
+      response.removeListener('close', onResponseClose)
+    }
   }
 
   private readBody(request: import('node:http').IncomingMessage, limit: number): Promise<string | null> {
