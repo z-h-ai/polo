@@ -1,16 +1,19 @@
-// Login-state guard wrapping the root navigator (POL-14).
+// Login-state guard wrapping the root navigator (POL-14, decision extracted
+// into authRoute.ts by POL-19).
 //
 // Blocks rendering until the persisted session read completes, then routes by
-// auth status: signed out -> /login, signed in -> /. Server-side revocation
-// (api client refresh failure) flips the store back to unauthenticated and the
-// user lands on the login screen automatically.
+// auth status: signed out -> /login, signed in -> / ((tabs)/index = 消息 Tab
+// since POL-19). Server-side revocation (api client refresh failure) flips the
+// store back to unauthenticated and the user lands on the login screen
+// automatically.
 
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'expo-router';
 
+import { authRouteTarget, LOGIN_ROUTE } from './authRoute';
 import { useSessionStore } from './session';
 
-export const LOGIN_ROUTE = '/login';
+export { LOGIN_ROUTE };
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const status = useSessionStore((state) => state.status);
@@ -23,16 +26,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     void restore();
   }, [restore]);
 
-  const onLoginRoute = pathname === LOGIN_ROUTE;
-
   useEffect(() => {
-    if (!hydrated) return;
-    if (status === 'authenticated' && onLoginRoute) {
-      router.replace('/');
-    } else if (status !== 'authenticated' && !onLoginRoute) {
-      router.replace(LOGIN_ROUTE);
+    const target = authRouteTarget({ hydrated, status, pathname });
+    if (target !== null) {
+      router.replace(target);
     }
-  }, [hydrated, status, onLoginRoute, router]);
+  }, [hydrated, status, pathname, router]);
 
   // Hold the native splash until the secure-store read has settled, so the
   // guard decision never flashes the wrong screen.

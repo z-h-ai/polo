@@ -14,13 +14,17 @@ if (typeof global.Buffer === 'undefined') {
 // POL-14: AuthGate owns the login routing decision — 未登录 -> /login，
 // 已登录 -> /。It renders nothing until the SecureStore read settles so the
 // wrong screen never flashes.
+// POL-19: / now resolves to (tabs)/index = 消息 Tab (bottom-tab shell).
 export default function RootLayout() {
   return (
     <AuthGate>
       <StatusBar style="auto" />
       <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
+        <Stack.Screen name="(tabs)" />
         <Stack.Screen name="login" />
+        <Stack.Screen name="scan-qr" />
+        <Stack.Screen name="qr-confirm" />
+        <Stack.Screen name="pair-placeholder" />
       </Stack>
     </AuthGate>
   );
