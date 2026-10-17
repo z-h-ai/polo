@@ -1453,12 +1453,16 @@ export class LocalAppRuntimeCoordinator {
     let admitted = false
     let admissionDispatchStarted = false
     let cancelledBeforeDispatch = false
+    let admissionOpen = true
     let journalScope: AppBillingJournalScope | undefined
     let journalKey: string | undefined
     try {
       executor = this.adapters.createExecutor({ connectionSlug, model,
         ...(this.adapters.admin.admitAppRequest ? { beforeSend: async (facts: HostLlmBeforeSendFacts): Promise<HostLlmAdmissionDecision> => {
           const assertNotCancelled = () => {
+            // Host admission has its own deadline. A timed-out execute may
+            // leave this hook awaiting authority without aborting its signal.
+            if (!admissionOpen) throw new Error('App query admission lifetime ended')
             if (controller.signal.aborted || runtime.controller.signal.aborted) {
               cancelledBeforeDispatch = true
               throw new Error('App request was cancelled before admission dispatch')
@@ -1488,6 +1492,7 @@ export class LocalAppRuntimeCoordinator {
     } catch {
       // Construction failed before the provider ran: release the reservation
       // and answer with a stable error so a retry can be admitted cleanly.
+      admissionOpen = false
       this.releaseReservation(capGen, runId, requestId)
       signal.removeEventListener('abort', abortForward)
       runtime.controller.signal.removeEventListener('abort', abortForward)
@@ -1525,6 +1530,9 @@ export class LocalAppRuntimeCoordinator {
           ...(hostUsage(result) ? { usage: hostUsage(result) } : {}),
         }
       } finally {
+        // Close synchronously before awaiting disposal: no detached guard may
+        // stage/send admission after the unique Host terminal was selected.
+        admissionOpen = false
         await executor.dispose().catch(() => {})
       }
     })()
