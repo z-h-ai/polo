@@ -219,6 +219,7 @@ const { useAppCatalog } = await import('../useAppCatalog')
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 
 beforeEach(() => {
+  launchHandoffPublish.mockClear()
   productSpaceContextState = productSpaceContext('organization-a')
   syncCatalog = mock(async (
     organizationId: string,

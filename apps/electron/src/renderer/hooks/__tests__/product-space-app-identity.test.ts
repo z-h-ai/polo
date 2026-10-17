@@ -6,7 +6,7 @@ function identity(): ProductSpaceAppIdentity {
   return {
     accountId: 'account-a', productSpaceId: 'space-a', catalogRevision: 'revision-a',
     catalogEntryId: 'entry-a', artifactInstanceId: 'artifact-a',
-    versionId: 'version-a', version: '1.0.0',
+    versionId: 'version-a', version: '1.0.0-rc.1',
     sources: [
       { kind: 'creator_circle', name: 'Circle A', circleId: 'circle-a' },
       { kind: 'enterprise_import', name: null, circleId: null },
