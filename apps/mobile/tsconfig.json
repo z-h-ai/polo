@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "paths": {
+      "@polo-ai/shared": ["./types/shared-protocol.d.ts"],
+      "@polo-ai/shared/protocol": ["./types/shared-protocol.d.ts"]
+    }
+  },
+  "include": ["app", "types", "**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "metro", "metro.config.js", ".expo"]
+}
