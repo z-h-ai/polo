@@ -224,12 +224,35 @@ export const GenUIActionButtonsWithIdSchema = GenUIBase.extend({
   buttons: z.array(GenUIActionButtonSchema).min(1).max(6),
 });
 
+/** One form field (POO-103): text/number/select/date inputs the user fills. */
+const GenUIFormFieldSchema = z.object({
+  key: z.string().min(1).max(60)
+    .describe('Value key in the submitted JSON object'),
+  label: z.string().min(1).max(80),
+  type: z.enum(['text', 'number', 'select', 'date']).default('text'),
+  required: z.boolean().optional(),
+  // Only meaningful on select fields — the cross-field rule (select needs
+  // options, others must not carry them) lives on the components array
+  // superRefine, like every other cross-field rule.
+  options: z.array(z.string().min(1).max(80)).min(1).max(20).optional(),
+});
+
+export const GenUIFormSchema = GenUIBase.extend({
+  type: z.literal('form'),
+  fields: z.array(GenUIFormFieldSchema).min(1).max(12),
+  submitLabel: z.string().min(1).max(40).optional(),
+  // NOTE: no "action" field on purpose — form submit is FIXED send-message
+  // semantics (the serialized values object becomes the next user message).
+  // Unknown keys are rejected, so an "action" attempt fails validation.
+}).strict();
+
 export const GenUIComponentSchema = z.discriminatedUnion('type', [
   GenUIStatCardSchema,
   GenUIDataTableSchema,
   GenUIAlertSchema,
   GenUIProgressSchema,
   GenUIActionButtonsWithIdSchema,
+  GenUIFormSchema,
 ]);
 
 export type GenUIComponent = z.infer<typeof GenUIComponentSchema>;
@@ -259,6 +282,35 @@ const GenUIComponentsArraySchema = z.array(GenUIComponentSchema)
         });
       }
       ids.add(component.id);
+      // form (POO-103) cross-field rules: unique keys; select fields need
+      // options, non-select fields must not carry them.
+      if (component.type === 'form') {
+        const keys = new Set<string>();
+        component.fields.forEach((field, fieldIndex) => {
+          if (keys.has(field.key)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [index, 'fields', fieldIndex, 'key'],
+              message: `Duplicate field key "${field.key}". Field keys must be unique within one form.`,
+            });
+          }
+          keys.add(field.key);
+          if (field.type === 'select' && (!field.options || field.options.length < 1)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [index, 'fields', fieldIndex, 'options'],
+              message: `select field "${field.key}" requires at least one option.`,
+            });
+          }
+          if (field.type !== 'select' && field.options) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [index, 'fields', fieldIndex, 'options'],
+              message: `options are only valid on select fields (field "${field.key}").`,
+            });
+          }
+        });
+      }
     });
   });
 
@@ -536,6 +588,7 @@ Use this instead of plain text when the answer is actionable or data-dense.
 - \`alert\`: info/success/warning/error banner
 - \`progress\`: running/success/error indicator with optional percent
 - \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input
+- \`form\`: 1-12 fields (text/number/select/date) the user fills in; submitting sends the serialized values object as the next user message (fixed semantics — no action config)
 
 **Rules:**
 - Keep the payload small: skeleton inline, data in files. Payloads over 4096 bytes are rejected.
@@ -550,7 +603,9 @@ Use this when the user needs a small interactive artifact — a calculator, a vi
 **Contract (violations are rejected):**
 - \`html\` MUST be one complete HTML document, fully self-contained: inline CSS/JS only.
 - No external network references: no \`http(s)://\` in src/href/CSS url() (SVG/XML xmlns namespaces are the only exception). No CDN, no web fonts, no image hotlinks — use data: URIs.
-- Never reference \`@polo-ai/sdk\` or \`poloai://\` links — session apps run in a sandbox with no host bridge.
+- Never reference \`@polo-ai/sdk\`.
+- Host bridge: the ONLY sanctioned deep link is \`poloai://action/ui-event/{sessionId}?cardId=…&eventId=…&type=button-click|value-change|submit&callbackId=…\` plus exactly one of \`payload\` (URL-encoded JSON object, ≤8KB) or \`payloadSrc\` (path of a JSON file inside the session data/ directory). It only works when the bundle declares \`<meta name="polo-bridge-capabilities" content="ui-event">\` AND the desktop observed that declaration in the exact document it attached — otherwise every event is rejected (capability_denied). Read \`poloCard\` and \`poloSession\` from the URL query the host appends to your file URL to fill in cardId/sessionId. REUSE one callbackId for every event of your card (it pairs the acks/errors; rotating it exhausts the host's per-page slots). At most 10 events per second per card. Inside the JSON payload: "modelContext" is a short summary for the assistant (hard 2KB cap, silently truncated — keep it tight); "privateState" is any JSON echoed back ONLY to your card via a ui_state message; other keys are ignored by the host.
+- Any other \`poloai://\` link is rejected.
 - Hard limit: 512 KB per bundle.
 
 **Updates:** pass \`updateOf\` with the app id from a previous call to rewrite that app in place (version increments, full rewrite — send the COMPLETE html every time). Omit \`updateOf\` to create a new app.

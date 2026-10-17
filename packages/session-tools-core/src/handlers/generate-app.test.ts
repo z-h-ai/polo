@@ -246,6 +246,30 @@ describe('generate_app handler', () => {
     expect(result.content[0]?.text).toContain('poloai://');
   });
 
+  it('rejects poloai:// forms that merely prefix the sanctioned ui-event path', async () => {
+    const result = await handleGenerateApp(ctx(), {
+      title: 'Bridge app',
+      html: '<!DOCTYPE html><html><body><a href="poloai://action/ui-eventx/abc">bridge</a></body></html>',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('poloai://');
+  });
+
+  it('accepts the sanctioned poloai://action/ui-event/ bridge link (POO-103)', async () => {
+    const html = [
+      '<!DOCTYPE html><html><head>',
+      '<meta name="polo-bridge-capabilities" content="ui-event">',
+      '</head><body><button id="go"></button><script>',
+      'const q = new URLSearchParams(location.search);',
+      `const url = \`poloai://action/ui-event/\${q.get("poloSession")}?cardId=\${q.get("poloCard")}&eventId=e1&type=button-click&callbackId=callback-1\`;`,
+      'location.href = url;',
+      '</script></body></html>',
+    ].join('');
+    const result = await handleGenerateApp(ctx(), { title: 'Bridge app', html });
+    expect(result.isError).toBe(false);
+    expect(result.content[0]?.text).toContain('[genui-app ');
+  });
+
   it('rejects html over the 512KB hard cap and does not write anything', async () => {
     const bigHtml = `${VALID_HTML}<!-- ${'x'.repeat(GENERATE_APP_MAX_HTML_BYTES)} -->`;
     expect(Buffer.byteLength(bigHtml, 'utf8')).toBeGreaterThan(GENERATE_APP_MAX_HTML_BYTES);

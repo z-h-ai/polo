@@ -12,6 +12,11 @@
  * Pinning opens the same file as a tab-browser web app (plus an audit record
  * written Main-side); the request travels over a CustomEvent so this shared
  * package stays decoupled from the Electron renderer's contexts.
+ *
+ * POO-103: the card's webview registers itself with the Main-owned
+ * UiCardRegistry on attach (CustomEvent bridge, same decoupling), which is
+ * what admits its ui-event deep links into the host's six-step validation —
+ * only when the generated bundle declared the `ui-event` bridge capability.
  */
 
 import * as React from 'react'
@@ -60,6 +65,9 @@ export function parseGenUiAppInput(input: unknown): { title: string; html: strin
 
 // ── Ephemeral partition naming (must match Main's GENUI_APP_PARTITION_PATTERN)
 
+/** Session ids that may name a genui partition / appear in guest URLs. */
+export const GENUI_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
 /**
  * Partition for a canvas guest: in-memory only (never `persist:`-prefixed),
  * namespaced per chat session. Unparseable session ids collapse to a shared
@@ -67,7 +75,7 @@ export function parseGenUiAppInput(input: unknown): { title: string; html: strin
  * partition name.
  */
 export function getGenUiAppPartition(sessionId: string | null | undefined): string {
-  const id = sessionId && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sessionId) ? sessionId : 'unknown'
+  const id = sessionId && GENUI_SESSION_ID_PATTERN.test(sessionId) ? sessionId : 'unknown'
   return `genui-app-${id}`
 }
 
@@ -148,6 +156,25 @@ function createPinRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
 }
 
+// ── Card registration bridge (POO-103, CustomEvent → Electron bridge) ────────
+
+export const GENUI_CARD_REGISTER_EVENT = 'craft:register-genui-card'
+export const GENUI_CARD_UNREGISTER_EVENT = 'craft:unregister-genui-card'
+
+export interface GenUiCardRegistration {
+  sessionId: string
+  cardId: string
+  guestWebContentsId: number
+}
+
+export function dispatchGenUiCardRegister(registration: GenUiCardRegistration): void {
+  window.dispatchEvent(new CustomEvent<GenUiCardRegistration>(GENUI_CARD_REGISTER_EVENT, { detail: registration }))
+}
+
+export function dispatchGenUiCardUnregister(registration: GenUiCardRegistration): void {
+  window.dispatchEvent(new CustomEvent<GenUiCardRegistration>(GENUI_CARD_UNREGISTER_EVENT, { detail: registration }))
+}
+
 // ── Card ─────────────────────────────────────────────────────────────────────
 
 export interface GenUiAppCardProps {
@@ -161,24 +188,55 @@ export interface GenUiAppCardProps {
   className?: string
 }
 
+/** Minimal structural view of the <webview> element's attach-time API. */
+interface GenUiWebviewElement extends HTMLElement {
+  getWebContentsId?: () => number
+}
+
+function createMountNonce(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().slice(0, 8)
+  }
+  return Math.random().toString(36).slice(2, 10)
+}
+
 export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId, className }: GenUiAppCardProps) {
   const { t } = useTranslation()
   const webviewRef = React.useRef<HTMLElement | null>(null)
   const [pinState, setPinState] = React.useState<'idle' | 'pending' | 'pinned' | 'error'>('idle')
   const [pinError, setPinError] = React.useState<string | null>(null)
   const [loadFailed, setLoadFailed] = React.useState(false)
-  const src = React.useMemo(() => buildGenUiAppSrc(indexPath, html), [indexPath, html])
+  // Per-mount card id (POO-103): two mounted instances of one app each get
+  // their own UiCardRegistry entry, so both can drive ui-events safely.
+  const cardId = React.useMemo(() => `${appId}-${createMountNonce()}`, [appId])
   const partition = React.useMemo(() => getGenUiAppPartition(sessionId), [sessionId])
+  // The bridge needs a real bundle file: data: fallback cards get no identity
+  // (and therefore no ui-event loop — their URL would be corrupted by params).
+  const canBridge = Boolean(indexPath && sessionId && GENUI_SESSION_ID_PATTERN.test(sessionId))
+  const src = React.useMemo(() => {
+    const base = buildGenUiAppSrc(indexPath, html)
+    if (!canBridge) return base
+    // Identity injection for file: bundles: the query string never changes
+    // the path Main's validators compare (fileURLToPath uses the pathname),
+    // while the guest reads its own ids to build ui-event deep links.
+    const params = new URLSearchParams({ poloCard: cardId, poloSession: sessionId! })
+    return `${base}?${params.toString()}`
+  }, [indexPath, html, cardId, sessionId, canBridge])
 
   // The guest may not navigate anywhere: its one document is the generated
   // bundle. This mirrors Main's hard block (defense in depth) and keeps the
-  // initial src load (which does not emit will-navigate) untouched.
+  // initial src load (which does not emit will-navigate) untouched. The one
+  // exception (POO-103): poloai:// navigations are left to Main's
+  // will-navigate handler — the authoritative gate, which prevents the
+  // navigation itself and forwards ui-event URLs into validation.
   React.useEffect(() => {
     const webview = webviewRef.current
     if (!webview) return
     const blockNavigation = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail
+      if (typeof detail === 'string' && detail.startsWith('poloai://')) return
       event.preventDefault()
-      console.warn('[GenUiAppCard] blocked guest navigation:', (event as CustomEvent<string>).detail)
+      console.warn('[GenUiAppCard] blocked guest navigation:', detail)
     }
     const failLoad = (event: Event) => {
       const detail = (event as CustomEvent<{ isMainFrame?: boolean }>).detail
@@ -192,6 +250,28 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       webview.removeEventListener('did-fail-load', failLoad)
     }
   }, [src, partition])
+
+  // POO-103: register the mounted guest with the Main-owned UiCardRegistry
+  // (via the Electron-side bridge) and unregister on unmount. Registration is
+  // only honored when Main observed this very guest attach.
+  React.useEffect(() => {
+    const webview = webviewRef.current as GenUiWebviewElement | null
+    if (!webview || !canBridge || !sessionId) return
+    let registeredGuestId: number | null = null
+    const handleDidAttach = () => {
+      const guestId = webview.getWebContentsId?.()
+      if (typeof guestId !== 'number' || guestId <= 0) return
+      registeredGuestId = guestId
+      dispatchGenUiCardRegister({ sessionId, cardId, guestWebContentsId: guestId })
+    }
+    webview.addEventListener('did-attach', handleDidAttach)
+    return () => {
+      webview.removeEventListener('did-attach', handleDidAttach)
+      if (registeredGuestId != null) {
+        dispatchGenUiCardUnregister({ sessionId, cardId, guestWebContentsId: registeredGuestId })
+      }
+    }
+  }, [cardId, sessionId, canBridge])
 
   const handlePin = React.useCallback(() => {
     if (!indexPath || pinState === 'pending') return

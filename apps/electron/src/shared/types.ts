@@ -353,6 +353,32 @@ export interface GenUiAppPinAuditResult {
   error?: string
 }
 
+/**
+ * POO-103 ui-card registration. The renderer reports the ids of a mounted
+ * canvas webview; Main only honors it against its own attach observations
+ * (webview-security) and derives the host window id from the RPC context —
+ * the renderer never names the host.
+ */
+export interface GenUiCardRegisterRequest {
+  sessionId: string
+  cardId: string
+  guestWebContentsId: number
+}
+
+export interface GenUiCardRegisterResult {
+  ok: boolean
+  error?: string
+}
+
+export interface GenUiCardUnregisterRequest {
+  sessionId: string
+  cardId: string
+}
+
+export interface GenUiCardUnregisterResult {
+  ok: boolean
+}
+
 export interface AdminRpcErrorPayload {
   errorCode?: string
   message?: string
@@ -677,6 +703,12 @@ export interface ElectronAPI {
   // Generative UI canvas apps — append a pin record to the session's audit log.
   // Main derives the session directory itself and validates the bundle path.
   appendGenUiAudit(request: GenUiAppPinAuditRequest): Promise<GenUiAppPinAuditResult>
+
+  // Generative UI canvas cards (POO-103) — register/unregister a mounted
+  // canvas webview with the Main-owned UiCardRegistry. Main verifies the
+  // claimed guest against its own attach observations.
+  registerGenUiCard(request: GenUiCardRegisterRequest): Promise<GenUiCardRegisterResult>
+  unregisterGenUiCard(request: GenUiCardUnregisterRequest): Promise<GenUiCardUnregisterResult>
 
   // Local App Bundle installation and runtime
   localApps: {

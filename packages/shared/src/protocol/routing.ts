@@ -133,8 +133,11 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.tabBrowser.GET_APPS,
   RPC_CHANNELS.tabBrowser.SAVE_APPS,
 
-  // genui — canvas app pin audit writes the local session directory
+  // genui — canvas app pin audit writes the local session directory; card
+  // registration feeds the Main-owned UiCardRegistry (POO-103)
   RPC_CHANNELS.genui.AUDIT_APP_PIN,
+  RPC_CHANNELS.genui.REGISTER_UI_CARD,
+  RPC_CHANNELS.genui.UNREGISTER_UI_CARD,
 
   // localApps — downloaded bundles and processes live on this device
   RPC_CHANNELS.localApps.GET_HOST_INFO,

@@ -168,6 +168,12 @@ export const RPC_CHANNELS = {
     // path itself and validates the bundle path before appending audit.jsonl —
     // the renderer never names a writable path.
     AUDIT_APP_PIN: 'genui:auditAppPin',
+    // POO-103: canvas card mount/unmount registration for the ui-event
+    // two-dimensional ownership model. Main only honors a registration whose
+    // guest webContents it observed attaching itself (webview-security) —
+    // the renderer reports ids, Main verifies them.
+    REGISTER_UI_CARD: 'genui:registerUiCard',
+    UNREGISTER_UI_CARD: 'genui:unregisterUiCard',
   },
   localApps: {
     GET_HOST_INFO: 'local-apps:getHostInfo',

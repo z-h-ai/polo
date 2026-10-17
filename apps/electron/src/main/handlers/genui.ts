@@ -19,7 +19,9 @@
  *
  * This module also owns the Main-trusted validator for a canvas guest's
  * initial webview src (see createGenUiGuestSrcValidator), wired into
- * webview-security at registration time.
+ * webview-security at registration time, and the POO-103 ui-event wiring:
+ * the UiCardRegistry RPC surface (register/unregister), the ui-event handler
+ * deps and the canvas-guest deep-link forwarder.
  */
 
 import { appendFileSync, existsSync, statSync } from 'node:fs'
@@ -29,12 +31,17 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { getWebAppArtifactPolicyState } from '@polo-ai/shared/config'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import { validateSessionId } from '@polo-ai/shared/sessions'
-import { GENUI_PINNED_APP_ID_PREFIX, type GenUiAppPinAuditRequest, type GenUiAppPinAuditResult } from '../../shared/types'
-import { setGenUiGuestSrcValidator } from '../webview-security'
+import { GENUI_PINNED_APP_ID_PREFIX, type GenUiAppPinAuditRequest, type GenUiAppPinAuditResult, type GenUiCardRegisterRequest, type GenUiCardRegisterResult, type GenUiCardUnregisterRequest, type GenUiCardUnregisterResult } from '../../shared/types'
+import { setGenUiGuestSrcValidator, setGenUiGuestDeepLinkForwarder } from '../webview-security'
+import { getUiCardRegistry } from '../ui-card-registry'
+import { setGenUiUiEventDeps, handleUiEventUrl } from '../genui-ui-event'
+import { getDeepLinkCallbackBridge } from '../deep-link-callback-bridge'
 import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.genui.AUDIT_APP_PIN,
+  RPC_CHANNELS.genui.REGISTER_UI_CARD,
+  RPC_CHANNELS.genui.UNREGISTER_UI_CARD,
 ] as const
 
 // Mirrors the generate_app APP_ID_PATTERN (session-tools-core) — the audit
@@ -58,6 +65,10 @@ export interface GenUiWorkspaceRef {
 export interface GenUiSessionManagerLike {
   getWorkspaces(): GenUiWorkspaceRef[]
   getSessionPath(sessionId: string): string | null
+  /** POO-103 ui-event wiring (optional so dep-less test fakes stay minimal). */
+  hasLiveSession?(sessionId: string): boolean
+  queueGenUiModelContext?(sessionId: string, entry: { cardId: string; context: string }): boolean
+  setGenUiSessionTeardownHook?(fn: (sessionId: string) => void): void
 }
 export interface GenUiSessionStorageLike {
   getSessionPath(workspaceRootPath: string, sessionId: string): string
@@ -77,6 +88,27 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
   // dep-less tests) the gate fails closed to data:-only.
   if (deps.sessionManager && deps.sessionStorage) {
     setGenUiGuestSrcValidator(createGenUiGuestSrcValidator(deps))
+  }
+
+  // POO-103 ui-event wiring: deps, deep-link forwarder, and the
+  // session-destruction hook that clears the registry. Everything fails
+  // closed while the session manager lacks the ui-event surface.
+  const registry = getUiCardRegistry()
+  const sessionManager = deps.sessionManager
+  if (sessionManager?.hasLiveSession && sessionManager.queueGenUiModelContext) {
+    setGenUiUiEventDeps({
+      registry,
+      bridge: getDeepLinkCallbackBridge(),
+      hasLiveSession: sessionId => sessionManager.hasLiveSession!(sessionId),
+      queueGenUiModelContext: (sessionId, entry) => sessionManager.queueGenUiModelContext!(sessionId, entry),
+      resolveSessionDataPath: createSessionDataPathResolver(deps),
+    })
+    sessionManager.setGenUiSessionTeardownHook?.(sessionId => {
+      registry.clearSession(sessionId)
+    })
+    setGenUiGuestDeepLinkForwarder((url, guestWebContentsId) => {
+      handleUiEventUrl(url, guestWebContentsId)
+    })
   }
 
   server.handle(RPC_CHANNELS.genui.AUDIT_APP_PIN, async (ctx, request: GenUiAppPinAuditRequest): Promise<GenUiAppPinAuditResult> => {
@@ -171,6 +203,72 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
+
+  // POO-103: card registration. The renderer reports a mounted canvas
+  // webview; Main honors it ONLY when its own attach observation agrees
+  // (guest id known, same session, same host window). The host window id
+  // comes from the RPC context — the renderer never names it.
+  server.handle(RPC_CHANNELS.genui.REGISTER_UI_CARD, async (ctx, request: GenUiCardRegisterRequest): Promise<GenUiCardRegisterResult> => {
+    try {
+      if (!request || typeof request !== 'object') throw new Error('Invalid register request')
+      const { sessionId, cardId, guestWebContentsId } = request
+      if (typeof sessionId !== 'string' || sessionId.length === 0) throw new Error('Missing session id')
+      if (typeof cardId !== 'string' || cardId.length === 0 || cardId.length > 128) throw new Error('Invalid card id')
+      if (typeof guestWebContentsId !== 'number' || !Number.isInteger(guestWebContentsId) || guestWebContentsId <= 0) {
+        throw new Error('Invalid guest webContents id')
+      }
+      const hostWebContentsId = ctx.webContentsId
+      if (typeof hostWebContentsId !== 'number') throw new Error('Cannot determine the calling window')
+      const verdict = registry.registerCard({ sessionId, cardId, guestWebContentsId, hostWebContentsId })
+      if (!verdict.ok) {
+        throw new Error(`Card registration rejected: ${verdict.reason}`)
+      }
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.genui.UNREGISTER_UI_CARD, async (_ctx, request: GenUiCardUnregisterRequest): Promise<GenUiCardUnregisterResult> => {
+    try {
+      if (!request || typeof request !== 'object') throw new Error('Invalid unregister request')
+      const { sessionId, cardId } = request
+      if (typeof sessionId !== 'string' || sessionId.length === 0) throw new Error('Missing session id')
+      if (typeof cardId !== 'string' || cardId.length === 0 || cardId.length > 128) throw new Error('Invalid card id')
+      registry.unregisterCard(sessionId, cardId)
+      // Unregistration is idempotent — a missed unmount (window closed before
+      // the RPC) is already covered by the guest-destroyed hook Main-side.
+      return { ok: true }
+    } catch (error) {
+      return { ok: false }
+    }
+  })
+}
+
+/**
+ * POO-103: session data/ resolver for ui-event payloadSrc confinement — same
+ * managed-vs-storage identity cross-check as the src validator, resolved per
+ * session at validation time (a session that moved workspaces re-resolves).
+ */
+export function createSessionDataPathResolver(deps: GenUiDeps): (sessionId: string) => string | null {
+  return (sessionId) => {
+    try {
+      const sessionManager = deps.sessionManager
+      const storage = deps.sessionStorage
+      if (!sessionManager || !storage) return null
+      validateSessionId(sessionId)
+      const managedSessionPath = sessionManager.getSessionPath(sessionId)
+      if (!managedSessionPath) return null
+      for (const workspace of sessionManager.getWorkspaces()) {
+        const storageSessionPath = storage.getSessionPath(workspace.rootPath, sessionId)
+        if (resolve(managedSessionPath) !== resolve(storageSessionPath)) continue
+        return storage.getDataPath(workspace.rootPath, sessionId)
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
 }
 
 /**

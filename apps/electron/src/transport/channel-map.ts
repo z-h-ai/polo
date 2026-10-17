@@ -125,6 +125,8 @@ export const CHANNEL_MAP = {
 
   // Generative UI canvas apps
   appendGenUiAudit: invoke(RPC_CHANNELS.genui.AUDIT_APP_PIN),
+  registerGenUiCard: invoke(RPC_CHANNELS.genui.REGISTER_UI_CARD),
+  unregisterGenUiCard: invoke(RPC_CHANNELS.genui.UNREGISTER_UI_CARD),
 
   // Local App Bundle runtime
   'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),

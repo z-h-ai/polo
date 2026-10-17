@@ -679,6 +679,8 @@
   "genui.app.pinned": "Rögzítve",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "Ez a kártya nem jeleníthető meg.",
+  "genui.form.requiredMissing": "Ez a mező kötelező.",
+  "genui.form.submit": "Küldés",
   "genui.unknownType": "Ismeretlen kártyatípus (\"{{type}}\") — nyers adatok megjelenítése.",
   "hints.analyzeSpreadsheet": "Elemezz egy {file:táblázatot}, és tedd közzé a megállapításokat a {source:Slack}-en",
   "hints.combineSlackThreads": "{source:Slack}-szálakat egyesítve heti összefoglalót készíts a {source:Notion}-be",

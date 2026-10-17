@@ -679,6 +679,8 @@
   "genui.app.pinned": "ピン留め済み",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "このカードを表示できませんでした。",
+  "genui.form.requiredMissing": "この項目は必須です。",
+  "genui.form.submit": "送信",
   "genui.unknownType": "不明なカードタイプ「{{type}}」— 生データを表示しています。",
   "hints.analyzeSpreadsheet": "{file:spreadsheet}を分析し、洞察を{source:Slack}に投稿する",
   "hints.combineSlackThreads": "{source:Slack}のスレッドをまとめて{source:Notion}の週次ダイジェストにする",

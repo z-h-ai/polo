@@ -65,6 +65,10 @@ const electronMock = {
       return ses
     },
   },
+  // POO-103: the ui-event chain pulls DeepLinkCallbackBridge (its constructor
+  // registers an ipcMain listener unless suppressed) — inert here.
+  ipcMain: { on: () => {}, off: () => {} },
+  webContents: { fromId: () => undefined },
 }
 
 mock.module('../app-sdk-service', () => ({ getAppSdkBridge: () => ({ prepareGuest: () => {}, attachGuest: () => {} }), setAppSdkWorkspaceResolver: () => {} }))
@@ -72,9 +76,12 @@ mock.module('electron', () => electronMock)
 mock.module('../browser-pane-manager', () => ({
   BROWSER_PANE_SESSION_PARTITION: 'persist:browser-pane',
 }))
-mock.module('../logger', () => ({ windowLog: {
-  info() {}, warn() {}, error() {}, debug() {},
-} }))
+mock.module('../logger', () => {
+  const stubLog = { info() {}, warn() {}, error() {}, debug() {} }
+  // POO-103: handlers/genui now pulls the ui-event chain (genui-ui-event +
+  // deep-link-callback-bridge), which logs through mainLog too.
+  return { windowLog: stubLog, mainLog: stubLog }
+})
 mock.module('../deep-link-log', () => ({ describeUrlForLog: (url: string) => url }))
 
 const {

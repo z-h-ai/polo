@@ -679,6 +679,8 @@
   "genui.app.pinned": "Pinned",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "This card couldn't be displayed.",
+  "genui.form.requiredMissing": "This field is required.",
+  "genui.form.submit": "Submit",
   "genui.unknownType": "Unknown card type \"{{type}}\" — showing raw data.",
   "hints.analyzeSpreadsheet": "Analyze a {file:spreadsheet} and post insights to {source:Slack}",
   "hints.combineSlackThreads": "Combine {source:Slack} threads into a weekly digest for {source:Notion}",

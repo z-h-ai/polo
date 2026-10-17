@@ -679,6 +679,8 @@
   "genui.app.pinned": "Angeheftet",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "Diese Karte konnte nicht angezeigt werden.",
+  "genui.form.requiredMissing": "Dieses Feld ist erforderlich.",
+  "genui.form.submit": "Absenden",
   "genui.unknownType": "Unbekannter Kartentyp \"{{type}}\" — Rohdaten werden angezeigt.",
   "hints.analyzeSpreadsheet": "Eine {file:Tabelle} analysieren und Erkenntnisse an {source:Slack} senden",
   "hints.combineSlackThreads": "{source:Slack}-Threads zu einem wöchentlichen Digest für {source:Notion} zusammenfassen",

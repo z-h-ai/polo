@@ -12,8 +12,9 @@
  *    call strings, and data: URI payloads one bounded decode deep (base64 or
  *    percent), all applied to an entity-decoded copy of the markup; w3.org
  *    XML namespaces are the only exemption — they are identifiers, never
- *    fetched — plus no `@polo-ai/sdk` literal, no `poloai:` protocol
- *    references. Main additionally installs a fail-closed request fence on
+ *    fetched — plus no `@polo-ai/sdk` literal, and `poloai:` references
+ *    confined to the sanctioned `poloai://action/ui-event/` bridge link
+ *    (POO-103). Main additionally installs a fail-closed request fence on
  *    every canvas partition, so this scan is defense in depth, not the last
  *    line.
  * 3. Artifacts live only under `<session data>/genui-apps/<id>/` — ids are
@@ -132,6 +133,13 @@ const XMLNS_ALLOWLIST = /^https?:\/\/(?:www\.)?w3\.org\//i;
 const SDK_REFERENCE_PATTERN = /@polo-ai\/sdk/i;
 /** Deep-link protocol that only exists to reach the host bridge. */
 const POLOAI_PROTOCOL_PATTERN = /poloai:/i;
+/**
+ * POO-103: the one sanctioned poloai:// form — the ui-event bridge. A bundle
+ * may reference exactly this shape; every other poloai: link stays rejected.
+ * (The deep link itself is still gated host-side by capability + sender
+ * validation, so referencing it without the meta declaration is inert.)
+ */
+const ALLOWED_POLOAI_UI_EVENT_PATTERN = /poloai:\/\/action\/ui-event\//gi;
 
 /**
  * data: payload extraction for the two document-carrying forms. Bounded
@@ -307,9 +315,12 @@ export async function handleGenerateApp(
   }
 
   if (POLOAI_PROTOCOL_PATTERN.test(html)) {
-    return errorResponse(
-      'html must not reference the poloai:// protocol — session apps run without a host bridge. Remove the link and retry.'
-    );
+    const withoutUiEventBridge = html.replace(ALLOWED_POLOAI_UI_EVENT_PATTERN, '');
+    if (POLOAI_PROTOCOL_PATTERN.test(withoutUiEventBridge)) {
+      return errorResponse(
+        'html must not reference the poloai:// protocol — the only sanctioned form is the poloai://action/ui-event/ host-bridge link (see the tool description). Remove the other link and retry.'
+      );
+    }
   }
 
   // Resolve the target app directory strictly inside <data>/genui-apps/.

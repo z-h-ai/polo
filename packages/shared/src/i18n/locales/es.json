@@ -679,6 +679,8 @@
   "genui.app.pinned": "Fijada",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "No se pudo mostrar esta tarjeta.",
+  "genui.form.requiredMissing": "Este campo es obligatorio.",
+  "genui.form.submit": "Enviar",
   "genui.unknownType": "Tipo de tarjeta desconocido \"{{type}}\": se muestran los datos en bruto.",
   "hints.analyzeSpreadsheet": "Analiza una {file:spreadsheet} y publica los insights en {source:Slack}",
   "hints.combineSlackThreads": "Combina hilos de {source:Slack} en un resumen semanal para {source:Notion}",

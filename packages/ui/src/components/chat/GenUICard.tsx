@@ -2,10 +2,9 @@
  * GenUICard - Renders declarative inline cards produced by the render_ui tool.
  *
  * The model sends a small payload ({ components: [...] }); this component
- * dispatches each entry to its registered renderer. P0 ships five component
- * types (stat-card, data-table, alert, progress, action-buttons) statically
- * imported — no dynamic loading, no arbitrary code execution: every payload
- * field is rendered as text, and data-table rows are read from the session
+ * dispatches each entry to its registered renderer. The registry ships six
+ * component types (stat-card, data-table, alert, progress, action-buttons,
+ * form) statically
  * data directory via MarkdownDatatableBlock's existing file-loading path.
  *
  * Unrecognized component types (newer registry entries on other app versions)
@@ -81,12 +80,29 @@ export interface GenUiActionButtons {
   buttons: GenUiActionButton[]
 }
 
+export interface GenUiFormField {
+  key: string
+  label: string
+  type: 'text' | 'number' | 'select' | 'date'
+  required?: boolean
+  options?: string[]
+}
+
+export interface GenUiForm {
+  type: 'form'
+  id: string
+  title?: string
+  fields: GenUiFormField[]
+  submitLabel?: string
+}
+
 export type GenUiComponent =
   | GenUiStatCard
   | GenUiDataTable
   | GenUiAlert
   | GenUiProgress
   | GenUiActionButtons
+  | GenUiForm
 
 // ── Tolerant parsing (models may emit slightly-off shapes; never crash) ──────
 
@@ -364,6 +380,118 @@ function ActionButtonsView({ component, sessionId }: { component: GenUiActionBut
   )
 }
 
+// ── Form (POO-103) ───────────────────────────────────────────────────────────
+
+const FORM_FIELD_STYLES = cn(
+  'h-[28px] w-full px-2 text-xs rounded-[6px] border border-foreground/[0.08] bg-background',
+  'text-foreground placeholder:text-muted-foreground/60',
+  'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+)
+
+/**
+ * Form card: user-filled inputs whose submit serializes the values object and
+ * sends it as the next user message — the same craft: insert+submit backfill
+ * pipeline action-buttons use (fixed send-message semantics per the tool
+ * contract; no per-form action configuration).
+ */
+function FormView({ component, sessionId }: { component: GenUiForm; sessionId?: string }) {
+  const { t } = useTranslation()
+  const [values, setValues] = React.useState<Record<string, string>>({})
+  const [missingKeys, setMissingKeys] = React.useState<Set<string>>(() => new Set())
+
+  const setValue = React.useCallback((key: string, value: string) => {
+    setValues(previous => ({ ...previous, [key]: value }))
+    setMissingKeys(previous => {
+      if (!previous.has(key)) return previous
+      const next = new Set(previous)
+      next.delete(key)
+      return next
+    })
+  }, [])
+
+  const handleSubmit = React.useCallback((event: React.FormEvent) => {
+    event.preventDefault()
+    if (!sessionId) return
+    const absentRequired = component.fields.filter(field => field.required && !(values[field.key] ?? '').trim())
+    if (absentRequired.length > 0) {
+      setMissingKeys(new Set(absentRequired.map(field => field.key)))
+      return
+    }
+    setMissingKeys(new Set())
+    // Numbers serialize as JSON numbers; empty fields are omitted entirely so
+    // the model receives only what the user actually entered.
+    const payload: Record<string, string | number> = {}
+    for (const field of component.fields) {
+      const raw = (values[field.key] ?? '').trim()
+      if (raw === '') continue
+      payload[field.key] = field.type === 'number' && raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : raw
+    }
+    dispatchGenUiInsertText(JSON.stringify(payload), sessionId)
+    dispatchGenUiSubmitInput(sessionId)
+  }, [component.fields, sessionId, values])
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-[8px] overflow-hidden border bg-muted/10"
+    >
+      {component.title && (
+        <div className="px-3 py-2 bg-muted/50 border-b">
+          <span className="text-[12px] text-muted-foreground font-medium">{component.title}</span>
+        </div>
+      )}
+      <div className="px-3 py-2.5 space-y-2">
+        {component.fields.map(field => (
+          <label key={field.key} className="block space-y-1">
+            <span className="flex items-baseline gap-1 text-[11px] text-muted-foreground">
+              {field.label}
+              {field.required && <span className="text-destructive/80">*</span>}
+            </span>
+            {field.type === 'select' ? (
+              <select
+                className={FORM_FIELD_STYLES}
+                value={values[field.key] ?? ''}
+                onChange={event => setValue(field.key, event.target.value)}
+                disabled={!sessionId}
+              >
+                <option value=""></option>
+                {(field.options ?? []).map(option => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                className={FORM_FIELD_STYLES}
+                value={values[field.key] ?? ''}
+                onChange={event => setValue(field.key, event.target.value)}
+                disabled={!sessionId}
+              />
+            )}
+            {missingKeys.has(field.key) && (
+              <span className="block text-[10px] text-destructive/80">{t('genui.form.requiredMissing')}</span>
+            )}
+          </label>
+        ))}
+      </div>
+      <div className="px-3 pb-2.5">
+        <button
+          type="submit"
+          disabled={!sessionId}
+          className={cn(
+            'h-[28px] px-3 text-xs font-medium rounded-[6px] transition-all',
+            'bg-accent/5 text-accent hover:bg-accent/10 shadow-tinted',
+            'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
+          )}
+        >
+          {component.submitLabel ?? t('genui.form.submit')}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 // ── Component registry (static imports for P0) ──────────────────────────────
 
 type GenUiComponentRenderer = React.ComponentType<{ component: GenUiComponent; sessionId?: string }>
@@ -374,6 +502,7 @@ const GENUI_COMPONENT_REGISTRY: Record<string, GenUiComponentRenderer> = {
   'alert': ({ component }) => <AlertView component={component as GenUiAlert} />,
   'progress': ({ component }) => <ProgressView component={component as GenUiProgress} />,
   'action-buttons': ({ component, sessionId }) => <ActionButtonsView component={component as GenUiActionButtons} sessionId={sessionId} />,
+  'form': ({ component, sessionId }) => <FormView component={component as GenUiForm} sessionId={sessionId} />,
 }
 
 /** Whether a component type has a registered renderer (else the JSON fallback renders) */

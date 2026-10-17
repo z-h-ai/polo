@@ -4,6 +4,7 @@ import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/util
 import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
 import { describeUrlForLog } from './deep-link-log'
 import { windowLog } from './logger'
+import { extractPoloBridgeCapabilities, getUiCardRegistry } from './ui-card-registry'
 import {
   legacyTabAppPartitionForScope,
   tabAppPartitionForScope,
@@ -47,6 +48,82 @@ export function setGenUiGuestSrcValidator(validator: GenUiGuestSrcValidator | nu
 /** Recovers the chat session id from a validated genui-app-<sessionId> partition. */
 export function sessionIdFromGenUiPartition(partition: string): string {
   return partition.replace(/^genui-app-/, '')
+}
+
+/**
+ * POO-103: the one deep-link shape a canvas guest may navigate to —
+ * `poloai://action/ui-event/{sessionId}`. Forwarded to the ui-event handler
+ * (wired below), never navigated. Everything else from a canvas guest stays
+ * blocked.
+ */
+export function isGenUiGuestUiEventUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return (
+      parsed.protocol === 'poloai:' &&
+      parsed.hostname === 'action' &&
+      parsed.pathname.split('/').filter(Boolean)[0] === 'ui-event'
+    )
+  } catch {
+    return false
+  }
+}
+
+type GenUiGuestDeepLinkForwarder = (url: string, guestWebContentsId: number) => void
+let genUiGuestDeepLinkForwarder: GenUiGuestDeepLinkForwarder | null = null
+
+/**
+ * Wires the ui-event forwarding (from the genui handler registration, which
+ * owns the ui-event deps). Setter injection keeps this module free of the
+ * bridge/registry import graph. While unset, canvas-guest ui-event URLs are
+ * simply dropped (fail closed).
+ */
+export function setGenUiGuestDeepLinkForwarder(forwarder: GenUiGuestDeepLinkForwarder | null): void {
+  genUiGuestDeepLinkForwarder = forwarder
+}
+
+// ── POO-103 attach correlation ───────────────────────────────────────────────
+// will-attach knows the validated src (and therefore the document's bridge
+// capability declaration) but not the guest id; did-attach knows the guest but
+// not the src. A short FIFO queue per host correlates the two — webviews of
+// one window attach in creation order. Entries expire quickly: a miss only
+// ever costs the card its (optional) capability grant, never grants one.
+
+interface PendingGenUiAttach {
+  partition: string
+  src: string
+  hostWebContentsId: number
+  queuedAt: number
+}
+
+const GENUI_ATTACH_PENDING_TTL_MS = 10_000
+let pendingGenUiAttaches: PendingGenUiAttach[] = []
+
+function queuePendingGenUiAttach(entry: PendingGenUiAttach): void {
+  const now = Date.now()
+  pendingGenUiAttaches = pendingGenUiAttaches.filter(pending => now - pending.queuedAt <= GENUI_ATTACH_PENDING_TTL_MS)
+  pendingGenUiAttaches.push(entry)
+}
+
+function takePendingGenUiAttach(hostWebContentsId: number, guest: Electron.WebContents): PendingGenUiAttach | undefined {
+  const now = Date.now()
+  const index = pendingGenUiAttaches.findIndex(
+    pending =>
+      pending.hostWebContentsId === hostWebContentsId &&
+      now - pending.queuedAt <= GENUI_ATTACH_PENDING_TTL_MS &&
+      matchesPartition(pending.partition, guest),
+  )
+  if (index < 0) return undefined
+  const [entry] = pendingGenUiAttaches.splice(index, 1)
+  return entry
+}
+
+function matchesPartition(partitionName: string, guest: Electron.WebContents): boolean {
+  try {
+    return session.fromPartition(partitionName) === guest.session
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -183,6 +260,8 @@ export function __resetWebviewSecurityForTests(): void {
   genuiGuestSessions = new WeakSet()
   genUiPolicySessions = new WeakSet()
   genUiGuestSrcValidator = null
+  genUiGuestDeepLinkForwarder = null
+  pendingGenUiAttaches = []
   delete trustedWebviewScopeResolver.getWorkspaceForWebContentsId
 }
 
@@ -399,6 +478,20 @@ export function installWebviewSecurityHandlers(): void {
     contents.on('will-navigate', (event, url) => {
       if (genuiGuestSessions.has(contents.session)) {
         event.preventDefault()
+        // POO-103: the ui-event deep link is the single sanctioned bridge —
+        // forwarded Main-side (the handler re-validates the URL strictly).
+        // The guest's URL never changes: the navigation stays prevented.
+        if (isGenUiGuestUiEventUrl(url)) {
+          if (genUiGuestDeepLinkForwarder) {
+            genUiGuestDeepLinkForwarder(url, contents.id)
+          } else {
+            windowLog.warn(
+              '[webview-security] dropped genui guest ui-event (no forwarder wired)',
+              describeUrlForLog(url),
+            )
+          }
+          return
+        }
         windowLog.warn(
           '[webview-security] blocked navigation from a genui canvas guest',
           describeUrlForLog(url),
@@ -426,7 +519,34 @@ export function installWebviewSecurityHandlers(): void {
     // trusted account+ProductSpace+Workspace tuple. A mismatching, missing,
     // or unresolvable partition (compromised or buggy renderer, partial
     // scope) never loads.
-    contents.on('did-attach-webview', (_event, guest) => getAppSdkBridge().attachGuest(contents, guest))
+    contents.on('did-attach-webview', (_event, guest) => {
+      getAppSdkBridge().attachGuest(contents, guest)
+      // POO-103: observe canvas guest attaches for the UiCardRegistry — the
+      // registration RPC from the renderer is only honored against these
+      // Main-observed records.
+      if (genuiGuestSessions.has(guest.session)) {
+        const pending = takePendingGenUiAttach(contents.id, guest)
+        if (pending) {
+          const registry = getUiCardRegistry()
+          registry.noteGuestAttached({
+            guestWebContentsId: guest.id,
+            hostWebContentsId: contents.id,
+            sessionId: sessionIdFromGenUiPartition(pending.partition),
+            partition: pending.partition,
+            capabilities: extractPoloBridgeCapabilities(pending.src),
+          })
+          // A destroyed guest drops its attach record and every card bound
+          // to it — closed cards can never keep accepting events.
+          guest.once('destroyed', () => {
+            getUiCardRegistry().noteGuestDetached(guest.id)
+          })
+        } else {
+          windowLog.warn(
+            '[webview-security] genui guest attached without a correlated will-attach record; bridge capabilities stay empty',
+          )
+        }
+      }
+    })
     contents.on('will-attach-webview', (event, webPreferences, params) => {
       delete params.preload
       delete webPreferences.preload
@@ -458,6 +578,16 @@ export function installWebviewSecurityHandlers(): void {
         }
         attachGenUiGuestPolicy(requestedPartition)
         genuiGuestSessions.add(session.fromPartition(requestedPartition))
+        // POO-103: remember the validated src so did-attach can extract the
+        // document's bridge capability declaration Main-side (issue at mount,
+        // invalidate on document change — the exact attached document is the
+        // only trust input).
+        queuePendingGenUiAttach({
+          partition: requestedPartition,
+          src: params.src ?? '',
+          hostWebContentsId: contents.id,
+          queuedAt: Date.now(),
+        })
         return
       }
 
