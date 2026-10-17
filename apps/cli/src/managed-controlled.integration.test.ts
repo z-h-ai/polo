@@ -36,6 +36,21 @@ test('controlled real CLI → desktop Broker/proxy → Admin/Provider: personal+
       if (!success) expect(code).not.toBe(0)
       return { code, out, err }
     }
+    // Invalid Admin transport/auth combinations must fail before any Provider call.
+    for (const connectionOverrides of [
+      { providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key' },
+      { authType: 'api_key' }, { authType: 'oauth' }, { authType: 'none' },
+      { customEndpoint: { api: 'anthropic-messages' } },
+      { customEndpoint: { api: 'openai-responses' } }, { customEndpoint: null },
+      { baseUrl: 'ftp://127.0.0.1/v1' }, { baseUrl: 'https://user:pass@example.invalid/v1' },
+    ]) {
+      await control({ connectionOverrides })
+      const rejected = await run(['exec', '--provider', 'polo', '--json', '-C', join(root, 'work'), 'Reject invalid transport.'], false)
+      expect(rejected.out + rejected.err).toContain('POLO_MANAGED_PROTOCOL_UNSUPPORTED')
+      expect((await state()).providerCalls).toBe(0)
+      expect((await state()).billing).toEqual([])
+    }
+    await control({ connectionOverrides: {} })
     const probes = await control({ probes: true })
     expect(probes.rejected).toHaveLength(14)
     expect(probes.duplicateFinish).toBe(true)
