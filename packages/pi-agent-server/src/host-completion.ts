@@ -317,7 +317,7 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     // The tracker's expected response model must equal the SENT clone id the seam constructs:
     // bare id, plus one stripped MiniMax- prefix for the minimax-cn catalog route.
     const expectedModel = request.provider === 'minimax-cn' ? stripPiPrefix(request.model).replace(/^MiniMax-/, '') : stripPiPrefix(request.model)
-    const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, claim: (kind) => failWith(kind) })
+    const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, route: { kind: request.routeKind, api: request.api }, claim: (kind) => failWith(kind) })
     const started = startHostPiStream(runtime, {
       ...phaseContext, onResponse: providerResponse.onResponse, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
       maxOutputTokens: request.maxOutputTokens, apiKey, signal: controller.signal,

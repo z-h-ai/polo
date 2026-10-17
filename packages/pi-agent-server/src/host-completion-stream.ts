@@ -9,6 +9,7 @@ import { createContentMeter, type SafeTerminalSnapshot } from './host-completion
 export type StreamVerdict = { kind: 'release'; status: 'completed' | 'partial'; text: string; usage: HostResultUsage } | { kind: 'failure'; failure: HostFailureKind; usage?: HostResultUsage }
 export function createHostStreamTracker(opts: {
   expectedModel: string; maxOutputTokens: number; jsonOutput: boolean; bedrock: boolean
+  route?: { kind: string; api?: string }
   claim: (kind: HostFailureKind) => void
 }) {
   const meter = createContentMeter()
@@ -46,7 +47,12 @@ export function createHostStreamTracker(opts: {
     const reportedModel = snapshot.responseModel.trim() || snapshot.model.trim()
     const input = opts.bedrock ? rawInput - cacheRead - cacheWrite : rawInput
     if (Math.min(rawInput, output, cacheRead, cacheWrite, total) < 0 || input < 0 || input + cacheRead <= 0 || total !== input + output + cacheRead + cacheWrite || output > opts.maxOutputTokens) return fail('provider_usage_invalid')
-    if (reportedModel !== opts.expectedModel) return fail('unexpected_terminal')
+    // Pi's model is the constructed/sent descriptor. responseModel is only
+    // a provider label (custom OpenAI relays may return a version or alias).
+    // Keep the actual sent model bound even when the response label differs.
+    if (snapshot.model !== opts.expectedModel) return fail('unexpected_terminal')
+    const customOpenAi = opts.route?.kind === 'custom' && opts.route.api === 'openai-completions'
+    if (!customOpenAi && reportedModel !== opts.expectedModel) return fail('unexpected_terminal')
     const usage: HostResultUsage = { inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, totalTokens: total,
       reportedModel, terminalReason: terminal.reason as 'stop' | 'length', provenance: 'provider_final' }
     if (opts.jsonOutput) {

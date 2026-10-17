@@ -15,6 +15,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **NewAPI SDK model labels** — Custom OpenAI-compatible SDK queries retain the provider response model label while binding execution and billing to the authorized model actually sent, matching managed CLI accounting.
+
 - **Creator quotation example packaging** — Build a static ZIP with a root file entry recognized by normal Creator upload, without reserving a published App ID. The same generator supplies the declarations required for a separate Enterprise internal import.
 
 - **Polo compute for independent CLI Threads** — Use `--provider polo` with the running, signed-in App's active personal or enterprise space. The desktop retains credentials, validates each model request through existing Assistant billing, and revokes CLI work on space/account changes or quit. Managed history stays bound to its original account and space; owned connections remain independent. Empty model responses now fail clearly, stale tool/terminal events cannot reach a successor runtime, and Mac release preparation stages lock-matched sharp/libvips for both CPU targets.

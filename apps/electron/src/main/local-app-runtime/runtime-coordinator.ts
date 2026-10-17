@@ -1485,7 +1485,9 @@ export class LocalAppRuntimeCoordinator {
           timeoutMs: parsed.data.timeoutMs,
           signal: controller.signal,
         })
-        const metadata = this.adapters.admin.admitAppRequest ? { hostRequestId: result.requestId, actualModel: result.usage?.reportedModel ?? result.model.replace(/^pi:/, ''), providerObservation: result.providerObservation ?? { version: 1 as const, state: 'missing' as const }, outputDisposition: result.status === 'completed' || result.status === 'partial' ? 'usable' as const : result.status === 'no_output' ? 'no_output' as const : 'unknown' as const } : {}
+        // Match managed CLI billing: actualModel is the authorized model sent
+        // upstream, while usage.reportedModel retains the response label.
+        const metadata = this.adapters.admin.admitAppRequest ? { hostRequestId: result.requestId, actualModel: result.model.replace(/^pi:/, ''), providerObservation: result.providerObservation ?? { version: 1 as const, state: 'missing' as const }, outputDisposition: result.status === 'completed' || result.status === 'partial' ? 'usable' as const : result.status === 'no_output' ? 'no_output' as const : 'unknown' as const } : {}
         if (result.status === 'completed' || result.status === 'partial') {
           return {
             kind: 'success',
