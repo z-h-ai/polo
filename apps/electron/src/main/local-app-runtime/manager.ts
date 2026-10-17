@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto'
-import { constants as fsConstants, createReadStream, existsSync } from 'fs'
+import { accessSync, constants as fsConstants, createReadStream, existsSync, statSync } from 'fs'
 import {
   access,
   lstat,
@@ -3201,6 +3201,17 @@ export class LocalAppRuntimeManager {
     for (const key of RUNTIME_ENV_ALLOWLIST) {
       const value = this.readBaseEnvironmentValue(key)
       if (value !== undefined) environment[key] = value
+    }
+    // Only advertise the Host-configured absolute executable, never an app's env value.
+    if (this.bunPath && isAbsolute(this.bunPath)) {
+      try {
+        if (statSync(this.bunPath).isFile()) {
+          accessSync(this.bunPath, fsConstants.X_OK)
+          environment.POLO_APP_BUN_PATH = this.bunPath
+        }
+      } catch {
+        // Bun is optional for Python apps; a missing runtime must not block startup.
+      }
     }
     return {
       ...environment,
