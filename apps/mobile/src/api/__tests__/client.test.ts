@@ -400,3 +400,74 @@ describe('api client', () => {
     expect(script.calls).toHaveLength(0);
   });
 });
+
+// POL-15 regression: qr confirm/reject return *business* 401s
+// (qr_login_expired / invalid_credentials). These must surface verbatim as
+// ApiError without entering the refresh chain or wiping the session — the
+// credential is fine, only the ticket is dead. Admin emits these codes
+// lowercase ({ error: 'qr_login_expired' }); the client reads the `error` key.
+describe('api client — business 401 codes skip refresh (POL-15)', () => {
+  test.each(['qr_login_expired', 'invalid_credentials'])(
+    '401 %s -> ApiError verbatim, no refresh, no wipe',
+    async (code) => {
+      const tokens = makeTokens({ accessToken: 'at1', refreshToken: 'rt1', user: USER });
+      const script = new FetchScript(() => jsonResponse({ error: code, message: 'nope' }, 401));
+      const client = makeClient(script, tokens);
+      let expired = 0;
+      client.onAuthExpired(() => {
+        expired += 1;
+      });
+
+      await expect(
+        client.post('/api/auth/qr/confirm', { qrId: 'q', secret: 's', action: 'confirm' }),
+      ).rejects.toMatchObject({ name: 'ApiError', errorCode: code, status: 401 });
+
+      expect(script.callsTo('/api/auth/refresh')).toHaveLength(0);
+      expect(script.callsTo('/api/auth/qr/confirm')).toHaveLength(1); // no replay
+      expect(tokens.getCleared()).toBe(0);
+      expect(expired).toBe(0);
+      expect(tokens.cached?.accessToken).toBe('at1');
+    },
+  );
+
+  test('replay 401 that turned into a business code keeps the session', async () => {
+    const tokens = makeTokens({ accessToken: 'at1', refreshToken: 'rt1', user: USER });
+    const script = new FetchScript(({ path, headers }) => {
+      if (path === '/api/auth/refresh') {
+        return jsonResponse({ accessToken: 'at2', refreshToken: 'rt2', expiresIn: 60 });
+      }
+      if (headers.Authorization === 'Bearer at1') {
+        return jsonResponse({ error: 'unauthorized', message: 'stale' }, 401);
+      }
+      return jsonResponse({ error: 'qr_login_expired', message: 'ticket gone' }, 401);
+    });
+    const client = makeClient(script, tokens);
+    let expired = 0;
+    client.onAuthExpired(() => {
+      expired += 1;
+    });
+
+    await expect(client.get('/api/auth/qr/status-locked')).rejects.toMatchObject({
+      name: 'ApiError',
+      errorCode: 'qr_login_expired',
+    });
+    expect(tokens.getCleared()).toBe(0);
+    expect(expired).toBe(0);
+  });
+
+  test("admin's lowercase 'unauthorized' still drives the refresh chain", async () => {
+    const tokens = makeTokens({ accessToken: 'at1', refreshToken: 'rt1', user: USER });
+    const script = new FetchScript(({ headers }) => {
+      if (headers.Authorization === 'Bearer at1') {
+        return jsonResponse({ error: 'unauthorized', message: 'stale' }, 401);
+      }
+      if (headers.Authorization === 'Bearer at2') return jsonResponse({ ok: true });
+      return jsonResponse({ accessToken: 'at2', refreshToken: 'rt2', expiresIn: 60 });
+    });
+    const client = makeClient(script, tokens);
+
+    await expect(client.get('/api/me')).resolves.toEqual({ ok: true });
+    expect(script.callsTo('/api/auth/refresh')).toHaveLength(1);
+    expect(tokens.cached?.accessToken).toBe('at2');
+  });
+});

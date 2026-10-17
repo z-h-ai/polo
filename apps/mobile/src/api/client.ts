@@ -20,6 +20,23 @@ import { tokenStore as defaultTokenStore } from '../auth/tokenStore';
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_RETRY_AFTER_SECONDS = 86_400;
 
+/**
+ * 401 codes that mean the credential itself failed. Admin also returns
+ * business 401s with other codes (qr confirm: qr_login_expired,
+ * invalid_credentials) — those must NOT enter the refresh/replay chain: the
+ * token is fine, replaying cannot help, and treating them as auth failures
+ * would wipe a perfectly good session and log the user out (POL-15).
+ * Lowercase = admin wire codes (lib/auth), uppercase = client fallbacks.
+ */
+const AUTH_401_CODES = new Set([
+  'unauthorized',
+  'token_revoked',
+  'UNAUTHORIZED',
+  'TOKEN_REVOKED',
+  'TOKEN_EXPIRED',
+  'AUTH_EXPIRED',
+]);
+
 export class ApiError extends Error {
   readonly status: number;
   /** Admin error code, passed through verbatim (e.g. 'sms_rate_limited'). */
@@ -207,16 +224,27 @@ export function createApiClient(deps: {
     const { response, data } = await send(path, method, options.body, auth);
 
     if (response.status === 401 && auth && !options.replayed && path !== '/api/auth/refresh') {
+      // A business 401 (recognizable non-auth code, e.g. qr_login_expired on
+      // the qr confirm route) is terminal for the request: the credential is
+      // valid, so neither the refresh rotation nor the replay can change the
+      // outcome. Surface it verbatim and keep the session (POL-15).
+      const firstCode = readErrorCode(data);
+      if (firstCode !== null && !AUTH_401_CODES.has(firstCode)) {
+        throw toApiError(response.status, data);
+      }
       const rotated = await refreshRotation();
       try {
         return await request<T>(path, { ...options, replayed: true });
       } catch (replayError) {
-        // A replay that still 401s means the fresh session itself is unusable.
-        // Clear only while that rotated session is still the stored one —
-        // concurrent replays clear/notify exactly once, and a racing re-login
-        // is left alone. Either way no further refresh happens (replayed flag
-        // prevents a refresh loop).
+        // A replay that still 401s means the fresh session itself is unusable
+        // (auth code or unreadable body). Clear only while that rotated
+        // session is still the stored one — concurrent replays clear/notify
+        // exactly once, and a racing re-login is left alone. Either way no
+        // further refresh happens (replayed flag prevents a refresh loop).
+        // A replay 401 carrying a business code means the new token WORKS —
+        // surface the ApiError without touching the session.
         if (replayError instanceof ApiError && replayError.status === 401) {
+          if (!AUTH_401_CODES.has(replayError.errorCode)) throw replayError;
           await clearIfCurrentSession(rotated.refreshToken);
           throw new AuthExpiredError(undefined, replayError);
         }
