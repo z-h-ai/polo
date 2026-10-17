@@ -23,6 +23,7 @@ test('copied example builds a Creator-uploadable payload without reserving an ap
     const entries = decodeCreatorAppPayloadZip(new Uint8Array(await readFile(resolve(project, 'polo-payload.zip'))))
     expect(entries.map(entry => entry.path).sort()).toEqual(['app.css', 'app.js', 'index.html', 'polo-app.json'])
     const localManifest = JSON.parse(entries.find(entry => entry.path === 'polo-app.json')!.content!)
+    expect(localManifest.appId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
     expect(localManifest.entry).toEqual(['index.html'])
     expect(localManifest.healthcheck).toBe('/')
     expect(localManifest.enterpriseMetadataVersion).toBe(1)
