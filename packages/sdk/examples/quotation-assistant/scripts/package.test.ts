@@ -21,15 +21,21 @@ test('copied example builds a Creator-uploadable payload without reserving an ap
       expect({ code, error: code === 0 ? '' : out + err }).toEqual({ code: 0, error: '' })
     }
     const entries = decodeCreatorAppPayloadZip(new Uint8Array(await readFile(resolve(project, 'polo-payload.zip'))))
-    expect(entries.map(entry => entry.path).sort()).toEqual(['app.css', 'app.js', 'index.html'])
+    expect(entries.map(entry => entry.path).sort()).toEqual(['app.css', 'app.js', 'index.html', 'polo-app.json'])
+    const localManifest = JSON.parse(entries.find(entry => entry.path === 'polo-app.json')!.content!)
+    expect(localManifest.entry).toEqual(['index.html'])
+    expect(localManifest.healthcheck).toBe('/')
+    expect(localManifest.enterpriseMetadataVersion).toBe(1)
+    for (const field of ['name', 'description', 'icon', 'instructions', 'author', 'source']) expect(localManifest[field].trim().length).toBeGreaterThan(0)
     const analysis = analyzeCreatorAppPayload(entries)
-    expect(analysis).toEqual({ status: 'ready', candidate: { runtime: 'static', path: 'index.html' } })
+    expect(analysis.status).toBe('ready')
+    if (analysis.status === 'ready') expect(analysis.candidate).toEqual({ runtime: 'static', path: 'index.html' })
     if (analysis.status !== 'ready') throw new Error('Creator ingress must detect the runnable payload')
     const bundle = createCanonicalCreatorAppBundle({ entries, appId: 'platform-assigned-quote', version: '1.0.0', name: 'Quote', entry: analysis.candidate })
     expect(bundle.manifest.appId).toBe('platform-assigned-quote')
     expect(bundle.manifest.entry).toEqual(['index.html'])
     const finalEntries = decodeCreatorAppPayloadZip(bundle.archive)
-    for (const entry of entries) {
+    for (const entry of entries.filter(entry => entry.path !== 'polo-app.json')) {
       expect(finalEntries.find(item => item.path === entry.path)?.bytes).toEqual(entry.bytes)
     }
   } finally {

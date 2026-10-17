@@ -49,19 +49,12 @@ npm install /path/to/polo-ai-sdk-0.1.0.tgz
 cp -R node_modules/@polo-ai/sdk/examples/quotation-assistant ./quote-app
 cd quote-app
 npm install /path/to/polo-ai-sdk-0.1.0.tgz
-POLO_APP_ID="<published-package-id>" POLO_APP_VERSION=1.0.0 npm run build
+npm run build
 npm run package
 ```
 
-For an unpublished local trial, after the same install/copy steps, run this in `quote-app`:
+Node 20+ (or compatible Bun), npm and declared esbuild/fflate dev dependencies are creator build requirements. The output `polo-payload.zip` is the Creator upload payload, with `index.html`, `app.js`, `app.css` and `polo-app.json` at its root. No App ID or version reservation is needed. Normal Creator upload assigns the identity/version and writes the final `polo-app.json` with a static file entry and healthcheck `/`; validation, review, publication and distribution establish the authorized Catalog bundle. Keep the upload payload and final bundle checksums distinct. A historical final bundle whose manifest entry is the directory `web` cannot be reused as this upload payload without adapting its entry layout.
 
-```sh
-POLO_APP_ID=local-trial-quotation-unpublished POLO_APP_VERSION=0.0.0-local npm run build
-npm run package
-```
-
-This placeholder example only validates the build and ZIP structure. It cannot install the App in Polo or grant authorization. For real publication and delivery, replace the placeholder with the ID/version matching the Catalog artifact and rebuild.
-
-Node 20+ (or compatible Bun), npm and declared esbuild/fflate dev dependencies are creator build requirements. The output `polo-payload.zip` is rootless: `polo-app.json`, `web/index.html`, `web/app.js`, `web/app.css`. Supply it to the existing creator publication/catalog delivery workflow. There is no new local ZIP import or entitlement bypass. Do not publish or grant access without authorization. Real use needs the authorized Catalog/version/download and valid space/provider/billing services.
+The ZIP alone cannot install the App in Polo or grant authorization. Do not publish or grant access without authorization. Real use needs the authorized Catalog/version/download and valid space/provider/billing services. The same generated ZIP includes Enterprise v1 metadata in the single `metadata` object in `scripts/build.mjs`. When deriving the example, update the name, description, icon, instructions, author and source there. For a new Enterprise internal import, choose a unique local package identity with `POLO_APP_ID=my-company-quote-example POLO_APP_VERSION=1.0.0 npm run build`, then `npm run package`. The Owner uses normal import, inspection, version adoption, scope and enablement; the local identity grants no access and does not inherit creator-circle authorization. Creator repackaging replaces this local manifest and may discard its enterprise declarations, so the downloaded Creator final bundle is not interchangeable with the generated Enterprise import ZIP.
 
 Maintainers: `bun run --cwd packages/sdk build`, `bun run --cwd packages/sdk test`, then `npm pack --workspace packages/sdk --pack-destination <delivery-dir>`. Build artifacts and tarballs are generated; maintain this Skill/example source only. A controlled Admin/Provider test proves that transport/runtime path only; it is not real-business E2E or formal product acceptance.

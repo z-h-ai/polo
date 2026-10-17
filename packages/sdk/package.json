@@ -12,7 +12,7 @@
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=browser --format=esm --outfile=dist/index.js && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "bun test src/*.test.ts examples/quotation-assistant/src/*.test.ts"
+    "test": "bun test src/*.test.ts examples/quotation-assistant/src/*.test.ts examples/quotation-assistant/scripts/*.test.ts"
   },
   "devDependencies": { "typescript": "^5.0.0", "esbuild": "^0.25.0" }
 }
