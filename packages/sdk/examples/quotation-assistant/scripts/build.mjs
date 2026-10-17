@@ -1,10 +1,11 @@
 import { build } from 'esbuild'
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 // Local package identity for direct Enterprise import. Creator upload replaces
 // it with the platform-assigned work/version identity; it grants no access.
-const appId = process.env.POLO_APP_ID || 'polo-sdk-quotation-example'
+const appId = process.env.POLO_APP_ID || randomUUID()
 const version = process.env.POLO_APP_VERSION || '1.0.0'
-if (!/^[A-Za-z0-9][A-Za-z0-9._:@|+-]{0,127}$/.test(appId) || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('Invalid local POLO_APP_ID or POLO_APP_VERSION')
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(appId) || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('POLO_APP_ID must be a local UUID and POLO_APP_VERSION must be SemVer')
 // Creators deriving this example should update these declarations together.
 const metadata = {
   enterpriseMetadataVersion: 1,
