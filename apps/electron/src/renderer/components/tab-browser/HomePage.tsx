@@ -731,15 +731,17 @@ export function HomePage() {
                       identityKey={entry.identityKey}
                       busy={Boolean(memberActions.operationStates[entry.identityKey])}
                       testId="home-directory-app"
-                      openDisabled={sourceLost}
+                      openDisabled={entry.launchBlocked}
                       onOpen={() => handleOpenApp(entry)}
                     />
-                    {sourceLost && (
+                    {entry.launchBlocked && (
                       <p
                         className="m-0 mt-[6px] px-[2px] text-[11px] leading-[1.5] text-muted-foreground"
                         data-testid={`home-directory-app-unavailable-${entry.identityKey}`}
                       >
-                        {t('poo70.h3.home.sourceLostReason')}
+                        {sourceLost
+                          ? t('poo70.h3.home.sourceLostReason')
+                          : t('homeApps.errors.unavailable')}
                       </p>
                     )}
                     {/* P70-HOME-01 保留本机隐藏恢复: a local hide control on

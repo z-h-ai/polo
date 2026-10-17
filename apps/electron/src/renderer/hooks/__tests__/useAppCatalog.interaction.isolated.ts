@@ -522,7 +522,41 @@ describe('useAppCatalog creator circle relations', () => {
     await waitFor(() => {
       expect(result.current.state.errorCode).toBe('request_failed')
     })
+    expect(result.current.state.accessMode).toBe('offline')
     expect(result.current.creatorCircles).toEqual([])
+  })
+
+  it('downgrades a 304 Catalog response to offline while retaining the recovery cache', async () => {
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-online',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [],
+    })
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-online')
+    })
+
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: true as const,
+    })
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.accessMode).toBe('offline')
+    })
+
+    expect(result.current.state.catalog?.appConfigVersion).toBe('rev-online')
+    expect(result.current.state.errorCode).toBeNull()
   })
 
   it('clears derived creator circles on a thrown authorization failure', async () => {

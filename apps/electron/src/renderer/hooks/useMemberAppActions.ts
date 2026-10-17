@@ -197,6 +197,7 @@ export function useMemberAppActions({
     const { app } = target
     const usageContextKey = catalog.productSpace?.productSpaceContextKey
     try {
+      await catalog.resolveLaunch(app)
       await catalog.installProductSpaceBundle(app)
       toast.success(t('homeApps.toast.installed', { name: app.name }))
       const accountId = catalog.state.catalog?.accountId

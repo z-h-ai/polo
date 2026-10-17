@@ -468,7 +468,9 @@ function stableEntryKey(
  * fresh Catalog. Existence is decided by the STABLE in-space identity
  * (catalogEntryId + artifactInstanceId) — a version upgrade replaces the
  * live entry and must never synthesize a tombstone. Re-appearing identities
- * clear their tombstone.
+ * clear their tombstone. A tombstone survives one additional verified empty
+ * read so the UI can explain and clean up the removal, but it is dropped on
+ * the next read instead of being renewed indefinitely.
  */
 export function recordProductSpaceCatalogAuthoritativeEntries(
   accountId: string,
@@ -547,7 +549,6 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
       tombstones.push({ ...candidate, availability: 'withdrawn', withdrawnAt: Date.now() })
     }
     for (const entry of previous.entries) carry(entry)
-    for (const tombstone of previous.tombstones) carry(tombstone)
   }
 
   // TRANSACTIONAL GRANT: build the candidate from an IMMUTABLE SNAPSHOT of
