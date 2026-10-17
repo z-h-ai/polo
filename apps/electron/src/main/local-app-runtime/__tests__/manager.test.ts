@@ -12,11 +12,12 @@ import {
   readdir,
   rm,
   stat,
+  symlink,
   truncate,
   writeFile,
 } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { delimiter, join } from 'path'
 import { PassThrough, Writable } from 'stream'
 import { deflateRawSync } from 'zlib'
 import * as tar from 'tar'
@@ -2031,6 +2032,108 @@ package = false
       extractBundleArchive(bombPath, join(testRoot, 'bomb-output')),
     ).rejects.toMatchObject({ code: 'UNSAFE_ARCHIVE' })
   })
+})
+
+describe('Host-owned optional Bun environment for Python', () => {
+  it.each(['available with spaces', 'unconfigured', 'missing', 'relative', 'directory', 'not executable'])(
+    '%s preserves Python startup and the runtime environment fences',
+    async (scenario) => {
+      const uvPath = Bun.which('uv')
+      expect(uvPath).toBeTruthy()
+      const bundledBun = join(testRoot, 'Polo AI.app', 'Bun runtime', 'bun')
+      await mkdir(join(bundledBun, '..'), { recursive: true })
+      if (scenario === 'available with spaces') await symlink(process.execPath, bundledBun)
+      if (scenario === 'directory') await mkdir(bundledBun)
+      if (scenario === 'not executable') {
+        await writeFile(bundledBun, 'not an executable')
+        await chmod(bundledBun, 0o644)
+      }
+      const bunPath = scenario === 'unconfigured' ? undefined
+        : scenario === 'relative' ? 'bun' : bundledBun
+      const runtime = makeManager({
+        uvPath: uvPath!,
+        bunPath,
+        baseEnvironment: {
+          ...process.env,
+          POLO_APP_BUN_PATH: '/untrusted/app-bun',
+          POLO_AI_BUN: '/untrusted/host-bun',
+          POLO_APP_API_TOKEN: 'untrusted-capability',
+          POLO_APP_HEALTH_TOKEN: 'untrusted-health',
+          POLO_APP_DATA_DIR: '/untrusted/data',
+          POLO_APP_BUNDLE_DIR: '/untrusted/bundle',
+          HOST: '0.0.0.0',
+          PORT: '1',
+          POLO_ADMIN_TOKEN: 'must-not-leak',
+          HTTPS_PROXY: 'http://untrusted.invalid',
+          PYTHONPATH: '/untrusted/python',
+        },
+      })
+      const appId = 'demo.python-bun-env'
+      const bundle = await writeBundle(appId, '1.0.0', {
+        runtime: 'python', entry: ['server.py'],
+      }, {
+        'server.py': `
+import json, os, subprocess
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+bun = os.environ.get("POLO_APP_BUN_PATH")
+converted = None
+if bun:
+    result = subprocess.run([bun, "-e", "console.log(JSON.stringify(process.argv.slice(1)))", "one argument ; $(literal)"], check=True, capture_output=True, text=True)
+    converted = json.loads(result.stdout)
+keys = ["PATH", "HOST", "HOSTNAME", "PORT", "POLO_APP_ID", "POLO_APP_VERSION", "POLO_APP_DATA_DIR", "POLO_APP_BUNDLE_DIR", "UV_PROJECT_ENVIRONMENT", "POLO_APP_BUN_PATH", "POLO_AI_BUN", "POLO_APP_API_TOKEN", "POLO_ADMIN_TOKEN", "HTTPS_PROXY", "PYTHONPATH"]
+body = json.dumps({"env": {key: os.environ.get(key) for key in keys}, "converted": converted}).encode()
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        payload = b"ok" if self.path == "/health" else body
+        self.send_response(200)
+        self.send_header("X-Polo-App-Health-Token", os.environ["POLO_APP_HEALTH_TOKEN"])
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+    def log_message(self, *_args):
+        pass
+ThreadingHTTPServer((os.environ["HOST"], int(os.environ["PORT"])), Handler).serve_forever()
+`,
+        'pyproject.toml': '[project]\nname = "python-bun-env"\nversion = "1.0.0"\nrequires-python = ">=3.11"\ndependencies = []\n[tool.uv]\npackage = false\n',
+      })
+      const lock = Bun.spawn([uvPath!, 'lock', '--offline', '--project', bundle], {
+        stdout: 'pipe', stderr: 'pipe',
+      })
+      expect(await lock.exited).toBe(0)
+      const archive = await archiveBundle(bundle, 'python-bun-env')
+      const url = await serveArchive(archive)
+      await runtime.install(requestFor(appId, '1.0.0', url, archive))
+      const started = await runtime.startExactVersion(appId, '1.0.0', {
+        processEnvironment: () => ({
+          env: { POLO_APP_API_TOKEN: 'host-owned-test-capability' },
+          sensitiveValues: ['host-owned-test-capability'],
+        }),
+      })
+      const result = await (await stableFetch(started.url)).json() as {
+        env: Record<string, string | null>; converted: string[] | null
+      }
+      const available = scenario === 'available with spaces'
+      expect(result.env.POLO_APP_BUN_PATH).toBe(available ? bundledBun : null)
+      expect(result.converted).toEqual(available ? ['one argument ; $(literal)'] : null)
+      // uv run activates the venv; the Host PATH must remain intact after it.
+      expect(result.env.PATH).toBe(`${join(result.env.UV_PROJECT_ENVIRONMENT!, 'bin')}${delimiter}${process.env.PATH!}`)
+      expect(result.env.HOST).toBe('127.0.0.1')
+      expect(result.env.HOSTNAME).toBe('127.0.0.1')
+      expect(result.env.PORT).toBe(String(started.port))
+      expect(result.env.POLO_APP_ID).toBe(appId)
+      expect(result.env.POLO_APP_VERSION).toBe('1.0.0')
+      expect(result.env.POLO_APP_DATA_DIR).toBe(join(testRoot, 'runtime', 'apps', appId, 'data'))
+      expect(result.env.POLO_APP_BUNDLE_DIR).toBe(join(testRoot, 'runtime', 'apps', appId, 'versions', '1.0.0'))
+      expect(result.env.UV_PROJECT_ENVIRONMENT).toContain(join('runtime-cache', appId, '1.0.0', 'python-venv'))
+      expect(result.env.POLO_APP_API_TOKEN).toBe('host-owned-test-capability')
+      for (const key of ['POLO_AI_BUN', 'POLO_ADMIN_TOKEN', 'HTTPS_PROXY', 'PYTHONPATH']) {
+        expect(result.env[key]).toBeNull()
+      }
+      expect((await runtime.getRuntimeStatus(appId)).status).toBe('running')
+    },
+    30_000,
+  )
 })
 
 describe('POO-54 exact-version runtime foundation', () => {
