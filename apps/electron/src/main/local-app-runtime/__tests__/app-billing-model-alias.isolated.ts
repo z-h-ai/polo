@@ -9,6 +9,7 @@ test('SDK billing uses admitted sent model while Host retains response alias and
   const directory = mkdtempSync(join(tmpdir(), 'polo-app-alias-'))
   const identity = { accountId: 'account-a', productSpaceId: crypto.randomUUID(), artifactInstanceId: crypto.randomUUID(), versionId: crypto.randomUUID(), version: '1.0.0' }
   const captured: unknown[] = []
+  const hostRequestId = `host-${crypto.randomUUID()}`
   const hostUsage = { inputTokens: 201, outputTokens: 58, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 259, reportedModel: 'deepseek-flash', terminalReason: 'stop' as const, provenance: 'provider_final' as const }
   const coordinator = new LocalAppRuntimeCoordinator({
     billingOutbox: new AppBillingOutbox(directory), getAdminOrigin: () => 'https://admin.example',
@@ -19,8 +20,8 @@ test('SDK billing uses admitted sent model while Host retains response alias and
       finishAppRun: async runId => ({ runId, status: 'completed', settlement: 'confirmed' }),
     },
     createExecutor: ({ beforeSend }) => ({ execute: async () => {
-      await beforeSend?.({ model: 'deepseek-chat', hostRequestId: 'host-original', transportBaseUrl: 'https://relay.example/v1', credentialFingerprint: 'a'.repeat(64) })
-      return { status: 'completed', text: '{}', model: 'pi:deepseek-chat', requestId: 'host-original', provider: 'openai', usage: hostUsage, providerObservation: { version: 1, state: 'observed', providerRequestId: 'provider-original', responseStatus: 200 } }
+      await beforeSend?.({ model: 'deepseek-chat', hostRequestId, transportBaseUrl: 'https://relay.example/v1', credentialFingerprint: 'a'.repeat(64) })
+      return { status: 'completed', text: '{}', model: 'pi:deepseek-chat', requestId: hostRequestId, provider: 'openai', usage: hostUsage, providerObservation: { version: 1, state: 'observed', providerRequestId: 'provider-original', responseStatus: 200 } }
     }, dispose: async () => {} }),
     resolveWorkspaceRoot: () => directory, loadWorkspaceConfig: () => ({ defaults: { defaultLlmConnection: 'managed', model: 'deepseek-chat' } }), getDefaultLlmConnection: () => null,
   })
