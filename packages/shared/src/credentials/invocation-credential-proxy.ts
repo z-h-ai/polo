@@ -64,7 +64,10 @@ export interface InvocationCredentialProxy {
 }
 
 export interface InvocationCredentialProxyOptions {
+  assertExecutionCurrent?: () => void
   billing?: ManagedBillingHooks
+  /** Desktop managed gateways accept only this fixed OpenAI route/model set. */
+  managedPolicy?: { allowedModels: readonly string[] }
   /**
    * Some provider SDKs parse non-secret routing claims from their auth value
    * before sending a request. Callers may supply an opaque, short-lived alias
@@ -200,11 +203,12 @@ function requestUpstream(
   headers: OutgoingHttpHeaders,
   body?: Buffer,
   downstream?: ServerResponse,
+  signal?: AbortSignal,
 ): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
     const request = (upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest)(
       upstreamUrl,
-      { method: incoming.method, headers },
+      { method: incoming.method, headers, signal },
       resolve,
     )
     request.once('error', reject)
@@ -365,9 +369,20 @@ export async function startInvocationCredentialProxy(
       'Credential proxy capability must be an opaque value of at least 32 characters',
     )
   }
+  if (options.managedPolicy && !options.billing) throw new Error('Managed proxy requires billing')
   let closed = false
+  let expectedHost = ''
+  const pending = new Set<Promise<void>>()
+  const controllers = new Set<AbortController>()
+  const sockets = new Set<import('node:net').Socket>()
 
   const server = createServer(async (request, response) => {
+    const controller = new AbortController()
+    controllers.add(controller)
+    let finishRequest!: () => void
+    const finished = new Promise<void>(resolve => { finishRequest = resolve })
+    pending.add(finished)
+    const done = () => { controllers.delete(controller); pending.delete(finished); finishRequest() }
     let lease: ManagedBillingLease | undefined
     let observation: ManagedBillingObservation | undefined
     let completed = false
@@ -388,9 +403,14 @@ export async function startInvocationCredentialProxy(
     ) {
       response.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' })
       response.end('Unauthorized')
+      done()
       return
     }
     try {
+      if (options.managedPolicy && (request.headers.host !== expectedHost || request.headers.origin !== undefined
+        || request.rawHeaders.filter((_, i) => i % 2 === 0 && request.rawHeaders[i]!.toLowerCase() === 'host').length !== 1
+        || request.url !== '/v1/chat/completions' || request.method !== 'POST')) throw new Error('POLO_MANAGED_REQUEST_REJECTED')
+      options.assertExecutionCurrent?.()
       const upstreamUrl = resolveUpstreamUrl(
         targetSnapshot.upstreamBaseUrl,
         request.url || '/',
@@ -400,6 +420,7 @@ export async function startInvocationCredentialProxy(
       const headers = buildUpstreamHeaders(request, capability, targetSnapshot)
       if (options.billing) {
         const parsed = await readManagedRequest(request, upstreamUrl)
+        if (options.managedPolicy && !options.managedPolicy.allowedModels.includes(parsed.model)) throw new Error('POLO_MODEL_NOT_ALLOWED')
         body = parsed.body
         requestedModel = parsed.model
         if (!targetSnapshot.credential) throw new Error('Managed upstream credential is unavailable')
@@ -411,12 +432,14 @@ export async function startInvocationCredentialProxy(
         headers[correlation.header] = correlation.nonce
         privateCorrelation = correlation.nonce
       }
+      options.assertExecutionCurrent?.()
       const upstream = await requestUpstream(
         upstreamUrl,
         request,
         headers,
         body,
         response,
+        controller.signal,
       )
       if (lease) observation = new ManagedBillingObservation(upstream, requestedModel)
       // Disposing/cancelling the child stops original transport, without
@@ -426,17 +449,20 @@ export async function startInvocationCredentialProxy(
       const secrets = [...credentialSecrets(targetSnapshot), ...(privateCorrelation ? [Buffer.from(privateCorrelation)] : [])]
       try { await proxyResponse(upstream, response, secrets, observation, () => complete(true)) }
       finally { response.off('close', abortUpstream); await complete(false) }
-    } catch {
+    } catch (error) {
       await complete(false).catch(() => {})
       if (!response.headersSent) {
         response.writeHead(502, {
           'content-type': 'text/plain; charset=utf-8',
         })
       }
-      response.end('Credential proxy upstream request failed')
-    }
+      const code = (error as { errorCode?: string })?.errorCode
+      response.end(options.managedPolicy && ['insufficient_credit', 'insufficient_quota', 'budget_exceeded', 'INSUFFICIENT_BALANCE'].includes(code ?? '')
+        ? 'POLO_INSUFFICIENT_CREDIT' : 'Credential proxy upstream request failed')
+    } finally { done() }
   })
 
+  server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)) })
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
       server.off('listening', onListening)
@@ -457,6 +483,7 @@ export async function startInvocationCredentialProxy(
     throw new Error('Credential proxy did not bind a loopback TCP port')
   }
 
+  expectedHost = `127.0.0.1:${address.port}`
   return {
     url: `http://127.0.0.1:${address.port}`,
     capability,
@@ -467,10 +494,13 @@ export async function startInvocationCredentialProxy(
     async close() {
       if (closed) return
       closed = true
+      for (const controller of controllers) controller.abort()
+      for (const socket of sockets) socket.destroy()
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
         server.closeAllConnections?.()
       })
+      await Promise.all([...pending])
     },
   }
 }

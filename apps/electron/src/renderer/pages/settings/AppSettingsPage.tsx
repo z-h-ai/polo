@@ -12,7 +12,7 @@
  * Note: Appearance settings (theme, font) have been moved to AppearanceSettingsPage.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -123,6 +123,7 @@ export default function AppSettingsPage() {
   const isElectron = window.electronAPI.getRuntimeEnvironment() === 'electron'
   const updateChecker = useUpdateChecker()
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
+  const terminalRequest = useRef(0)
   const [terminalStatus, setTerminalStatus] = useState<TerminalIntegrationStatus | null>(null)
   const [terminalBusy, setTerminalBusy] = useState(false)
   const [terminalError, setTerminalError] = useState<TerminalIntegrationErrorPayload | null>(null)
@@ -159,13 +160,15 @@ export default function AppSettingsPage() {
 
   useEffect(() => {
     loadSettings()
-  }, [])
+  }, [loadSettings])
 
   const loadTerminalStatus = useCallback(async () => {
+    const request = ++terminalRequest.current
     setTerminalBusy(true)
     setTerminalError(null)
     try {
       const result = await window.electronAPI.getTerminalIntegrationStatus()
+      if (request !== terminalRequest.current) return
       if (result.success) {
         setTerminalStatus(result.status)
         setTerminalError(null)
@@ -173,41 +176,47 @@ export default function AppSettingsPage() {
         setTerminalError(result)
       }
     } catch (error) {
+      if (request !== terminalRequest.current) return
       console.error('[terminal-integration] status IPC failed', error)
       setTerminalError({
         errorCode: 'ipc_failed',
         errorParams: { operation: 'status' },
       })
     } finally {
-      setTerminalBusy(false)
+      if (request === terminalRequest.current) setTerminalBusy(false)
     }
   }, [])
 
   useEffect(() => {
     if (!isElectron) return
+    const requestTracker = terminalRequest
     void loadTerminalStatus()
+    return () => { requestTracker.current++ }
   }, [isElectron, loadTerminalStatus])
 
   const handleTerminalAction = useCallback(async (action: 'install' | 'uninstall') => {
+    const request = ++terminalRequest.current
     setTerminalBusy(true)
     setTerminalError(null)
     try {
       const result = action === 'uninstall'
         ? await window.electronAPI.uninstallTerminalIntegration()
         : await window.electronAPI.installTerminalIntegration()
+      if (request !== terminalRequest.current) return
       if (result.success) {
         setTerminalStatus(result.status)
       } else {
         setTerminalError(result)
       }
     } catch (error) {
+      if (request !== terminalRequest.current) return
       console.error(`[terminal-integration] ${action} IPC failed`, error)
       setTerminalError({
         errorCode: 'ipc_failed',
         errorParams: { operation: action as TerminalIntegrationOperation },
       })
     } finally {
-      setTerminalBusy(false)
+      if (request === terminalRequest.current) setTerminalBusy(false)
     }
   }, [])
 
@@ -370,7 +379,7 @@ export default function AppSettingsPage() {
                 </SettingsCard>
               </SettingsSection>
 
-              {isElectron && (terminalError !== null || terminalStatus?.supported) && (
+              {isElectron && (terminalBusy || terminalError !== null || terminalStatus?.supported) && (
                 <SettingsSection
                   title={t("settings.terminalFeatures.title")}
                   description={t("settings.terminalFeatures.description")}
@@ -378,7 +387,7 @@ export default function AppSettingsPage() {
                   <SettingsCard>
                     <SettingsRow
                       label={!terminalStatus
-                        ? t("settings.terminalFeatures.statusUnavailable")
+                        ? terminalBusy ? t("common.checking") : t("settings.terminalFeatures.statusUnavailable")
                         : terminalStatus.installed
                           ? t("settings.terminalFeatures.installed")
                           : t("settings.terminalFeatures.notInstalled")}

@@ -30,6 +30,7 @@ export interface SpawnedServer {
 }
 
 export interface SpawnServerOptions {
+  detached?: boolean
   /** Path to the server entry file. Auto-detected from monorepo root if omitted. */
   serverEntry?: string
   /** Extra env vars to pass to the server process. */
@@ -77,6 +78,14 @@ export function resolveBunExecutable(): string {
 }
 
 function inferPackagedEnvironment(serverEntry: string): Record<string, string> {
+  if (serverEntry.endsWith(join('packages', 'server', 'src', 'index.ts'))) {
+    const sourceRoot = resolve(serverEntry, '..', '..', '..', '..')
+    return {
+      POLO_AI_APP_ROOT: process.env.POLO_AI_APP_ROOT || sourceRoot,
+      POLO_AI_BUNDLED_ASSETS_ROOT: process.env.POLO_AI_BUNDLED_ASSETS_ROOT || join(sourceRoot, 'apps', 'electron'),
+      POLO_AI_IS_PACKAGED: 'false',
+    }
+  }
   if (!serverEntry.endsWith(join('dist', 'server', 'polo-server.js'))) return {}
   const appRoot = resolve(serverEntry, '..', '..', '..')
   const bundledAssetsRoot = join(appRoot, 'dist')
@@ -124,6 +133,7 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
         POLO_AI_RPC_PORT: '0',
         POLO_AI_RPC_HOST: '127.0.0.1',
       }),
+      detached: opts?.detached,
       stdout: 'pipe',
       stderr: 'pipe',
       stdin: 'pipe',

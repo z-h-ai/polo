@@ -250,3 +250,22 @@ describe('resolveInterceptorBundlePath dev-mode source preference', () => {
     expect(paths.interceptorBundlePath).toBe(overridePath);
   });
 });
+
+describe('packaged Bun resource ownership', () => {
+  const base = join(tmpdir(), `polo-sdk-bun-${Date.now()}`)
+  afterEach(() => { rmSync(base, { recursive: true, force: true }) })
+  it('uses the shipped Resources/vendor Bun when appRoot is Resources/app', () => {
+    const resourcesPath = join(base, 'Polo AI.app', 'Contents', 'Resources')
+    const bun = join(resourcesPath, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
+    mkdirSync(join(resourcesPath, 'vendor', 'bun'), { recursive: true }); writeFileSync(bun, 'bundled')
+    const paths = resolveBackendRuntimePaths({ appRootPath: join(resourcesPath, 'app'), resourcesPath, isPackaged: true })
+    expect(paths.bundledRuntimePath).toBe(bun)
+    expect(paths.nodeRuntimePath).toBe(bun)
+  })
+  it('retains the legacy appRoot vendor location when Resources has no runtime', () => {
+    const appRootPath = join(base, 'app')
+    const bun = join(appRootPath, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
+    mkdirSync(join(appRootPath, 'vendor', 'bun'), { recursive: true }); writeFileSync(bun, 'legacy')
+    expect(resolveBackendRuntimePaths({ appRootPath, resourcesPath: join(base, 'Resources'), isPackaged: true }).bundledRuntimePath).toBe(bun)
+  })
+})

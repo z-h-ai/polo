@@ -14,6 +14,7 @@ const ROOT_DIR = join(import.meta.dir, "..");
 const DIST_DIR = join(ROOT_DIR, "apps/electron/dist");
 
 const OUTPUTS = [
+  { entry: "apps/electron/src/preload/app-sdk.ts", outfile: "apps/electron/dist/app-sdk-preload.cjs", label: "app-sdk-preload.cjs" },
   {
     entry: "apps/electron/src/preload/bootstrap.ts",
     outfile: "apps/electron/dist/bootstrap-preload.cjs",

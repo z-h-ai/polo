@@ -15,11 +15,25 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **NewAPI SDK model labels** — Custom OpenAI-compatible SDK queries retain the provider response model label while binding execution and billing to the authorized model actually sent, matching managed CLI accounting.
+
+- **Creator quotation example packaging** — Build a static ZIP with a root file entry recognized by normal Creator upload, without reserving a published App ID. The same generator supplies the declarations required for a separate Enterprise internal import.
+
+- **Polo compute for independent CLI Threads** — Use `--provider polo` with the running, signed-in App's active personal or enterprise space. The desktop retains credentials, validates each model request through existing Assistant billing, and revokes CLI work on space/account changes or quit. Managed history stays bound to its original account and space; owned connections remain independent. Empty model responses now fail clearly, stale tool/terminal events cannot reach a successor runtime, and Mac release preparation stages lock-matched sharp/libvips for both CPU targets.
+
 - **Unified Polo terminal command** — Desktop releases now include a version-matched CLI, packaged headless server, and Bun runtime behind the cross-platform `polo` command. The CLI discovers a running App securely, `polo run` works without a source checkout, and macOS can install, repair, or remove terminal support from the App. (POO-14) (`cd05b2d`)
 - **Focused built-in App launcher** — Remove the Kanban and AirDrop shortcuts from the desktop App's built-in launcher, leaving Polo 助手 as the only built-in App. (POO-34)
 
 ## Bug Fixes
 
+- **Responsive terminal setup** — Slow shell startup and terminal checks no longer block the Mac App settings window. Checks share concurrent requests, time out safely, and stop their shell processes on shutdown; terminal setup now clarifies that the CLI is included and enabling the terminal command is optional. The direct Mac App CLI entry includes its native dependencies and bundled defaults. Default and resumed connections bootstrap their existing credentials without lending a saved credential to a different endpoint.
+
 - **Terminal packaging and upgrade safety** — Keep the macOS command attached to the current App bundle across moves and upgrades, preserve modified or user-owned Windows and Linux launchers with verified ownership state, and use the same self-relative packaged wrapper on every platform. macOS profile and launcher updates now claim a verified leaf, publish only into an empty destination, preserve concurrent regular-file or symlink replacements, and restore claimed user configuration after local publication failures; Windows launcher, compatibility shim, root pointer, ownership state, and PATH updates now use identity-bound claims, no-replace publication, guarded registry transactions, and handle-bound cleanup; Linux launcher, ownership state, PATH profile, and App replacement use the same no-clobber and rollback model without following user-owned runtime symlinks. Immutable previous-release tags use strict SemVer validation. Shell readiness checks are bounded, normal builds are gated on final-container smoke tests, and the three-platform release/nightly workflow verifies fixed previous assets before installing build tools, then runs install, discovery, real headless tasks, upgrade, and uninstall checks. Legacy releases are validated with their historical layout, packaged runtimes include checksum- and architecture-verified `uv`, release acceptance requires pinned signing identities, and terminal/discovery/wrapper failures are generated from the shared locale catalogs. (POO-14) (`7a5f553`, `233ada3`, `b4c14f9`, `cb18105`, `4ca546d`, `beb25e2`, `cabb49d`, `80d3f3f`, `55a1b60`, `eeae32c`, `40f4c7b`, `d1753a0`, `7a026f3`, `c103fae`)
 
+- **Polo CLI file tools and restoration** — Polo compute supports AI with Read/Write/Edit/Ls while enforcing existing safe/yolo file approvals. Shell, scripts, MCP/Source/Skill execution and Pi extension/package loading stay unavailable until process containment is supported. Saved owned Threads retain their compute when the default changes; unknown managed history cannot acquire a new owner.
+
 ## Breaking Changes
+
+- **Standalone terminal execution** — Bound bundled CLI execution to its private Thread owner and lease so owned connections can run without a desktop ProductSpace. Managed platform connections remain unavailable through this path. Terminal settings now distinguish an included CLI from a command that has not been enabled.
+
+- 新增创作者浏览器 SDK 候选：获授权本地 App 可调用 Polo AI 单次查询、观察状态并取消，无需自建后端或持有 Provider 密钥；附可构建报价助手与随包创作者 Skill。依赖包含 bridge v1 的宿主构建，既有发布版兼容性未声明。

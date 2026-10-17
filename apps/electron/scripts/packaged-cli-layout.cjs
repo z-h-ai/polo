@@ -1,5 +1,5 @@
 const { createHash } = require('node:crypto')
-const { existsSync, readFileSync } = require('node:fs')
+const { existsSync, readFileSync, readdirSync } = require('node:fs')
 const path = require('node:path')
 
 function packagedResourcesDir(context) {
@@ -112,6 +112,25 @@ function validatePackagedCliLayout({ resourcesDir, platform, expectedVersion }) 
   return { resourcesDir, appDir, binDir, bun, koffi, ...launchers, ...payload }
 }
 
+// The App's --polo-cli entry evaluates main.cjs before dispatching to Bun.
+// sharp's bundled JavaScript still needs these native packages at that point.
+function validateMacMainNativePayload(resourcesDir, arch) {
+  const imgRoot = path.join(resourcesDir, 'app', 'node_modules', '@img')
+  const addon = path.join(imgRoot, `sharp-darwin-${arch}`)
+  const libvips = path.join(imgRoot, `sharp-libvips-darwin-${arch}`)
+  for (const file of [
+    path.join(addon, 'package.json'),
+    path.join(addon, 'lib', `sharp-darwin-${arch}.node`),
+    path.join(libvips, 'package.json'),
+    path.join(libvips, 'lib', 'index.js'),
+  ]) {
+    if (!existsSync(file)) throw new Error(`Packaged Mac main native dependency is missing: ${file}`)
+  }
+  if (!readdirSync(path.join(libvips, 'lib')).some(name => /^libvips-cpp\..+\.dylib$/.test(name))) {
+    throw new Error(`Packaged Mac libvips library is missing: ${libvips}`)
+  }
+}
+
 function validateSourceCliLayout(projectDir, platform) {
   const appVersion = JSON.parse(readFileSync(path.join(projectDir, 'package.json'), 'utf8')).version
   validateLauncherSources(path.join(projectDir, 'resources', 'bin'))
@@ -124,5 +143,6 @@ module.exports = {
   packagedResourcesDir,
   validateLauncherSources,
   validatePackagedCliLayout,
+  validateMacMainNativePayload,
   validateSourceCliLayout,
 }

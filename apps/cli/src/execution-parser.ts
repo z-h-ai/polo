@@ -15,6 +15,7 @@ export interface ExecutionArgs {
   threadId?: string
   last: boolean
   workspace?: string
+  space?: string
   workingDirectory?: string
   provider?: string
   model?: string
@@ -48,6 +49,7 @@ export class UsageError extends Error {
  */
 export const CLI_OPTION_ARITY: Readonly<Record<string, 0 | 1>> = Object.freeze({
   '--workspace': 1,
+  '--space': 1,
   '-C': 1,
   '--cd': 1,
   '--provider': 1,
@@ -257,6 +259,10 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
         ;[args.workingDirectory, i] = takeValue(tokens, i, inline, name)
         continue
       }
+      case '--space': {
+        ;[args.space, i] = takeValue(tokens, i, inline, name)
+        continue
+      }
       case '--provider': {
         ;[args.provider, i] = takeValue(tokens, i, inline, name)
         continue
@@ -395,6 +401,7 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
     }
   }
 
+  if (args.provider === 'polo' && (args.apiKey || args.baseUrl)) throw new UsageError('POLO_MANAGED_OVERRIDE_FORBIDDEN: --provider polo cannot use --api-key/--base-url')
   if (yolo && dangerousAlias) {
     throw new UsageError('conflicting options: --yolo and --dangerously-bypass-approvals-and-sandbox')
   }

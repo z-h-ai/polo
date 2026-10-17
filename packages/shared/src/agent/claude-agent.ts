@@ -1031,7 +1031,7 @@ export class ClaudeAgent extends BaseAgent {
               ? { name: 'authorization', format: 'bearer' }
               : { name: 'x-api-key', format: 'raw' },
           ],
-        });
+        }, { assertExecutionCurrent: this.config.assertExecutionCurrent });
         // R50/R51/R56/R57 (obs bc4493fd + 21c38fb2): the proxy listener is a
         // PROCESS-LEVEL side effect owned by THIS call — tracked so a
         // per-call abort can close it. If the agent was destroyed, aborted,

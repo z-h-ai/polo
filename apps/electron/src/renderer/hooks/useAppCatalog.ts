@@ -33,6 +33,7 @@ import {
   emitAdminCatalogSessionAuthFailure,
 } from '@/lib/admin-auth-failure'
 import { getHomeAppErrorCode } from '@/lib/home-app-errors'
+import { sameProductSpaceAppIdentity } from './product-space-app-identity'
 
 export interface AppCatalogState {
   catalog: AppCatalogCacheEntry | null
@@ -632,7 +633,7 @@ export function useAppCatalog() {
       const next: Record<string, ProductSpaceAppInstallState> = {}
       for (const installState of states) {
         const expected = requested.get(identityKey(installState.app))
-        if (!expected || JSON.stringify(expected) !== JSON.stringify(installState.app)) {
+        if (!expected || !sameProductSpaceAppIdentity(expected, installState.app)) {
           throw new Error(i18n.t('homeApps.errors.staleContext'))
         }
         next[identityKey(installState.app)] = installState

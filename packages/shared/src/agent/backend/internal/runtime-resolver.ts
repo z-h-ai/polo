@@ -61,11 +61,15 @@ function resolveUpwards(base: string, relativePath: string, maxLevels = 4): stri
 
 function resolveBundledRuntimePath(hostRuntime: BackendHostRuntimeContext): string | undefined {
   const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
-  const bunBasePath = process.platform === 'win32'
-    ? (hostRuntime.resourcesPath || hostRuntime.appRootPath)
-    : hostRuntime.appRootPath;
-  const bunPath = join(bunBasePath, 'vendor', 'bun', bunBinary);
-  if (existsSync(bunPath)) return bunPath;
+  // electron-builder extraResources places Bun beside app/, on every OS.
+  // Retain appRoot/vendor for older/dev layouts, but packaged builds never
+  // borrow a system runtime from PATH.
+  const bunPath = firstExistingPath([
+    ...(hostRuntime.isPackaged && hostRuntime.resourcesPath
+      ? [join(hostRuntime.resourcesPath, 'vendor', 'bun', bunBinary)] : []),
+    join(hostRuntime.appRootPath, 'vendor', 'bun', bunBinary),
+  ]);
+  if (bunPath) return bunPath;
 
   // Non-packaged (headless server, dev mode): fall back to system bun via PATH.
   // Packaged apps must ship their own bundled bun — never resolve from PATH

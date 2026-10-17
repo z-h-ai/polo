@@ -18,6 +18,8 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { managedResources } from './managed-resources.ts';
+import { MANAGED_TOOL_UNSUPPORTED, type ToolExecutionPolicy } from '../../shared/src/agent/tool-execution-policy.ts';
 import { PromptTurnContexts, createPiPromptEventDrain, type PromptTurnContext } from './prompt-turn-context.ts';
 
 // Pi SDK
@@ -119,6 +121,7 @@ interface InitMessage {
   piAuth?: { provider: string; credential: PiCredential };
   credentialProxy?: { baseUrl: string; capability: string };
   credentialIsolation?: boolean;
+  toolExecutionPolicy?: ToolExecutionPolicy;
 }
 
 interface RuntimeConfigUpdateMessage {
@@ -509,11 +512,8 @@ async function ensureSession(): Promise<AgentSession> {
       return resolveSearchProvider(initConfig?.piAuth, initConfig?.credentialProxy).search(query, count);
     },
   };
-  const searchTool = createSearchTool(searchProvider);
-  const webFetchTool = createWebFetchTool(() =>
-    initConfig?.sessionPath || null
-  );
-  const webTools = [searchTool, webFetchTool];
+  const managed = initConfig.toolExecutionPolicy === 'managed-file-only';
+  const webTools = managed ? [] : [createSearchTool(searchProvider), createWebFetchTool(() => initConfig?.sessionPath || null)];
 
   // Pi SDK 0.70.0 registration contract:
   //   - `customTools` accepts ToolDefinition[] — our hook-wrapped objects go here
@@ -524,7 +524,12 @@ async function ensureSession(): Promise<AgentSession> {
   //     our hooked versions take effect (permissions + large-response summarization).
   //   - Do NOT pass tool *objects* to `tools` — `allowedToolNames = new Set(options.tools)`
   //     then `.has(name)` returns false for every string lookup → zero tools active.
-  const builtinDefs = [
+  const builtinDefs = managed ? [
+    createReadToolDefinition(cwd),
+    createEditToolDefinition(cwd),
+    createWriteToolDefinition(cwd),
+    createLsToolDefinition(cwd),
+  ] : [
     createReadToolDefinition(cwd),
     createBashToolDefinition(cwd),
     createEditToolDefinition(cwd),
@@ -533,7 +538,7 @@ async function ensureSession(): Promise<AgentSession> {
     createFindToolDefinition(cwd),
     createLsToolDefinition(cwd),
   ];
-  const proxyTools = buildProxyTools();
+  const proxyTools = managed ? [] : buildProxyTools();
   const wrappedAll = wrapToolsWithHooks([...builtinDefs, ...webTools, ...proxyTools]);
   const toolAllowlist = wrappedAll.map(t => t.name);
   debugLog(`Session tools: ${builtinDefs.length} builtin + ${webTools.length} web + ${proxyTools.length} proxy = ${wrappedAll.length} total`);
@@ -541,6 +546,7 @@ async function ensureSession(): Promise<AgentSession> {
   // Build session options
   const sessionOptions: CreateAgentSessionOptions = {
     cwd,
+    ...(managed ? managedResources() : {}),
     authStorage,
     modelRegistry,
     customTools: wrappedAll,
@@ -923,6 +929,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     // Create minimal ephemeral session
     const ephemeralOptions: CreateAgentSessionOptions = {
       cwd: resolvedCwd(),
+      ...(initConfig?.toolExecutionPolicy === 'managed-file-only' ? managedResources() : {}),
       authStorage,
       modelRegistry,
       tools: [],
@@ -1153,7 +1160,7 @@ function handleSessionEvent(event: AgentSessionEvent, originalTurn: PromptTurnCo
       // fire all requests to the main process in parallel NOW, before executeToolCalls
       // iterates sequentially. Each proxy tool's execute() will hit the cache.
       const content = (msg as { content?: Array<{ type: string; id?: string; name?: string; arguments?: unknown }> }).content;
-      if (Array.isArray(content)) {
+      if (initConfig?.toolExecutionPolicy !== 'managed-file-only' && Array.isArray(content)) {
         const prefetchableToolCalls = content.filter(
           (c): c is { type: string; id?: string; name: string; arguments?: unknown } =>
             c.type === 'toolCall' && !!c.name && isPrefetchableTool(c.name),
@@ -1201,6 +1208,7 @@ function handleSessionEvent(event: AgentSessionEvent, originalTurn: PromptTurnCo
 // ============================================================
 
 async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promise<void> {
+  if (initConfig?.toolExecutionPolicy === 'managed-file-only' && msg.toolExecutionPolicy !== 'managed-file-only') throw new Error(MANAGED_TOOL_UNSUPPORTED);
   // Clean up any existing session from a previous init
   if (piSession) {
     if (unsubscribeEvents) {
@@ -1335,6 +1343,10 @@ async function handleAdmittedPrompt(msg: Extract<InboundMessage, { type: 'prompt
 }
 
 function handleRegisterTools(msg: Extract<InboundMessage, { type: 'register_tools' }>): void {
+  if (initConfig?.toolExecutionPolicy === 'managed-file-only') {
+    debugLog(MANAGED_TOOL_UNSUPPORTED);
+    return;
+  }
   // Session tools use explicit REPLACE semantics: the main process sends the
   // complete session-tool set on every registration, so tools omitted from
   // the list (e.g. request_user_input after a desktop → messaging turn

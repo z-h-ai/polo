@@ -25,7 +25,7 @@
     "typecheck": "bun run typecheck:shared",
     "typecheck:shared": "cd packages/shared && bun run tsc --noEmit",
     "typecheck:staged": "bash scripts/typecheck-staged.sh",
-    "typecheck:all": "cd packages/core && bun run tsc --noEmit && cd ../shared && bun run tsc --noEmit && cd ../server-core && bun run tsc --noEmit && cd ../server && bun run tsc --noEmit && cd ../session-tools-core && bun run tsc --noEmit && cd ../pi-agent-server && bun run typecheck && cd ../../apps/electron && bun run typecheck && cd ../../packages/ui && bun run tsc --noEmit",
+    "typecheck:all": "cd packages/core && bun run tsc --noEmit && cd ../shared && bun run tsc --noEmit && cd ../server-core && bun run tsc --noEmit && cd ../server && bun run tsc --noEmit && cd ../session-tools-core && bun run tsc --noEmit && cd ../pi-agent-server && bun run typecheck && cd ../../apps/electron && bun run typecheck && cd ../../packages/ui && bun run tsc --noEmit && cd ../sdk && bun run typecheck",
     "server:start": "bun run packages/server/src/index.ts",
     "server:dev": "bun run server:build:subprocess && POLO_AI_DEBUG=true POLO_AI_BUNDLED_ASSETS_ROOT=$PWD/apps/electron bun run packages/server/src/index.ts",
     "server:build": "bun run scripts/build-server.ts",
@@ -66,7 +66,7 @@
     "electron:validate:artifacts:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File apps/electron/scripts/validate-final-artifacts.ps1",
     "build:wa-worker": "bun run scripts/build-wa-worker.ts",
     "electron:build:assets": "cd apps/electron && bun scripts/copy-assets.ts",
-    "electron:build": "bun run scripts/assert-production-electron-output.ts && bun run electron:build:cli && bun run electron:build:main && bun run electron:build:preload && bun run electron:build:renderer && bun run electron:build:resources && bun run electron:build:assets && bun run electron:validate:cli",
+    "electron:build": "bun run scripts/assert-production-electron-output.ts && bun run --cwd packages/shared build && bun run electron:build:cli && bun run electron:build:main && bun run electron:build:preload && bun run electron:build:renderer && bun run electron:build:resources && bun run electron:build:assets && bun run electron:validate:cli",
     "electron:start": "bun run electron:build && electron apps/electron",
     "electron:e2e:phone-auth": "bun run scripts/electron-phone-auth-e2e.ts",
     "electron:e2e:release-v012": "bun run scripts/electron-release-v012-e2e.ts",
@@ -113,7 +113,8 @@
     "release:version:check": "bun run scripts/release-version.ts check",
     "check-version": "bun run release:version:check",
     "oss:sync": "bun run scripts/oss-sync.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "typecheck:sdk": "bun run --cwd packages/sdk typecheck"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.947.0",

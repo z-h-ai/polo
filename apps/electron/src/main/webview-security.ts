@@ -1,3 +1,4 @@
+import { getAppSdkBridge, setAppSdkWorkspaceResolver } from './app-sdk-service'
 import { app, session, shell } from 'electron'
 import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
 import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
@@ -41,6 +42,7 @@ const trustedWebviewScopeResolver: WebviewScopeResolver = {}
  */
 export function setWebviewScopeResolver(resolver: WebviewScopeResolver): void {
   trustedWebviewScopeResolver.getWorkspaceForWebContentsId = resolver.getWorkspaceForWebContentsId
+  setAppSdkWorkspaceResolver(id => resolver.getWorkspaceForWebContentsId?.(id) ?? null)
 }
 
 /** Test seam: resets the caches and the scope resolver. */
@@ -259,7 +261,14 @@ export function installWebviewSecurityHandlers(): void {
     // trusted account+ProductSpace+Workspace tuple. A mismatching, missing,
     // or unresolvable partition (compromised or buggy renderer, partial
     // scope) never loads.
+    contents.on('did-attach-webview', (_event, guest) => getAppSdkBridge().attachGuest(contents, guest))
     contents.on('will-attach-webview', (event, webPreferences, params) => {
+      delete params.preload
+      delete webPreferences.preload
+      webPreferences.nodeIntegration = false
+      webPreferences.nodeIntegrationInSubFrames = false
+      webPreferences.contextIsolation = true
+      webPreferences.sandbox = true
       const requestedPartition = webPreferences.partition
       const decision = decideTabAppAttach(contents.id)
 
@@ -281,6 +290,7 @@ export function installWebviewSecurityHandlers(): void {
           return
         }
         attachWebviewPermissionHandlers(decision.partition)
+        getAppSdkBridge().prepareGuest(contents.id, params.src ?? '', webPreferences)
         return
       }
 

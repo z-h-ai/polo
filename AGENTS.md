@@ -18,6 +18,8 @@
 - 开发：`bun run electron:dev`。
 - 构建：`bun run electron:build`。
 - 测试：`bun run test`；单文件检查可用 `bun test <test-file>`。
+- CLI runtime：`bun test apps/cli/src/runtime*.test.ts apps/cli/src/managed-provenance.integration.test.ts packages/server-core/src/sessions/cli-execution-authority.test.ts`（真实 server + Pi worker；应为 0 fail）。
+- CLI managed：`bun test apps/cli/src/managed-controlled.integration.test.ts apps/cli/src/managed-lifecycle.integration.test.ts packages/shared/src/credentials/__tests__/desktop-managed-proxy.test.ts`（真实 Broker/proxy/Admin client + HTTP fixtures；应为 0 fail，不能作为真实计费验收）。
 - 类型检查：`bun run typecheck:all`。
 - Lint：`bun run lint`。
 

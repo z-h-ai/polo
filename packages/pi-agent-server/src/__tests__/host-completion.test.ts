@@ -470,13 +470,13 @@ describe('host worker single-request JSONL fixtures', () => {
     }
   }, 60000)
 
-  it('rejects a reportedModel drift with zero text release', async () => {
+  it('retains a custom OpenAI response label without changing the sent model', async () => {
     const mock = await startMockSse({ chunks: textChunks('other-model', 'Hello', { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 }) })
     try {
       const outcome = await runWorker(request({ route: { kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: mock.url }, model: 'test-model', credential: { type: 'none' } }))
       const result = parseSingleResult(outcome.stdout)
-      expect(result.error).toMatchObject({ code: 'provider_protocol_error', reason: 'unexpected_terminal', message: 'LLM provider returned an unsupported terminal event' })
-      expect(result.text).toBeUndefined()
+      expect(result).toMatchObject({ status: 'completed', model: 'test-model', text: 'Hello', usage: { reportedModel: 'other-model', inputTokens: 5, outputTokens: 4 } })
+      expect(JSON.parse(mock.requests()[0].body).model).toBe('test-model')
     } finally {
       mock.close()
     }

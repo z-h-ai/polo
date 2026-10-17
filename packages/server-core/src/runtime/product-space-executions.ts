@@ -1,6 +1,6 @@
 import type { ExecutionStatus, ProductSpaceExecutionScope } from '@polo-ai/shared/product-spaces'
 
-export type ProductSpaceExecutionKind = 'assistant_session' | 'local_app' | 'skill_operation'
+export type ProductSpaceExecutionKind = 'assistant_session' | 'local_app' | 'skill_operation' | 'cli_execution'
 
 export type ExecutionStopOutcome = 'stopped' | 'failed'
 

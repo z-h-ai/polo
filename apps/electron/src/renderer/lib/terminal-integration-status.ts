@@ -19,6 +19,7 @@ export function getTerminalIntegrationStatusMessage(
   status: TerminalIntegrationStatus,
   t: TFunction,
 ): string {
+  if (status.shellCheck?.status === 'timeout') return t('settings.terminalFeatures.status.shellTimeout')
   return t(STATUS_KEYS[status.statusCode], status.statusParams)
 }
 

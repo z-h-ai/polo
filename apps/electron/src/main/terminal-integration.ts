@@ -15,7 +15,7 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import type {
   TerminalIntegrationErrorCode,
@@ -70,19 +70,16 @@ export interface TerminalIntegrationOptions {
   resourcesPath: string
   appExecutable: string
   appVersion: string
-  commandLookup?: () => string | null
-  commandValidator?: () => { ok: boolean; output?: string }
+  commandLookup?: () => string | null | Promise<string | null>
+  commandValidator?: () => { ok: boolean; output?: string } | Promise<{ ok: boolean; output?: string }>
   shellTimeoutMs?: number
   shellOutputLimit?: number
   shellRunner?: (
     shell: string,
     command: string,
     limits: { timeoutMs: number; outputLimit: number },
-  ) => {
-    status: 'ok' | 'timeout' | 'failed'
-    output?: string
-    outputTruncated?: boolean
-  }
+  ) => Partial<ShellCommandResult> & Pick<ShellCommandResult, 'status'>
+    | Promise<Partial<ShellCommandResult> & Pick<ShellCommandResult, 'status'>>
   /** Allows deterministic transaction-race coverage in main-process tests. */
   onBeforeTransactionStep?: (
     step: TerminalIntegrationTransactionStep,
@@ -607,15 +604,26 @@ interface ShellCommandResult {
   outputTruncated?: boolean
 }
 
-function runLoginShell(
+const activeShellProbes = new Set<() => void>()
+let stopping = false
+
+/** Called before Electron exits; queued operations must not start new probes. */
+export function shutdownTerminalIntegration(): void {
+  stopping = true
+  for (const stop of activeShellProbes) stop()
+}
+process.once('exit', shutdownTerminalIntegration)
+
+async function runLoginShell(
   options: TerminalIntegrationOptions,
   command: string,
-): ShellCommandResult {
+): Promise<ShellCommandResult> {
+  if (stopping) return { status: 'failed', output: '' }
   const shell = options.shell ?? process.env.SHELL ?? '/bin/zsh'
   const timeoutMs = options.shellTimeoutMs ?? SHELL_TIMEOUT_MS
   const outputLimit = options.shellOutputLimit ?? SHELL_OUTPUT_LIMIT
   if (options.shellRunner) {
-    const result = options.shellRunner(shell, command, { timeoutMs, outputLimit })
+    const result = await options.shellRunner(shell, command, { timeoutMs, outputLimit })
     return {
       status: result.status,
       output: (result.output ?? '').slice(0, outputLimit),
@@ -623,34 +631,67 @@ function runLoginShell(
         || (result.output?.length ?? 0) > outputLimit,
     }
   }
-  const result = spawnSync(shell, ['-lic', command], {
-    encoding: 'utf8',
-    env: process.env,
-    timeout: timeoutMs,
-    maxBuffer: outputLimit,
-    killSignal: 'SIGKILL',
+  return new Promise(resolveResult => {
+    // A process group lets timeout/shutdown kill shell grandchildren as well as
+    // the shell. This path is macOS-only; Windows remains installer-managed.
+    const child = spawn(shell, ['-lic', command], {
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        ...(options.homeDir ? { HOME: options.homeDir, ZDOTDIR: options.homeDir } : {}),
+      },
+    })
+    const chunks: Buffer[] = []
+    let bytes = 0
+    let settled = false
+    let outputTruncated = false
+    const killGroup = () => {
+      if (!child.pid) return
+      try { process.kill(-child.pid, 'SIGKILL') } catch {
+        try { child.kill('SIGKILL') } catch { /* Already exited. */ }
+      }
+    }
+    const finish = (status: ShellCommandResult['status']) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      activeShellProbes.delete(stop)
+      killGroup()
+      child.stdout.destroy()
+      child.stderr.destroy()
+      resolveResult({ status, output: Buffer.concat(chunks).toString('utf8'),
+        ...(outputTruncated ? { outputTruncated: true } : {}) })
+    }
+    const stop = () => finish('failed')
+    const timer = setTimeout(() => finish('timeout'), timeoutMs)
+    activeShellProbes.add(stop)
+    const collect = (chunk: Buffer) => {
+      if (settled) return
+      const remaining = Math.max(0, outputLimit - bytes)
+      chunks.push(chunk.subarray(0, remaining))
+      bytes += chunk.length
+      if (bytes > outputLimit) {
+        outputTruncated = true
+        finish('failed')
+      }
+    }
+    child.stdout.on('data', collect)
+    child.stderr.on('data', collect)
+    child.on('error', () => finish('failed'))
+    child.on('close', code => finish(code === 0 ? 'ok' : 'failed'))
   })
-  const rawOutput = `${result.stdout ?? ''}${result.stderr ?? ''}`
-  const output = rawOutput.slice(0, outputLimit)
-  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code
-  if (errorCode === 'ETIMEDOUT') {
-    return { status: 'timeout', output, outputTruncated: rawOutput.length > outputLimit }
-  }
-  if (result.status !== 0 || result.error) {
-    return { status: 'failed', output, outputTruncated: rawOutput.length > outputLimit }
-  }
-  return { status: 'ok', output, outputTruncated: rawOutput.length > outputLimit }
 }
 
-function lookupAndValidateCommand(options: TerminalIntegrationOptions): {
+async function lookupAndValidateCommand(options: TerminalIntegrationOptions): Promise<{
   found: string | null
   valid: boolean
   shellCheck: NonNullable<TerminalIntegrationStatus['shellCheck']>
-} {
+}> {
   const timeoutMs = options.shellTimeoutMs ?? SHELL_TIMEOUT_MS
   if (options.commandLookup) {
-    const found = options.commandLookup()
-    const validation = options.commandValidator?.() ?? { ok: false }
+    const found = await options.commandLookup()
+    const validation = await options.commandValidator?.() ?? { ok: false }
     return {
       found,
       valid: validation.ok,
@@ -658,7 +699,7 @@ function lookupAndValidateCommand(options: TerminalIntegrationOptions): {
     }
   }
 
-  const lookup = runLoginShell(
+  const lookup = await runLoginShell(
     options,
     'polo_command="$(command -v polo 2>/dev/null || true)"; '
       + 'printf \'__POLO_COMMAND__%s\\n\' "$polo_command"',
@@ -690,7 +731,7 @@ function lookupAndValidateCommand(options: TerminalIntegrationOptions): {
       },
     }
   }
-  const validation = runLoginShell(
+  const validation = await runLoginShell(
     options,
     'polo_version="$(polo --version)" && '
       + 'printf \'__POLO_VERSION__%s\\n\' "$polo_version"',
@@ -708,9 +749,9 @@ function lookupAndValidateCommand(options: TerminalIntegrationOptions): {
   }
 }
 
-export function getTerminalIntegrationStatus(
+async function inspectTerminalIntegration(
   options: TerminalIntegrationOptions,
-): TerminalIntegrationStatus {
+): Promise<TerminalIntegrationStatus> {
   const launcherPath = getLauncherPath(options)
   if ((options.platform ?? process.platform) !== 'darwin') {
     return {
@@ -723,6 +764,8 @@ export function getTerminalIntegrationStatus(
     }
   }
 
+  const command = await lookupAndValidateCommand(options)
+  // Inspect local ownership after the async boundary, never from a stale snapshot.
   const state = readState(options)
   const profile = profileForShell(options)
   const profilePaths = safeProfilePaths(options, state)
@@ -757,7 +800,6 @@ export function getTerminalIntegrationStatus(
       break
     }
   }
-  const command = lookupAndValidateCommand(options)
   const found = command.found
   const normalizedFound = found ? resolve(found) : null
   const normalizedLauncherPath = resolve(launcherPath)
@@ -811,16 +853,17 @@ export function getTerminalIntegrationStatus(
   }
 }
 
-export function installTerminalIntegration(
+async function installTerminalIntegrationNow(
   options: TerminalIntegrationOptions,
-): TerminalIntegrationStatus {
+): Promise<TerminalIntegrationStatus> {
   if ((options.platform ?? process.platform) !== 'darwin') {
     throw new TerminalIntegrationOperationError('unsupported_platform')
   }
 
   const profile = profileForShell(options)
   try {
-    const currentStatus = getTerminalIntegrationStatus(options)
+    const currentStatus = await inspectTerminalIntegration(options)
+    if (stopping) throw new TerminalIntegrationOperationError('install_failed')
     if (currentStatus.conflict) return currentStatus
 
     const launcherPath = getLauncherPath(options)
@@ -837,11 +880,11 @@ export function installTerminalIntegration(
     }
 
     if (!installManagedLauncher(options, launcherPath, launcherTarget, state)) {
-      return getTerminalIntegrationStatus(options)
+      return await inspectTerminalIntegration(options)
     }
     writeState(options, launcherTarget, [profile.path], profile.path)
 
-    return getTerminalIntegrationStatus(options)
+    return await inspectTerminalIntegration(options)
   } catch (error) {
     if (error instanceof TerminalIntegrationOperationError) throw error
     if (error instanceof MalformedTerminalProfileError) {
@@ -859,9 +902,9 @@ export function installTerminalIntegration(
   }
 }
 
-export function uninstallTerminalIntegration(
+async function uninstallTerminalIntegrationNow(
   options: TerminalIntegrationOptions,
-): TerminalIntegrationStatus {
+): Promise<TerminalIntegrationStatus> {
   if ((options.platform ?? process.platform) !== 'darwin') {
     throw new TerminalIntegrationOperationError('unsupported_platform')
   }
@@ -880,7 +923,7 @@ export function uninstallTerminalIntegration(
     removeManagedLauncher(options, launcherPath, state)
     if (state) rmSync(statePath(options), { force: true })
 
-    return getTerminalIntegrationStatus(options)
+    return await inspectTerminalIntegration(options)
   } catch (error) {
     if (error instanceof TerminalIntegrationOperationError) throw error
     if (error instanceof MalformedTerminalProfileError) {
@@ -896,6 +939,63 @@ export function uninstallTerminalIntegration(
       { cause: error },
     )
   }
+}
+
+interface IntegrationQueue {
+  tail: Promise<unknown>
+  status?: { signature: string; result: Promise<TerminalIntegrationStatus> }
+}
+const integrationQueues = new Map<string, IntegrationQueue>()
+const functionIds = new WeakMap<Function, number>()
+let nextFunctionId = 0
+function functionId(fn: Function | undefined): number {
+  if (!fn) return 0
+  if (!functionIds.has(fn)) functionIds.set(fn, ++nextFunctionId)
+  return functionIds.get(fn)!
+}
+function enqueueIntegration(
+  options: TerminalIntegrationOptions,
+  operation: 'status' | 'install' | 'uninstall',
+  run: () => Promise<TerminalIntegrationStatus>,
+): Promise<TerminalIntegrationStatus> {
+  const key = resolve(options.homeDir ?? homedir())
+  let queue = integrationQueues.get(key)
+  if (!queue) {
+    queue = { tail: Promise.resolve() }
+    integrationQueues.set(key, queue)
+  }
+  const signature = JSON.stringify([
+    options.platform ?? process.platform, options.resourcesPath, options.appExecutable,
+    options.appVersion, options.shell ?? process.env.SHELL, process.env.PATH, process.env.ZDOTDIR,
+    options.shellTimeoutMs, options.shellOutputLimit, functionId(options.commandLookup),
+    functionId(options.commandValidator), functionId(options.shellRunner),
+  ])
+  if (operation === 'status' && queue.status?.signature === signature) return queue.status.result
+  // Only consecutive in-flight status calls can coalesce. Mutations break the
+  // flight, so a later status cannot return an observation from before install.
+  queue.status = undefined
+  const result = queue.tail.catch(() => {}).then(() => {
+    if (stopping) throw new TerminalIntegrationOperationError(`${operation}_failed`)
+    return run()
+  })
+  queue.tail = result
+  if (operation === 'status') queue.status = { signature, result }
+  const completed = () => {
+    if (queue.status?.result === result) queue.status = undefined
+    if (queue.tail === result) integrationQueues.delete(key)
+  }
+  void result.then(completed, completed)
+  return result
+}
+
+export function getTerminalIntegrationStatus(options: TerminalIntegrationOptions): Promise<TerminalIntegrationStatus> {
+  return enqueueIntegration(options, 'status', () => inspectTerminalIntegration(options))
+}
+export function installTerminalIntegration(options: TerminalIntegrationOptions): Promise<TerminalIntegrationStatus> {
+  return enqueueIntegration(options, 'install', () => installTerminalIntegrationNow(options))
+}
+export function uninstallTerminalIntegration(options: TerminalIntegrationOptions): Promise<TerminalIntegrationStatus> {
+  return enqueueIntegration(options, 'uninstall', () => uninstallTerminalIntegrationNow(options))
 }
 
 function promptStatePath(options: TerminalIntegrationOptions): string {

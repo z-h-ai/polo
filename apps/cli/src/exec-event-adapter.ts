@@ -41,9 +41,9 @@ export class ExecEventAdapter {
     return this.protocolStarted
   }
 
-  start(threadId: string): void {
+  start(threadId: string, computeSource?: 'local-owned' | 'desktop-managed'): void {
     this.protocolStarted = true
-    this.emit({ type: 'thread.started', thread_id: threadId })
+    this.emit({ type: 'thread.started', thread_id: threadId, ...(computeSource ? { compute_source: computeSource } : {}) })
     this.emit({ type: 'turn.started' })
   }
 

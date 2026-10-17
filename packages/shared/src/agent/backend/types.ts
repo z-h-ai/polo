@@ -184,6 +184,12 @@ export interface BackendHostRuntimeContext {
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
 export interface CoreBackendConfig {
+  /** Minted only from verified CLI desktop authority; independent of permission mode. */
+  toolExecutionPolicy?: import('../tool-execution-policy').ToolExecutionPolicy;
+  /** Trusted standalone bootstrap preserves user global Skills despite private HOME. */
+  localGlobalSkillsRoot?: string;
+  /** Host-owned local execution lease; independent of managed billing admission. */
+  assertExecutionCurrent?: () => void;
   /** Host-owned admission and metering for managed Polo model requests. */
   managedBilling?: import('../../credentials/managed-billing-observation').ManagedBillingHooks;
   /** Main-owned canonical Skill discovery and per-use permission; absent means unavailable. */

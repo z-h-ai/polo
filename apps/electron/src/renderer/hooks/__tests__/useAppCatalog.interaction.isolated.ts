@@ -219,6 +219,7 @@ const { useAppCatalog } = await import('../useAppCatalog')
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 
 beforeEach(() => {
+  launchHandoffPublish.mockClear()
   productSpaceContextState = productSpaceContext('organization-a')
   syncCatalog = mock(async (
     organizationId: string,
@@ -656,6 +657,116 @@ describe('useAppCatalog ProductSpace launch binding', () => {
     await expect(result.current.resolveLaunch(
       result.current.state.catalog!.apps[0]!,
     )).rejects.toThrow()
+  })
+
+  for (const rejection of ['unknown identity', 'missing row', 'changed version', 'extra field', 'source drift']) {
+    it(`clears installed on refresh for ${rejection}`, async () => {
+      installStrictCatalogAndResolver()
+      getProductSpaceInstallStates = mock(async (identities: any[]) => identities.map(identity => ({
+        app: identity, state: 'installed', currentVersion: identity.version,
+      })))
+      const { result } = renderHook(() => useAppCatalog())
+      await waitFor(() => {
+        const app = result.current.state.catalog?.apps[0]
+        expect(app && result.current.getInstallState(app)?.state).toBe('installed')
+      })
+      getProductSpaceInstallStates = mock(async (identities: any[]) => {
+        if (rejection === 'missing row') return []
+        return identities.map(identity => ({
+          app: {
+            ...identity,
+            ...(rejection === 'unknown identity' ? { catalogEntryId: 'foreign-entry' } : {}),
+            ...(rejection === 'changed version' ? { version: '9.9.9' } : {}),
+            ...(rejection === 'extra field' ? { extra: 'unexpected' } : {}),
+            ...(rejection === 'source drift' ? { sources: [{ ...identity.sources[0], name: 'other' }] } : {}),
+          },
+          state: 'installed', currentVersion: identity.version,
+        }))
+      })
+      await act(async () => { await result.current.sync(true) })
+      expect(result.current.state.installStates).toEqual({})
+    })
+  }
+
+  it('ignores an old install-state response after a newer Catalog snapshot wins', async () => {
+    installStrictCatalogAndResolver()
+    const oldResponse = deferred<any[]>()
+    let calls = 0
+    let oldIdentities: any[] = []
+    getProductSpaceInstallStates = mock(async (identities: any[]) => {
+      calls += 1
+      if (calls === 1) {
+        oldIdentities = identities
+        return oldResponse.promise
+      }
+      return identities.map(identity => ({ app: identity, state: 'installed', currentVersion: identity.version }))
+    })
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => { expect(calls).toBe(1) })
+    await act(async () => { await result.current.sync(true) })
+    const app = result.current.state.catalog!.apps[0]!
+    expect(result.current.getInstallState(app)?.state).toBe('installed')
+    await act(async () => {
+      oldResponse.resolve(oldIdentities.map(identity => ({ app: identity, state: 'not_installed' })))
+      await oldResponse.promise
+    })
+    expect(result.current.getInstallState(app)?.state).toBe('installed')
+  })
+
+  it('retains installed after refresh with Main field order and opens without install confirmation', async () => {
+    const resolver = installStrictCatalogAndResolver({
+      delivery: {
+        kind: 'bundle', downloadUrl: 'https://app.example.test/bundle.zip',
+        checksum: 'a'.repeat(64), sizeBytes: 1024, runtime: 'js',
+      },
+    })
+    getProductSpaceInstallStates = mock(async (identities: any[]) => identities.map(input => ({
+      // validateProductSpaceAppIdentity in Main reconstructs this order;
+      // notably catalogRevision follows version, unlike the renderer request.
+      app: {
+        accountId: input.accountId,
+        productSpaceId: input.productSpaceId,
+        catalogEntryId: input.catalogEntryId,
+        artifactInstanceId: input.artifactInstanceId,
+        versionId: input.versionId,
+        version: input.version,
+        catalogRevision: input.catalogRevision,
+        sources: input.sources.map((source: any) => ({
+          kind: source.kind, name: source.name, circleId: source.circleId,
+        })),
+        availability: input.availability,
+      },
+      state: 'installed', currentVersion: input.version,
+    })))
+    const { useMemberAppActions } = await import('../useMemberAppActions')
+    const { useProductSpaceAppLaunchHandoff } = await import('@/context/ProductSpaceContext')
+    const { result } = renderHook(() => {
+      const catalog = useAppCatalog()
+      const launchHandoff = useProductSpaceAppLaunchHandoff()
+      const actions = useMemberAppActions({
+        catalog, context: { spaceKind: 'enterprise', launchHandoff },
+      })
+      return { catalog, actions }
+    })
+    await waitFor(() => {
+      const app = result.current.catalog.state.catalog?.apps[0]
+      expect(app && result.current.catalog.getInstallState(app)?.state).toBe('installed')
+    })
+    await act(async () => { await result.current.catalog.sync(true) })
+    const app = result.current.catalog.state.catalog!.apps[0]!
+    expect(result.current.catalog.getInstallState(app)).toMatchObject({
+      state: 'installed', currentVersion: '2.3.4',
+    })
+    expect(getProductSpaceInstallStates).toHaveBeenCalledTimes(2)
+    await act(async () => { await result.current.actions.open(app) })
+    expect(resolver).toHaveBeenCalledWith('organization-a', 'catalog-entry-a')
+    expect(result.current.actions.prepareTarget).toBeNull()
+    expect(installProductSpaceBundle).not.toHaveBeenCalled()
+    expect(launchHandoffPublish).toHaveBeenCalledTimes(1)
+    expect(launchHandoffPublish).toHaveBeenCalledWith('account-a', expect.objectContaining({
+      subject: expect.objectContaining({ artifactInstanceId: 'artifact-instance-a', version: '2.3.4' }),
+      delivery: expect.objectContaining({ kind: 'bundle' }),
+    }))
   })
 
   it('binds installation and removal to the exact Catalog artifact version', async () => {

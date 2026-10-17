@@ -38,6 +38,8 @@
     "./handlers/rpc/transfer": "./src/handlers/rpc/transfer.ts",
     "./handlers/rpc/trusted-product-space-account": "./src/handlers/rpc/trusted-product-space-account.ts",
     "./handlers/rpc/workspace": "./src/handlers/rpc/workspace.ts",
+    "./runtime/cli-managed-client": "./src/runtime/cli-managed-client.ts",
+    "./runtime/cli-managed-broker": "./src/runtime/cli-managed-broker.ts",
     "./runtime/product-space-executions": "./src/runtime/product-space-executions.ts",
     "./runtime/native-installations": "./src/runtime/native-installations.ts",
     "./runtime/trusted-start-gate": "./src/runtime/trusted-start-gate.ts",

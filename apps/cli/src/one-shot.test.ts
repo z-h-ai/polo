@@ -26,6 +26,20 @@ afterEach(async () => {
 })
 
 describe('one-shot execution internals', () => {
+  it('bootstraps default and resumed credentials only for the matching configured route', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-credential-route-'))
+    tempDirs.push(temp)
+    const proc = Bun.spawn([
+      process.execPath, 'run',
+      join(import.meta.dir, '__fixtures__', 'connection-credential-routing.ts'), temp,
+    ], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env } })
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text(),
+    ])
+    expect(exitCode, stderr).toBe(0)
+    expect(stdout).toBe('ok\n')
+  })
+
   it('rejects userinfo and sensitive base URL query parameters', () => {
     expect(() => normalizeCredentialFreeBaseUrl(
       'https://user:oauth-secret@example.test/v1',

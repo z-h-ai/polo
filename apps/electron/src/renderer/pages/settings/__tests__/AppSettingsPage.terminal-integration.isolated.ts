@@ -136,6 +136,20 @@ afterEach(() => {
 })
 
 describe('App settings terminal integration status failures', () => {
+  it('shows a pending check while other settings can render', async () => {
+    let finish!: (result: StatusResult) => void
+    getStatus = () => new Promise(resolve => { finish = resolve })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('Polo terminal features')).toBeTruthy()
+      expect(screen.getByText('Checking...')).toBeTruthy()
+      expect(screen.getByText('Network')).toBeTruthy()
+    })
+    expect(screen.queryByText('Command enabled')).toBeNull()
+    finish({ success: false, errorCode: 'status_failed' })
+    await screen.findByRole('button', { name: 'Retry' })
+  })
+
   it('renders a structured initial status failure with a localized retry', async () => {
     renderPage()
 
@@ -193,8 +207,8 @@ describe('App settings terminal integration status failures', () => {
     await user.click(await screen.findByRole('button', { name: 'Retry' }))
 
     await waitFor(() => {
-      expect(screen.getByText('Terminal features installed')).toBeTruthy()
-      expect(screen.getByText('Polo terminal features are ready.')).toBeTruthy()
+      expect(screen.getByText('Command enabled')).toBeTruthy()
+      expect(screen.getByText('The polo terminal command is ready.')).toBeTruthy()
     })
     expect(reads).toBe(2)
     expect(screen.queryByText(

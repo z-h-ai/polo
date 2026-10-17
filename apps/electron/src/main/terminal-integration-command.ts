@@ -43,7 +43,7 @@ export function parseTerminalIntegrationCommand(
 export function executeTerminalIntegrationCommand(
   command: TerminalIntegrationCommand,
   options: TerminalIntegrationOptions,
-): TerminalIntegrationStatus {
+): Promise<TerminalIntegrationStatus> {
   if (command === 'uninstall') return uninstallTerminalIntegration(options)
   if (command === 'status') return getTerminalIntegrationStatus(options)
   return installTerminalIntegration(options)

@@ -4,6 +4,7 @@ import { join } from 'path'
 const required = [
   'dist/main.cjs',
   'dist/bootstrap-preload.cjs',
+  'dist/app-sdk-preload.cjs',
   'dist/browser-toolbar-preload.cjs',
   'dist/interceptor.cjs',
   'dist/renderer/index.html',

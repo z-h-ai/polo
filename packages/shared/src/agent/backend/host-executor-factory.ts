@@ -46,6 +46,9 @@ export function computeFingerprint(c: LlmConnection): string {
 
 export function resolveExecutablePolicy(c: LlmConnection): PolicyResult {
   const at = c.authType, pt = c.providerType, pa = c.piAuthProvider
+  // An explicit custom route must never fall through to a catalog endpoint.
+  if (c.customEndpoint && pt !== 'pi_compat') return { ok: false }
+  if (pt === 'pi_compat' && c.customEndpoint?.api !== 'openai-completions' && c.customEndpoint?.api !== 'anthropic-messages') return { ok: false }
   if (pt === 'anthropic' && at === 'api_key') return { ok: true, policy: { routeKind: 'catalog', provider: 'anthropic', credentialType: 'api_key', staticHref: CATALOG_TRANSPORT_HREFS['anthropic'], isCopilot: false, isBedrock: false } }
   if (pt === 'anthropic' && at === 'oauth') return { ok: true, policy: { routeKind: 'catalog', provider: 'anthropic', credentialType: 'oauth_access', staticHref: CATALOG_TRANSPORT_HREFS['anthropic'], isCopilot: false, isBedrock: false } }
   if (pt === 'pi' && at === 'api_key' && pa && API_KEY_CATALOG_PROVIDERS.has(pa)) return { ok: true, policy: { routeKind: 'catalog', provider: pa, credentialType: 'api_key', staticHref: CATALOG_TRANSPORT_HREFS[pa], isCopilot: false, isBedrock: false } }

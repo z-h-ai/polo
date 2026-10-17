@@ -81,6 +81,18 @@ export class AppApiCapabilityRegistry {
     return null
   }
 
+  /** Main-only handle verification; identical TTL/revocation gate to HTTP. */
+  verifyGeneration(generation: number, bindings: CapabilityBindings, now: number): CapabilityRecord | null {
+    const record = this.records.get(generation)
+    if (!record || record.expiresAt <= now || this.revoked.has(generation)) return null
+    return record.identityKey === bindings.identityKey
+      && JSON.stringify(record.identity) === JSON.stringify(bindings.identity)
+      && record.workspaceId === bindings.workspaceId
+      && record.executionId === bindings.executionId
+      && record.runtimeGeneration === bindings.runtimeGeneration
+      && record.scopeGeneration === bindings.scopeGeneration ? record : null
+  }
+
   get(capabilityGeneration: number): CapabilityRecord | undefined {
     return this.records.get(capabilityGeneration)
   }
