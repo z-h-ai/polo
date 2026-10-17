@@ -147,7 +147,12 @@ export class CliManagedBroker {
     if (!captured.current() || !proof.ownerCurrent() || ctx.signal?.aborted) throw new Error('POLO_MANAGED_REVOKED')
     const connection = getLlmConnection(selection.connectionSlug)
     if (connection?.slug !== `polo-space-${captured.owner.productSpaceId}` || connection.managedBy !== 'admin'
-      || !connection.baseUrl || connection.providerType !== 'pi' || connection.customEndpoint?.api !== 'openai-completions') throw new Error('POLO_MANAGED_PROTOCOL_UNSUPPORTED')
+      || !connection.baseUrl || connection.providerType !== 'pi_compat' || connection.authType !== 'api_key_with_endpoint'
+      || connection.customEndpoint?.api !== 'openai-completions') throw new Error('POLO_MANAGED_PROTOCOL_UNSUPPORTED')
+    // Match the Admin custom-endpoint contract before acquiring credentials or billing.
+    let endpoint: URL
+    try { endpoint = new URL(connection.baseUrl) } catch { throw new Error('POLO_MANAGED_PROTOCOL_UNSUPPORTED') }
+    if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('POLO_MANAGED_PROTOCOL_UNSUPPORTED')
     const allowedModels = connection.models?.map(m => typeof m === 'string' ? m : m.id) ?? []
     const model = input.model ?? selection.model ?? connection.defaultModel
     if (!model || !allowedModels.includes(model)) throw new Error('POLO_MODEL_NOT_ALLOWED')
