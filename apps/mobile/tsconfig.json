@@ -3,7 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"],
-    "types": ["node"],
+    "types": ["node", "bun"],
     "paths": {
       "@polo-ai/shared": ["./types/shared-protocol.d.ts"],
       "@polo-ai/shared/protocol": ["./types/shared-protocol.d.ts"]
