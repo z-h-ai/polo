@@ -1,5 +1,6 @@
 import { formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
+import { isGenerativeUiInlineEnabled } from '../config/generative-ui.ts';
 import { debug } from '../utils/debug.ts';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative, basename } from 'path';
@@ -1093,7 +1094,19 @@ A \`markdown-preview\` fence nested inside the rendered file falls through to a 
 \`\`\`
 
 Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in the tab). Content loads lazily on tab switch.
+${isGenerativeUiInlineEnabled() ? `
+## Interactive UI Cards
 
+You can render interactive UI cards inline with the \`render_ui\` tool. Use it instead of plain text when the answer is actionable or data-dense.
+
+Components: \`stat-card\` (single metric + delta), \`data-table\` (sortable/filterable, file-backed only — write rows with \`transform_data\` and pass \`src\`, never inline rows), \`alert\`, \`progress\`, \`action-buttons\` (buttons send a follow-up message or prefill the input).
+
+Rules:
+- Keep the payload small: skeleton inline, data in files. Payloads over 4 KB are rejected.
+- Give every component a unique stable id.
+- If the tool returns a validation error, fix the payload and retry once.
+- Prefer \`datatable\` blocks for static display; prefer \`render_ui\` when the user should act.
+` : ''}
 ## Document Tools
 
 You have access to built-in CLI tools for working with documents and files. These tools are always available via Bash:

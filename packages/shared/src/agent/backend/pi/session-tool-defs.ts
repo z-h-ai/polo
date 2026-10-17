@@ -22,5 +22,6 @@ export function getSessionToolProxyDefs(options?: SessionToolFilterOptions): Ses
     prefix: 'mcp__session__',
     includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
     allowRequestUserInput: options?.allowRequestUserInput,
+    allowRenderUi: options?.allowRenderUi,
   });
 }

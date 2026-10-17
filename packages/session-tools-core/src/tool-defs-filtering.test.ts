@@ -74,3 +74,36 @@ describe('session tool filtering helpers', () => {
     expect(blockedPrefixed.has('mcp__session__spawn_session')).toBe(true);
   });
 });
+
+describe('render_ui tool gating', () => {
+  it('does not register render_ui by default (fail closed)', () => {
+    const names = getSessionToolNames();
+    expect(names.has('render_ui')).toBe(false);
+  });
+
+  it('does not register render_ui when the toggle flag is off', () => {
+    const defs = getSessionToolDefs({ allowRenderUi: false, allowRequestUserInput: true });
+    const names = defs.map(d => d.name);
+
+    expect(names.includes('render_ui')).toBe(false);
+  });
+
+  it('registers render_ui only when the toggle flag is on', () => {
+    const defs = getSessionToolDefs({ allowRenderUi: true });
+    const def = defs.find(d => d.name === 'render_ui');
+
+    expect(def).toBeDefined();
+    expect(def?.executionMode).toBe('registry');
+    expect(def?.safeMode).toBe('allow');
+    expect(def?.readOnly).toBe(true);
+    expect(def?.handler).toBeDefined();
+  });
+
+  it('json schema conversion respects the allowRenderUi filter', () => {
+    const off = getToolDefsAsJsonSchema({ prefix: 'mcp__session__' }).map(d => d.name);
+    expect(off.includes('mcp__session__render_ui')).toBe(false);
+
+    const on = getToolDefsAsJsonSchema({ prefix: 'mcp__session__', allowRenderUi: true }).map(d => d.name);
+    expect(on.includes('mcp__session__render_ui')).toBe(true);
+  });
+});

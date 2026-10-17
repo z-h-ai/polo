@@ -444,6 +444,8 @@ export const RPC_CHANNELS = {
   tools: {
     GET_BROWSER_TOOL_ENABLED: 'tools:getBrowserToolEnabled',
     SET_BROWSER_TOOL_ENABLED: 'tools:setBrowserToolEnabled',
+    GET_GENERATIVE_UI_INLINE_ENABLED: 'tools:getGenerativeUiInlineEnabled',
+    SET_GENERATIVE_UI_INLINE_ENABLED: 'tools:setGenerativeUiInlineEnabled',
   },
   caching: {
     GET_EXTENDED_PROMPT_CACHE: 'caching:getExtendedPromptCache',

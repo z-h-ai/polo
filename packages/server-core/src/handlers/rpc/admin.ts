@@ -71,6 +71,7 @@ import {
   getLlmConnections,
   setAdminConfigVersion,
   setDefaultLlmConnection,
+  setGenerativeUiRemoteCapability,
   updateLlmConnection,
   type LlmConnection,
 } from '@polo-ai/shared/config'
@@ -2918,8 +2919,19 @@ export function registerAdminHandlers(
   )
 
   server.handle(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES, async () =>
-    callOrganization('getCreatorArtifactCapabilities', (client, accessToken) =>
-      client.getCreatorArtifactCapabilities(accessToken)))
+    callOrganization('getCreatorArtifactCapabilities', async (client, accessToken) => {
+      const capability = await client.getCreatorArtifactCapabilities(accessToken);
+      // Same /api/capabilities endpoint also carries the Generative UI flag;
+      // refresh the synchronous toggle cache whenever capabilities are read.
+      // Absent field keeps the feature enabled, so pre-flag servers are
+      // unaffected.
+      try {
+        setGenerativeUiRemoteCapability(await client.getGenerativeUiCapability(accessToken));
+      } catch {
+        // Capability read is best-effort; toggle cache keeps its previous value.
+      }
+      return capability;
+    }))
 
   server.handle(RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS, async (_ctx, rawInput: unknown) => {
     const input = CreatorArtifactListRpcInputSchema.safeParse(rawInput)

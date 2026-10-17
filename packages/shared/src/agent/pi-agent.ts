@@ -355,6 +355,10 @@ export class PiAgent extends BaseAgent {
   // capability drift between turns (desktop ↔ messaging switches).
   private _lastRegisteredAllowRequestUserInput: boolean = false;
 
+  // Last allowRenderUi value sent to the subprocess — same drift detection
+  // for the render_ui tool (Generative UI inline cards).
+  private _lastRegisteredAllowRenderUi: boolean = false;
+
   // RPC request counter for unique IDs
   private rpcIdCounter: number = 0;
 
@@ -653,14 +657,16 @@ export class PiAgent extends BaseAgent {
    * Build the session-scoped proxy tool defs for the subprocess.
    *
    * Visibility mirrors the Claude adapter:
-   * - `request_user_input` only registers when allowRequestUserInput is set
-   *   (desktop interactive main-session turns).
+   * - `request_user_input` / `render_ui` only register when their capability
+   *   flags are set (desktop interactive main-session turns; render_ui also
+   *   requires the generativeUI.inline toggle).
    * - `browser_tool` is hidden when the built-in browser tool is disabled.
    */
   private buildSessionToolDefs(): SessionToolProxyDef[] {
     if (this.managedFileOnly) return [];
     let sessionToolDefs = getSessionToolProxyDefs({
       allowRequestUserInput: this.allowRequestUserInput,
+      allowRenderUi: this.allowRenderUi,
     });
 
     // Mirror Claude's gate: hide `browser_tool` when the user has disabled
@@ -698,19 +704,22 @@ export class PiAgent extends BaseAgent {
       scope: 'session',
     });
     this._lastRegisteredAllowRequestUserInput = this.allowRequestUserInput;
-    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput})`);
+    this._lastRegisteredAllowRenderUi = this.allowRenderUi;
+    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi})`);
   }
 
   /**
-   * Re-register proxy tools only when the request_user_input capability flag
-   * drifted from what the subprocess currently knows. The subprocess sets
-   * toolsChanged and recreates its session on the next prompt.
+   * Re-register proxy tools only when a capability flag drifted from what the
+   * subprocess currently knows. The subprocess sets toolsChanged and recreates
+   * its session on the next prompt.
    */
   private syncSessionToolRegistration(): void {
-    if (this._lastRegisteredAllowRequestUserInput === this.allowRequestUserInput) {
+    const ruiDrifted = this._lastRegisteredAllowRequestUserInput !== this.allowRequestUserInput;
+    const guiDrifted = this._lastRegisteredAllowRenderUi !== this.allowRenderUi;
+    if (!ruiDrifted && !guiDrifted) {
       return;
     }
-    this.debug(`request_user_input visibility changed to ${this.allowRequestUserInput} — re-registering session tools`);
+    this.debug(`session tool visibility changed (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}) — re-registering session tools`);
     this.sendSessionToolRegistration();
   }
 
@@ -1784,6 +1793,12 @@ export class PiAgent extends BaseAgent {
       if (toolName === 'request_user_input' && !this.allowRequestUserInput) {
         return {
           content: 'request_user_input is not available in this session. Ask the user your question as plain text instead.',
+          isError: true,
+        };
+      }
+      if (toolName === 'render_ui' && !this.allowRenderUi) {
+        return {
+          content: 'render_ui is not available in this session. Present the same information as markdown or a datatable block instead.',
           isError: true,
         };
       }

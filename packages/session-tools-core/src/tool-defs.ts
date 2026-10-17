@@ -33,6 +33,7 @@ import { handleRequestUserInput } from './handlers/request-user-input.ts';
 import { RequestUserInputArgsSchema, REQUEST_USER_INPUT_OTHER_OPTION_ID } from './question-types.ts';
 import { handleUpdatePreferences } from './handlers/update-preferences.ts';
 import { handleTransformData } from './handlers/transform-data.ts';
+import { handleRenderUi } from './handlers/render-ui.ts';
 import { handleScriptSandbox } from './handlers/script-sandbox.ts';
 import { handleRenderTemplate } from './handlers/render-template.ts';
 import { handleSendDeveloperFeedback } from './handlers/send-developer-feedback.ts';
@@ -139,6 +140,129 @@ export const TransformDataSchema = z.object({
   script: z.string().describe('Transform script source code. Receives input file paths as command-line args (sys.argv[1:] or process.argv.slice(2)), last arg is the output file path.'),
   inputFiles: z.array(z.string()).describe('Input file paths relative to session dir (e.g., "long_responses/stripe_txns.txt")'),
   outputFile: z.string().describe('Output file name relative to session data/ dir (e.g., "transactions.json")'),
+});
+
+// ============================================================
+// render_ui — Generative UI (Track 1, declarative, no code exec)
+// ============================================================
+
+/** Hard cap on the whole render_ui input, serialized as UTF-8 JSON. */
+export const RENDER_UI_MAX_PAYLOAD_BYTES = 4096;
+/** Max components per render_ui call. */
+export const RENDER_UI_MAX_COMPONENTS = 8;
+
+const GenUIBase = z.object({
+  id: z.string().min(1).max(64)
+    .describe('Stable component id. Reusing an id in a later call updates that component.'),
+  title: z.string().max(120).optional().describe('Optional card header'),
+});
+
+export const GenUIStatCardSchema = GenUIBase.extend({
+  type: z.literal('stat-card'),
+  label: z.string().max(80),
+  value: z.union([z.number(), z.string().max(40)]),
+  unit: z.string().max(12).optional(),
+  delta: z.number().optional().describe('Decimal, e.g. 0.152 = +15.2%'),
+  trend: z.enum(['up', 'down', 'flat']).optional(),
+});
+
+// Column types align with the datatable rich-block contract in system.ts
+const GenUITableColumnSchema = z.object({
+  key: z.string().max(60),
+  label: z.string().max(80),
+  type: z.enum(['text', 'number', 'currency', 'percent', 'boolean', 'date', 'badge']).default('text'),
+});
+
+export const GenUIDataTableSchema = GenUIBase.extend({
+  type: z.literal('data-table'),
+  columns: z.array(GenUITableColumnSchema).min(1).max(24),
+  // Hard rule: inline rows are NOT accepted — data must land on disk via
+  // transform_data first, then be referenced through "src".
+  src: z.string().min(1)
+    .describe('Path to a JSON rows file written by transform_data (absolute, or relative to the session data dir). Inline rows NOT accepted.'),
+  pageSize: z.number().int().min(5).max(100).optional(),
+  // Rejecting unknown keys here is what enforces "no inline rows": a `rows`
+  // field fails validation with a clear message instead of being stripped.
+}).strict();
+
+export const GenUIAlertSchema = GenUIBase.extend({
+  type: z.literal('alert'),
+  severity: z.enum(['info', 'success', 'warning', 'error']),
+  message: z.string().max(500),
+});
+
+export const GenUIProgressSchema = GenUIBase.extend({
+  type: z.literal('progress'),
+  status: z.enum(['running', 'success', 'error']),
+  label: z.string().max(120),
+  percent: z.number().min(0).max(100).optional().describe('Omit for indeterminate'),
+});
+
+const GenUIActionButtonSchema = z.object({
+  id: z.string().min(1).max(64),
+  label: z.string().min(1).max(40),
+  style: z.enum(['primary', 'secondary', 'danger']).default('secondary'),
+  // P0 only ships these two backfill actions; run-tool direct invocation is
+  // deferred to P2 (needs the capability gating work).
+  action: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('send-message'),
+      prompt: z.string().min(1).max(2000)
+        .describe('Sent as the next user message when clicked'),
+    }),
+    z.object({
+      kind: z.literal('fill-input'),
+      text: z.string().min(1).max(2000)
+        .describe('Prefills the chat input without sending'),
+    }),
+  ]),
+});
+
+export const GenUIActionButtonsWithIdSchema = GenUIBase.extend({
+  type: z.literal('action-buttons'),
+  buttons: z.array(GenUIActionButtonSchema).min(1).max(6),
+});
+
+export const GenUIComponentSchema = z.discriminatedUnion('type', [
+  GenUIStatCardSchema,
+  GenUIDataTableSchema,
+  GenUIAlertSchema,
+  GenUIProgressSchema,
+  GenUIActionButtonsWithIdSchema,
+]);
+
+export type GenUIComponent = z.infer<typeof GenUIComponentSchema>;
+
+// Cross-field rules live on the components array (not the top-level object):
+// a superRefine on the object itself would wrap RenderUiSchema in ZodEffects
+// and break the `.shape` access the Claude SDK toolset builder relies on.
+const GenUIComponentsArraySchema = z.array(GenUIComponentSchema)
+  .min(1)
+  .max(RENDER_UI_MAX_COMPONENTS)
+  .superRefine((components, ctx) => {
+    // TextEncoder (not Buffer) so the schema stays portable to browser bundles.
+    const bytes = new TextEncoder().encode(JSON.stringify({ components })).length;
+    if (bytes > RENDER_UI_MAX_PAYLOAD_BYTES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Payload ${bytes}B exceeds ${RENDER_UI_MAX_PAYLOAD_BYTES}B. Move data into a file via transform_data and use "src".`,
+      });
+    }
+    const ids = new Set<string>();
+    components.forEach((component, index) => {
+      if (ids.has(component.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, 'id'],
+          message: `Duplicate component id "${component.id}". Component ids must be unique within one call.`,
+        });
+      }
+      ids.add(component.id);
+    });
+  });
+
+export const RenderUiSchema = z.object({
+  components: GenUIComponentsArraySchema,
 });
 
 export const ScriptSandboxSchema = z.object({
@@ -369,6 +493,23 @@ Use this tool when you need to transform large datasets (20+ rows) into structur
 
 **Security:** Runs in an isolated subprocess with no access to API keys or credentials. 30-second timeout.`,
 
+  render_ui: `Render interactive UI cards inline in the chat with declarative JSON components.
+
+Use this instead of plain text when the answer is actionable or data-dense.
+
+**Components** (1-8 per call, discriminated by "type"):
+- \`stat-card\`: single metric + optional delta/trend
+- \`data-table\`: sortable/filterable table, file-backed ONLY — write rows with transform_data and pass "src"; inline rows are rejected
+- \`alert\`: info/success/warning/error banner
+- \`progress\`: running/success/error indicator with optional percent
+- \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input
+
+**Rules:**
+- Keep the payload small: skeleton inline, data in files. Payloads over 4096 bytes are rejected.
+- Give every component a unique stable "id" — reusing an id in a later call updates that card in place.
+- If this tool returns a validation error, fix the payload and retry once.
+- Prefer datatable/spreadsheet blocks for static display; prefer render_ui when the user should act.`,
+
   script_sandbox: `Run quick inline diagnostics in a sandboxed subprocess with network isolation.
 
 Use this for short Python/Node/Bun snippets when strict Explore-mode Bash parsing blocks inline diagnostics.
@@ -563,6 +704,11 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // (see SessionToolFilterOptions.allowRequestUserInput). Safe in all permission
   // modes: asking a question must not trigger another permission confirmation.
   { name: 'request_user_input', description: TOOL_DESCRIPTIONS.request_user_input, inputSchema: RequestUserInputArgsSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRequestUserInput },
+  // Generative UI inline cards — same desktop-only gating as request_user_input
+  // (see SessionToolFilterOptions.allowRenderUi), plus the generativeUI.inline
+  // feature toggle folded into the flag by the session layer. Declared JSON
+  // only: no code execution, no network — safe in all permission modes.
+  { name: 'render_ui', description: TOOL_DESCRIPTIONS.render_ui, inputSchema: RenderUiSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleRenderUi },
   { name: 'update_user_preferences', description: TOOL_DESCRIPTIONS.update_user_preferences, inputSchema: UpdatePreferencesSchema, executionMode: 'registry', safeMode: 'block', handler: handleUpdatePreferences },
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
@@ -595,6 +741,15 @@ export interface SessionToolFilterOptions {
    * to false so backends must opt in explicitly.
    */
   allowRequestUserInput?: boolean;
+  /**
+   * Only desktop interactive main-session turns enable render_ui (Generative
+   * UI inline cards), and only while the generativeUI.inline feature toggle
+   * is on — the session layer folds remote capability + local Settings kill
+   * switch into this flag before each turn. Every non-desktop source and any
+   * disabled toggle state fails closed. Defaults to false so backends must
+   * opt in explicitly.
+   */
+  allowRenderUi?: boolean;
 }
 
 /**
@@ -606,12 +761,16 @@ export interface SessionToolFilterOptions {
 export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionToolDef[] {
   const includeDeveloperFeedback = options?.includeDeveloperFeedback ?? true;
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
+  const allowRenderUi = options?.allowRenderUi ?? false;
 
   return SESSION_TOOL_DEFS.filter(def => {
     if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
       return false;
     }
     if (!allowRequestUserInput && def.name === 'request_user_input') {
+      return false;
+    }
+    if (!allowRenderUi && def.name === 'render_ui') {
       return false;
     }
     return true;
@@ -726,11 +885,13 @@ export function getToolDefsAsJsonSchema(opts?: {
   prefix?: string;
   includeDeveloperFeedback?: boolean;
   allowRequestUserInput?: boolean;
+  allowRenderUi?: boolean;
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
   const defs = getSessionToolDefs({
     includeDeveloperFeedback: opts?.includeDeveloperFeedback,
     allowRequestUserInput: opts?.allowRequestUserInput,
+    allowRenderUi: opts?.allowRenderUi,
   });
 
   return defs.map(def => {

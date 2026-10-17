@@ -200,6 +200,8 @@ export {
   handleScriptSandbox,
   // Render Template
   handleRenderTemplate,
+  // Render UI (Generative UI inline cards)
+  handleRenderUi,
   // Send Developer Feedback
   handleSendDeveloperFeedback,
 } from './handlers/index.ts';
@@ -219,6 +221,7 @@ export type {
   TransformDataArgs,
   ScriptSandboxArgs,
   RenderTemplateArgs,
+  RenderUiArgs,
   SendDeveloperFeedbackArgs,
 } from './handlers/index.ts';
 
@@ -237,6 +240,16 @@ export {
   TransformDataSchema,
   ScriptSandboxSchema,
   RenderTemplateSchema,
+  // Generative UI (render_ui) schemas
+  GenUIStatCardSchema,
+  GenUIDataTableSchema,
+  GenUIAlertSchema,
+  GenUIProgressSchema,
+  GenUIActionButtonsWithIdSchema,
+  GenUIComponentSchema,
+  RenderUiSchema,
+  RENDER_UI_MAX_PAYLOAD_BYTES,
+  RENDER_UI_MAX_COMPONENTS,
   // Browser tool schema
   BrowserToolSchema,
   // Developer feedback schema
@@ -273,4 +286,5 @@ export type {
   JsonSchemaToolDef,
   SessionToolFilterOptions,
   SessionToolNameOptions,
+  GenUIComponent,
 } from './tool-defs.ts';

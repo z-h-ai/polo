@@ -224,6 +224,11 @@ export interface SessionScopedToolsOptions {
    * participates in the cache key so toggling it between turns rebuilds tools.
    */
   allowRequestUserInput?: boolean;
+  /**
+   * Register render_ui (Generative UI inline cards; desktop interactive turns
+   * with the generativeUI.inline toggle on). Participates in the cache key.
+   */
+  allowRenderUi?: boolean;
 }
 
 /**
@@ -242,10 +247,11 @@ export function getSessionScopedTools(
   options?: SessionScopedToolsOptions,
 ): ReturnType<typeof createSdkMcpServer> {
   const sessionPath = storage.getSessionPath(workspaceRootPath, sessionId);
-  // The capability flag is part of the cache key: a session switching between
+  // The capability flags are part of the cache key: a session switching between
   // desktop and non-desktop turns must rebuild its toolset (P0 contract).
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
-  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}`;
+  const allowRenderUi = options?.allowRenderUi ?? false;
+  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}`;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -304,6 +310,7 @@ export function getSessionScopedTools(
     tools = getSessionToolDefs({
       includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
       allowRequestUserInput,
+      allowRenderUi,
     })
       .filter(def => def.handler !== null) // Skip backend-specific tools (call_llm)
       .map(def => registryTool(def.name, def.inputSchema.shape));

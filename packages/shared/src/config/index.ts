@@ -20,3 +20,10 @@ export {
 
 export { hasManagedCliMarkers, assertOwnedCliConnection, type CliConnectionProvenance } from './cli-connection-policy'
 export { desktopManagedConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor } from './desktop-managed'
+export {
+  setGenerativeUiRemoteCapability,
+  isGenerativeUiRemoteInlineDisabled,
+  isGenerativeUiInlineEnabled,
+  GenerativeUiCapabilitySchema,
+  type GenerativeUiCapability,
+} from './generative-ui'

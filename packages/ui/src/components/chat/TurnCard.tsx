@@ -38,6 +38,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '../tooltip'
 import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
+import { GenUICard, mergeGenUiComponents, parseGenUiComponents } from './GenUICard'
 import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, deriveTurnPhase, shouldShowThinkingIndicator, type ActivityGroup, type AssistantTurn } from './turn-utils'
 import { extractAnnotationSelectedText } from './follow-up-helpers'
 import {
@@ -573,6 +574,9 @@ function formatToolInput(
 
   // For call_llm: model shown as badge, prompt duplicates intent
   if (toolName === 'mcp__session__call_llm') return ''
+
+  // For render_ui: the card itself renders below; dumping JSON here is noise
+  if (toolName === 'mcp__session__render_ui') return ''
 
   const parts: string[] = []
 
@@ -2891,6 +2895,19 @@ export const TurnCard = React.memo(function TurnCard({
     [sortedActivities, hasTaskSubagents]
   )
 
+  // Declarative inline cards (render_ui): merge same-id components across all
+  // completed calls in the turn. Failed calls are skipped — the model retries
+  // and only the successful payload should render.
+  const genUiComponents = useMemo(
+    () => mergeGenUiComponents(
+      sortedActivities
+        .filter(a => a.type === 'tool' && a.toolName === 'mcp__session__render_ui' && a.status === 'completed')
+        .map(a => parseGenUiComponents(a.toolInput))
+        .filter(group => group.length > 0)
+    ),
+    [sortedActivities]
+  )
+
   // Don't render if nothing to show and turn is complete
   if (activities.length === 0 && !response && isComplete) {
     return null
@@ -3097,6 +3114,11 @@ export const TurnCard = React.memo(function TurnCard({
             )}
           </AnimatePresence>
         </div>
+      )}
+
+      {/* Declarative inline cards (render_ui) - visible without expanding activities */}
+      {genUiComponents.length > 0 && (
+        <GenUICard components={genUiComponents} sessionId={sessionId} className="mt-2" />
       )}
 
       {/* Standalone thinking indicator - when no activities but still working */}

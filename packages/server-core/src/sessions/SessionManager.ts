@@ -26,7 +26,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@polo-ai/shared/agent/backend'
-import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
+import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, isGenerativeUiInlineEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
@@ -1216,6 +1216,28 @@ export function computeRequestUserInputEligibility(
     return hidden === true && isMini === true
   }
   return !hidden && !isMini
+}
+
+/**
+ * Per-turn eligibility for the render_ui tool (Generative UI inline cards).
+ * Same fail-closed desktop/hidden/mini matrix as request_user_input (the
+ * cards render on the same interactive chat surface), intersected with the
+ * two-level generativeUI.inline feature toggle: remote capability flag
+ * (absent = enabled) AND the local Settings kill switch. Either off, or any
+ * non-desktop source, fails closed.
+ */
+export function computeRenderUiEligibility(
+  invocationSource: InvocationSource | undefined,
+  hidden: boolean | undefined,
+  isMini: boolean | undefined,
+  origin: import('@polo-ai/shared/protocol').SessionOrigin | undefined,
+): boolean {
+  return isGenerativeUiInlineEnabled() && computeRequestUserInputEligibility(
+    invocationSource,
+    hidden,
+    isMini,
+    origin,
+  )
 }
 
 /**
@@ -8282,8 +8304,8 @@ export class SessionManager implements ISessionManager {
       // there when the agent already exists.
       agent.setSessionTurnGeneration(managed.processingGeneration)
 
-      // Re-apply the per-turn capability flag — a freshly created agent defaults
-      // to false, so desktop turns must set it after creation as well. The
+      // Re-apply the per-turn capability flags — a freshly created agent defaults
+      // both to false, so desktop turns must set them after creation as well. The
       // source is the one bound to THIS turn (captured at the new-generation
       // boundary), never a message that was queued behind it.
       const allowRequestUserInputNow = computeRequestUserInputEligibility(
@@ -8294,6 +8316,15 @@ export class SessionManager implements ISessionManager {
       )
       if (agent.allowRequestUserInput !== allowRequestUserInputNow) {
         agent.allowRequestUserInput = allowRequestUserInputNow
+      }
+      const allowRenderUiNow = computeRenderUiEligibility(
+        invocationSource,
+        managed.hidden,
+        managed.systemPromptPreset === 'mini',
+        managed.origin,
+      )
+      if (agent.allowRenderUi !== allowRenderUiNow) {
+        agent.allowRenderUi = allowRenderUiNow
       }
 
       // Always set all sources for context (even if none are enabled), including built-ins
@@ -9237,6 +9268,15 @@ export class SessionManager implements ISessionManager {
     )
     if (managed.agent && managed.agent.allowRequestUserInput !== allowRequestUserInput) {
       managed.agent.allowRequestUserInput = allowRequestUserInput
+    }
+    const allowRenderUi = computeRenderUiEligibility(
+      invocationSource,
+      managed.hidden,
+      managed.systemPromptPreset === 'mini',
+      managed.origin,
+    )
+    if (managed.agent && managed.agent.allowRenderUi !== allowRenderUi) {
+      managed.agent.allowRenderUi = allowRenderUi
     }
   }
 

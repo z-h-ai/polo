@@ -272,6 +272,13 @@ export abstract class BaseAgent implements AgentBackend {
    */
   allowRequestUserInput = false;
   /**
+   * Per-turn capability flag: whether the render_ui tool (Generative UI
+   * inline cards) is visible. Set by the SessionManager before each turn —
+   * desktop interactive sessions with the generativeUI.inline toggle on;
+   * every other combination fails closed.
+   */
+  allowRenderUi = false;
+  /**
    * The processing generation of the turn whose events this agent is
    * currently processing. Injected by the SessionManager at every turn start
    * (and after agent creation) so tool-call callbacks can carry their

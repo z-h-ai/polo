@@ -410,6 +410,8 @@ export const CHANNEL_MAP = {
   // Tools settings
   getBrowserToolEnabled: invoke(RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED),
   setBrowserToolEnabled: invoke(RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED),
+  getGenerativeUiInlineEnabled: invoke(RPC_CHANNELS.tools.GET_GENERATIVE_UI_INLINE_ENABLED),
+  setGenerativeUiInlineEnabled: invoke(RPC_CHANNELS.tools.SET_GENERATIVE_UI_INLINE_ENABLED),
 
   // Prompt caching & context
   getExtendedPromptCache: invoke(RPC_CHANNELS.caching.GET_EXTENDED_PROMPT_CACHE),

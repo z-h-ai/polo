@@ -79,6 +79,8 @@ export interface StoredConfig {
   // Tools
   browserToolEnabled?: boolean;  // Enable built-in browser tool (default: true). Disable for Playwright/Puppeteer.
   allowRemoteEvaluate?: boolean;  // Allow remote agents to call `browser_tool evaluate` on local browser (default: true).
+  // Generative UI
+  generativeUiInlineEnabled?: boolean;  // Enable render_ui Generative UI inline cards (default: true). User-level kill switch.
   // Prompt caching & context
   extendedPromptCache?: boolean;  // Use 1h prompt cache TTL instead of 5m (default: false)
   enable1MContext?: boolean;  // Enable 1M context window for supported models (default: false — opt-in; requires Anthropic Tier 4+)
@@ -154,6 +156,7 @@ const FALLBACK_CONFIG_DEFAULTS: ConfigDefaults = {
     browserToolEnabled: true,
     adminUrl: 'https://polo-admin.z-h-ai.com/',
     allowRemoteEvaluate: true,
+    generativeUiInlineEnabled: true,
   },
   workspaceDefaults: {
     thinkingLevel: 'medium',
@@ -561,6 +564,34 @@ export function getBrowserToolEnabled(): boolean {
 export function setBrowserToolEnabled(enabled: boolean): void {
   updateStoredConfig(config => {
     config.browserToolEnabled = enabled;
+  });
+
+  // Clear session tool caches so all sessions pick up the change immediately.
+  // Lazy import to avoid circular dependency (storage ← session-scoped-tools ← storage).
+  import('../agent/session-scoped-tools.ts').then(m => m.invalidateAllSessionToolsCaches()).catch(() => {});
+}
+
+/**
+ * Get whether Generative UI inline cards (render_ui) are enabled locally.
+ * User-level kill switch; combined with the remote `generativeUI.inline`
+ * capability via isGenerativeUiInlineEnabled(). Defaults to true — including
+ * when an older packaged defaults file predates the key (absent = enabled).
+ */
+export function getGenerativeUiInlineEnabled(): boolean {
+  const config = loadStoredConfig();
+  if (config?.generativeUiInlineEnabled !== undefined) {
+    return config.generativeUiInlineEnabled;
+  }
+  const defaults = loadConfigDefaults();
+  return defaults.defaults.generativeUiInlineEnabled !== false;
+}
+
+/**
+ * Set whether Generative UI inline cards (render_ui) are enabled locally.
+ */
+export function setGenerativeUiInlineEnabled(enabled: boolean): void {
+  updateStoredConfig(config => {
+    config.generativeUiInlineEnabled = enabled;
   });
 
   // Clear session tool caches so all sessions pick up the change immediately.

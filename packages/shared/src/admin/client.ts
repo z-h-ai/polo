@@ -57,6 +57,10 @@ import {
 } from './types.ts';
 import { z, type ZodType } from 'zod';
 import {
+  GenerativeUiCapabilitySchema,
+  type GenerativeUiCapability,
+} from '../config/generative-ui.ts';
+import {
   NativeInstallationAdmissionRequestSchema, NativeInstallationAdmissionSchema,
   NativeInstallationReportSchema, NativeInstallationReceiptSchema,
   type NativeInstallationAdmissionRequest, type NativeInstallationAdmission,
@@ -899,6 +903,22 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, CreatorArtifactCapabilitySchema);
+  }
+
+  /**
+   * Read the generativeUI section of /api/capabilities. The section and its
+   * `inline` field are both optional — absent means enabled (backward
+   * compatible with servers predating the flag). Callers should feed the
+   * result into setGenerativeUiRemoteCapability to refresh the toggle cache.
+   */
+  async getGenerativeUiCapability(
+    accessToken: string,
+  ): Promise<GenerativeUiCapability> {
+    const response = await this.request<unknown>('/api/capabilities', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, GenerativeUiCapabilitySchema);
   }
 
   async listCreatorArtifacts(

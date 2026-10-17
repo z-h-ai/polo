@@ -112,6 +112,7 @@ export default function AppSettingsPage() {
 
   // Tools state
   const [browserToolEnabled, setBrowserToolEnabled] = useState(true)
+  const [generativeUiInlineEnabled, setGenerativeUiInlineEnabled] = useState(true)
 
   // Proxy state
   const [proxyForm, setProxyForm] = useState<ProxyFormState>(EMPTY_PROXY_FORM)
@@ -141,15 +142,17 @@ export default function AppSettingsPage() {
   const loadSettings = useCallback(async () => {
     if (!window.electronAPI) return
     try {
-      const [notificationsOn, keepAwakeOn, browserToolOn, proxySettings] = await Promise.all([
+      const [notificationsOn, keepAwakeOn, browserToolOn, generativeUiOn, proxySettings] = await Promise.all([
         window.electronAPI.getNotificationsEnabled(),
         window.electronAPI.getKeepAwakeWhileRunning(),
         window.electronAPI.getBrowserToolEnabled(),
+        window.electronAPI.getGenerativeUiInlineEnabled(),
         window.electronAPI.getNetworkProxySettings(),
       ])
       setNotificationsEnabled(notificationsOn)
       setKeepAwakeEnabled(keepAwakeOn)
       setBrowserToolEnabled(browserToolOn)
+      setGenerativeUiInlineEnabled(generativeUiOn)
       const form = toProxyFormState(proxySettings)
       setProxyForm(form)
       setSavedProxyForm(form)
@@ -235,6 +238,11 @@ export default function AppSettingsPage() {
     await window.electronAPI.setBrowserToolEnabled(enabled)
   }, [])
 
+  const handleGenerativeUiInlineEnabledChange = useCallback(async (enabled: boolean) => {
+    setGenerativeUiInlineEnabled(enabled)
+    await window.electronAPI.setGenerativeUiInlineEnabled(enabled)
+  }, [])
+
   // Proxy handlers
   const isProxyDirty = useMemo(() => {
     return JSON.stringify(proxyForm) !== JSON.stringify(savedProxyForm)
@@ -309,6 +317,12 @@ export default function AppSettingsPage() {
                     description={t("settings.tools.builtInBrowserDesc")}
                     checked={browserToolEnabled}
                     onCheckedChange={handleBrowserToolEnabledChange}
+                  />
+                  <SettingsToggle
+                    label={t("settings.tools.generativeUiInline")}
+                    description={t("settings.tools.generativeUiInlineDesc")}
+                    checked={generativeUiInlineEnabled}
+                    onCheckedChange={handleGenerativeUiInlineEnabledChange}
                   />
                 </SettingsCard>
               </SettingsSection>
