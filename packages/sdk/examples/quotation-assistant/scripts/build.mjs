@@ -4,8 +4,10 @@ import { randomUUID } from 'node:crypto'
 // Local package identity for direct Enterprise import. Creator upload replaces
 // it with the platform-assigned work/version identity; it grants no access.
 const appId = process.env.POLO_APP_ID || randomUUID()
-const version = process.env.POLO_APP_VERSION || '1.0.0'
-if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(appId) || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('POLO_APP_ID must be a local UUID and POLO_APP_VERSION must be SemVer')
+const version = (process.env.POLO_APP_VERSION || '1.0.0').trim()
+// Match the receiving Admin appVersionSchema, including build metadata.
+const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(appId) || version.length > 64 || !versionPattern.test(version)) throw new Error('POLO_APP_ID must be a local UUID and POLO_APP_VERSION must be SemVer')
 // Creators deriving this example should update these declarations together.
 const metadata = {
   enterpriseMetadataVersion: 1,
