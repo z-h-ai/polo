@@ -24,11 +24,13 @@ const launch = { contractVersion: 1, productSpaceId: 'space-a', catalogEntryId: 
 let installed = false
 const start = mock(async (_request: unknown) => ({ appId: 'artifact-a', version: '1.0.0', executionId: 'execution-a', runtimeGeneration: 1, scopeGeneration: 1, runtimeKind: 'js', uiUrl: 'http://127.0.0.1:43210/', platformApi: { status: 'available' } }))
 const stop = mock(async (_request: unknown) => ({ status: 'stopped' }))
+const resolveLaunch = mock(async () => launch)
+const installProductSpaceBundle = mock(async () => { installed = true })
 const catalog = {
   state: { catalog: { accountId: 'account-a', organizationId: 'space-a', appConfigVersion: 'revision-a', apps: [app] }, accessMode: 'online' },
-  productSpace: space, resolveLaunch: async () => launch,
+  productSpace: space, resolveLaunch,
   getInstallState: () => installed ? { state: 'installed', currentVersion: '1.0.0' } : { state: 'not_installed' },
-  installProductSpaceBundle: async () => { installed = true },
+  installProductSpaceBundle,
 } as unknown as AppCatalogInstance
 function Probe() {
   const handoff = useProductSpaceAppLaunchHandoff()
@@ -44,7 +46,7 @@ function Probe() {
 }
 const tree = (store: ReturnType<typeof createStore>, value: ProductSpaceContextValue) => createElement(I18nextProvider, { i18n }, createElement(Provider, { store }, createElement(ProductSpaceProvider, { value, children: null }, createElement(MemberCatalogProvider, { catalog, children: null }, createElement(TabShellProvider, { children: null, workspaceId: 'workspace-a', productSpaceScope: { accountId: value.accountId, productSpaceId: value.activeProductSpaceId } }, createElement(Probe))))))
 const mount = (store = createStore(), value = space) => ({ store, ...render(tree(store, value)) })
-beforeEach(() => { installed = false; start.mockReset(); start.mockImplementation(async () => ({ appId: 'artifact-a', version: '1.0.0', executionId: 'execution-a', runtimeGeneration: 1, scopeGeneration: 1, runtimeKind: 'js', uiUrl: 'http://127.0.0.1:43210/', platformApi: { status: 'available' } })); stop.mockReset(); stop.mockImplementation(async () => ({ status: 'stopped' })); window.localStorage.clear(); Object.defineProperty(window, 'electronAPI', { configurable: true, value: { localApps: { start, stop }, productSpaceListActiveExecutions: async () => ({ success: true, executions: [{ executionId: 'execution-a', status: 'running' }] }) } }) })
+beforeEach(() => { installed = false; start.mockReset(); start.mockImplementation(async () => ({ appId: 'artifact-a', version: '1.0.0', executionId: 'execution-a', runtimeGeneration: 1, scopeGeneration: 1, runtimeKind: 'js', uiUrl: 'http://127.0.0.1:43210/', platformApi: { status: 'available' } })); stop.mockReset(); stop.mockImplementation(async () => ({ status: 'stopped' })); resolveLaunch.mockReset(); resolveLaunch.mockImplementation(async () => launch); installProductSpaceBundle.mockReset(); installProductSpaceBundle.mockImplementation(async () => { installed = true }); window.localStorage.clear(); Object.defineProperty(window, 'electronAPI', { configurable: true, value: { localApps: { start, stop }, productSpaceListActiveExecutions: async () => ({ success: true, executions: [{ executionId: 'execution-a', status: 'running' }] }) } }) })
 afterEach(cleanup)
 it('install confirmation consumes the real handoff and opens the exact runtime once', async () => {
   const view = mount()
@@ -57,6 +59,21 @@ it('install confirmation consumes the real handoff and opens the exact runtime o
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
   expect(start).toHaveBeenCalledTimes(1)
   expect(view.store.get(openTabsAtom).filter(tab => tab.appId === 'artifact-a')).toHaveLength(1)
+})
+
+it('install confirmation authorizes before any bundle bytes are written', async () => {
+  resolveLaunch.mockImplementationOnce(async () => launch)
+  resolveLaunch.mockImplementationOnce(async () => {
+    throw Object.assign(new Error('distribution revoked'), { code: 'FORBIDDEN' })
+  })
+  const view = mount()
+  fireEvent.click(view.getByText('open fixture'))
+  fireEvent.click(await view.findByText('install fixture'))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+
+  expect(resolveLaunch).toHaveBeenCalledTimes(2)
+  expect(installProductSpaceBundle).not.toHaveBeenCalled()
+  expect(installed).toBe(false)
 })
 
 it('does not persist runtime UI URLs or delivery credentials', async () => {

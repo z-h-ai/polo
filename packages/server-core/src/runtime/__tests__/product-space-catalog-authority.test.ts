@@ -130,6 +130,16 @@ describe('ProductSpace Catalog authority', () => {
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.tombstones).toEqual([])
   })
 
+  it('drops an unconfirmed tombstone on the next verified empty Catalog', () => {
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
+    expect(recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-2', []))
+      .toHaveLength(1)
+    expect(recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-3', []))
+      .toEqual([])
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.tombstones)
+      .toEqual([])
+  })
+
   it('never shares records or bindings across accounts or ProductSpaces', () => {
     recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-b', ...tuple())).toBe(false)
@@ -338,7 +348,7 @@ describe('ProductSpace Catalog authority', () => {
       const before = captureTrustedState()
       expect(() => recordProductSpaceCatalogAuthoritativeEntries(
         'account-a', 'space-a', `rev-bad-${index}`, [badEntry],
-      )).toThrow(/ProductSpaceCatalogEntrySchema/)
+      )).toThrow(/ProductSpaceCatalogEntrySchema|AuthorityEntrySchema/)
       const after = captureTrustedState()
       expect(after.recordJson).toBe(before.recordJson)
       expect(Buffer.compare(after.fileBytes, before.fileBytes)).toBe(0)

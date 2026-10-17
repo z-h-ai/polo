@@ -322,6 +322,61 @@ async function requireAuthorizedCatalogApp(
   return { app, appConfigVersion, accessMode, canAccessDeliveryMetadata }
 }
 
+async function requireFreshAuthorizedCatalogApp(
+  scope: CatalogLocalAppScope,
+): Promise<{ app: CatalogApp; appConfigVersion: string }> {
+  const tokens = await getCredentialManager().getAdminTokens()
+  const adminUrl = getAdminUrl()
+  if (!tokens || tokens.userId !== scope.accountId || !adminUrl) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'The organization app authorization session is unavailable',
+    )
+  }
+  const result = await new AdminClient(adminUrl).getAppCatalog(
+    tokens.accessToken,
+    scope.organizationId,
+  )
+  if (result.notModified) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'A fresh organization app Catalog is required',
+    )
+  }
+  const app = result.apps.find(candidate => candidate.id === scope.catalogAppId)
+  if (!app || app.availability !== 'available') {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'The organization app is no longer authorized for installation or launch',
+    )
+  }
+  const current = await requireAuthorizedCatalogApp(scope)
+  if (
+    current.app.id !== app.id
+    || current.appConfigVersion !== result.appConfigVersion
+    || current.app.availability !== 'available'
+  ) {
+    throw new LocalAppRuntimeError(
+      'RELEASE_CHANGED',
+      'The organization app Catalog changed during authorization',
+    )
+  }
+  return { app, appConfigVersion: result.appConfigVersion }
+}
+
+function matchesCatalogRelease(
+  release: AppReleaseSummary,
+  expected: AppReleaseSummary,
+): boolean {
+  return release.id === expected.id
+    && release.version === expected.version
+    && release.runtime === expected.runtime
+    && release.checksum === expected.checksum
+    && release.sizeBytes === expected.sizeBytes
+    && release.platform === expected.platform
+    && release.arch === expected.arch
+}
+
 async function withCatalogScope<T>(
   rawReference: unknown,
   catalogOperation: (scope: CatalogLocalAppScope) => Promise<T>,
@@ -877,6 +932,28 @@ function matchesConfirmedRelease(
   )
 }
 
+function assertProductSpaceLaunchIdentity(
+  launch: Awaited<ReturnType<AdminClient['resolveProductSpaceLaunch']>>,
+  app: ProductSpaceAppIdentity,
+): void {
+  if (
+    launch.subject.kind !== 'artifact_instance'
+    || launch.subject.artifactType !== 'app'
+    || launch.subject.artifactInstanceId !== app.artifactInstanceId
+    || launch.subject.versionId !== app.versionId
+    || launch.subject.version !== app.version
+    || launch.productSpaceId !== app.productSpaceId
+    || launch.catalogEntryId !== app.catalogEntryId
+    || !Number.isFinite(Date.parse(launch.expiresAt))
+    || Date.parse(launch.expiresAt) <= Date.now()
+  ) {
+    throw new LocalAppRuntimeError(
+      'RELEASE_CHANGED',
+      'The resolved ProductSpace App launch identity changed',
+    )
+  }
+}
+
 async function resolveCatalogDownload(
   scope: CatalogLocalAppScope,
   release: AppReleaseSummary,
@@ -1194,21 +1271,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         { platform: hostPlatform(), arch: hostArchitecture() },
       )
       await assertProductSpaceAccountCurrent(app)
-      if (
-        launch.subject.kind !== 'artifact_instance'
-        || launch.subject.artifactType !== 'app'
-        || launch.subject.artifactInstanceId !== app.artifactInstanceId
-        || launch.subject.versionId !== app.versionId
-        || launch.subject.version !== app.version
-        || launch.productSpaceId !== app.productSpaceId
-        || launch.catalogEntryId !== app.catalogEntryId
-        || Date.parse(launch.expiresAt) <= Date.now()
-      ) {
-        throw new LocalAppRuntimeError(
-          'RELEASE_CHANGED',
-          'The resolved ProductSpace App launch identity changed',
-        )
-      }
+      assertProductSpaceLaunchIdentity(launch, app)
       if (launch.delivery.kind !== 'bundle') {
         throw new LocalAppRuntimeError(
           'INVALID_REQUEST',
@@ -1235,7 +1298,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       const installed = await registry.install({
         scope: productSpaceBundleScope(app),
         expectedManifestAppId,
-        version: launch.subject.version,
+        version: app.version,
         downloadUrl: launch.delivery.downloadUrl,
         checksum: launch.delivery.checksum,
         sizeBytes: launch.delivery.sizeBytes,
@@ -1452,11 +1515,11 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       }
       const reference = requireRendererCatalogScope(rawRequest.scope)
 
+      const cached = await requireAuthorizedCatalogApp(reference)
       const {
         app,
-        appConfigVersion,
         accessMode,
-      } = await requireAuthorizedCatalogApp(reference)
+      } = cached
       if (accessMode !== 'online') {
         throw new LocalAppRuntimeError(
           'NOT_AUTHORIZED',
@@ -1469,11 +1532,22 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'The authorized Catalog app has no installable release',
         )
       }
-      const release = app.currentRelease
+      const fresh = await requireFreshAuthorizedCatalogApp(reference)
+      const release = fresh.app.currentRelease
+      if (
+        !release
+        || !app.currentRelease
+        || !matchesCatalogRelease(release, app.currentRelease)
+      ) {
+        throw new LocalAppRuntimeError(
+          'RELEASE_CHANGED',
+          'The organization app release changed after confirmation',
+        )
+      }
       if (!matchesConfirmedRelease(
         rawRequest,
-        app,
-        appConfigVersion,
+        fresh.app,
+        fresh.appConfigVersion,
         release,
       )) {
         throw new LocalAppRuntimeError(
@@ -1742,6 +1816,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'Only installed and prepared organization apps can start while offline',
         )
       }
+      if (accessMode === 'online') {
+        await requireFreshAuthorizedCatalogApp(scope)
+      }
       return startAndRegisterLocalApp(scope, () => registry.start(scope), callerWorkspaceId(ctx))
     })()
   }
@@ -1811,7 +1888,31 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         'This ProductSpace App is not available to launch',
       )
     }
-    return {
+    let launch: Awaited<ReturnType<AdminClient['resolveProductSpaceLaunch']>>
+    try {
+      launch = await client.resolveProductSpaceLaunch(
+        tokens.accessToken,
+        context,
+        catalog,
+        entry.catalogEntryId,
+        { platform: hostPlatform(), arch: hostArchitecture() },
+      )
+    } catch (error) {
+      if (
+        error
+        && typeof error === 'object'
+        && ['FORBIDDEN', 'MEMBERSHIP_REMOVED', 'ARTIFACT_ACCESS_DENIED']
+          .includes(String((error as { errorCode?: unknown }).errorCode))
+      ) {
+        throw new LocalAppRuntimeError(
+          'REMOTE_FORBIDDEN',
+          'The server denied this ProductSpace App launch',
+          { cause: error },
+        )
+      }
+      throw error
+    }
+    const app: ProductSpaceAppIdentity = {
       accountId: identity.accountId,
       productSpaceId: identity.productSpaceId,
       catalogEntryId: entry.catalogEntryId,
@@ -1822,6 +1923,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       sources: entry.sources,
       availability: entry.availability,
     }
+    await assertProductSpaceAccountCurrent(app)
+    assertProductSpaceLaunchIdentity(launch, app)
+    return app
   }
 
   /**

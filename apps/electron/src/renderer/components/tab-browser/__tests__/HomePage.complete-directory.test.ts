@@ -594,6 +594,60 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
     view.unmount()
   })
 
+  it('renders a withdrawn ProductSpace App as blocked instead of openable', async () => {
+    stubCatalogEntries = [{
+      kind: 'app' as const,
+      catalogEntryId: 'withdrawn-app',
+      artifactInstanceId: 'artifact-withdrawn-app',
+      version: { versionId: 'version-withdrawn', version: '1.0.0' },
+      name: 'Withdrawn App',
+      description: '',
+      availability: 'withdrawn' as const,
+      deliveryMode: 'remote_url' as const,
+      remoteUrl: 'https://withdrawn.example.com',
+      sources: [{ kind: 'enterprise_import' as const, name: 'Organization A' }],
+    }]
+    const providerValue = {
+      accountId: 'account-a',
+      activeProductSpaceId: 'organization-a',
+      activeProductSpace: { id: 'organization-a', kind: 'enterprise', name: 'Organization A' },
+      productSpaces: [],
+      allProductSpaces: [],
+      personalProductSpaceId: 'organization-a',
+      productSpaceContextKey: 'account-a|organization-a',
+      contextVersion: 7,
+      pendingSwitch: null,
+      onSelectProductSpace: () => {},
+      onRefreshProductSpaces: () => {},
+      onConfirmStopAndSwitch: () => {},
+      onRetryFailedStops: () => {},
+      onRetryTargetLoad: () => {},
+      onCancelSwitch: () => {},
+      onDismissTargetAccessLost: () => {},
+      onStopSwitchExecution: () => {},
+    }
+    const view = render(createElement(
+      ProductSpaceProvider,
+      {
+        value: providerValue as never,
+        children: createElement(
+          I18nextProvider,
+          { i18n },
+          createElement(MemberCatalogProvider, null, createElement(HomePage)),
+        ),
+      },
+    ))
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    })
+    expect(screen.getByTestId('home-directory-app').getAttribute('data-open-disabled'))
+      .toBe('true')
+    expect((screen.getByRole('button', { name: i18n.t('common.open') }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect(screen.getByText(i18n.t('homeApps.errors.unavailable'))).toBeTruthy()
+    view.unmount()
+  })
+
   it('usage recorded on the page survives a REAL remount and keeps sorting', async () => {
     stubCatalogEntries = [{
       kind: 'app' as const,
