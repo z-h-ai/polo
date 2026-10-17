@@ -1246,6 +1246,7 @@
   "poo70.c6.cap.serverReason": "Motivo del servidor: {{reason}}",
   "poo70.c6.cap.title": "Aún no se puede renovar por adelantado",
   "poo70.c6.detail.expiredAt": "Caducó el {{date}}",
+  "poo70.c6.detail.freeEnded": "Autorización finalizada · Vuelve a unirte para restaurar",
   "poo70.c6.detail.freeTerm": "Sin caducidad",
   "poo70.c6.detail.nextPrice": "El precio cambia a {{price}} el {{date}}.",
   "poo70.c6.detail.period.free": "Gratis",

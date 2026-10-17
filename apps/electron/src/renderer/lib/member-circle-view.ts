@@ -117,6 +117,65 @@ export function isEntitlementJudgmentPaid(
 }
 
 /**
+ * Whether the provider's CURRENT membership row still carries an active paid
+ * entitlement. This intentionally separates a future renewal order from the
+ * current term: the row must be active, its provider period must still run,
+ * and the newest correction-aware source for that term must be paid (a partial
+ * refund/dispute keeps the provider-retained remainder). Pending renewal
+ * projections do not revoke the older paid source, while a definitive refund,
+ * chargeback, expiry, suspension, elapsed period, or missing period fails closed. A
+ * provider-omitted projection remains unknown and therefore defers to the
+ * active provider row/current period; it is never treated as stored-paid
+ * success. Free memberships are governed by their active lifecycle alone.
+ */
+export function isMembershipCurrentlyPaidEntitled(
+  membership: Pick<
+    MemberMembership,
+    'status' | 'billingKind' | 'currentPeriodEnd' | 'paymentOrders'
+  >,
+  now: number = Date.now(),
+): boolean {
+  if (membership.status !== 'active') return false
+  if (membership.billingKind === 'free') return true
+
+  const periodEnd = Date.parse(membership.currentPeriodEnd ?? '')
+  if (!Number.isFinite(periodEnd) || periodEnd <= now) return false
+
+  let hasCurrentSource = false
+  let hasUnknownProjection = false
+  if (membership.paymentOrders.length === 0) hasUnknownProjection = true
+  for (const order of membership.paymentOrders) {
+    const judgment = judgeMembershipPaymentStatus(order)
+    if (judgment.basis === 'unknown' || judgment.effectivePaymentStatus === 'unknown') {
+      hasUnknownProjection = true
+      continue
+    }
+    if (judgment.effectivePaymentStatus === 'paid') {
+      hasCurrentSource = true
+      break
+    }
+    if (
+      (
+        judgment.effectivePaymentStatus === 'partially_refunded'
+        || judgment.effectivePaymentStatus === 'partially_disputed'
+      )
+      && judgment.correction?.partial === true
+    ) {
+      hasCurrentSource = true
+      break
+    }
+    if (
+      judgment.effectivePaymentStatus !== 'pending'
+      && judgment.effectivePaymentStatus !== 'unknown'
+    ) {
+      return false
+    }
+  }
+  if (!hasCurrentSource && hasUnknownProjection) return true
+  return hasCurrentSource
+}
+
+/**
  * CircleIds whose creator-circle authorization is LOST — the same restricted
  * rule the C3 list rows apply (lifecycle not `active`, or the G5 projection
  * says the latest order is no longer paid), so the home directory, the circle
@@ -136,11 +195,10 @@ export function selectLostCircleAuthorizationIds(
       candidate => candidate.circle.circleId === circleId,
     ) ?? null
     const status = membership?.status ?? circle.status
-    const judgment = membership ? selectLatestEntitlementJudgment(membership) : null
-    const projectedNotPaid = judgment !== null
-      && judgment.basis === 'projected'
-      && judgment.effectivePaymentStatus !== 'paid'
-    if (status !== 'active' || projectedNotPaid) lost.add(circleId)
+    const currentEntitlement = membership
+      ? isMembershipCurrentlyPaidEntitled(membership)
+      : null
+    if (status !== 'active' || currentEntitlement === false) lost.add(circleId)
   }
   return lost
 }

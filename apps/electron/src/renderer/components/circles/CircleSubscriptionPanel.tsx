@@ -12,6 +12,7 @@ import {
   toMemberCircleReadError,
   type MemberCircleRenewalPreviewResultPayload,
 } from '@/hooks/useMemberCircles'
+import { formatSubscriptionPrice } from '@/lib/format-subscription-price'
 import { isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import {
   selectCirclePurchaseHandoff,
@@ -120,28 +121,7 @@ export function formatSubscriptionDate(iso: string): string {
   return new Date(parsed).toISOString().slice(0, 10)
 }
 
-/**
- * Minor-unit price rendering. The DTO amount is in minor units (the contract
- * stores 2-exponent currency minors); the value is shown in the provider's
- * currency. `null` / negative amounts return empty — the caller then shows
- * the web-confirmation state instead of fabricating a number.
- */
-export function formatSubscriptionPrice(
-  amountMinor: number | null,
-  currency: string | null,
-  locale?: string,
-): string {
-  if (amountMinor === null || amountMinor < 0 || !currency) return ''
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency,
-      currencyDisplay: 'narrowSymbol',
-    }).format(amountMinor / 100)
-  } catch {
-    return `${amountMinor / 100} ${currency}`
-  }
-}
+export { formatSubscriptionPrice }
 
 /** Authoritative period wording — the preview period discriminated union ONLY. */
 export function subscriptionPeriodLabel(
@@ -478,7 +458,9 @@ export function CircleSubscriptionPanel({
             className="m-0 text-right text-[13px] font-medium text-foreground"
             data-testid="circle-subscription-validity-value"
           >
-            {!isPaid && t('poo70.c6.detail.freeTerm')}
+            {!isPaid && t(status === 'active'
+              ? 'poo70.c6.detail.freeTerm'
+              : 'poo70.c6.detail.freeEnded')}
             {isPaid && validityDate && endedBeforePeriodEnd && (
               <span data-testid="circle-subscription-validity-revoked">
                 {t('poo70.c6.detail.validityRevoked')}

@@ -333,6 +333,10 @@ describe('subscription display helpers', () => {
 
   it('renders minor-unit prices and never fabricates unavailable amounts', () => {
     expect(formatSubscriptionPrice(3900, 'CNY', 'zh-Hans')).toContain('39')
+    expect(formatSubscriptionPrice(0, 'CNY', 'zh-Hans')).toContain('0.00')
+    const unknownCurrency = formatSubscriptionPrice(29900, 'XYZ', 'zh-Hans')
+    expect(unknownCurrency.startsWith('XYZ')).toBe(true)
+    expect(unknownCurrency).toContain('299.00')
     expect(formatSubscriptionPrice(null, 'CNY', 'zh-Hans')).toBe('')
     expect(formatSubscriptionPrice(3900, null, 'zh-Hans')).toBe('')
     expect(formatSubscriptionPrice(-1, 'CNY', 'zh-Hans')).toBe('')
@@ -356,6 +360,35 @@ describe('P70-SUBSCRIPTION-01: identity, single occurrence, authoritative period
     // Validity is the membership currentPeriodEnd, rendered ONCE.
     const validity = screen.getByTestId('circle-subscription-validity-value')
     expect(validity.textContent).toContain('有效至 2026-11-02')
+  })
+
+  it('stays active while the current paid period runs and only the renewal order is pending', async () => {
+    renderPanel({
+      membership: membershipFixture({
+        paymentOrders: [
+          {
+            orderId: 'order-renewal-pending',
+            storedStatus: 'pending',
+            amountMinor: 3900,
+            currency: 'CNY',
+            effectivePaymentStatus: 'pending',
+            correction: null,
+          },
+          {
+            orderId: 'order-current-paid',
+            storedStatus: 'paid',
+            amountMinor: 3900,
+            currency: 'CNY',
+            effectivePaymentStatus: 'paid',
+            correction: null,
+          },
+        ],
+      }),
+    })
+    const status = await screen.findByTestId('circle-subscription-status')
+    expect(status.getAttribute('data-status')).toBe('active')
+    expect(screen.getByTestId('circle-subscription-validity-value').textContent)
+      .toContain('有效至 2026-11-02')
   })
 
   it('renders price and period exactly once (no duplication anywhere in the section)', async () => {
@@ -387,6 +420,23 @@ describe('P70-SUBSCRIPTION-01: identity, single occurrence, authoritative period
     await screen.findByTestId('circle-subscription-renew')
     expect(screen.getByTestId('circle-subscription-period-value').textContent).toContain('价格以公开页确认价格为准')
     expect(container.textContent).not.toContain(price(3900))
+  })
+
+  it('distinguishes an active free authorization from an ended free authorization', async () => {
+    const activeCircle = circleFixture({ billingKind: 'free' })
+    const activeMembership = membershipFixture({ billingKind: 'free' })
+    renderPanel({ circle: activeCircle, membership: activeMembership })
+    expect(screen.getByTestId('circle-subscription-validity-value').textContent).toContain('长期有效')
+
+    cleanup()
+    renderPanel({
+      circle: circleFixture({ billingKind: 'free', status: 'expired' }),
+      membership: membershipFixture({ billingKind: 'free', status: 'expired' }),
+    })
+    const validity = await screen.findByTestId('circle-subscription-validity-value')
+    expect(validity.textContent).toContain('授权已结束')
+    expect(validity.textContent).toContain('重新加入后可恢复')
+    expect(validity.textContent).not.toContain('长期有效')
   })
 
   it('free circles show no renewal surface and issue no preview GET', async () => {

@@ -8,6 +8,7 @@ import {
   deriveCircleReturnRoute,
   type CircleReturnEntitlementState,
 } from '@/lib/circle-return-target'
+import { formatSubscriptionPrice } from '@/lib/format-subscription-price'
 import type { CircleReturnState } from '@/hooks/useCircleReturn'
 
 /**
@@ -107,7 +108,7 @@ export function CircleReturnPanel({
   targetCircleName,
   spaceName,
 }: CircleReturnPanelProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const clientPage = useOptionalClientPage()
 
   const isOrder = state.kind === 'order'
@@ -251,7 +252,11 @@ export function CircleReturnPanel({
             </span>
           </FactRow>
           <FactRow label={t('poo70.c8.order.amount')} testId="circle-return-order-amount">
-            {state.orderFacts.order.amountMinor} {state.orderFacts.order.currency}
+            {formatSubscriptionPrice(
+              state.orderFacts.order.amountMinor,
+              state.orderFacts.order.currency,
+              i18n.language,
+            )}
           </FactRow>
           {state.orderFacts.checkoutUnknown && (
             <div

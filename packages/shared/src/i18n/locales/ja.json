@@ -1246,6 +1246,7 @@
   "poo70.c6.cap.serverReason": "サーバー側の理由：{{reason}}",
   "poo70.c6.cap.title": "現在は早期更新できません",
   "poo70.c6.detail.expiredAt": "{{date}} に期限切れ",
+  "poo70.c6.detail.freeEnded": "認証は終了しました · 再参加で復元できます",
   "poo70.c6.detail.freeTerm": "無期限",
   "poo70.c6.detail.nextPrice": "{{date}} から価格が {{price}} に変わります。",
   "poo70.c6.detail.period.free": "無料",

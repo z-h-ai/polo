@@ -7,7 +7,7 @@ import type { MemberCircleScopeKey } from '@/hooks/useMemberCircles'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import {
   memberCircleCreatorNameField,
-  selectLatestEntitlementJudgment,
+  isMembershipCurrentlyPaidEntitled,
 } from '@/lib/member-circle-view'
 import {
   MemberCircleRow,
@@ -127,11 +127,10 @@ export function normalizeMemberCircleRow(
   const status = membership?.status ?? circle.status
   const billingKind = membership?.billingKind ?? circle.billingKind
   const currentPeriodEnd = membership?.currentPeriodEnd ?? circle.currentPeriodEnd
-  const judgment = membership ? selectLatestEntitlementJudgment(membership) : null
-  const projectedNotPaid = judgment !== null
-    && judgment.basis === 'projected'
-    && judgment.effectivePaymentStatus !== 'paid'
-  const restricted = status !== 'active' || projectedNotPaid
+  const currentEntitlement = membership
+    ? isMembershipCurrentlyPaidEntitled(membership)
+    : null
+  const restricted = status !== 'active' || currentEntitlement === false
   const entitlementState: MemberCircleEntitlementState = restricted ? 'restore' : 'valid'
 
   let termText: string

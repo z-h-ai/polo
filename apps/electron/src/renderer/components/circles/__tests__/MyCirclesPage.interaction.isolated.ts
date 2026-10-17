@@ -298,7 +298,10 @@ function accountAMemberships(): Array<MemberMembership> {
       name: 'Design Circle',
       billingKind: 'paid',
       currentPeriodEnd: '2026-11-02T00:00:00.000Z',
-      orders: [{ orderId: 'order-design-1', storedStatus: 'paid', effectivePaymentStatus: 'paid' }],
+      orders: [
+        { orderId: 'order-design-renewal', storedStatus: 'pending', effectivePaymentStatus: 'pending' },
+        { orderId: 'order-design-1', storedStatus: 'paid', effectivePaymentStatus: 'paid' },
+      ],
     }),
     membershipFixture({
       circleId: 'circle-annual',
@@ -514,6 +517,7 @@ describe('MyCirclesPage unified list (P70-CIRCLE-LIST-01)', () => {
     expect(terms[4]).toBe('Needs restoration')
     expect(rows[3]!.getAttribute('data-entitlement-state')).toBe('restore')
     expect(rows[4]!.getAttribute('data-entitlement-state')).toBe('restore')
+    expect(rows[1]!.getAttribute('data-entitlement-state')).toBe('valid')
   })
 
   it('shows the G1 upstream-pending creator line and never derives a name from ownerUserId', async () => {

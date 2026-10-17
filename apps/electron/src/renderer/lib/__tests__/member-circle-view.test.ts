@@ -7,6 +7,7 @@ import type {
 import {
   isEntitlementJudgmentPaid,
   isMembershipEndedBeforePeriodEnd,
+  isMembershipCurrentlyPaidEntitled,
   isRenewalPriceAvailable,
   judgeMembershipPaymentStatus,
   memberCircleCreatorNameField,
@@ -324,6 +325,125 @@ describe('selectLostCircleAuthorizationIds (POO-70 visual review R1 F2)', () => 
 
   it('never judges a circle absent from the receipts', () => {
     expect(selectLostCircleAuthorizationIds([], []).size).toBe(0)
+  })
+})
+
+describe('isMembershipCurrentlyPaidEntitled (POO77 F1)', () => {
+  const now = Date.parse('2026-10-17T00:00:00.000Z')
+  const futurePeriodEnd = '2026-11-01T00:00:00.000Z'
+  const pastPeriodEnd = '2026-10-01T00:00:00.000Z'
+
+  it('keeps the current paid period when only a newer renewal order is pending', () => {
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-current-paid', {
+      currentPeriodEnd: futurePeriodEnd,
+      paymentOrders: [
+        paymentOrder({ effectivePaymentStatus: 'pending' }),
+        paymentOrder({ effectivePaymentStatus: 'paid' }),
+      ],
+    }), now)).toBe(true)
+  })
+
+  it('keeps partial-refund benefits when the authoritative membership is active for a future period', () => {
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-partial-refund', {
+      currentPeriodEnd: futurePeriodEnd,
+      paymentOrders: [
+        paymentOrder({
+          effectivePaymentStatus: 'partially_refunded',
+          correction: {
+            kind: 'refund',
+            amountMinor: 9900,
+            partial: true,
+            refundAmountMinor: 1000,
+            chargebackAmountMinor: 0,
+          },
+        }),
+      ],
+    }), now)).toBe(true)
+  })
+
+  it('keeps a partially disputed remainder when the provider marks the correction partial', () => {
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-partial-dispute', {
+      currentPeriodEnd: futurePeriodEnd,
+      paymentOrders: [paymentOrder({
+        effectivePaymentStatus: 'partially_disputed',
+        correction: {
+          kind: 'chargeback',
+          amountMinor: 1000,
+          partial: true,
+          refundAmountMinor: 0,
+          chargebackAmountMinor: 1000,
+        },
+      })],
+    }), now)).toBe(true)
+  })
+
+  it('fails closed when the newest definitive source is disputed even if an older source was paid', () => {
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-newest-disputed', {
+      currentPeriodEnd: futurePeriodEnd,
+      paymentOrders: [
+        paymentOrder({ effectivePaymentStatus: 'disputed' }),
+        paymentOrder({ effectivePaymentStatus: 'paid' }),
+      ],
+    }), now)).toBe(false)
+  })
+
+  it('fails closed for expiry, suspension, elapsed period, and missing authoritative period', () => {
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-expired', {
+      status: 'expired',
+      currentPeriodEnd: futurePeriodEnd,
+    }), now)).toBe(false)
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-suspended', {
+      status: 'suspended',
+      currentPeriodEnd: futurePeriodEnd,
+    }), now)).toBe(false)
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-period-elapsed', {
+      currentPeriodEnd: pastPeriodEnd,
+    }), now)).toBe(false)
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-no-period', {
+      currentPeriodEnd: null,
+    }), now)).toBe(false)
+  })
+
+  it('fails closed without a projected paid or partial-refund source', () => {
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-pending-only', {
+      currentPeriodEnd: futurePeriodEnd,
+      paymentOrders: [paymentOrder({ effectivePaymentStatus: 'pending' })],
+    }), now)).toBe(false)
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-omitted-projection-only', {
+      currentPeriodEnd: futurePeriodEnd,
+      paymentOrders: [paymentOrder({ effectivePaymentStatus: 'unknown' })],
+    }), now)).toBe(true)
+    expect(isMembershipCurrentlyPaidEntitled(membership('c-full-refund', {
+      currentPeriodEnd: futurePeriodEnd,
+      paymentOrders: [paymentOrder({ effectivePaymentStatus: 'refunded' })],
+    }), now)).toBe(false)
+  })
+
+  it('aggregates independent circle sources while a revoked latest source stays restricted', () => {
+    const lost = selectLostCircleAuthorizationIds(
+      [
+        circleSnapshot('c-current-paid-source'),
+        circleSnapshot('c-latest-revoked'),
+      ],
+      [
+        membership('c-current-paid-source', {
+          currentPeriodEnd: futurePeriodEnd,
+          paymentOrders: [
+            paymentOrder({ effectivePaymentStatus: 'pending' }),
+            paymentOrder({ effectivePaymentStatus: 'paid' }),
+          ],
+        }),
+        membership('c-latest-revoked', {
+          currentPeriodEnd: futurePeriodEnd,
+          paymentOrders: [
+            paymentOrder({ effectivePaymentStatus: 'refunded' }),
+            paymentOrder({ effectivePaymentStatus: 'paid' }),
+          ],
+        }),
+      ],
+    )
+    expect(lost.has('c-current-paid-source')).toBe(false)
+    expect(lost.has('c-latest-revoked')).toBe(true)
   })
 })
 

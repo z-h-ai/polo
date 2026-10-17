@@ -1246,6 +1246,7 @@
   "poo70.c6.cap.serverReason": "Powód z serwera: {{reason}}",
   "poo70.c6.cap.title": "Wcześniejsze odnowienie jest jeszcze niedostępne",
   "poo70.c6.detail.expiredAt": "Wygasło {{date}}",
+  "poo70.c6.detail.freeEnded": "Autoryzacja zakończona · Ponowne dołączenie przywraca dostęp",
   "poo70.c6.detail.freeTerm": "Bez wygaśnięcia",
   "poo70.c6.detail.nextPrice": "Dnia {{date}} cena zmieni się na {{price}}.",
   "poo70.c6.detail.period.free": "Darmowe",

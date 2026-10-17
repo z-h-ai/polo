@@ -28,7 +28,7 @@ import { isValidPoloUuid } from '@polo-ai/shared/protocol'
 import type { CircleReturnCandidate, CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import type { ClientPageRoute } from '@/context/ClientPageContext'
 import {
-  selectLatestEntitlementJudgment,
+  isMembershipCurrentlyPaidEntitled,
 } from '@/lib/member-circle-view'
 
 // ---------------------------------------------------------------------------
@@ -207,12 +207,7 @@ export function deriveMembershipEntitlementState(
   membership: MemberMembership | null,
 ): CircleReturnEntitlementState {
   if (!membership) return 'unknown'
-  if (membership.status !== 'active') return 'invalid'
-  const judgment = selectLatestEntitlementJudgment(membership)
-  if (judgment && judgment.basis === 'projected' && judgment.effectivePaymentStatus !== 'paid') {
-    return 'invalid'
-  }
-  return 'valid'
+  return isMembershipCurrentlyPaidEntitled(membership) ? 'valid' : 'invalid'
 }
 
 /**

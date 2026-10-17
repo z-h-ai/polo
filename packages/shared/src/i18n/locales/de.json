@@ -1246,6 +1246,7 @@
   "poo70.c6.cap.serverReason": "Servergrund: {{reason}}",
   "poo70.c6.cap.title": "Vorzeitige Verlängerung noch nicht möglich",
   "poo70.c6.detail.expiredAt": "Abgelaufen am {{date}}",
+  "poo70.c6.detail.freeEnded": "Berechtigung beendet · Durch erneuten Beitritt wiederherstellbar",
   "poo70.c6.detail.freeTerm": "Ohne Ablauf",
   "poo70.c6.detail.nextPrice": "Der Preis ändert sich am {{date}} zu {{price}}.",
   "poo70.c6.detail.period.free": "Kostenlos",

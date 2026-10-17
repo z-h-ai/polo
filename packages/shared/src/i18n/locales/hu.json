@@ -1246,6 +1246,7 @@
   "poo70.c6.cap.serverReason": "Szerver indoka: {{reason}}",
   "poo70.c6.cap.title": "Az előzetes megújítás még nem érhető el",
   "poo70.c6.detail.expiredAt": "Lejárt: {{date}}",
+  "poo70.c6.detail.freeEnded": "A jogosultság lezárult · Újracsatlakozással helyreállítható",
   "poo70.c6.detail.freeTerm": "Nincs lejárat",
   "poo70.c6.detail.nextPrice": "Az ár {{date}} napon {{price}} értékre változik.",
   "poo70.c6.detail.period.free": "Ingyenes",

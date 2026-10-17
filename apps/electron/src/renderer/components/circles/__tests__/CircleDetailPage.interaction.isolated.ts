@@ -607,19 +607,38 @@ describe('outer route assembly (P70-CIRCLE-DETAIL-01)', () => {
     })
   })
 
-  it('backs out of the detail into circles, then home, never popping the home root', async () => {
+  it('directed back always returns to circles after section switches, restores list filters, then can return home', async () => {
     await renderAssembly()
     await navigateToDetail()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-detail-tab-updates'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-detail-tab-subscription'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-subscription-panel')).toBeTruthy()
+    })
 
     fireEvent.click(screen.getByTestId('circle-detail-back'))
     expect(observedRoute).toEqual({ kind: 'circles' })
     await waitFor(() => {
       expect(screen.getByTestId('my-circles-page')).toBeTruthy()
     })
-    fireEvent.click(screen.getByTestId('my-circles-back'))
-    expect(observedRoute).toEqual({ kind: 'home' })
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: '晨星' } })
+      fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+    })
+    await act(async () => {
+      probeClientPage!.navigate({ kind: 'circle-detail', circleId: 'circle-1', section: 'content' })
+    })
     await waitFor(() => {
-      expect(screen.getByTestId('home-app-hub')).toBeTruthy()
+      expect(screen.getByTestId('circle-detail-page')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('circle-detail-back'))
+    await waitFor(() => {
+      expect(screen.getByTestId('my-circles-search').getAttribute('value')).toBe('晨星')
+      expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
     })
   })
 })
@@ -764,6 +783,46 @@ describe('leave flow in the subscription section (P70-CIRCLE-DETAIL-02)', () => 
 // -------------------------------------------------------------------------
 
 describe('post-leave heading state (POO-70 visual review R1 F3)', () => {
+  it('keeps the heading valid while the current paid period runs and only the newer renewal is pending', async () => {
+    circlesByAccount['account-a'] = [
+      circleFixture({
+        circleId: 'circle-1',
+        membershipId: 'ms-1',
+        name: '晨星增长圈',
+        billingKind: 'paid',
+      }),
+    ]
+    membershipsByAccount['account-a'] = [
+      {
+        ...membershipFixture({ circleId: 'circle-1', membershipId: 'ms-1', billingKind: 'paid' }),
+        currentPeriodEnd: '2026-11-01T00:00:00.000Z',
+        paymentOrders: [
+          {
+            orderId: 'order-renewal-pending',
+            storedStatus: 'pending',
+            amountMinor: 29900,
+            currency: 'CNY',
+            effectivePaymentStatus: 'pending',
+            correction: null,
+          },
+          {
+            orderId: 'order-current-paid',
+            storedStatus: 'paid',
+            amountMinor: 29900,
+            currency: 'CNY',
+            effectivePaymentStatus: 'paid',
+            correction: null,
+          },
+        ],
+      },
+    ]
+    await renderAssembly()
+    await navigateToDetail('circle-1', 'content')
+
+    expect(screen.getByTestId('circle-detail-heading-status').getAttribute('data-status')).toBe('valid')
+    expect(screen.getByTestId('circle-detail-term').textContent).toContain('2026-11-01')
+  })
+
   it('a leave-ended membership renders ONE restore badge with the ended/rejoin note instead of a duplicated 待恢复', async () => {
     // F1 leave receipt shape: active→expired while the paid period keeps
     // running (currentPeriodEnd still ahead).
@@ -1029,6 +1088,69 @@ describe('main-scroller registration (P70-CIRCLE-DETAIL-03)', () => {
 // -------------------------------------------------------------------------
 
 describe('circle return verification assembly (C8 wiring)', () => {
+  it('surfaces a cold-start pending candidate from home without requiring the user to enter a circle detail', async () => {
+    const returnCircleId = 'c8c8c8c8-0000-4000-8000-00000000c804'
+    circlesByAccount['account-a'] = [
+      circleFixture({ circleId: returnCircleId, membershipId: 'ms-return-home', name: '首页回归圈', billingKind: 'free' }),
+    ]
+    membershipsByAccount['account-a'] = [
+      membershipFixture({ circleId: returnCircleId, membershipId: 'ms-return-home', billingKind: 'free' }),
+    ]
+    returnPendingQueue.push({
+      status: 'pending',
+      candidate: {
+        candidateId: 'cand-home-cold-start',
+        protocolVersion: 1,
+        target: { circleId: returnCircleId },
+        createdAt: '2026-10-04T00:00:00.000Z',
+      },
+    })
+
+    await renderAssembly()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('candidate')
+    })
+    expect(screen.queryByTestId('circle-detail-page')).toBeNull()
+    expect(screen.queryByTestId('home-app-hub')).toBeNull()
+  })
+
+  it('surfaces live event candidates from the circles list and circle detail without duplicate consumption', async () => {
+    const targetCircleId = 'c8c8c8c8-0000-4000-8000-00000000c806'
+    circlesByAccount['account-a'] = [
+      circleFixture({ circleId: targetCircleId, membershipId: 'ms-return-live', name: '实时回归圈', billingKind: 'free' }),
+    ]
+    membershipsByAccount['account-a'] = [
+      membershipFixture({ circleId: targetCircleId, membershipId: 'ms-return-live', billingKind: 'free' }),
+    ]
+
+    for (const routeKind of ['circles', 'detail'] as const) {
+      await renderAssembly()
+      if (routeKind === 'circles') {
+        await act(async () => {
+          probeClientPage!.navigate({ kind: 'circles' })
+        })
+        await waitFor(() => expect(screen.getByTestId('my-circles-page')).toBeTruthy())
+      } else {
+        await navigateToDetail('circle-1')
+      }
+
+      await act(async () => {
+        returnEventSubscriber!({
+          candidateId: `cand-live-${routeKind}`,
+          protocolVersion: 1,
+          target: { circleId: targetCircleId },
+          createdAt: '2026-10-04T00:00:00.000Z',
+        })
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('candidate')
+      })
+      expect(returnAckedIds).toEqual([])
+      cleanup()
+    }
+  })
+
   it('consumes the B1 candidate on mount, takes the page over with the flow panel, runs ONE authoritative round to the verified fact, acks, and releases on back', async () => {
     // The bridge target must address a REAL row by strict UUID; the fixture
     // circle ids are symbolic, so the return test seeds its own UUID row.
@@ -1052,8 +1174,11 @@ describe('circle return verification assembly (C8 wiring)', () => {
     })
 
     await renderAssembly()
-    // Consumption happens on the detail page mount (the C8 hook lives there).
-    await navigateToDetail('circle-1')
+    // Consumption happens at the outer home router — no detail entry required.
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-kind')).toBe('circle')
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('candidate')
+    })
 
     // The candidate is surfaced: the flow panel takes the page over.
     await waitFor(() => {
@@ -1061,11 +1186,7 @@ describe('circle return verification assembly (C8 wiring)', () => {
       expect(panel.getAttribute('data-return-kind')).toBe('circle')
       expect(panel.getAttribute('data-return-phase')).toBe('candidate')
     })
-    expect(screen.getByTestId('circle-detail-page').getAttribute('data-return-active')).toBe('true')
-    // Single flow-state surface: the detail heading/tabs are NOT rendered
-    // beside it (不造第二套标题).
-    expect(screen.queryByTestId('circle-detail-title')).toBeNull()
-    expect(screen.queryByTestId('circle-detail-tabs')).toBeNull()
+    expect(screen.queryByTestId('circle-detail-page')).toBeNull()
     // The target circle's confirmed name comes from the C2 rows.
     expect(screen.getByTestId('circle-return-fact-target').textContent).toContain('回归圈')
 
@@ -1083,7 +1204,7 @@ describe('circle return verification assembly (C8 wiring)', () => {
     // The entitlement fact renders from the refreshed authoritative row.
     expect(screen.getByTestId('circle-return-fact-entitlement-value').textContent).toBe('Valid')
     // The takeover persists until the user leaves the flow surface.
-    expect(screen.queryByTestId('circle-detail-title')).toBeNull()
+    expect(screen.queryByTestId('home-app-hub')).toBeNull()
 
     // 返回我的圈子 releases the candidate (bridge cancel) and routes to circles.
     await act(async () => {
@@ -1121,9 +1242,8 @@ describe('return panel open-original (P2-1)', () => {
     })
   }
 
-  async function verifyCandidateOnPage(circleId: string) {
+  async function verifyCandidateOnPage() {
     await renderAssembly()
-    await navigateToDetail(circleId)
     await waitFor(() => {
       expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('candidate')
     })
@@ -1140,7 +1260,7 @@ describe('return panel open-original (P2-1)', () => {
     seedReturnCircleAndCandidate()
     // The candidate's derived route IS the current route (circle detail,
     // content section) — the pre-fix dead-button case.
-    await verifyCandidateOnPage(returnCircleId)
+    await verifyCandidateOnPage()
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('circle-return-open'))
@@ -1160,7 +1280,7 @@ describe('return panel open-original (P2-1)', () => {
   it('DIFFERENT circle: opening the original navigates, the remount consumes nothing, and the target object renders', async () => {
     seedReturnCircleAndCandidate()
     // The user is on ANOTHER circle's detail; the candidate targets 回归圈.
-    await verifyCandidateOnPage('circle-1')
+    await verifyCandidateOnPage()
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('circle-return-open'))
@@ -1203,7 +1323,6 @@ describe('account mismatch reauthenticate CTA (P2-2)', () => {
     seedOrderCandidate()
     const reauthenticateSpy = jest.fn()
     await renderAssembly({ accountId: 'account-a', onReauthenticateRequest: reauthenticateSpy })
-    await navigateToDetail('circle-1')
     await waitFor(() => {
       expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-kind')).toBe('order')
     })
@@ -1232,7 +1351,6 @@ describe('account mismatch reauthenticate CTA (P2-2)', () => {
   it('WITHOUT a wired entry: no dead CTA — the honest manual-recovery note replaces it', async () => {
     seedOrderCandidate()
     await renderAssembly()
-    await navigateToDetail('circle-1')
     await waitFor(() => {
       expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-kind')).toBe('order')
     })

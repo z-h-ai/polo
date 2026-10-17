@@ -6,21 +6,18 @@ import type {
   MemberCircleSnapshot,
   MemberMembership,
 } from '@polo-ai/shared/admin'
-import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import type { ClientCircleDetailSection } from '@/context/ClientPageContext'
 import { useMemberCatalog } from '@/context/MemberCatalogContext'
 import { useMemberCircles } from '@/context/MemberCircleResourceContext'
 import type { MemberCirclesReadPhase } from '@/hooks/useMemberCircles'
 import { useLeaveCircle } from '@/hooks/useLeaveCircle'
-import { useCircleReturn } from '@/hooks/useCircleReturn'
-import { CircleReturnPanel } from './CircleReturnPanel'
 import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
 import {
   selectHomeAppDirectory,
   type HomeAppDirectory,
 } from '@/lib/home-app-directory'
-import { selectLatestEntitlementJudgment, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
+import { isMembershipCurrentlyPaidEntitled, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import { CircleContentPanel } from './CircleContentPanel'
 import { CircleSubscriptionPanel } from './CircleSubscriptionPanel'
 import { CircleSupportPanel, type CircleSupportTarget } from './CircleSupportPanel'
@@ -78,24 +75,7 @@ import { LeaveCircleDialog } from './LeaveCircleDialog'
  *   so scrolling THIS page drives the header hairline. No skills-management
  *   surface and no assistant implementation change exists here.
  *
- * - Return verification (C8/POO-99, P70-RETURN-01/02): the page mounts
- *   `useCircleReturn` on the SAME C2 resource, so the B1 web→desktop return
- *   candidate is consumed the moment a circle detail is open (event-first +
- *   getPending; the hook owns dedup/ack/cancel). While a candidate is
- *   surfaced the `CircleReturnPanel` takes over the page as the flow-state
- *   surface of the confirmed prototype scenes (核对圈子加入结果 / 返回后核对
- *   原订阅订单 / mismatch) — single surface, no second heading beside it.
- *   A concluded round ends the takeover: a verified `打开原对象` navigates
- *   the N1 route to the target's detail section (a different circleId
- *   remounts this page fresh — the acked candidate no longer surfaces and
- *   the object renders normally), and `返回我的圈子` releases the candidate.
- *   `onReauthenticateRequest` is the OPTIONAL App-threaded A1 re-login
- *   entry: unset means the mismatch recovery currently ends at the hook's
- *   fact-drop with the minimal target retained (the user recovers through
- *   the existing account menu). App forwards the entry via TabShell
- *   (enterAdminLogin); unset only in isolated mounts (degraded note).
- *
- * Upstream-expected: none — C8/POO-99 is integrated as of afb222aa.
+ * Upstream-expected: none.
  */
 
 // ---------------------------------------------------------------------------
@@ -149,13 +129,12 @@ export function deriveCircleDetailHeadingState(
   membership: MemberMembership | null,
 ): CircleDetailHeadingState {
   const status = membership?.status ?? circle.status
-  const judgment = membership ? selectLatestEntitlementJudgment(membership) : null
-  const projectedNotPaid = judgment !== null
-    && judgment.basis === 'projected'
-    && judgment.effectivePaymentStatus !== 'paid'
+  const currentEntitlement = membership
+    ? isMembershipCurrentlyPaidEntitled(membership)
+    : null
   return {
     status,
-    restricted: status !== 'active' || projectedNotPaid,
+    restricted: status !== 'active' || currentEntitlement === false,
     appsCount: circle.entitlements.filter(e => e.artifact.type === 'web_app').length,
     skillsCount: circle.entitlements.filter(e => e.artifact.type === 'skill').length,
   }
@@ -274,19 +253,11 @@ export interface CircleDetailPageProps {
   circleId: string
   /** The active detail section (N1 route field; the tabs navigate it). */
   section: ClientCircleDetailSection
-  /**
-   * The App-threaded A1 re-login entry for the C8 account-mismatch recovery
-   * (optional; unset = the mismatch recovery keeps the minimal target and
-   * the user recovers through the existing account menu — see the docblock
-   * and the delivery notes for the declared two-line App/TabShell forward).
-   */
-  onReauthenticateRequest?: (target: CircleReturnTargetIds | null) => void
 }
 
 export function CircleDetailPage({
   circleId,
   section,
-  onReauthenticateRequest,
 }: CircleDetailPageProps) {
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
@@ -296,14 +267,6 @@ export function CircleDetailPage({
   const launchHandoff = useProductSpaceAppLaunchHandoff()
   const leave = useLeaveCircle()
   const detailMainRef = useRef<HTMLElement>(null)
-  // C8 return verification on the SAME C2 resource: the B1 candidate is
-  // consumed on mount (event-first, deduped; `unavailable` mirror retries
-  // the read), one authoritative round per click, ack only after locate.
-  const circleReturn = useCircleReturn({
-    resource,
-    onReauthenticateRequest,
-  })
-
   const detail = resource.getCircle(circleId)
   const relationsPhase = resource.state.phase
 
@@ -348,12 +311,7 @@ export function CircleDetailPage({
   }, [clientPage, circleId])
 
   const handleBack = useCallback(() => {
-    if (!clientPage) return
-    if (clientPage.canGoBack) {
-      clientPage.back()
-    } else {
-      clientPage.navigate({ kind: 'circles' })
-    }
+    clientPage?.navigate({ kind: 'circles' })
   }, [clientPage])
 
   // ── C7 leave flow (subscription section only) ─────────────────────────────
@@ -456,25 +414,6 @@ export function CircleDetailPage({
     })
   }, [heading, circleReady, detail, t])
 
-  // ── C8 return verification surface (page takeover while a candidate is
-  // surfaced) ────────────────────────────────────────────────────────────────
-  // The panel is the confirmed flow-state page (核对圈子加入结果 / 返回后核对
-  // 原订阅订单 / mismatch): while the hook holds a candidate the page renders
-  // IT alone — the detail heading/tabs/body come back when the candidate is
-  // released (cancel/back) or concluded and the user opens the target (a new
-  // mount consumes nothing — the candidate was acked). The leave dialog below
-  // stays mounted through a takeover: a mid-flow candidate never destroys the
-  // leave flow's facts (C7 owns them in the hook).
-  const returnActive = circleReturn.state.phase !== 'idle'
-  const returnTargetCircleName = useMemo(() => {
-    const targetCircleId = circleReturn.state.target?.circleId ?? null
-    if (!targetCircleId) return null
-    return (resource.circles ?? []).find(
-      candidate => candidate.circle.circleId === targetCircleId,
-    )?.circle.name ?? null
-  }, [circleReturn.state.target, resource.circles])
-  const spaceName = catalog.productSpace?.activeProductSpace?.name ?? null
-
   return (
     // The page's MAIN scroller — ClientHomeRouter registers THIS element with
     // the N1 header-line controller (P70-CIRCLE-DETAIL-03).
@@ -483,7 +422,7 @@ export function CircleDetailPage({
       data-testid="circle-detail-page"
       data-circle-id={circleId}
       data-section={section}
-      data-return-active={returnActive ? 'true' : 'false'}
+      data-return-active="false"
     >
       <main
         ref={detailMainRef}
@@ -492,24 +431,6 @@ export function CircleDetailPage({
         style={workbenchStyle}
         className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
       >
-        {/* C8 page takeover: while a return candidate is surfaced this page
-        IS the flow-state surface (its own single heading/actions; prototype
-        P-M07-RETURN*). The detail body returns when the candidate is
-        released or concluded out of. */}
-        {returnActive && (
-          <CircleReturnPanel
-            state={circleReturn.state}
-            onCheck={() => { void circleReturn.checkOnce() }}
-            // P2-2 (POO-100 review): the mismatch CTA renders ONLY when an
-            // A1 re-login entry is actually wired — undefined keeps the
-            // honest manual-recovery note instead of a dead button.
-            onReauthenticate={onReauthenticateRequest ? circleReturn.reauthenticate : undefined}
-            onCancel={() => { void circleReturn.cancel() }}
-            targetCircleName={returnTargetCircleName}
-            spaceName={spaceName}
-          />
-        )}
-        {!returnActive && (<>
         {/* Prototype `.subpage-heading.circle-detail-heading`: back button +
         eyebrow + THE single identity heading (ready circles only). */}
         <div className="mb-[18px] flex items-center gap-[18px] border-b border-border pb-[18px]">
@@ -721,7 +642,6 @@ export function CircleDetailPage({
             <CircleUnavailableState phase={relationsPhase} onRetry={relationsRetry} />
           )
         )}
-        </>)}
       </main>
 
       {/* C7's THE single confirmation — rendered from the page so the flow

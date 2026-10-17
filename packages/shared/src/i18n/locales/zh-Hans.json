@@ -1246,6 +1246,7 @@
   "poo70.c6.cap.serverReason": "服务端原因：{{reason}}",
   "poo70.c6.cap.title": "暂时不能提前续费",
   "poo70.c6.detail.expiredAt": "{{date}} 到期",
+  "poo70.c6.detail.freeEnded": "授权已结束 · 重新加入后可恢复",
   "poo70.c6.detail.freeTerm": "长期有效",
   "poo70.c6.detail.nextPrice": "{{date}} 起价格调整为 {{price}}。",
   "poo70.c6.detail.period.free": "免费",
