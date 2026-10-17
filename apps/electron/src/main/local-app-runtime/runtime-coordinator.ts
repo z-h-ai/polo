@@ -1451,16 +1451,34 @@ export class LocalAppRuntimeCoordinator {
     const queryKey = `${runtime.identityKey}:${runId}:${requestId}`
     let executor: CoordinatorExecutor
     let admitted = false
+    let admissionDispatchStarted = false
+    let cancelledBeforeDispatch = false
     let journalScope: AppBillingJournalScope | undefined
     let journalKey: string | undefined
     try {
       executor = this.adapters.createExecutor({ connectionSlug, model,
         ...(this.adapters.admin.admitAppRequest ? { beforeSend: async (facts: HostLlmBeforeSendFacts): Promise<HostLlmAdmissionDecision> => {
-          if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || !await current() || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
+          const assertNotCancelled = () => {
+            if (controller.signal.aborted || runtime.controller.signal.aborted) {
+              cancelledBeforeDispatch = true
+              throw new Error('App request was cancelled before admission dispatch')
+            }
+          }
+          assertNotCancelled()
+          if (this.isGenerationTornDown(runtime)) throw new Error('Original App scope was withdrawn')
+          const isCurrent = await current()
+          assertNotCancelled()
+          if (!isCurrent || this.isGenerationTornDown(runtime)) throw new Error('Original App scope was withdrawn')
+          const isScopeCurrent = !this.adapters.isScopeCurrent || await this.adapters.isScopeCurrent(runtime.identity)
+          assertNotCancelled()
+          if (!isScopeCurrent || this.isGenerationTornDown(runtime)) throw new Error('Original App scope was withdrawn')
           if (!this.adapters.billingOutbox) throw new Error('Durable App billing journal is unavailable')
           journalScope = this.journalScope(runtime)
           const body = { productSpaceId: runtime.identity.productSpaceId, requestId, ...facts }
           journalKey = this.adapters.billingOutbox.stageAdmission(journalScope, runId, body)
+          // Once dispatch starts, an aborted/lost acknowledgement is unknown;
+          // neither cancellation nor a later empty snapshot proves no send.
+          admissionDispatchStarted = true
           const response = await this.adapters.admin.admitAppRequest!(runId, body, this.originalAdminOptions(runtime, controller.signal))
           admitted = true
           if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || !await current() || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
@@ -1535,8 +1553,14 @@ export class LocalAppRuntimeCoordinator {
       return { errorCode: outcome.kind === 'error' ? outcome.code : 'run_state_conflict' }
     }
     if (this.adapters.admin.admitAppRequest && !admitted) {
-      this.runState.noteHostTerminal(capGen, runId, requestId, { kind: 'error', code: 'metering_unconfirmed' })
-      return { errorCode: 'metering_unconfirmed' }
+      // A definite pre-dispatch error has no provider receipt. Strip Host
+      // placeholders so cleanup can finish the original run without inventing
+      // usage; a late abort must not relabel an earlier unrelated error.
+      const code = !admissionDispatchStarted && outcome.kind === 'error'
+        ? cancelledBeforeDispatch ? 'request_cancelled' : outcome.code
+        : 'metering_unconfirmed'
+      this.runState.noteHostTerminal(capGen, runId, requestId, { kind: 'error', code })
+      return { errorCode: code }
     }
     const record = this.runState.noteHostTerminal(capGen, runId, requestId, outcome)
     if (!record) return { errorCode: 'run_state_conflict' }
