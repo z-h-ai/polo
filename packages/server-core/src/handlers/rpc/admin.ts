@@ -1480,6 +1480,12 @@ export function registerAdminHandlers(
         if (!ended) return staleAdminValidationResult()
         return { loggedIn: false }
       }
+      // /api/capabilities also carries the org-level generativeUI.inline
+      // toggle. VALIDATE is the production path that runs on every logged-in
+      // boot and after login (before any turn), so refresh the synchronous
+      // toggle cache here — the creator-artifact capabilities RPC alone has no
+      // production caller, which left the remote switch ineffective.
+      await refreshGenerativeUiRemoteCapability(client, tokenResult.tokens.accessToken);
       const verifiedSession = await persistVerifiedAdminUser(
         manager,
         sessions,
@@ -2925,11 +2931,7 @@ export function registerAdminHandlers(
       // refresh the synchronous toggle cache whenever capabilities are read.
       // Absent field keeps the feature enabled, so pre-flag servers are
       // unaffected.
-      try {
-        setGenerativeUiRemoteCapability(await client.getGenerativeUiCapability(accessToken));
-      } catch {
-        // Capability read is best-effort; toggle cache keeps its previous value.
-      }
+      await refreshGenerativeUiRemoteCapability(client, accessToken);
       return capability;
     }))
 
@@ -3303,6 +3305,24 @@ function invalidateCreatorArtifactCache(userId: string, organizationId?: string)
   const prefix = organizationId ? `${userId}\0${organizationId}\0` : `${userId}\0`
   for (const key of creatorArtifactCatalogCache.keys()) {
     if (key.startsWith(prefix)) creatorArtifactCatalogCache.delete(key)
+  }
+}
+
+/**
+ * Best-effort refresh of the synchronous Generative UI remote-toggle cache
+ * from /api/capabilities. Called on production paths that run while logged in
+ * (post-login VALIDATE, creator artifact capabilities) so the org-level
+ * `generativeUI.inline` kill switch actually reaches per-turn tool eligibility.
+ * A failed read keeps the previously cached value (absent still = enabled).
+ */
+async function refreshGenerativeUiRemoteCapability(
+  client: AdminClient,
+  accessToken: string,
+): Promise<void> {
+  try {
+    setGenerativeUiRemoteCapability(await client.getGenerativeUiCapability(accessToken));
+  } catch {
+    // Capability read is best-effort; toggle cache keeps its previous value.
   }
 }
 

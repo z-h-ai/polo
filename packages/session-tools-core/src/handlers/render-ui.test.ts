@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { SessionToolContext } from '../context.ts';
@@ -237,6 +237,27 @@ describe('render_ui handler', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain('src" must be within the session data directory');
+  });
+
+  it('gives out-of-boundary paths the containment error whether or not they exist (no existence oracle)', async () => {
+    // Containment is decided BEFORE existence, so a missing outside path must
+    // be indistinguishable from a present one — existence only ever decides
+    // the not-found retry hint for paths already inside the data dir.
+    const missingOutside = join(siblingDir, 'never-written.json');
+    expect(existsSync(missingOutside)).toBe(false);
+
+    const result = await handleRenderUi(ctx(), {
+      components: [{
+        id: 'probe',
+        type: 'data-table',
+        columns: [{ key: 'a', label: 'A', type: 'text' as const }],
+        src: missingOutside,
+      }],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('src" must be within the session data directory');
+    expect(result.content[0]?.text).not.toContain('file not found');
   });
 
   it('rejects a data-table src that escapes via symlink', async () => {

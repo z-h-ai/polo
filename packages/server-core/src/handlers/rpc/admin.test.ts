@@ -26,6 +26,12 @@ import {
   resolveMemberCirclePurchaseUrl as realResolveMemberCirclePurchaseUrl,
   MemberCircleUuidSchema as realMemberCircleUuidSchema,
 } from '../../../../shared/src/admin/member-circles'
+// Canonical-skill turn contract constant: consumed through the barrel by
+// server-core/runtime/canonical-skills.ts, which admin.ts binds at import
+// time — the barrel stub below must carry it or the file fails to load.
+import {
+  SKILL_TURN_CONTRACT_VERSION as realSkillTurnContractVersion,
+} from '../../../../shared/src/admin/skill-turn-contract'
 
 type StoredTokens = {
   accessToken: string
@@ -114,6 +120,7 @@ const adminClientBehavior = {
     defaultConnection: null,
   }),
   listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
+  getGenerativeUiCapability: async (_accessToken: string): Promise<any> => ({}),
   createCreatorAppPublicationDraft: async (_accessToken: string, _input: unknown): Promise<any> => ({
     appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
   }),
@@ -259,6 +266,11 @@ class MockAdminClient {
     return adminClientBehavior.listOrganizations(accessToken)
   }
 
+  async getGenerativeUiCapability(accessToken: string) {
+    adminClientCalls.push({ method: 'getGenerativeUiCapability', args: [], accessToken })
+    return adminClientBehavior.getGenerativeUiCapability(accessToken)
+  }
+
   async listCreatorArtifacts(accessToken: string, input: unknown) {
     adminClientCalls.push({
       method: 'listCreatorArtifacts',
@@ -388,11 +400,13 @@ const configState: {
   adminConfigVersion?: string
   connections: TestConnection[]
   defaultConnection: string | null
+  generativeUiRemoteCapability?: unknown
 } = {
   adminUrl: 'https://admin.example.com',
   adminConfigVersion: undefined,
   connections: [],
   defaultConnection: null,
+  generativeUiRemoteCapability: undefined,
 }
 
 const managerState: {
@@ -437,6 +451,7 @@ mock.module('@polo-ai/shared/admin', () => ({
   // Re-exported constants must survive the mock — later test files in the same
   // bun process (e.g. manager.test.ts) import them through this module path.
   CREATOR_APP_CANONICAL_ENTRIES: realCreatorAppCanonicalEntries,
+  SKILL_TURN_CONTRACT_VERSION: realSkillTurnContractVersion,
   CREATOR_APP_PAYLOAD_LIMITS: realCreatorAppPayloadLimits,
   CREATOR_APP_PAYLOAD_MAX_BYTES: realCreatorAppPayloadMaxBytes,
   // Shared test stub authorization (reviewer P2-2, POO-70 orchestration):
@@ -532,6 +547,11 @@ mock.module('@polo-ai/shared/config', () => ({
     if (!configState.connections.some(item => item.slug === slug)) return false
     configState.defaultConnection = slug
     return true
+  },
+  // Captured so tests can assert the Generative UI toggle-cache refresh
+  // wiring without coupling to the real module's state.
+  setGenerativeUiRemoteCapability: (capability: unknown) => {
+    configState.generativeUiRemoteCapability = capability ?? undefined
   },
 }))
 
@@ -686,6 +706,7 @@ beforeEach(() => {
   configState.adminConfigVersion = undefined
   configState.connections = []
   configState.defaultConnection = null
+  configState.generativeUiRemoteCapability = undefined
   managerState.tokens = null
   managerState.llmApiKeys = new Map()
   managerState.deletedCredentialSlugs = []
@@ -749,6 +770,9 @@ beforeEach(() => {
     defaultConnection: 'admin-anthropic',
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
+  // Absent generativeUI section = enabled; keeps every existing test's
+  // validate() path on the fail-open default.
+  adminClientBehavior.getGenerativeUiCapability = async () => ({})
   adminClientBehavior.createCreatorAppPublicationDraft = async () => ({
     appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
   })
@@ -1859,7 +1883,9 @@ describe('registerAdminHandlers', () => {
       loggedIn: true,
       configVersion: 'config-v1',
     })
-    expect(adminClientCalls.map(call => call.method)).toEqual(['refresh', 'validate', 'getLlmConnections'])
+    expect(adminClientCalls.map(call => call.method)).toEqual([
+      'refresh', 'validate', 'getGenerativeUiCapability', 'getLlmConnections',
+    ])
     expect(adminClientCalls.find(call => call.method === 'validate')?.accessToken).toBe('fresh-access-token')
     expect(managerState.tokens).toMatchObject({
       accessToken: 'fresh-access-token',
@@ -1893,6 +1919,49 @@ describe('registerAdminHandlers', () => {
       status: 401,
     })
     expect(managerState.tokens).toBeNull()
+  })
+
+  it('validate refreshes the Generative UI remote capability cache', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getGenerativeUiCapability = async () => ({
+      generativeUI: { inline: false },
+    })
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ loggedIn: true })
+    expect(configState.generativeUiRemoteCapability).toEqual({
+      generativeUI: { inline: false },
+    })
+  })
+
+  it('a failed Generative UI capability read keeps the previous cache value', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    configState.generativeUiRemoteCapability = { generativeUI: { inline: true } }
+    adminClientBehavior.getGenerativeUiCapability = async () => {
+      throw new Error('temporary capabilities outage')
+    }
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ loggedIn: true })
+    expect(configState.generativeUiRemoteCapability).toEqual({ generativeUI: { inline: true } })
   })
 
   it('syncs admin connections by upserting incoming config and removing admin-deleted connections', async () => {

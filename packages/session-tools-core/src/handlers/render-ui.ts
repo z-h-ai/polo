@@ -15,8 +15,8 @@
  *    time so mid-session disable takes effect on the next tool call.
  */
 
-import { resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { resolve, dirname, join, basename } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
 import type { SessionToolContext } from '../context.ts';
 import type { ToolResult } from '../types.ts';
 import { successResponse, errorResponse } from '../response.ts';
@@ -41,6 +41,28 @@ function formatValidationIssues(error: { issues: Array<{ path: (string | number)
 function describeComponent(component: GenUIComponent): string {
   const title = component.title ? ` — ${component.title}` : '';
   return `- ${component.type} "${component.id}"${title}`;
+}
+
+/**
+ * Real path with symlinked prefixes resolved, tolerating a not-yet-written
+ * target: the nearest existing ancestor is real-pathed and the missing
+ * remainder re-appended. Without this, a missing src compares its lexical
+ * fallback (e.g. macOS tmpdir `/var/...`) against the boundary's real path
+ * (`/private/var/...`) and containment would spuriously fail.
+ */
+function realPathForBoundaryCheck(target: string): string {
+  let current = resolve(target);
+  let suffix = '';
+  for (;;) {
+    try {
+      return join(realpathSync.native(current), suffix);
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolve(target);
+      suffix = suffix ? join(basename(current), suffix) : basename(current);
+      current = parent;
+    }
+  }
 }
 
 /**
@@ -77,18 +99,26 @@ export async function handleRenderUi(
     if (!dataDir) {
       return errorResponse('render_ui data-table components require a session data directory.');
     }
+    // The boundary is decided in real-path space so symlink escapes are caught
+    // AND a not-yet-written src inside the directory still passes containment.
+    const boundaryDir = realPathForBoundaryCheck(dataDir);
     for (const table of dataTables) {
       const resolvedSrc = resolve(dataDir, table.src);
-      // Existence first: the containment check resolves symlinks, which only
-      // behaves correctly for paths that exist.
+      // Containment FIRST, existence second: the boundary decision must not
+      // depend on whether an outside path happens to exist. An existence-first
+      // order turns the two error messages into a filesystem existence oracle
+      // (outside present → containment error, outside missing → not-found);
+      // here out-of-boundary srcs always get the same containment error, and
+      // existence only ever decides the not-found retry hint for paths already
+      // inside the boundary.
+      if (!isPathWithinDirectory(realPathForBoundaryCheck(resolvedSrc), boundaryDir)) {
+        return errorResponse(
+          `data-table "src" must be within the session data directory. Got: ${table.src}`
+        );
+      }
       if (!existsSync(resolvedSrc)) {
         return errorResponse(
           `data-table "src" file not found: ${table.src}\n\nRun transform_data first, then reference its output path.`
-        );
-      }
-      if (!isPathWithinDirectory(resolvedSrc, dataDir)) {
-        return errorResponse(
-          `data-table "src" must be within the session data directory. Got: ${table.src}`
         );
       }
     }

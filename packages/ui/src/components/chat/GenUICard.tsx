@@ -30,7 +30,8 @@ export interface GenUiStatCard {
   label: string
   value: string | number
   unit?: string
-  delta?: string
+  /** Decimal fraction per the tool schema (0.152 = +15.2%). */
+  delta?: number
   trend?: GenUiTrend
 }
 
@@ -89,18 +90,14 @@ export type GenUiComponent =
 
 // ── Tolerant parsing (models may emit slightly-off shapes; never crash) ──────
 
-const GENUI_COMPONENT_TYPES = new Set<string>([
-  'stat-card',
-  'data-table',
-  'alert',
-  'progress',
-  'action-buttons',
-])
-
 /**
  * Extract render_ui components from an arbitrary tool-input value.
  * Accepts `{ components: [...] }` or a bare array; silently drops entries
- * with an unknown type or missing id instead of throwing.
+ * without a usable id instead of throwing. The `type` field is deliberately
+ * NOT filtered here — unknown types must survive parsing so the registry can
+ * fall back to the read-only JSON view (GenUiUnknownFallback) instead of
+ * silently losing the payload (e.g. a newer registry entry on another app
+ * version).
  */
 export function parseGenUiComponents(input: unknown): GenUiComponent[] {
   let raw: unknown
@@ -114,9 +111,7 @@ export function parseGenUiComponents(input: unknown): GenUiComponent[] {
   const out: GenUiComponent[] = []
   for (const entry of raw as unknown[]) {
     if (!entry || typeof entry !== 'object') continue
-    const type = (entry as { type?: unknown }).type
     const id = (entry as { id?: unknown }).id
-    if (typeof type !== 'string' || !GENUI_COMPONENT_TYPES.has(type)) continue
     if (typeof id !== 'string' || id.length === 0) continue
     out.push(entry as GenUiComponent)
   }
@@ -206,6 +201,15 @@ export function dispatchGenUiSubmitInput(sessionId: string): void {
 
 // ── Component renderers ──────────────────────────────────────────────────────
 
+/**
+ * The schema sends a decimal fraction (0.152 = +15.2%); render it as a signed
+ * percentage so the sign is never lost on positive deltas.
+ */
+export function formatStatDelta(delta: number): string {
+  const percent = Math.round(delta * 1000) / 10
+  return `${percent > 0 ? '+' : ''}${percent}%`
+}
+
 function StatCardView({ component }: { component: GenUiStatCard }) {
   return (
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
@@ -222,7 +226,7 @@ function StatCardView({ component }: { component: GenUiStatCard }) {
             {component.unit && <span className="text-[13px] font-normal text-muted-foreground ml-1">{component.unit}</span>}
           </div>
         </div>
-        {component.delta && (
+        {component.delta !== undefined && (
           <span className={cn(
             'shrink-0 inline-flex items-center gap-1 text-[12px] font-medium tabular-nums',
             component.trend === 'up' && 'text-success',
@@ -232,7 +236,7 @@ function StatCardView({ component }: { component: GenUiStatCard }) {
             {component.trend === 'up' && <TrendingUp className="w-3 h-3" />}
             {component.trend === 'down' && <TrendingDown className="w-3 h-3" />}
             {(!component.trend || component.trend === 'flat') && <Minus className="w-3 h-3" />}
-            {component.delta}
+            {formatStatDelta(component.delta)}
           </span>
         )}
       </div>

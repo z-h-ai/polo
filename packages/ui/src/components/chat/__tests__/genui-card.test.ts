@@ -3,6 +3,7 @@ import {
   parseGenUiComponents,
   mergeGenUiComponents,
   hasGenUiRenderer,
+  formatStatDelta,
 } from '../GenUICard'
 
 describe('parseGenUiComponents', () => {
@@ -26,15 +27,19 @@ describe('parseGenUiComponents', () => {
     expect(parsed[0]!.id).toBe('p1')
   })
 
-  it('drops entries with unknown types instead of throwing', () => {
+  it('keeps unknown types so unknown entries render the fallback instead of being dropped', () => {
     const parsed = parseGenUiComponents({
       components: [
         { type: 'chart', id: 'c1' },
         { type: 'stat-card', id: 's1', label: 'Keep', value: 1 },
       ],
     })
-    expect(parsed.length).toBe(1)
-    expect(parsed[0]!.id).toBe('s1')
+    expect(parsed.length).toBe(2)
+    expect(parsed[0]!.id).toBe('c1')
+    expect((parsed[0] as { type?: string }).type).toBe('chart')
+    expect(parsed[1]!.id).toBe('s1')
+    // No registered renderer for 'chart' → GenUICard renders GenUiUnknownFallback.
+    expect(hasGenUiRenderer('chart')).toBe(false)
   })
 
   it('drops entries without a usable id', () => {
@@ -109,5 +114,27 @@ describe('hasGenUiRenderer (fallback decision)', () => {
   it('falls back to the read-only JSON view for unknown types', () => {
     expect(hasGenUiRenderer('chart')).toBe(false)
     expect(hasGenUiRenderer('')).toBe(false)
+  })
+})
+
+describe('formatStatDelta (schema delta is a decimal fraction: 0.152 = +15.2%)', () => {
+  it('prefixes positive deltas with +', () => {
+    expect(formatStatDelta(0.152)).toBe('+15.2%')
+    expect(formatStatDelta(0.15)).toBe('+15%')
+    expect(formatStatDelta(1.5)).toBe('+150%')
+  })
+
+  it('keeps negative deltas signed by the number itself', () => {
+    expect(formatStatDelta(-0.034)).toBe('-3.4%')
+    expect(formatStatDelta(-0.05)).toBe('-5%')
+  })
+
+  it('renders zero unsigned', () => {
+    expect(formatStatDelta(0)).toBe('0%')
+  })
+
+  it('rounds to one decimal place', () => {
+    expect(formatStatDelta(0.15234)).toBe('+15.2%')
+    expect(formatStatDelta(-0.02689)).toBe('-2.7%')
   })
 })
