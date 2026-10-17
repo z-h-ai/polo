@@ -26,7 +26,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@polo-ai/shared/agent/backend'
-import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, isGenerativeUiCanvasEnabled, isGenerativeUiInlineEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
+import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, isGenerativeUiCanvasEnabled, isGenerativeUiInlineEnabled, isWebAppArtifactPolicyEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
@@ -1243,7 +1243,10 @@ export function computeRenderUiEligibility(
 /**
  * Per-turn eligibility for the generate_app tool (Generative UI canvas apps).
  * Same fail-closed matrix as render_ui, intersected with the generativeUI.canvas
- * toggle (remote capability + local Settings kill switch) instead of inline.
+ * toggle (remote capability + local Settings kill switch) instead of inline,
+ * and with the remote web_app artifact policy (POO-102): `enabled: false`
+ * keeps the tool unregistered for the turn. The policy also tightens the pin
+ * path independently (bundle size cap at genui.AUDIT_APP_PIN).
  */
 export function computeGenerateAppEligibility(
   invocationSource: InvocationSource | undefined,
@@ -1251,7 +1254,7 @@ export function computeGenerateAppEligibility(
   isMini: boolean | undefined,
   origin: import('@polo-ai/shared/protocol').SessionOrigin | undefined,
 ): boolean {
-  return isGenerativeUiCanvasEnabled() && computeRequestUserInputEligibility(
+  return isGenerativeUiCanvasEnabled() && isWebAppArtifactPolicyEnabled() && computeRequestUserInputEligibility(
     invocationSource,
     hidden,
     isMini,

@@ -7,15 +7,20 @@
  * home or touch the host bridge:
  *
  * 1. Hard size cap (GENERATE_APP_MAX_HTML_BYTES, UTF-8 bytes).
- * 2. Static scan: no external http(s) resource references (src/href/CSS
- *    url(); w3.org XML namespaces are the only exemption — they are
- *    identifiers, never fetched), no `@polo-ai/sdk` literal, no `poloai:`
- *    protocol references.
+ * 2. Static scan: no external http(s) resource references — src/href (quoted
+ *    and unquoted), srcset, CSS url() and @import, inline fetch/WebSocket/XHR
+ *    call strings, and data: URI payloads one bounded decode deep (base64 or
+ *    percent), all applied to an entity-decoded copy of the markup; w3.org
+ *    XML namespaces are the only exemption — they are identifiers, never
+ *    fetched — plus no `@polo-ai/sdk` literal, no `poloai:` protocol
+ *    references. Main additionally installs a fail-closed request fence on
+ *    every canvas partition, so this scan is defense in depth, not the last
+ *    line.
  * 3. Artifacts live only under `<session data>/genui-apps/<id>/` — ids are
  *    validated against a strict pattern, so updateOf can never traverse.
- * 4. Update semantics = full rewrite + version increment (version.json).
- *    No zip, no polo-app.json — that identity is written by the publish
- *    flow, not by session-local generation.
+ * 4. Update semantics = full atomic rewrite (temp name + rename) + version
+ *    increment (version.json). No zip, no polo-app.json — that identity is
+ *    written by the publish flow, not by session-local generation.
  *
  * The tool is only registered for desktop interactive turns while the
  * generativeUI.canvas toggle is on (see tool-defs.ts allowGenerateApp); the
@@ -24,7 +29,7 @@
  */
 
 import { join, resolve } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { SessionToolContext } from '../context.ts';
 import type { ToolResult } from '../types.ts';
@@ -44,10 +49,30 @@ export interface GenerateAppArgs {
 
 interface ResolvedApp {
   appId: string;
-  version: number;
   appDir: string;
   indexPath: string;
   versionPath: string;
+}
+
+/**
+ * Atomic single-file write: the content lands at a unique temp name in the
+ * target directory and is renamed over the target. Readers (the loading
+ * webview, the pin gate) see either the previous document or the complete new
+ * one — never a torn file.
+ */
+function writeAtomic(filePath: string, data: string): void {
+  const tempPath = `${filePath}.tmp-${randomBytes(6).toString('hex')}`;
+  try {
+    writeFileSync(tempPath, data, 'utf-8');
+    renameSync(tempPath, filePath);
+  } catch (error) {
+    try {
+      unlinkSync(tempPath);
+    } catch {
+      // The temp file may never have been created; the original error wins.
+    }
+    throw error;
+  }
 }
 
 const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
@@ -58,12 +83,46 @@ const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
  * exempt ONLY when their value points at the w3.org namespaces — those are
  * XML namespace identifiers, never fetched, and blocking them would break
  * every inline <svg>.
+ *
+ * POO-102 review hardening: the scan runs on an entity-decoded copy of the
+ * markup (&#104;ttps:// in an attribute decodes exactly once, matching what
+ * the HTML parser hands the browser), covers unquoted attribute values,
+ * srcset, the CSS `@import "…"` string form, inline fetch/WebSocket/XHR-style
+ * network calls, and decodes one bounded level of data: URI payloads so a
+ * base64- (or percent-) wrapped iframe/document carrying external links is
+ * rejected with its payload.
  */
 const EXTERNAL_REF_PATTERNS: Array<{ label: string; regex: RegExp; groups: number[] }> = [
   // Group 2 = double-quoted value, group 3 = single-quoted value.
   { label: 'src/href attribute', regex: /\b(?:src|href)\s*=\s*("([^"]*)"|'([^']*)')/gi, groups: [2, 3] },
+  // Unquoted attribute value form: src=https://… (run ends at whitespace or a
+  // tag close; the quoted forms above never match here because the value
+  // class excludes quotes). srcset is included so its unquoted single-entry
+  // form is covered too — the quoted srcset form is matched separately below.
+  { label: 'unquoted src/href/srcset attribute', regex: /\b(?:src|href|srcset)\s*=\s*([^\s>'"]+)/gi, groups: [1] },
+  // Group 2 = double-quoted srcset, group 3 = single-quoted; the value is a
+  // comma-separated candidate list whose entries are "url [descriptor]".
+  { label: 'srcset attribute', regex: /\bsrcset\s*=\s*("([^"]*)"|'([^']*)')/gi, groups: [2, 3] },
   // Group 2 = url(...) body.
   { label: 'CSS url()', regex: /url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi, groups: [2] },
+  // CSS @import in its string form (the url() form is covered above).
+  { label: 'CSS @import', regex: /@import\s+(['"])([^'"]+)\1/gi, groups: [2] },
+  // Inline script network calls, best-effort string-level coverage: fetch,
+  // WebSocket (ws(s)), EventSource, sendBeacon, XHR open, dynamic import.
+  // No JS parser — this is the second fence behind the session-level network
+  // fence Main installs on canvas partitions. Group 1 captures the URL so the
+  // shared http(s) test below applies to the address, not the call text.
+  {
+    label: 'inline network call',
+    regex: /\b(?:fetch|new\s+WebSocket|WebSocket|EventSource|sendBeacon|import)\s*\(\s*(['"`])\s*(wss?:[^\s'"`)]*|https?:[^\s'"`)]*)/gi,
+    groups: [2],
+  },
+  // XHR: .open('GET', 'https://…') or .open('https://…').
+  {
+    label: 'inline network call',
+    regex: /\.open\s*\(\s*(?:['"][A-Z]+['"]\s*,\s*)?(['"])(https?:[^'"]*)/gi,
+    groups: [2],
+  },
 ];
 
 const XMLNS_ATTR_PATTERN = /\bxmlns(?::[A-Za-z0-9_-]+)?\s*=\s*("([^"]*)"|'([^']*)')/gi;
@@ -74,23 +133,107 @@ const SDK_REFERENCE_PATTERN = /@polo-ai\/sdk/i;
 /** Deep-link protocol that only exists to reach the host bridge. */
 const POLOAI_PROTOCOL_PATTERN = /poloai:/i;
 
+/**
+ * data: payload extraction for the two document-carrying forms. Bounded
+ * recursion (MAX_SCAN_DEPTH) so a payload cannot hide behind more encodings
+ * than this; payload size is bounded by the 512KB document cap upstream.
+ */
+const BASE64_DATA_URI_PATTERN = /data:[^"'`\s]*;base64,([A-Za-z0-9+/=]{16,})/gi;
+const ENCODED_DOCUMENT_DATA_URI_PATTERN =
+  /data:(?:text\/html|image\/svg|application\/xhtml)[^"'`\s]*,[^"'`\s]{8,}/gi;
+const MAX_SCAN_DEPTH = 2;
+
+const NAMED_HTML_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+};
+
+/**
+ * One-pass HTML entity decode over the common numeric forms and the named
+ * entities an attribute value realistically needs. Decoding once mirrors the
+ * browser: a value the parser would see as "https://…" must be scanned as
+ * "https://…", while double-encoded content stays inert in the DOM too.
+ */
+export function decodeHtmlEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]{0,31});/g, (whole, body: string) => {
+    if (body.charCodeAt(0) === 0x23 /* # */) {
+      const hex = body.charCodeAt(1) === 0x78 /* x */;
+      const code = Number.parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
+      return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    }
+    return NAMED_HTML_ENTITIES[body.toLowerCase()] ?? whole;
+  });
+}
+
+function decodeDataUriPayload(uriText: string): string | null {
+  try {
+    const base64Idx = uriText.toLowerCase().indexOf(';base64,');
+    if (base64Idx >= 0) {
+      const encoded = uriText.slice(base64Idx + ';base64,'.length);
+      return Buffer.from(encoded, 'base64').toString('utf-8');
+    }
+    const commaIdx = uriText.indexOf(',');
+    if (commaIdx < 0) return null;
+    return decodeURIComponent(uriText.slice(commaIdx + 1));
+  } catch {
+    // Malformed encodings are inert for this scan — nothing more to extract.
+    return null;
+  }
+}
+
 export function findExternalResourceReference(html: string): { kind: string; value: string } | null {
+  return findExternalResourceReferenceInText(decodeHtmlEntities(html), 0);
+}
+
+function findExternalResourceReferenceInText(
+  text: string,
+  depth: number,
+): { kind: string; value: string } | null {
   const xmlnsValues = new Set<string>();
-  for (const match of html.matchAll(XMLNS_ATTR_PATTERN)) {
+  for (const match of text.matchAll(XMLNS_ATTR_PATTERN)) {
     const value = (match[2] ?? match[3] ?? '').trim();
     if (value) xmlnsValues.add(value);
   }
 
   for (const { label, regex, groups } of EXTERNAL_REF_PATTERNS) {
-    for (const match of html.matchAll(regex)) {
-      for (const group of groups) {
-        const ref = (match[group] ?? '').trim();
-        if (!ref) continue;
-        if (!/^https?:\/\//i.test(ref)) continue;
-        // xmlns values are identifiers; a src/href/url() pointing at a w3.org
-        // namespace is still an external reference and stays rejected.
-        if (xmlnsValues.has(ref) && XMLNS_ALLOWLIST.test(ref)) continue;
-        return { kind: label, value: ref };
+    for (const match of text.matchAll(regex)) {
+      const candidates = groups.map(group => (match[group] ?? '').trim());
+      for (const raw of candidates) {
+        if (!raw) continue;
+        // srcset carries a candidate list: every entry's URL (text before the
+        // first whitespace) is checked on its own.
+        const refs = label === 'srcset attribute'
+          ? raw.split(',').map(entry => entry.trim().split(/\s+/)[0] ?? '')
+          : [raw];
+        for (const ref of refs) {
+          // wss?:// is accepted here for the inline-call patterns — a
+          // WebSocket endpoint in an attribute is inert anyway, and scanning
+          // broader only ever tightens.
+          if (!ref || !/^(?:https?|wss?):\/\//i.test(ref)) continue;
+          // xmlns values are identifiers; a src/href/url() pointing at a w3.org
+          // namespace is still an external reference and stays rejected.
+          if (xmlnsValues.has(ref) && XMLNS_ALLOWLIST.test(ref)) continue;
+          return { kind: label, value: ref };
+        }
+      }
+    }
+  }
+
+  if (depth >= MAX_SCAN_DEPTH) return null;
+  for (const pattern of [BASE64_DATA_URI_PATTERN, ENCODED_DOCUMENT_DATA_URI_PATTERN]) {
+    for (const match of text.matchAll(pattern)) {
+      const decoded = decodeDataUriPayload(match[0]);
+      if (!decoded) continue;
+      const nested = findExternalResourceReferenceInText(decoded, depth + 1);
+      if (nested) {
+        return {
+          kind: `external reference inside a data: URI payload (${nested.kind})`,
+          value: nested.value,
+        };
       }
     }
   }
@@ -196,10 +339,8 @@ export async function handleGenerateApp(
         `updateOf app not found: ${updateOf}. List the id from the previous generate_app result, or omit updateOf to create a new app.`
       );
     }
-    const version = readVersion(join(appDir, 'version.json')) + 1;
     resolved = {
       appId: updateOf,
-      version,
       appDir,
       indexPath: join(appDir, 'index.html'),
       versionPath: join(appDir, 'version.json'),
@@ -212,20 +353,30 @@ export async function handleGenerateApp(
     }
     resolved = {
       appId,
-      version: 1,
       appDir,
       indexPath: join(appDir, 'index.html'),
       versionPath: join(appDir, 'version.json'),
     };
   }
 
+  // Concurrency semantics for racing updateOf calls on one app id (POO-102
+  // review): each write swaps index.html atomically (temp name + rename, so a
+  // loading webview never sees a torn document), then RE-READS the version
+  // counter and swaps version.json the same way. Two racing updates can still
+  // interleave to the same "next" version and last-writer-wins on the
+  // document — session-local generation has no cross-writer lock — but the
+  // invariants that matter hold: version.json is only bumped after the
+  // document it describes is already fully in place, both files are always
+  // individually complete, and a version can never regress below the counter
+  // observed at write time.
+  let version: number;
   try {
     mkdirSync(resolved.appDir, { recursive: true });
-    writeFileSync(resolved.indexPath, html, 'utf-8');
-    writeFileSync(
+    writeAtomic(resolved.indexPath, html);
+    version = readVersion(resolved.versionPath) + 1;
+    writeAtomic(
       resolved.versionPath,
-      `${JSON.stringify({ version: resolved.version, updatedAt: new Date().toISOString() }, null, 2)}\n`,
-      'utf-8'
+      `${JSON.stringify({ version, updatedAt: new Date().toISOString() }, null, 2)}\n`,
     );
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -233,13 +384,13 @@ export async function handleGenerateApp(
   }
 
   const lines = [
-    `Generative UI app "${title}" ${updateOf ? `updated to v${resolved.version}` : 'created (v1)'}.`,
+    `Generative UI app "${title}" ${updateOf ? `updated to v${version}` : 'created (v1)'}.`,
     `App id: ${resolved.appId}`,
     `Entry: ${resolved.indexPath}`,
     'It is now rendering in a sandboxed card below. To iterate, resend the COMPLETE html with updateOf set to this app id.',
     // Machine-readable marker consumed by the desktop renderer (webview card
     // + pin-to-tab). Keep the shape stable.
-    `[genui-app id="${resolved.appId}" version="${resolved.version}" path="${resolved.indexPath}"]`,
+    `[genui-app id="${resolved.appId}" version="${version}" path="${resolved.indexPath}"]`,
   ];
 
   return successResponse(lines.join('\n'));

@@ -72,11 +72,29 @@ export function getGenUiAppPartition(sessionId: string | null | undefined): stri
 }
 
 /**
+ * Renderer-safe equivalent of node:url's pathToFileURL() for absolute bundle
+ * paths (packages/ui must stay free of node: imports — this module is bundled
+ * for the webui too). Percent-encodes every path segment — spaces, '#', '?'
+ * and '%' included, so a path can never be read as URL syntax — and gives
+ * Windows drive paths the well-formed third slash (`file:///C:/…`), which the
+ * previous hand-rolled `file://C:\…` form lacked.
+ */
+export function pathToFileUrl(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/')
+  const drive = /^([A-Za-z]:)(.+)$/.exec(normalized)
+  // `(.+)` guarantees group 2 is non-empty, but indexed access types it
+  // optional (noUncheckedIndexedAccess); the fallback is unreachable.
+  const body = drive?.[2] ?? normalized
+  const prefix = drive ? `file:///${drive[1]}` : 'file://'
+  return `${prefix}${body.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/**
  * Guest source: the written bundle file when known, else the HTML inline as a
  * data URL (same-document content, no network, no disk requirement).
  */
 export function buildGenUiAppSrc(indexPath: string | undefined, html: string): string {
-  if (indexPath) return `file://${indexPath.split(/[\\/]/).map(encodeURIComponent).join('/')}`
+  if (indexPath) return pathToFileUrl(indexPath)
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
 }
 

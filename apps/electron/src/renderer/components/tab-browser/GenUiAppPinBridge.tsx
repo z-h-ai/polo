@@ -25,9 +25,8 @@ import {
   dispatchGenUiAppPinResult,
   type GenUiAppPinRequest,
 } from '@polo-ai/ui/chat/GenUiAppCard'
+import { GENUI_PINNED_APP_ID_PREFIX } from '../../../shared/types'
 import type { AppDefinition } from '../../../shared/tab-browser-types'
-
-const PINNED_APP_ID_PREFIX = 'gen-ui-app-'
 
 export function GenUiAppPinBridge() {
   const { installApp, openApp, installedApps } = useTabShell()
@@ -50,7 +49,7 @@ export function GenUiAppPinBridge() {
         title: request.title,
         indexPath: request.indexPath,
         version: request.version,
-        pinnedAppId: `${PINNED_APP_ID_PREFIX}${request.appId}`,
+        pinnedAppId: `${GENUI_PINNED_APP_ID_PREFIX}${request.appId}`,
       })
       if (!audit.ok) {
         throw new Error(audit.error || 'Audit write failed')
@@ -61,7 +60,7 @@ export function GenUiAppPinBridge() {
       //    content into the launcher config.
       const order = installedAppsRef.current.reduce((max, app) => Math.max(max, app.order), 0) + 1
       const app: AppDefinition = {
-        id: `${PINNED_APP_ID_PREFIX}${request.appId}`,
+        id: `${GENUI_PINNED_APP_ID_PREFIX}${request.appId}`,
         name: request.title,
         url: buildGenUiAppSrc(request.indexPath, ''),
         type: 'webapp',

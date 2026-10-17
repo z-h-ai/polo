@@ -10,16 +10,27 @@
  * - The bundle path in the request is only trusted after it resolves to
  *   exactly `<session data>/genui-apps/<appId>/index.html` for an existing
  *   file — a forged or renamed path is rejected, not clamped.
+ * - pinnedAppId must be exactly `gen-ui-app-<appId>` — the derivation the
+ *   renderer bridge is supposed to make, verified instead of trusted.
+ * - The bundle size is checked against the remote web_app artifact policy
+ *   (POO-102): an oversized bundle is refused, not pinned.
  * - The audit line is appended to `<session dir>/audit.jsonl` (JSONL, one
  *   record per pin, newest last). A failed audit write fails the pin.
+ *
+ * This module also owns the Main-trusted validator for a canvas guest's
+ * initial webview src (see createGenUiGuestSrcValidator), wired into
+ * webview-security at registration time.
  */
 
 import { appendFileSync, existsSync, statSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { join, resolve, sep } from 'node:path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { getWebAppArtifactPolicyState } from '@polo-ai/shared/config'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import { validateSessionId } from '@polo-ai/shared/sessions'
-import type { GenUiAppPinAuditRequest, GenUiAppPinAuditResult } from '../../shared/types'
+import { GENUI_PINNED_APP_ID_PREFIX, type GenUiAppPinAuditRequest, type GenUiAppPinAuditResult } from '../../shared/types'
+import { setGenUiGuestSrcValidator } from '../webview-security'
 import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
@@ -32,13 +43,42 @@ const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 const APP_ID_MAX_LENGTH = 64
 const AUDIT_LINE_MAX_BYTES = 16 * 1024
 
+/**
+ * Structural surfaces of the deps this module consumes — the full
+ * WindowManager/SessionManager/SessionStorage classes satisfy them, and tests
+ * can stand in with minimal fakes.
+ */
+export interface GenUiWindowManagerLike {
+  getWorkspaceForWindow(webContentsId: number): string | null | undefined
+}
+export interface GenUiWorkspaceRef {
+  id: string
+  rootPath: string
+}
+export interface GenUiSessionManagerLike {
+  getWorkspaces(): GenUiWorkspaceRef[]
+  getSessionPath(sessionId: string): string | null
+}
+export interface GenUiSessionStorageLike {
+  getSessionPath(workspaceRootPath: string, sessionId: string): string
+  getDataPath(workspaceRootPath: string, sessionId: string): string
+}
+
 export interface GenUiDeps {
-  windowManager?: HandlerDeps['windowManager']
-  sessionManager?: HandlerDeps['sessionManager']
-  sessionStorage?: HandlerDeps['sessionStorage']
+  windowManager?: GenUiWindowManagerLike
+  sessionManager?: GenUiSessionManagerLike
+  sessionStorage?: GenUiSessionStorageLike
 }
 
 export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): void {
+  // Main-trusted initial-src gate for canvas webviews (POO-102): while these
+  // deps are available, webview-security consults this validator for every
+  // genui-app-<sessionId> guest's file: src. Until registration runs (and in
+  // dep-less tests) the gate fails closed to data:-only.
+  if (deps.sessionManager && deps.sessionStorage) {
+    setGenUiGuestSrcValidator(createGenUiGuestSrcValidator(deps))
+  }
+
   server.handle(RPC_CHANNELS.genui.AUDIT_APP_PIN, async (ctx, request: GenUiAppPinAuditRequest): Promise<GenUiAppPinAuditResult> => {
     try {
       if (!request || typeof request !== 'object') throw new Error('Invalid audit request')
@@ -49,6 +89,12 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
       }
       if (typeof pinnedAppId !== 'string' || pinnedAppId.length === 0 || pinnedAppId.length > 128) {
         throw new Error('Invalid pinned app id')
+      }
+      // pinnedAppId is never trusted as a name: it must be exactly the
+      // gen-ui-app-<appId> derivation of the audited appId, so an audit line
+      // can never tie one app's bundle to another app's tab-browser entry.
+      if (pinnedAppId !== `${GENUI_PINNED_APP_ID_PREFIX}${appId}`) {
+        throw new Error(`pinnedAppId must be ${GENUI_PINNED_APP_ID_PREFIX}<appId>`)
       }
       if (typeof title !== 'string' || title.length === 0 || title.length > 200) throw new Error('Invalid title')
       if (typeof indexPath !== 'string' || indexPath.length === 0) throw new Error('Missing bundle path')
@@ -93,6 +139,17 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
         throw new Error('Bundle file not found')
       }
 
+      // Pin gate (POO-102): the remote web_app artifact policy bounds what
+      // may be pinned, on top of the generation-side hard cap — a bundle
+      // above the policy's maxBundleBytes is refused, not recorded.
+      const policyState = getWebAppArtifactPolicyState()
+      const bundleBytes = statSync(expectedIndexPath).size
+      if (bundleBytes > policyState.maxBundleBytes) {
+        throw new Error(
+          `Bundle exceeds the web_app policy limit: ${bundleBytes} > ${policyState.maxBundleBytes} bytes`
+        )
+      }
+
       const record = {
         event: 'genui_app_pin',
         at: new Date().toISOString(),
@@ -114,4 +171,63 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
+}
+
+/**
+ * The Main-trusted verdict for a canvas guest's initial file: src (wired into
+ * webview-security above). The src may only be the generate_app entry of the
+ * very session the partition names:
+ *
+ * - the session id is re-validated and resolved through the SessionManager
+ *   (never from the request alone),
+ * - the managed-vs-storage path identity is cross-checked exactly like the
+ *   audit flow, so a session that moved workspaces (or a fabricated one)
+ *   cannot satisfy the check,
+ * - the decoded path must equal
+ *   `<session data>/genui-apps/<appId>/index.html` for a well-formed appId —
+ *   derived by comparison against the storage-derived path, not by clamping.
+ *
+ * data: srcs never reach this validator (allowed directly by webview-security
+ * as inert); any other scheme is rejected there.
+ */
+export function createGenUiGuestSrcValidator(deps: GenUiDeps): (sessionId: string, src: string) => boolean {
+  return (sessionId, src) => {
+    try {
+      const sessionManager = deps.sessionManager
+      const storage = deps.sessionStorage
+      if (!sessionManager || !storage) return false
+      validateSessionId(sessionId)
+      const managedSessionPath = sessionManager.getSessionPath(sessionId)
+      if (!managedSessionPath) return false
+
+      let candidatePath: string
+      try {
+        candidatePath = resolve(fileURLToPath(new URL(src)))
+      } catch {
+        return false
+      }
+      // Shape gate first: .../genui-apps/<appId>/index.html with a
+      // generate_app-shaped appId. The workspace loop below then requires the
+      // exact storage-derived twin of this path.
+      const bundleMatch = /^(.+)[/]genui-apps[/]([A-Za-z0-9][A-Za-z0-9_-]*)[/]index\.html$/.exec(
+        candidatePath.split(sep).join('/')
+      )
+      if (!bundleMatch) return false
+
+      for (const workspace of sessionManager.getWorkspaces()) {
+        const storageSessionPath = storage.getSessionPath(workspace.rootPath, sessionId)
+        if (resolve(managedSessionPath) !== resolve(storageSessionPath)) continue
+        const expectedIndexPath = resolve(
+          storage.getDataPath(workspace.rootPath, sessionId),
+          'genui-apps',
+          bundleMatch[2],
+          'index.html',
+        )
+        if (candidatePath === expectedIndexPath) return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
 }

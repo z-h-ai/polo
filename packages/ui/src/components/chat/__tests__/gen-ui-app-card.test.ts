@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'bun:test'
+import { pathToFileURL } from 'node:url'
 import {
   buildGenUiAppSrc,
   getGenUiAppPartition,
   mergeGenUiAppCalls,
   parseGenUiAppInput,
   parseGenUiAppResult,
+  pathToFileUrl,
 } from '../GenUiAppCard'
 
 describe('getGenUiAppPartition', () => {
@@ -55,14 +57,40 @@ describe('parseGenUiAppInput', () => {
   })
 })
 
+describe('pathToFileUrl', () => {
+  it('matches node:url pathToFileURL for POSIX paths (spaces, hashes, unicode, percent)', () => {
+    for (const p of [
+      '/tmp/genui-apps/app-1/index.html',
+      '/tmp/my app dir/app-1/index.html',
+      '/tmp/we#rd?name/index.html',
+      '/tmp/100%valid/index.html',
+      '/tmp/ünïcøde/app/index.html',
+    ]) {
+      expect(pathToFileUrl(p)).toBe(pathToFileURL(p).href)
+    }
+  })
+
+  it('gives Windows drive paths the well-formed third slash and encodes specials', () => {
+    expect(pathToFileUrl('C:\\data\\genui-apps\\app-1\\index.html')).toBe(
+      'file:///C:/data/genui-apps/app-1/index.html',
+    )
+    expect(pathToFileUrl('C:/my dir/app#1/index.html')).toBe(
+      'file:///C:/my%20dir/app%231/index.html',
+    )
+  })
+})
+
 describe('buildGenUiAppSrc', () => {
   it('prefers the written bundle file and encodes path segments', () => {
     expect(buildGenUiAppSrc('/tmp/my app dir/app-1/index.html', '')).toBe(
       'file:///tmp/my%20app%20dir/app-1/index.html',
     )
     expect(buildGenUiAppSrc('C:\\data\\genui-apps\\app-1\\index.html', '')).toBe(
-      'file://C%3A/data/genui-apps/app-1/index.html',
+      'file:///C:/data/genui-apps/app-1/index.html',
     )
+    // URL-significant characters can never split the src.
+    expect(buildGenUiAppSrc('/tmp/app#1/index.html', '')).toBe('file:///tmp/app%231/index.html')
+    expect(buildGenUiAppSrc('/tmp/app?1/index.html', '')).toBe('file:///tmp/app%3F1/index.html')
   })
 
   it('falls back to an inline data URL without a path', () => {

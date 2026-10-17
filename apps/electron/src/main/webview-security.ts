@@ -30,6 +30,44 @@ const handledPartitions = new Set<string>()
 const cleanedLegacyPartitions = new Set<string>()
 
 /**
+ * Main-trusted validator for a genui canvas guest's initial src (POO-102
+ * review): the session id comes from the already-gated partition name and the
+ * src must be a `data:` URL or a `file:` URL that resolves to a generated
+ * bundle under that session's data directory. Wired from the genui RPC
+ * handler registration (which owns the session/storage deps); while unset the
+ * verdict is fail-closed — `data:` only.
+ */
+type GenUiGuestSrcValidator = (sessionId: string, src: string) => boolean
+let genUiGuestSrcValidator: GenUiGuestSrcValidator | null = null
+
+export function setGenUiGuestSrcValidator(validator: GenUiGuestSrcValidator | null): void {
+  genUiGuestSrcValidator = validator
+}
+
+/** Recovers the chat session id from a validated genui-app-<sessionId> partition. */
+export function sessionIdFromGenUiPartition(partition: string): string {
+  return partition.replace(/^genui-app-/, '')
+}
+
+/**
+ * Whether the initial src of a genui canvas guest may load. `data:` URLs are
+ * inert (no network — the fence below cancels every non-file/data/blob
+ * request — and no navigation). Everything else needs the Main-trusted path
+ * validator; a missing validator fails closed.
+ */
+function isAllowedGenUiGuestSrc(partition: string, src: string | undefined): boolean {
+  if (typeof src !== 'string' || src.length === 0) return false
+  try {
+    const parsed = new URL(src)
+    if (parsed.protocol === 'data:') return true
+    if (parsed.protocol !== 'file:') return false
+  } catch {
+    return false
+  }
+  return genUiGuestSrcValidator?.(sessionIdFromGenUiPartition(partition), src) ?? false
+}
+
+/**
  * Ephemeral per-session partition namespace for generate_app canvas guests.
  * The strict shape doubles as the will-attach allow-list: it can never carry
  * the `persist:` prefix (in-memory storage only, so canvas state dies with
@@ -47,6 +85,80 @@ export function isGenUiAppPartition(partition: string | undefined | null): parti
 // the guest-side popup/navigation policy can recognize canvas guests without
 // re-deriving partition names from WebContents.
 let genuiGuestSessions = new WeakSet<Electron.Session>()
+
+// Session objects whose canvas policy (network fence + permission deny-all)
+// has been installed, tracked by identity — genui partitions are in-memory
+// and recreated per process, so identity is stable exactly as long as the
+// policy is.
+let genUiPolicySessions = new WeakSet<Electron.Session>()
+
+/**
+ * Canvas-guest policy (POO-102 review): deliberately separate from the
+ * browser-pane/tab-app permission set. A generated bundle is untrusted model
+ * output rendered locally, so it gets
+ *
+ * 1. a fail-closed request fence — every request whose scheme is not
+ *    file:/data:/blob: is cancelled (fetch/XHR/WebSocket/images/fonts: a
+ *    bundle can never call home even if the static generation scan missed an
+ *    encoding), and
+ * 2. deny-all permissions — no clipboard, geolocation, media, notifications,
+ *    or any other power; the loose `allow` set below stays exclusive to the
+ *    user-facing browser surfaces.
+ */
+function attachGenUiGuestPolicyToSession(ses: Electron.Session): void {
+  if (genUiPolicySessions.has(ses)) return
+  genUiPolicySessions.add(ses)
+
+  if (typeof ses.setPermissionCheckHandler === 'function') {
+    ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+      windowLog.warn(
+        '[webview-security] genui guest permission denied:',
+        permission,
+        describeUrlForLog(requestingOrigin),
+      )
+      return false
+    })
+  }
+
+  if (typeof ses.setPermissionRequestHandler === 'function') {
+    ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+      const requestingOrigin = (
+        details as { requestingOrigin?: string } | undefined
+      )?.requestingOrigin ?? 'unknown'
+      windowLog.warn(
+        '[webview-security] genui guest permission request denied:',
+        permission,
+        describeUrlForLog(requestingOrigin),
+      )
+      callback(false)
+    })
+  }
+
+  if (typeof ses.webRequest?.onBeforeRequest === 'function') {
+    ses.webRequest.onBeforeRequest((details, callback) => {
+      let allowed = false
+      try {
+        allowed = ['file:', 'data:', 'blob:'].includes(new URL(details.url).protocol)
+      } catch {
+        allowed = false
+      }
+      if (!allowed) {
+        windowLog.warn(
+          '[webview-security] cancelled genui guest request:',
+          String(details.resourceType ?? 'unknown'),
+          describeUrlForLog(details.url),
+        )
+        callback({ cancel: true })
+        return
+      }
+      callback({})
+    })
+  }
+}
+
+function attachGenUiGuestPolicy(partitionName: string): void {
+  attachGenUiGuestPolicyToSession(session.fromPartition(partitionName))
+}
 
 interface WebviewScopeResolver {
   getWorkspaceForWebContentsId?: (webContentsId: number) => string | null
@@ -69,6 +181,8 @@ export function __resetWebviewSecurityForTests(): void {
   handledPartitions.clear()
   cleanedLegacyPartitions.clear()
   genuiGuestSessions = new WeakSet()
+  genUiPolicySessions = new WeakSet()
+  genUiGuestSrcValidator = null
   delete trustedWebviewScopeResolver.getWorkspaceForWebContentsId
 }
 
@@ -143,8 +257,16 @@ function decideTabAppAttach(
  * browser-pane partition is handled eagerly; scoped tab-app partitions are
  * attached at `will-attach-webview` (before the guest navigates) and — as
  * defense in depth — on guest web-contents creation.
+ *
+ * Genui canvas partitions are redirected to their own deny-all + fenced
+ * policy: the loose `allow` set must never govern a generated bundle, no
+ * matter which future call site passes the partition name in.
  */
 function attachWebviewPermissionHandlers(partitionName: string): void {
+  if (isGenUiAppPartition(partitionName)) {
+    attachGenUiGuestPolicy(partitionName)
+    return
+  }
   if (handledPartitions.has(partitionName)) return
   handledPartitions.add(partitionName)
   const ses = session.fromPartition(partitionName)
@@ -225,7 +347,12 @@ export function installWebviewSecurityHandlers(): void {
     if (contents.getType() === 'webview') {
       // Defense in depth: the authoritative gate is the host's
       // will-attach-webview below; this guest-side hook covers guests whose
-      // window predates the resolver wiring.
+      // window predates the resolver wiring. A session already recognized as
+      // a genui canvas guest re-arms its deny-all + fenced policy here too
+      // (no return: the common popup/navigation policy below still applies).
+      if (genuiGuestSessions.has(contents.session)) {
+        attachGenUiGuestPolicyToSession(contents.session)
+      }
       const host = contents.hostWebContents
       const decision = host ? decideTabAppAttach(host.id) : { mode: 'closed' as const }
       if (decision.mode === 'scoped') {
@@ -315,8 +442,21 @@ export function installWebviewSecurityHandlers(): void {
       // incomplete scope ('closed') still blocks everything. The SDK bridge
       // stays inert here — prepareGuest only ever injects a preload for
       // registered 127.0.0.1 launch origins, never for file/data content.
+      //
+      // The initial src is Main-validated too (POO-102 review): a data: URL or
+      // a file: URL that resolves to a generated bundle of exactly the session
+      // named by the partition. A renderer-supplied arbitrary file path (or
+      // any remote URL) never loads.
       if (decision.mode !== 'closed' && isGenUiAppPartition(requestedPartition)) {
-        attachWebviewPermissionHandlers(requestedPartition)
+        if (!isAllowedGenUiGuestSrc(requestedPartition, params.src)) {
+          event.preventDefault()
+          windowLog.warn(
+            '[webview-security] blocked genui guest with an untrusted initial src',
+            describeUrlForLog(params.src ?? ''),
+          )
+          return
+        }
+        attachGenUiGuestPolicy(requestedPartition)
         genuiGuestSessions.add(session.fromPartition(requestedPartition))
         return
       }

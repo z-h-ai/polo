@@ -330,6 +330,14 @@ import type { AppDefinition } from './tab-browser-types'
  * directory from the workspace mapping and validates that `indexPath` points
  * inside `genui-apps/<appId>/` before anything is written.
  */
+/**
+ * Tab-browser app id namespace for pinned canvas apps: `gen-ui-app-<appId>`.
+ * Both the pin bridge (renderer) and the audit gate (Main) derive the id with
+ * this prefix, and Main rejects a request whose pinnedAppId is not exactly
+ * this derivation of its appId.
+ */
+export const GENUI_PINNED_APP_ID_PREFIX = 'gen-ui-app-'
+
 export interface GenUiAppPinAuditRequest {
   sessionId: string
   appId: string

@@ -121,6 +121,9 @@ const adminClientBehavior = {
   }),
   listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
   getGenerativeUiCapability: async (_accessToken: string): Promise<any> => ({}),
+  getWebAppArtifactPolicy: async (_accessToken: string): Promise<any> => ({
+    enabled: true, maxBundleBytes: 512 * 1024, maxFileCount: 1,
+  }),
   createCreatorAppPublicationDraft: async (_accessToken: string, _input: unknown): Promise<any> => ({
     appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
   }),
@@ -271,6 +274,11 @@ class MockAdminClient {
     return adminClientBehavior.getGenerativeUiCapability(accessToken)
   }
 
+  async getWebAppArtifactPolicy(accessToken: string) {
+    adminClientCalls.push({ method: 'getWebAppArtifactPolicy', args: [], accessToken })
+    return adminClientBehavior.getWebAppArtifactPolicy(accessToken)
+  }
+
   async listCreatorArtifacts(accessToken: string, input: unknown) {
     adminClientCalls.push({
       method: 'listCreatorArtifacts',
@@ -401,12 +409,14 @@ const configState: {
   connections: TestConnection[]
   defaultConnection: string | null
   generativeUiRemoteCapability?: unknown
+  webAppArtifactPolicy?: unknown
 } = {
   adminUrl: 'https://admin.example.com',
   adminConfigVersion: undefined,
   connections: [],
   defaultConnection: null,
   generativeUiRemoteCapability: undefined,
+  webAppArtifactPolicy: undefined,
 }
 
 const managerState: {
@@ -552,6 +562,11 @@ mock.module('@polo-ai/shared/config', () => ({
   // wiring without coupling to the real module's state.
   setGenerativeUiRemoteCapability: (capability: unknown) => {
     configState.generativeUiRemoteCapability = capability ?? undefined
+  },
+  // Captured so tests can assert the web_app artifact-policy refresh wiring
+  // (POO-102) the same way.
+  setWebAppArtifactPolicy: (policy: unknown) => {
+    configState.webAppArtifactPolicy = policy ?? undefined
   },
 }))
 
@@ -773,6 +788,9 @@ beforeEach(() => {
   // Absent generativeUI section = enabled; keeps every existing test's
   // validate() path on the fail-open default.
   adminClientBehavior.getGenerativeUiCapability = async () => ({})
+  adminClientBehavior.getWebAppArtifactPolicy = async () => ({
+    enabled: true, maxBundleBytes: 512 * 1024, maxFileCount: 1,
+  })
   adminClientBehavior.createCreatorAppPublicationDraft = async () => ({
     appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
   })
@@ -1884,7 +1902,7 @@ describe('registerAdminHandlers', () => {
       configVersion: 'config-v1',
     })
     expect(adminClientCalls.map(call => call.method)).toEqual([
-      'refresh', 'validate', 'getGenerativeUiCapability', 'getLlmConnections',
+      'refresh', 'validate', 'getGenerativeUiCapability', 'getWebAppArtifactPolicy', 'getLlmConnections',
     ])
     expect(adminClientCalls.find(call => call.method === 'validate')?.accessToken).toBe('fresh-access-token')
     expect(managerState.tokens).toMatchObject({
@@ -1962,6 +1980,52 @@ describe('registerAdminHandlers', () => {
 
     expect(result).toMatchObject({ loggedIn: true })
     expect(configState.generativeUiRemoteCapability).toEqual({ generativeUI: { inline: true } })
+  })
+
+  it('validate refreshes the web_app artifact policy cache alongside the capability', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getWebAppArtifactPolicy = async () => ({
+      enabled: false, maxBundleBytes: 64 * 1024, maxFileCount: 1,
+    })
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ loggedIn: true })
+    // The mock captures the raw server policy — the wiring contract is that
+    // the fetch result reaches the cache setter on the VALIDATE path.
+    expect(configState.webAppArtifactPolicy).toEqual({
+      enabled: false, maxBundleBytes: 64 * 1024, maxFileCount: 1,
+    })
+  })
+
+  it('a failed web_app policy read keeps the previous cache value', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    const previous = { enabled: true, maxBundleBytes: 128 * 1024, maxFileCount: 1 }
+    configState.webAppArtifactPolicy = previous
+    adminClientBehavior.getWebAppArtifactPolicy = async () => {
+      throw new Error('temporary policy outage')
+    }
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ loggedIn: true })
+    expect(configState.webAppArtifactPolicy).toEqual(previous)
   })
 
   it('syncs admin connections by upserting incoming config and removing admin-deleted connections', async () => {

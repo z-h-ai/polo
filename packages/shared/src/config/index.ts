@@ -29,3 +29,9 @@ export {
   GenerativeUiCapabilitySchema,
   type GenerativeUiCapability,
 } from './generative-ui'
+export {
+  setWebAppArtifactPolicy,
+  getWebAppArtifactPolicyState,
+  isWebAppArtifactPolicyEnabled,
+  type WebAppArtifactPolicyState,
+} from './web-app-policy'
