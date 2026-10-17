@@ -1270,11 +1270,6 @@ export function computeGenerateAppEligibility(
 }
 
 /**
- * POO-103: build the one-shot system-reminder block for pending GenUI widget
- * state (canvas card modelContext entries queued by accepted ui-events).
- * Injected at the effectiveMessage assembly point; never persisted.
- */
-/**
  * Card-supplied context must never break out of — or forge structure inside —
  * the reminder frame: tag delimiters are stripped and line breaks collapsed,
  * so each entry stays one line that cannot close the block early. The length
@@ -1286,6 +1281,11 @@ function sanitizeGenUiWidgetContext(context: string): string {
     .replace(/\r\n?|\n/g, ' ')
 }
 
+/**
+ * POO-103: build the one-shot system-reminder block for pending GenUI widget
+ * state (canvas card modelContext entries queued by accepted ui-events).
+ * Injected at the effectiveMessage assembly point; never persisted.
+ */
 export function buildGenUiWidgetStateReminder(
   entries: ReadonlyArray<{ cardId: string; context: string }>,
 ): string {
