@@ -324,6 +324,27 @@ export type {
 } from '@polo-ai/shared/admin/types'
 import type { AppDefinition } from './tab-browser-types'
 
+/**
+ * Audit record for pinning a generate_app canvas app into the tab browser
+ * (POO-102). The renderer supplies ids/metadata only; Main derives the session
+ * directory from the workspace mapping and validates that `indexPath` points
+ * inside `genui-apps/<appId>/` before anything is written.
+ */
+export interface GenUiAppPinAuditRequest {
+  sessionId: string
+  appId: string
+  title: string
+  indexPath: string
+  version?: number
+  /** Tab-browser app id the canvas app was pinned under. */
+  pinnedAppId: string
+}
+
+export interface GenUiAppPinAuditResult {
+  ok: boolean
+  error?: string
+}
+
 export interface AdminRpcErrorPayload {
   errorCode?: string
   message?: string
@@ -644,6 +665,10 @@ export interface ElectronAPI {
   // Tab browser app launcher configuration
   getTabBrowserApps(): Promise<AppDefinition[]>
   saveTabBrowserApps(apps: AppDefinition[]): Promise<void>
+
+  // Generative UI canvas apps — append a pin record to the session's audit log.
+  // Main derives the session directory itself and validates the bundle path.
+  appendGenUiAudit(request: GenUiAppPinAuditRequest): Promise<GenUiAppPinAuditResult>
 
   // Local App Bundle installation and runtime
   localApps: {
@@ -1323,6 +1348,8 @@ export interface ElectronAPI {
   setBrowserToolEnabled(enabled: boolean): Promise<void>
   getGenerativeUiInlineEnabled(): Promise<boolean>
   setGenerativeUiInlineEnabled(enabled: boolean): Promise<void>
+  getGenerativeUiCanvasEnabled(): Promise<boolean>
+  setGenerativeUiCanvasEnabled(enabled: boolean): Promise<void>
 
   // Appearance settings
   getRichToolDescriptions(): Promise<boolean>

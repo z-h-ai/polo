@@ -13,6 +13,7 @@ export {
   CreatorSkillSafetyStatusSchema,
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
+  WebAppArtifactPolicySchema,
 } from '../creator-skills/schemas.ts'
 
 const nonBlankString = (maxLength: number) =>

@@ -29,6 +29,25 @@ const allow = new Set([
 const handledPartitions = new Set<string>()
 const cleanedLegacyPartitions = new Set<string>()
 
+/**
+ * Ephemeral per-session partition namespace for generate_app canvas guests.
+ * The strict shape doubles as the will-attach allow-list: it can never carry
+ * the `persist:` prefix (in-memory storage only, so canvas state dies with
+ * the guest and can never leak across accounts, ProductSpaces or restarts),
+ * and it can never collide with the scoped tab-app or browser-pane
+ * partitions that the gate below expects.
+ */
+export const GENUI_APP_PARTITION_PATTERN = /^genui-app-[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
+export function isGenUiAppPartition(partition: string | undefined | null): partition is string {
+  return typeof partition === 'string' && GENUI_APP_PARTITION_PATTERN.test(partition)
+}
+
+// Session objects created from a genui-app partition, tracked by identity so
+// the guest-side popup/navigation policy can recognize canvas guests without
+// re-deriving partition names from WebContents.
+let genuiGuestSessions = new WeakSet<Electron.Session>()
+
 interface WebviewScopeResolver {
   getWorkspaceForWebContentsId?: (webContentsId: number) => string | null
 }
@@ -49,6 +68,7 @@ export function setWebviewScopeResolver(resolver: WebviewScopeResolver): void {
 export function __resetWebviewSecurityForTests(): void {
   handledPartitions.clear()
   cleanedLegacyPartitions.clear()
+  genuiGuestSessions = new WeakSet()
   delete trustedWebviewScopeResolver.getWorkspaceForWebContentsId
 }
 
@@ -216,8 +236,18 @@ export function installWebviewSecurityHandlers(): void {
     }
 
     // Common webview/window policy: popups open externally (never inside the
-    // guest), and only HTTP(S) navigations are allowed.
+    // guest), and only HTTP(S) navigations are allowed. Canvas guests are the
+    // exception on both counts: model-generated content gets no popups at all
+    // (never handed to the user's browser) and no in-guest navigation — its
+    // one document is the generated bundle.
     contents.setWindowOpenHandler((details) => {
+      if (genuiGuestSessions.has(contents.session)) {
+        windowLog.warn(
+          '[webview-security] blocked popup from a genui canvas guest',
+          describeUrlForLog(details.url),
+        )
+        return { action: 'deny' }
+      }
       const classification = classifyExternalUrl(details.url)
       if (classification.kind === 'dangerous' || classification.kind === 'internal-deeplink') {
         const reason = classification.kind === 'internal-deeplink'
@@ -240,6 +270,14 @@ export function installWebviewSecurityHandlers(): void {
     })
 
     contents.on('will-navigate', (event, url) => {
+      if (genuiGuestSessions.has(contents.session)) {
+        event.preventDefault()
+        windowLog.warn(
+          '[webview-security] blocked navigation from a genui canvas guest',
+          describeUrlForLog(url),
+        )
+        return
+      }
       try {
         const parsed = new URL(url)
         if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return
@@ -271,6 +309,18 @@ export function installWebviewSecurityHandlers(): void {
       webPreferences.sandbox = true
       const requestedPartition = webPreferences.partition
       const decision = decideTabAppAttach(contents.id)
+
+      // Genui canvas guests: the ephemeral genui-app-* namespace is allowed in
+      // every resolvable window mode (its storage is in-memory only), while an
+      // incomplete scope ('closed') still blocks everything. The SDK bridge
+      // stays inert here — prepareGuest only ever injects a preload for
+      // registered 127.0.0.1 launch origins, never for file/data content.
+      if (decision.mode !== 'closed' && isGenUiAppPartition(requestedPartition)) {
+        attachWebviewPermissionHandlers(requestedPartition)
+        genuiGuestSessions.add(session.fromPartition(requestedPartition))
+        return
+      }
+
 
       if (decision.mode === 'scoped') {
         // Before any navigation the scoped policy is guaranteed on the

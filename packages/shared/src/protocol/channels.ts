@@ -163,6 +163,12 @@ export const RPC_CHANNELS = {
     GET_APPS: 'tab-browser:getApps',
     SAVE_APPS: 'tab-browser:saveApps',
   },
+  genui: {
+    // Canvas app (generate_app) pin audit. Main derives the session directory
+    // path itself and validates the bundle path before appending audit.jsonl —
+    // the renderer never names a writable path.
+    AUDIT_APP_PIN: 'genui:auditAppPin',
+  },
   localApps: {
     GET_HOST_INFO: 'local-apps:getHostInfo',
     INSTALL: 'local-apps:install',
@@ -446,6 +452,8 @@ export const RPC_CHANNELS = {
     SET_BROWSER_TOOL_ENABLED: 'tools:setBrowserToolEnabled',
     GET_GENERATIVE_UI_INLINE_ENABLED: 'tools:getGenerativeUiInlineEnabled',
     SET_GENERATIVE_UI_INLINE_ENABLED: 'tools:setGenerativeUiInlineEnabled',
+    GET_GENERATIVE_UI_CANVAS_ENABLED: 'tools:getGenerativeUiCanvasEnabled',
+    SET_GENERATIVE_UI_CANVAS_ENABLED: 'tools:setGenerativeUiCanvasEnabled',
   },
   caching: {
     GET_EXTENDED_PROMPT_CACHE: 'caching:getExtendedPromptCache',

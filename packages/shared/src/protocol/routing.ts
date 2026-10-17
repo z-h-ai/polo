@@ -133,6 +133,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.tabBrowser.GET_APPS,
   RPC_CHANNELS.tabBrowser.SAVE_APPS,
 
+  // genui — canvas app pin audit writes the local session directory
+  RPC_CHANNELS.genui.AUDIT_APP_PIN,
+
   // localApps — downloaded bundles and processes live on this device
   RPC_CHANNELS.localApps.GET_HOST_INFO,
   RPC_CHANNELS.localApps.INSTALL,
@@ -191,6 +194,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.tools.GET_GENERATIVE_UI_INLINE_ENABLED,
   RPC_CHANNELS.tools.SET_GENERATIVE_UI_INLINE_ENABLED,
+  RPC_CHANNELS.tools.GET_GENERATIVE_UI_CANVAS_ENABLED,
+  RPC_CHANNELS.tools.SET_GENERATIVE_UI_CANVAS_ENABLED,
 
   // browserPane — Electron BrowserView
   RPC_CHANNELS.browserPane.CREATE,
@@ -277,6 +282,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // Creator publication consumes local File bytes and local authenticated
   // credentials; it must never be proxied to a workspace server.
   RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
+  // Payment handoff resolves on the local trusted Admin session.
+  RPC_CHANNELS.admin.PAYMENT_HANDOFF,
 
   // memberCircles — member-side circle reads run on the device's trusted
   // Admin session (same trust boundary as admin.*); never workspace-proxied.
@@ -329,6 +336,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
   RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE,
   RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE,
+  // Space skill catalog reads run on the local trusted Admin session fence,
+  // same boundary as the rest of productSpace.*.
+  RPC_CHANNELS.productSpace.LIST_SKILLS,
 ])
 
 // ---------------------------------------------------------------------------

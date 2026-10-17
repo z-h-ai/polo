@@ -96,6 +96,7 @@ import {
   CreatorSkillSafetyStatusBatchSchema,
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
+  WebAppArtifactPolicySchema,
   AppCatalogResponseSchema,
   AppReleaseDownloadSchema,
   AdminPlatformAppSchema,
@@ -1027,6 +1028,22 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, SkillArchivePolicySchema);
+  }
+
+  /**
+   * Server-issued web_app artifact policy. The schema's max bounds are the
+   * client hard caps — a response above HARD_WEBAPP_BUNDLE_POLICY fails
+   * validation here rather than loosening the installer's ceiling (callers
+   * further clamp through clampWebAppArtifactPolicy).
+   */
+  async getWebAppArtifactPolicy(
+    accessToken: string,
+  ): Promise<{ enabled: boolean; maxBundleBytes: number; maxFileCount: number }> {
+    const response = await this.request<unknown>('/api/artifact-policies/web_app', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, WebAppArtifactPolicySchema);
   }
 
   async createCreatorSkillUploadGrant(

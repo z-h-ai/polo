@@ -23,7 +23,9 @@ export { desktopManagedConnection, sameDesktopManagedOwner, type DesktopManagedO
 export {
   setGenerativeUiRemoteCapability,
   isGenerativeUiRemoteInlineDisabled,
+  isGenerativeUiRemoteCanvasDisabled,
   isGenerativeUiInlineEnabled,
+  isGenerativeUiCanvasEnabled,
   GenerativeUiCapabilitySchema,
   type GenerativeUiCapability,
 } from './generative-ui'

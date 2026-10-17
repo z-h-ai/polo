@@ -142,17 +142,19 @@ export default function AppSettingsPage() {
   const loadSettings = useCallback(async () => {
     if (!window.electronAPI) return
     try {
-      const [notificationsOn, keepAwakeOn, browserToolOn, generativeUiOn, proxySettings] = await Promise.all([
+      const [notificationsOn, keepAwakeOn, browserToolOn, generativeUiOn, generativeUiCanvasOn, proxySettings] = await Promise.all([
         window.electronAPI.getNotificationsEnabled(),
         window.electronAPI.getKeepAwakeWhileRunning(),
         window.electronAPI.getBrowserToolEnabled(),
         window.electronAPI.getGenerativeUiInlineEnabled(),
+        window.electronAPI.getGenerativeUiCanvasEnabled(),
         window.electronAPI.getNetworkProxySettings(),
       ])
       setNotificationsEnabled(notificationsOn)
       setKeepAwakeEnabled(keepAwakeOn)
       setBrowserToolEnabled(browserToolOn)
       setGenerativeUiInlineEnabled(generativeUiOn)
+      setGenerativeUiCanvasEnabled(generativeUiCanvasOn)
       const form = toProxyFormState(proxySettings)
       setProxyForm(form)
       setSavedProxyForm(form)
@@ -243,6 +245,13 @@ export default function AppSettingsPage() {
     await window.electronAPI.setGenerativeUiInlineEnabled(enabled)
   }, [])
 
+  const [generativeUiCanvasEnabled, setGenerativeUiCanvasEnabled] = useState(true)
+
+  const handleGenerativeUiCanvasEnabledChange = useCallback(async (enabled: boolean) => {
+    setGenerativeUiCanvasEnabled(enabled)
+    await window.electronAPI.setGenerativeUiCanvasEnabled(enabled)
+  }, [])
+
   // Proxy handlers
   const isProxyDirty = useMemo(() => {
     return JSON.stringify(proxyForm) !== JSON.stringify(savedProxyForm)
@@ -323,6 +332,12 @@ export default function AppSettingsPage() {
                     description={t("settings.tools.generativeUiInlineDesc")}
                     checked={generativeUiInlineEnabled}
                     onCheckedChange={handleGenerativeUiInlineEnabledChange}
+                  />
+                  <SettingsToggle
+                    label={t("settings.tools.generativeUiCanvas")}
+                    description={t("settings.tools.generativeUiCanvasDesc")}
+                    checked={generativeUiCanvasEnabled}
+                    onCheckedChange={handleGenerativeUiCanvasEnabledChange}
                   />
                 </SettingsCard>
               </SettingsSection>

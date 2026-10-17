@@ -26,7 +26,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@polo-ai/shared/agent/backend'
-import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, isGenerativeUiInlineEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
+import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, isGenerativeUiCanvasEnabled, isGenerativeUiInlineEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
@@ -1233,6 +1233,25 @@ export function computeRenderUiEligibility(
   origin: import('@polo-ai/shared/protocol').SessionOrigin | undefined,
 ): boolean {
   return isGenerativeUiInlineEnabled() && computeRequestUserInputEligibility(
+    invocationSource,
+    hidden,
+    isMini,
+    origin,
+  )
+}
+
+/**
+ * Per-turn eligibility for the generate_app tool (Generative UI canvas apps).
+ * Same fail-closed matrix as render_ui, intersected with the generativeUI.canvas
+ * toggle (remote capability + local Settings kill switch) instead of inline.
+ */
+export function computeGenerateAppEligibility(
+  invocationSource: InvocationSource | undefined,
+  hidden: boolean | undefined,
+  isMini: boolean | undefined,
+  origin: import('@polo-ai/shared/protocol').SessionOrigin | undefined,
+): boolean {
+  return isGenerativeUiCanvasEnabled() && computeRequestUserInputEligibility(
     invocationSource,
     hidden,
     isMini,
@@ -8326,6 +8345,15 @@ export class SessionManager implements ISessionManager {
       if (agent.allowRenderUi !== allowRenderUiNow) {
         agent.allowRenderUi = allowRenderUiNow
       }
+      const allowGenerateAppNow = computeGenerateAppEligibility(
+        invocationSource,
+        managed.hidden,
+        managed.systemPromptPreset === 'mini',
+        managed.origin,
+      )
+      if (agent.allowGenerateApp !== allowGenerateAppNow) {
+        agent.allowGenerateApp = allowGenerateAppNow
+      }
 
       // Always set all sources for context (even if none are enabled), including built-ins
       const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
@@ -9277,6 +9305,15 @@ export class SessionManager implements ISessionManager {
     )
     if (managed.agent && managed.agent.allowRenderUi !== allowRenderUi) {
       managed.agent.allowRenderUi = allowRenderUi
+    }
+    const allowGenerateApp = computeGenerateAppEligibility(
+      invocationSource,
+      managed.hidden,
+      managed.systemPromptPreset === 'mini',
+      managed.origin,
+    )
+    if (managed.agent && managed.agent.allowGenerateApp !== allowGenerateApp) {
+      managed.agent.allowGenerateApp = allowGenerateApp
     }
   }
 

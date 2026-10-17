@@ -229,6 +229,11 @@ export interface SessionScopedToolsOptions {
    * with the generativeUI.inline toggle on). Participates in the cache key.
    */
   allowRenderUi?: boolean;
+  /**
+   * Register generate_app (Generative UI canvas apps; desktop interactive
+   * turns with the generativeUI.canvas toggle on). Participates in the cache key.
+   */
+  allowGenerateApp?: boolean;
 }
 
 /**
@@ -251,7 +256,8 @@ export function getSessionScopedTools(
   // desktop and non-desktop turns must rebuild its toolset (P0 contract).
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
   const allowRenderUi = options?.allowRenderUi ?? false;
-  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}`;
+  const allowGenerateApp = options?.allowGenerateApp ?? false;
+  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}::gap-${allowGenerateApp ? '1' : '0'}`;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -311,6 +317,7 @@ export function getSessionScopedTools(
       includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
       allowRequestUserInput,
       allowRenderUi,
+      allowGenerateApp,
     })
       .filter(def => def.handler !== null) // Skip backend-specific tools (call_llm)
       .map(def => registryTool(def.name, def.inputSchema.shape));

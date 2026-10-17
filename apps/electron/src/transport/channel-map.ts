@@ -123,6 +123,9 @@ export const CHANNEL_MAP = {
   getTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.GET_APPS),
   saveTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.SAVE_APPS),
 
+  // Generative UI canvas apps
+  appendGenUiAudit: invoke(RPC_CHANNELS.genui.AUDIT_APP_PIN),
+
   // Local App Bundle runtime
   'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),
   'localApps.install': invoke(RPC_CHANNELS.localApps.INSTALL),
@@ -412,6 +415,8 @@ export const CHANNEL_MAP = {
   setBrowserToolEnabled: invoke(RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED),
   getGenerativeUiInlineEnabled: invoke(RPC_CHANNELS.tools.GET_GENERATIVE_UI_INLINE_ENABLED),
   setGenerativeUiInlineEnabled: invoke(RPC_CHANNELS.tools.SET_GENERATIVE_UI_INLINE_ENABLED),
+  getGenerativeUiCanvasEnabled: invoke(RPC_CHANNELS.tools.GET_GENERATIVE_UI_CANVAS_ENABLED),
+  setGenerativeUiCanvasEnabled: invoke(RPC_CHANNELS.tools.SET_GENERATIVE_UI_CANVAS_ENABLED),
 
   // Prompt caching & context
   getExtendedPromptCache: invoke(RPC_CHANNELS.caching.GET_EXTENDED_PROMPT_CACHE),

@@ -421,6 +421,15 @@ export interface SessionToolContext {
    */
   isRenderUiEnabled?: () => boolean;
 
+  /**
+   * Live state of the generativeUI.canvas feature toggle, read by the
+   * generate_app handler AT TOOL-CALL TIME so a mid-session disable takes
+   * effect on the next call (registration gating stays per-turn). Optional:
+   * hosts without capability plumbing omit it and rely on registration-time
+   * gating only.
+   */
+  isGenerateAppEnabled?: () => boolean;
+
   /** Restrict tool subprocess environments for a CLI one-shot Thread. */
   credentialIsolation?: boolean;
 }

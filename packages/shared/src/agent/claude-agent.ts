@@ -1328,7 +1328,7 @@ export class ClaudeAgent extends BaseAgent {
           undefined,
           this.sessionStorage,
           this.workingDirectory,
-          { allowRequestUserInput: this.allowRequestUserInput, allowRenderUi: this.allowRenderUi },
+          { allowRequestUserInput: this.allowRequestUserInput, allowRenderUi: this.allowRenderUi, allowGenerateApp: this.allowGenerateApp },
         ),
         // Polo AI documentation - always available for searching setup guides
         // This is a public Mintlify MCP server, no auth needed

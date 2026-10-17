@@ -694,6 +694,14 @@ export interface AgentBackend {
    */
   allowRenderUi: boolean;
 
+  /**
+   * Per-turn capability flag: whether the generate_app tool (Generative UI
+   * canvas apps) is visible. Set by the session layer before each turn —
+   * desktop interactive sessions with the generativeUI.canvas toggle on;
+   * every other combination fails closed.
+   */
+  allowGenerateApp: boolean;
+
   /** Called when a source config changes */
   onSourceChange: SourceChangeCallback | null;
 

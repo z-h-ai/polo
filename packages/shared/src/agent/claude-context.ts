@@ -11,7 +11,7 @@
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'fs';
 import { join, basename } from 'path';
 import { CONFIG_DIR } from '../config/paths.ts';
-import { isGenerativeUiInlineEnabled } from '../config/generative-ui.ts';
+import { isGenerativeUiInlineEnabled, isGenerativeUiCanvasEnabled } from '../config/generative-ui.ts';
 import type {
   SessionToolContext,
   SessionToolCallbacks,
@@ -239,6 +239,8 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     // Live generativeUI.inline state for the render_ui handler's call-time
     // re-check (mid-session disable takes effect on the next tool call).
     isRenderUiEnabled: () => isGenerativeUiInlineEnabled(),
+    // Same for the generativeUI.canvas state and the generate_app handler.
+    isGenerateAppEnabled: () => isGenerativeUiCanvasEnabled(),
     credentialIsolation: sessionStorage.owner === 'cli',
     workingDirectory: options.workingDirectory,
     callbacks,

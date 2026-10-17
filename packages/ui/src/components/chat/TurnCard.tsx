@@ -39,6 +39,13 @@ import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
 import { GenUICard, mergeGenUiComponents, parseGenUiComponents } from './GenUICard'
+import {
+  type GenUiAppCardProps,
+  GenUiAppCard,
+  mergeGenUiAppCalls,
+  parseGenUiAppInput,
+  parseGenUiAppResult,
+} from './GenUiAppCard'
 import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, deriveTurnPhase, shouldShowThinkingIndicator, type ActivityGroup, type AssistantTurn } from './turn-utils'
 import { extractAnnotationSelectedText } from './follow-up-helpers'
 import {
@@ -577,6 +584,10 @@ function formatToolInput(
 
   // For render_ui: the card itself renders below; dumping JSON here is noise
   if (toolName === 'mcp__session__render_ui') return ''
+
+  // For generate_app: same as render_ui — the canvas card renders below, and
+  // the HTML input plus the marker line would be pure noise
+  if (toolName === 'mcp__session__generate_app') return ''
 
   const parts: string[] = []
 
@@ -2908,6 +2919,34 @@ export const TurnCard = React.memo(function TurnCard({
     [sortedActivities]
   )
 
+  // Canvas apps (generate_app): one card per app id across all completed calls
+  // in the turn. The card body comes from the tool input; the bundle path and
+  // version come from the marker line in the tool result. Calls that failed or
+  // produced no parseable marker (older app version) are skipped — except that
+  // a missing marker still renders when the result is not an error, so the
+  // inline HTML preview survives result-shape drift.
+  const genUiAppCalls = useMemo(
+    () => mergeGenUiAppCalls(
+      sortedActivities
+        .filter(a => a.type === 'tool' && a.toolName === 'mcp__session__generate_app' && a.status === 'completed')
+        .map((a): GenUiAppCardProps | null => {
+          const input = parseGenUiAppInput(a.toolInput)
+          if (!input) return null
+          const result = parseGenUiAppResult(a.content)
+          return {
+            appId: result?.appId ?? `unwritten-${a.id}`,
+            title: input.title,
+            html: input.html,
+            indexPath: result?.indexPath,
+            version: result?.version,
+            sessionId: sessionId ?? null,
+          }
+        })
+        .filter((call): call is GenUiAppCardProps => call !== null)
+    ),
+    [sortedActivities, sessionId]
+  )
+
   // Don't render if nothing to show and turn is complete
   if (activities.length === 0 && !response && isComplete) {
     return null
@@ -3120,6 +3159,20 @@ export const TurnCard = React.memo(function TurnCard({
       {genUiComponents.length > 0 && (
         <GenUICard components={genUiComponents} sessionId={sessionId} className="mt-2" />
       )}
+
+      {/* Canvas app cards (generate_app) - sandboxed webview per generated app */}
+      {genUiAppCalls.length > 0 && genUiAppCalls.map(call => (
+        <GenUiAppCard
+          key={call.appId}
+          appId={call.appId}
+          title={call.title}
+          html={call.html}
+          indexPath={call.indexPath}
+          version={call.version}
+          sessionId={call.sessionId}
+          className="mt-2"
+        />
+      ))}
 
       {/* Standalone thinking indicator - when no activities but still working */}
       {!hasActivities && isThinking && !animateResponse && (

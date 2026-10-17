@@ -1,6 +1,6 @@
 import { formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
-import { isGenerativeUiInlineEnabled } from '../config/generative-ui.ts';
+import { isGenerativeUiInlineEnabled, isGenerativeUiCanvasEnabled } from '../config/generative-ui.ts';
 import { debug } from '../utils/debug.ts';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative, basename } from 'path';
@@ -1106,6 +1106,17 @@ Rules:
 - Give every component a unique stable id.
 - If the tool returns a validation error, fix the payload and retry once.
 - Prefer \`datatable\` blocks for static display; prefer \`render_ui\` when the user should act.
+` : ''}
+${isGenerativeUiCanvasEnabled() ? `
+## Canvas Apps
+
+For small interactive artifacts that declarative cards cannot express (calculators, mini demos, visual toys, converters with live preview), build a single-file HTML app with the \`generate_app\` tool. It renders in a sandboxed card in the chat and can be pinned to a tab.
+
+Contract:
+- One complete HTML document, fully self-contained: inline CSS/JS, no external http(s) resources (no CDN, no web fonts, no image hotlinks — use data: URIs). SVG/xmlns namespace identifiers are fine.
+- Never reference \`@polo-ai/sdk\` or \`poloai://\` links — the sandbox has no host bridge.
+- 512 KB hard limit per bundle.
+- Iterate by resending the COMPLETE html with \`updateOf\` set to the returned app id; each update is a full rewrite (version increments).
 ` : ''}
 ## Document Tools
 

@@ -107,3 +107,45 @@ describe('render_ui tool gating', () => {
     expect(on.includes('mcp__session__render_ui')).toBe(true);
   });
 });
+
+describe('generate_app tool gating', () => {
+  it('does not register generate_app by default (fail closed)', () => {
+    const names = getSessionToolNames();
+    expect(names.has('generate_app')).toBe(false);
+  });
+
+  it('does not register generate_app when the toggle flag is off', () => {
+    const defs = getSessionToolDefs({ allowGenerateApp: false, allowRenderUi: true, allowRequestUserInput: true });
+    const names = defs.map(d => d.name);
+
+    expect(names.includes('generate_app')).toBe(false);
+  });
+
+  it('registers generate_app only when the toggle flag is on', () => {
+    const defs = getSessionToolDefs({ allowGenerateApp: true });
+    const def = defs.find(d => d.name === 'generate_app');
+
+    expect(def).toBeDefined();
+    expect(def?.executionMode).toBe('registry');
+    expect(def?.safeMode).toBe('allow');
+    expect(def?.handler).toBeDefined();
+  });
+
+  it('render_ui and generate_app toggle independently', () => {
+    const onlyCanvas = getSessionToolDefs({ allowGenerateApp: true }).map(d => d.name);
+    expect(onlyCanvas.includes('generate_app')).toBe(true);
+    expect(onlyCanvas.includes('render_ui')).toBe(false);
+
+    const onlyInline = getSessionToolDefs({ allowRenderUi: true }).map(d => d.name);
+    expect(onlyInline.includes('render_ui')).toBe(true);
+    expect(onlyInline.includes('generate_app')).toBe(false);
+  });
+
+  it('json schema conversion respects the allowGenerateApp filter', () => {
+    const off = getToolDefsAsJsonSchema({ prefix: 'mcp__session__' }).map(d => d.name);
+    expect(off.includes('mcp__session__generate_app')).toBe(false);
+
+    const on = getToolDefsAsJsonSchema({ prefix: 'mcp__session__', allowGenerateApp: true }).map(d => d.name);
+    expect(on.includes('mcp__session__generate_app')).toBe(true);
+  });
+});

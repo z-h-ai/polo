@@ -359,6 +359,10 @@ export class PiAgent extends BaseAgent {
   // for the render_ui tool (Generative UI inline cards).
   private _lastRegisteredAllowRenderUi: boolean = false;
 
+  // Last allowGenerateApp value sent to the subprocess — same drift detection
+  // for the generate_app tool (Generative UI canvas apps).
+  private _lastRegisteredAllowGenerateApp: boolean = false;
+
   // RPC request counter for unique IDs
   private rpcIdCounter: number = 0;
 
@@ -667,6 +671,7 @@ export class PiAgent extends BaseAgent {
     let sessionToolDefs = getSessionToolProxyDefs({
       allowRequestUserInput: this.allowRequestUserInput,
       allowRenderUi: this.allowRenderUi,
+      allowGenerateApp: this.allowGenerateApp,
     });
 
     // Mirror Claude's gate: hide `browser_tool` when the user has disabled
@@ -705,7 +710,8 @@ export class PiAgent extends BaseAgent {
     });
     this._lastRegisteredAllowRequestUserInput = this.allowRequestUserInput;
     this._lastRegisteredAllowRenderUi = this.allowRenderUi;
-    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi})`);
+    this._lastRegisteredAllowGenerateApp = this.allowGenerateApp;
+    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp})`);
   }
 
   /**
@@ -716,10 +722,11 @@ export class PiAgent extends BaseAgent {
   private syncSessionToolRegistration(): void {
     const ruiDrifted = this._lastRegisteredAllowRequestUserInput !== this.allowRequestUserInput;
     const guiDrifted = this._lastRegisteredAllowRenderUi !== this.allowRenderUi;
-    if (!ruiDrifted && !guiDrifted) {
+    const gapDrifted = this._lastRegisteredAllowGenerateApp !== this.allowGenerateApp;
+    if (!ruiDrifted && !guiDrifted && !gapDrifted) {
       return;
     }
-    this.debug(`session tool visibility changed (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}) — re-registering session tools`);
+    this.debug(`session tool visibility changed (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}) — re-registering session tools`);
     this.sendSessionToolRegistration();
   }
 
@@ -1799,6 +1806,12 @@ export class PiAgent extends BaseAgent {
       if (toolName === 'render_ui' && !this.allowRenderUi) {
         return {
           content: 'render_ui is not available in this session. Present the same information as markdown or a datatable block instead.',
+          isError: true,
+        };
+      }
+      if (toolName === 'generate_app' && !this.allowGenerateApp) {
+        return {
+          content: 'generate_app is not available in this session. Present the same result as markdown, a datatable block, or a render_ui card instead.',
           isError: true,
         };
       }

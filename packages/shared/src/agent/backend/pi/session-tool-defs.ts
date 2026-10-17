@@ -23,5 +23,6 @@ export function getSessionToolProxyDefs(options?: SessionToolFilterOptions): Ses
     includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
     allowRequestUserInput: options?.allowRequestUserInput,
     allowRenderUi: options?.allowRenderUi,
+    allowGenerateApp: options?.allowGenerateApp,
   });
 }

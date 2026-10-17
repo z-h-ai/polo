@@ -21,6 +21,7 @@ import { handleSubmitPlan } from './handlers/submit-plan.ts';
 import { handleConfigValidate } from './handlers/config-validate.ts';
 import { handleSkillValidate } from './handlers/skill-validate.ts';
 import { handleMermaidValidate } from './handlers/mermaid-validate.ts';
+import { handleGenerateApp } from './handlers/generate-app.ts';
 import { handleSourceTest } from './handlers/source-test.ts';
 import {
   handleSourceOAuthTrigger,
@@ -263,6 +264,38 @@ const GenUIComponentsArraySchema = z.array(GenUIComponentSchema)
 
 export const RenderUiSchema = z.object({
   components: GenUIComponentsArraySchema,
+});
+
+// ============================================================
+// generate_app — Generative UI canvas apps (Track 2, sandboxed webview)
+// ============================================================
+
+/**
+ * Hard cap on a generate_app HTML bundle, serialized as UTF-8. Mirrors
+ * HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes in @polo-ai/shared (this package
+ * must not import shared — it is a leaf dependency — so the value is pinned
+ * here and guarded by a test on the shared side).
+ */
+export const GENERATE_APP_MAX_HTML_BYTES = 512 * 1024;
+/** Max length of the app id / updateOf reference (also a traversal guard: ids never contain path separators). */
+export const GENERATE_APP_MAX_ID_LENGTH = 64;
+
+const GENERATE_APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+export const GenerateAppSchema = z.object({
+  title: z.string().min(1).max(120).describe('Short display name shown on the app card.'),
+  html: z
+    .string()
+    .min(1)
+    .describe(
+      'Complete single-file HTML document. Self-contained: no external http(s) resources, no @polo-ai/sdk, no poloai:// links. Hard limit 512KB.'
+    ),
+  updateOf: z
+    .string()
+    .max(GENERATE_APP_MAX_ID_LENGTH)
+    .regex(GENERATE_APP_ID_PATTERN, 'updateOf must be an app id returned by a previous generate_app call')
+    .optional()
+    .describe('Id of an existing app to fully rewrite. Omit to create a new app.'),
 });
 
 export const ScriptSandboxSchema = z.object({
@@ -510,6 +543,20 @@ Use this instead of plain text when the answer is actionable or data-dense.
 - If this tool returns a validation error, fix the payload and retry once.
 - Prefer datatable/spreadsheet blocks for static display; prefer render_ui when the user should act.`,
 
+  generate_app: `Create a self-contained single-file HTML app that renders in a sandboxed webview card in the chat.
+
+Use this when the user needs a small interactive artifact — a calculator, a visual dashboard mock, a converter, a playable demo — that declarative render_ui cards cannot express.
+
+**Contract (violations are rejected):**
+- \`html\` MUST be one complete HTML document, fully self-contained: inline CSS/JS only.
+- No external network references: no \`http(s)://\` in src/href/CSS url() (SVG/XML xmlns namespaces are the only exception). No CDN, no web fonts, no image hotlinks — use data: URIs.
+- Never reference \`@polo-ai/sdk\` or \`poloai://\` links — session apps run in a sandbox with no host bridge.
+- Hard limit: 512 KB per bundle.
+
+**Updates:** pass \`updateOf\` with the app id from a previous call to rewrite that app in place (version increments, full rewrite — send the COMPLETE html every time). Omit \`updateOf\` to create a new app.
+
+If this tool returns a validation error, fix the html and retry once.`,
+
   script_sandbox: `Run quick inline diagnostics in a sandboxed subprocess with network isolation.
 
 Use this for short Python/Node/Bun snippets when strict Explore-mode Bash parsing blocks inline diagnostics.
@@ -709,6 +756,13 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // feature toggle folded into the flag by the session layer. Declared JSON
   // only: no code execution, no network — safe in all permission modes.
   { name: 'render_ui', description: TOOL_DESCRIPTIONS.render_ui, inputSchema: RenderUiSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleRenderUi },
+  // Generative UI canvas apps — same desktop-only gating as render_ui (see
+  // SessionToolFilterOptions.allowGenerateApp), plus the generativeUI.canvas
+  // feature toggle folded into the flag by the session layer. The handler is
+  // fail-closed: it validates the bundle (size, no external refs, no SDK, no
+  // poloai:// bridge) before anything touches disk, then writes into the
+  // session data dir only.
+  { name: 'generate_app', description: TOOL_DESCRIPTIONS.generate_app, inputSchema: GenerateAppSchema, executionMode: 'registry', safeMode: 'allow', handler: handleGenerateApp },
   { name: 'update_user_preferences', description: TOOL_DESCRIPTIONS.update_user_preferences, inputSchema: UpdatePreferencesSchema, executionMode: 'registry', safeMode: 'block', handler: handleUpdatePreferences },
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
@@ -750,6 +804,14 @@ export interface SessionToolFilterOptions {
    * opt in explicitly.
    */
   allowRenderUi?: boolean;
+  /**
+   * Only desktop interactive main-session turns enable generate_app (Generative
+   * UI canvas apps), and only while the generativeUI.canvas feature toggle is
+   * on — same shape as allowRenderUi. Every non-desktop source and any
+   * disabled toggle state fails closed. Defaults to false so backends must opt
+   * in explicitly.
+   */
+  allowGenerateApp?: boolean;
 }
 
 /**
@@ -762,6 +824,7 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
   const includeDeveloperFeedback = options?.includeDeveloperFeedback ?? true;
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
   const allowRenderUi = options?.allowRenderUi ?? false;
+  const allowGenerateApp = options?.allowGenerateApp ?? false;
 
   return SESSION_TOOL_DEFS.filter(def => {
     if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
@@ -771,6 +834,9 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
       return false;
     }
     if (!allowRenderUi && def.name === 'render_ui') {
+      return false;
+    }
+    if (!allowGenerateApp && def.name === 'generate_app') {
       return false;
     }
     return true;
@@ -886,12 +952,14 @@ export function getToolDefsAsJsonSchema(opts?: {
   includeDeveloperFeedback?: boolean;
   allowRequestUserInput?: boolean;
   allowRenderUi?: boolean;
+  allowGenerateApp?: boolean;
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
   const defs = getSessionToolDefs({
     includeDeveloperFeedback: opts?.includeDeveloperFeedback,
     allowRequestUserInput: opts?.allowRequestUserInput,
     allowRenderUi: opts?.allowRenderUi,
+    allowGenerateApp: opts?.allowGenerateApp,
   });
 
   return defs.map(def => {

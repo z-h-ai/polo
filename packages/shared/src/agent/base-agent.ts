@@ -279,6 +279,13 @@ export abstract class BaseAgent implements AgentBackend {
    */
   allowRenderUi = false;
   /**
+   * Per-turn capability flag: whether the generate_app tool (Generative UI
+   * canvas apps) is visible. Set by the SessionManager before each turn —
+   * desktop interactive sessions with the generativeUI.canvas toggle on;
+   * every other combination fails closed.
+   */
+  allowGenerateApp = false;
+  /**
    * The processing generation of the turn whose events this agent is
    * currently processing. Injected by the SessionManager at every turn start
    * (and after agent creation) so tool-call callbacks can carry their
