@@ -271,14 +271,12 @@ for (const phase of ['before-dispatch', 'unknown-admission', 'dispatched-cancell
     } else assert.equal(entries.length, 0)
     // A separate connected finish uses original settlement authority and cleanup.
     const finished = await post(url + '/run/finish', { runId: query.runId, status: 'cancelled' }, signing.token).received
-    if (phase === 'before-dispatch') {
-      assert.equal(finished.status, 200)
-      assert.equal(finished.body?.data?.settlement, 'pending')
-      assert.equal(calls.finishes.length, 1)
-    } else {
-      assert.equal(finished.status, 409, 'unsettled requests do not allow a fabricated successful finish')
-      assert.equal(calls.finishes.length, 0)
-    }
+    // Finishing the run and confirming its financial settlement are separate:
+    // the existing coordinator permits a successful finish with pending billing.
+    assert.equal(finished.status, 200)
+    assert.equal(finished.body?.data?.settlement, 'pending')
+    assert.equal(calls.finishes.length, 1)
+    assert.equal(outbox.entries('offline', 'https://offline.invalid').length, entries.length, 'pending finish retains recovery metadata')
     assert.notEqual(finished.body?.data?.settlement, 'no_charge')
     assert.notEqual(finished.body?.data?.settlement, 'confirmed')
     assert.ok(calls.finishes.every(value => !(value as { aborted?: boolean }).aborted))
