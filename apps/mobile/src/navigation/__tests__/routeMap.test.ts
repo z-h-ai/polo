@@ -30,9 +30,13 @@ describe('expo-router route map', () => {
   });
 
   test('every non-tab Stack screen in app/_layout.tsx has a route file', () => {
-    for (const route of ['login.tsx', 'scan-qr.tsx', 'qr-confirm.tsx', 'pair-placeholder.tsx']) {
+    for (const route of ['login.tsx', 'scan-qr.tsx', 'qr-confirm.tsx', 'pair.tsx', 'device-manage.tsx']) {
       expect(existsSync(join(APP_DIR, route))).toBe(true);
     }
+  });
+
+  test('the POL-19 pair-placeholder route stays removed (replaced by /pair in POL-16)', () => {
+    expect(existsSync(join(APP_DIR, 'pair-placeholder.tsx'))).toBe(false);
   });
 
   test('tab routes in tabConfig match the (tabs) file convention', () => {

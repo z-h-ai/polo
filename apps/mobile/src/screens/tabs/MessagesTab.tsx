@@ -1,9 +1,9 @@
 // 消息 Tab (POL-19, prototype M01).
 //
 // Two states like M01:
-//   - 空态 (default until POL-16/18 wire the binding/session data): big glyph,
-//     还没有消息, 副文, 「去绑定电脑」 primary button -> /pair-placeholder
-//     (P03 route placeholder), boundary chip about 多会话管理.
+//   - 空态 (default until POL-18 wires the session data): big glyph,
+//     还没有消息, 副文, 「去绑定电脑」 primary button -> /pair (the POL-16
+//     pairing flow), boundary chip about 多会话管理.
 //   - 有会话占位: conversation-card structure in place (device name + time +
 //     summary + unread bubble + task-result chip); tapping the card is a
 //     no-op until the session page exists (POL-18). Below the list sits the
@@ -56,7 +56,7 @@ export function MessagesTab({
         {hasConversations ? (
           <ConversationList conversations={conversations} />
         ) : (
-          <EmptyState onPressBind={() => router.push('/pair-placeholder')} />
+          <EmptyState onPressBind={() => router.push('/pair')} />
         )}
       </ScrollView>
     </View>

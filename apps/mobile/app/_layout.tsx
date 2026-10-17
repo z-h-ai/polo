@@ -24,7 +24,9 @@ export default function RootLayout() {
         <Stack.Screen name="login" />
         <Stack.Screen name="scan-qr" />
         <Stack.Screen name="qr-confirm" />
-        <Stack.Screen name="pair-placeholder" />
+        {/* POL-16: pairing flow + device management (placeholder route removed). */}
+        <Stack.Screen name="pair" />
+        <Stack.Screen name="device-manage" />
       </Stack>
     </AuthGate>
   );
