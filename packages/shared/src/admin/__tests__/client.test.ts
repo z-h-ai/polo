@@ -1453,4 +1453,87 @@ describe('AdminClient', () => {
       });
     }
   });
+
+  it('issues a pairing code with the local macDeviceId and strict response fields', async () => {
+    mockJsonFetch({
+      code: '8F3K2Q',
+      macDeviceId: 'mac-0123456789abcdef',
+      expiresInSeconds: 300,
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.createDevicePairingCode('access-token', {
+      macDeviceId: 'mac-0123456789abcdef',
+    });
+
+    expect(result).toEqual({
+      code: '8F3K2Q',
+      macDeviceId: 'mac-0123456789abcdef',
+      expiresInSeconds: 300,
+    });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/devices/pairing-code');
+    expect(fetchCalls[0]!.init.method).toBe('POST');
+    expect(fetchCalls[0]!.init.headers).toMatchObject({
+      Authorization: 'Bearer access-token',
+      'Content-Type': 'application/json',
+    });
+    expect(fetchCalls[0]!.init.body).toBe(
+      JSON.stringify({ macDeviceId: 'mac-0123456789abcdef' }),
+    );
+  });
+
+  it('lists bound devices with bearer auth and validates the device view', async () => {
+    const devices = [{
+      id: 'device-1',
+      name: 'iPhone 15 Pro',
+      platform: 'ios' as const,
+      macDeviceId: 'mac-0123456789abcdef',
+      pushToken: null,
+      lastSeenAt: '2026-10-17T10:00:00.000Z',
+      boundAt: '2026-10-01T00:00:00.000Z',
+      revoked: false,
+    }];
+    mockJsonFetch({ devices });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.listDevices('access-token');
+
+    expect(result).toEqual({ devices });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/devices/list');
+    expect(fetchCalls[0]!.init.method).toBe('GET');
+    expect(fetchCalls[0]!.init.headers).toMatchObject({
+      Authorization: 'Bearer access-token',
+    });
+    expect(fetchCalls[0]!.init.body).toBeUndefined();
+  });
+
+  it('revokes by deviceId and returns the revoked device views', async () => {
+    mockJsonFetch({ revokedCount: 1, devices: [] });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.revokeDevice('access-token', { deviceId: 'device-1' });
+
+    expect(result).toEqual({ revokedCount: 1, devices: [] });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/devices/revoke');
+    expect(fetchCalls[0]!.init.method).toBe('POST');
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({ deviceId: 'device-1' }));
+  });
+
+  it('surfaces the device limit error code from admin responses', async () => {
+    mockJsonFetch(
+      { error: 'device_bind_limit_reached', message: 'Too many phones' },
+      409,
+    );
+
+    const client = new AdminClient('https://admin.example.com');
+    let caught: unknown;
+    try {
+      await client.createDevicePairingCode('access-token', { macDeviceId: 'mac-abc123' });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(AdminError);
+    expect((caught as AdminError).errorCode).toBe('device_bind_limit_reached');
+  });
 });

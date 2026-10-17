@@ -282,6 +282,8 @@ let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
 let adminResumeValidationInFlight: Promise<void> | null = null
+// polo-relay outbound link (POL-12) — created after bootstrapServer resolves
+let relayLink: import('./relay-client').RelayLink | null = null
 const electronRuntimeInstance = {
   instanceId: randomUUID(),
   startedAt: new Date().toISOString(),
@@ -1022,6 +1024,9 @@ app.whenReady().then(async () => {
         }),
         onClientConnected: ({ clientId, webContentsId }) => {
           if (webContentsId != null) clientMap.set(webContentsId, clientId)
+          // All clients are forwarded; the link itself excludes renderer
+          // windows (webContentsId != null) from the online-lan state.
+          relayLink?.onClientConnected(clientId, webContentsId)
         },
         cleanupClientResources: (clientId) => {
           for (const [wcId, cId] of clientMap) {
@@ -1029,6 +1034,7 @@ app.whenReady().then(async () => {
           }
           cleanupSessionFileWatchForClient(clientId)
           clearClientActiveSession(clientId)
+          relayLink?.onClientDisconnected(clientId)
         },
       })
 
@@ -1095,6 +1101,30 @@ app.whenReady().then(async () => {
         }
       } catch (err) {
         mainLog.error('[messaging] Gateway initialization failed:', err)
+      }
+
+      // ---------------------------------------------------------------------
+      // polo-relay client (POL-12, PRD v1.6 §⑥) — outbound WSS envelope link
+      // plus loopback bridge that injects relay-routed phone traffic into the
+      // embedded WsRpcServer above. Disabled (stays offline) when no relay
+      // URL is configured; re-resolves URL/token on every reconnect attempt.
+      // ---------------------------------------------------------------------
+      try {
+        const { createRelayLink } = await import('./relay-client')
+        relayLink = createRelayLink({
+          instance: { protocol: instance.protocol, port: instance.port },
+          tokenProvider: async () => {
+            const { getCredentialManager } = await import('@polo-ai/shared/credentials')
+            return (await getCredentialManager().getAdminTokens())?.accessToken ?? null
+          },
+          broadcast: (status) => {
+            windowManager?.broadcastToAllWindows(RPC_CHANNELS.relay.STATUS_CHANGED, { status })
+          },
+          logger: mainLog,
+        })
+        void relayLink.start()
+      } catch (err) {
+        mainLog.error('[relay-client] initialization failed:', err)
       }
 
       // IPC handlers — preload uses sendSync to get WS connection details
@@ -1518,6 +1548,14 @@ app.on('before-quit', (event) => {
   const attempt = beforeQuitCleanup.begin(event, async () => {
     // Ensure Cmd+Q/app quit bypasses layered window close interception (Cmd+W behavior).
     windowManager?.setAppQuitting(true)
+
+    // polo-relay outbound link (POL-12) — stop reconnects and close sockets.
+    try {
+      relayLink?.stop()
+      relayLink = null
+    } catch (err) {
+      mainLog.warn('[relay-client] stop failed:', err instanceof Error ? err.message : String(err))
+    }
 
     if (windowManager) {
       const windows = windowManager.getWindowStates()

@@ -23,6 +23,7 @@ import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
 import { buildAdminPreloadApi } from './admin-api'
+import { buildPhoneLinkPreloadApi } from './phone-link'
 import { createCallbackServer } from '@polo-ai/shared/auth/callback-server'
 import { CHATGPT_OAUTH_CONFIG } from '@polo-ai/shared/auth/chatgpt-oauth-config'
 import {
@@ -320,6 +321,9 @@ Object.assign(api, buildAdminPreloadApi(client, {
     ? url => ipcRenderer.invoke('__phone-auth-e2e:open-external', url)
     : url => shell.openExternal(url),
 }))
+
+// 手机 ↔ Mac 配对（POL-13）：设置页「手机连接」面板的数据链
+Object.assign(api, buildPhoneLinkPreloadApi(client))
 
 // ── performOAuth ─────────────────────────────────────────────────────────
 // Multi-step orchestration: callback server (local) → oauth:start (server) →

@@ -388,6 +388,7 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   permissions: 'ShieldCheck',
   labels: 'Tag',
   messaging: 'MessageSquare',
+  'phone-connection': 'Smartphone',
   server: 'Server',
   shortcuts: 'Keyboard',
   preferences: 'UserCircle',

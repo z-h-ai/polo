@@ -137,6 +137,22 @@ export type TransportConnectionStatus =
   | 'disconnected'
   | 'failed'
 
+/**
+ * Relay link status (POL-12) — defined in parallel to
+ * TransportConnectionStatus (which describes the renderer↔embedded-server
+ * transport). This describes the Mac↔polo-relay outbound link:
+ *   - online-relay: outbound relay WSS usable
+ *   - online-lan:   embedded WsRpcServer has an external (non-renderer,
+ *                   non-bridge) handshake-completed client
+ *   - offline:      neither
+ * Display-only (settings page / menu); never drives business retries.
+ */
+export type RelayLinkStatus = 'online-relay' | 'online-lan' | 'offline'
+
+export interface RelayStatusPayload {
+  status: RelayLinkStatus
+}
+
 export type TransportConnectionErrorKind =
   | 'auth'
   | 'protocol'

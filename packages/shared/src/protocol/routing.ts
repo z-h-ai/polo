@@ -72,6 +72,10 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.theme.GET_SYSTEM_PREFERENCE,
   RPC_CHANNELS.theme.SYSTEM_CHANGED,
   RPC_CHANNELS.theme.APP_CHANGED,
+
+  // relay — POL-11 relay 客户端（Electron 主进程内）向本 renderer 广播的状态事件
+  RPC_CHANNELS.relay.STATUS_CHANGED,
+
   RPC_CHANNELS.theme.GET_APP,
   RPC_CHANNELS.theme.GET_PRESETS,
   RPC_CHANNELS.theme.LOAD_PRESET,
@@ -270,6 +274,13 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // Creator publication consumes local File bytes and local authenticated
   // credentials; it must never be proxied to a workspace server.
   RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
+
+  // 手机 ↔ Mac 配对（PRD v1.6 §⑤）— 消费本地 admin 凭据与本机设备标识，
+  // 由 Electron 主进程 GUI 处理器转发 admin devices 端点，不得代理到工作区服务器。
+  RPC_CHANNELS.admin.CREATE_PAIRING_CODE,
+  RPC_CHANNELS.admin.LIST_DEVICES,
+  RPC_CHANNELS.admin.REVOKE_DEVICE,
+  RPC_CHANNELS.phoneLink.HOST_INFO,
 
   // preferences — device-local launcher and verified Admin organization state
   RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,

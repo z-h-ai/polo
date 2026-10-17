@@ -10,6 +10,7 @@ import { registerBrowserHandlers } from './browser'
 import { registerSettingsGuiHandlers } from './settings'
 import { registerTabBrowserHandlers } from './tab-browser'
 import { registerLocalAppHandlers } from './local-apps'
+import { registerPhoneLinkHandlers } from './phone-link'
 
 export function registerGuiRpcHandlers(server: RpcServer, deps: HandlerDeps): void {
   registerSystemGuiHandlers(server, deps)
@@ -18,6 +19,7 @@ export function registerGuiRpcHandlers(server: RpcServer, deps: HandlerDeps): vo
   registerSettingsGuiHandlers(server, deps)
   registerTabBrowserHandlers(server)
   registerLocalAppHandlers(server)
+  registerPhoneLinkHandlers(server, deps)
 }
 
 export function registerAllRpcHandlers(server: RpcServer, deps: HandlerDeps, serverCtx?: ServerHandlerContext): void {

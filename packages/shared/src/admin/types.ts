@@ -414,6 +414,52 @@ export interface UpdateOrganizationMemberInput {
   reason?: string;
 }
 
+// ── Devices（手机 ↔ Mac 绑定，PRD v1.6 §⑤；polo-admin /api/devices/* 契约）──
+
+export type AdminDevicePlatform = 'ios' | 'android';
+
+/** list/revoke 响应中的绑定行视图（对齐 polo-admin toDeviceView） */
+export interface AdminDeviceView {
+  id: string;
+  name: string;
+  platform: AdminDevicePlatform;
+  macDeviceId: string;
+  pushToken: string | null;
+  /** ISO 时间；从未活跃时为 null */
+  lastSeenAt: string | null;
+  /** ISO 绑定时间 */
+  boundAt: string;
+  revoked: boolean;
+}
+
+export interface AdminDevicePairingCodeInput {
+  /** 本机 Mac 稳定标识（6-128 字符，[A-Za-z0-9][A-Za-z0-9._:-]*） */
+  macDeviceId: string;
+}
+
+export interface AdminDevicePairingCodeResponse {
+  /** 6 位明文配对码：5min TTL、一次性；重签发作废旧码 */
+  code: string;
+  macDeviceId: string;
+  /** 配对码有效期（秒） */
+  expiresInSeconds: number;
+}
+
+export interface AdminDeviceListResponse {
+  devices: AdminDeviceView[];
+}
+
+/** deviceId 与 macDeviceId 必须二选一（polo-admin deviceRevokeSchema） */
+export interface AdminDeviceRevokeInput {
+  deviceId?: string;
+  macDeviceId?: string;
+}
+
+export interface AdminDeviceRevokeResponse {
+  revokedCount: number;
+  devices: AdminDeviceView[];
+}
+
 export type PhoneAuthErrorCode =
   | 'phone_auth_disabled'
   | 'invalid_phone'
@@ -469,6 +515,12 @@ export type AdminErrorCode =
   | 'upload_expired'
   | 'checksum_mismatch'
   | 'content_digest_mismatch'
+  | 'rate_limited'
+  | 'device_already_bound'
+  | 'device_bind_limit_reached'
+  | 'pairing_code_invalid'
+  | 'pairing_code_expired'
+  | 'pairing_code_consumed'
   | PhoneAuthErrorCode;
 
 export interface AdminErrorDetails {

@@ -45,6 +45,7 @@ export const SETTINGS_PAGES = [
   { id: 'permissions' as const, labelKey: 'settings.permissions.title', descriptionKey: 'settings.permissions.description' },
   { id: 'labels' as const, labelKey: 'settings.labels.title', descriptionKey: 'settings.labels.description' },
   { id: 'messaging' as const, labelKey: 'settings.messaging.title', descriptionKey: 'settings.messaging.description' },
+  { id: 'phone-connection' as const, labelKey: 'settings.phoneConnection.title', descriptionKey: 'settings.phoneConnection.description' },
   { id: 'server' as const, labelKey: 'settings.server.title', descriptionKey: 'settings.server.description' },
   { id: 'shortcuts' as const, labelKey: 'settings.shortcuts.title', descriptionKey: 'settings.shortcuts.description' },
   { id: 'preferences' as const, labelKey: 'settings.preferences.title', descriptionKey: 'settings.preferences.description' },

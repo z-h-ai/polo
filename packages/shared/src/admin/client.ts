@@ -44,6 +44,11 @@ import {
   type AdminPlatformRelease,
   type AdminSignedUpload,
   type AdminPlatformReleaseInput,
+  type AdminDevicePairingCodeInput,
+  type AdminDevicePairingCodeResponse,
+  type AdminDeviceListResponse,
+  type AdminDeviceRevokeInput,
+  type AdminDeviceRevokeResponse,
 } from './types.ts';
 import { z, type ZodType } from 'zod';
 import {
@@ -81,6 +86,9 @@ import {
   AdminPlatformAppSchema,
   AdminPlatformReleaseSchema,
   AdminPlatformReleaseCreatedResponseSchema,
+  AdminDevicePairingCodeResponseSchema,
+  AdminDeviceListResponseSchema,
+  AdminDeviceRevokeResponseSchema,
 } from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
@@ -136,6 +144,12 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'upload_expired',
   'checksum_mismatch',
   'content_digest_mismatch',
+  'rate_limited',
+  'device_already_bound',
+  'device_bind_limit_reached',
+  'pairing_code_invalid',
+  'pairing_code_expired',
+  'pairing_code_consumed',
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -205,6 +219,12 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   upload_expired: 'The upload address has expired',
   checksum_mismatch: 'The downloaded ZIP failed its checksum check',
   content_digest_mismatch: 'The extracted Skill content failed its integrity check',
+  rate_limited: 'Too many requests. Try again later',
+  device_already_bound: 'This device is already bound',
+  device_bind_limit_reached: 'Phone limit reached. Unbind one before pairing another',
+  pairing_code_invalid: 'Pairing code is invalid. Generate a new one',
+  pairing_code_expired: 'Pairing code has expired. Generate a new one',
+  pairing_code_consumed: 'Pairing code was already used. Generate a new one',
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;
@@ -916,6 +936,46 @@ export class AdminClient {
       || status.archiveChecksum !== canonicalChecksum
     ) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
     return status;
+  }
+
+  // ── Devices（手机 ↔ Mac 绑定，PRD v1.6 §⑤）───────────────────────────
+
+  /** 签发配对码：5min TTL、一次性；重签发作废旧码（admin 侧 10/min/用户限速） */
+  async createDevicePairingCode(
+    accessToken: string,
+    input: AdminDevicePairingCodeInput,
+  ): Promise<AdminDevicePairingCodeResponse> {
+    const response = await this.request<unknown>('/api/devices/pairing-code', {
+      method: 'POST',
+      accessToken,
+      body: { macDeviceId: input.macDeviceId },
+    });
+    return this.readSuccessResponse(response, AdminDevicePairingCodeResponseSchema);
+  }
+
+  /** 当前账号的活跃绑定列表（绑定事实源是 admin Device 表） */
+  async listDevices(accessToken: string): Promise<AdminDeviceListResponse> {
+    const response = await this.request<unknown>('/api/devices/list', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, AdminDeviceListResponseSchema);
+  }
+
+  /** 解绑：deviceId 与 macDeviceId 二选一；解绑即时受理，最长 60s 全网断开 */
+  async revokeDevice(
+    accessToken: string,
+    input: AdminDeviceRevokeInput,
+  ): Promise<AdminDeviceRevokeResponse> {
+    const response = await this.request<unknown>('/api/devices/revoke', {
+      method: 'POST',
+      accessToken,
+      body: {
+        ...(input.deviceId !== undefined ? { deviceId: input.deviceId } : {}),
+        ...(input.macDeviceId !== undefined ? { macDeviceId: input.macDeviceId } : {}),
+      },
+    });
+    return this.readSuccessResponse(response, AdminDeviceRevokeResponseSchema);
   }
 
   private async request<T>(path: string, options: {

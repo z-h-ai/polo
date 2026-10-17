@@ -429,3 +429,31 @@ export const UpdateOrganizationMemberRpcInputSchema = z.object({
 export const RemoveOrganizationMemberRpcInputSchema = z.object({
   reason: z.string().trim().min(1).max(512).optional(),
 }).strict()
+
+// ── Devices（手机 ↔ Mac 绑定；对齐 polo-admin /api/devices/* 响应契约）────
+
+export const AdminDeviceViewSchema = z.object({
+  id: nonBlankString(128),
+  name: nonBlankString(128),
+  platform: z.enum(['ios', 'android']),
+  macDeviceId: nonBlankString(128),
+  pushToken: z.string().max(256).nullable(),
+  lastSeenAt: z.string().max(64).nullable(),
+  boundAt: nonBlankString(64),
+  revoked: z.boolean(),
+})
+
+export const AdminDevicePairingCodeResponseSchema = z.object({
+  code: nonBlankString(16),
+  macDeviceId: nonBlankString(128),
+  expiresInSeconds: z.number().int().positive(),
+})
+
+export const AdminDeviceListResponseSchema = z.object({
+  devices: z.array(AdminDeviceViewSchema),
+})
+
+export const AdminDeviceRevokeResponseSchema = z.object({
+  revokedCount: z.number().int().min(0),
+  devices: z.array(AdminDeviceViewSchema),
+})

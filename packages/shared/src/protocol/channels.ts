@@ -7,6 +7,9 @@ export const RPC_CHANNELS = {
   remote: {
     TEST_CONNECTION: 'remote:testConnection',
   },
+  relay: {
+    STATUS_CHANGED: 'relay:statusChanged',
+  },
   server: {
     GET_WORKSPACES: 'server:getWorkspaces',
     CREATE_WORKSPACE: 'server:createWorkspace',
@@ -232,6 +235,14 @@ export const RPC_CHANNELS = {
     GET_CREATOR_SKILL_DOWNLOAD_GRANT: 'admin:getCreatorSkillDownloadGrant',
     GET_CREATOR_SKILL_SAFETY_STATUS: 'admin:getCreatorSkillSafetyStatus',
     PUBLISH_CREATOR_APP: 'admin:publishCreatorApp',
+    // 手机 ↔ Mac 配对（PRD v1.6 §⑤；GUI 处理器在 Electron 主进程转发 admin）
+    CREATE_PAIRING_CODE: 'admin:createPairingCode',
+    LIST_DEVICES: 'admin:listDevices',
+    REVOKE_DEVICE: 'admin:revokeDevice',
+  },
+  // 手机连接面板的本机信息（macDeviceId / LAN wsUrl 提示；非 admin 端点）
+  phoneLink: {
+    HOST_INFO: 'phoneLink:hostInfo',
   },
   llmConnections: {
     LIST: 'LLM_Connection:list',

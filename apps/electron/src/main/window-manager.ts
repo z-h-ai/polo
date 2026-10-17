@@ -93,6 +93,18 @@ export class WindowManager {
     return this.clientResolver?.(webContentsId)
   }
 
+  /**
+   * Broadcast an event to every live window. Used by main-process services
+   * that are not workspace-scoped (e.g. relay-client status, POL-12).
+   * Routes through pushToWindow (RPC event sink with webContents.send
+   * fallback) so it works before WS handshake completes.
+   */
+  broadcastToAllWindows(channel: string, ...args: any[]): void {
+    for (const managed of this.getAllWindows()) {
+      this.pushToWindow(managed.window, channel, ...args)
+    }
+  }
+
   /** Push an event to a specific window via the RPC event sink. Falls back to webContents.send. */
   private pushToWindow(window: BrowserWindow, channel: string, ...args: any[]): void {
     if (this.eventSink && this.clientResolver) {

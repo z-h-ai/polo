@@ -40,6 +40,7 @@
   "dependencies": {
     "@polo-ai/core": "workspace:*",
     "@polo-ai/messaging-gateway": "workspace:*",
+    "@polo-ai/relay": "workspace:*",
     "@polo-ai/server-core": "workspace:*",
     "@polo-ai/shared": "workspace:*",
     "@polo-ai/ui": "workspace:*",
