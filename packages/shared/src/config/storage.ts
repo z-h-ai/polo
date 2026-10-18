@@ -80,8 +80,8 @@ export interface StoredConfig {
   browserToolEnabled?: boolean;  // Enable built-in browser tool (default: true). Disable for Playwright/Puppeteer.
   allowRemoteEvaluate?: boolean;  // Allow remote agents to call `browser_tool evaluate` on local browser (default: true).
   // Generative UI
-  generativeUiInlineEnabled?: boolean;  // Enable render_ui Generative UI inline cards (default: true). User-level kill switch.
-  generativeUiCanvasEnabled?: boolean;  // Enable generate_app Generative UI canvas apps (default: true). User-level kill switch.
+  generativeUiInlineEnabled?: boolean;  // Enable render_ui Generative UI inline cards (shipped default: false). User-level kill switch.
+  generativeUiCanvasEnabled?: boolean;  // Enable generate_app Generative UI canvas apps (shipped default: false). User-level kill switch.
   // Prompt caching & context
   extendedPromptCache?: boolean;  // Use 1h prompt cache TTL instead of 5m (default: false)
   enable1MContext?: boolean;  // Enable 1M context window for supported models (default: false — opt-in; requires Anthropic Tier 4+)
@@ -157,8 +157,8 @@ const FALLBACK_CONFIG_DEFAULTS: ConfigDefaults = {
     browserToolEnabled: true,
     adminUrl: 'https://polo-admin.z-h-ai.com/',
     allowRemoteEvaluate: true,
-    generativeUiInlineEnabled: true,
-    generativeUiCanvasEnabled: true,
+    generativeUiInlineEnabled: false,
+    generativeUiCanvasEnabled: false,
   },
   workspaceDefaults: {
     thinkingLevel: 'medium',
@@ -576,8 +576,9 @@ export function setBrowserToolEnabled(enabled: boolean): void {
 /**
  * Get whether Generative UI inline cards (render_ui) are enabled locally.
  * User-level kill switch; combined with the remote `generativeUI.inline`
- * capability via isGenerativeUiInlineEnabled(). Defaults to true — including
- * when an older packaged defaults file predates the key (absent = enabled).
+ * capability via isGenerativeUiInlineEnabled(). Shipped default is off via the
+ * bundled config-defaults.json (re-synced on every launch); an absent key from
+ * an older bundled file still reads as enabled until the next sync.
  */
 export function getGenerativeUiInlineEnabled(): boolean {
   const config = loadStoredConfig();
@@ -604,8 +605,9 @@ export function setGenerativeUiInlineEnabled(enabled: boolean): void {
 /**
  * Get whether Generative UI canvas apps (generate_app) are enabled locally.
  * User-level kill switch; combined with the remote `generativeUI.canvas`
- * capability via isGenerativeUiCanvasEnabled(). Defaults to true — including
- * when an older packaged defaults file predates the key (absent = enabled).
+ * capability via isGenerativeUiCanvasEnabled(). Shipped default is off via the
+ * bundled config-defaults.json (re-synced on every launch); an absent key from
+ * an older bundled file still reads as enabled until the next sync.
  */
 export function getGenerativeUiCanvasEnabled(): boolean {
   const config = loadStoredConfig();
