@@ -699,6 +699,7 @@
   "genui.dataTable.rowValuesMissing": "该行部分字段缺失。",
   "genui.form.requiredMissing": "此字段为必填项。",
   "genui.form.submit": "提交",
+  "genui.skeleton.building": "正在构建 {{type}} 卡片…",
   "genui.unknownType": "未知卡片类型 \"{{type}}\" — 显示原始数据。",
   "hints.analyzeSpreadsheet": "分析 {file:spreadsheet} 并将洞察发布到 {source:Slack}",
   "hints.combineSlackThreads": "将 {source:Slack} 讨论整合为 {source:Notion} 周报",

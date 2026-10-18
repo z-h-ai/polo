@@ -699,6 +699,7 @@
   "genui.dataTable.rowValuesMissing": "Faltan algunos valores en esta fila.",
   "genui.form.requiredMissing": "Este campo es obligatorio.",
   "genui.form.submit": "Enviar",
+  "genui.skeleton.building": "Creando tarjeta {{type}}…",
   "genui.unknownType": "Tipo de tarjeta desconocido \"{{type}}\": se muestran los datos en bruto.",
   "hints.analyzeSpreadsheet": "Analiza una {file:spreadsheet} y publica los insights en {source:Slack}",
   "hints.combineSlackThreads": "Combina hilos de {source:Slack} en un resumen semanal para {source:Notion}",

@@ -350,6 +350,19 @@ export type SessionEvent =
   | { type: 'usage_update'; sessionId: string; tokenUsage: { inputTokens: number; contextWindow?: number } }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
   | { type: 'working_directory_error'; sessionId: string; error: string }
+  // P0-2 render_ui skeleton streaming (Wave-1): partial tool input for an
+  // in-flight render_ui call, so the chat can preview "building <type> —
+  // <title>" skeleton cards before the tool call completes.
+  //
+  // RENDERER-INTERNAL CHANNEL — three hard rules (guarded by
+  // genui-tool-input-delta-isolation.test.ts):
+  //   1. NEVER added to the tab protocol page whitelist (PoloaiProtocolEvent
+  //      union / toProtocolEvent fan-out) — same discipline as ui_state.
+  //   2. NEVER persisted — no message is created, nothing enters session JSONL.
+  //   3. Emitted for render_ui only, throttled (GENUI_TOOL_INPUT_DELTA_FLUSH_MS)
+  //      and capped (GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS); the completed
+  //      tool_start/tool_result pair remains the authoritative payload path.
+  | { type: 'tool_input_delta'; sessionId: string; toolUseId: string; toolName: string; delta: string; seq: number; timestamp?: number }
 
 export interface SendMessageOptions {
   skillSlugs?: string[]
@@ -855,6 +868,24 @@ export const GENUI_BRIDGE_CAPABILITIES_META_NAME = 'polo-bridge-capabilities'
 /** The only bridge capability defined so far. Unknown tokens fail closed. */
 export const GENUI_BRIDGE_CAPABILITY_UI_EVENT = 'ui-event'
 export const GENUI_BRIDGE_CAPABILITIES = [GENUI_BRIDGE_CAPABILITY_UI_EVENT] as const
+
+// ---------------------------------------------------------------------------
+// P0-2 render_ui skeleton streaming — emission parameters
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum interval between two tool_input_delta emissions for the same
+ * toolUseId (renderer-internal channel — see the SessionEvent comment).
+ */
+export const GENUI_TOOL_INPUT_DELTA_FLUSH_MS = 250
+
+/**
+ * Hard cap on the TOTAL characters emitted per toolUseId across all its
+ * tool_input_delta events. Once reached the emitter goes silent and the
+ * renderer waits for the completed tool call (graceful degradation — the
+ * full payload arrives with tool_start/tool_result anyway).
+ */
+export const GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS = 8192
 
 /** Strict cardId shape shared by the registry, the deep link and the renderer. */
 export const GENUI_UI_CARD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/

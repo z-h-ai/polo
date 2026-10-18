@@ -699,6 +699,7 @@
   "genui.dataTable.rowValuesMissing": "Brakuje niektórych wartości w tym wierszu.",
   "genui.form.requiredMissing": "To pole jest wymagane.",
   "genui.form.submit": "Wyślij",
+  "genui.skeleton.building": "Tworzenie karty {{type}}…",
   "genui.unknownType": "Nieznany typ karty \"{{type}}\" — wyświetlanie surowych danych.",
   "hints.analyzeSpreadsheet": "Przeanalizuj {file:spreadsheet} i opublikuj wnioski w {source:Slack}",
   "hints.combineSlackThreads": "Połącz wątki {source:Slack} w tygodniowy digest dla {source:Notion}",

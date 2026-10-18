@@ -12,6 +12,7 @@
     "./chat/SessionViewer": "./src/components/chat/SessionViewer.tsx",
     "./chat/TurnCard": "./src/components/chat/TurnCard.tsx",
     "./chat/GenUiAppCard": "./src/components/chat/GenUiAppCard.tsx",
+    "./chat/genuiToolInputDeltas": "./src/components/chat/genuiToolInputDeltas.ts",
     "./chat/turn-utils": "./src/components/chat/turn-utils.ts",
     "./markdown": "./src/components/markdown/index.ts",
     "./annotations/follow-up-state": "./src/components/annotations/follow-up-state.ts",

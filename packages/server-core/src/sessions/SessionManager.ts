@@ -11043,6 +11043,22 @@ export class SessionManager implements ISessionManager {
         this.queueDelta(sessionId, workspaceId, event.text, event.turnId)
         break
 
+      case 'tool_input_delta':
+        // P0-2 render_ui skeleton streaming: renderer-internal channel —
+        // forwarded to the live renderer ONLY. No message is created, nothing
+        // is persisted, and the tab protocol page whitelist excludes the type
+        // (see the dto comment + genui-tool-input-delta-isolation test).
+        emit({
+          type: 'tool_input_delta',
+          sessionId,
+          toolUseId: event.toolUseId,
+          toolName: event.toolName,
+          delta: event.delta,
+          seq: event.seq,
+          timestamp: this.monotonic(),
+        }, workspaceId)
+        break
+
       case 'text_complete': {
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)

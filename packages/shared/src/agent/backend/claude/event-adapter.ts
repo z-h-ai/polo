@@ -15,6 +15,10 @@
 import type { SDKMessage, SDKAssistantMessageError } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentEvent } from '@polo-ai/core/types';
 import type { AgentError } from '../../errors.ts';
+import {
+  GENUI_TOOL_INPUT_DELTA_FLUSH_MS,
+  GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS,
+} from '../../../protocol/dto.ts';
 import { BaseEventAdapter } from '../base-event-adapter.ts';
 import { ToolIndex, extractToolStarts, extractToolResults, isParentTaskTool, type ContentBlock } from '../../tool-matching.ts';
 
@@ -28,6 +32,31 @@ export interface ClaudeAdapterCallbacks {
   mapSDKError: (errorCode: SDKAssistantMessageError) => Promise<{ type: 'typed_error'; error: AgentError }>;
   /** Session directory for tool metadata (prevents cross-session race condition) */
   sessionDir?: string;
+  /** Injectable clock for tool_input_delta throttle tests. Defaults to Date.now. */
+  now?: () => number;
+}
+
+/**
+ * P0-2 render_ui skeleton streaming: the render_ui tool names the Claude path
+ * can present in a tool_use block. Session-scoped tools registered through the
+ * 'session' MCP server appear as 'mcp__session__render_ui' in the SDK stream;
+ * the bare form guards against direct (non-MCP) registration. The Pi path
+ * prefixes differently and never emits tool_input_delta (graceful degradation
+ * — Pi sessions simply render after completion).
+ */
+export function isRenderUiToolName(name: unknown): boolean {
+  return name === 'render_ui' || name === 'mcp__session__render_ui';
+}
+
+/** Per-toolUseId emission state for one streaming render_ui tool call. */
+interface ToolInputTracker {
+  toolName: string;
+  buffered: string;
+  totalChars: number;
+  lastEmitAt: number;
+  seq: number;
+  /** True once the total-char cap is reached — emitter goes silent afterwards. */
+  capped: boolean;
 }
 
 /**
@@ -95,6 +124,11 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
   private activeParentTools = new Set<string>();
   private pendingText: string | null = null;
 
+  // P0-2 render_ui skeleton streaming: stream content-block index → toolUseId
+  // and per-toolUseId throttle/cap state.
+  private streamToolUseIndex = new Map<number, string>();
+  private toolInputTrackers = new Map<string, ToolInputTracker>();
+
   // Session-persistent state (survives across turns)
   private lastAssistantUsage: AssistantUsage | null = null;
   private cachedContextWindow?: number;
@@ -117,6 +151,8 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
     this.activeParentTools = new Set();
     this.pendingText = null;
     this.lastAssistantUsage = null;
+    this.streamToolUseIndex = new Map();
+    this.toolInputTrackers = new Map();
   }
 
   // ============================================================
@@ -350,6 +386,23 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
       // Stream events arrive with empty input — the full input comes later
       const toolBlock = event.content_block;
       const sdkParentId = (message as any).parent_tool_use_id;
+      // P0-2: map the stream content-block index to its toolUseId so the
+      // input_json_delta handler below knows which tool call is streaming.
+      if (typeof event.index === 'number' && toolBlock.id) {
+        this.streamToolUseIndex.set(event.index, toolBlock.id);
+        if (isRenderUiToolName(toolBlock.name)) {
+          this.toolInputTrackers.set(toolBlock.id, {
+            toolName: toolBlock.name,
+            buffered: '',
+            totalChars: 0,
+            // Start the throttle window at block start: the first emission
+            // waits at least FLUSH_MS instead of firing on the first chunk.
+            lastEmitAt: this.now(),
+            seq: 0,
+            capped: false,
+          });
+        }
+      }
       const streamBlocks: ContentBlock[] = [{
         type: 'tool_use' as const,
         id: toolBlock.id,
@@ -374,6 +427,78 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
       }
 
       events.push(...streamEvents);
+    } else if (event.type === 'content_block_delta' && event.delta.type === 'input_json_delta') {
+      // P0-2 render_ui skeleton streaming — mirrors the tool_start path above
+      // (same stream, same block identity) but for partial input. render_ui
+      // ONLY: no event firehose for every other tool. Throttled to one
+      // emission per FLUSH_MS per toolUseId, silenced at the total-char cap;
+      // the completed tool call remains the authoritative payload path.
+      this.adaptToolInputDelta(event, events);
+    } else if (event.type === 'content_block_stop') {
+      // P0-2: final flush of whatever is still buffered for this tool call
+      // (under the cap), then forget the stream index mapping.
+      if (typeof event.index === 'number') {
+        const toolUseId = this.streamToolUseIndex.get(event.index);
+        if (toolUseId) {
+          const tracker = this.toolInputTrackers.get(toolUseId);
+          if (tracker && !tracker.capped && tracker.buffered) {
+            events.push({
+              type: 'tool_input_delta',
+              toolUseId,
+              toolName: tracker.toolName,
+              delta: tracker.buffered,
+              seq: ++tracker.seq,
+            });
+            tracker.buffered = '';
+          }
+          this.toolInputTrackers.delete(toolUseId);
+          this.streamToolUseIndex.delete(event.index);
+        }
+      }
+    }
+  }
+
+  private now(): number {
+    return this.callbacks.now?.() ?? Date.now();
+  }
+
+  /**
+   * Buffer one input_json_delta chunk for a tracked render_ui tool call and
+   * emit a tool_input_delta when the throttle window has elapsed or the cap
+   * was reached. Emits at most once per FLUSH_MS; after
+   * MAX_TOTAL_CHARS characters the tracker is capped and stays silent until
+   * content_block_stop (the completed call renders the real cards).
+   */
+  private adaptToolInputDelta(
+    event: { index?: number; delta: { partial_json?: unknown } },
+    events: AgentEvent[],
+  ): void {
+    if (typeof event.index !== 'number') return;
+    const toolUseId = this.streamToolUseIndex.get(event.index);
+    if (!toolUseId) return;
+    const tracker = this.toolInputTrackers.get(toolUseId);
+    if (!tracker || tracker.capped) return;
+
+    const chunk = typeof event.delta.partial_json === 'string' ? event.delta.partial_json : '';
+    if (!chunk) return;
+
+    tracker.buffered += chunk;
+    tracker.totalChars += chunk.length;
+
+    const now = this.now();
+    const throttleElapsed = now - tracker.lastEmitAt >= GENUI_TOOL_INPUT_DELTA_FLUSH_MS;
+    const overCap = tracker.totalChars >= GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS;
+    if ((throttleElapsed && tracker.buffered) || overCap) {
+      events.push({
+        type: 'tool_input_delta',
+        toolUseId,
+        toolName: tracker.toolName,
+        delta: tracker.buffered,
+        seq: ++tracker.seq,
+      });
+      tracker.buffered = '';
+      tracker.lastEmitAt = now;
+      if (overCap) tracker.capped = true;
     }
   }
 

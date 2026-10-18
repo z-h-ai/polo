@@ -699,6 +699,7 @@
   "genui.dataTable.rowValuesMissing": "Some values in this row are missing.",
   "genui.form.requiredMissing": "This field is required.",
   "genui.form.submit": "Submit",
+  "genui.skeleton.building": "Building {{type}} card…",
   "genui.unknownType": "Unknown card type \"{{type}}\" — showing raw data.",
   "hints.analyzeSpreadsheet": "Analyze a {file:spreadsheet} and post insights to {source:Slack}",
   "hints.combineSlackThreads": "Combine {source:Slack} threads into a weekly digest for {source:Notion}",
