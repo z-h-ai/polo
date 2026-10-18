@@ -202,6 +202,9 @@ describe('resolveStatDeltaTone (goodWhen direction semantics)', () => {
     expect(resolveStatDeltaTone('flat', 'up')).toBe('muted')
     expect(resolveStatDeltaTone(undefined, 'down')).toBe('muted')
     expect(resolveStatDeltaTone('flat', 'down')).toBe('muted')
+  })
+})
+
 // ── Confirm / params gates (iter/confirm-flow) ───────────────────────────────
 
 const PLAIN_BUTTON: GenUiActionButton = {
