@@ -6,6 +6,12 @@ import {
   formatStatDelta,
   formatStatValue,
   resolveStatDeltaTone,
+  interpolateGenUiTemplate,
+  missingGenUiParamKeys,
+  resolveGenUiActionButtonText,
+  planGenUiButtonPress,
+  planGenUiParamsSubmit,
+  type GenUiActionButton,
 } from '../GenUICard'
 
 describe('parseGenUiComponents', () => {
@@ -196,5 +202,134 @@ describe('resolveStatDeltaTone (goodWhen direction semantics)', () => {
     expect(resolveStatDeltaTone('flat', 'up')).toBe('muted')
     expect(resolveStatDeltaTone(undefined, 'down')).toBe('muted')
     expect(resolveStatDeltaTone('flat', 'down')).toBe('muted')
+// ── Confirm / params gates (iter/confirm-flow) ───────────────────────────────
+
+const PLAIN_BUTTON: GenUiActionButton = {
+  id: 'b1',
+  label: 'Create order',
+  style: 'primary',
+  action: { kind: 'send-message', prompt: 'Create the replenishment order' },
+}
+
+describe('interpolateGenUiTemplate (params → promptTemplate)', () => {
+  it('replaces every occurrence of a filled key with the trimmed value', () => {
+    expect(interpolateGenUiTemplate('Add {{count}} people ({{count}} total) to {{queue}}', { count: ' 2 ', queue: 'refunds' }))
+      .toBe('Add 2 people (2 total) to refunds')
+  })
+
+  it('leaves placeholders visible when their key was not filled', () => {
+    expect(interpolateGenUiTemplate('Add {{count}} people to {{queue}}', { queue: 'refunds' }))
+      .toBe('Add {{count}} people to refunds')
+  })
+
+  it('returns the template unchanged with no values', () => {
+    expect(interpolateGenUiTemplate('Add {{count}}', {})).toBe('Add {{count}}')
+  })
+})
+
+describe('missingGenUiParamKeys (required interception)', () => {
+  const params = [
+    { key: 'count', label: 'Count', type: 'number' as const, required: true },
+    { key: 'queue', label: 'Queue', type: 'select' as const, required: true, options: ['refunds'] },
+    { key: 'note', label: 'Note', type: 'text' as const },
+  ]
+
+  it('reports required keys left blank, in declaration order', () => {
+    expect(missingGenUiParamKeys(params, {})).toEqual(['count', 'queue'])
+    expect(missingGenUiParamKeys(params, { count: '  ', queue: 'refunds' })).toEqual(['count'])
+  })
+
+  it('reports nothing when every required key is filled', () => {
+    expect(missingGenUiParamKeys(params, { count: '2', queue: 'refunds' })).toEqual([])
+  })
+
+  it('ignores optional params left blank', () => {
+    expect(missingGenUiParamKeys([params[2]!], {})).toEqual([])
+  })
+})
+
+describe('resolveGenUiActionButtonText (the text that gets backfilled)', () => {
+  it('passes a plain prompt through unchanged (zero regression)', () => {
+    expect(resolveGenUiActionButtonText(PLAIN_BUTTON.action)).toBe('Create the replenishment order')
+  })
+
+  it('passes fill-input text through unchanged', () => {
+    expect(resolveGenUiActionButtonText({ kind: 'fill-input', text: 'Export as CSV' })).toBe('Export as CSV')
+  })
+
+  it('interpolates promptTemplate with the filled values', () => {
+    expect(resolveGenUiActionButtonText(
+      { kind: 'send-message', promptTemplate: 'Add {{count}} people to the {{queue}} queue' },
+      { count: '2', queue: 'refunds' },
+    )).toBe('Add 2 people to the refunds queue')
+  })
+
+  it('falls back to an empty prompt for a malformed send-message action', () => {
+    expect(resolveGenUiActionButtonText({ kind: 'send-message' })).toBe('')
+  })
+})
+
+describe('planGenUiButtonPress (confirm 展开: the gate sequence)', () => {
+  it('executes directly when the button has no gates (zero regression)', () => {
+    const press = planGenUiButtonPress(PLAIN_BUTTON)
+    expect(press).toEqual({ gate: 'execute', text: 'Create the replenishment order' })
+  })
+
+  it('opens the confirm bar for a confirm button instead of executing', () => {
+    const confirmButton: GenUiActionButton = {
+      ...PLAIN_BUTTON,
+      confirm: { message: 'Creates 3 POs totalling ¥120k — continue?' },
+    }
+    expect(planGenUiButtonPress(confirmButton)).toEqual({ gate: 'confirm' })
+  })
+
+  it('opens the params form first for a params button', () => {
+    const paramsButton: GenUiActionButton = {
+      ...PLAIN_BUTTON,
+      params: [{ key: 'count', label: 'Count', type: 'number', required: true }],
+      action: { kind: 'send-message', promptTemplate: 'Add {{count}} people' },
+    }
+    expect(planGenUiButtonPress(paramsButton)).toEqual({ gate: 'params' })
+  })
+
+  it('never plans an execute for a gated click before the gates pass (cancel = collapse, no backfill)', () => {
+    const gated: GenUiActionButton = {
+      ...PLAIN_BUTTON,
+      confirm: { message: 'sure?' },
+      params: [{ key: 'count', label: 'Count' }],
+      action: { kind: 'send-message', promptTemplate: 'Add {{count}}' },
+    }
+    for (const values of [{}, { count: '2' }]) {
+      const press = planGenUiButtonPress(gated, values)
+      expect(press.gate === 'execute').toBe(false)
+    }
+  })
+})
+
+describe('planGenUiParamsSubmit (params 执行 → next gate)', () => {
+  const paramsButton: GenUiActionButton = {
+    id: 'p1',
+    label: 'Add people',
+    style: 'primary',
+    params: [
+      { key: 'count', label: 'Count', type: 'number', required: true },
+      { key: 'note', label: 'Note', type: 'text' },
+    ],
+    action: { kind: 'send-message', promptTemplate: 'Add {{count}} people. Note: {{note}}' },
+  }
+
+  it('intercepts missing required values instead of executing', () => {
+    const plan = planGenUiParamsSubmit(paramsButton, {})
+    expect(plan).toEqual({ ok: false, missing: ['count'] })
+  })
+
+  it('advances to execute with the interpolated text when values are complete', () => {
+    const plan = planGenUiParamsSubmit(paramsButton, { count: '2' })
+    expect(plan).toEqual({ ok: true, gate: 'execute', text: 'Add 2 people. Note: {{note}}' })
+  })
+
+  it('advances to the confirm bar when the button also declares confirm', () => {
+    const gated: GenUiActionButton = { ...paramsButton, confirm: { message: 'Adds headcount — continue?' } }
+    expect(planGenUiParamsSubmit(gated, { count: '2' })).toEqual({ ok: true, gate: 'confirm' })
   })
 })

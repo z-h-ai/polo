@@ -229,17 +229,42 @@ export const GenUIProgressSchema = GenUIBase.extend({
   percent: z.number().min(0).max(100).optional().describe('Omit for indeterminate'),
 });
 
+/** One per-click parameter field the user fills before the action runs. */
+const GenUIActionButtonParamSchema = z.object({
+  key: z.string().max(40)
+    .describe('Placeholder name — "{{key}}" occurrences in promptTemplate are replaced with the filled value'),
+  label: z.string().max(60),
+  type: z.enum(['text', 'number', 'select']).default('text'),
+  required: z.boolean().default(false),
+  // Same convention as form fields: only select params may carry options, and
+  // a select param must — enforced by the button-level superRefine below.
+  options: z.array(z.string().max(80)).max(12).optional(),
+});
+
 const GenUIActionButtonSchema = z.object({
   id: z.string().min(1).max(64),
   label: z.string().min(1).max(40),
   style: z.enum(['primary', 'secondary', 'danger']).default('secondary'),
+  // Optional pre-click gates (all UI-only — the backfill pipeline itself is
+  // unchanged). confirm renders an in-place confirmation bar before the
+  // action fires; params renders an in-place mini form whose values are
+  // interpolated into promptTemplate.
+  confirm: z.object({
+    message: z.string().max(300)
+      .describe('Shown on the in-place confirmation bar before the action runs — state the consequence or impact'),
+  }).optional(),
+  params: z.array(GenUIActionButtonParamSchema).max(8).optional(),
   // P0 only ships these two backfill actions; run-tool direct invocation is
   // deferred to P2 (needs the capability gating work).
   action: z.discriminatedUnion('kind', [
     z.object({
       kind: z.literal('send-message'),
       prompt: z.string().min(1).max(2000)
-        .describe('Sent as the next user message when clicked'),
+        .describe('Sent as the next user message when clicked. Mutually exclusive with promptTemplate.')
+        .optional(),
+      promptTemplate: z.string().min(1).max(2000)
+        .describe('Sent as the next user message when clicked, after every {{key}} placeholder is replaced by the value the user entered in the params form. Required when params is set.')
+        .optional(),
     }),
     z.object({
       kind: z.literal('fill-input'),
@@ -247,6 +272,63 @@ const GenUIActionButtonSchema = z.object({
         .describe('Prefills the chat input without sending'),
     }),
   ]),
+}).superRefine((button, ctx) => {
+  // Cross-field rules that cannot live on the discriminated union members
+  // (a refine would wrap them in ZodEffects and break the union) — same
+  // constraint that keeps the form rules on the components array.
+  const action = button.action;
+  if (action.kind === 'send-message') {
+    if (action.prompt && action.promptTemplate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['action', 'promptTemplate'],
+        message: 'send-message actions must use either "prompt" or "promptTemplate", not both.',
+      });
+    }
+    if (!action.prompt && !action.promptTemplate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['action', 'prompt'],
+        message: 'send-message actions require "prompt" or "promptTemplate".',
+      });
+    }
+  }
+  if (!button.params) return;
+  // Parameterized buttons interpolate user input into a template — fill-input
+  // has no template to interpolate into, so params require promptTemplate.
+  if (action.kind !== 'send-message' || !action.promptTemplate) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['params'],
+      message: 'buttons with "params" must use a send-message action with "promptTemplate" ({{key}} placeholders).',
+    });
+  }
+  // Mirror the form field contract: unique keys, select⇔options.
+  const keys = new Set<string>();
+  button.params.forEach((param, index) => {
+    if (keys.has(param.key)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['params', index, 'key'],
+        message: `Duplicate param key "${param.key}". Param keys must be unique within one button.`,
+      });
+    }
+    keys.add(param.key);
+    if (param.type === 'select' && (!param.options || param.options.length < 1)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['params', index, 'options'],
+        message: `select param "${param.key}" requires at least one option.`,
+      });
+    }
+    if (param.type !== 'select' && param.options) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['params', index, 'options'],
+        message: `options are only valid on select params (param "${param.key}").`,
+      });
+    }
+  });
 });
 
 export const GenUIActionButtonsWithIdSchema = GenUIBase.extend({
@@ -665,7 +747,7 @@ Use this instead of plain text when the answer is actionable or data-dense.
 - \`data-table\`: sortable/filterable table, file-backed ONLY — write rows with transform_data and pass "src"; inline rows are rejected. Optional per-row interactivity: "rowAction" (a button per row whose {{col.key}} template is sent as the next user message), "detailTemplate" (a per-row Details link that prefills the input without sending), "columns[].link" (render a column's values as external links).
 - \`alert\`: info/success/warning/error banner
 - \`progress\`: running/success/error indicator with optional percent
-- \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input
+- \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input; optional \`confirm\` (message ≤300 chars) shows an in-place confirmation bar first, optional \`params\` + \`promptTemplate\` collect 1-8 per-click values and interpolate \`{{key}}\` before sending — use \`confirm\` for high-stakes actions and \`params\` instead of hardcoding variable values into the prompt
 - \`form\`: 1-12 fields (text/number/select/date) the user fills in; submitting sends the serialized values object as the next user message (fixed semantics — no action config)
 
 **Value semantics** (pick per meaning, not per sign):

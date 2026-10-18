@@ -91,11 +91,23 @@ export interface GenUiProgress {
   percent?: number
 }
 
+export interface GenUiActionButtonParam {
+  key: string
+  label: string
+  type: 'text' | 'number' | 'select'
+  required?: boolean
+  options?: string[]
+}
+
 export interface GenUiActionButton {
   id: string
   label: string
   style: 'primary' | 'secondary' | 'danger'
-  action: { kind: 'send-message'; prompt: string } | { kind: 'fill-input'; text: string }
+  confirm?: { message: string }
+  params?: GenUiActionButtonParam[]
+  action:
+    | { kind: 'send-message'; prompt?: string; promptTemplate?: string }
+    | { kind: 'fill-input'; text: string }
 }
 
 export interface GenUiActionButtons {
@@ -349,6 +361,68 @@ export function resolveGenUiCellLink(value: unknown): GenUiCellLink | null {
   const raw = String(value).trim()
   if (raw === '' || !isSafeGenUiHref(raw)) return null
   return { href: raw }
+}
+
+// ── Button gates (confirm / params — iter/confirm-flow) ─────────────────────
+
+/**
+ * Replace `{{key}}` occurrences with the user-filled values. Values are used
+ * trimmed; a placeholder whose key was not filled (optional param left blank,
+ * or a key the schema never declared) is left visible rather than silently
+ * emptied — the model sees exactly what the user saw.
+ */
+export function interpolateGenUiTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{([^{}]*)\}\}/g, (placeholder, key: string) => {
+    const value = values[key]
+    return value === undefined ? placeholder : value.trim()
+  })
+}
+
+/** Keys of required params left blank (empty or whitespace-only). */
+export function missingGenUiParamKeys(params: GenUiActionButtonParam[], values: Record<string, string>): string[] {
+  return params
+    .filter(param => param.required && !(values[param.key] ?? '').trim())
+    .map(param => param.key)
+}
+
+/** The backfilled text for an action: the template interpolated, prompt, or fill text. */
+export function resolveGenUiActionButtonText(
+  action: GenUiActionButton['action'],
+  values: Record<string, string> = {},
+): string {
+  if (action.kind === 'fill-input') return action.text
+  return action.promptTemplate ? interpolateGenUiTemplate(action.promptTemplate, values) : action.prompt ?? ''
+}
+
+export type GenUiButtonPress =
+  | { gate: 'params' }
+  | { gate: 'confirm' }
+  | { gate: 'execute'; text: string }
+
+/**
+ * What a click on the button does next: open the params mini form when the
+ * button declares params, else the confirm bar when it declares confirm, else
+ * execute directly. Cancel (collapsing the open panel) never reaches the
+ * backfill pipeline — execution only happens through an explicit
+ * `{ gate: 'execute' }` plan.
+ */
+export function planGenUiButtonPress(button: GenUiActionButton, values: Record<string, string> = {}): GenUiButtonPress {
+  if (button.params && button.params.length > 0) return { gate: 'params' }
+  if (button.confirm) return { gate: 'confirm' }
+  return { gate: 'execute', text: resolveGenUiActionButtonText(button.action, values) }
+}
+
+export type GenUiParamsSubmitPlan =
+  | { ok: false; missing: string[] }
+  | { ok: true; gate: 'confirm' }
+  | { ok: true; gate: 'execute'; text: string }
+
+/** The params form 执行 button: intercept missing required values, else advance to the next gate. */
+export function planGenUiParamsSubmit(button: GenUiActionButton, values: Record<string, string>): GenUiParamsSubmitPlan {
+  const missing = missingGenUiParamKeys(button.params ?? [], values)
+  if (missing.length > 0) return { ok: false, missing }
+  if (button.confirm) return { ok: true, gate: 'confirm' }
+  return { ok: true, gate: 'execute', text: resolveGenUiActionButtonText(button.action, values) }
 }
 
 // ── Component renderers ──────────────────────────────────────────────────────
@@ -641,16 +715,78 @@ const ACTION_BUTTON_STYLES: Record<GenUiActionButton['style'], string> = {
   danger: 'bg-destructive/5 text-destructive hover:bg-destructive/10 shadow-tinted',
 }
 
+/** In-place panel opened by a click on a confirm/params button (session-local React state, never persisted). */
+type GenUiExpandedPanel = { buttonId: string; stage: 'params' | 'confirm' } | null
+
+const GENUI_ACTION_BAR_STYLES: Record<'accent' | 'destructive', string> = {
+  accent: 'border-accent/20 bg-accent/[0.04]',
+  destructive: 'border-destructive/20 bg-destructive/[0.04]',
+}
+
 function ActionButtonsView({ component, sessionId }: { component: GenUiActionButtons; sessionId?: string }) {
-  const handleAction = React.useCallback((button: GenUiActionButton) => {
+  const { t } = useTranslation()
+  // Session-render-cycle state only: which button's panel is open, what the
+  // user typed into it, which buttons already fired (receipt state). Nothing
+  // here is persisted — a remounted card starts fresh.
+  const [panel, setPanel] = React.useState<GenUiExpandedPanel>(null)
+  const [paramValues, setParamValues] = React.useState<Record<string, Record<string, string>>>({})
+  const [missingParams, setMissingParams] = React.useState<ReadonlySet<string>>(() => new Set())
+  // buttonId → the exact text that was backfilled, so the disabled button's
+  // title keeps showing the receipt even if the card is updated in place.
+  const [executedTexts, setExecutedTexts] = React.useState<ReadonlyMap<string, string>>(() => new Map())
+
+  const execute = React.useCallback((button: GenUiActionButton, text: string) => {
     if (!sessionId) return
+    dispatchGenUiInsertText(text, sessionId)
     if (button.action.kind === 'send-message') {
-      dispatchGenUiInsertText(button.action.prompt, sessionId)
       dispatchGenUiSubmitInput(sessionId)
-    } else {
-      dispatchGenUiInsertText(button.action.text, sessionId)
     }
+    setExecutedTexts(previous => new Map(previous).set(button.id, text))
+    setPanel(null)
+    setMissingParams(new Set())
   }, [sessionId])
+
+  const handleButtonClick = React.useCallback((button: GenUiActionButton) => {
+    if (!sessionId || executedTexts.has(button.id)) return
+    const press = planGenUiButtonPress(button, paramValues[button.id] ?? {})
+    if (press.gate === 'execute') {
+      execute(button, press.text)
+    } else {
+      setMissingParams(new Set())
+      setPanel({ buttonId: button.id, stage: press.gate })
+    }
+  }, [execute, executedTexts, paramValues, sessionId])
+
+  const handleParamChange = React.useCallback((buttonId: string, key: string, value: string) => {
+    setParamValues(previous => ({ ...previous, [buttonId]: { ...previous[buttonId], [key]: value } }))
+    setMissingParams(previous => {
+      if (!previous.has(key)) return previous
+      const next = new Set(previous)
+      next.delete(key)
+      return next
+    })
+  }, [])
+
+  const handleParamsSubmit = React.useCallback((button: GenUiActionButton) => {
+    if (!sessionId) return
+    const plan = planGenUiParamsSubmit(button, paramValues[button.id] ?? {})
+    if (!plan.ok) {
+      setMissingParams(new Set(plan.missing))
+      return
+    }
+    if (plan.gate === 'confirm') {
+      setPanel({ buttonId: button.id, stage: 'confirm' })
+      return
+    }
+    execute(button, plan.text)
+  }, [execute, paramValues, sessionId])
+
+  const collapsePanel = React.useCallback(() => {
+    setPanel(null)
+    setMissingParams(new Set())
+  }, [])
+
+  const openPanelButton = panel ? component.buttons.find(button => button.id === panel.buttonId) : undefined
 
   return (
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
@@ -660,24 +796,130 @@ function ActionButtonsView({ component, sessionId }: { component: GenUiActionBut
         </div>
       )}
       <div className="px-3 py-2.5 flex flex-wrap gap-2">
-        {component.buttons.map(button => (
-          <button
-            key={button.id}
-            type="button"
-            disabled={!sessionId}
-            onClick={() => handleAction(button)}
-            title={!sessionId ? undefined : button.action.kind === 'send-message' ? button.action.prompt : button.action.text}
-            className={cn(
-              'h-[28px] px-3 text-xs font-medium rounded-[6px] transition-all',
-              'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-              ACTION_BUTTON_STYLES[button.style],
-            )}
-          >
-            {button.label}
-          </button>
-        ))}
+        {component.buttons.map(button => {
+          const executedText = executedTexts.get(button.id)
+          return (
+            <button
+              key={button.id}
+              type="button"
+              disabled={!sessionId || executedText !== undefined}
+              onClick={() => handleButtonClick(button)}
+              title={!sessionId
+                ? undefined
+                : executedText !== undefined
+                  ? executedText
+                  : button.action.kind === 'send-message'
+                    ? button.action.prompt ?? button.action.promptTemplate
+                    : button.action.text}
+              className={cn(
+                'h-[28px] px-3 text-xs font-medium rounded-[6px] transition-all',
+                'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+                ACTION_BUTTON_STYLES[button.style],
+              )}
+            >
+              {executedText !== undefined ? `${t('genui.actions.executed')} ✓` : button.label}
+            </button>
+          )
+        })}
       </div>
+      {openPanelButton && panel && sessionId && (
+        panel.stage === 'confirm' ? (
+          <div className={cn(
+            'px-3 py-2.5 border-t flex flex-wrap items-center gap-2',
+            GENUI_ACTION_BAR_STYLES[openPanelButton.style === 'danger' ? 'destructive' : 'accent'],
+          )}>
+            <span className="text-[12px] leading-snug text-foreground/80 min-w-0 flex-1 select-text">
+              {openPanelButton.confirm?.message}
+            </span>
+            <button
+              type="button"
+              onClick={() => execute(openPanelButton, resolveGenUiActionButtonText(openPanelButton.action, paramValues[openPanelButton.id] ?? {}))}
+              className={cn(
+                'h-[28px] px-3 text-xs font-medium rounded-[6px] transition-all shrink-0',
+                'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+                openPanelButton.style === 'danger' ? ACTION_BUTTON_STYLES.danger : ACTION_BUTTON_STYLES.primary,
+              )}
+            >
+              {t('genui.actions.confirm')}
+            </button>
+            <button
+              type="button"
+              onClick={collapsePanel}
+              className={cn(
+                'h-[28px] px-3 text-xs font-medium rounded-[6px] transition-all shrink-0',
+                'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                ACTION_BUTTON_STYLES.secondary,
+              )}
+            >
+              {t('common.cancel')}
+            </button>
+          </div>
+        ) : (
+          <form
+            onSubmit={event => {
+              event.preventDefault()
+              handleParamsSubmit(openPanelButton)
+            }}
+            className="px-3 py-2.5 border-t space-y-2"
+          >
+            {(openPanelButton.params ?? []).map(param => (
+              <label key={param.key} className="block space-y-1">
+                <span className="flex items-baseline gap-1 text-[11px] text-muted-foreground">
+                  {param.label}
+                  {param.required && <span className="text-destructive/80">*</span>}
+                </span>
+                {param.type === 'select' ? (
+                  <select
+                    className={FORM_FIELD_STYLES}
+                    value={paramValues[openPanelButton.id]?.[param.key] ?? ''}
+                    onChange={event => handleParamChange(openPanelButton.id, param.key, event.target.value)}
+                  >
+                    <option value=""></option>
+                    {(param.options ?? []).map(option => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={param.type === 'number' ? 'number' : 'text'}
+                    className={FORM_FIELD_STYLES}
+                    value={paramValues[openPanelButton.id]?.[param.key] ?? ''}
+                    onChange={event => handleParamChange(openPanelButton.id, param.key, event.target.value)}
+                  />
+                )}
+                {missingParams.has(param.key) && (
+                  <span className="block text-[10px] text-destructive/80">{t('genui.form.requiredMissing')}</span>
+                )}
+              </label>
+            ))}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                className={cn(
+                  'h-[28px] px-3 text-xs font-medium rounded-[6px] transition-all',
+                  'bg-accent/5 text-accent hover:bg-accent/10 shadow-tinted',
+                  'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                )}
+              >
+                {t('genui.actions.execute')}
+              </button>
+              <button
+                type="button"
+                onClick={collapsePanel}
+                className={cn(
+                  'h-[28px] px-3 text-xs font-medium rounded-[6px] transition-all',
+                  'bg-background text-foreground/80 hover:bg-muted shadow-minimal border border-foreground/[0.06]',
+                  'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                )}
+              >
+                {t('common.cancel')}
+              </button>
+            </div>
+          </form>
+        )
+      )}
     </div>
   )
 }
