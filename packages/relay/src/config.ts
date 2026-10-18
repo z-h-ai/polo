@@ -25,6 +25,24 @@ export interface RelayConfig {
   offlineQueueMaxPerMac: number
   /** TTL for introspection & check-access caches, ms. Env: POLO_RELAY_AUTH_CACHE_TTL_MS. */
   authCacheTtlMs: number
+  /**
+   * Independent revocation-recheck interval, ms (FIX-4, PRD §⑤ 「最长 60 秒内全网
+   * 断开」). Every interval the server re-introspects every online connection
+   * directly against admin (bypassing the auth cache), so revocation propagates
+   * in ≤ interval + one RTT instead of authCacheTtl(60s) + heartbeat(30s) ≈ 90s.
+   * 0 disables (direct RelayConfig construction, tests); via env only positive
+   * integers are accepted (same policy as heartbeatIntervalMs).
+   * Env: POLO_RELAY_REVOKE_RECHECK_MS.
+   */
+  revokeRecheckMs: number
+  /**
+   * FILE-mode ASR: how long to wait for the supplier's final transcript after
+   * the client ends, ms (FIX-5). STREAM keeps its own 5s wait. FILE transcription
+   * of a ≤300s recording routinely exceeds 5s — a global 5s wait would close the
+   * session with an empty-text asr_final.
+   * Env: POLO_RELAY_ASR_FILE_FINAL_WAIT_MS.
+   */
+  asrFileFinalWaitMs: number
   /** Server heartbeat ping interval, ms (0 disables — tests). Env: POLO_RELAY_HEARTBEAT_INTERVAL_MS. */
   heartbeatIntervalMs: number
   /** Kill a connection with no liveness evidence for this long, ms. Env: POLO_RELAY_HEARTBEAT_TIMEOUT_MS. */
@@ -68,6 +86,8 @@ export function loadRelayConfig(env: Record<string, string | undefined> = proces
     offlineQueueTtlMs: intFromEnv(env, 'POLO_RELAY_OFFLINE_QUEUE_TTL_MS', 300_000),
     offlineQueueMaxPerMac: intFromEnv(env, 'POLO_RELAY_OFFLINE_QUEUE_MAX_PER_MAC', 200),
     authCacheTtlMs: intFromEnv(env, 'POLO_RELAY_AUTH_CACHE_TTL_MS', 60_000),
+    revokeRecheckMs: intFromEnv(env, 'POLO_RELAY_REVOKE_RECHECK_MS', 15_000),
+    asrFileFinalWaitMs: intFromEnv(env, 'POLO_RELAY_ASR_FILE_FINAL_WAIT_MS', 30_000),
     heartbeatIntervalMs: env['POLO_RELAY_HEARTBEAT_INTERVAL_MS'] !== undefined
       ? intFromEnv(env, 'POLO_RELAY_HEARTBEAT_INTERVAL_MS', 30_000)
       : 30_000,
