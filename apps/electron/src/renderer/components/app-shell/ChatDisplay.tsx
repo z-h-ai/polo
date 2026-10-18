@@ -1301,6 +1301,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!session?.isProcessing) return
     window.electronAPI.cancelProcessing(session.id, silent).catch(error => {
       console.error('[ChatDisplay] Failed to cancel processing:', error)
+      // Redirect-internal stops stay silent; user-initiated stops surface the
+      // failure so the session is not stuck "generating" with no feedback.
+      // isProcessing stays untouched - it is driven by server events.
+      if (!silent) {
+        toast.error(t('toast.stopResponseFailed'))
+      }
     })
   }
 
