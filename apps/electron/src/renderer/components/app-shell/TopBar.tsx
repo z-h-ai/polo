@@ -3,7 +3,7 @@ import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbench
  * TopBar - The single global workbench bar (frozen POO-41 `.workbench-bar`
  * semantics, unified with the tab strip per the POO-70 hifi prototype).
  *
- * Layout: [traffic-light inset] [Brand lockup] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
+ * Layout: [traffic-light inset] [AppMenu (Polo logo dropdown)] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
  *
  * P70-NAV-01: this bar is the ONLY top navigation — the opened app tabs, the
  * current ProductSpace identity and the account menu live here, and there is no
@@ -34,6 +34,8 @@ import { useOptionalTheme } from "@/context/ThemeContext"
 import { navigate, routes } from "@/lib/navigate"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
+import { useOptionalActionRegistry } from "@/actions"
+import { AppMenu } from "@/components/AppMenu"
 import { getSessionTitle } from "@/utils/session"
 import type { ExecutionSummary } from "@polo-ai/shared/product-spaces"
 import {
@@ -88,6 +90,7 @@ export function TopBar() {
   const workbenchStyle = useClientWorkbenchStyle()
   const appShell = useOptionalAppShellContext()
   const productSpace = useOptionalProductSpaceContext()
+  const actionRegistry = useOptionalActionRegistry()
   const {
     activeTab,
     activeTabId,
@@ -229,22 +232,24 @@ export function TopBar() {
       )}
       style={{ ...workbenchStyle, height: "var(--topbar-height)", paddingLeft: trafficLightInset, paddingRight: 8 }}
     >
-      {/* === LEFT: Brand lockup === */}
+      {/* === LEFT: App menu (Polo logo dropdown) ===
+          This is the cross-platform application menu (Win/Linux have no native
+          menu bar). Handlers mirror the macOS native-menu broadcast consumers:
+          App.tsx onMenuNewChat/onMenuOpenSettings/onMenuKeyboardShortcuts and
+          AppShell's toggle listeners. The bar sits above NavigationProvider,
+          so every handler routes through the global navigate() event — same
+          contract as openSessionFromNotification below. */}
       <div className="pointer-events-auto flex flex-none items-center">
-        <button
-          type="button"
-          data-testid="topbar-brand"
-          onClick={activateHome}
-          aria-label={t("topbar.brand.home")}
-          className="titlebar-no-drag flex min-w-[82px] items-center gap-[9px] rounded-[8px] outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-w-[34px]"
-        >
-          <span className="grid size-[26px] flex-none place-items-center rounded-[8px] bg-foreground text-[13px] font-extrabold text-background">
-            P
-          </span>
-          <span className="text-[14px] font-bold tracking-[-0.03em] text-foreground max-md:hidden">
-            Polo
-          </span>
-        </button>
+        <AppMenu
+          onNewChat={() => navigate(routes.action.newSession())}
+          onNewWindow={() => { void window.electronAPI.menuNewWindow() }}
+          onOpenSettings={() => navigate(routes.view.settings())}
+          onOpenSettingsSubpage={(subpage) => navigate(routes.view.settings(subpage))}
+          onOpenKeyboardShortcuts={() => navigate(routes.view.settings('shortcuts'))}
+          onOpenStoredUserPreferences={() => navigate(routes.view.settings('preferences'))}
+          onToggleSidebar={actionRegistry ? () => actionRegistry.execute('view.toggleSidebar') : undefined}
+          onToggleFocusMode={actionRegistry ? () => actionRegistry.execute('view.toggleFocusMode') : undefined}
+        />
       </div>
 
       {/* === Tabs: Home tab + open web tabs === */}

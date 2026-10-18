@@ -131,6 +131,15 @@ export function useActionRegistry() {
   return context
 }
 
+/**
+ * Optional variant of `useActionRegistry` for components that can mount above
+ * or outside the provider in isolated tests (e.g. TopBar). Returns null when
+ * no registry is mounted; callers should degrade gracefully.
+ */
+export function useOptionalActionRegistry(): ActionRegistryContextType | null {
+  return useContext(ActionRegistryContext)
+}
+
 // ─────────────────────────────────────────────
 // Utility functions
 // ─────────────────────────────────────────────
