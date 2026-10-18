@@ -6,7 +6,9 @@
     "types": ["node", "bun"],
     "paths": {
       "@polo-ai/shared": ["./types/shared-protocol.d.ts"],
-      "@polo-ai/shared/protocol": ["./types/shared-protocol.d.ts"]
+      "@polo-ai/shared/protocol": ["./types/shared-protocol.d.ts"],
+      "@polo-ai/server-core/transport/client": ["./types/shared-protocol.d.ts"],
+      "@polo-ai/server-core/transport/codec": ["./types/shared-protocol.d.ts"]
     }
   },
   "include": ["app", "types", "**/*.ts", "**/*.tsx"],
