@@ -24,8 +24,9 @@ describe('genui builtin catalog descriptors', () => {
     const interactive = GENUI_BUILTIN_COMPONENT_DESCRIPTORS
       .filter(d => d.interactive)
       .map(d => d.type);
-    // action-buttons and form are the only ones whose clicks do anything.
-    expect(interactive.sort()).toEqual(['action-buttons', 'form']);
+    // action-buttons and form always carry clicks; data-table joined them when
+    // rowAction/detailTemplate started routing through the craft: pipeline.
+    expect(interactive.sort()).toEqual(['action-buttons', 'data-table', 'form']);
   });
 
   it('keeps descriptions single-line (they are injected into a tool description)', () => {

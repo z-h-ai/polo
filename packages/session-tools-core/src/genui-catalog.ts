@@ -46,7 +46,10 @@ export interface GenUiComponentDescriptor {
  */
 export const GENUI_BUILTIN_COMPONENT_DESCRIPTORS: readonly GenUiComponentDescriptor[] = [
   { type: 'stat-card', description: 'single metric with optional delta and trend', interactive: false },
-  { type: 'data-table', description: 'sortable file-backed table (rows via transform_data + "src", never inline)', interactive: false },
+  // data-table is interactive in the action-buttons/form sense: its optional
+  // rowAction/detailTemplate route through the same host-mediated craft:
+  // pipeline (a table without them simply has no clickable parts).
+  { type: 'data-table', description: 'sortable file-backed table (rows via transform_data + "src", never inline) with optional per-row actions and source links', interactive: true },
   { type: 'alert', description: 'info/success/warning/error banner', interactive: false },
   { type: 'progress', description: 'running/success/error indicator with optional percent', interactive: false },
   { type: 'action-buttons', description: '1-6 buttons that send a follow-up message or prefill the chat input', interactive: true },

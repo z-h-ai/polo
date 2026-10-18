@@ -58,6 +58,8 @@ interface ColumnDef {
   semantics?: 'rate' | 'share' | 'change'
   /** badge columns only: cell value → chip color; unmatched values stay neutral */
   badgeColors?: Record<string, 'info' | 'success' | 'warning' | 'error'>
+  /** iter/row-actions: render values as external links (http(s) value or { value, link }) */
+  link?: boolean
 }
 
 interface DatatableData {
@@ -337,12 +339,28 @@ class DatatableErrorBoundary extends React.Component<
 
 // ── Main component ───────────────────────────────────────────────────────────
 
+/**
+ * Opt-in row-level render hooks. Only the GenUI data-table passes these
+ * (GenUICard's DataTableView); the markdown ```datatable rich block never
+ * does, and with both undefined the component renders exactly as before.
+ *
+ * - renderColumnCell replaces a cell's content; it receives the default node
+ *   (formatCell output) so callers can wrap it or discard it for a custom one.
+ * - renderRowAction appends a trailing, non-sortable, non-exported action
+ *   column with one control per row (group headers/empty rows span it).
+ */
 export interface MarkdownDatatableBlockProps {
   code: string
   className?: string
+  renderColumnCell?: (
+    col: ColumnDef,
+    row: Record<string, unknown>,
+    defaultCell: React.ReactNode,
+  ) => React.ReactNode
+  renderRowAction?: (row: Record<string, unknown>) => React.ReactNode
 }
 
-export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlockProps) {
+export function MarkdownDatatableBlock({ code, className, renderColumnCell, renderRowAction }: MarkdownDatatableBlockProps) {
   const { t } = useTranslation()
   const { onReadFile } = usePlatform()
 
@@ -519,14 +537,24 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
 
   const groupColumnLabel = groupKey ? parsed.columns.find((c) => c.key === groupKey)?.label ?? groupKey : ''
 
+  // The optional GenUI action column widens every grid span by one.
+  const columnCount = parsed.columns.length + (renderRowAction ? 1 : 0)
+
   const renderRows = (rows: Record<string, unknown>[]) =>
     rows.map((row, i) => (
       <tr key={i} className="border-b border-foreground/[0.03] last:border-0 hover:bg-foreground/[0.015] transition-colors">
         {parsed.columns.map((col) => (
           <td key={col.key} className={cn('py-2 px-3 whitespace-nowrap', colAlign(col.type, col.align))}>
-            {formatCell(row[col.key], col)}
+            {renderColumnCell
+              ? renderColumnCell(col, row, formatCell(row[col.key], col))
+              : formatCell(row[col.key], col)}
           </td>
         ))}
+        {renderRowAction && (
+          <td className="py-2 px-3 whitespace-nowrap text-right">
+            {renderRowAction(row)}
+          </td>
+        )}
       </tr>
     ))
 
@@ -555,6 +583,7 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
                 </span>
               </th>
             ))}
+            {renderRowAction && <th className="py-2 px-3 whitespace-nowrap" aria-hidden="true" />}
           </tr>
         </thead>
         <tbody>
@@ -564,7 +593,7 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
                 className="cursor-pointer select-none"
                 onClick={() => toggleCollapsed(group.value)}
               >
-                <td colSpan={parsed.columns.length} className="py-2 px-3 bg-foreground/[0.03] border-b border-foreground/[0.06]">
+                <td colSpan={columnCount} className="py-2 px-3 bg-foreground/[0.03] border-b border-foreground/[0.06]">
                   <span className="inline-flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
                     <ChevronRight className={cn('w-3 h-3 transition-transform', !collapsedGroups.has(group.value) && 'rotate-90')} />
                     {groupColumnLabel}: {group.value}
@@ -576,7 +605,7 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
             </React.Fragment>
           )) : processedRows.length ? renderRows(processedRows) : (
             <tr>
-              <td colSpan={parsed.columns.length} className="py-6 text-center text-muted-foreground text-[13px]">
+              <td colSpan={columnCount} className="py-6 text-center text-muted-foreground text-[13px]">
                 No rows
               </td>
             </tr>

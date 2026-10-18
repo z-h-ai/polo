@@ -687,6 +687,8 @@
   "genui.app.publishing": "发布中…",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "该卡片无法显示。",
+  "genui.dataTable.rowDetail": "详情",
+  "genui.dataTable.rowValuesMissing": "该行部分字段缺失。",
   "genui.form.requiredMissing": "此字段为必填项。",
   "genui.form.submit": "提交",
   "genui.unknownType": "未知卡片类型 \"{{type}}\" — 显示原始数据。",

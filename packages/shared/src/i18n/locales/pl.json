@@ -687,6 +687,8 @@
   "genui.app.publishing": "Publikowanie…",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "Nie można wyświetlić tej karty.",
+  "genui.dataTable.rowDetail": "Szczegóły",
+  "genui.dataTable.rowValuesMissing": "Brakuje niektórych wartości w tym wierszu.",
   "genui.form.requiredMissing": "To pole jest wymagane.",
   "genui.form.submit": "Wyślij",
   "genui.unknownType": "Nieznany typ karty \"{{type}}\" — wyświetlanie surowych danych.",

@@ -687,6 +687,8 @@
   "genui.app.publishing": "Közzététel folyamatban…",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "Ez a kártya nem jeleníthető meg.",
+  "genui.dataTable.rowDetail": "Részletek",
+  "genui.dataTable.rowValuesMissing": "A sor egyes értékei hiányoznak.",
   "genui.form.requiredMissing": "Ez a mező kötelező.",
   "genui.form.submit": "Küldés",
   "genui.unknownType": "Ismeretlen kártyatípus (\"{{type}}\") — nyers adatok megjelenítése.",

@@ -186,6 +186,12 @@ const GenUITableColumnSchema = z.object({
     .describe("Meaning of a percent column, deciding its rendering: 'change' (default) is an up/down move — signed, green/red; 'rate' is a level/ratio (loss rate, utilization) and 'share' a proportion of a whole — both rendered unsigned and neutral so 6.8% never looks like good news."),
   badgeColors: z.record(z.string(), z.enum(['info', 'success', 'warning', 'error'])).optional()
     .describe('badge columns only: cell value → color chip, e.g. {"高": "error", "中": "warning", "低": "success"}. Values not in the map stay neutral.'),
+  // Source link (iter/row-actions): the value renders as a link and opens via
+  // the platform URL handler — e.g. a clause number whose original text lives
+  // at a URL the model puts in the data. href comes from the row value itself
+  // (when it is an http(s) URL) or its { value, link } object form.
+  link: z.boolean().optional()
+    .describe('Render this column\'s values as links that open externally. The row value is either the URL itself or an object { value, link }.')
 });
 
 export const GenUIDataTableSchema = GenUIBase.extend({
@@ -196,6 +202,16 @@ export const GenUIDataTableSchema = GenUIBase.extend({
   src: z.string().min(1)
     .describe('Path to a JSON rows file written by transform_data (absolute, or relative to the session data dir). Inline rows NOT accepted.'),
   pageSize: z.number().int().min(5).max(100).optional(),
+  // Row-level actions (iter/row-actions) — all optional; a table without them
+  // renders exactly like before. Placeholders {{col.key}} are filled from the
+  // clicked row's values; missing values become empty strings.
+  rowAction: z.object({
+    label: z.string().max(20),
+    promptTemplate: z.string().max(500)
+      .describe('Sent as the next user message when the row\'s action button is clicked, with {{col.key}} placeholders replaced by that row\'s values. Example: "为 {{sku}} 生成补货工单".'),
+  }).strict().optional(),
+  detailTemplate: z.string().max(500).optional()
+    .describe('Per-row "Details" drill-down: {{col.key}} placeholders are replaced with that row\'s values and the filled text PREFILLS the chat input without sending (fill semantics, for follow-up questions).'),
   // Rejecting unknown keys here is what enforces "no inline rows": a `rows`
   // field fails validation with a clear message instead of being stripped.
 }).strict();
@@ -646,7 +662,7 @@ Use this instead of plain text when the answer is actionable or data-dense.
 
 **Components** (1-8 per call, discriminated by "type"):
 - \`stat-card\`: single metric + optional delta/trend
-- \`data-table\`: sortable/filterable table, file-backed ONLY — write rows with transform_data and pass "src"; inline rows are rejected
+- \`data-table\`: sortable/filterable table, file-backed ONLY — write rows with transform_data and pass "src"; inline rows are rejected. Optional per-row interactivity: "rowAction" (a button per row whose {{col.key}} template is sent as the next user message), "detailTemplate" (a per-row Details link that prefills the input without sending), "columns[].link" (render a column's values as external links).
 - \`alert\`: info/success/warning/error banner
 - \`progress\`: running/success/error indicator with optional percent
 - \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input

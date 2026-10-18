@@ -687,6 +687,8 @@
   "genui.app.publishing": "Publishing…",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "This card couldn't be displayed.",
+  "genui.dataTable.rowDetail": "Details",
+  "genui.dataTable.rowValuesMissing": "Some values in this row are missing.",
   "genui.form.requiredMissing": "This field is required.",
   "genui.form.submit": "Submit",
   "genui.unknownType": "Unknown card type \"{{type}}\" — showing raw data.",
