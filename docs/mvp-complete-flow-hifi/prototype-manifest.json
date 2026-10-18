@@ -455,7 +455,7 @@
   "default_story": "UI-refinement",
   "design": {
     "revision": "poo70-client-design-r2-20261004",
-    "sha256": "129d9151934df0ecc8e1581aab6e0a815fc4a97dd8bba76a6a40e4c791acef2c",
+    "sha256": "cc9fce7c9298cf5a6d2e88b8fbec0584096dc03f011f9e067dcea975ba2c9c96",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {

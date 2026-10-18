@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polo AI 组件库 · Component Library(dev@e7c0e6bd)</title>
+<meta name="provenance" content="token 值取自 .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css(fe5bfc32)与 workbench-review.css(75e75333);组件清单见 references/component-inventory.md;基线 dev@e7c0e6bd,2026-10-18。本页为展示产物,非设计权威。">
+<style>
+/* ============================================================
+   1) 设计令牌 —— 逐值取自 skill 权威 workbench-base.css :root
+   ============================================================ */
+:root{
+  --background:#fbfbfa;--surface:#ffffff;--foreground:#17181a;--accent:#6e56cf;
+  --info:#3275d8;--success:#2d8a5b;--destructive:#c84646;--on-accent:#ffffff;
+  --bg-elevated:var(--surface);--surface-strong:#f3f4f5;--border:#e6e7e9;
+  --fg-3:color-mix(in srgb,var(--foreground) 3%,var(--background));
+  --fg-5:color-mix(in srgb,var(--foreground) 5%,var(--background));
+  --fg-10:color-mix(in srgb,var(--foreground) 10%,var(--background));
+  --fg-20:color-mix(in srgb,var(--foreground) 20%,var(--background));
+  --fg-40:color-mix(in srgb,var(--foreground) 40%,var(--background));
+  --fg-50:color-mix(in srgb,var(--foreground) 50%,var(--background));
+  --fg-60:color-mix(in srgb,var(--foreground) 60%,var(--background));
+  --fg-70:color-mix(in srgb,var(--foreground) 70%,var(--background));
+  --fg-80:color-mix(in srgb,var(--foreground) 80%,var(--background));
+  --success-soft:color-mix(in srgb,var(--success) 10%,transparent);
+  --info-soft:color-mix(in srgb,var(--info) 10%,transparent);
+  --destructive-soft:color-mix(in srgb,var(--destructive) 10%,transparent);
+  --accent-soft:color-mix(in srgb,var(--accent) 12%,transparent);
+  --overlay:color-mix(in srgb,var(--foreground) 42%,transparent);
+  --shadow-minimal:0 1px 2px rgba(23,24,26,.06),0 1px 4px rgba(23,24,26,.03);
+  --shadow-middle:0 14px 34px rgba(23,24,26,.10),0 2px 7px rgba(23,24,26,.04);
+  --shadow-panel:0 20px 44px rgba(23,24,26,.14),0 3px 9px rgba(23,24,26,.06);
+  --radius-xs:4px;--radius-sm:6px;--radius-md:8px;--radius-inner:10px;--radius-lg:12px;
+  --radius-edge:14px;--radius-card:20px;--radius-pill:9999px;
+  --transition-fast:.14s ease-out;--transition-state:.28s ease-out;
+  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+}
+[data-theme="dark"]{
+  --background:#18191b;--surface:#222326;--foreground:#f4f3f1;--accent:#8c78df;
+  --info:#6da3ec;--success:#5aae80;--destructive:#e06a6a;--surface-strong:#252629;--border:#34363b;
+  --shadow-minimal:0 1px 3px rgba(0,0,0,.24);--shadow-middle:0 20px 44px rgba(0,0,0,.34);--shadow-panel:0 24px 56px rgba(0,0,0,.42);
+}
+/* ============================================================
+   2) 基础重置(与 workbench-base.css 同款)
+   ============================================================ */
+*{box-sizing:border-box}
+html{min-width:320px;font-size:15px;font-optical-sizing:auto;scroll-behavior:smooth}
+body{min-width:320px;margin:0;color:var(--foreground);background:var(--background);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+button,input,textarea,select{color:inherit;font:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--accent);outline-offset:3px}
+[hidden]{display:none!important}
+.icon{display:inline-block;width:16px;height:16px;flex:0 0 auto}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+@keyframes dialog-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes state-spin{to{transform:rotate(360deg)}}
+.spinner{width:12px;height:12px;border:2px solid color-mix(in srgb,currentColor 24%,transparent);border-top-color:currentColor;border-radius:50%;display:inline-block;animation:state-spin .7s linear infinite}
+/* ============================================================
+   3) workbench 组件类(子集,逐值照抄权威 CSS;页内演示直接消费)
+   ============================================================ */
+.workbench-bar{position:sticky;z-index:20;top:0;display:flex;align-items:center;gap:12px;height:64px;padding:0 28px;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--background) 92%,transparent);backdrop-filter:blur(18px)}
+.brand-lockup{display:flex;min-width:82px;align-items:center;gap:9px;padding:0;border:0;background:transparent;color:var(--foreground);font-size:14px;font-weight:720;letter-spacing:-.03em}
+.brand-mark{display:grid;width:26px;height:26px;place-items:center;border-radius:8px;background:var(--foreground);color:var(--background);font-size:13px;font-weight:800}
+.mac-window-controls{display:flex;align-items:center;gap:8px;flex:0 0 auto;width:52px;height:16px;margin-right:12px;user-select:none}
+.mac-window-dot{display:block;flex:0 0 12px;width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+.mac-window-dot.close{background:#ff5f57}.mac-window-dot.minimize{background:#febc2e}.mac-window-dot.fullscreen{background:#28c840}
+.tabs{display:flex;min-width:0;height:100%;flex:1 1 auto;align-items:center;gap:4px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{display:inline-flex;min-width:98px;max-width:190px;height:36px;flex:0 0 auto;align-items:center;border-radius:9px;color:var(--fg-50);font-size:12px;white-space:nowrap}
+.tab:hover{background:var(--surface-strong);color:var(--foreground)}
+.tab.active{background:var(--surface);color:var(--foreground);box-shadow:var(--shadow-minimal)}
+.tab-activate{display:inline-flex;min-width:0;height:36px;flex:1;align-items:center;gap:7px;padding:0 4px 0 10px;overflow:hidden;border:0;background:transparent;color:inherit}
+.tab-activate>span:nth-child(2){overflow:hidden;text-overflow:ellipsis}
+.tab .tab-icon{display:grid;width:18px;height:18px;place-items:center;border-radius:4px;background:var(--accent-soft);color:var(--accent)}
+.tab .tab-icon .icon{width:13px;height:13px}
+.tab-run-dot{width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--success);box-shadow:0 0 0 2px var(--success-soft)}
+.tab-close{position:relative;box-sizing:border-box;width:24px;height:24px;flex:0 0 auto;margin-right:3px;padding:0;border:0;background:transparent;color:var(--fg-40)}
+.tab-close::before,.tab-close::after{content:"";position:absolute;left:50%;top:50%;width:10px;height:1.5px;border-radius:1px;background:currentColor;transform-origin:center;pointer-events:none}
+.tab-close::before{transform:translate(-50%,-50%) rotate(45deg)}
+.tab-close::after{transform:translate(-50%,-50%) rotate(-45deg)}
+.tab-close:hover{background:var(--fg-10);color:var(--foreground)}
+.home-tab{display:inline-flex;height:36px;flex:0 0 auto;align-items:center;justify-content:center;gap:8px;padding:0 12px;border:0;border-radius:9px;background:transparent;color:var(--fg-50);font-size:12px;font-weight:620}
+.home-tab:hover{background:var(--surface-strong);color:var(--foreground)}
+.home-tab.active{background:var(--surface);color:var(--foreground);box-shadow:var(--shadow-minimal)}
+.bar-actions{display:flex;flex:0 0 auto;align-items:center;gap:8px}
+.bar-button,.icon-button,.avatar-button{border:0;background:transparent}
+.bar-button{display:flex;height:34px;align-items:center;gap:7px;padding:0 9px;border-radius:9px;color:var(--fg-60);font-size:12px;font-weight:500;white-space:nowrap}
+.bar-button:hover{background:var(--surface-strong);color:var(--foreground)}
+.icon-button{position:relative;display:inline-grid;width:32px;height:32px;place-items:center;border-radius:var(--radius-sm);color:var(--fg-50)}
+.icon-button:hover{background:var(--fg-5);color:var(--foreground)}
+.avatar-button{display:grid;width:28px;height:28px;place-items:center;margin-left:3px;border-radius:var(--radius-pill);background:var(--foreground);color:var(--background);font-size:11px;font-weight:600}
+.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--fg-40)}
+.status-dot.running{background:var(--success);box-shadow:0 0 0 3px var(--success-soft)}
+.notification-dot{position:absolute;top:6px;right:6px;width:5px;height:5px;border:1px solid var(--background);border-radius:50%;background:var(--info)}
+.space-indicator{display:flex;min-width:0;max-width:180px;height:36px;align-items:center;gap:8px;padding:0 4px;color:var(--foreground)}
+.space-avatar{display:grid;width:26px;height:26px;flex:0 0 auto;place-items:center;border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:600}
+.space-copy{display:grid;min-width:0;gap:2px;flex:1}
+.space-copy strong{overflow:hidden;color:var(--foreground);font-size:13px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.connection-banner{display:grid;width:100%;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;margin-bottom:8px;padding:9px 11px;border:1px solid color-mix(in srgb,var(--info) 42%,var(--border));border-radius:var(--radius-md);background:var(--info-soft);color:var(--foreground);box-shadow:var(--shadow-minimal)}
+.connection-icon{display:grid;width:30px;height:30px;place-items:center;border-radius:var(--radius-sm);background:var(--surface);color:var(--info)}
+.connection-copy{display:grid;min-width:0;gap:2px}
+.connection-copy strong{font-size:12px;font-weight:650}
+.connection-copy small{color:var(--fg-60);font-size:10px;line-height:1.4}
+.eyebrow{margin:0 0 7px;color:var(--fg-50);font-size:11px;font-weight:500;letter-spacing:.75px;text-transform:uppercase}
+.home-hero{display:flex;align-items:flex-end;justify-content:space-between;gap:28px;margin-bottom:32px}
+.home-hero h1{margin:0;font-size:clamp(30px,3vw,38px);font-weight:750;letter-spacing:-.055em;line-height:1.08}
+.home-hero p:last-child{max-width:690px;margin:13px 0 0;color:var(--fg-60);font-size:15px;line-height:1.65}
+.home-context-link{display:grid;min-width:210px;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 10px;border:1px solid transparent;border-radius:var(--radius-lg);background:transparent;color:var(--fg-70);text-align:left}
+.home-context-link:hover{background:var(--fg-5);color:var(--foreground)}
+.home-context-link>.icon:first-child{color:var(--accent)}
+.home-context-link>.icon:last-child{width:14px;height:14px;color:var(--fg-40)}
+.home-context-link span{display:grid;gap:3px}
+.home-context-link strong{font-size:13px;font-weight:600}
+.home-context-link small{color:var(--fg-50);font-size:11px}
+.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+.section-header h2{margin:0;font-size:20px;font-weight:720;letter-spacing:-.03em}
+.section-header p{max-width:720px;margin:6px 0 0;color:var(--fg-60);font-size:14px;line-height:1.45}
+.section-link,.text-button{padding:3px 0;border:0;background:transparent;color:var(--accent);font-size:12px;font-weight:500}
+.section-link:hover,.text-button:hover{text-decoration:underline}
+.card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.product-card,.result-card,.detail-card{min-width:0;padding:20px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow-minimal)}
+.product-card{display:flex;min-height:222px;flex-direction:column;transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease}
+.product-card:hover,.result-card:hover{border-color:color-mix(in srgb,var(--accent) 42%,var(--border));transform:translateY(-3px);box-shadow:var(--shadow-middle)}
+.home-app-grid .product-card:hover{border-color:var(--fg-20);transform:translateY(-1px);box-shadow:var(--shadow-middle)}
+.home-app-grid .card-heading{display:grid;gap:0}
+.home-app-grid .app-art{width:42px;height:42px;margin-bottom:26px;border-radius:13px}
+.assistant-card .app-art{background:var(--accent-soft);color:var(--accent)}
+.card-kicker{margin:0 0 4px;color:var(--accent);font-size:9px;font-weight:720;letter-spacing:.08em;text-transform:uppercase}
+.card-heading{display:flex;min-width:0;align-items:flex-start;gap:10px}
+.app-art{display:grid;width:38px;height:38px;flex:0 0 auto;place-items:center;border-radius:var(--radius-md);background:var(--accent-soft);color:var(--accent)}
+.app-art.compact{width:30px;height:30px;border-radius:var(--radius-sm)}
+.app-art.teal{background:var(--success-soft);color:var(--success)}
+.app-art.amber{background:var(--info-soft);color:var(--info)}
+.app-art.ink{background:var(--fg-10);color:var(--foreground)}
+.app-art .icon{width:18px;height:18px}
+.card-title{min-width:0}
+.card-title h3{overflow:hidden;margin:1px 0 3px;font-size:15px;font-weight:720;text-overflow:ellipsis;white-space:nowrap}
+.home-app-grid .card-title h3{font-size:16px}
+.source-line{overflow:hidden;margin:0;color:var(--fg-50);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
+.home-app-grid .source-line{font-size:12px}
+.product-description,.result-card p{margin:18px 0 0;color:var(--fg-60);font-size:12px;line-height:1.55}
+.home-app-grid .product-description{max-width:34rem;margin-top:17px;font-size:13px;line-height:1.6}
+.status-line{display:flex;align-items:center;gap:6px;margin-top:auto;padding-top:14px}
+.status{display:inline-flex;min-height:20px;align-items:center;gap:5px;padding:2px 7px;border-radius:var(--radius-xs);font-size:10px;font-weight:500;line-height:1.4;white-space:nowrap}
+.status::before{width:5px;height:5px;border-radius:50%;background:currentColor;content:""}
+.status.good{background:var(--success-soft);color:var(--success)}
+.status.info{background:var(--info-soft);color:var(--info)}
+.status.bad{background:var(--destructive-soft);color:var(--destructive)}
+.status.neutral{background:var(--fg-5);color:var(--fg-60)}
+.card-action{min-height:30px;margin-left:auto;padding:0 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:transparent;color:var(--foreground);font-size:12px;font-weight:500;white-space:nowrap}
+.card-action:hover{border-color:var(--accent);color:var(--accent)}
+.card-action:disabled{cursor:not-allowed;opacity:.48}
+.card-action.primary{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
+.home-app-grid .card-action{border-color:transparent;background:transparent;color:var(--fg-60)}
+.home-app-grid .card-action:hover{border-color:transparent;background:var(--fg-5);color:var(--foreground)}
+.home-app-grid .assistant-card .home-primary-action{min-height:32px;padding:0 12px;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);font-weight:650;box-shadow:var(--shadow-minimal)}
+.assistant-card-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-left:auto}
+.button{display:inline-flex;min-height:32px;align-items:center;justify-content:center;gap:6px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:transparent;color:var(--foreground);font-size:12px;font-weight:500;white-space:nowrap}
+.button:hover{background:var(--fg-5)}
+.button:disabled{cursor:not-allowed;opacity:.48}
+.button:disabled:hover{background:transparent}
+.button.primary{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
+.button.primary:hover{background:color-mix(in srgb,var(--accent) 86%,#000)}
+.button.danger{border-color:var(--destructive);background:var(--destructive);color:#fff}
+.button.quiet{min-height:28px}
+.circle-filter-row{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+.circle-filter{min-height:30px;padding:0 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--fg-60);font-size:11px}
+.circle-filter:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--border));color:var(--foreground)}
+.circle-filter.active{border-color:color-mix(in srgb,var(--accent) 42%,var(--border));background:var(--accent-soft);color:var(--accent);font-weight:600}
+.circle-filter span{margin-left:4px;color:var(--fg-50);font-size:9px}
+.r14-toolbar{display:flex;align-items:end;flex-wrap:wrap;gap:16px;margin-bottom:24px}
+.r14-toolbar label{display:grid;gap:6px;font-size:12px;color:var(--fg-60)}
+.r14-toolbar .r14-search{flex:1;min-width:220px}
+.r14-toolbar input,.r14-toolbar select{min-height:38px;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:var(--foreground);font:inherit;outline:none}
+.r14-toolbar input:focus,.r14-toolbar select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.r14-tabs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 24px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.r14-tabs .button.selected{color:var(--accent);background:var(--accent-soft);border-color:transparent}
+.circle-list{display:grid;gap:12px}
+.circle-card{display:grid;grid-template-columns:52px minmax(0,1fr) auto;align-items:center;gap:20px;padding:24px;border:1px solid var(--border);border-radius:20px;background:var(--surface);box-shadow:var(--shadow-minimal)}
+.circle-card:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--border));box-shadow:var(--shadow-middle)}
+.circle-avatar{display:grid;width:52px;height:52px;flex:0 0 52px;place-items:center;border-radius:16px;background:var(--accent-soft);color:var(--accent);font-size:20px;font-weight:700}
+.circle-list [data-circle-kind=growth] .circle-avatar{background:color-mix(in srgb,var(--success) 10%,var(--background));color:var(--success)}
+.circle-list [data-circle-kind=data] .circle-avatar{background:var(--fg-5);color:var(--fg-60)}
+.circle-list [data-circle-kind=annual] .circle-avatar{background:color-mix(in srgb,var(--accent) 13%,var(--background));color:var(--accent)}
+.circle-card-copy{display:block;min-width:0}
+.circle-card-title{display:block;margin:0}
+.circle-list .circle-card h2{font-size:18px;line-height:1.45;font-weight:650;margin:0 0 4px;letter-spacing:-.02em}
+.circle-creator{font-size:12px;color:var(--fg-50);margin:0 0 10px}
+.circle-update{font-size:13px;line-height:1.6;color:var(--fg-70);margin:8px 0 12px}
+.circle-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;font-size:12px;line-height:1.6;color:var(--fg-50)}
+.circle-term{color:var(--fg-70)}
+.circle-count{padding-left:16px;border-left:1px solid var(--border)}
+.circle-list .circle-open{align-self:center;white-space:nowrap;border-color:transparent;background:transparent;color:var(--accent);font-size:13px}
+.circle-list .circle-open:hover{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.circle-source-pill{display:inline-flex;max-width:100%;padding:3px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:9px;font-weight:600;line-height:1.3}
+.subpage-heading{display:flex;align-items:flex-start;gap:18px;margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)}
+.subpage-heading>div{min-width:0;flex:1}
+.subpage-heading h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.03em;line-height:1.25}
+.subpage-heading p{max-width:690px;margin:7px 0 0;color:var(--fg-60);font-size:13px;line-height:1.5}
+.back-button{display:inline-flex;min-height:30px;align-items:center;gap:5px;padding:0 8px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--fg-60);font-size:11px}
+.back-button:hover{background:var(--fg-5);color:var(--foreground)}
+.empty-note{padding:18px;border:1px dashed var(--border);border-radius:var(--radius-lg);color:var(--fg-60);font-size:12px}
+.empty-state{display:grid;justify-items:center;gap:10px;padding:28px 20px;border:1px solid var(--border);border-radius:var(--radius-lg);color:var(--fg-60);text-align:center}
+.empty-state h2{margin:0;color:var(--foreground);font-size:18px}
+.empty-state p{max-width:440px;margin:0;font-size:12px}
+.home-zero-guide{display:grid;justify-items:center;gap:10px;padding:34px 20px;border:1px dashed var(--border);border-radius:var(--radius-card);text-align:center}
+.home-zero-guide p{max-width:460px;margin:0;color:var(--fg-60);font-size:12px}
+.modal-layer{position:absolute;z-index:50;inset:0;display:grid;place-items:center;padding:20px;background:var(--overlay)}
+.dialog{width:min(520px,100%);overflow:hidden;border:1px solid var(--border);border-radius:var(--radius-edge);background:var(--surface);box-shadow:var(--shadow-panel);animation:dialog-in var(--transition-fast)}
+.dialog-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 20px 14px}
+.dialog-header h2{margin:0;font-size:16px;font-weight:600}
+.dialog-header p{margin:6px 0 0;color:var(--fg-60);font-size:13px;line-height:1.5}
+.dialog-body{padding:0 20px 18px}
+.dialog-footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:13px 20px;border-top:1px solid var(--border)}
+.close-button{display:grid;width:28px;height:28px;place-items:center;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--fg-50)}
+.close-button:hover{background:var(--fg-5);color:var(--foreground)}
+.dialog-list{overflow:hidden;border:1px solid var(--border);border-radius:var(--radius-md)}
+.dialog-row{display:flex;align-items:center;gap:10px;padding:11px;border-bottom:1px solid var(--border)}
+.dialog-row:last-child{border-bottom:0}
+.row-copy{display:grid;min-width:0;flex:1;gap:3px}
+.row-copy strong{font-size:12px;font-weight:500}
+.row-copy small{color:var(--fg-50);font-size:10px}
+.row-state{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--info);font-size:10px}
+.row-state.good{color:var(--success)}
+.row-state.bad{color:var(--destructive)}
+.row-state.stopping{color:var(--info)}
+.dialog-note{margin:11px 0 0;color:var(--fg-50);font-size:11px;line-height:1.45}
+.impact-card{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-elevated)}
+.impact-card>.icon{color:var(--info)}
+.impact-card span{display:grid;gap:3px}
+.impact-card strong{font-size:12px}
+.impact-card small{color:var(--fg-50);font-size:10px;line-height:1.4}
+.popover{position:absolute;top:calc(100% + 8px);border:1px solid var(--border);border-radius:var(--radius-inner);background:var(--background);box-shadow:var(--shadow-panel)}
+.account-menu{right:20px;width:min(294px,calc(100vw - 24px));padding:6px;background:var(--surface)}
+.menu-label,.menu-section-title{padding:8px 9px 5px;color:var(--fg-40);font-size:11px;font-weight:500;letter-spacing:.75px;text-transform:uppercase}
+.menu-row{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;padding:7px 8px;border:0;border-radius:var(--radius-sm);background:transparent;text-align:left}
+.menu-row:hover{background:var(--fg-5)}
+.menu-row .menu-copy{display:grid;min-width:0;flex:1;gap:2px}
+.menu-row b{font-size:13px;font-weight:500}
+.menu-row small{color:var(--fg-50);font-size:11px;line-height:1.35}
+.menu-row .check{width:15px;height:15px;color:var(--success)}
+.menu-divider{height:1px;margin:5px 3px;background:var(--border)}
+.menu-row .menu-icon{display:grid;width:26px;height:26px;place-items:center;border-radius:var(--radius-sm);background:var(--fg-5);color:var(--fg-60)}
+.menu-row .menu-icon .icon{width:14px;height:14px}
+.menu-row .menu-arrow{width:13px;height:13px;color:var(--fg-40)}
+.toast{position:absolute;z-index:80;right:20px;bottom:20px;max-width:390px;padding:10px 13px;border-left:3px solid var(--accent);border-radius:var(--radius-md);background:var(--foreground);color:var(--background);box-shadow:var(--shadow-middle);font-size:12px;line-height:1.4;animation:toast-in var(--transition-fast)}
+.notice{display:grid;grid-template-columns:8px minmax(0,1fr);gap:9px;padding:10px;border:0;border-radius:var(--radius-sm);background:transparent;text-align:left}
+.notice:hover{background:var(--fg-5)}
+.notice-mark{width:6px;height:6px;margin-top:5px;border-radius:50%;background:var(--info)}
+.notice.success .notice-mark{background:var(--success)}
+.notice strong{display:block;font-size:12px;font-weight:500}
+.notice p{margin:3px 0 0;color:var(--fg-60);font-size:12px;line-height:1.4}
+.notice small{display:inline-block;margin-top:4px;color:var(--fg-50);font-size:10px}
+.auth-ambient{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 20% 16%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 33%),radial-gradient(circle at 86% 84%,color-mix(in srgb,var(--success) 8%,transparent),transparent 36%)}
+.login-split{position:relative;display:grid;width:min(960px,100%);min-height:570px;grid-template-columns:1.08fr .92fr;overflow:hidden;border:1px solid var(--border);border-radius:24px;background:var(--surface);box-shadow:var(--shadow-panel)}
+.login-story{display:flex;flex-direction:column;justify-content:space-between;padding:54px;background:var(--fg-3)}
+.auth-brand{display:flex;align-items:center;gap:9px;padding:4px 8px 16px;font-size:14px;font-weight:700}
+.login-story h1{max-width:460px;margin:24px 0 0;font-size:36px;line-height:1.12;letter-spacing:-.04em}
+.login-story p{max-width:430px;color:var(--fg-50);font-size:14px;line-height:1.65}
+.value-points{display:grid;gap:12px}
+.value-point{display:flex;align-items:center;gap:10px;font-size:12px}
+.value-point>span{display:grid;width:21px;height:21px;flex:0 0 auto;place-items:center;border-radius:50%;background:var(--success-soft);color:var(--success)}
+.login-panel{display:flex;flex-direction:column;justify-content:center;padding:46px}
+.login-panel h2{margin:0;font-size:22px}
+.login-panel>p:not(.eyebrow){margin:8px 0 0;color:var(--fg-50);font-size:12px;line-height:1.55}
+.auth-form{display:grid;gap:15px;margin-top:20px}
+.auth-field{display:grid;gap:7px;color:var(--fg-60);font-size:11px;font-weight:600}
+.auth-field>input,.auth-phone-input{width:100%;height:44px;overflow:hidden;border:1px solid var(--border);border-radius:10px;outline:0;background:var(--fg-3)}
+.auth-field>input{padding:0 12px}
+.auth-phone-input{display:grid;grid-template-columns:54px minmax(0,1fr)}
+.auth-phone-input b{display:grid;place-items:center;border-right:1px solid var(--border);color:var(--fg-50);font-size:12px;font-weight:500}
+.auth-phone-input input{min-width:0;padding:0 12px;border:0;outline:0;background:transparent}
+.auth-field>input:focus,.auth-phone-input:focus-within{border-color:color-mix(in srgb,var(--accent) 45%,var(--border));box-shadow:0 0 0 3px var(--accent-soft)}
+.auth-primary{min-height:40px}
+.trust-row{margin-top:18px;padding:10px 12px;border-radius:9px;background:var(--fg-3);color:var(--fg-50);font-size:10px;line-height:1.5}
+.method-switch{display:flex;align-items:center;gap:6px;justify-self:start;min-height:28px;padding:0;border:0;background:transparent;color:var(--accent);font-size:11px;font-weight:500}
+.method-switch:hover{text-decoration:underline}
+.system-state-card{width:min(520px,100%);padding:30px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow-panel);text-align:center}
+.system-state-card h1{margin:0;color:var(--foreground);font-size:24px;font-weight:720;letter-spacing:-.035em}
+.state-description{margin:9px 0 0;color:var(--fg-60);font-size:13px;line-height:1.58}
+.state-icon{display:grid;width:52px;height:52px;place-items:center;margin:0 auto 18px;border-radius:var(--radius-edge);background:var(--info-soft);color:var(--info)}
+.state-icon.bad{background:var(--destructive-soft);color:var(--destructive)}
+.state-icon .icon{width:25px;height:25px}
+.state-facts{display:grid;overflow:hidden;margin:22px 0 0;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);text-align:left}
+.state-facts div{display:grid;grid-template-columns:116px minmax(0,1fr);gap:12px;padding:11px 13px;border-bottom:1px solid var(--border);font-size:12px}
+.state-facts div:last-child{border-bottom:0}
+.state-facts dt{color:var(--fg-50)}
+.state-facts dd{min-width:0;margin:0;overflow-wrap:anywhere}
+.state-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:22px}
+.system-progress{height:7px;overflow:hidden;margin-top:24px;border-radius:var(--radius-pill);background:var(--fg-10)}
+.system-progress span{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width var(--transition-state)}
+.system-progress-label{margin:8px 0 0;color:var(--fg-50);font-size:10px}
+.progress-track{height:6px;overflow:hidden;margin-bottom:16px;border-radius:var(--radius-pill);background:var(--fg-10)}
+.progress-track span{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width var(--transition-state)}
+.switch-progress-summary{display:flex;justify-content:space-between;margin:18px 0 8px;color:var(--fg-60);font-size:11px}
+.switch-progress-summary strong{color:var(--foreground)}
+.credits-banner{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--destructive) 35%,var(--border));border-radius:var(--radius-md);background:var(--destructive-soft);color:var(--fg-70);font-size:12px;line-height:1.45}
+.credits-banner .icon{color:var(--destructive)}
+.credits-banner b{color:var(--foreground)}
+.credits-banner .button{margin-left:auto;flex:0 0 auto}
+.credits-banner.info{border-color:color-mix(in srgb,var(--info) 35%,var(--border));background:var(--info-soft)}
+.credits-banner.info .icon{color:var(--info)}
+.settings-layout{display:grid;grid-template-columns:190px minmax(0,1fr);gap:22px;align-items:start}
+.settings-nav-card{display:grid;gap:4px;padding:8px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow-minimal)}
+.settings-nav-card button{min-height:36px;padding:0 11px;border:0;border-radius:var(--radius-md);background:transparent;color:var(--fg-60);text-align:left}
+.settings-nav-card button.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
+.settings-row{display:flex;min-height:62px;align-items:center;justify-content:space-between;gap:18px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface)}
+.settings-row+.settings-row{margin-top:8px}
+.settings-row>span{display:grid;gap:3px;min-width:0}
+.settings-row strong{color:var(--foreground);font-size:12px}
+.settings-row small{color:var(--fg-50);font-size:10px;line-height:1.45}
+.settings-row.danger-row{border-color:color-mix(in srgb,var(--destructive) 22%,var(--border))}
+.table-card{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-minimal)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{padding:10px 12px;background:var(--bg-elevated);color:var(--fg-50);font-size:10px;font-weight:500;text-align:left;white-space:nowrap}
+td{padding:12px;border-top:1px solid var(--border);color:var(--fg-60);white-space:nowrap}
+.message{display:grid;width:min(100%,700px);grid-template-columns:auto minmax(0,1fr);gap:10px}
+.message.user{margin-left:auto;grid-template-columns:minmax(0,1fr) auto}
+.message.user .message-avatar{order:2}
+.message.user>div{order:1;padding:10px 13px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--fg-5)}
+.message.assistant>div{padding:11px 13px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface)}
+.message-avatar{display:grid;width:28px;height:28px;place-items:center;border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:600}
+.message small{color:var(--fg-50);font-size:10px}
+.message p{margin:5px 0 0;font-size:13px;line-height:1.58}
+.tool-call{display:flex;align-items:center;gap:9px;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-elevated)}
+.tool-call>.icon{color:var(--accent)}
+.tool-call>span:nth-child(2){display:grid;flex:1;gap:2px}
+.tool-call strong{font-size:11px}
+.tool-call small{font-size:9px}
+.tool-actions{display:flex;align-items:center;gap:6px}
+.composer-wrap{width:100%;max-width:840px;margin:3px auto 0;padding:0 16px 16px}
+.chat-composer{overflow:hidden;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-middle)}
+.chat-composer>textarea{display:block;width:100%;min-height:84px;max-height:260px;padding:15px 18px 11px;resize:none;border:0;outline:0;background:transparent;font-size:13px;line-height:1.5}
+.composer-footer{display:grid;min-height:44px;grid-template-columns:auto minmax(0,auto) 1fr auto;align-items:center;gap:4px;padding:7px 8px;border-top:1px solid var(--border)}
+.composer-tool{display:inline-flex;min-width:0;height:28px;align-items:center;gap:6px;padding:0 8px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--fg-60);font-size:10px;white-space:nowrap}
+.composer-tool:hover{background:var(--fg-5);color:var(--foreground)}
+.composer-tool .icon{width:14px;height:14px}
+.composer-send{display:grid;width:30px;height:30px;place-items:center;border:0;border-radius:50%;background:var(--foreground);color:var(--background)}
+.composer-send .icon{width:15px;height:15px}
+.question-card{display:grid;gap:10px;margin-top:10px;padding:12px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:var(--radius-md);background:var(--accent-soft)}
+.question-card strong{font-size:13px}
+.question-actions{display:flex;gap:8px}
+.chat-file-row{display:flex;align-items:center;gap:9px;margin-top:8px;padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-elevated)}
+.chat-file-row .icon{color:var(--accent)}
+.chat-file-row>div{display:grid;min-width:0;flex:1;gap:2px}
+.chat-file-row strong{font-size:12px;font-weight:500}
+.chat-file-row small{color:var(--fg-50);font-size:10px}
+.assistant-mode-badge{display:inline-flex;height:30px;align-items:center;gap:6px;padding:0 9px;border:0;border-radius:var(--radius-md);background:var(--info-soft);color:var(--info);box-shadow:var(--shadow-minimal);font-size:11px;font-weight:600}
+.session-row{display:grid;gap:3px;width:100%;padding:9px 10px;border:0;border-radius:var(--radius-sm);background:transparent;text-align:left}
+.session-row:hover,.session-row.active{background:var(--fg-5)}
+.session-row strong{overflow:hidden;font-size:12px;font-weight:500;text-overflow:ellipsis;white-space:nowrap}
+.session-row span{color:var(--fg-50);font-size:10px}
+.assistant-list-label{margin:9px 9px 4px;color:var(--fg-40);font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.class-chip{display:inline-flex;align-items:center;font-size:10px;font-weight:500;border-radius:var(--radius-xs);padding:1px 5px;white-space:nowrap}
+.class-chip.reuse{background:var(--success-soft);color:var(--success)}
+.class-chip.adjust{background:var(--info-soft);color:var(--info)}
+.class-chip.new{background:var(--destructive-soft);color:var(--destructive)}
+.class-chip.integ{background:var(--accent-soft);color:var(--accent)}
+.class-chip.state,.class-chip.cross{background:var(--fg-5);color:var(--fg-60)}
+.kbd{display:inline-flex;min-height:20px;align-items:center;padding:1px 6px;border:1px solid var(--border);border-bottom-width:2px;border-radius:var(--radius-sm);background:var(--surface);box-shadow:var(--shadow-minimal);font-family:var(--font-mono);font-size:11px}
+/* review.css:hairline 顶栏增量(本页演示容器内生效) */
+.lib-topbar-demo .workbench-bar{border-bottom-color:transparent}
+.lib-topbar-demo .workbench-bar[data-scrolled="true"]{border-bottom-color:var(--border)}
+/* ============================================================
+   4) 本页展示层样式(lib-*)
+   ============================================================ */
+.lib-main{max-width:1260px;margin:0 auto;padding:34px 44px 96px}
+.lib-nav{display:flex;gap:4px;flex:1 1 auto;align-items:center}
+.lib-nav a{display:inline-flex;height:32px;align-items:center;padding:0 10px;border-radius:8px;color:var(--fg-60);font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap}
+.lib-nav a:hover{background:var(--fg-5);color:var(--foreground)}
+.lib-section{margin-top:56px;scroll-margin-top:84px}
+.lib-section>header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:12px}
+.lib-section>header h2{margin:0;font-size:22px;font-weight:720;letter-spacing:-.03em}
+.lib-section>header .lib-anchor{font-family:var(--font-mono);font-size:11px;color:var(--fg-40)}
+.lib-lede{margin:10px 0 20px;color:var(--fg-60);font-size:13px;line-height:1.6;max-width:860px}
+.lib-panel{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--background);box-shadow:var(--shadow-minimal);margin-bottom:22px;overflow:hidden}
+.lib-panel-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:13px 18px;border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+.lib-panel-title h3{margin:0;font-size:14px;font-weight:650;letter-spacing:-.01em}
+.lib-panel-title .src{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--fg-50);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+.lib-panel-body{padding:22px}
+.lib-stage{position:relative;display:grid;gap:18px;padding:26px;background:var(--fg-3);border-radius:var(--radius-inner);overflow:hidden}
+.lib-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.lib-col{display:grid;gap:12px}
+.lib-note{margin:12px 2px 0;color:var(--fg-50);font-size:11px;line-height:1.6}
+.lib-note code,.src code,.lib-table code{font-family:var(--font-mono);font-size:10px;background:var(--fg-5);padding:1px 5px;border-radius:4px}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px}
+.swatch{border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);box-shadow:var(--shadow-minimal);overflow:hidden}
+.swatch .chip{height:52px}
+.swatch .meta{display:grid;gap:2px;padding:8px 10px}
+.swatch b{font-size:11px;font-weight:600}
+.swatch small{font-family:var(--font-mono);font-size:9px;color:var(--fg-50);overflow:hidden;text-overflow:ellipsis}
+.radius-demo{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:12px}
+.radius-box{display:grid;place-items:center;height:74px;border:1.5px solid var(--accent);background:var(--accent-soft);color:var(--accent);font-family:var(--font-mono);font-size:10px}
+.shadow-demo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.shadow-box{display:grid;place-items:center;height:96px;border-radius:var(--radius-card);background:var(--surface);font-family:var(--font-mono);font-size:10px;color:var(--fg-60)}
+.type-row{display:flex;align-items:baseline;gap:18px;padding:7px 0;border-bottom:1px dashed var(--border)}
+.type-row:last-child{border-bottom:0}
+.type-row code{font-family:var(--font-mono);font-size:10px;color:var(--fg-40);flex:0 0 190px}
+.icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.icon-cell{display:grid;justify-items:center;gap:7px;padding:13px 6px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:var(--fg-70)}
+.icon-cell:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--border));color:var(--accent)}
+.icon-cell .icon{width:var(--icon-demo-size,20px);height:var(--icon-demo-size,20px)}
+.icon-cell small{font-family:var(--font-mono);font-size:9px;color:var(--fg-50);max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.icon-group-label{margin:18px 0 8px;color:var(--fg-40);font-size:11px;font-weight:500;letter-spacing:.75px;text-transform:uppercase}
+.brand-tile{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;color:#fff}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.stat{padding:16px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-minimal)}
+.stat b{display:block;font-size:26px;font-weight:750;letter-spacing:-.03em}
+.stat small{color:var(--fg-50);font-size:11px;line-height:1.4}
+.lib-table td,.lib-table th{white-space:normal}
+.lib-table td code{font-size:10px}
+.op-item{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px dashed var(--border)}
+.op-item:last-child{border-bottom:0}
+.op-item b{color:var(--accent);font-family:var(--font-mono);font-size:12px}
+.op-item div{font-size:12px;color:var(--fg-70);line-height:1.55}
+.lib-switch{position:relative;display:inline-block;width:34px;height:20px;flex:0 0 auto}
+.lib-switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.lib-switch i{position:absolute;inset:0;border-radius:999px;background:var(--fg-20);transition:background var(--transition-fast)}
+.lib-switch i::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:var(--shadow-minimal);transition:transform var(--transition-fast)}
+.lib-switch input:checked+i{background:var(--accent)}
+.lib-switch input:checked+i::after{transform:translateX(14px)}
+.lib-switch input:focus-visible+i{outline:2px solid var(--accent);outline-offset:3px}
+.lib-seg{display:inline-flex;padding:3px;gap:2px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface)}
+.lib-seg button{min-height:26px;padding:0 10px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--fg-60);font-size:11px;font-weight:500}
+.lib-seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.alert{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;padding:11px 13px;border:1px solid transparent;border-radius:var(--radius-md);font-size:12px;line-height:1.5}
+.alert .icon{width:16px;height:16px;margin-top:1px}
+.alert b{display:block;font-size:12px}
+.alert.info{background:var(--info-soft);border-color:color-mix(in srgb,var(--info) 35%,var(--border));color:var(--fg-70)}
+.alert.info .icon{color:var(--info)}
+.alert.success{background:var(--success-soft);border-color:color-mix(in srgb,var(--success) 35%,var(--border));color:var(--fg-70)}
+.alert.success .icon{color:var(--success)}
+.alert.bad{background:var(--destructive-soft);border-color:color-mix(in srgb,var(--destructive) 35%,var(--border));color:var(--fg-70)}
+.alert.bad .icon{color:var(--destructive)}
+.alert.accent{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 35%,var(--border));color:var(--fg-70)}
+.alert.accent .icon{color:var(--accent)}
+.avatar-stack{display:flex;align-items:center}
+.avatar-stack .space-avatar{width:28px;height:28px;border:2px solid var(--surface);margin-left:-8px}
+.avatar-stack .space-avatar:first-child{margin-left:0}
+.avatar-more{display:grid;place-items:center;width:28px;height:28px;margin-left:-8px;border:2px solid var(--surface);border-radius:999px;background:var(--fg-10);color:var(--fg-60);font-size:10px;font-weight:600}
+.pair-code{display:flex;gap:8px;justify-content:center}
+.pair-code b{display:grid;place-items:center;width:42px;height:52px;border-radius:var(--radius-md);background:var(--fg-5);font-family:var(--font-mono);font-size:24px;font-weight:600}
+.lib-theme-toggle{display:inline-flex;height:32px;align-items:center;gap:6px;padding:0 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--fg-60);font-size:11px;font-weight:500}
+footer.lib-footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--border);color:var(--fg-50);font-size:11px;line-height:1.7}
+footer.lib-footer a{color:var(--accent);text-decoration:none}
+footer.lib-footer a:hover{text-decoration:underline}
+@media(max-width:1080px){.card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.lib-main{padding:26px 26px 80px}.shadow-demo{grid-template-columns:1fr}.settings-layout{grid-template-columns:1fr}}
+@media(max-width:760px){.login-split{min-height:0;grid-template-columns:minmax(0,1fr);border-radius:18px}.login-story{display:none}.login-panel{padding:28px 22px}.card-grid{grid-template-columns:minmax(0,1fr)}.circle-card{grid-template-columns:44px minmax(0,1fr) auto;gap:14px;padding:20px}.circle-avatar{width:44px;height:44px;font-size:18px;border-radius:14px}.lib-main{padding:20px 16px 72px}.lib-nav{display:none}}
+</style>
+</head>
+<body>
+
+<header class="workbench-bar">
+  <div class="mac-window-controls"><span class="mac-window-dot close"></span><span class="mac-window-dot minimize"></span><span class="mac-window-dot fullscreen"></span></div>
+  <div class="brand-lockup"><span class="brand-mark">P</span><span>Polo AI 组件库</span></div>
+  <nav class="lib-nav">
+    <a href="#tokens">1 令牌</a><a href="#icons">2 图标</a><a href="#tech">3 技术组件</a><a href="#biz">4 业务组件</a><a href="#inventory">5 清单与统计</a>
+  </nav>
+  <div class="bar-actions">
+    <button class="lib-theme-toggle" id="themeToggle"><span class="icon" data-icon="moon"></span><span id="themeLabel">Dark</span></button>
+    <a class="avatar-button" style="text-decoration:none" href="#inventory" title="组件清单">组件</a>
+  </div>
+</header>
+
+<main class="lib-main">
+
+  <section class="home-hero" style="margin-top:26px">
+    <div>
+      <p class="eyebrow">Polo AI · Design System Component Library</p>
+      <h1>组件库总览</h1>
+      <p>基于 <strong>dev@e7c0e6bd</strong>(2026-10-18)对 Mac App(Electron Renderer + packages/ui)的全量组件盘点,抽取封装为<strong>技术组件(含 Icon)</strong>与<strong>业务组件</strong>两层。全部样式值逐值取自设计系统 skill 权威令牌 <code>workbench-base.css</code> / <code>workbench-review.css</code>;组件来源以 <code>file</code> 标注,生产实现留在原模块,本页只做展示封装。</p>
+    </div>
+    <button class="home-context-link" onclick="document.getElementById('inventory').scrollIntoView()">
+      <span class="icon" data-icon="layers"></span>
+      <span><strong>组件清单</strong><small>108 + 74 + 165 个图标</small></span>
+      <span class="icon" data-icon="chevron-right"></span>
+    </button>
+  </section>
+
+  <!-- ================= 1 TOKENS ================= -->
+  <section class="lib-section" id="tokens">
+    <header><h2>1 · 设计令牌 Tokens</h2><span class="lib-anchor">.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css</span></header>
+    <p class="lib-lede">色彩 / 圆角 / 阴影 / 字号取自 skill 权威 light 令牌(dark 令牌存在但 skill 未验收,可用右上角切换预览)。z-index 与断点注册表属于 renderer 侧 <code>index.css</code> 体系,一并登记。</p>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>语义色彩(完整 CSS color,不包 hsl())</h3><span class="src"><code>:root</code> · workbench-base.css:2-41</span></div>
+      <div class="lib-panel-body">
+        <div class="swatches" id="swatchColors"></div>
+        <p class="lib-note">灰阶派生:<code>--fg-3 … --fg-80 = color-mix(in srgb, var(--foreground) N%, var(--background))</code>;软底色:<code>--accent-soft 12%</code>、<code>--success/info/destructive-soft 10%</code> 透明混合;遮罩 <code>--overlay 42%</code>。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>圆角阶梯(8 档)</h3><span class="src"><code>--radius-xs … --radius-pill</code></span></div>
+      <div class="lib-panel-body">
+        <div class="radius-demo" id="radiusDemo"></div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>海拔阴影(3 档)</h3><span class="src"><code>--shadow-minimal / middle / panel</code></span></div>
+      <div class="lib-panel-body">
+        <div class="shadow-demo">
+          <div class="shadow-box" style="box-shadow:var(--shadow-minimal)">shadow-minimal</div>
+          <div class="shadow-box" style="box-shadow:var(--shadow-middle)">shadow-middle</div>
+          <div class="shadow-box" style="box-shadow:var(--shadow-panel)">shadow-panel(对话框)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>字体排印阶梯</h3><span class="src">system-ui 栈 · html 15px · 字重 500-750</span></div>
+      <div class="lib-panel-body">
+        <div class="type-row"><code>hero · clamp(30-38px)/750/-.055em</code><span style="font-size:34px;font-weight:750;letter-spacing:-.055em">我的应用</span></div>
+        <div class="type-row"><code>h1 · 22px/700</code><span style="font-size:22px;font-weight:700">我的圈子</span></div>
+        <div class="type-row"><code>h2 · 20px/720</code><span style="font-size:20px;font-weight:720">已安装应用</span></div>
+        <div class="type-row"><code>h3/card · 15-16px/720</code><span style="font-size:15px;font-weight:720">应用卡片标题</span></div>
+        <div class="type-row"><code>body · 13-15px</code><span style="font-size:13px">正文与描述文本,行高 1.55-1.65。</span></div>
+        <div class="type-row"><code>caption · 11-12px</code><span style="font-size:11px;color:var(--fg-50)">来源行、次要说明 11px</span></div>
+        <div class="type-row"><code>micro · 9-10px</code><span style="font-size:10px;color:var(--fg-50)">徽标/元数据 10px,等宽用 --font-mono</span></div>
+        <div class="type-row"><code>eyebrow · 11px/500/.75px 大写</code><span style="font-size:11px;letter-spacing:.75px;text-transform:uppercase;color:var(--fg-50)">Section Eyebrow</span></div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>z-index 与断点注册表(renderer 体系)</h3><span class="src">apps/electron/src/renderer/index.css :root 238-253</span></div>
+      <div class="lib-panel-body">
+        <div class="table-card"><table class="lib-table">
+          <thead><tr><th>注册表</th><th>取值(权威)</th></tr></thead>
+          <tbody>
+            <tr><td>z-index 16 档 <code>--z-*</code></td><td>base 0 · local 10 · sticky 20 · titlebar 40 · panel 50 · dropdown 100 · tooltip 150 · modal 200 · overlay 300 · fullscreen 350 · floating-backdrop 390 · floating-menu 400 · island-overlay 390 · island 400 · island-popover 410 · splash 600(ESLint <code>no-hardcoded-z-index</code> 强制)</td></tr>
+            <tr><td>批准阴影 10 类</td><td>shadow-none / minimal / tinted / thin / middle / strong / panel-focused / modal-small / bottom-border / bottom-border-thin(<code>no-nonstandard-shadows</code>)</td></tr>
+            <tr><td>产品面断点</td><td>媒体查询 1080 / 760 / 640(增量 1050 / 850)</td></tr>
+            <tr><td>助手面断点</td><td>容器查询 448px(panel-compact)/ 768px(mobile)</td></tr>
+            <tr><td>过渡</td><td><code>--transition-fast .14s</code> · <code>--transition-state .28s</code> · 焦点环 outline 2px accent / offset 3px</td></tr>
+          </tbody>
+        </table></div>
+        <p class="lib-note">⚠ 两套体系并存:renderer 全局用 oklch 相对色(如 <code>--accent: oklch(0.62 0.13 293)</code>),产品面经 <code>lib/client-workbench-style.ts</code> 以 <code>?raw</code> 消费本页这套 hex 令牌;同名变量不同值,不可混用(详见 §5 对照表)。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 2 ICONS ================= -->
+  <section class="lib-section" id="icons">
+    <header><h2>2 · Icon 图标体系</h2><span class="lib-anchor">renderer/components/icons · packages/ui/icons · lucide-react</span></header>
+    <p class="lib-lede">现状是四种模式并存:lucide-react 直接引用为主体(<strong>158 个文件 / 134 个图标</strong>)、自定义内联 SVG(28 个导出)、packages/ui 规范图标(3 个)、品牌静态资产(17 个)。本页封装提案:<strong>统一 Icon 签名</strong>(24 网格 / currentColor / 可控 size 与 strokeWidth)+ 语义分组 + barrel 导出。下方图标即按该签名由 JS 注册表渲染。</p>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title">
+        <h3>Icon 组件(统一签名)</h3>
+        <div class="r14-toolbar" style="margin:0;gap:10px;flex:1;justify-content:flex-end">
+          <input id="iconSearch" class="r14-search" style="min-width:180px;min-height:32px;max-width:240px" placeholder="搜索图标名…" aria-label="搜索图标">
+          <div class="lib-seg" id="sizeSeg" aria-label="尺寸阶梯">
+            <button data-size="12">xs 12</button><button data-size="14">sm 14</button><button data-size="16">md 16</button><button class="on" data-size="20">lg 20</button><button data-size="24">xl 24</button>
+          </div>
+          <div class="lib-seg" id="strokeSeg" aria-label="描边宽度">
+            <button class="on" data-sw="2">stroke 2</button><button data-sw="1.5">stroke 1.5</button>
+          </div>
+        </div>
+      </div>
+      <div class="lib-panel-body" id="iconBrowser"></div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>品牌与平台图标(彩色,不参与 currentColor)</h3><span class="src">renderer/assets/{provider-icons,messaging-icons} · MessagingPlatformIcon</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-row">
+          <span class="icon-cell" style="width:auto;padding:10px 14px;grid-auto-flow:column;gap:10px"><svg class="icon" viewBox="0 0 24 24" width="24" height="24"><rect width="24" height="24" rx="6" fill="#17181a"/><path d="M8.2 16.6 9.4 12l3.2 3.1zM9.4 12l7.2-4.4c.4-.2.7.2.5.6l-2.3 4.6" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg><small>telegram</small></span>
+          <span class="icon-cell" style="width:auto;padding:10px 14px;grid-auto-flow:column;gap:10px"><svg class="icon" viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="11" fill="#25D366"/><path d="M8.6 15.9c.5-3.4 2.6-5.9 5.9-7.1-.9 1.7-1 3-.6 4.1m-5.3 3c-.6-.3-1.2-1-1.4-1.7-.7-2.3.7-5.4 3.5-7.2 2.4-1.5 5.4-1.6 7.4-.3-1.9-.2-4 .5-5.6 1.9-2.3 2-3 4.8-2.4 6.7.2.6.6 1.1 1 1.4z" fill="none" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg><small>whatsapp</small></span>
+          <span class="icon-cell" style="width:auto;padding:10px 14px;grid-auto-flow:column;gap:10px"><svg class="icon" viewBox="0 0 24 24" width="24" height="24"><rect width="24" height="24" rx="6" fill="#00D6B9"/><path d="M9.4 17c1.2-3.6 3.5-6 6.9-7.5-.9 1.8-1 3.1-.6 4.2l1.8-.8c-.3 1.7-1.3 2.8-2.8 3.4.4.8 1.1 1.3 2.1 1.4-2.4 1.1-5.2.8-7.4-.7z" fill="#fff"/></svg><small>lark</small></span>
+          <span class="icon-cell" style="width:auto;padding:10px 14px;grid-auto-flow:column;gap:10px"><span class="brand-mark" style="width:24px;height:24px;border-radius:7px">P</span><small>polo-brand</small></span>
+          <span class="icon-cell" style="width:auto;padding:10px 14px;grid-auto-flow:column;gap:10px"><svg class="icon" viewBox="0 0 24 24" width="24" height="24"><path d="M4 8.5 12 4l8 4.5-8 4.5z" fill="#6e56cf"/><path d="M4 15.5 12 11l8 4.5-8 4.5z" fill="#6e56cf" opacity=".45"/></svg><small>mcp</small></span>
+        </div>
+        <div class="lib-row" style="margin-top:10px">
+          <span class="app-art compact"><span class="icon" data-icon="sparkles"></span></span>
+          <span class="app-art compact teal"><span class="icon" data-icon="zap"></span></span>
+          <span class="app-art compact amber"><span class="icon" data-icon="globe"></span></span>
+          <span class="app-art compact ink"><span class="icon" data-icon="database"></span></span>
+          <span style="font-size:11px;color:var(--fg-50)">provider-icons/ 14 枚按 providerType 解析,品牌色 32px;建议独立 brand-icons 语义分层</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 3 TECH ================= -->
+  <section class="lib-section" id="tech">
+    <header><h2>3 · 技术组件 Technical</h2><span class="lib-anchor">packages/ui · renderer/components/ui</span></header>
+    <p class="lib-lede">从两个技术组件库抽取封装:packages/ui(约 108 个导出)+ renderer components/ui(74 文件)。下列演示按 workbench 令牌统一呈现;生产实现留在原模块。</p>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>Button 按钮</h3><span class="src">skill .button 系 · renderer ui/button.tsx(cva 6 变体×4 尺寸)</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="lib-row">
+            <button class="button primary">主要操作</button>
+            <button class="button">默认</button>
+            <button class="button quiet">Quiet 28px</button>
+            <button class="button danger">危险操作</button>
+            <button class="button" disabled>禁用</button>
+            <button class="button primary"><span class="icon" data-icon="send"></span>带图标</button>
+            <button class="icon-button" title="图标按钮 32px"><span class="icon" data-icon="more-horizontal"></span></button>
+            <button class="text-button">文字按钮</button>
+            <button class="card-action primary">卡片主操作</button>
+          </div>
+        </div>
+        <p class="lib-note">规格:min-height 32px(quiet 28px)/ radius-md 8px / 12px 500;primary hover 加深 14%;card-action 30px 用于卡片 status-line。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>Input / Search / 表单字段</h3><span class="src">.r14-toolbar 38px · .auth-field 44px · settings/SettingsInput</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="r14-toolbar" style="margin:0">
+            <label class="r14-search">搜索应用<input placeholder="搜索我的应用…" aria-label="搜索应用"></label>
+            <label>来源<select><option>全部来源</option><option>官方</option><option>圈子</option></select></label>
+            <label>排序<select><option>最近使用</option><option>常用</option><option>名称</option></select></label>
+          </div>
+          <div style="max-width:340px" class="lib-col">
+            <label class="auth-field">手机号(自动注册)
+              <span class="auth-phone-input"><b>+86</b><input inputmode="numeric" placeholder="138 0000 0000"></span>
+            </label>
+            <label class="auth-field">密码<input type="password" placeholder="••••••••"></label>
+            <button class="button primary auth-primary" style="width:100%">登录</button>
+          </div>
+          <div class="lib-row">
+            <span class="kbd">⌘</span><span class="kbd">K</span>
+            <span style="font-size:11px;color:var(--fg-50)">Kbd 键帽 · renderer ui/kbd.tsx</span>
+          </div>
+        </div>
+        <p class="lib-note">焦点合同:输入 focus = <code>border accent 45% + 0 0 0 3px accent-soft</code>;全局 focus-visible = outline 2px accent / offset 3px。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>状态徽标 / 横幅 / 通知</h3><span class="src">.status · .credits-banner · .notice · info/Info_Alert(4 色)</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="lib-row">
+            <span class="status good">运行中</span><span class="status info">准备中</span><span class="status bad">失败</span><span class="status neutral">已停止</span>
+            <span class="circle-source-pill">认证创作者</span>
+            <span class="class-chip reuse">复用</span><span class="class-chip adjust">调整</span><span class="class-chip new">新增</span><span class="class-chip integ">整合</span><span class="class-chip state">状态</span>
+          </div>
+          <div class="credits-banner"><span class="icon" data-icon="alert-triangle"></span><span><b>额度不足</b>:当前会话将在本轮结束后暂停。</span><button class="button">去充值</button></div>
+          <div class="credits-banner info"><span class="icon" data-icon="info"></span><span><b>连接已恢复</b>:离线期间的变更已同步。</span><button class="button">查看</button></div>
+          <div class="alert info"><span class="icon" data-icon="info"></span><span><b>Info_Alert · info</b>info/Info_Alert.tsx cva 四色告警,带 Title/Description 复合结构。</span></div>
+          <div class="alert success"><span class="icon" data-icon="check-circle"></span><span><b>Info_Alert · success</b>成功态用 success-soft 底 + 35% 边框。</span></div>
+          <div class="alert bad"><span class="icon" data-icon="alert-triangle"></span><span><b>Info_Alert · destructive</b>错误态;重试动作可并入 action 插槽(提案)。</span></div>
+          <div class="alert accent"><span class="icon" data-icon="sparkles"></span><span><b>Info_Alert · accent</b>助手/AI 语义用 accent-soft。</span></div>
+          <div style="max-width:360px">
+            <div class="notice success"><i class="notice-mark"></i><div><strong>技能已启用</strong><p>web-search 已在本机准备完成。</p><small>10:24</small></div></div>
+            <div class="notice"><i class="notice-mark"></i><div><strong>配对等待中</strong><p>等待 Telegram 确认配对码。</p><small>10:25</small></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>菜单 / 弹层 / Toast</h3><span class="src">.popover · .account-menu · .toast · StyledDropdown(Radix)</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="lib-row" style="align-items:flex-start">
+            <div style="position:relative;flex:0 0 auto">
+              <button class="avatar-button" style="width:34px;height:34px" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden">窦</button>
+              <div class="popover account-menu" hidden>
+                <div class="menu-label">douglas@polo.ai</div>
+                <button class="menu-row"><span class="menu-icon"><span class="icon" data-icon="users"></span></span><span class="menu-copy"><b>切换空间</b><small>星河设计 · 3 个空间</small></span><span class="menu-arrow icon" data-icon="chevron-right"></span></button>
+                <button class="menu-row"><span class="menu-icon"><span class="icon" data-icon="moon"></span></span><span class="menu-copy"><b>外观</b><small>浅色</small></span></button>
+                <button class="menu-row"><span class="menu-icon"><span class="icon" data-icon="log-out"></span></span><span class="menu-copy"><b>退出登录</b></span></button>
+                <div class="menu-divider"></div>
+                <div class="menu-section-title">空间</div>
+                <button class="menu-row"><span class="space-avatar" style="width:26px;height:26px">星</span><span class="menu-copy"><b>星河设计</b><small>当前空间</small></span><span class="check icon" data-icon="check"></span></button>
+                <button class="menu-row"><span class="space-avatar" style="width:26px;height:26px">晨</span><span class="menu-copy"><b>晨星科技</b><small>企业</small></span></button>
+              </div>
+            </div>
+            <button class="button" id="toastBtn"><span class="icon" data-icon="bell"></span>触发 Toast</button>
+            <div style="position:relative;flex:1;min-height:70px;border:1px dashed var(--border);border-radius:var(--radius-md);display:grid;place-items:center;color:var(--fg-40);font-size:11px" id="toastHost">toast 落点(右下)</div>
+          </div>
+        </div>
+        <p class="lib-note">popover:radius-inner 10px + surface + shadow-panel;菜单行 min-height 44px;destructive 变体红字(StyledDropdownMenuItem)。生产为 Radix dropdown/dialog + <code>popover-styled</code>;Island 动态岛与 dismissible-layer-bridge 属于自研浮层框架(packages/ui)。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>头像 / 状态点 / 加载</h3><span class="src">.space-avatar · CrossfadeAvatar · AvatarGroup · SourceStatusIndicator · Spinner</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="lib-row">
+            <span class="space-avatar">星</span><span class="space-avatar" style="background:var(--success-soft);color:var(--success)">晨</span><span class="space-avatar" style="background:var(--fg-10);color:var(--fg-60)">私</span>
+            <span class="avatar-stack"><span class="space-avatar">A</span><span class="space-avatar" style="background:var(--success-soft);color:var(--success)">B</span><span class="space-avatar" style="background:var(--info-soft);color:var(--info)">C</span><span class="avatar-more">+5</span></span>
+            <span class="status-dot running"></span><span class="status-dot"></span>
+            <span class="icon-button"><span class="icon" data-icon="bell"></span><span class="notification-dot"></span></span>
+            <span class="spinner"></span>
+            <span style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-60)"><span class="spinner"></span>正在准备空间…</span>
+          </div>
+        </div>
+        <p class="lib-note">AvatarGroup max=3 + "+N" 溢出;CrossfadeAvatar 图标→头像 cross-fade;SourceStatusIndicator 5 态呼吸点;Spinner 3×3 cube(packages/ui LoadingIndicator,renderer 引用 34 次,最高频组件)。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>分段控件 / 过滤药丸 / 开关 / 进度</h3><span class="src">SettingsSegmentedControl · .circle-filter · SettingsToggle · .system-progress</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="circle-filter-row" style="margin:0">
+            <button class="circle-filter active">全部 <span>12</span></button>
+            <button class="circle-filter">有效权益 <span>7</span></button>
+            <button class="circle-filter">待恢复 <span>2</span></button>
+          </div>
+          <div class="lib-row">
+            <div class="lib-seg"><button class="on">月度</button><button>年度</button><button>永久</button></div>
+            <label class="lib-switch"><input type="checkbox" checked aria-label="开关示例"><i></i></label>
+            <span style="font-size:12px">自动检查更新(SettingsToggle 行)</span>
+          </div>
+          <div style="max-width:420px">
+            <div class="progress-track"><span style="width:64%"></span></div>
+            <div class="switch-progress-summary"><span>正在停止执行 <strong>4 / 6</strong></span><span>空间切换</span></div>
+            <div class="system-progress" style="margin-top:6px"><span style="width:64%"></span></div>
+            <p class="system-progress-label">system-progress 7px · progress-track 6px(六相事务对话框)</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>空状态 / 卡片壳</h3><span class="src">.empty-state · .home-zero-guide · .empty-note · Empty 全家</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="lib-row" style="align-items:stretch">
+            <div class="empty-state" style="flex:1;min-width:220px"><span class="state-icon" style="margin:0"><span class="icon" data-icon="search"></span></span><h2>没有匹配的应用</h2><p>换个关键词,或清除筛选条件后重试。</p><button class="button quiet" style="margin-top:6px">清除筛选</button></div>
+            <div class="home-zero-guide" style="flex:1;min-width:220px"><span class="state-icon" style="margin:0"><span class="icon" data-icon="sparkles"></span></span><h2 style="margin:0;font-size:18px">还没有应用</h2><p>从圈子获取第一个应用,或打开 Polo 助手开始创作。</p></div>
+            <div class="empty-note" style="flex:1;min-width:180px">empty-note · 18px 虚线边框轻量占位</div>
+          </div>
+        </div>
+        <p class="lib-note">提案 <code>WorkbenchEmptyState</code>:HomePage×4、CircleDetailPage×2 同构(52px 图标位 + 18px 标题 + 12px 提示 + 恢复动作);配套 <code>AsyncContent(loading/error/empty/children)</code> 收敛 5 处三态实现。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 4 BIZ ================= -->
+  <section class="lib-section" id="biz">
+    <header><h2>4 · 业务组件 Business</h2><span class="lib-anchor">circles · tab-browser · product-space · onboarding · app-shell · settings</span></header>
+    <p class="lib-lede">按产品面分组:客户端产品面(skill 绑定的 10 个组件生产落点)、助手面、设置面。每个组件标注生产来源。</p>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>登录分屏卡(登录表单)</h3><span class="src">onboarding/AdminLoginStep.tsx · 密码/验证码切换 + 手机号自动注册</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage" style="position:relative">
+          <div class="auth-ambient"></div>
+          <div class="login-split" style="min-height:520px">
+            <div class="login-story">
+              <div>
+                <div class="auth-brand"><span class="brand-mark">P</span> Polo AI</div>
+                <h1>一个工作台,装下你的全部创作流。</h1>
+                <p>应用、技能与圈子协作,在同一块画布上运转。</p>
+              </div>
+              <div class="value-points">
+                <div class="value-point"><span><span class="icon" data-icon="check" style="width:12px;height:12px"></span></span>手机号登录即自动注册</div>
+                <div class="value-point"><span><span class="icon" data-icon="check" style="width:12px;height:12px"></span></span>企业 / 个人空间隔离</div>
+                <div class="value-point"><span><span class="icon" data-icon="check" style="width:12px;height:12px"></span></span>本地优先,数据可携</div>
+              </div>
+            </div>
+            <div class="login-panel">
+              <p class="eyebrow">欢迎回来</p>
+              <h2 id="loginTitle">登录 Polo AI</h2>
+              <p>未注册的手机号验证后将自动创建账号。</p>
+              <div class="auth-form">
+                <div id="phoneFields">
+                  <label class="auth-field">手机号<span class="auth-phone-input"><b>+86</b><input inputmode="numeric" placeholder="138 0000 0000"></span></label>
+                  <label class="auth-field">验证码
+                    <span style="display:grid;grid-template-columns:1fr auto;gap:8px">
+                      <input inputmode="numeric" placeholder="6 位验证码">
+                      <button type="button" class="button quiet">获取验证码</button>
+                    </span>
+                  </label>
+                </div>
+                <div id="passwordFields" hidden>
+                  <label class="auth-field">账号<input placeholder="手机号或邮箱"></label>
+                  <label class="auth-field">密码<input type="password" placeholder="••••••••"></label>
+                </div>
+                <button class="method-switch" id="loginSwitch" type="button">使用密码登录 →</button>
+                <button class="button primary auth-primary">登录</button>
+                <div class="trust-row">登录即代表同意用户协议与隐私政策;凭据仅保存在本机。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>工作台顶栏 + 滚动发丝线(交互)</h3><span class="src">app-shell/TopBar.tsx · ClientPageContext.registerMainScroller</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-topbar-demo" style="border:1px solid var(--border);border-radius:var(--radius-inner);overflow:hidden;background:var(--background)">
+          <div id="demoTopbar" class="workbench-bar" style="position:sticky;top:0">
+            <div class="mac-window-controls"><span class="mac-window-dot close"></span><span class="mac-window-dot minimize"></span><span class="mac-window-dot fullscreen"></span></div>
+            <div class="brand-lockup"><span class="brand-mark">P</span><span>Polo AI</span></div>
+            <nav class="tabs">
+              <button class="home-tab active"><span class="icon" data-icon="home"></span><span>首页</span></button>
+              <span class="tab active"><button class="tab-activate"><span class="tab-icon"><span class="icon" data-icon="globe"></span></span><span>星河官网</span></button><span class="tab-run-dot"></span><button class="tab-close" title="关闭标签"></button></span>
+              <span class="tab"><button class="tab-activate"><span class="tab-icon"><span class="icon" data-icon="file-text"></span></span><span>季度报告</span></button><button class="tab-close" title="关闭标签"></button></span>
+            </nav>
+            <div class="bar-actions">
+              <button class="bar-button"><span class="icon" data-icon="chevron-left"></span><span class="icon" data-icon="chevron-right"></span></button>
+              <button class="bar-button"><span class="status-dot running"></span><span>2</span></button>
+              <div class="space-indicator"><span class="space-avatar">星</span><span class="space-copy"><strong>星河设计</strong></span></div>
+              <button class="icon-button"><span class="icon" data-icon="bell"></span><span class="notification-dot"></span></button>
+              <button class="avatar-button">窦</button>
+            </div>
+          </div>
+          <div id="demoScroll" style="height:240px;overflow-y:auto;padding:22px 28px 60px;background:var(--background)">
+            <p class="eyebrow">滚动演示区</p>
+            <h2 style="margin:0 0 8px;font-size:20px;font-weight:720">向下滚动试试</h2>
+            <p style="color:var(--fg-60);font-size:13px;line-height:1.6;margin:0 0 14px">主体滚离顶部后顶栏才出现发丝线(border-bottom 由 transparent → var(--border));这是 skill workbench-header-scroll.js 的生产行为(rAF 节流 scrollTop&gt;0 → isHeaderLineVisible)。</p>
+            <div class="card-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+              <div class="result-card"><h3>占位内容 A</h3><p>撑高滚动区域。</p></div>
+              <div class="result-card"><h3>占位内容 B</h3><p>撑高滚动区域。</p></div>
+              <div class="result-card"><h3>占位内容 C</h3><p>撑高滚动区域。</p></div>
+              <div class="result-card"><h3>占位内容 D</h3><p>撑高滚动区域。</p></div>
+            </div>
+          </div>
+        </div>
+        <p class="lib-note">D-PC-10:顶栏只显示当前空间身份,切换在账号菜单;去第二排资源 Tab;web 标签带运行点;64px 高 / blur(18px) / 92% 背景。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>首页「我的应用」目录 + 应用卡</h3><span class="src">tab-browser/HomePage.tsx · MemberAppCard.tsx(variant home/detail)</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="home-hero" style="margin-bottom:20px">
+            <div><p class="eyebrow" style="margin-bottom:10px">工作台</p><h1>我的应用</h1><p>从目录打开应用,或在 Polo 助手里创建新作品。</p></div>
+            <button class="home-context-link"><span class="icon" data-icon="users"></span><span><strong>我的圈子</strong><small>查看圈子内容,管理订阅</small></span><span class="icon" data-icon="chevron-right"></span></button>
+          </div>
+          <div class="r14-toolbar" style="margin-bottom:16px">
+            <label class="r14-search">搜索<input placeholder="搜索应用…"></label>
+            <label>来源<select><option>全部</option></select></label>
+            <label>排序<select><option>最近使用</option></select></label>
+          </div>
+          <div class="card-grid home-app-grid">
+            <div class="product-card">
+              <div class="card-heading"><span class="app-art"><span class="icon" data-icon="globe"></span></span><div class="card-title"><p class="source-line">星河设计 · 认证创作者</p><h3>官网速览</h3></div></div>
+              <p class="product-description">抓取与整理站点内容,生成可检索的资料卡。</p>
+              <div class="status-line actions-only"><button class="card-action">打开</button></div>
+            </div>
+            <div class="product-card assistant-card">
+              <div class="card-heading"><span class="app-art"><span class="icon" data-icon="sparkles"></span></span><div class="card-title"><p class="source-line">Polo 官方</p><h3>Polo 助手</h3></div></div>
+              <p class="product-description">会话式创作与自动化;管理技能、连接来源。</p>
+              <div class="status-line actions-only assistant-card-actions"><button class="card-action">管理技能</button><button class="card-action primary home-primary-action">打开助手</button></div>
+            </div>
+            <div class="product-card">
+              <div class="card-heading"><span class="app-art teal"><span class="icon" data-icon="zap"></span></span><div class="card-title"><p class="source-line">晨星科技</p><h3>数据看板</h3></div></div>
+              <p class="product-description">从表格生成周报图表,支持导出。</p>
+              <div class="status-line actions-only"><button class="card-action">打开</button></div>
+            </div>
+          </div>
+          <div class="lib-row">
+            <span class="status info"><span class="icon" data-icon="zap" style="width:11px;height:11px"></span>运行中</span>
+            <span style="font-size:11px;color:var(--fg-50)">运行徽章 bg-info/10 text-info 10px;home 变体无常驻状态与来源数量(detail 变体保留来源行)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>我的圈子 · 统一列表项</h3><span class="src">circles/MyCirclesPage.tsx · MemberCircleRow.tsx(免费/月付/年付/受限同构)</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="subpage-heading">
+            <button class="back-button"><span class="icon" data-icon="arrow-left"></span>首页</button>
+            <div><p class="eyebrow" style="margin-bottom:4px">我的圈子</p><h1>我的圈子</h1><p>查看圈子内容,管理订阅。</p></div>
+          </div>
+          <div class="circle-filter-row" style="margin:0 0 14px">
+            <button class="circle-filter active">全部 <span>3</span></button>
+            <button class="circle-filter">有效权益 <span>2</span></button>
+            <button class="circle-filter">待恢复 <span>1</span></button>
+          </div>
+          <div class="circle-list">
+            <div class="circle-card" data-circle-kind="growth">
+              <span class="circle-avatar">绿</span>
+              <div class="circle-card-copy">
+                <div class="circle-card-title"><h2>绿洲创作圈</h2></div>
+                <p class="circle-creator">创作者 · 林间工作室</p>
+                <p class="circle-update">每周更新创作素材与提示词,成员可优先试用新技能。</p>
+                <div class="circle-meta"><span class="circle-term">免费</span><span class="circle-count">应用 6</span><span class="circle-count">技能 2</span></div>
+              </div>
+              <button class="button quiet circle-open">查看详情</button>
+            </div>
+            <div class="circle-card" data-circle-kind="annual">
+              <span class="circle-avatar">星</span>
+              <div class="circle-card-copy">
+                <div class="circle-card-title"><h2>星河设计圈</h2></div>
+                <p class="circle-creator">创作者 · 星河设计</p>
+                <p class="circle-update">年度订阅:设计系统、组件与自动化模板持续更新。</p>
+                <div class="circle-meta"><span class="circle-term">年付 · 有效期至 2027-04-30</span><span class="circle-count">应用 12</span><span class="circle-count">技能 5</span></div>
+              </div>
+              <button class="button quiet circle-open">查看详情</button>
+            </div>
+            <div class="circle-card" data-circle-kind="data">
+              <span class="circle-avatar">晨</span>
+              <div class="circle-card-copy">
+                <div class="circle-card-title"><h2>晨星数据圈</h2></div>
+                <p class="circle-creator">创作者 · 晨星科技</p>
+                <p class="circle-update">月度订阅:数据看板与报表自动化应用。</p>
+                <div class="circle-meta"><span class="circle-term">月付 · 有效期至 2026-11-18</span><span class="circle-count">应用 4</span><span class="circle-count">技能 1</span></div>
+              </div>
+              <button class="button quiet circle-open">查看详情</button>
+            </div>
+          </div>
+        </div>
+        <p class="lib-note">review.css 增量:头像 52px/radius 16;卡片 radius 20 / padding 24;<code>data-circle-kind</code> 差异化头像色(growth=success 10%、annual=accent 13%、data=fg-5);≤850px 折叠 44px 头像。权益词固定位置、计数用 circle-count 分隔。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>圈子详情 · 分区与订阅</h3><span class="src">circles/CircleDetailPage.tsx + Content/Updates/SubscriptionPanel</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="subpage-heading">
+            <button class="back-button"><span class="icon" data-icon="arrow-left"></span>我的圈子</button>
+            <div><p class="eyebrow" style="margin-bottom:4px">圈子详情</p><h1>星河设计圈</h1><p>应用 12 · 技能 5 · 更新于 2026-10-12</p></div>
+            <span class="status good">会员生效中</span>
+          </div>
+          <div class="r14-tabs" id="circleTabs">
+            <button class="button selected" data-tab="content">内容</button>
+            <button class="button" data-tab="updates">更新</button>
+            <button class="button" data-tab="subscription">订阅</button>
+          </div>
+          <div id="tab-content" class="lib-col">
+            <div class="card-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+              <div class="product-card"><div class="card-heading"><span class="app-art"><span class="icon" data-icon="layers"></span></span><div class="card-title"><p class="source-line">来自本圈子</p><h3>设计系统工具箱</h3></div></div><p class="product-description">令牌管理与组件审计。detail 变体保留来源行。</p><div class="status-line actions-only"><button class="card-action">打开</button></div></div>
+              <div class="product-card"><div class="card-heading"><span class="app-art amber"><span class="icon" data-icon="terminal"></span></span><div class="card-title"><p class="source-line">来自本圈子</p><h3>周报自动化</h3></div></div><p class="product-description">定时汇总数据并生成报告。</p><div class="status-line actions-only"><button class="card-action">打开</button></div></div>
+            </div>
+            <div class="result-card"><h3><span class="icon" data-icon="sparkles" style="width:13px;height:13px;color:var(--success);vertical-align:-2px"></span> 圈子技能(只读)</h3><p style="margin:8px 0 0">web-search · v2 · 检索增强;版本与用途仅出现一次(§13.13 文案去重)。</p></div>
+          </div>
+          <div id="tab-updates" hidden class="lib-col">
+            <div class="result-card"><h3>v1.8 · 2026-10-12</h3><p>新增设计令牌审计;修复导入路径。</p></div>
+            <div class="result-card"><h3>v1.7 · 2026-09-28</h3><p>组件模板更新;上游待确认条目单独标记(upstream_pending)。</p></div>
+          </div>
+          <div id="tab-subscription" hidden>
+            <div class="system-state-card" style="width:100%;text-align:left">
+              <div class="state-icon" style="margin:0 0 14px"><span class="icon" data-icon="check-circle"></span></div>
+              <h1 style="font-size:20px">订阅生效中</h1>
+              <dl class="state-facts" style="margin-top:16px">
+                <div><dt>价格</dt><dd>¥ 288 / 年(价格以网页为准时如实标注)</dd></div>
+                <div><dt>周期</dt><dd>年度</dd></div>
+                <div><dt>有效期</dt><dd>2027-04-30 到期(各出现一次)</dd></div>
+              </dl>
+              <div class="state-actions" style="justify-content:flex-start">
+                <button class="button">续费(网页交接)</button>
+                <button class="button danger" id="leaveBtn">退出圈子</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="lib-note">订阅分区:价格/周期/有效期各一次;续费 = GET preview → 网页交接,无桌面支付;退出按钮仅出现在订阅区。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>确认对话框(退出圈子)</h3><span class="src">circles/LeaveCircleDialog.tsx · edge 圆角 + shadow-panel</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-row"><button class="button danger" id="openLeave">预览退出圈子对话框</button><span style="font-size:11px;color:var(--fg-50)">原对象明确 · last-source 影响清单 · busy 期禁用取消</span></div>
+        <div class="lib-stage" id="leaveStage" style="min-height:180px;margin-top:14px">
+          <div class="modal-layer" id="leaveModal" hidden>
+            <div class="dialog" role="dialog" aria-modal="true" aria-label="退出圈子">
+              <div class="dialog-header">
+                <div><h2>退出「星河设计圈」?</h2><p>退出后将失去该圈子的应用与技能访问权限。</p></div>
+                <button class="close-button" id="leaveClose"><span class="icon" data-icon="x"></span></button>
+              </div>
+              <div class="dialog-body">
+                <div class="impact-card"><span class="icon" data-icon="alert-triangle"></span><span><strong>影响 3 个仅来自本圈子的作品</strong><small>设计系统工具箱 · 周报自动化 · 数据清洗</small></span></div>
+                <p class="dialog-note">单次确认写;结果未知时不重复提交,可稍后在圈子列表重试。</p>
+              </div>
+              <div class="dialog-footer">
+                <button class="button quiet" id="leaveCancel">取消</button>
+                <button class="button danger" id="leaveConfirm">退出圈子</button>
+              </div>
+            </div>
+          </div>
+          <span style="justify-self:center;align-self:center;color:var(--fg-40);font-size:12px">对话框在此容器内演示(position:absolute + --overlay)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>系统态与空间切换</h3><span class="src">product-space/{PreparationScreen,ErrorScreen,ContractGate,SwitchDialog}.tsx</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="lib-row" style="align-items:stretch;justify-items:center">
+            <div class="system-state-card" style="flex:1;min-width:250px">
+              <div class="state-icon"><span class="spinner"></span></div>
+              <h1>正在准备空间</h1>
+              <p class="state-description">首次进入需要同步应用与技能目录,请保持网络连接。</p>
+              <div class="system-progress"><span style="width:38%"></span></div>
+              <p class="system-progress-label">38% · 约 20 秒</p>
+              <div class="state-actions"><button class="button quiet">稍后再说</button></div>
+            </div>
+            <div class="system-state-card" style="flex:1;min-width:250px">
+              <div class="state-icon bad"><span class="icon" data-icon="alert-triangle"></span></div>
+              <h1>空间加载失败</h1>
+              <p class="state-description">网关暂时不可用,已保留本地缓存。</p>
+              <dl class="state-facts"><div><dt>错误码</dt><dd>GATEWAY_503</dd></div><div><dt>重试</dt><dd>可手动重试,不影响本地数据</dd></div></dl>
+              <div class="state-actions"><button class="button">重试</button><button class="button quiet">离线继续</button></div>
+            </div>
+          </div>
+          <div style="max-width:480px;margin:0 auto">
+            <div class="switch-progress-summary"><span>正在停止执行 <strong>4 / 6</strong></span><span>切换到 晨星科技</span></div>
+            <div class="progress-track"><span style="width:64%"></span></div>
+            <div class="dialog-list">
+              <div class="dialog-row"><span class="row-state good"><span class="icon" data-icon="check" style="width:11px;height:11px"></span>已停止</span><div class="row-copy"><strong>官网速览</strong><small>运行中 → 已停止</small></div></div>
+              <div class="dialog-row"><span class="row-state stopping"><span class="spinner" style="width:10px;height:10px"></span>停止中</span><div class="row-copy"><strong>数据看板</strong><small>正在保存状态</small></div></div>
+            </div>
+            <p class="dialog-note">六相事务:confirm → stopping → stop-failed / target-loading / target-failed / target-access-lost;skill space-switch-*.js 的生产等价。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>助手会话 · 消息与工具调用</h3><span class="src">app-shell/ChatDisplay.tsx · packages/ui/chat(TurnCard/UserMessageBubble)</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div style="max-width:300px;border:1px solid var(--border);border-radius:var(--radius-inner);background:var(--surface);padding:8px;box-shadow:var(--shadow-minimal)">
+            <button class="button" style="width:100%;justify-content:flex-start;margin-bottom:6px;background:var(--surface)"><span class="icon" data-icon="plus"></span>新会话</button>
+            <div class="assistant-list-label">今天</div>
+            <button class="session-row active"><strong>设计系统组件盘点</strong><span>12 条消息 · 运行中</span></button>
+            <button class="session-row"><strong>周报数据核对</strong><span>昨天</span></button>
+            <button class="session-row muted"><strong>旧版原型清理</strong><span>10-12 · 已归档</span></button>
+            <div class="assistant-list-label">本周</div>
+            <button class="session-row"><strong>圈子订阅核对</strong><span>10-15</span></button>
+          </div>
+          <div style="display:grid;gap:22px;flex:1;min-width:0">
+            <div class="message user"><div><small>你 · 10:31</small><p>帮我把这个仓库的组件盘点一下,重点看图标体系。</p></div><span class="message-avatar">窦</span></div>
+            <div class="message assistant"><span class="message-avatar">P</span><div>
+              <small>Polo · 10:31</small>
+              <p>已完成扫描:packages/ui 约 108 个导出,renderer 侧 74 个文件,图标四种模式并存……</p>
+              <div class="tool-call"><span class="icon" data-icon="terminal"></span><span><strong>Bash · grep -r "lucide-react"</strong><small>158 个文件 · 134 个图标</small></span><span class="tool-actions"><button class="icon-button" style="width:24px;height:24px" title="详情"><span class="icon" data-icon="external-link" style="width:12px;height:12px"></span></button></span></div>
+              <div class="tool-call"><span class="icon" data-icon="file-text"></span><span><strong>Read · component-inventory.md</strong><small>done · 214 行</small></span></div>
+            </div></div>
+            <div class="message assistant"><span class="message-avatar">P</span><div>
+              <small>Polo · 10:33</small>
+              <div class="question-card"><strong>结构化确认</strong><span style="font-size:12px;color:var(--fg-70)">图标统一签名采用 packages/ui 的 IconProps(size + strokeWidth)?多选时带 badge。</span>
+                <div class="question-actions"><button class="button primary quiet">确认</button><button class="button quiet">调整</button></div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+        <p class="lib-note">用户气泡 fg-5 底;助手消息 surface;tool-call 用 bg-elevated;question-card 是 POO-50 结构化输入卡(accent 35% 边 + accent-soft 底)。streaming 优化:StreamingMarkdown 分块 hash-memo 仅重渲尾块。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>输入区 Composer + 授权卡 + 配对码</h3><span class="src">app-shell/input/* · chat/AuthRequestCard.tsx · messaging/PairingCodeDialog.tsx</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="composer-wrap" style="padding:0">
+            <div class="chat-composer">
+              <textarea placeholder="给 Polo 助手发消息,@ 提及技能,/ 触发命令…" aria-label="消息输入框"></textarea>
+              <div class="composer-footer">
+                <button class="composer-tool"><span class="icon" data-icon="paperclip"></span>附件</button>
+                <button class="composer-tool"><span class="icon" data-icon="folder"></span>工作区</button>
+                <span style="min-width:0"></span>
+                <span class="assistant-mode-badge" style="height:28px">Ask<span class="icon" data-icon="chevron-down" style="width:11px;height:11px"></span></span>
+                <button class="composer-send" title="发送"><span class="icon" data-icon="send"></span></button>
+              </div>
+            </div>
+          </div>
+          <div style="max-width:460px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-minimal);overflow:hidden">
+            <div style="display:flex;gap:10px;align-items:center;padding:13px 15px;border-bottom:1px solid var(--border);background:var(--success-soft)">
+              <span class="icon" data-icon="key" style="color:var(--success)"></span>
+              <span style="display:grid;gap:2px"><strong style="font-size:13px">连接 Datadog</strong><small style="color:var(--fg-50);font-size:10px">需要 API Key 与 Application Key</small></span>
+            </div>
+            <div style="display:grid;gap:12px;padding:15px">
+              <label class="auth-field" style="font-size:10px">API Key<input style="height:36px" placeholder="da2…"></label>
+              <label class="auth-field" style="font-size:10px">App Key<input style="height:36px" type="password" placeholder="••••••"></label>
+              <div class="lib-row" style="justify-content:flex-end"><button class="button quiet">取消</button><button class="button primary">授权</button></div>
+              <p class="dialog-note" style="margin:0">非交互终态折叠为单行图标卡;OAuth 流程切换为「Sign in」按钮 + Spinner。</p>
+            </div>
+          </div>
+          <div style="max-width:380px;margin:0 auto;border:1px solid var(--border);border-radius:var(--radius-edge);background:var(--surface);box-shadow:var(--shadow-panel);padding:20px;text-align:center">
+            <p class="eyebrow" style="margin:0 0 10px">Telegram 会话配对</p>
+            <div class="pair-code"><b>7</b><b>2</b><b>4</b><b>9</b><b>1</b><b>5</b></div>
+            <p class="dialog-note" style="margin-top:12px">向 <b style="color:var(--accent)">@polo_pair_bot</b> 发送 <code>/pair 724915</code></p>
+            <p class="dialog-note" style="margin-top:4px;color:var(--destructive)">04:59 后过期</p>
+          </div>
+        </div>
+        <p class="lib-note">组件化建议:PairingCodeDialog 与 TelegramSupergroupPairingDialog ~80% 同构,抽 <code>PairingCodeBody</code> + 倒计时 hook;AuthRequestCard 保留四形态状态机。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>设置面</h3><span class="src">settings/ 13 原语 · pages/settings/ 13 页 · 500ms 自动保存</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-stage">
+          <div class="settings-layout" style="width:100%">
+            <div class="settings-nav-card">
+              <button class="active">外观</button><button>输入</button><button>标签</button><button>权限</button><button>消息</button><button>服务器</button>
+            </div>
+            <div>
+              <div class="settings-row"><span><strong>主题</strong><small>浅色画布 #fbfbfa;暗色令牌存在但未验收</small></span><div class="lib-seg"><button class="on">浅色</button><button>深色</button><button>系统</button></div></div>
+              <div class="settings-row"><span><strong>等宽字体</strong><small>代码块使用 JetBrains Mono(renderer 体系)</small></span><label class="lib-switch"><input type="checkbox" checked aria-label="等宽字体"><i></i></label></div>
+              <div class="settings-row"><span><strong>自动保存</strong><small>500ms debounce;脏比较后静默写入</small></span><label class="lib-switch"><input type="checkbox" checked aria-label="自动保存"><i></i></label></div>
+              <div class="settings-row danger-row"><span><strong>重置工作区</strong><small>破坏性操作,需随机算术题确认(ResetConfirmationDialog)</small></span><button class="button danger quiet">重置…</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 5 INVENTORY ================= -->
+  <section class="lib-section" id="inventory">
+    <header><h2>5 · 组件清单与统计</h2><span class="lib-anchor">.agents/skills/polo-ai-design-system/references/component-inventory.md</span></header>
+    <p class="lib-lede">完整清单(含 file:line)已登记进设计系统 skill:<code>references/component-inventory.md</code>(只读登记,生产组件留原模块)。以下为摘要。</p>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>规模统计</h3></div>
+      <div class="lib-panel-body">
+        <div class="stat-grid">
+          <div class="stat"><b>108</b><small>packages/ui 导出组件(浮层 29 · markdown 28 · 菜单 14)</small></div>
+          <div class="stat"><b>74</b><small>renderer components/ui 文件(原子 24 · 复合 25 · 领域 20)</small></div>
+          <div class="stat"><b>134+28+3</b><small>图标:lucide + 自定义 + packages/ui(另有品牌 17)</small></div>
+          <div class="stat"><b>28</b><small>renderer 业务组件子目录</small></div>
+          <div class="stat"><b>10</b><small>skill 组件全部有生产落点(§4 映射)</small></div>
+          <div class="stat"><b>16 / 8 / 3</b><small>z-index 档 · 圆角档 · 海拔档</small></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>关键组件索引(节选)</h3><span class="src">完整版见 component-inventory.md §1-§6</span></div>
+      <div class="lib-panel-body">
+        <div class="table-card"><table class="lib-table">
+          <thead><tr><th>组件</th><th>层</th><th>生产来源</th><th>要点</th></tr></thead>
+          <tbody>
+            <tr><td>Spinner / LoadingIndicator</td><td>技术</td><td><code>packages/ui/components/ui/LoadingIndicator.tsx</code></td><td>引用 34 次,最高频</td></tr>
+            <tr><td>StyledDropdown 全家</td><td>技术</td><td><code>packages/ui/.../StyledDropdown.tsx</code> + electron shim</td><td>Radix;26 文件经 shim 引用</td></tr>
+            <tr><td>Button(cva)</td><td>技术</td><td><code>renderer/components/ui/button.tsx</code></td><td>6 变体 × 4 尺寸;建议下沉 packages/ui</td></tr>
+            <tr><td>EntityList / EntityRow / EntityPanel</td><td>技术</td><td><code>renderer/components/ui/entity-*.tsx</code></td><td>泛型列表 + 多选 + 长按手势</td></tr>
+            <tr><td>DataTable</td><td>技术</td><td><code>renderer/components/ui/data-table.tsx</code></td><td>TanStack 封装,排序/树形/拖宽</td></tr>
+            <tr><td>Icon(统一签名提案)</td><td>技术</td><td><code>packages/ui/icons/types.ts</code> IconProps</td><td>SVGProps + size + strokeWidth</td></tr>
+            <tr><td>StreamingMarkdown</td><td>技术</td><td><code>renderer/components/markdown/StreamingMarkdown.tsx:139</code></td><td>分块 djb2 hash memo</td></tr>
+            <tr><td>AdminLoginStep(登录表单)</td><td>业务</td><td><code>onboarding/AdminLoginStep.tsx:96</code></td><td>skill 登录组件生产落点</td></tr>
+            <tr><td>TopBar(工作台顶栏)</td><td>业务</td><td><code>app-shell/TopBar.tsx:86</code></td><td>hairline 滚动触发</td></tr>
+            <tr><td>MemberAppCard(应用卡)</td><td>业务</td><td><code>tab-browser/MemberAppCard.tsx:58</code></td><td>home/detail 双变体</td></tr>
+            <tr><td>MemberCircleRow(圈子统一列表)</td><td>业务</td><td><code>circles/MemberCircleRow.tsx:72</code></td><td>四 tone 头像同构行</td></tr>
+            <tr><td>CircleDetailPage + 三分区</td><td>业务</td><td><code>circles/CircleDetailPage.tsx:258</code></td><td>价格/周期/有效期各一次</td></tr>
+            <tr><td>LeaveCircleDialog(确认对话框)</td><td>业务</td><td><code>circles/LeaveCircleDialog.tsx:42</code></td><td>edge 14px + shadow-panel</td></tr>
+            <tr><td>ProductSpaceSwitchDialog</td><td>业务</td><td><code>product-space/ProductSpaceSwitchDialog.tsx:24</code></td><td>六相切换事务</td></tr>
+            <tr><td>AuthRequestCard</td><td>业务</td><td><code>chat/AuthRequestCard.tsx:165</code></td><td>四形态授权卡状态机</td></tr>
+            <tr><td>SettingsRow / Card / Toggle</td><td>业务</td><td><code>settings/Settings*.tsx</code></td><td>13 原语支撑 13 设置页</td></tr>
+            <tr><td>TurnCard(助手回合卡)</td><td>业务</td><td><code>packages/ui/chat/TurnCard.tsx</code></td><td>嵌套子代理 + annotations</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>组件化机会(合并 / 上提 / 缺口,优先级序)</h3><span class="src">component-inventory.md §8</span></div>
+      <div class="lib-panel-body"><div id="opList"></div></div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>两套令牌体系对照(不可混用)</h3><span class="src">renderer/index.css vs skill workbench CSS</span></div>
+      <div class="lib-panel-body">
+        <div class="table-card"><table class="lib-table">
+          <thead><tr><th>维度</th><th>renderer index.css(助手/全局)</th><th>skill workbench(产品面权威)</th></tr></thead>
+          <tbody>
+            <tr><td>色彩空间</td><td>oklch 相对色 + color-mix(<code>--accent: oklch(0.62 0.13 293)</code>)</td><td>hex(<code>--accent: #6e56cf</code>)</td></tr>
+            <tr><td>Dark 选择器</td><td><code>.dark</code></td><td><code>[data-theme=dark]</code>(未验收)</td></tr>
+            <tr><td>圆角</td><td>全局 0,组件级类</td><td>8 档 --radius token</td></tr>
+            <tr><td>阴影</td><td>多层环+模糊,10 批准类</td><td>3 档实影</td></tr>
+            <tr><td>z-index / 断点</td><td>16 档 token / 容器查询 448·768</td><td>裸值 / 媒体查询 1080·760·640</td></tr>
+            <tr><td>桥梁</td><td colspan="2"><code>lib/client-workbench-style.ts</code> ?raw 解析 skill CSS → inline 作用域注入(light 冻结)</td></tr>
+          </tbody>
+        </table></div>
+        <p class="lib-note">另:packages/ui/styles/index.css 是第三份等价主题(仅 apps/viewer @import),与 renderer 已漂移(accent oklch 0.58/0.22 vs 0.62/0.13),建议收敛为单一维护源。</p>
+      </div>
+    </div>
+
+    <div class="lib-panel">
+      <div class="lib-panel-title"><h3>死代码与待复核</h3><span class="src">component-inventory.md §9</span></div>
+      <div class="lib-panel-body">
+        <div class="lib-col">
+          <div class="alert bad"><span class="icon" data-icon="trash-2"></span><span><b>死代码(0 生产引用)</b>files/FileViewer · preview/TableOfContents · settings/SearchableModelInput · settings/SettingsEditRow · icons 4 文件(ConnectionIcon/PanelRightRounded/PoloAiAppIcon/TodoStateIcons) · tab-browser 退役 4 文件(AllAppsView/ManageHomeAppsDialog/OrganizationAppCard/AppIcon) · shiki/ 3 wrapper · InlineSkillMention(@deprecated)</span></div>
+          <div class="alert info"><span class="icon" data-icon="alert-triangle"></span><span><b>待复核</b>①「管理技能页面暂缓」vs ProductSpaceSkillsDialog 已存在;②modules 声明与 paths 覆盖口径;③dark 令牌边界提升到 skill 正文;④800×600 回归 vs WindowWidthGuard ≤640px;⑤三份主题 CSS 漂移;⑥design-demos 三目录均非设计 authority。</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="lib-footer">
+    <p><strong>Polo AI 组件库</strong> · 2026-10-18 · 基线 <code>dev@e7c0e6bd</code> · 8 个并行探索子 agent(GLM-5.3)汇总。</p>
+    <p>令牌来源:<code>.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css</code>(SHA-256 前缀 fe5bfc32)与 <code>workbench-review.css</code>(75e75333);组件登记:<a href="../../.agents/skills/polo-ai-design-system/references/component-inventory.md">references/component-inventory.md</a>;工作表:<a href="./2026-10-18-design-system-component-extraction-worksheet.md">2026-10-18 worksheet</a>。</p>
+    <p>本页为展示产物,不构成设计授权;数值以 skill 权威令牌为准,生产组件留在原拥有模块。</p>
+  </footer>
+</main>
+
+<script>
+/* ---------- Icon 注册表(统一签名:24 网格 / currentColor / size / strokeWidth) ---------- */
+var ICONS = {
+  '导航 & 面板': {
+    'chevron-down':'<path d="m6 9 6 6 6-6"/>','chevron-up':'<path d="m18 15-6-6-6 6"/>','chevron-left':'<path d="m15 18-6-6 6-6"/>','chevron-right':'<path d="m9 18 6-6-6-6"/>',
+    'arrow-left':'<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>','arrow-right':'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+    'panel-left':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
+    'home':'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+    'search':'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+    'settings':'<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+    'more-horizontal':'<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+    'external-link':'<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>'
+  },
+  '操作': {
+    'plus':'<path d="M5 12h14"/><path d="M12 5v14"/>','minus':'<path d="M5 12h14"/>','x':'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    'check':'<path d="M20 6 9 17l-5-5"/>','check-circle':'<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+    'square-pen':'<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z"/>',
+    'trash-2':'<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
+    'copy':'<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+    'send':'<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+    'download':'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+    'refresh-cw':'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+    'log-out':'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>',
+    'filter':'<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+    'power':'<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>'
+  },
+  '状态 & 反馈': {
+    'info':'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    'alert-triangle':'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    'alert-circle':'<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+    'loader':'<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+    'circle-dashed':'<circle cx="12" cy="12" r="10" stroke-dasharray="4 4"/>',
+    'clock':'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    'wifi':'<path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 20 0"/><line x1="12" x2="12.01" y1="20" y2="20"/>',
+    'shield-check':'<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+    'lock':'<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    'eye':'<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+    'eye-off':'<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/><path d="m2 2 20 20"/>'
+  },
+  '沟通 & 身份': {
+    'message-square':'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    'bell':'<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+    'user':'<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    'users':'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    'phone':'<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>',
+    'key':'<path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
+    'globe':'<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>'
+  },
+  '文件 & 数据': {
+    'folder':'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    'file-text':'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    'image':'<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+    'database':'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
+    'code':'<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+    'terminal':'<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+    'hash':'<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
+    'paperclip':'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+    'calendar':'<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'
+  },
+  'AI & 品牌(线性)': {
+    'sparkles':'<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+    'zap':'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+    'bot':'<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+    'layers':'<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+    'moon':'<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+    'star':'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'
+  }
+};
+var strokeW = 2, iconQuery = '';
+function iconSvg(name, inner){
+  return '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="'+strokeW+'" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+inner+'</svg>';
+}
+function renderIcons(){
+  var host = document.getElementById('iconBrowser');
+  var html = '';
+  Object.keys(ICONS).forEach(function(group){
+    var cells = '';
+    var count = 0;
+    Object.keys(ICONS[group]).forEach(function(name){
+      if(iconQuery && name.indexOf(iconQuery) < 0) return;
+      cells += '<span class="icon-cell" title="'+name+'">'+iconSvg(name, ICONS[group][name])+'<small>'+name+'</small></span>';
+      count++;
+    });
+    if(count) html += '<div class="icon-group-label">'+group+' · '+count+'</div><div class="icon-grid">'+cells+'</div>';
+  });
+  if(!html) html = '<div class="empty-note">没有匹配「'+iconQuery+'」的图标。</div>';
+  host.innerHTML = html;
+  hydrateDataIcons(host);
+}
+function hydrateDataIcons(root){
+  (root||document).querySelectorAll('[data-icon]').forEach(function(el){
+    if(el.firstChild) return;
+    var name = el.getAttribute('data-icon'), inner = null;
+    Object.keys(ICONS).forEach(function(g){ if(ICONS[g][name] !== undefined) inner = ICONS[g][name]; });
+    if(inner === null) inner = '<circle cx="12" cy="12" r="9"/>';
+    el.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="'+strokeW+'" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:100%;height:100%;display:block">'+inner+'</svg>';
+  });
+}
+document.getElementById('iconSearch').addEventListener('input', function(e){ iconQuery = e.target.value.trim(); renderIcons(); });
+document.getElementById('sizeSeg').addEventListener('click', function(e){
+  if(e.target.dataset.size){ this.querySelectorAll('button').forEach(function(b){b.classList.remove('on')}); e.target.classList.add('on');
+    document.getElementById('iconBrowser').style.setProperty('--icon-demo-size', e.target.dataset.size+'px'); }
+});
+document.getElementById('strokeSeg').addEventListener('click', function(e){
+  if(e.target.dataset.sw){ this.querySelectorAll('button').forEach(function(b){b.classList.remove('on')}); e.target.classList.add('on');
+    strokeW = parseFloat(e.target.dataset.sw); renderIcons(); }
+});
+/* ---------- 令牌渲染 ---------- */
+var COLOR_TOKENS = [
+  ['--background','#fbfbfa','画布'],['--surface','#ffffff','表面/卡片'],['--surface-strong','#f3f4f5','强表面/hover'],['--foreground','#17181a','前景'],
+  ['--border','#e6e7e9','边框'],['--accent','#6e56cf','强调(紫)'],['--info','#3275d8','信息(蓝)'],['--success','#2d8a5b','成功'],['--destructive','#c84646','危险'],
+  ['--on-accent','#ffffff','强调上的文字'],['--accent-soft','accent 12%','软底·强调'],['--success-soft','success 10%','软底·成功'],['--info-soft','info 10%','软底·信息'],['--destructive-soft','destructive 10%','软底·危险']
+];
+document.getElementById('swatchColors').innerHTML = COLOR_TOKENS.map(function(t){
+  return '<div class="swatch"><div class="chip" style="background:var('+t[0]+');border-bottom:1px solid var(--border)"></div><div class="meta"><b>'+t[0]+'</b><small>'+t[1]+' · '+t[2]+'</small></div></div>';
+}).join('') + ['--fg-3','--fg-5','--fg-10','--fg-20','--fg-40','--fg-50','--fg-60','--fg-70','--fg-80'].map(function(v){
+  return '<div class="swatch"><div class="chip" style="background:var('+v+')"></div><div class="meta"><b>'+v+'</b><small>foreground '+v.replace('--fg-','')+'% 混合</small></div></div>';
+}).join('');
+var RADII = [['--radius-xs','4px'],['--radius-sm','6px'],['--radius-md','8px'],['--radius-inner','10px'],['--radius-lg','12px'],['--radius-edge','14px'],['--radius-card','20px'],['--radius-pill','9999px']];
+document.getElementById('radiusDemo').innerHTML = RADII.map(function(r){
+  return '<div class="radius-box" style="border-radius:'+r[1]+'">'+r[0].replace('--radius-','')+'<br>'+r[1]+'</div>';
+}).join('');
+/* ---------- 组件化机会清单 ---------- */
+var OPPS = [
+  ['01','WorkbenchPageMain:main 容器样板(1260px+断点 padding+scroller 注册)在 4 个页面逐字重复'],
+  ['02','AsyncContent(loading/error/empty/children):5 处独立三态实现,收益最大'],
+  ['03','InputShell/SecretInput:输入壳+眼睛切换重复 6+ 次;settings 已有而 onboarding/apisetup 未复用'],
+  ['04','SectionHeader:SettingsSection ≈ Info_Section ≈ CronBuilder 小节头,三变体合一'],
+  ['05','WorkbenchBanner/EmptyState:danger/info 横幅与空态卡在产品面 10+ 处内联'],
+  ['06','内联菜单常量:五份 MENU_*_STYLE 重复;packages/ui InlineMenuSurface 零引用,应统一'],
+  ['07','PairingCodeBody/CredentialTestDialog:两对同构对话框(含逐行相同的倒计时)'],
+  ['08','TreeView:SessionFilesSection 整段复刻 LeftSidebar 连接线/stagger'],
+  ['09','CopyButton+useCopied:3 处复制按钮/双 PatternBadge'],
+  ['10','ChoiceCard:RadioCard/ProviderSelect/OptionButton 同视觉;SegmentedControl 手写 3 份'],
+  ['11','Dropdown 收敛:SimpleDropdown(手写 fixed)→ StyledDropdown(Radix);styled-context-menu 随迁'],
+  ['12','基础原语上提:renderer ui/ 约 20 个原子件下沉 packages/ui(sonner 需解 ThemeContext 依赖)'],
+  ['13','Icon 统一签名+barrel+尺寸/描边 token;品牌资产独立分层'],
+  ['14','useAutosave(debounce+flush+脏检查):可被 14 个设置页复用;保存反馈三态统一'],
+  ['15','徽章收敛:MicroBadge vs Info_Badge vs ui/Badge 三套 → Info_Badge size 变体']
+];
+document.getElementById('opList').innerHTML = OPPS.map(function(o){
+  return '<div class="op-item"><b>'+o[0]+'</b><div>'+o[1]+'</div></div>';
+}).join('');
+/* ---------- 交互 ---------- */
+document.getElementById('themeToggle').addEventListener('click', function(){
+  var root = document.documentElement;
+  var dark = root.getAttribute('data-theme') === 'dark';
+  if(dark){ root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme','dark'); }
+  document.getElementById('themeLabel').textContent = dark ? 'Dark' : 'Light';
+});
+document.getElementById('loginSwitch').addEventListener('click', function(){
+  var phone = document.getElementById('phoneFields'), pass = document.getElementById('passwordFields');
+  var toPassword = phone && !phone.hidden;
+  if(toPassword){ phone.hidden = true; pass.hidden = false; this.textContent = '使用验证码登录 →'; }
+  else { phone.hidden = false; pass.hidden = true; this.textContent = '使用密码登录 →'; }
+});
+var demoScroll = document.getElementById('demoScroll'), demoTopbar = document.getElementById('demoTopbar');
+demoScroll.addEventListener('scroll', function(){
+  demoTopbar.setAttribute('data-scrolled', demoScroll.scrollTop > 0 ? 'true' : 'false');
+});
+document.getElementById('circleTabs').addEventListener('click', function(e){
+  var btn = e.target.closest('button[data-tab]'); if(!btn) return;
+  this.querySelectorAll('button').forEach(function(b){ b.classList.remove('selected') });
+  btn.classList.add('selected');
+  ['content','updates','subscription'].forEach(function(k){
+    document.getElementById('tab-'+k).hidden = (k !== btn.dataset.tab);
+  });
+});
+var leaveModal = document.getElementById('leaveModal');
+document.getElementById('openLeave').addEventListener('click', function(){ leaveModal.hidden = false; });
+document.getElementById('leaveClose').addEventListener('click', function(){ leaveModal.hidden = true; });
+document.getElementById('leaveCancel').addEventListener('click', function(){ leaveModal.hidden = true; });
+document.getElementById('leaveConfirm').addEventListener('click', function(){
+  leaveModal.hidden = true; showToast('已提交退出请求;结果未知时可稍后重试。');
+});
+document.getElementById('toastBtn').addEventListener('click', function(){ showToast('组件库已复制到剪贴板(演示)。'); });
+function showToast(msg){
+  var host = document.getElementById('toastHost');
+  var t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  host.appendChild(t);
+  setTimeout(function(){ t.remove(); }, 2600);
+}
+/* ---------- 初始化 ---------- */
+renderIcons();
+hydrateDataIcons(document);
+</script>
+</body>
+</html>
