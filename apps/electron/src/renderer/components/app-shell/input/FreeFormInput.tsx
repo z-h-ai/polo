@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
+import { toast } from 'sonner'
 import { Command as CommandPrimitive } from 'cmdk'
 import { AnimatePresence, motion } from 'motion/react'
 import {
@@ -841,9 +842,13 @@ export function FreeFormInput({
           const attachment = await readFileAsAttachment(files[i], fileNames[i])
           if (attachment) {
             setAttachments(prev => [...prev, attachment])
+          } else {
+            // readFileAsAttachment resolves null when the FileReader fails
+            toast.error(t('toast.attachmentFailed', { name: fileNames[i] }))
           }
         } catch (error) {
           console.error('[FreeFormInput] Failed to process pasted file:', error)
+          toast.error(t('toast.attachmentFailed', { name: fileNames[i] }))
         }
         setLoadingCount(prev => prev - 1)
       }
@@ -854,7 +859,7 @@ export function FreeFormInput({
 
     window.addEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
     return () => window.removeEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
-  }, [disabled, sessionId, isFocusedPanel, richInputRef])
+  }, [disabled, sessionId, isFocusedPanel, richInputRef, t])
 
   // Build active commands list for slash command menu
   const activeCommands = React.useMemo(() => {
@@ -1002,13 +1007,18 @@ export function FreeFormInput({
 
   // Shared helper: read a File, add as attachment, decrement loading count
   const processFileAttachment = async (file: File, overrideName?: string) => {
+    const displayName = overrideName || file.name
     try {
       const attachment = await readFileAsAttachment(file, overrideName)
       if (attachment) {
         setAttachments(prev => [...prev, attachment])
+      } else {
+        // readFileAsAttachment resolves null when the FileReader fails
+        toast.error(t('toast.attachmentFailed', { name: displayName }))
       }
     } catch (error) {
       console.error('[FreeFormInput] Failed to read file:', error)
+      toast.error(t('toast.attachmentFailed', { name: displayName }))
     }
     setLoadingCount(prev => prev - 1)
   }
