@@ -31,6 +31,7 @@ import { AsrAdapterRegistry } from './adapter.ts'
 import { VoiceBillingClient, type VoiceBillingResult } from './billing.ts'
 import { AsrCapabilityService, supplierConfigFromEnv } from './capabilities.ts'
 import { MockAsrAdapter } from './mock-adapter.ts'
+import { MimoFileAsrAdapter, mimoAsrOptionsFromEnv } from './mimo-adapter.ts'
 import {
   ASR_CLOSE_CODE,
   ASR_PREHOLD_SECONDS,
@@ -507,11 +508,12 @@ export interface CreateDefaultAsrServiceOptions {
   env?: Record<string, string | undefined>
 }
 
-/** env/本地配置 + 火山/mock 注册表 + admin 计费客户端的默认组装（测试可整体注入覆盖）。 */
+/** env/本地配置 + 火山/MiMo/mock 注册表 + admin 计费客户端的默认组装（测试可整体注入覆盖）。 */
 export function createDefaultAsrService(options: CreateDefaultAsrServiceOptions): AsrService {
   const env = options.env ?? process.env
   const registry = new AsrAdapterRegistry()
   registry.register(new VolcanoStreamAsrAdapter(volcanoAsrOptionsFromEnv(env)))
+  registry.register(new MimoFileAsrAdapter(mimoAsrOptionsFromEnv(env))) // POL-21 FILE 供应商
   registry.register(new MockAsrAdapter())
   return new AsrService({
     auth: options.auth,
