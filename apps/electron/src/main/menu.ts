@@ -24,6 +24,7 @@ export function createApplicationMenu(windowManager: WindowManager, sink?: Event
   cachedWindowManager = windowManager
   cachedEventSink = sink ?? null
   cachedClientResolver = resolver ?? null
+  installWebviewMenuShortcutForwarding()
   rebuildMenu()
 }
 
@@ -49,8 +50,11 @@ export async function rebuildMenu(): Promise<void> {
   const windowManager = cachedWindowManager
   const isMac = process.platform === 'darwin'
 
-  // On Windows/Linux, hide the native menu entirely
-  // Users access menu via the Polo AI logo dropdown in the app
+  // On Windows/Linux, hide the native menu entirely: the in-app Polo AI logo
+  // dropdown (AppMenu mounted in the TopBar) is the cross-platform application
+  // menu, so a native menu bar would only duplicate it. macOS keeps the native
+  // menu because Apple guidelines require it; both surfaces run the same
+  // handlers via the menu broadcast channels.
   if (!isMac) {
     Menu.setApplicationMenu(null)
     return
@@ -265,6 +269,104 @@ function sendToRenderer(channel: MenuBroadcastChannel): void {
       cachedEventSink(channel, { to: 'client', clientId })
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Webview menu-shortcut forwarding (F7)
+//
+// The menu accelerators below are declared with `registerAccelerator: false`:
+// the renderer action registry owns the keyboard side via its capture-phase
+// window keydown listener. But when focus is inside a <webview> guest, the
+// keydown never reaches the host renderer, so those shortcuts go dead. The
+// main process forwards the same six combos from the guest's
+// before-input-event to the host renderer (newWindow stays in main — it needs
+// WindowManager access).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Structural subset of Electron's `Input` payload from before-input-event. */
+export interface WebviewShortcutInput {
+  type: string
+  key: string
+  control: boolean
+  meta: boolean
+  shift: boolean
+  alt: boolean
+}
+
+/** The menu action a forwarded webview shortcut should trigger. */
+export type WebviewMenuShortcutAction =
+  | 'newChat'
+  | 'newWindow'
+  | 'openSettings'
+  | 'toggleFocusMode'
+  | 'toggleSidebar'
+  | 'keyboardShortcuts'
+
+/**
+ * Pure matcher for the six renderer-owned menu accelerators. CmdOrCtrl
+ * semantics: meta on macOS, control on Windows/Linux — the opposite cmd/ctrl
+ * modifier, alt, or an unexpected shift disqualifies the combo. Only keyDown
+ * events match (keyUp/rawKeyDown must not re-trigger an action).
+ */
+export function matchWebviewMenuShortcut(input: WebviewShortcutInput): WebviewMenuShortcutAction | null {
+  if (input.type !== 'keyDown') return null
+  const isMac = process.platform === 'darwin'
+  const mod = isMac ? input.meta : input.control
+  const foreignMod = isMac ? input.control : input.meta
+  if (!mod || foreignMod || input.alt) return null
+  const key = input.key.toLowerCase()
+  if (input.shift) return key === 'n' ? 'newWindow' : null
+  switch (key) {
+    case 'n': return 'newChat'
+    case ',': return 'openSettings'
+    case '.': return 'toggleFocusMode'
+    case 'b': return 'toggleSidebar'
+    case '/': return 'keyboardShortcuts'
+    default: return null
+  }
+}
+
+let webviewShortcutForwardingInstalled = false
+
+/** Broadcast channel for each forwarded action (newWindow is handled in main). */
+const WEBVIEW_SHORTCUT_CHANNELS: Record<Exclude<WebviewMenuShortcutAction, 'newWindow'>, MenuBroadcastChannel> = {
+  newChat: RPC_CHANNELS.menu.NEW_CHAT,
+  openSettings: RPC_CHANNELS.menu.OPEN_SETTINGS,
+  toggleFocusMode: RPC_CHANNELS.menu.TOGGLE_FOCUS_MODE,
+  toggleSidebar: RPC_CHANNELS.menu.TOGGLE_SIDEBAR,
+  keyboardShortcuts: RPC_CHANNELS.menu.KEYBOARD_SHORTCUTS,
+}
+
+/**
+ * Installs the webview before-input-event listener exactly once (module-level
+ * flag guards double registration). Called from createApplicationMenu(); safe
+ * to call repeatedly.
+ */
+function installWebviewMenuShortcutForwarding(): void {
+  if (webviewShortcutForwardingInstalled) return
+  webviewShortcutForwardingInstalled = true
+  app.on('web-contents-created', (_event, contents) => {
+    if (contents.getType() !== 'webview') return
+    contents.on('before-input-event', (event, input) => {
+      const action = matchWebviewMenuShortcut(input)
+      if (!action) return
+      // Swallow the keystroke so the guest page never also reacts to it.
+      event.preventDefault()
+      if (action === 'newWindow') {
+        // Mirrors the File > New Window click in the native menu template:
+        // focused window's workspace gets a new window; no workspace → no-op.
+        const focused = BrowserWindow.getFocusedWindow()
+        if (cachedWindowManager && focused) {
+          const workspaceId = cachedWindowManager.getWorkspaceForWindow(focused.webContents.id)
+          if (workspaceId) {
+            cachedWindowManager.createWindow({ workspaceId })
+          }
+        }
+        return
+      }
+      sendToRenderer(WEBVIEW_SHORTCUT_CHANNELS[action])
+    })
+  })
 }
 
 /**

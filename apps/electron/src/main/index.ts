@@ -1283,6 +1283,49 @@ app.whenReady().then(async () => {
         }
       })
 
+      // Export a session bundle to a local JSON file (session menu → "Export").
+      // Main-process orchestrated: the renderer has no generic save-dialog or
+      // writeFile capability, so the whole flow (bundle → save dialog → write)
+      // runs here. Returns the written file path, or null when the user
+      // cancelled the save dialog.
+      ipcMain.handle('__session:exportToFile', async (event, sessionId: string) => {
+        if (!sessionId || typeof sessionId !== 'string') throw new Error('sessionId is required')
+        if (!sessionManager) throw new Error('Session manager not initialized')
+
+        const { getWorkspaceByNameOrId } = await import('@polo-ai/shared/config')
+        const { sanitizeFilename } = await import('@polo-ai/server-core/handlers')
+
+        const workspaceId = windowManager?.getWorkspaceForWindow(event.sender.id)
+        if (!workspaceId) throw new Error('Unable to resolve workspace for export')
+        const workspace = getWorkspaceByNameOrId(workspaceId)
+        if (!workspace) throw new Error(`Source workspace ${workspaceId} not found`)
+
+        const bundle = await sessionManager.exportSession(sessionId, workspace.id)
+        if (!bundle) throw new Error(`Failed to export session ${sessionId}`)
+
+        // Default filename: sanitized session display name + short id suffix
+        // (keeps exports identifiable without risking path traversal or
+        // filesystem-invalid characters). Falls back to the bare session id.
+        const sessionName = sessionManager.getSessions(workspace.id).find(s => s.id === sessionId)?.name
+        const defaultBase = sessionName
+          ? `${sanitizeFilename(sessionName)}-${sessionId.slice(0, 8)}`
+          : sessionId
+
+        const saveOptions = {
+          defaultPath: join(app.getPath('downloads'), `${defaultBase}.json`),
+          filters: [{ name: 'JSON', extensions: ['json'] }],
+        }
+        const parentWindow = BrowserWindow.fromWebContents(event.sender)
+        const result = parentWindow
+          ? await dialog.showSaveDialog(parentWindow, saveOptions)
+          : await dialog.showSaveDialog(saveOptions)
+        if (result.canceled || !result.filePath) return null
+
+        const { writeFile } = await import('fs/promises')
+        await writeFile(result.filePath, JSON.stringify(bundle, null, 2), 'utf-8')
+        return result.filePath
+      })
+
       // App relaunch (for server config changes — NOT an update install)
       ipcMain.handle('app:relaunch', () => {
         app.relaunch()

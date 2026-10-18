@@ -30,6 +30,7 @@ import {
   RefreshCw,
   Tag,
   Send,
+  FileDown,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { getStateColor, getStateIcon, type SessionStatusId } from '@/config/session-status-config'
@@ -260,6 +261,12 @@ export function SessionMenu({
       <MenuItem onClick={actions.copyPath}>
         <Copy className="h-3.5 w-3.5" />
         <span className="flex-1">{t("sessionMenu.copyPath")}</span>
+      </MenuItem>
+
+      {/* Export conversation to a JSON file via the OS save dialog */}
+      <MenuItem onClick={actions.exportSession}>
+        <FileDown className="h-3.5 w-3.5" />
+        <span className="flex-1">{t("sessionMenu.export")}</span>
       </MenuItem>
 
       <Separator />

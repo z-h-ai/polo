@@ -34,6 +34,7 @@ type ApiToChannelMapKeys = Exclude<
   | 'invokeOnServer' // direct IPC to main process — cross-server RPC
   | 'transferSessionToWorkspace' // direct IPC to main process — orchestrated remote transfer
   | 'onTransferProgress' // direct IPC listener — chunk upload progress
+  | 'exportSessionToFile' // direct IPC to main process — save dialog + local file write
   | 'sendDeepLinkActionResult' // direct IPC to main process — webview protocol callback ack
   | 'onCircleReturnCandidate' // preload-implemented listener over the WS client (POO-70 B1 circle-return bridge, bootstrap.ts)
   | 'changeLanguage' // direct IPC to main process — syncs i18n language
