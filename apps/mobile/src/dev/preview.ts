@@ -81,6 +81,20 @@ function fixtureResponse(path: string): unknown | undefined {
     preholdSeconds: 60,
     credits: 10,
   };
+  // POL-26 视觉验收：qr-confirm 的就绪态（P11 对照）——已扫待确认票据，
+  // 请求端信息对齐原型帧（MacBook Pro · macOS 15 / 上海 · 112.65.××.××）。
+  if (path.startsWith('/api/auth/qr/status')) {
+    return {
+      qrId: 'qr-preview-01',
+      status: 'scanned',
+      expiresInSeconds: 120,
+      requester: {
+        clientType: '',
+        ipMasked: '上海 · 112.65.××.××',
+        userAgent: 'MacBook Pro · macOS 15',
+      },
+    };
+  }
   return undefined;
 }
 

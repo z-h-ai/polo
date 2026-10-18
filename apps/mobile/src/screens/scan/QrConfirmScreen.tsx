@@ -267,7 +267,13 @@ export function QrConfirmScreen() {
       <View style={styles.body}>
         <View style={styles.hero}>
           <View style={styles.heroBadge}>
-            <Text style={styles.heroBadgeText}>P</Text>
+            {/* V-08: shield mark (proto i-shield: purple outline + check),
+                drawn with views — no react-native-svg dependency. */}
+            <View style={styles.shieldMark}>
+              <View style={styles.shieldBody} />
+              <View style={styles.shieldTip} />
+              <Text style={styles.shieldCheck}>✓</Text>
+            </View>
           </View>
           <Text style={styles.heroTitle}>授权该设备登录你的账号？</Text>
           <Text style={styles.heroSub}>对方将在你确认后自动完成登录</Text>
@@ -297,6 +303,7 @@ export function QrConfirmScreen() {
 
         <View style={styles.infobar}>
           <Text style={styles.infobarText}>
+            <Text style={styles.infobarIcon}>⚠️ </Text>
             如果这次登录不是你本人发起，请点「不是我，拒绝」，并尽快在网页端「账号安全」中修改密码。
           </Text>
         </View>
@@ -382,14 +389,57 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: radius.logo,
-    backgroundColor: colors.accentSoft,
+    // Opaque flatten of accentSoft over the screen background: the shield tip
+    // masks the body's bottom arc with this exact color (see shieldTip).
+    backgroundColor: colors.accentSoftSolid,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heroBadgeText: {
-    color: colors.accentDeep,
-    fontSize: 24,
-    fontWeight: '700',
+  // V-08 shield mark — 24×29 silhouette from the prototype's i-shield path:
+  // rounded-top body, curved flanks, pointed tip, ✓ centered inside.
+  shieldMark: {
+    width: 24,
+    height: 29,
+  },
+  shieldBody: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 24,
+    height: 24,
+    borderWidth: 2,
+    borderColor: colors.accent,
+    // flatter shoulders than a circle so the silhouette reads as a shield
+    // (proto i-shield), not a map pin
+    borderTopLeftRadius: 7,
+    borderTopRightRadius: 7,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
+  shieldTip: {
+    // 45°-rotated square stroked on its two lower edges → the pointed bottom.
+    // The opaque badge-tinted fill hides the body's bottom arc underneath;
+    // its edges are tangent to that arc, so the strokes join cleanly.
+    position: 'absolute',
+    top: 14.5,
+    left: 6,
+    width: 12,
+    height: 12,
+    transform: [{ rotate: '45deg' }],
+    borderRightWidth: 2,
+    borderBottomWidth: 2,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoftSolid,
+  },
+  shieldCheck: {
+    position: 'absolute',
+    top: 7,
+    left: 0,
+    width: 24,
+    textAlign: 'center',
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '800',
   },
   heroTitle: {
     color: colors.foreground,
@@ -438,14 +488,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   infobar: {
-    backgroundColor: colors.accentSoft,
+    // V-04: amber anti-phishing hint card (prototype .infobar).
+    backgroundColor: colors.warningBg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.warningBorder,
     borderRadius: 10,
-    padding: 11,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   infobarText: {
-    color: colors.fg60,
-    fontSize: 11.5,
-    lineHeight: 18,
+    color: colors.warning,
+    fontSize: 12.5,
+    lineHeight: 19,
+  },
+  infobarIcon: {
+    color: colors.warning,
+    fontSize: 12,
   },
   actions: {
     marginTop: 'auto',
@@ -465,18 +523,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   dangerButton: {
+    // V-10: light-red filled reject button (prototype .btnD).
     height: 48,
     borderRadius: radius.field,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.dangerBg,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.buttonBorder,
+    borderColor: colors.dangerBorder,
   },
   dangerButtonLabel: {
     color: colors.destructive,
     fontSize: fontSize.button,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   wideButton: {
     alignSelf: 'stretch',
