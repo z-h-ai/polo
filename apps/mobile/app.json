@@ -32,6 +32,13 @@
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "麦克风用于按住说话，将语音转成文字发送",
+          "recordAudioAndroid": true
+        }
       ]
     ]
   }
