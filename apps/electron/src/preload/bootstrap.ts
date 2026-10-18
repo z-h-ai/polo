@@ -498,6 +498,12 @@ Object.assign(api, buildAdminPreloadApi(client, {
   return () => { ipcRenderer.removeListener('transfer:progress', handler) }
 }
 
+// Export a session bundle to a local JSON file — main-process orchestrated
+// (bundle export + OS save dialog + write) since the renderer has no generic
+// save-dialog / writeFile capability. Returns null when the user cancels.
+;(api as ElectronAPI).exportSessionToFile = (sessionId: string) =>
+  ipcRenderer.invoke('__session:exportToFile', sessionId)
+
 // System warnings — expose env-based flags set during main process startup
 // (preload-only: reads env var directly, no IPC round-trip needed)
 ;(api as ElectronAPI).getSystemWarnings = async () => ({
