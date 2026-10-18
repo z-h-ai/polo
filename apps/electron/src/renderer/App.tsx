@@ -71,6 +71,7 @@ import {
   DocumentFormattedMarkdownOverlay,
   JSONPreviewOverlay,
 } from '@polo-ai/ui'
+import { appendGenUiToolInputDelta } from '@polo-ai/ui/chat/genuiToolInputDeltas'
 import { useLinkInterceptor, type FilePreviewState } from '@/hooks/useLinkInterceptor'
 import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
 import { useStaleSessionRecovery } from '@/hooks/useStaleSessionRecovery'
@@ -1666,6 +1667,16 @@ export default function App() {
         // (repeated events are idempotent).
         applyPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId, pendingQuestionGuardRef.current))
         removeSession(sessionId)
+        return
+      }
+
+      // P0-2 render_ui skeleton streaming: renderer-internal channel. Feed the
+      // ephemeral accumulator and stop — the event must never reach the agent
+      // event processor (no message state) and by dto contract never reaches
+      // tab protocol pages either (whitelist excludes the type). seq rides
+      // along: the accumulator drops non-increasing deliveries.
+      if (event.type === 'tool_input_delta') {
+        appendGenUiToolInputDelta(sessionId, event.toolUseId, event.delta, event.seq)
         return
       }
 

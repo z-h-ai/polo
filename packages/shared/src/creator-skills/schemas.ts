@@ -3,7 +3,7 @@ import {
   CreatorSkillMetadataError,
   validateCreatorSkillMetadata,
 } from './metadata.ts'
-import { HARD_SKILL_ARCHIVE_POLICY } from './types.ts'
+import { HARD_SKILL_ARCHIVE_POLICY, HARD_WEBAPP_BUNDLE_POLICY } from './types.ts'
 
 const entityId = z.string().trim().min(1).max(512)
 const isoDate = z.string().datetime({ offset: true })
@@ -46,6 +46,39 @@ export const SkillArchivePolicySchema = z.object({
   maxFileBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxFileBytes),
   maxExpandedBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxExpandedBytes),
 })
+
+/**
+ * Server-issued policy for web_app (Generative UI canvas) artifacts. The max
+ * bounds ARE the client hard caps: a server response that exceeds
+ * HARD_WEBAPP_BUNDLE_POLICY fails validation instead of loosening it, so the
+ * installer can never be talked above the local ceiling.
+ */
+export const WebAppArtifactPolicySchema = z.object({
+  enabled: z.boolean(),
+  maxBundleBytes: z.number().int().positive().max(HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes),
+  maxFileCount: z.number().int().positive().max(HARD_WEBAPP_BUNDLE_POLICY.maxFileCount),
+})
+
+/**
+ * HARD clamp for the installer side: intersect a server policy with the local
+ * hard caps so every effective limit is ≤ HARD_WEBAPP_BUNDLE_POLICY, and an
+ * `enabled: true` from the server can never bypass a local disable.
+ */
+export function clampWebAppArtifactPolicy(policy: {
+  enabled: boolean
+  maxBundleBytes: number
+  maxFileCount: number
+}): { enabled: boolean; maxBundleBytes: number; maxFileCount: number } {
+  const parsed = WebAppArtifactPolicySchema.safeParse(policy)
+  if (!parsed.success) {
+    return { enabled: false, maxBundleBytes: 0, maxFileCount: 0 }
+  }
+  return {
+    enabled: parsed.data.enabled,
+    maxBundleBytes: Math.min(parsed.data.maxBundleBytes, HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes),
+    maxFileCount: Math.min(parsed.data.maxFileCount, HARD_WEBAPP_BUNDLE_POLICY.maxFileCount),
+  }
+}
 
 export const SkillValidationIssueSchema = z.object({
   code: z.string().min(1).max(128),

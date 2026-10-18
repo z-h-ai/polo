@@ -412,6 +412,20 @@ export async function handleDeepLink(
 
   mainLog.info('[DeepLink] Handling', logContext)
 
+  // POO-103: canvas-card ui-event loop. Consumed here and NEVER navigated —
+  // a ui-event URL aimed at a tab protocol page fails validation inside the
+  // handler (it owns no registered cards), keeping the tab webview trust
+  // model untouched.
+  if (target.action === 'ui-event') {
+    if (sourceWebContentsId == null) {
+      mainLog.warn('[DeepLink] ui-event without a source webContents — dropped', logContext)
+      return { success: true }
+    }
+    const { handleUiEventUrl } = await import('./genui-ui-event')
+    handleUiEventUrl(url, sourceWebContentsId)
+    return { success: true }
+  }
+
   if (target.action === 'send-message') {
     if (!target.callbackId || sourceWebContentsId == null) {
       return { success: false, error: 'send-message requires a valid callbackId and source webContents' }

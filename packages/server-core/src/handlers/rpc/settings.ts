@@ -81,6 +81,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL,
   RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED,
+  RPC_CHANNELS.tools.GET_GENERATIVE_UI_INLINE_ENABLED,
+  RPC_CHANNELS.tools.SET_GENERATIVE_UI_INLINE_ENABLED,
+  RPC_CHANNELS.tools.GET_GENERATIVE_UI_CANVAS_ENABLED,
+  RPC_CHANNELS.tools.SET_GENERATIVE_UI_CANVAS_ENABLED,
   RPC_CHANNELS.settings.GET_NETWORK_PROXY,
   RPC_CHANNELS.dialog.OPEN_FOLDER,
 ] as const
@@ -476,6 +480,26 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED, async (_ctx, enabled: boolean) => {
     const { setBrowserToolEnabled } = await import('@polo-ai/shared/config/storage')
     setBrowserToolEnabled(enabled)
+  })
+
+  server.handle(RPC_CHANNELS.tools.GET_GENERATIVE_UI_INLINE_ENABLED, async () => {
+    const { getGenerativeUiInlineEnabled } = await import('@polo-ai/shared/config/storage')
+    return getGenerativeUiInlineEnabled()
+  })
+
+  server.handle(RPC_CHANNELS.tools.SET_GENERATIVE_UI_INLINE_ENABLED, async (_ctx, enabled: boolean) => {
+    const { setGenerativeUiInlineEnabled } = await import('@polo-ai/shared/config/storage')
+    setGenerativeUiInlineEnabled(enabled)
+  })
+
+  server.handle(RPC_CHANNELS.tools.GET_GENERATIVE_UI_CANVAS_ENABLED, async () => {
+    const { getGenerativeUiCanvasEnabled } = await import('@polo-ai/shared/config/storage')
+    return getGenerativeUiCanvasEnabled()
+  })
+
+  server.handle(RPC_CHANNELS.tools.SET_GENERATIVE_UI_CANVAS_ENABLED, async (_ctx, enabled: boolean) => {
+    const { setGenerativeUiCanvasEnabled } = await import('@polo-ai/shared/config/storage')
+    setGenerativeUiCanvasEnabled(enabled)
   })
 
   // ============================================================

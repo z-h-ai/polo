@@ -24,6 +24,9 @@ import {
 } from '../../shared/tab-browser-types'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { ProductSpaceAppLaunchBridge } from '@/components/tab-browser/ProductSpaceAppLaunchBridge'
+import { GenUiAppPinBridge } from '@/components/tab-browser/GenUiAppPinBridge'
+import { GenUiAppPublishBridge } from '@/components/tab-browser/GenUiAppPublishBridge'
+import { GenUiCardRegistryBridge } from '@/components/tab-browser/GenUiCardRegistryBridge'
 import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
 
 export interface WebAppNavigationControls {
@@ -53,6 +56,8 @@ interface TabShellContextValue {
   activateHome: () => void
   activateTab: (tabId: string) => void
   openApp: (app: AppDefinition) => void
+  /** Install (or update) an app in the launcher and persist it. */
+  installApp: (app: AppDefinition) => Promise<void>
   closeTab: (tabId: string) => void
   registerProductSpaceTabClose?: (handler: ((tabId: string) => boolean) | null) => void
   reorderTabs: (draggedTabId: string, targetTabId: string) => void
@@ -189,6 +194,17 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     }
   }, [activeTabId, installedApps, openTabs, persistApps, setActiveTabId, setOpenTabs])
 
+  // Install a new launcher app or update one with the same id in place (a
+  // re-pinned canvas app at a newer version rewrites its entry).
+  const installApp = useCallback(async (app: AppDefinition) => {
+    const existing = installedApps.some((candidate) => candidate.id === app.id)
+    await persistApps(
+      existing
+        ? installedApps.map((candidate) => (candidate.id === app.id ? app : candidate))
+        : [...installedApps, app],
+    )
+  }, [installedApps, persistApps])
+
   const registerWebAppNavigation = useCallback((tabId: string, controls: WebAppNavigationControls | null) => {
     setWebAppNavigation((current) => {
       if (!controls) {
@@ -229,6 +245,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     activateHome: () => activateTabWrite(HOME_TAB_ID),
     activateTab: activateTabWrite,
     openApp: openAppTab,
+    installApp,
     closeTab,
     registerProductSpaceTabClose,
     reorderTabs: (draggedTabId, targetTabId) => {
@@ -252,6 +269,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     activeWebAppNavigation,
     activateTabWrite,
     closeTab,
+    installApp,
     registerProductSpaceTabClose,
     installedApps,
     isReady,
@@ -267,6 +285,9 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
   return (
     <TabShellContext.Provider value={value}>
       {liveProductSpace && <ProductSpaceAppLaunchBridge />}
+      <GenUiAppPinBridge />
+      <GenUiAppPublishBridge />
+      <GenUiCardRegistryBridge />
       {children}
     </TabShellContext.Provider>
   )

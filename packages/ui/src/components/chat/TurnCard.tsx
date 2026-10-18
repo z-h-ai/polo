@@ -38,6 +38,16 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '../tooltip'
 import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
+import { GenUICard, mergeGenUiComponents, parseGenUiComponents } from './GenUICard'
+import { extractGenUiSkeletons, isRenderUiActivityToolName, type GenUiSkeleton } from './genuiSkeleton'
+import { useGenUiToolInputPartials, getGenUiToolInputPartials, clearGenUiToolInputDelta } from './genuiToolInputDeltas'
+import {
+  type GenUiAppCardProps,
+  GenUiAppCard,
+  mergeGenUiAppCalls,
+  parseGenUiAppInput,
+  parseGenUiAppResult,
+} from './GenUiAppCard'
 import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, deriveTurnPhase, shouldShowThinkingIndicator, type ActivityGroup, type AssistantTurn } from './turn-utils'
 import { extractAnnotationSelectedText } from './follow-up-helpers'
 import {
@@ -573,6 +583,13 @@ function formatToolInput(
 
   // For call_llm: model shown as badge, prompt duplicates intent
   if (toolName === 'mcp__session__call_llm') return ''
+
+  // For render_ui: the card itself renders below; dumping JSON here is noise
+  if (toolName === 'mcp__session__render_ui') return ''
+
+  // For generate_app: same as render_ui — the canvas card renders below, and
+  // the HTML input plus the marker line would be pure noise
+  if (toolName === 'mcp__session__generate_app') return ''
 
   const parts: string[] = []
 
@@ -2891,6 +2908,89 @@ export const TurnCard = React.memo(function TurnCard({
     [sortedActivities, hasTaskSubagents]
   )
 
+  // Declarative inline cards (render_ui): merge same-id components across all
+  // completed calls in the turn. Failed calls are skipped — the model retries
+  // and only the successful payload should render.
+  const genUiComponents = useMemo(
+    () => mergeGenUiComponents(
+      sortedActivities
+        .filter(a => a.type === 'tool' && isRenderUiActivityToolName(a.toolName) && a.status === 'completed')
+        .map(a => parseGenUiComponents(a.toolInput))
+        .filter(group => group.length > 0)
+    ),
+    [sortedActivities]
+  )
+
+  // P0-2 skeleton streaming: while a render_ui call is IN FLIGHT, preview its
+  // components as skeleton cards (type + title only — never business data)
+  // derived from the throttled tool_input_delta stream. The skeleton
+  // disappears when the activity completes (real cards take over above) or
+  // fails. Ephemeral by design: the delta buffer lives in the renderer-internal
+  // accumulator only, never in message state or persistence.
+  const inProgressRenderUiActivities = useMemo(
+    () => sortedActivities.filter(
+      a => a.type === 'tool' && isRenderUiActivityToolName(a.toolName)
+        && (a.status === 'running' || a.status === 'pending')
+    ),
+    [sortedActivities]
+  )
+  const inProgressRenderUiToolIds = useMemo(
+    () => inProgressRenderUiActivities.map(a => a.toolUseId).filter((id): id is string => !!id),
+    [inProgressRenderUiActivities]
+  )
+  const genuiToolInputPartials = useGenUiToolInputPartials(sessionId)
+  const genUiSkeletons = useMemo<Array<GenUiSkeleton & { key: string }>>(() => {
+    if (inProgressRenderUiToolIds.length === 0 || !sessionId) return []
+    const skeletons: Array<GenUiSkeleton & { key: string }> = []
+    for (const toolUseId of inProgressRenderUiToolIds) {
+      const partial = genuiToolInputPartials.get(toolUseId)
+      if (!partial) continue
+      for (const skeleton of extractGenUiSkeletons(partial)) {
+        skeletons.push({ ...skeleton, key: `${toolUseId}:${skeleton.type}:${skeleton.title ?? ''}` })
+      }
+    }
+    return skeletons
+  }, [inProgressRenderUiToolIds, genuiToolInputPartials, sessionId])
+
+  // Buffer hygiene: when a tracked render_ui call leaves the in-progress set
+  // (completed / failed / turn rebuilt), drop its accumulated partial so the
+  // ephemeral store never grows unbounded.
+  useEffect(() => {
+    if (!sessionId) return
+    const inProgress = new Set(inProgressRenderUiToolIds)
+    for (const toolUseId of getGenUiToolInputPartials(sessionId).keys()) {
+      if (!inProgress.has(toolUseId)) clearGenUiToolInputDelta(sessionId, toolUseId)
+    }
+  }, [sessionId, inProgressRenderUiToolIds])
+
+  // Canvas apps (generate_app): one card per app id across all completed calls
+  // in the turn. The card body comes from the tool input; the bundle path and
+  // version come from the marker line in the tool result. Calls that failed or
+  // produced no parseable marker (older app version) are skipped — except that
+  // a missing marker still renders when the result is not an error, so the
+  // inline HTML preview survives result-shape drift.
+  const genUiAppCalls = useMemo(
+    () => mergeGenUiAppCalls(
+      sortedActivities
+        .filter(a => a.type === 'tool' && a.toolName === 'mcp__session__generate_app' && a.status === 'completed')
+        .map((a): GenUiAppCardProps | null => {
+          const input = parseGenUiAppInput(a.toolInput)
+          if (!input) return null
+          const result = parseGenUiAppResult(a.content)
+          return {
+            appId: result?.appId ?? `unwritten-${a.id}`,
+            title: input.title,
+            html: input.html,
+            indexPath: result?.indexPath,
+            version: result?.version,
+            sessionId: sessionId ?? null,
+          }
+        })
+        .filter((call): call is GenUiAppCardProps => call !== null)
+    ),
+    [sortedActivities, sessionId]
+  )
+
   // Don't render if nothing to show and turn is complete
   if (activities.length === 0 && !response && isComplete) {
     return null
@@ -3098,6 +3198,43 @@ export const TurnCard = React.memo(function TurnCard({
           </AnimatePresence>
         </div>
       )}
+
+      {/* Declarative inline cards (render_ui) - visible without expanding activities */}
+      {genUiComponents.length > 0 && (
+        <GenUICard components={genUiComponents} sessionId={sessionId} className="mt-2" />
+      )}
+
+      {/* P0-2 render_ui skeleton previews - in-flight calls only (type+title, no data) */}
+      {genUiSkeletons.length > 0 && (
+        <div className="mt-2 flex flex-col gap-2" data-testid="genui-skeletons">
+          {genUiSkeletons.map(skeleton => (
+            <div
+              key={skeleton.key}
+              className="rounded-[8px] border bg-muted/10 px-3 py-2.5 flex items-center gap-2.5"
+            >
+              <Spinner className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+              <span className="text-[13px] text-muted-foreground truncate">
+                {i18n.t('genui.skeleton.building', { type: skeleton.type })}
+                {skeleton.title ? ` — ${skeleton.title}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Canvas app cards (generate_app) - sandboxed webview per generated app */}
+      {genUiAppCalls.length > 0 && genUiAppCalls.map(call => (
+        <GenUiAppCard
+          key={call.appId}
+          appId={call.appId}
+          title={call.title}
+          html={call.html}
+          indexPath={call.indexPath}
+          version={call.version}
+          sessionId={call.sessionId}
+          className="mt-2"
+        />
+      ))}
 
       {/* Standalone thinking indicator - when no activities but still working */}
       {!hasActivities && isThinking && !animateResponse && (

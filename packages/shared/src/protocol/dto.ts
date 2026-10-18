@@ -350,6 +350,19 @@ export type SessionEvent =
   | { type: 'usage_update'; sessionId: string; tokenUsage: { inputTokens: number; contextWindow?: number } }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
   | { type: 'working_directory_error'; sessionId: string; error: string }
+  // P0-2 render_ui skeleton streaming (Wave-1): partial tool input for an
+  // in-flight render_ui call, so the chat can preview "building <type> —
+  // <title>" skeleton cards before the tool call completes.
+  //
+  // RENDERER-INTERNAL CHANNEL — three hard rules (guarded by
+  // genui-tool-input-delta-isolation.test.ts):
+  //   1. NEVER added to the tab protocol page whitelist (PoloaiProtocolEvent
+  //      union / toProtocolEvent fan-out) — same discipline as ui_state.
+  //   2. NEVER persisted — no message is created, nothing enters session JSONL.
+  //   3. Emitted for render_ui only, throttled (GENUI_TOOL_INPUT_DELTA_FLUSH_MS)
+  //      and capped (GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS); the completed
+  //      tool_start/tool_result pair remains the authoritative payload path.
+  | { type: 'tool_input_delta'; sessionId: string; toolUseId: string; toolName: string; delta: string; seq: number; timestamp?: number }
 
 export interface SendMessageOptions {
   skillSlugs?: string[]
@@ -760,6 +773,14 @@ export type PoloaiProtocolErrorCode =
   | 'session_not_found'
   | 'not_authorized'
   | 'internal_error'
+  // POO-103 ui-event loop (proposal §7.3): the six-step host validation maps
+  // every rejection onto one of these codes over the existing poloai:error
+  // channel — a canvas card always learns WHY its event was dropped.
+  | 'invalid_payload'
+  | 'card_not_registered'
+  | 'capability_denied'
+  | 'payload_too_large'
+  | 'rate_limited'
 
 export interface PoloaiProtocolError {
   code: PoloaiProtocolErrorCode
@@ -781,19 +802,146 @@ export interface PoloaiProtocolEvent {
     | 'complete'
     | 'error'
     | 'interrupted'
+    // POO-103: private widget state pushed back to exactly the card that sent
+    // the ui-event (never broadcast — the SessionEvent union has no ui_state,
+    // so handleSessionEvent can never leak one to other protocol pages).
+    | 'ui_state'
   sessionId: string
   delta?: string
   text?: string
   toolName?: string
   error?: string
+  /** ui_state: the card that owns this state snapshot. */
+  cardId?: string
+  /** ui_state: the app-declared privateState payload, card-local only. */
+  state?: unknown
+  /** ui_state: whether the paired modelContext exceeded the 2KB cap and was truncated. */
+  modelContextTruncated?: boolean
 }
 
 export interface PoloaiProtocolMessage {
   type: 'poloai:ack' | 'poloai:event' | 'poloai:error'
   callbackId: string
-  result?: { sessionId?: string }
+  result?: { sessionId?: string; eventId?: string }
   event?: PoloaiProtocolEvent
   error?: PoloaiProtocolError
+}
+
+// ---------------------------------------------------------------------------
+// poloai://action/ui-event — GenUI canvas card event loop (POO-103)
+// ---------------------------------------------------------------------------
+
+/** Deep-link action name: poloai://action/ui-event/{sessionId}. */
+export const GENUI_UI_EVENT_ACTION = 'ui-event'
+
+/** Event types a canvas card may send; anything else is invalid_payload. */
+export const GENUI_UI_EVENT_TYPES = ['button-click', 'value-change', 'submit'] as const
+export type GenUiUiEventType = (typeof GENUI_UI_EVENT_TYPES)[number]
+
+/** Hard cap on the inline `payload` URL parameter (UTF-8 bytes). */
+export const GENUI_UI_EVENT_MAX_PAYLOAD_BYTES = 8 * 1024
+/** Hard cap on a payloadSrc file read (UTF-8 bytes) — big objects live in data/. */
+export const GENUI_UI_EVENT_MAX_PAYLOAD_SRC_BYTES = 1024 * 1024
+/**
+ * Hard cap on the modelContext segment injected into the next turn's context
+ * (UTF-8 bytes, truncated — never rejected — per proposal §8 GENUI-09).
+ */
+export const GENUI_MODEL_CONTEXT_MAX_BYTES = 2048
+/** Bounded per-session queue of pending GenUI model-context injections. */
+export const GENUI_MODEL_CONTEXT_MAX_QUEUE = 8
+/**
+ * Per-card sliding-window rate limit: at most this many ui-events per second
+ * (proposal §7.2 step 6); excess events are rate_limited.
+ */
+export const GENUI_UI_EVENT_RATE_LIMIT = 10
+export const GENUI_UI_EVENT_RATE_WINDOW_MS = 1000
+
+/**
+ * The `<meta name="polo-bridge-capabilities" content="…">` declaration a
+ * generate_app bundle uses to opt into host bridge features. Mechanism per
+ * ADR-0020 (mount-time issuance, invalidated when the document changes) —
+ * NOT its Catalog trust root: the declaration is read by Main from the exact
+ * document the guest attaches with, so a stale or forged renderer claim can
+ * never broaden it.
+ */
+export const GENUI_BRIDGE_CAPABILITIES_META_NAME = 'polo-bridge-capabilities'
+/** The only bridge capability defined so far. Unknown tokens fail closed. */
+export const GENUI_BRIDGE_CAPABILITY_UI_EVENT = 'ui-event'
+export const GENUI_BRIDGE_CAPABILITIES = [GENUI_BRIDGE_CAPABILITY_UI_EVENT] as const
+
+// ---------------------------------------------------------------------------
+// P0-2 render_ui skeleton streaming — emission parameters
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum interval between two tool_input_delta emissions for the same
+ * toolUseId (renderer-internal channel — see the SessionEvent comment).
+ */
+export const GENUI_TOOL_INPUT_DELTA_FLUSH_MS = 250
+
+/**
+ * Cap on tool_input_delta emission per toolUseId: once the emitter has
+ * RECEIVED this many input characters for the call, it flushes what is
+ * buffered and goes silent (the completed tool call remains the authoritative
+ * payload path). Not a byte-exact output guarantee — the final flush at the
+ * threshold carries everything accumulated since the previous flush, so the
+ * emitted total may overshoot by up to one buffered chunk.
+ */
+export const GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS = 8192
+
+/** Strict cardId shape shared by the registry, the deep link and the renderer. */
+export const GENUI_UI_CARD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
+export function isValidGenUiUiCardId(value: unknown): value is string {
+  return typeof value === 'string' && GENUI_UI_CARD_ID_PATTERN.test(value)
+}
+
+export function isValidGenUiUiEventType(value: unknown): value is GenUiUiEventType {
+  return typeof value === 'string' && (GENUI_UI_EVENT_TYPES as readonly string[]).includes(value)
+}
+
+/**
+ * UTF-8-safe truncation for modelContext injection: cuts at a code-point
+ * boundary (never mid-surrogate) and reports whether anything was dropped.
+ * A context at or under the cap is returned untouched with truncated=false.
+ */
+export function truncateGenUiModelContext(
+  context: string,
+  maxBytes = GENUI_MODEL_CONTEXT_MAX_BYTES,
+): { text: string; truncated: boolean } {
+  if (Buffer.byteLength(context, 'utf8') <= maxBytes) {
+    return { text: context, truncated: false }
+  }
+  let low = 0
+  let high = context.length
+  // Binary search the longest prefix that fits; adding one char at a time
+  // would be O(n·m) on pathological multi-byte input.
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (Buffer.byteLength(context.slice(0, mid), 'utf8') <= maxBytes) {
+      low = mid
+    } else {
+      high = mid - 1
+    }
+  }
+  // `low` is the longest fitting char count; drop a trailing lone surrogate
+  // half if the cut landed between a surrogate pair.
+  let cut = low
+  const tail = context.charCodeAt(cut - 1)
+  if (tail >= 0xd800 && tail <= 0xdbff) cut -= 1
+  return { text: context.slice(0, cut), truncated: true }
+}
+
+/**
+ * Parse a Main-extracted `polo-bridge-capabilities` meta content value into
+ * the known capability set. Unknown tokens are dropped (fail closed), not
+ * carried — a future capability must be added here before a bundle can use it.
+ */
+export function parseGenUiBridgeCapabilities(content: string | undefined | null): string[] {
+  if (typeof content !== 'string') return []
+  const tokens = content.split(/[\s,]+/).filter(Boolean)
+  const known = new Set<string>(GENUI_BRIDGE_CAPABILITIES)
+  return [...new Set(tokens)].filter(token => known.has(token))
 }
 
 // ---------------------------------------------------------------------------

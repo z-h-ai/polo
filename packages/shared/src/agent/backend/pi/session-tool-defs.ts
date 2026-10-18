@@ -11,6 +11,7 @@ import {
   type JsonSchemaToolDef,
   type SessionToolFilterOptions,
 } from '@polo-ai/session-tools-core';
+import { getGenUiComponentCatalog } from '../../../genui/component-catalog.ts';
 import { FEATURE_FLAGS } from '../../../feature-flags.ts';
 
 export type SessionToolProxyDef = JsonSchemaToolDef;
@@ -22,5 +23,11 @@ export function getSessionToolProxyDefs(options?: SessionToolFilterOptions): Ses
     prefix: 'mcp__session__',
     includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
     allowRequestUserInput: options?.allowRequestUserInput,
+    allowRenderUi: options?.allowRenderUi,
+    allowGenerateApp: options?.allowGenerateApp,
+    // POO-104 model-side component index: default to the host runtime
+    // registry (builtin catalog until third-party installs exist); an explicit
+    // renderUiCatalog option wins.
+    renderUiCatalog: options?.renderUiCatalog ?? getGenUiComponentCatalog().descriptors(),
   });
 }

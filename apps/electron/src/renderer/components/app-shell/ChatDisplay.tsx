@@ -39,6 +39,7 @@ import {
   type FileChange,
   type DiffViewerSettings,
 } from "@polo-ai/ui"
+import { clearGenUiToolInputDeltasForSession } from "@polo-ai/ui/chat/genuiToolInputDeltas"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
@@ -1140,13 +1141,20 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
 
-    const isSessionSwitch = prevSessionIdRef.current !== session?.id
+    const prevSessionId = prevSessionIdRef.current
+    const isSessionSwitch = prevSessionId !== session?.id
     prevSessionIdRef.current = session?.id ?? null
 
     // On session switch: reset UI state (scroll handled by ScrollOnMount)
     if (isSessionSwitch) {
       isStickToBottomRef.current = true
       setVisibleTurnCount(TURNS_PER_PAGE)
+      // P0-2 buffer hygiene: the previous session's ephemeral
+      // tool_input_delta buffers have no live consumer once we switch away —
+      // drop them so a mid-stream switch never leaves stale partials resident
+      // for the session's lifetime (the per-toolUseId cleanup in TurnCard only
+      // runs for the turn currently rendered there).
+      if (prevSessionId) clearGenUiToolInputDeltasForSession(prevSessionId)
     }
 
     // Debounced scroll for streaming - waits for layout to settle

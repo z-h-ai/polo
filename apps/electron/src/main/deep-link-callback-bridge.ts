@@ -215,6 +215,66 @@ export class DeepLinkCallbackBridge {
     this.postToEntry(entry, { type: 'poloai:error', callbackId, error })
   }
 
+  /**
+   * POO-103: bind a ui-event callback to its session so the card receives the
+   * session's whitelisted protocol events through the existing fan-out. Only
+   * the owning webContents may bind, and the send-message sessionOwners map is
+   * deliberately untouched — tab protocol pages keep their exclusive
+   * ownership model.
+   */
+  bindCallbackToSession(callbackId: string, webContentsId: number, sessionId: string): BridgeResult {
+    const entry = this.callbacks.get(callbackId)
+    if (!entry || entry.webContentsId !== webContentsId) {
+      return { ok: false, error: makeError('not_authorized', 'callbackId is not owned by this webContents') }
+    }
+    entry.sessionId = sessionId
+    entry.lastActiveAt = this.now()
+    return { ok: true }
+  }
+
+  /**
+   * POO-103: push private widget state back to exactly the card that sent the
+   * ui-event, as a ui_state protocol event. Never broadcast: the entry lookup
+   * is ownership-checked, so only the sender's own callback receives it.
+   */
+  postUiStateToCard(
+    callbackId: string,
+    webContentsId: number,
+    event: { sessionId: string; cardId: string; state: unknown; modelContextTruncated: boolean },
+  ): void {
+    const entry = this.ownedEntry(callbackId, webContentsId)
+    if (!entry) return
+    this.postToEntry(entry, {
+      type: 'poloai:event',
+      callbackId,
+      event: {
+        type: 'ui_state',
+        sessionId: event.sessionId,
+        cardId: event.cardId,
+        state: event.state,
+        modelContextTruncated: event.modelContextTruncated,
+      },
+    })
+  }
+
+  /** POO-103: acknowledge one ui-event, pairing the app's eventId. */
+  sendUiEventAck(callbackId: string, webContentsId: number, eventId: string, sessionId: string): void {
+    const entry = this.ownedEntry(callbackId, webContentsId)
+    if (!entry) return
+    this.postToEntry(entry, {
+      type: 'poloai:ack',
+      callbackId,
+      result: { sessionId, eventId },
+    })
+  }
+
+  private ownedEntry(callbackId: string, webContentsId: number): CallbackEntry | undefined {
+    const entry = this.callbacks.get(callbackId)
+    if (!entry || entry.webContentsId !== webContentsId) return undefined
+    entry.lastActiveAt = this.now()
+    return entry
+  }
+
   handleActionResult(result: DeepLinkActionResult): void {
     if (!isValidPoloaiCallbackId(result?.callbackId)) return
 

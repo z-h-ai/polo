@@ -15,12 +15,17 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { SessionToolContext } from './context.ts';
 import type { ToolResult } from './types.ts';
+// POO-104 model-side component index (§5.7): one-way import — genui-catalog
+// stays dependency-free so the dynamic schema assembly (genui-schema.ts) can
+// import both sides without a cycle.
+import { GENUI_BUILTIN_COMPONENT_DESCRIPTORS, buildRenderUiToolDescription, type GenUiComponentDescriptor } from './genui-catalog.ts';
 
 // Handlers
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
 import { handleConfigValidate } from './handlers/config-validate.ts';
 import { handleSkillValidate } from './handlers/skill-validate.ts';
 import { handleMermaidValidate } from './handlers/mermaid-validate.ts';
+import { handleGenerateApp } from './handlers/generate-app.ts';
 import { handleSourceTest } from './handlers/source-test.ts';
 import {
   handleSourceOAuthTrigger,
@@ -33,6 +38,7 @@ import { handleRequestUserInput } from './handlers/request-user-input.ts';
 import { RequestUserInputArgsSchema, REQUEST_USER_INPUT_OTHER_OPTION_ID } from './question-types.ts';
 import { handleUpdatePreferences } from './handlers/update-preferences.ts';
 import { handleTransformData } from './handlers/transform-data.ts';
+import { handleRenderUi } from './handlers/render-ui.ts';
 import { handleScriptSandbox } from './handlers/script-sandbox.ts';
 import { handleRenderTemplate } from './handlers/render-template.ts';
 import { handleSendDeveloperFeedback } from './handlers/send-developer-feedback.ts';
@@ -139,6 +145,423 @@ export const TransformDataSchema = z.object({
   script: z.string().describe('Transform script source code. Receives input file paths as command-line args (sys.argv[1:] or process.argv.slice(2)), last arg is the output file path.'),
   inputFiles: z.array(z.string()).describe('Input file paths relative to session dir (e.g., "long_responses/stripe_txns.txt")'),
   outputFile: z.string().describe('Output file name relative to session data/ dir (e.g., "transactions.json")'),
+});
+
+// ============================================================
+// render_ui — Generative UI (Track 1, declarative, no code exec)
+// ============================================================
+
+/** Hard cap on the whole render_ui input, serialized as UTF-8 JSON. */
+export const RENDER_UI_MAX_PAYLOAD_BYTES = 4096;
+/** Max components per render_ui call. */
+export const RENDER_UI_MAX_COMPONENTS = 8;
+
+const GenUIBase = z.object({
+  id: z.string().min(1).max(64)
+    .describe('Stable component id. Reusing an id in a later call updates that component.'),
+  title: z.string().max(120).optional().describe('Optional card header'),
+});
+
+export const GenUIStatCardSchema = GenUIBase.extend({
+  type: z.literal('stat-card'),
+  label: z.string().max(80),
+  value: z.union([z.number(), z.string().max(40)]),
+  format: z.enum(['number', 'percent', 'currency']).optional()
+    .describe("How to render `value`: 'number' adds thousands separators; 'percent' treats a decimal fraction as a share (0.093 → 9.3%); 'currency' adds thousands separators plus the `currency` prefix. Omit to display `value` verbatim (e.g. with a unit suffix)."),
+  currency: z.string().max(8).optional()
+    .describe("Currency symbol or code used by format 'currency' (e.g. '$', 'CNY')."),
+  unit: z.string().max(12).optional(),
+  delta: z.number().optional().describe('Decimal, e.g. 0.152 = +15.2%'),
+  trend: z.enum(['up', 'down', 'flat']).optional(),
+  goodWhen: z.enum(['up', 'down', 'neutral']).default('up')
+    .describe("Which delta direction is good news, controlling the delta color: 'up' (default) colors rises green / falls red; 'down' is inverted — rises red, falls green (queue length, error rate, loss ratio); 'neutral' always renders the delta muted."),
+});
+
+// Column types align with the datatable rich-block contract in system.ts
+const GenUITableColumnSchema = z.object({
+  key: z.string().max(60),
+  label: z.string().max(80),
+  type: z.enum(['text', 'number', 'currency', 'percent', 'boolean', 'date', 'badge']).default('text'),
+  semantics: z.enum(['rate', 'share', 'change']).default('change')
+    .describe("Meaning of a percent column, deciding its rendering: 'change' (default) is an up/down move — signed, green/red; 'rate' is a level/ratio (loss rate, utilization) and 'share' a proportion of a whole — both rendered unsigned and neutral so 6.8% never looks like good news."),
+  badgeColors: z.record(z.string(), z.enum(['info', 'success', 'warning', 'error'])).optional()
+    .describe('badge columns only: cell value → color chip, e.g. {"高": "error", "中": "warning", "低": "success"}. Values not in the map stay neutral.'),
+  // Source link (iter/row-actions): the value renders as a link and opens via
+  // the platform URL handler — e.g. a clause number whose original text lives
+  // at a URL the model puts in the data. href comes from the row value itself
+  // (when it is an http(s) URL) or its { value, link } object form.
+  link: z.boolean().optional()
+    .describe('Render this column\'s values as links that open externally. The row value is either the URL itself or an object { value, link }.')
+});
+
+export const GenUIDataTableSchema = GenUIBase.extend({
+  type: z.literal('data-table'),
+  columns: z.array(GenUITableColumnSchema).min(1).max(24),
+  // Hard rule: inline rows are NOT accepted — data must land on disk via
+  // transform_data first, then be referenced through "src".
+  src: z.string().min(1)
+    .describe('Path to a JSON rows file written by transform_data (absolute, or relative to the session data dir). Inline rows NOT accepted.'),
+  pageSize: z.number().int().min(5).max(100).optional(),
+  // Row-level actions (iter/row-actions) — all optional; a table without them
+  // renders exactly like before. Placeholders {{col.key}} are filled from the
+  // clicked row's values; missing values become empty strings.
+  rowAction: z.object({
+    label: z.string().max(20),
+    promptTemplate: z.string().max(500)
+      .describe('Sent as the next user message when the row\'s action button is clicked, with {{col.key}} placeholders replaced by that row\'s values. Example: "为 {{sku}} 生成补货工单".'),
+  }).strict().optional(),
+  detailTemplate: z.string().max(500).optional()
+    .describe('Per-row "Details" drill-down: {{col.key}} placeholders are replaced with that row\'s values and the filled text PREFILLS the chat input without sending (fill semantics, for follow-up questions).'),
+  // Rejecting unknown keys here is what enforces "no inline rows": a `rows`
+  // field fails validation with a clear message instead of being stripped.
+}).strict();
+
+/**
+ * chart (iter/chart): the sixth component, a CLOSED FORM — exactly four chart
+ * types, 2-24 categories, 1-3 bounded series, everything optional except the
+ * shape itself. Unlike data-table there is no `src`: chart payloads are
+ * inline by design (few points), with the array-level superRefine's 4KB cap
+ * as the natural backstop. `.strict()` rejects unknown keys so a future
+ * escape hatch cannot grow silently; the categories/values equal-length rule
+ * lives on the components array superRefine (a refine here would wrap this
+ * member in ZodEffects and break the discriminated union — same constraint
+ * as the button params rule).
+ */
+export const GenUIChartSchema = GenUIBase.extend({
+  type: z.literal('chart'),
+  chartType: z.enum(['bar', 'line', 'funnel', 'pie'])
+    .describe("'bar' for comparisons/rankings across categories (flips to a horizontal ranking when one series spans 4+ categories), 'line' for trends over an ordered axis, 'funnel' for stage-to-stage drop-off, 'pie' for share of a whole."),
+  categories: z.array(z.string().max(60)).min(2).max(24)
+    .describe('Category labels: x-axis ticks (bar/line), funnel stages top-to-bottom, or pie slices. Every series "values" array must have exactly one value per category.'),
+  series: z.array(z.object({
+    name: z.string().max(60).describe('Series label shown in the legend and tooltip.'),
+    unit: z.string().max(12).optional().describe('Optional unit suffix shown in tooltips (e.g. "%", "万台").'),
+    values: z.array(z.number()).min(2).max(48)
+      .describe('One number per category — same length and order as "categories" (mismatch is rejected).'),
+  })).min(1).max(3)
+    .describe('1-3 data series. pie/funnel render the first series only.'),
+  goodWhen: z.enum(['up', 'down', 'neutral']).optional()
+    .describe('Reserved for semantic coloring of future chart variants; accepted today but does not change rendering.'),
+}).strict();
+
+export const GenUIAlertSchema = GenUIBase.extend({
+  type: z.literal('alert'),
+  severity: z.enum(['info', 'success', 'warning', 'error']),
+  message: z.string().max(500),
+});
+
+export const GenUIProgressSchema = GenUIBase.extend({
+  type: z.literal('progress'),
+  status: z.enum(['running', 'success', 'error']),
+  label: z.string().max(120),
+  percent: z.number().min(0).max(100).optional().describe('Omit for indeterminate'),
+});
+
+/** One per-click parameter field the user fills before the action runs. */
+const GenUIActionButtonParamSchema = z.object({
+  key: z.string().max(40)
+    .describe('Placeholder name — "{{key}}" occurrences in promptTemplate are replaced with the filled value'),
+  label: z.string().max(60),
+  type: z.enum(['text', 'number', 'select']).default('text'),
+  required: z.boolean().default(false),
+  // Same convention as form fields: only select params may carry options, and
+  // a select param must — enforced by the button-level superRefine below.
+  options: z.array(z.string().max(80)).max(12).optional(),
+});
+
+const GenUIActionButtonSchema = z.object({
+  id: z.string().min(1).max(64),
+  label: z.string().min(1).max(40),
+  style: z.enum(['primary', 'secondary', 'danger']).default('secondary'),
+  // Optional pre-click gates (all UI-only — the backfill pipeline itself is
+  // unchanged). confirm renders an in-place confirmation bar before the
+  // action fires; params renders an in-place mini form whose values are
+  // interpolated into promptTemplate.
+  confirm: z.object({
+    message: z.string().max(300)
+      .describe('Shown on the in-place confirmation bar before the action runs — state the consequence or impact'),
+  }).optional(),
+  params: z.array(GenUIActionButtonParamSchema).max(8).optional(),
+  // P0 only ships these two backfill actions; run-tool direct invocation is
+  // deferred to P2 (needs the capability gating work).
+  action: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('send-message'),
+      prompt: z.string().min(1).max(2000)
+        .describe('Sent as the next user message when clicked. Mutually exclusive with promptTemplate.')
+        .optional(),
+      promptTemplate: z.string().min(1).max(2000)
+        .describe('Sent as the next user message when clicked, after every {{key}} placeholder is replaced by the value the user entered in the params form. Required when params is set.')
+        .optional(),
+    }),
+    z.object({
+      kind: z.literal('fill-input'),
+      text: z.string().min(1).max(2000)
+        .describe('Prefills the chat input without sending'),
+    }),
+  ]),
+}).superRefine((button, ctx) => {
+  // Cross-field rules that cannot live on the discriminated union members
+  // (a refine would wrap them in ZodEffects and break the union) — same
+  // constraint that keeps the form rules on the components array.
+  const action = button.action;
+  if (action.kind === 'send-message') {
+    if (action.prompt && action.promptTemplate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['action', 'promptTemplate'],
+        message: 'send-message actions must use either "prompt" or "promptTemplate", not both.',
+      });
+    }
+    if (!action.prompt && !action.promptTemplate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['action', 'prompt'],
+        message: 'send-message actions require "prompt" or "promptTemplate".',
+      });
+    }
+  }
+  if (!button.params) return;
+  // Parameterized buttons interpolate user input into a template — fill-input
+  // has no template to interpolate into, so params require promptTemplate.
+  if (action.kind !== 'send-message' || !action.promptTemplate) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['params'],
+      message: 'buttons with "params" must use a send-message action with "promptTemplate" ({{key}} placeholders).',
+    });
+  }
+  // Mirror the form field contract: unique keys, select⇔options.
+  const keys = new Set<string>();
+  button.params.forEach((param, index) => {
+    if (keys.has(param.key)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['params', index, 'key'],
+        message: `Duplicate param key "${param.key}". Param keys must be unique within one button.`,
+      });
+    }
+    keys.add(param.key);
+    if (param.type === 'select' && (!param.options || param.options.length < 1)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['params', index, 'options'],
+        message: `select param "${param.key}" requires at least one option.`,
+      });
+    }
+    if (param.type !== 'select' && param.options) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['params', index, 'options'],
+        message: `options are only valid on select params (param "${param.key}").`,
+      });
+    }
+  });
+});
+
+export const GenUIActionButtonsWithIdSchema = GenUIBase.extend({
+  type: z.literal('action-buttons'),
+  buttons: z.array(GenUIActionButtonSchema).min(1).max(6),
+});
+
+/** One form field (POO-103): text/number/select/date inputs the user fills. */
+const GenUIFormFieldSchema = z.object({
+  key: z.string().min(1).max(60)
+    .describe('Value key in the submitted JSON object'),
+  label: z.string().min(1).max(80),
+  type: z.enum(['text', 'number', 'select', 'date']).default('text'),
+  required: z.boolean().optional(),
+  // Only meaningful on select fields — the cross-field rule (select needs
+  // options, others must not carry them) lives on the components array
+  // superRefine, like every other cross-field rule.
+  options: z.array(z.string().min(1).max(80)).min(1).max(20).optional(),
+});
+
+export const GenUIFormSchema = GenUIBase.extend({
+  type: z.literal('form'),
+  fields: z.array(GenUIFormFieldSchema).min(1).max(12),
+  submitLabel: z.string().min(1).max(40).optional(),
+  // NOTE: no "action" field on purpose — form submit is FIXED send-message
+  // semantics (the serialized values object becomes the next user message).
+  // Unknown keys are rejected, so an "action" attempt fails validation.
+}).strict();
+
+export const GenUIComponentSchema = z.discriminatedUnion('type', [
+  GenUIStatCardSchema,
+  GenUIDataTableSchema,
+  GenUIAlertSchema,
+  GenUIProgressSchema,
+  GenUIActionButtonsWithIdSchema,
+  GenUIFormSchema,
+  GenUIChartSchema,
+]);
+
+/**
+ * Per-member inference, not `z.infer` of the whole union: with a third
+ * `.default()` field in the union the full-union instantiation exceeds TS's
+ * depth budget and every consumer sees `{}` for the component type (it
+ * silently degraded render-ui.ts and the schema tests to `unknown`). Members
+ * infer fine individually, and the assembled array schema below pins this
+ * type with a cast — runtime validation is untouched.
+ */
+export type GenUIComponent =
+  | z.infer<typeof GenUIStatCardSchema>
+  | z.infer<typeof GenUIDataTableSchema>
+  | z.infer<typeof GenUIAlertSchema>
+  | z.infer<typeof GenUIProgressSchema>
+  | z.infer<typeof GenUIActionButtonsWithIdSchema>
+  | z.infer<typeof GenUIFormSchema>
+  | z.infer<typeof GenUIChartSchema>;
+
+/** Pre-validation counterpart of GenUIComponent — the `.default()` fields (`goodWhen`, `semantics`, column `type`) are still optional. */
+export type GenUIComponentInput =
+  | z.input<typeof GenUIStatCardSchema>
+  | z.input<typeof GenUIDataTableSchema>
+  | z.input<typeof GenUIAlertSchema>
+  | z.input<typeof GenUIProgressSchema>
+  | z.input<typeof GenUIActionButtonsWithIdSchema>
+  | z.input<typeof GenUIFormSchema>
+  | z.input<typeof GenUIChartSchema>;
+
+/**
+ * Loose view of a component for the cross-field rules — the dynamic schema
+ * assembly (genui-schema.ts) reuses this builder with unions that contain
+ * only a subset of the component types, so the rules cannot assume the
+ * static discriminated-union narrowing.
+ */
+type GenUiComponentLike = {
+  id: string;
+  type: string;
+  fields?: Array<{ key: string; type: string; options?: string[] }>;
+  categories?: unknown;
+  series?: Array<{ values?: unknown }>;
+};
+
+/**
+ * The components array with its cross-field rules, parameterized by the
+ * component union. Cross-field rules live on the array (not the top-level
+ * object): a superRefine on the object itself would wrap the schema in
+ * ZodEffects and break the `.shape` access the Claude SDK toolset builder
+ * relies on. The rules apply identically to every enabled-component subset
+ * (POO-104 dynamic assembly) — payload cap, unique ids, and the form
+ * select⇔options contract are union-independent.
+ */
+export function buildGenUiComponentsArraySchema(componentSchema: z.ZodTypeAny) {
+  return z.array(componentSchema)
+    .min(1)
+    .max(RENDER_UI_MAX_COMPONENTS)
+    .superRefine((components, ctx) => {
+      // TextEncoder (not Buffer) so the schema stays portable to browser bundles.
+      const bytes = new TextEncoder().encode(JSON.stringify({ components })).length;
+      if (bytes > RENDER_UI_MAX_PAYLOAD_BYTES) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Payload ${bytes}B exceeds ${RENDER_UI_MAX_PAYLOAD_BYTES}B. Move data into a file via transform_data and use "src".`,
+        });
+      }
+      const ids = new Set<string>();
+      (components as GenUiComponentLike[]).forEach((component, index) => {
+        if (ids.has(component.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [index, 'id'],
+            message: `Duplicate component id "${component.id}". Component ids must be unique within one call.`,
+          });
+        }
+        ids.add(component.id);
+        // form (POO-103) cross-field rules: unique keys; select fields need
+        // options, non-select fields must not carry them.
+        if (component.type === 'form' && Array.isArray(component.fields)) {
+          const keys = new Set<string>();
+          component.fields.forEach((field, fieldIndex) => {
+            if (keys.has(field.key)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, 'fields', fieldIndex, 'key'],
+                message: `Duplicate field key "${field.key}". Field keys must be unique within one form.`,
+              });
+            }
+            keys.add(field.key);
+            if (field.type === 'select' && (!field.options || field.options.length < 1)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, 'fields', fieldIndex, 'options'],
+                message: `select field "${field.key}" requires at least one option.`,
+              });
+            }
+            if (field.type !== 'select' && field.options) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, 'fields', fieldIndex, 'options'],
+                message: `options are only valid on select fields (field "${field.key}").`,
+              });
+            }
+          });
+        }
+        // chart (iter/chart) cross-field rule: every series must carry exactly
+        // one value per category, in category order. Lives on the array like
+        // the form rules — a superRefine on the chart member itself would
+        // wrap it in ZodEffects and break the discriminated union. Guarded
+        // with Array.isArray because the loose component view cannot assume
+        // the chart member parsed (the per-field constraints already ran);
+        // the narrowed arrays are bound to consts because narrowing does not
+        // survive into the forEach callback.
+        if (component.type === 'chart' && Array.isArray(component.categories) && Array.isArray(component.series)) {
+          const categoryCount = component.categories.length;
+          component.series.forEach((series, seriesIndex) => {
+            const values = series?.values;
+            if (Array.isArray(values) && values.length !== categoryCount) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, 'series', seriesIndex, 'values'],
+                message: `series[${seriesIndex}].values has ${values.length} entries but the chart declares ${categoryCount} categories — values and categories must match in length and order.`,
+              });
+            }
+          });
+        }
+      });
+    });
+}
+
+// The explicit type pin goes with the per-member GenUIComponent union above:
+// left to inference, the union-in-array instantiation collapses to `{}` in
+// consumers (see the GenUIComponent doc comment).
+const GenUIComponentsArraySchema = buildGenUiComponentsArraySchema(GenUIComponentSchema) as unknown as z.ZodType<GenUIComponent[]>;
+
+export const RenderUiSchema = z.object({
+  components: GenUIComponentsArraySchema,
+});
+
+// ============================================================
+// generate_app — Generative UI canvas apps (Track 2, sandboxed webview)
+// ============================================================
+
+/**
+ * Hard cap on a generate_app HTML bundle, serialized as UTF-8. Mirrors
+ * HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes in @polo-ai/shared (this package
+ * must not import shared — it is a leaf dependency — so the value is pinned
+ * here and guarded by a test on the shared side).
+ */
+export const GENERATE_APP_MAX_HTML_BYTES = 512 * 1024;
+/** Max length of the app id / updateOf reference (also a traversal guard: ids never contain path separators). */
+export const GENERATE_APP_MAX_ID_LENGTH = 64;
+
+const GENERATE_APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+export const GenerateAppSchema = z.object({
+  title: z.string().min(1).max(120).describe('Short display name shown on the app card.'),
+  html: z
+    .string()
+    .min(1)
+    .describe(
+      'Complete single-file HTML document. Self-contained: no external http(s) resources, no @polo-ai/sdk, no poloai:// links. Hard limit 512KB.'
+    ),
+  updateOf: z
+    .string()
+    .max(GENERATE_APP_MAX_ID_LENGTH)
+    .regex(GENERATE_APP_ID_PATTERN, 'updateOf must be an app id returned by a previous generate_app call')
+    .optional()
+    .describe('Id of an existing app to fully rewrite. Omit to create a new app.'),
 });
 
 export const ScriptSandboxSchema = z.object({
@@ -369,6 +792,48 @@ Use this tool when you need to transform large datasets (20+ rows) into structur
 
 **Security:** Runs in an isolated subprocess with no access to API keys or credentials. 30-second timeout.`,
 
+  render_ui: `Render interactive UI cards inline in the chat with declarative JSON components.
+
+Use this instead of plain text when the answer is actionable or data-dense.
+
+**Components** (1-8 per call, discriminated by "type"):
+- \`stat-card\`: single metric + optional delta/trend
+- \`data-table\`: sortable/filterable table, file-backed ONLY — write rows with transform_data and pass "src"; inline rows are rejected. Optional per-row interactivity: "rowAction" (a button per row whose {{col.key}} template is sent as the next user message), "detailTemplate" (a per-row Details link that prefills the input without sending), "columns[].link" (render a column's values as external links).
+- \`chart\`: closed-form chart with INLINE data (no "src" needed): "chartType" \`bar\` (comparisons/rankings; auto-renders horizontal for 4+ categories with one series), \`line\` (trends), \`funnel\` (stage drop-off), \`pie\` (share of a whole); 2-24 categories x 1-3 bounded series. Use \`chart\` for distributions, trends, shares and funnels; keep \`data-table\` when the user needs row-level detail.
+- \`alert\`: info/success/warning/error banner
+- \`progress\`: running/success/error indicator with optional percent
+- \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input; optional \`confirm\` (message ≤300 chars) shows an in-place confirmation bar first, optional \`params\` + \`promptTemplate\` collect 1-8 per-click values and interpolate \`{{key}}\` before sending — use \`confirm\` for high-stakes actions and \`params\` instead of hardcoding variable values into the prompt
+- \`form\`: 1-12 fields (text/number/select/date) the user fills in; submitting sends the serialized values object as the next user message (fixed semantics — no action config)
+
+**Value semantics** (pick per meaning, not per sign):
+- percent table columns render as up/down moves (+, green/red) by default. For levels and proportions — loss rate, utilization, weight, share — set the column \`"semantics"\`: \`"rate"\` or \`"share"\` so values render unsigned and neutral.
+- \`stat-card\` accepts \`"format"\`: \`"number"\` (thousands separators) | \`"percent"\` (0.093 → 9.3%) | \`"currency"\` (thousands + \`"currency"\` prefix). Omit \`format\` to show the raw value (e.g. with a unit).
+- \`stat-card\` \`"goodWhen"\` controls delta coloring: \`"down"\` (queues, errors, costs — a rise is bad news) renders increases red and decreases green; \`"neutral"\` renders the delta muted. Default \`"up"\` keeps rises green.
+- badge table columns can map values to colors via \`"badgeColors"\`: \`{"高": "error", "中": "warning", "低": "success"}\`; unmapped values stay neutral.
+
+**Rules:**
+- Keep the payload small: skeleton inline, data in files. Payloads over 4096 bytes are rejected. \`chart\` is the exception — its few bounded points ride inline.
+- Give every component a unique stable "id" — reusing an id in a later call updates that card in place.
+- If this tool returns a validation error, fix the payload and retry once.
+- Prefer datatable/spreadsheet blocks for static display; prefer render_ui when the user should act.
+- View-state operations (filter/sort/group) are handled client-side by the table; reserve action-buttons for semantic follow-ups that need the model.`,
+
+  generate_app: `Create a self-contained single-file HTML app that renders in a sandboxed webview card in the chat.
+
+Use this when the user needs a small interactive artifact — a calculator, a visual dashboard mock, a converter, a playable demo — that declarative render_ui cards cannot express.
+
+**Contract (violations are rejected):**
+- \`html\` MUST be one complete HTML document, fully self-contained: inline CSS/JS only.
+- No external network references: no \`http(s)://\` in src/href/CSS url() (SVG/XML xmlns namespaces are the only exception). No CDN, no web fonts, no image hotlinks — use data: URIs.
+- Never reference \`@polo-ai/sdk\`.
+- Host bridge: the ONLY sanctioned deep link is \`poloai://action/ui-event/{sessionId}?cardId=…&eventId=…&type=button-click|value-change|submit&callbackId=…\` plus exactly one of \`payload\` (URL-encoded JSON object, ≤8KB) or \`payloadSrc\` (path of a JSON file inside the session data/ directory). It only works when the bundle declares \`<meta name="polo-bridge-capabilities" content="ui-event">\` AND the desktop observed that declaration in the exact document it attached — otherwise every event is rejected (capability_denied). Read \`poloCard\` and \`poloSession\` from the URL query the host appends to your file URL to fill in cardId/sessionId. REUSE one callbackId for every event of your card (it pairs the acks/errors; rotating it exhausts the host's per-page slots). At most 10 events per second per card. Inside the JSON payload: "modelContext" is a short summary for the assistant (hard 2KB cap, silently truncated — keep it tight); "privateState" is any JSON echoed back ONLY to your card via a ui_state message; other keys are ignored by the host.
+- Any other \`poloai://\` link is rejected.
+- Hard limit: 512 KB per bundle.
+
+**Updates:** pass \`updateOf\` with the app id from a previous call to rewrite that app in place (version increments, full rewrite — send the COMPLETE html every time). Omit \`updateOf\` to create a new app.
+
+If this tool returns a validation error, fix the html and retry once.`,
+
   script_sandbox: `Run quick inline diagnostics in a sandboxed subprocess with network isolation.
 
 Use this for short Python/Node/Bun snippets when strict Explore-mode Bash parsing blocks inline diagnostics.
@@ -563,6 +1028,18 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // (see SessionToolFilterOptions.allowRequestUserInput). Safe in all permission
   // modes: asking a question must not trigger another permission confirmation.
   { name: 'request_user_input', description: TOOL_DESCRIPTIONS.request_user_input, inputSchema: RequestUserInputArgsSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRequestUserInput },
+  // Generative UI inline cards — same desktop-only gating as request_user_input
+  // (see SessionToolFilterOptions.allowRenderUi), plus the generativeUI.inline
+  // feature toggle folded into the flag by the session layer. Declared JSON
+  // only: no code execution, no network — safe in all permission modes.
+  { name: 'render_ui', description: TOOL_DESCRIPTIONS.render_ui, inputSchema: RenderUiSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleRenderUi },
+  // Generative UI canvas apps — same desktop-only gating as render_ui (see
+  // SessionToolFilterOptions.allowGenerateApp), plus the generativeUI.canvas
+  // feature toggle folded into the flag by the session layer. The handler is
+  // fail-closed: it validates the bundle (size, no external refs, no SDK, no
+  // poloai:// bridge) before anything touches disk, then writes into the
+  // session data dir only.
+  { name: 'generate_app', description: TOOL_DESCRIPTIONS.generate_app, inputSchema: GenerateAppSchema, executionMode: 'registry', safeMode: 'allow', handler: handleGenerateApp },
   { name: 'update_user_preferences', description: TOOL_DESCRIPTIONS.update_user_preferences, inputSchema: UpdatePreferencesSchema, executionMode: 'registry', safeMode: 'block', handler: handleUpdatePreferences },
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
@@ -595,6 +1072,32 @@ export interface SessionToolFilterOptions {
    * to false so backends must opt in explicitly.
    */
   allowRequestUserInput?: boolean;
+  /**
+   * Only desktop interactive main-session turns enable render_ui (Generative
+   * UI inline cards), and only while the generativeUI.inline feature toggle
+   * is on — the session layer folds remote capability + local Settings kill
+   * switch into this flag before each turn. Every non-desktop source and any
+   * disabled toggle state fails closed. Defaults to false so backends must
+   * opt in explicitly.
+   */
+  allowRenderUi?: boolean;
+  /**
+   * Only desktop interactive main-session turns enable generate_app (Generative
+   * UI canvas apps), and only while the generativeUI.canvas feature toggle is
+   * on — same shape as allowRenderUi. Every non-desktop source and any
+   * disabled toggle state fails closed. Defaults to false so backends must opt
+   * in explicitly.
+   */
+  allowGenerateApp?: boolean;
+  /**
+   * POO-104 model-side component index (proposal §5.7): the enabled-component
+   * catalog snapshot appended, one `type — one-line description` per entry, to
+   * the render_ui tool description. Description-only — it never changes which
+   * tools are visible or what the input schema accepts; the render_ui schema
+   * keeps validating the full builtin union, so a stale catalog can only
+   * under-describe, never reject. Omit for the builtin catalog.
+   */
+  renderUiCatalog?: GenUiComponentDescriptor[];
 }
 
 /**
@@ -606,12 +1109,20 @@ export interface SessionToolFilterOptions {
 export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionToolDef[] {
   const includeDeveloperFeedback = options?.includeDeveloperFeedback ?? true;
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
+  const allowRenderUi = options?.allowRenderUi ?? false;
+  const allowGenerateApp = options?.allowGenerateApp ?? false;
 
   return SESSION_TOOL_DEFS.filter(def => {
     if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
       return false;
     }
     if (!allowRequestUserInput && def.name === 'request_user_input') {
+      return false;
+    }
+    if (!allowRenderUi && def.name === 'render_ui') {
+      return false;
+    }
+    if (!allowGenerateApp && def.name === 'generate_app') {
       return false;
     }
     return true;
@@ -720,18 +1231,27 @@ export interface JsonSchemaToolDef {
  *
  * @param opts.prefix - Optional prefix for tool names (e.g., 'mcp__session__' for Pi)
  * @param opts.includeDeveloperFeedback - Include experimental feedback tool in output
+ * @param opts.renderUiCatalog - POO-104 model-side component index: appended
+ *   to the render_ui description as one `type — one-liner` per enabled
+ *   component. Defaults to the builtin catalog.
  * @returns Array of tool definitions with JSON Schema inputSchema
  */
 export function getToolDefsAsJsonSchema(opts?: {
   prefix?: string;
   includeDeveloperFeedback?: boolean;
   allowRequestUserInput?: boolean;
+  allowRenderUi?: boolean;
+  allowGenerateApp?: boolean;
+  renderUiCatalog?: GenUiComponentDescriptor[];
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
   const defs = getSessionToolDefs({
     includeDeveloperFeedback: opts?.includeDeveloperFeedback,
     allowRequestUserInput: opts?.allowRequestUserInput,
+    allowRenderUi: opts?.allowRenderUi,
+    allowGenerateApp: opts?.allowGenerateApp,
   });
+  const renderUiCatalog = opts?.renderUiCatalog ?? GENUI_BUILTIN_COMPONENT_DESCRIPTORS;
 
   return defs.map(def => {
     // Explicit `as any` avoids TS2589 ("type instantiation is excessively deep")
@@ -742,7 +1262,9 @@ export function getToolDefsAsJsonSchema(opts?: {
     delete jsonSchema.additionalProperties;
     return {
       name: prefix + def.name,
-      description: def.description,
+      description: def.name === 'render_ui'
+        ? buildRenderUiToolDescription(def.description, renderUiCatalog)
+        : def.description,
       inputSchema: jsonSchema,
     };
   });

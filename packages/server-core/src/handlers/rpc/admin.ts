@@ -71,6 +71,8 @@ import {
   getLlmConnections,
   setAdminConfigVersion,
   setDefaultLlmConnection,
+  setGenerativeUiRemoteCapability,
+  setWebAppArtifactPolicy,
   updateLlmConnection,
   type LlmConnection,
 } from '@polo-ai/shared/config'
@@ -1479,6 +1481,15 @@ export function registerAdminHandlers(
         if (!ended) return staleAdminValidationResult()
         return { loggedIn: false }
       }
+      // /api/capabilities also carries the org-level generativeUI.inline
+      // toggle. VALIDATE is the production path that runs on every logged-in
+      // boot and after login (before any turn), so refresh the synchronous
+      // toggle cache here — the creator-artifact capabilities RPC alone has no
+      // production caller, which left the remote switch ineffective. The
+      // web_app artifact policy rides the same refresh (POO-102): it gates
+      // generate_app registration and the pin path.
+      await refreshGenerativeUiRemoteCapability(client, tokenResult.tokens.accessToken);
+      await refreshWebAppArtifactPolicy(client, tokenResult.tokens.accessToken);
       const verifiedSession = await persistVerifiedAdminUser(
         manager,
         sessions,
@@ -2918,8 +2929,16 @@ export function registerAdminHandlers(
   )
 
   server.handle(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES, async () =>
-    callOrganization('getCreatorArtifactCapabilities', (client, accessToken) =>
-      client.getCreatorArtifactCapabilities(accessToken)))
+    callOrganization('getCreatorArtifactCapabilities', async (client, accessToken) => {
+      const capability = await client.getCreatorArtifactCapabilities(accessToken);
+      // Same /api/capabilities endpoint also carries the Generative UI flag;
+      // refresh the synchronous toggle cache whenever capabilities are read.
+      // Absent field keeps the feature enabled, so pre-flag servers are
+      // unaffected. The web_app artifact policy refreshes alongside it.
+      await refreshGenerativeUiRemoteCapability(client, accessToken);
+      await refreshWebAppArtifactPolicy(client, accessToken);
+      return capability;
+    }))
 
   server.handle(RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS, async (_ctx, rawInput: unknown) => {
     const input = CreatorArtifactListRpcInputSchema.safeParse(rawInput)
@@ -3291,6 +3310,43 @@ function invalidateCreatorArtifactCache(userId: string, organizationId?: string)
   const prefix = organizationId ? `${userId}\0${organizationId}\0` : `${userId}\0`
   for (const key of creatorArtifactCatalogCache.keys()) {
     if (key.startsWith(prefix)) creatorArtifactCatalogCache.delete(key)
+  }
+}
+
+/**
+ * Best-effort refresh of the synchronous Generative UI remote-toggle cache
+ * from /api/capabilities. Called on production paths that run while logged in
+ * (post-login VALIDATE, creator artifact capabilities) so the org-level
+ * `generativeUI.inline` kill switch actually reaches per-turn tool eligibility.
+ * A failed read keeps the previously cached value (absent still = enabled).
+ */
+async function refreshGenerativeUiRemoteCapability(
+  client: AdminClient,
+  accessToken: string,
+): Promise<void> {
+  try {
+    setGenerativeUiRemoteCapability(await client.getGenerativeUiCapability(accessToken));
+  } catch {
+    // Capability read is best-effort; toggle cache keeps its previous value.
+  }
+}
+
+/**
+ * Best-effort refresh of the remote web_app artifact policy cache (POO-102),
+ * from the same authenticated org context as the Generative UI toggle above
+ * and on the same production paths. The result is clamped before caching, so
+ * only tightened policies ever land. A failed read keeps the previously
+ * cached policy (defaulting to enabled + local hard caps when nothing was
+ * ever received).
+ */
+async function refreshWebAppArtifactPolicy(
+  client: AdminClient,
+  accessToken: string,
+): Promise<void> {
+  try {
+    setWebAppArtifactPolicy(await client.getWebAppArtifactPolicy(accessToken));
+  } catch {
+    // Policy read is best-effort; the cache keeps its previous value.
   }
 }
 

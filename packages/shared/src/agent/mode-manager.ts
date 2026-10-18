@@ -2017,11 +2017,15 @@ export function shouldAllowToolInMode(
       // enforced by the toolset assembly + the host-side capability
       // re-check; a tool that was invoked must be classified by its real
       // safeMode metadata, or safe mode would block a tool the canonical
-      // metadata marks `allow`.
+      // metadata marks `allow`. render_ui / generate_app join the canonical
+      // set for the same reason (their visibility is gated separately via
+      // allowRenderUi / allowGenerateApp).
       const safeAllowedSessionTools = getSessionSafeAllowedToolNames({
         prefix: 'mcp__session__',
         includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
         allowRequestUserInput: true,
+        allowRenderUi: true,
+        allowGenerateApp: true,
       });
 
       if (safeAllowedSessionTools.has(toolName)) {

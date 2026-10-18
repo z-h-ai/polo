@@ -50,6 +50,7 @@
     "./config/types": "./src/config/types.ts",
     "./credentials": "./src/credentials/index.ts",
     "./credentials/managed-billing-observation": "./src/credentials/managed-billing-observation.ts",
+    "./genui": "./src/genui/index.ts",
     "./mcp": "./src/mcp/index.ts",
     "./prompts": "./src/prompts/index.ts",
     "./sessions": "./src/sessions/index.ts",
