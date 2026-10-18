@@ -381,6 +381,36 @@ export interface GenUiCardUnregisterResult {
   error?: string
 }
 
+/**
+ * POO-104 publish chain, packaging leg. The renderer names ONLY ids — Main
+ * derives the app directory from the calling window's workspace mapping
+ * (never from the request), packages the bundle into the upload ZIP, and
+ * returns the payload once. The renderer then submits it through the existing
+ * admin.PUBLISH_CREATOR_APP chain; the payload crosses this channel in the
+ * Main→renderer direction only.
+ */
+export interface GenUiAppPublishPackageRequest {
+  sessionId: string
+  appId: string
+  /** Display name for the artifact (audit + suggested artifact name). */
+  title: string
+}
+
+export interface GenUiAppPublishPackageResult {
+  ok: boolean
+  error?: string
+  /** Upload ZIP, base64. Present only on success. */
+  payloadBase64?: string
+  /** The analyzed static entry for the admin publish chain. */
+  entry?: { runtime: 'static'; path: string }
+  /** sha256 over the ZIP bytes (hex) — mirrors the upload-chain checksum. */
+  checksum?: string
+  sizeBytes?: number
+  fileCount?: number
+  /** Publish policy copy (SDK bridge requirement, catalog read-only note). */
+  policyNotice?: string
+}
+
 export interface AdminRpcErrorPayload {
   errorCode?: string
   message?: string
@@ -711,6 +741,10 @@ export interface ElectronAPI {
   // claimed guest against its own attach observations.
   registerGenUiCard(request: GenUiCardRegisterRequest): Promise<GenUiCardRegisterResult>
   unregisterGenUiCard(request: GenUiCardUnregisterRequest): Promise<GenUiCardUnregisterResult>
+
+  // Generative UI canvas app publish chain (POO-104) — package the
+  // session-local bundle into the upload payload behind Main's trust anchors.
+  packageGenUiAppArtifact(request: GenUiAppPublishPackageRequest): Promise<GenUiAppPublishPackageResult>
 
   // Local App Bundle installation and runtime
   localApps: {

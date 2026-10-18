@@ -276,6 +276,27 @@ export {
   getToolDefsAsJsonSchema,
 } from './tool-defs.ts';
 
+// POO-104 GenUI component catalog seam (§5.7): model-side index, dynamic
+// render_ui union assembly, and replay schemaVersion snapshots.
+export {
+  GENUI_RENDER_UI_SCHEMA_VERSION,
+  GENUI_BUILTIN_COMPONENT_DESCRIPTORS,
+  sanitizeCatalogText,
+  buildRenderUiCatalogSection,
+  buildRenderUiToolDescription,
+} from './genui-catalog.ts';
+export type { GenUiComponentDescriptor } from './genui-catalog.ts';
+export {
+  GENUI_COMPONENT_SCHEMAS,
+  buildRenderUiSchemaForComponentTypes,
+  buildRenderUiJsonSchemaForComponentTypes,
+  getGenUiComponentJsonSchemas,
+  getGenUiComponentSchemasForSnapshot,
+  validateGenUiComponentsForSnapshot,
+  assertBuiltinCatalogConsistency,
+  GenUiSnapshotValidationError,
+} from './genui-schema.ts';
+
 export type {
   SessionToolExecutionMode,
   SessionToolSafeMode,

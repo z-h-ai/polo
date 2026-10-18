@@ -30,10 +30,13 @@ import {
   SESSION_TOOL_REGISTRY,
   getSessionToolDefs,
   TOOL_DESCRIPTIONS as BASE_DESCRIPTIONS,
+  buildRenderUiToolDescription,
   // Types
   type ToolResult,
   type AuthRequest,
+  type GenUiComponentDescriptor,
 } from '@polo-ai/session-tools-core';
+import { getGenUiComponentCatalog } from '../genui/component-catalog.ts';
 import { createLLMTool, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { createSpawnSessionTool, type SpawnSessionFn } from './spawn-session-tool.ts';
 import { createBrowserTools, type BrowserPaneFns } from './browser-tools.ts';
@@ -234,6 +237,15 @@ export interface SessionScopedToolsOptions {
    * turns with the generativeUI.canvas toggle on). Participates in the cache key.
    */
   allowGenerateApp?: boolean;
+  /**
+   * POO-104 model-side component index (§5.7): the enabled-component catalog
+   * snapshot appended to render_ui's description (type + one-liner only —
+   * never full schema documents). Description-only: the input schema keeps
+   * validating the canonical builtin union regardless. Defaults to the host
+   * runtime registry; participates in the cache key so a catalog change
+   * rebuilds the toolset.
+   */
+  renderUiCatalog?: readonly GenUiComponentDescriptor[];
 }
 
 /**
@@ -257,7 +269,11 @@ export function getSessionScopedTools(
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
   const allowRenderUi = options?.allowRenderUi ?? false;
   const allowGenerateApp = options?.allowGenerateApp ?? false;
-  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}::gap-${allowGenerateApp ? '1' : '0'}`;
+  const renderUiCatalog = options?.renderUiCatalog ?? getGenUiComponentCatalog().descriptors();
+  // Catalog signature in the cache key: a catalog change (third-party install)
+  // must rebuild the toolset so render_ui's description reflects it.
+  const renderUiCatalogKey = renderUiCatalog.map(d => d.type).join(',');
+  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}::gap-${allowGenerateApp ? '1' : '0'}::cat-${renderUiCatalogKey}`;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -302,7 +318,13 @@ export function getSessionScopedTools(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     function registryTool(name: string, schema: any) {
       const def = SESSION_TOOL_REGISTRY.get(name)!;
-      return tool(name, TOOL_DESCRIPTIONS[name] || def.description, schema, async (args: any) => {
+      // render_ui's description carries the dynamic component index (POO-104,
+      // §5.7 two-layer index, model side): type + one-liner per enabled
+      // component, appended to the canonical base description.
+      const description = name === 'render_ui'
+        ? buildRenderUiToolDescription(BASE_DESCRIPTIONS.render_ui, renderUiCatalog)
+        : TOOL_DESCRIPTIONS[name] || def.description;
+      return tool(name, description, schema, async (args: any) => {
         const result = await def.handler!(ctx, args);
         return convertResult(result);
       }, def.readOnly ? { annotations: { readOnlyHint: true } } : undefined);

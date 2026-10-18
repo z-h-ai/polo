@@ -11,7 +11,10 @@
  *
  * Pinning opens the same file as a tab-browser web app (plus an audit record
  * written Main-side); the request travels over a CustomEvent so this shared
- * package stays decoupled from the Electron renderer's contexts.
+ * package stays decoupled from the Electron renderer's contexts. POO-104 adds
+ * the publish action (发布为 Web App Artifact) on the same pattern: Main
+ * packages the session-local bundle and the Electron-side bridge hands it to
+ * the existing CreatorArtifact upload chain.
  *
  * POO-103: the card's webview registers itself with the Main-owned
  * UiCardRegistry on attach (CustomEvent bridge, same decoupling), which is
@@ -21,7 +24,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AppWindow, Pin } from 'lucide-react'
+import { AppWindow, Globe, Pin } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 // <webview> JSX typing comes from @types/react's WebViewHTMLAttributes
@@ -154,6 +157,53 @@ function createPinRequestId(): string {
     return crypto.randomUUID()
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+}
+
+// ── Publish bridge (POO-104: 发布为 Web App Artifact) ────────────────────────
+//
+// Same CustomEvent decoupling as pinning: the card asks for a publish, the
+// Electron-side bridge packages the session-local bundle (Main) and hands the
+// payload to the existing CreatorArtifact upload chain. The card never sees
+// organization ids or zip bytes — Main derives the bundle path from the
+// session identity itself, so no path crosses this boundary.
+
+export const GENUI_APP_PUBLISH_EVENT = 'craft:publish-genui-app'
+export const GENUI_APP_PUBLISH_RESULT_EVENT = 'craft:publish-genui-app-result'
+
+export interface GenUiAppPublishRequest {
+  requestId: string
+  sessionId: string
+  appId: string
+  title: string
+}
+
+export interface GenUiAppPublishResult {
+  requestId: string
+  ok: boolean
+  error?: string
+}
+
+export function dispatchGenUiAppPublish(request: GenUiAppPublishRequest): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppPublishRequest>(GENUI_APP_PUBLISH_EVENT, { detail: request }))
+}
+
+/** Electron-side bridge replies through this. */
+export function dispatchGenUiAppPublishResult(result: GenUiAppPublishResult): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppPublishResult>(GENUI_APP_PUBLISH_RESULT_EVENT, { detail: result }))
+}
+
+/** Subscribe to the publish result for one requestId; returns an unsubscribe. */
+export function onGenUiAppPublishResult(
+  requestId: string,
+  handler: (result: GenUiAppPublishResult) => void,
+): () => void {
+  const listener = (event: Event) => {
+    const detail = (event as CustomEvent<GenUiAppPublishResult>).detail
+    if (detail?.requestId !== requestId) return
+    handler(detail)
+  }
+  window.addEventListener(GENUI_APP_PUBLISH_RESULT_EVENT, listener)
+  return () => window.removeEventListener(GENUI_APP_PUBLISH_RESULT_EVENT, listener)
 }
 
 // ── Card registration bridge (POO-103, CustomEvent → Electron bridge) ────────
@@ -297,6 +347,35 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
     })
   }, [appId, indexPath, pinState, sessionId, t, title, version])
 
+  // POO-104 publish: Main packages the bundle and the Electron bridge pushes
+  // it through the CreatorArtifact upload chain. Only a real bundle file in a
+  // real session can publish — the same gating as the pin action.
+  const canPublish = Boolean(indexPath && sessionId)
+  const [publishState, setPublishState] = React.useState<'idle' | 'pending' | 'published' | 'error'>('idle')
+  const [publishError, setPublishError] = React.useState<string | null>(null)
+
+  const handlePublish = React.useCallback(() => {
+    if (!canPublish || publishState === 'pending') return
+    const requestId = createPinRequestId()
+    setPublishState('pending')
+    setPublishError(null)
+    const unsubscribe = onGenUiAppPublishResult(requestId, (result) => {
+      unsubscribe()
+      if (result.ok) {
+        setPublishState('published')
+      } else {
+        setPublishState('error')
+        setPublishError(result.error ?? t('genui.app.publishFailed'))
+      }
+    })
+    dispatchGenUiAppPublish({
+      requestId,
+      sessionId: sessionId!,
+      appId,
+      title,
+    })
+  }, [appId, canPublish, publishState, sessionId, t, title])
+
   return (
     <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
       <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-1.5">
@@ -323,9 +402,26 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
             {pinState === 'pinned' ? t('genui.app.pinned') : t('genui.app.pin')}
           </button>
         )}
+        {canPublish && (
+          <button
+            type="button"
+            onClick={handlePublish}
+            disabled={publishState === 'pending' || publishState === 'published'}
+            title={t('genui.app.publishHint')}
+            className={cn(
+              'shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border transition-colors',
+              publishState === 'published'
+                ? 'border-success/30 text-success bg-success/[0.06]'
+                : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted',
+            )}
+          >
+            <Globe className="w-3 h-3" />
+            {publishState === 'published' ? t('genui.app.published') : publishState === 'pending' ? t('genui.app.publishing') : t('genui.app.publish')}
+          </button>
+        )}
       </div>
-      {pinError && (
-        <div className="px-3 py-1.5 text-[11px] text-destructive/80 bg-destructive/[0.04] border-b">{pinError}</div>
+      {(pinError || publishError) && (
+        <div className="px-3 py-1.5 text-[11px] text-destructive/80 bg-destructive/[0.04] border-b">{publishError ?? pinError}</div>
       )}
       {loadFailed ? (
         <div className="h-[320px] flex items-center justify-center text-[12px] text-muted-foreground/70">

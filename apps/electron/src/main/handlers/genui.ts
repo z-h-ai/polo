@@ -22,16 +22,31 @@
  * webview-security at registration time, and the POO-103 ui-event wiring:
  * the UiCardRegistry RPC surface (register/unregister), the ui-event handler
  * deps and the canvas-guest deep-link forwarder.
+ *
+ * POO-104 adds the publish-chain packaging leg (PUBLISH_APP_AS_ARTIFACT):
+ * Main packages the session-local canvas app into the upload ZIP behind the
+ * same trust anchors as the pin audit — the renderer names only ids, every
+ * path is derived here, the web_app policy gates the bundle, the audit line
+ * lands BEFORE the payload is handed back, and the upload itself goes through
+ * the existing admin.PUBLISH_CREATOR_APP chain (polo-app.json stays
+ * upload-flow-owned; generation never pre-writes it).
  */
 
-import { appendFileSync, existsSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { join, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { getWebAppArtifactPolicyState } from '@polo-ai/shared/config'
+import {
+  buildGenUiAppArtifactZip,
+  buildGenUiPublishNotice,
+  collectGenUiAppPublishFiles,
+  evaluateGenUiAppPublishPolicy,
+} from '@polo-ai/shared/genui'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import { validateSessionId } from '@polo-ai/shared/sessions'
-import { GENUI_PINNED_APP_ID_PREFIX, type GenUiAppPinAuditRequest, type GenUiAppPinAuditResult, type GenUiCardRegisterRequest, type GenUiCardRegisterResult, type GenUiCardUnregisterRequest, type GenUiCardUnregisterResult } from '../../shared/types'
+import { GENUI_PINNED_APP_ID_PREFIX, type GenUiAppPinAuditRequest, type GenUiAppPinAuditResult, type GenUiAppPublishPackageRequest, type GenUiAppPublishPackageResult, type GenUiCardRegisterRequest, type GenUiCardRegisterResult, type GenUiCardUnregisterRequest, type GenUiCardUnregisterResult } from '../../shared/types'
 import { setGenUiGuestSrcValidator, setGenUiGuestDeepLinkForwarder } from '../webview-security'
 import { getUiCardRegistry } from '../ui-card-registry'
 import { setGenUiUiEventDeps, handleUiEventUrl } from '../genui-ui-event'
@@ -42,6 +57,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.genui.AUDIT_APP_PIN,
   RPC_CHANNELS.genui.REGISTER_UI_CARD,
   RPC_CHANNELS.genui.UNREGISTER_UI_CARD,
+  RPC_CHANNELS.genui.PUBLISH_APP_AS_ARTIFACT,
 ] as const
 
 // Mirrors the generate_app APP_ID_PATTERN (session-tools-core) — the audit
@@ -136,34 +152,12 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
 
       // The calling window's Workspace mapping is the only trust anchor — a
       // renderer cannot name another workspace's session directory.
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
-      if (!workspaceId) throw new Error('Cannot determine workspace for the audit record')
-      const sessionManager = deps.sessionManager
-      if (!sessionManager) throw new Error('Session manager is unavailable')
-      const storage = deps.sessionStorage
-      if (!storage) throw new Error('Session storage resolver is unavailable')
-      const workspace = sessionManager.getWorkspaces()
-        .find(candidate => candidate.id === workspaceId)
-      if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
-
-      // SECURITY: sessionId is path-checked before any path composition.
-      validateSessionId(sessionId)
-      const managedSessionPath = sessionManager.getSessionPath(sessionId)
-      if (!managedSessionPath) throw new Error(`Session not found: ${sessionId}`)
-      const sessionPath = storage.getSessionPath(workspace.rootPath, sessionId)
-      if (resolve(managedSessionPath) !== resolve(sessionPath)) {
-        throw new Error(`Session storage identity mismatch: ${sessionId}`)
-      }
+      const { sessionPath, dataPath } = resolveTrustedSessionContext(ctx, deps, sessionId)
 
       // The audited bundle must be exactly the generate_app artifact for this
       // app id — resolve() both sides, then require the request path to equal
       // the derived one (no "close enough", no clamping into place).
-      const expectedIndexPath = resolve(
-        storage.getDataPath(workspace.rootPath, sessionId),
-        'genui-apps',
-        appId,
-        'index.html',
-      )
+      const expectedIndexPath = resolve(dataPath, 'genui-apps', appId, 'index.html')
       if (resolve(indexPath) !== expectedIndexPath) {
         throw new Error('Bundle path does not match the generated artifact for this app')
       }
@@ -199,6 +193,76 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
       }
       appendFileSync(join(sessionPath, 'audit.jsonl'), `${line}\n`, { encoding: 'utf-8', flag: 'a' })
       return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  // POO-104 publish chain, packaging leg: package the session-local canvas
+  // app into the upload payload. Same trust anchors as the pin audit; the
+  // audit line lands BEFORE the payload is handed back, so a publish package
+  // can never leave the device unrecorded.
+  server.handle(RPC_CHANNELS.genui.PUBLISH_APP_AS_ARTIFACT, async (ctx, request: GenUiAppPublishPackageRequest): Promise<GenUiAppPublishPackageResult> => {
+    try {
+      if (!request || typeof request !== 'object') throw new Error('Invalid publish request')
+      const { sessionId, appId, title } = request
+      if (typeof sessionId !== 'string' || sessionId.length === 0) throw new Error('Missing session id')
+      if (typeof appId !== 'string' || !APP_ID_PATTERN.test(appId) || appId.length > APP_ID_MAX_LENGTH) {
+        throw new Error('Invalid app id')
+      }
+      if (typeof title !== 'string' || title.length === 0 || title.length > 200) throw new Error('Invalid title')
+
+      // Trust anchor + path derivation: the renderer names ids only; the app
+      // directory comes from the calling window's workspace mapping.
+      const { sessionPath, dataPath } = resolveTrustedSessionContext(ctx, deps, sessionId)
+      const appDir = resolve(dataPath, 'genui-apps', appId)
+      const indexPath = join(appDir, 'index.html')
+      if (!existsSync(indexPath) || !statSync(indexPath).isFile()) {
+        throw new Error(`Bundle file not found for app: ${appId}`)
+      }
+
+      // Layout + policy gates, both fail-closed, in that order: the layout
+      // decides what would be packaged, the policy decides whether it may be.
+      const collected = collectGenUiAppPublishFiles(appDir)
+      if (!collected.ok) throw new Error(collected.error)
+      const policyVerdict = evaluateGenUiAppPublishPolicy(collected.files, getWebAppArtifactPolicyState())
+      if (!policyVerdict.ok) throw new Error(policyVerdict.error)
+
+      const archive = buildGenUiAppArtifactZip(collected.files)
+      const checksum = createHash('sha256').update(archive).digest('hex')
+
+      // Audit-first (same contract as the pin): a failed audit write fails
+      // the packaging, so no payload is ever produced unrecorded.
+      const version = readGenUiAppVersion(appDir)
+      const record = {
+        event: 'genui_app_publish',
+        at: new Date().toISOString(),
+        sessionId,
+        appId,
+        version,
+        title,
+        checksum,
+        sizeBytes: archive.byteLength,
+        fileCount: collected.files.length,
+        webContentsId: ctx.webContentsId ?? null,
+      }
+      const line = JSON.stringify(record)
+      if (Buffer.byteLength(line, 'utf8') > AUDIT_LINE_MAX_BYTES) {
+        throw new Error('Audit record too large')
+      }
+      appendFileSync(join(sessionPath, 'audit.jsonl'), `${line}\n`, { encoding: 'utf-8', flag: 'a' })
+
+      return {
+        ok: true,
+        payloadBase64: Buffer.from(archive).toString('base64'),
+        // The analyzed entry the admin publish chain expects for a static
+        // bundle (CREATOR_APP_CANONICAL_ENTRIES.static).
+        entry: { runtime: 'static', path: 'index.html' },
+        checksum,
+        sizeBytes: archive.byteLength,
+        fileCount: collected.files.length,
+        policyNotice: buildGenUiPublishNotice(),
+      }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -249,6 +313,51 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
       return { ok: false }
     }
   })
+}
+
+/**
+ * The trust anchor shared by the pin audit and the publish packaging: the
+ * calling window's Workspace mapping is the only anchor — a renderer cannot
+ * name another workspace's session directory. SECURITY: sessionId is
+ * path-checked before any path composition, and the managed-vs-storage
+ * identity cross-check rejects a moved or fabricated session.
+ */
+function resolveTrustedSessionContext(
+  ctx: { workspaceId?: string | null; webContentsId?: number | null },
+  deps: GenUiDeps,
+  sessionId: string,
+): { sessionPath: string; dataPath: string } {
+  const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
+  if (!workspaceId) throw new Error('Cannot determine workspace for the genui request')
+  const sessionManager = deps.sessionManager
+  if (!sessionManager) throw new Error('Session manager is unavailable')
+  const storage = deps.sessionStorage
+  if (!storage) throw new Error('Session storage resolver is unavailable')
+  const workspace = sessionManager.getWorkspaces()
+    .find(candidate => candidate.id === workspaceId)
+  if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+  validateSessionId(sessionId)
+  const managedSessionPath = sessionManager.getSessionPath(sessionId)
+  if (!managedSessionPath) throw new Error(`Session not found: ${sessionId}`)
+  const sessionPath = storage.getSessionPath(workspace.rootPath, sessionId)
+  if (resolve(managedSessionPath) !== resolve(sessionPath)) {
+    throw new Error(`Session storage identity mismatch: ${sessionId}`)
+  }
+  return { sessionPath, dataPath: storage.getDataPath(workspace.rootPath, sessionId) }
+}
+
+/**
+ * Tolerant read of the session-local version.json a generate_app write leaves
+ * next to index.html. Publish bookkeeping only — a missing or malformed file
+ * publishes with version: null rather than failing the chain.
+ */
+function readGenUiAppVersion(appDir: string): number | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(appDir, 'version.json'), 'utf-8')) as { version?: unknown }
+    return typeof raw.version === 'number' && Number.isInteger(raw.version) && raw.version > 0 ? raw.version : null
+  } catch {
+    return null
+  }
 }
 
 /**

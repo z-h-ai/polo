@@ -174,6 +174,12 @@ export const RPC_CHANNELS = {
     // the renderer reports ids, Main verifies them.
     REGISTER_UI_CARD: 'genui:registerUiCard',
     UNREGISTER_UI_CARD: 'genui:unregisterUiCard',
+    // POO-104 publish chain: Main packages the session-local canvas app into
+    // the upload payload (zip, root layout) behind the same trust anchors as
+    // the pin audit. The payload crosses this channel once, renderer → Main
+    // never — Main hands the packaged bytes BACK to the caller, which submits
+    // them through the existing admin.PUBLISH_CREATOR_APP chain.
+    PUBLISH_APP_AS_ARTIFACT: 'genui:publishAppArtifact',
   },
   localApps: {
     GET_HOST_INFO: 'local-apps:getHostInfo',

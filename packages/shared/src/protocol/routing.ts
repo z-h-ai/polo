@@ -134,10 +134,13 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.tabBrowser.SAVE_APPS,
 
   // genui — canvas app pin audit writes the local session directory; card
-  // registration feeds the Main-owned UiCardRegistry (POO-103)
+  // registration feeds the Main-owned UiCardRegistry (POO-103); the publish
+  // packaging reads session-local bundle bytes (POO-104) — all of it stays on
+  // this device, the upload itself goes through the admin channel separately.
   RPC_CHANNELS.genui.AUDIT_APP_PIN,
   RPC_CHANNELS.genui.REGISTER_UI_CARD,
   RPC_CHANNELS.genui.UNREGISTER_UI_CARD,
+  RPC_CHANNELS.genui.PUBLISH_APP_AS_ARTIFACT,
 
   // localApps — downloaded bundles and processes live on this device
   RPC_CHANNELS.localApps.GET_HOST_INFO,

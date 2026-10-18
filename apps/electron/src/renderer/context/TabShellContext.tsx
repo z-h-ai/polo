@@ -25,6 +25,7 @@ import {
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { ProductSpaceAppLaunchBridge } from '@/components/tab-browser/ProductSpaceAppLaunchBridge'
 import { GenUiAppPinBridge } from '@/components/tab-browser/GenUiAppPinBridge'
+import { GenUiAppPublishBridge } from '@/components/tab-browser/GenUiAppPublishBridge'
 import { GenUiCardRegistryBridge } from '@/components/tab-browser/GenUiCardRegistryBridge'
 import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
 
@@ -285,6 +286,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     <TabShellContext.Provider value={value}>
       {liveProductSpace && <ProductSpaceAppLaunchBridge />}
       <GenUiAppPinBridge />
+      <GenUiAppPublishBridge />
       <GenUiCardRegistryBridge />
       {children}
     </TabShellContext.Provider>

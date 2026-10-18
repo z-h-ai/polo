@@ -15,6 +15,10 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { SessionToolContext } from './context.ts';
 import type { ToolResult } from './types.ts';
+// POO-104 model-side component index (§5.7): one-way import — genui-catalog
+// stays dependency-free so the dynamic schema assembly (genui-schema.ts) can
+// import both sides without a cycle.
+import { GENUI_BUILTIN_COMPONENT_DESCRIPTORS, buildRenderUiToolDescription, type GenUiComponentDescriptor } from './genui-catalog.ts';
 
 // Handlers
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
@@ -257,62 +261,84 @@ export const GenUIComponentSchema = z.discriminatedUnion('type', [
 
 export type GenUIComponent = z.infer<typeof GenUIComponentSchema>;
 
-// Cross-field rules live on the components array (not the top-level object):
-// a superRefine on the object itself would wrap RenderUiSchema in ZodEffects
-// and break the `.shape` access the Claude SDK toolset builder relies on.
-const GenUIComponentsArraySchema = z.array(GenUIComponentSchema)
-  .min(1)
-  .max(RENDER_UI_MAX_COMPONENTS)
-  .superRefine((components, ctx) => {
-    // TextEncoder (not Buffer) so the schema stays portable to browser bundles.
-    const bytes = new TextEncoder().encode(JSON.stringify({ components })).length;
-    if (bytes > RENDER_UI_MAX_PAYLOAD_BYTES) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Payload ${bytes}B exceeds ${RENDER_UI_MAX_PAYLOAD_BYTES}B. Move data into a file via transform_data and use "src".`,
-      });
-    }
-    const ids = new Set<string>();
-    components.forEach((component, index) => {
-      if (ids.has(component.id)) {
+/**
+ * Loose view of a component for the cross-field rules — the dynamic schema
+ * assembly (genui-schema.ts) reuses this builder with unions that contain
+ * only a subset of the component types, so the rules cannot assume the
+ * static discriminated-union narrowing.
+ */
+type GenUiComponentLike = {
+  id: string;
+  type: string;
+  fields?: Array<{ key: string; type: string; options?: string[] }>;
+};
+
+/**
+ * The components array with its cross-field rules, parameterized by the
+ * component union. Cross-field rules live on the array (not the top-level
+ * object): a superRefine on the object itself would wrap the schema in
+ * ZodEffects and break the `.shape` access the Claude SDK toolset builder
+ * relies on. The rules apply identically to every enabled-component subset
+ * (POO-104 dynamic assembly) — payload cap, unique ids, and the form
+ * select⇔options contract are union-independent.
+ */
+export function buildGenUiComponentsArraySchema(componentSchema: z.ZodTypeAny) {
+  return z.array(componentSchema)
+    .min(1)
+    .max(RENDER_UI_MAX_COMPONENTS)
+    .superRefine((components, ctx) => {
+      // TextEncoder (not Buffer) so the schema stays portable to browser bundles.
+      const bytes = new TextEncoder().encode(JSON.stringify({ components })).length;
+      if (bytes > RENDER_UI_MAX_PAYLOAD_BYTES) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: [index, 'id'],
-          message: `Duplicate component id "${component.id}". Component ids must be unique within one call.`,
+          message: `Payload ${bytes}B exceeds ${RENDER_UI_MAX_PAYLOAD_BYTES}B. Move data into a file via transform_data and use "src".`,
         });
       }
-      ids.add(component.id);
-      // form (POO-103) cross-field rules: unique keys; select fields need
-      // options, non-select fields must not carry them.
-      if (component.type === 'form') {
-        const keys = new Set<string>();
-        component.fields.forEach((field, fieldIndex) => {
-          if (keys.has(field.key)) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [index, 'fields', fieldIndex, 'key'],
-              message: `Duplicate field key "${field.key}". Field keys must be unique within one form.`,
-            });
-          }
-          keys.add(field.key);
-          if (field.type === 'select' && (!field.options || field.options.length < 1)) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [index, 'fields', fieldIndex, 'options'],
-              message: `select field "${field.key}" requires at least one option.`,
-            });
-          }
-          if (field.type !== 'select' && field.options) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [index, 'fields', fieldIndex, 'options'],
-              message: `options are only valid on select fields (field "${field.key}").`,
-            });
-          }
-        });
-      }
+      const ids = new Set<string>();
+      (components as GenUiComponentLike[]).forEach((component, index) => {
+        if (ids.has(component.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [index, 'id'],
+            message: `Duplicate component id "${component.id}". Component ids must be unique within one call.`,
+          });
+        }
+        ids.add(component.id);
+        // form (POO-103) cross-field rules: unique keys; select fields need
+        // options, non-select fields must not carry them.
+        if (component.type === 'form' && Array.isArray(component.fields)) {
+          const keys = new Set<string>();
+          component.fields.forEach((field, fieldIndex) => {
+            if (keys.has(field.key)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, 'fields', fieldIndex, 'key'],
+                message: `Duplicate field key "${field.key}". Field keys must be unique within one form.`,
+              });
+            }
+            keys.add(field.key);
+            if (field.type === 'select' && (!field.options || field.options.length < 1)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, 'fields', fieldIndex, 'options'],
+                message: `select field "${field.key}" requires at least one option.`,
+              });
+            }
+            if (field.type !== 'select' && field.options) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, 'fields', fieldIndex, 'options'],
+                message: `options are only valid on select fields (field "${field.key}").`,
+              });
+            }
+          });
+        }
+      });
     });
-  });
+}
+
+const GenUIComponentsArraySchema = buildGenUiComponentsArraySchema(GenUIComponentSchema);
 
 export const RenderUiSchema = z.object({
   components: GenUIComponentsArraySchema,
@@ -867,6 +893,15 @@ export interface SessionToolFilterOptions {
    * in explicitly.
    */
   allowGenerateApp?: boolean;
+  /**
+   * POO-104 model-side component index (proposal §5.7): the enabled-component
+   * catalog snapshot appended, one `type — one-line description` per entry, to
+   * the render_ui tool description. Description-only — it never changes which
+   * tools are visible or what the input schema accepts; the render_ui schema
+   * keeps validating the full builtin union, so a stale catalog can only
+   * under-describe, never reject. Omit for the builtin catalog.
+   */
+  renderUiCatalog?: GenUiComponentDescriptor[];
 }
 
 /**
@@ -1000,6 +1035,9 @@ export interface JsonSchemaToolDef {
  *
  * @param opts.prefix - Optional prefix for tool names (e.g., 'mcp__session__' for Pi)
  * @param opts.includeDeveloperFeedback - Include experimental feedback tool in output
+ * @param opts.renderUiCatalog - POO-104 model-side component index: appended
+ *   to the render_ui description as one `type — one-liner` per enabled
+ *   component. Defaults to the builtin catalog.
  * @returns Array of tool definitions with JSON Schema inputSchema
  */
 export function getToolDefsAsJsonSchema(opts?: {
@@ -1008,6 +1046,7 @@ export function getToolDefsAsJsonSchema(opts?: {
   allowRequestUserInput?: boolean;
   allowRenderUi?: boolean;
   allowGenerateApp?: boolean;
+  renderUiCatalog?: GenUiComponentDescriptor[];
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
   const defs = getSessionToolDefs({
@@ -1016,6 +1055,7 @@ export function getToolDefsAsJsonSchema(opts?: {
     allowRenderUi: opts?.allowRenderUi,
     allowGenerateApp: opts?.allowGenerateApp,
   });
+  const renderUiCatalog = opts?.renderUiCatalog ?? GENUI_BUILTIN_COMPONENT_DESCRIPTORS;
 
   return defs.map(def => {
     // Explicit `as any` avoids TS2589 ("type instantiation is excessively deep")
@@ -1026,7 +1066,9 @@ export function getToolDefsAsJsonSchema(opts?: {
     delete jsonSchema.additionalProperties;
     return {
       name: prefix + def.name,
-      description: def.description,
+      description: def.name === 'render_ui'
+        ? buildRenderUiToolDescription(def.description, renderUiCatalog)
+        : def.description,
       inputSchema: jsonSchema,
     };
   });

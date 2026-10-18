@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'bun:test'
 import { pathToFileURL } from 'node:url'
 import {
+  GENUI_APP_PUBLISH_EVENT,
   buildGenUiAppSrc,
+  dispatchGenUiAppPublish,
+  dispatchGenUiAppPublishResult,
   getGenUiAppPartition,
   mergeGenUiAppCalls,
+  onGenUiAppPublishResult,
   parseGenUiAppInput,
   parseGenUiAppResult,
   pathToFileUrl,
@@ -113,5 +117,53 @@ describe('mergeGenUiAppCalls', () => {
     expect(merged[0]!.html).toBe('three')
     expect(merged[0]!.version).toBe(2)
     expect(merged[1]!.appId).toBe('b')
+  })
+})
+
+describe('publish bridge events (POO-104)', () => {
+  const globalScope = globalThis as { window?: EventTarget }
+  const originalWindow = globalScope.window
+  let fakeWindow: EventTarget
+
+  function useFakeWindow(): void {
+    fakeWindow = new EventTarget()
+    globalScope.window = fakeWindow
+  }
+
+  function restoreWindow(): void {
+    globalScope.window = originalWindow
+  }
+
+  it('dispatchGenUiAppPublish carries the request on the publish event', () => {
+    useFakeWindow()
+    try {
+      const request = { requestId: 'r1', sessionId: 'sess-1', appId: 'app-1', title: 'Demo' }
+      let received: unknown = null
+      fakeWindow.addEventListener(GENUI_APP_PUBLISH_EVENT, (event) => {
+        received = (event as CustomEvent).detail
+      })
+      dispatchGenUiAppPublish(request)
+      expect(received).toEqual(request)
+    } finally {
+      restoreWindow()
+    }
+  })
+
+  it('onGenUiAppPublishResult filters by requestId and unsubscribes', () => {
+    useFakeWindow()
+    try {
+      const seen: boolean[] = []
+      const unsubscribe = onGenUiAppPublishResult('r2', (result) => {
+        seen.push(result.ok)
+      })
+      // Another request's result must not leak into this subscription.
+      dispatchGenUiAppPublishResult({ requestId: 'other', ok: false })
+      dispatchGenUiAppPublishResult({ requestId: 'r2', ok: true })
+      unsubscribe()
+      dispatchGenUiAppPublishResult({ requestId: 'r2', ok: false })
+      expect(seen).toEqual([true])
+    } finally {
+      restoreWindow()
+    }
   })
 })

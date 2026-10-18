@@ -127,6 +127,7 @@ export const CHANNEL_MAP = {
   appendGenUiAudit: invoke(RPC_CHANNELS.genui.AUDIT_APP_PIN),
   registerGenUiCard: invoke(RPC_CHANNELS.genui.REGISTER_UI_CARD),
   unregisterGenUiCard: invoke(RPC_CHANNELS.genui.UNREGISTER_UI_CARD),
+  packageGenUiAppArtifact: invoke(RPC_CHANNELS.genui.PUBLISH_APP_AS_ARTIFACT),
 
   // Local App Bundle runtime
   'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),
