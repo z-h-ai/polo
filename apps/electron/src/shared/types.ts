@@ -513,6 +513,9 @@ export interface ElectronAPI {
 
   // Session export/import (cross-workspace transfer)
   exportSession(sessionId: string): Promise<unknown>
+  /** Export a session bundle to a user-chosen JSON file (OS save dialog, main-process orchestrated).
+   *  Resolves to the written file path, or null when the user cancelled the save dialog. */
+  exportSessionToFile(sessionId: string): Promise<string | null>
   importSession(targetWorkspaceId: string, bundle: unknown, mode: 'move' | 'fork'): Promise<{ sessionId: string; warnings?: string[] }>
   exportRemoteSessionTransfer(sessionId: string): Promise<RemoteSessionTransferPayload>
   importRemoteSessionTransfer(targetWorkspaceId: string, payload: RemoteSessionTransferPayload): Promise<ImportRemoteSessionTransferResult>

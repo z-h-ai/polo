@@ -37,6 +37,7 @@ import {
   CloudUpload,
   Columns2,
   Copy,
+  FileDown,
   Flag,
   FlagOff,
   FolderOpen,
@@ -316,6 +317,7 @@ export function CompactSessionMenu({
               onOpenInNewWindow={closeAfter(onOpenInNewWindow)}
               onShowInFinder={closeAfter(actions.showInFinder)}
               onCopyPath={closeAfter(actions.copyPath)}
+              onExport={closeAfter(actions.exportSession)}
               onDelete={closeAfter(onDelete)}
             />
           )}
@@ -389,6 +391,7 @@ interface RootPaneProps {
   onOpenInNewWindow?: () => void
   onShowInFinder?: () => void
   onCopyPath?: () => void
+  onExport?: () => void
   onDelete?: () => void
 }
 
@@ -420,6 +423,7 @@ function RootPane({
   onOpenInNewWindow,
   onShowInFinder,
   onCopyPath,
+  onExport,
   onDelete,
 }: RootPaneProps) {
   const { t } = useTranslation()
@@ -509,6 +513,9 @@ function RootPane({
         onTap={onShowInFinder}
       />
       <Row icon={<Copy className="h-4 w-4" />} label={t('sessionMenu.copyPath')} onTap={onCopyPath} />
+      {onExport && (
+        <Row icon={<FileDown className="h-4 w-4" />} label={t('sessionMenu.export')} onTap={onExport} />
+      )}
 
       <Separator />
 
