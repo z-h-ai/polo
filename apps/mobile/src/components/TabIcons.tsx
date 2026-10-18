@@ -2,8 +2,10 @@
 //
 // Pure react-native shapes mirroring the prototype line icons (#i-msg,
 // #i-mac, #i-user in polo-mobile-prototype.html). @expo/vector-icons is not a
-// dependency of this app, so the three glyphs are drawn with Views; active
-// state is conveyed by the accent tint the tab bar passes down.
+// dependency of this app, so the glyphs are drawn with Views; active
+// state is conveyed by the accent tint the tab bar passes down. The extra
+// 'phone' glyph (V-11) serves device rows: platform-unknown cards fall back
+// to it instead of the person icon.
 
 import { Text, View, StyleSheet, type ColorValue } from 'react-native';
 
@@ -12,7 +14,7 @@ import { colors } from '../theme/tokens';
 
 const STROKE = 2;
 
-export type TabIconName = 'messages' | 'devices' | 'profile';
+export type TabIconName = 'messages' | 'devices' | 'profile' | 'phone';
 
 function MessagesIcon({ color, size }: { color: ColorValue; size: number }) {
   const bubble = size * 0.82;
@@ -104,6 +106,37 @@ function ProfileIcon({ color, size }: { color: ColorValue; size: number }) {
   );
 }
 
+// Phone handset glyph (V-11): rounded-rect outline + home line, same
+// line-icon style as the tab glyphs — mirrors the prototype phone icon in
+// P02/P12 device rows.
+function PhoneIcon({ color, size }: { color: ColorValue; size: number }) {
+  return (
+    <View style={iconBox(size)}>
+      <View
+        style={{
+          width: size * 0.58,
+          height: size * 0.88,
+          borderRadius: size * 0.14,
+          borderWidth: STROKE,
+          borderColor: color,
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          paddingBottom: size * 0.09,
+        }}
+      >
+        <View
+          style={{
+            width: size * 0.14,
+            height: STROKE,
+            borderRadius: 99,
+            backgroundColor: color,
+          }}
+        />
+      </View>
+    </View>
+  );
+}
+
 function iconBox(size: number) {
   return { width: size, height: size, alignItems: 'center', justifyContent: 'center' } as const;
 }
@@ -116,6 +149,8 @@ export function TabIcon({ name, color, size }: { name: TabIconName; color: Color
       return <DevicesIcon color={color} size={size} />;
     case 'profile':
       return <ProfileIcon color={color} size={size} />;
+    case 'phone':
+      return <PhoneIcon color={color} size={size} />;
   }
 }
 

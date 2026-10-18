@@ -11,6 +11,9 @@
 //     advice).
 // This phone's binding rows are NOT marked specially: admin list rows are the
 // phone↔Mac bindings of this user; the 本机 section is informational only.
+// Visual contract (proto P12): the 当前设备 chip is light-green/green (V-03);
+// row glyphs follow the platform via deviceIconForPlatform (V-11) — the
+// person icon never stands in for a device.
 
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -24,7 +27,13 @@ import { UnbindConfirmSheet } from '../../components/UnbindConfirmSheet';
 import { TabIcon } from '../../components/TabIcons';
 import { useSessionStore } from '../../auth/session';
 import { boundAtLabel } from '../../lib/deviceStatus';
-import { macDisplayName, manageSectionTitles, MANAGE_NOTE_LINES, maskPhone } from '../../lib/devicesUi';
+import {
+  deviceIconForPlatform,
+  macDisplayName,
+  manageSectionTitles,
+  MANAGE_NOTE_LINES,
+  maskPhone,
+} from '../../lib/devicesUi';
 import { phoneDisplayName } from '../pairing/PairFlowScreen';
 import { colors } from '../../theme/tokens';
 
@@ -108,7 +117,12 @@ export function DeviceManageScreen() {
         <View style={styles.card}>
           <View style={styles.row}>
             <View style={styles.avatar}>
-              <TabIcon name="profile" color={colors.accentDeep} size={20} />
+              {/* V-11: 本机是手机 — phone glyph, never the person icon. */}
+              <TabIcon
+                name={deviceIconForPlatform(Platform.OS)}
+                color={colors.accentDeep}
+                size={20}
+              />
             </View>
             <View style={styles.texts}>
               <Text style={styles.rowTitle} numberOfLines={1}>
@@ -140,7 +154,11 @@ export function DeviceManageScreen() {
             {devices.map((device) => (
               <View key={device.id} style={styles.row}>
                 <View style={styles.avatar}>
-                  <TabIcon name="devices" color={colors.accentDeep} size={20} />
+                  <TabIcon
+                    name={deviceIconForPlatform(device.platform)}
+                    color={colors.accentDeep}
+                    size={20}
+                  />
                 </View>
                 <View style={styles.texts}>
                   <Text style={styles.rowTitle} numberOfLines={1}>
@@ -271,17 +289,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.fg50,
   },
+  // V-03: 本机语义 — light-green chip with success-green text (proto P12).
   currentChip: {
     height: 22,
     paddingHorizontal: 8,
     borderRadius: 999,
-    backgroundColor: colors.accentSoft,
+    backgroundColor: colors.successSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   currentChipText: {
     fontSize: 10.5,
-    color: colors.accentDeep,
+    color: colors.success,
   },
   unbind: {
     minHeight: 32,

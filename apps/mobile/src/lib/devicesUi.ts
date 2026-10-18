@@ -9,11 +9,22 @@
 //   - the P12 本机 masked phone + section titles.
 
 import type { DeviceView } from '../api/devices';
+import type { TabIconName } from '../components/TabIcons';
 import { inferDeviceStatus } from './deviceStatus';
 
 /** Admin exposes no Mac display name — the stable macDeviceId is the title. */
 export function macDisplayName(device: Pick<DeviceView, 'macDeviceId'>): string {
   return device.macDeviceId || '未知电脑';
+}
+
+/**
+ * V-11 device-row glyph selection: 'macos' renders the computer graphic,
+ * anything else — including an unknown/empty platform — renders the phone
+ * graphic. The person glyph is reserved for the profile tab, never a device
+ * fallback.
+ */
+export function deviceIconForPlatform(platform: string | null | undefined): TabIconName {
+  return platform === 'macos' ? 'devices' : 'phone';
 }
 
 export interface DeviceCardModel {
@@ -23,6 +34,8 @@ export interface DeviceCardModel {
   online: boolean;
   /** 离线卡的整卡弱化 (P02 opacity .62). */
   dimmed: boolean;
+  /** Self-reported platform — picks the row glyph via deviceIconForPlatform. */
+  platform: string;
 }
 
 export function toDeviceCardModel(device: DeviceView, nowMs: number): DeviceCardModel {
@@ -33,6 +46,7 @@ export function toDeviceCardModel(device: DeviceView, nowMs: number): DeviceCard
     statusLabel: status.label,
     online: status.online,
     dimmed: !status.online,
+    platform: device.platform,
   };
 }
 

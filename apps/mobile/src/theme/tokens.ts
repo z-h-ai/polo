@@ -14,6 +14,7 @@ export const colors = {
   destructiveBg: 'rgba(230,0,12,0.08)', // errbar background
   destructiveBorder: 'rgba(230,0,12,0.2)', // errbar border
   success: '#098926', // --success
+  successSoft: '#EAF7EE', // tinted success background (P12 当前设备 chip, V-03)
   info: '#ed990e', // --info
   fieldBg: '#f0f1f4', // --fg-3 (input background)
   border: 'rgba(17,19,23,0.05)', // --border
