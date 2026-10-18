@@ -8,8 +8,12 @@
  * Compound format (hierarchical navigation):
  *   poloai://allSessions[/session/{sessionId}]            - Session list (all sessions)
  *   poloai://flagged[/session/{sessionId}]             - Session list (flagged filter)
+ *   poloai://archived[/session/{sessionId}]            - Session list (archived filter)
  *   poloai://state/{stateId}[/session/{sessionId}]     - Session list (state filter)
+ *   poloai://label/{labelId}[/session/{sessionId}]     - Session list (label filter; labelId percent-encoded)
+ *   poloai://view/{viewId}[/session/{sessionId}]       - Session list (view filter; viewId percent-encoded)
  *   poloai://sources[/source/{sourceSlug}]          - Sources list
+ *   poloai://automations[/{type}[/automation/{automationId}]] - Automations list (scheduled/event/agentic)
  *   poloai://settings[/{subpage}]                   - Settings (general, shortcuts, preferences)
  *
  * Action format:
@@ -263,9 +267,12 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
       }
     }
 
-    // Compound route prefixes
+    // Compound route prefixes — must stay in sync with the view-route
+    // prefixes in src/shared/route-parser.ts (COMPOUND_ROUTE_PREFIXES) and
+    // the routes.view builders in src/shared/routes.ts. Parity is enforced by
+    // __tests__/deep-link-route-parity.test.ts.
     const COMPOUND_ROUTE_PREFIXES = [
-      'allSessions', 'flagged', 'state', 'sources', 'settings', 'skills'
+      'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'settings'
     ]
 
     // poloai://allSessions/..., poloai://settings/..., etc. (compound routes)
