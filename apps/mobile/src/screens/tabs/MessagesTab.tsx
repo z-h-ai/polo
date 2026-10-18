@@ -32,7 +32,7 @@ export const EMPTY_TITLE = '还没有消息';
 export const EMPTY_SUBTITLE = '绑定电脑后，从这里给电脑上的 Polo AI 发消息、派任务';
 export const BIND_BUTTON_LABEL = '去绑定电脑';
 export const BOUNDARY_CHIP =
-  '当前支持绑定多台电脑，每台电脑 1 个会话 · 多会话管理即将上线';
+  '可绑定多台电脑，每台电脑 1 个会话 · 多会话管理即将上线';
 export const PUSH_HINT = '离开 App 时，任务结果将通过系统通知提醒 · 即将上线';
 /** Summary line before the first message exists. */
 export const FRESH_BINDING_SUMMARY = '绑定成功，发条消息试试吧';
