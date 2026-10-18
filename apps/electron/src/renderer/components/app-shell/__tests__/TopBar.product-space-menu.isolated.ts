@@ -22,6 +22,12 @@ mock.module('@/context/TabShellContext', () => ({ useTabShell: () => ({
   activeTab: { type: 'home' }, activeTabId: 'home', openTabs: [], activateHome: () => {},
   activateTab: () => {}, closeTab: () => {}, reorderTabs: () => {},
 }) }))
+// The AppMenu (Polo logo dropdown) has its own coverage in
+// TopBar.app-menu.isolated.ts; stub it here so this file stays focused on the
+// account menu and does not need the action registry provider.
+mock.module('@/components/AppMenu', () => ({
+  AppMenu: () => createElement('div', { 'data-testid': 'topbar-app-menu' }),
+}))
 const { render, screen, cleanup, waitFor } = await import('@testing-library/react')
 const userEvent = (await import('@testing-library/user-event')).default
 const { ProductSpaceProvider } = await import('@/context/ProductSpaceContext')
