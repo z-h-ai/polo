@@ -349,3 +349,8 @@ P1 + 6 项 P2 已全部修复（`fix(genui): address Wave-1 review findings`）�
 - **P2-4 lockstep 双向（fixed）**：GenUICard 导出 `GENUI_COMPONENT_TYPES`（registry keys 派生），测试改为双向集合相等断言——registry 加渲染器不更新骨架白名单同样红。
 - **P2-5 会话切换缓冲滞留（fixed）**：接上最小缝隙——ChatDisplay 既有的会话切换检测 effect（deps 含 `session?.id`）在切换时 `clearGenUiToolInputDeltasForSession(前一会话)`；TurnCard 的 per-toolUseId 清理仍兜底同会话内调用收尾。
 - **P2-6 TurnCard 工具名（fixed）**：新增 `isRenderUiActivityToolName`（ui 侧，语义镜像发射侧 isRenderUiToolName：`render_ui` 与 `mcp__session__render_ui` 都认），TurnCard 的进行中筛选与 completed 卡片筛选两处统一走它；配正反单测。
+
+## Wave-1 视觉验收与 E2E 结论（2026-10-19 收口）
+
+- **视觉验收**：PASS-with-notes（0 V1 / 6 V2 建议）。验收形态为代码级设计合规审查（对照 polo-ai-design-system 通用 token/状态合同 + packages/ui 既有卡片家族惯例）；该 Skill 声明模块不含聊天卡片，故以仓库惯例为主要参照。V2 建议清单：Spinner 无效尺寸类改字号驱动、"No rows" 硬编码英文宜 i18n、非法数值输入加 aria-invalid 微提示、chips 圆角 4px vs 家族 6px 统一、全屏视图缺筛选状态条、chip 加 max-w truncate。均记录待下轮，不阻塞。
+- **E2E 基线判定**：AGENTS.md 两套真实集成在本 worktree 环境为基线红——runtime 11 pass/10 fail、managed 1 pass/5 fail。**逐名比对证实 HEAD(5fcd866b) 与基线(825742ab) 失败集合完全相同**（SIGINT/SIGTERM/…stop 超时、owned-CLI Skills/HOME、empty provider stream、managed cancel/owner-death/desktop-death/quit/controlled 链路），属环境既有问题（含 bun install 时 @vscode/ripgrep postinstall 失败），与本轮改动无关；**Wave-1 新增 E2E 失败 = 0**。针对性 genui 套件 689 pass / 0 fail、typecheck:all exit 0、lint 无新增为本轮绿色证据。
