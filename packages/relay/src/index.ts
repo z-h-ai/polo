@@ -4,6 +4,14 @@
  * Env: POLO_RELAY_PORT, POLO_RELAY_JWT_SECRET (shared with polo-admin
  * JWT_SECRET), POLO_ADMIN_BASE_URL, … — see src/config.ts and the repo-root
  * .env.example.
+ *
+ * /asr (POL-20): streaming ASR proxy on the same port. Supplier selection via
+ * POLO_RELAY_ASR_DEFAULT_SUPPLIER (volcengine | mock — use `mock` for local
+ * dev), rate-card overrides via POLO_RELAY_ASR_RATE_CARDS_JSON. Upstream
+ * volcano credentials come only from VOLCENGINE_ASR_APPID /
+ * VOLCENGINE_ASR_ACCESS_TOKEN / VOLCENGINE_ASR_RESOURCE_ID at deploy time
+ * (secrets never enter the repo or docs; unconfigured volcano → handshake
+ * close 4405 supplier_unavailable — loud failure, no silent fallback).
  */
 
 import { loadRelayConfig } from './config.ts'

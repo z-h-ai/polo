@@ -13,6 +13,9 @@
  *   no liveness evidence for 60s is terminated and its recent peers get
  *   `{type:"peer_disconnected"}`.
  * - Rate limit: per-connection sliding window, over-limit → close 4008.
+ * - `/asr` (POL-20): streaming ASR proxy upgrade path — same dual-layer auth,
+ *   own frames/close codes, billing prehold→settle埋点. Envelope routing
+ *   semantics on every other path are unchanged (纯新增路径).
  *
  * Bun.serve usage follows the repo precedent in
  * packages/server-core/src/bootstrap/headless-start.ts (and the POL-7 PoC in
@@ -34,6 +37,7 @@ import {
 } from './envelope.ts'
 import { OfflineQueue, type QueueEntry } from './queue.ts'
 import { SlidingWindowLimiter } from './ratelimit.ts'
+import { createDefaultAsrService, type AsrConnectionState, type AsrService, type AsrWsLike } from './asr/service.ts'
 
 export const CLOSE_CODE = {
   RATE_LIMITED: 4008,
@@ -62,6 +66,8 @@ export interface WsData {
   lastAuthAt: number
   limiter: SlidingWindowLimiter
   recentPeers: Set<string>
+  /** Set only for /asr streaming connections (POL-20); envelope connections never have it. */
+  asr?: AsrConnectionState
 }
 
 export interface RelayLogger {
@@ -76,6 +82,11 @@ export interface StartRelayServerOptions {
   logger?: RelayLogger
   /** Injectable clock for tests. */
   now?: () => number
+  /**
+   * /asr streaming pipeline (POL-20). Defaults to the env-backed assembly
+   * (volcano + mock adapters); `null` disables the /asr path entirely.
+   */
+  asr?: AsrService | null
 }
 
 export interface RelayServerHandle {
@@ -96,6 +107,9 @@ export function startRelayServer(options: StartRelayServerOptions): RelayServerH
     audience: config.jwtAudience,
   }
   const auth = options.auth ?? new RelayAuth(admin, jwt, { authCacheTtlMs: config.authCacheTtlMs, now })
+  const asr = options.asr !== undefined
+    ? options.asr
+    : createDefaultAsrService({ auth, adminBaseUrl: config.adminBaseUrl, maxMsgPerSec: config.maxMsgPerSec, logger: log, now })
 
   const connections = new Map<string, ServerWebSocket<WsData>>()
   let nextConnId = 1
@@ -356,6 +370,13 @@ export function startRelayServer(options: StartRelayServerOptions): RelayServerH
         return Response.json({ ok: true, connections: connections.size })
       }
 
+      // POL-20: /asr streaming path — pure addition; every other path keeps the
+      // envelope semantics below untouched.
+      if (url.pathname === '/asr') {
+        if (!asr) return handshakeErrorResponse(404, 'asr_disabled', '/asr is disabled on this relay')
+        return asr.handleUpgrade(req, server, nextConnId++)
+      }
+
       // Prefer the Authorization header (keeps the token out of intermediary
       // access logs); the `?token=` query param stays supported for clients
       // that cannot set WS headers.
@@ -404,9 +425,18 @@ export function startRelayServer(options: StartRelayServerOptions): RelayServerH
     },
     websocket: {
       maxPayloadLength: config.maxPayloadBytes,
-      open: (ws) => handleOpen(ws),
-      message: (ws, raw) => handleMessage(ws, raw),
-      close: (ws, code, reason) => handleClose(ws, code, reason),
+      open: (ws) => {
+        if (ws.data.asr) asr?.handleOpen(ws as ServerWebSocket<WsData> & AsrWsLike)
+        else handleOpen(ws)
+      },
+      message: (ws, raw) => {
+        if (ws.data.asr) asr?.handleMessage(ws as ServerWebSocket<WsData> & AsrWsLike, raw)
+        else handleMessage(ws, raw)
+      },
+      close: (ws, code, reason) => {
+        if (ws.data.asr) asr?.handleClose(ws as ServerWebSocket<WsData> & AsrWsLike, code, reason)
+        else handleClose(ws, code, reason)
+      },
     },
   })
 
