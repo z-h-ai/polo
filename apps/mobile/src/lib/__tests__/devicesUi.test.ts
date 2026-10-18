@@ -6,6 +6,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { DeviceView } from '../../api/devices';
 import {
+  deviceIconForPlatform,
   deviceListShape,
   DEVICE_EMPTY_COPY,
   DEVICE_LIST_FOOTER_LINES,
@@ -62,6 +63,7 @@ describe('deviceListShape — P02 空态 vs 列表态', () => {
       statusLabel: '在线 · 经云中转',
       online: true,
       dimmed: false,
+      platform: 'ios',
     });
     expect(shape.cards[1]?.online).toBe(false);
     expect(shape.cards[1]?.dimmed).toBe(true);
@@ -74,6 +76,25 @@ describe('toDeviceCardModel', () => {
     const offline = toDeviceCardModel(device({ lastSeenAt: null }), NOW);
     expect(offline.dimmed).toBe(true);
     expect(offline.statusLabel).toBe('离线 · 暂无活跃记录');
+  });
+
+  test('cards carry the raw platform for the V-11 glyph pick', () => {
+    expect(toDeviceCardModel(device({ platform: 'macos' }), NOW).platform).toBe('macos');
+    expect(toDeviceCardModel(device({ platform: 'bogus' }), NOW).platform).toBe('bogus');
+  });
+});
+
+describe('deviceIconForPlatform — V-11 glyph fallback', () => {
+  test("'macos' renders the computer graphic", () => {
+    expect(deviceIconForPlatform('macos')).toBe('devices');
+  });
+
+  test('unknown/other platforms fall back to the phone graphic, never person', () => {
+    expect(deviceIconForPlatform('ios')).toBe('phone');
+    expect(deviceIconForPlatform('android')).toBe('phone');
+    expect(deviceIconForPlatform('')).toBe('phone');
+    expect(deviceIconForPlatform(undefined)).toBe('phone');
+    expect(deviceIconForPlatform(null)).toBe('phone');
   });
 });
 

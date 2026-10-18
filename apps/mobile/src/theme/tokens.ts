@@ -21,6 +21,7 @@ export const colors = {
   warningBorder: 'rgba(237,153,14,0.25)', // .infobar border
   fieldBorder: 'rgba(17,19,23,0.15)', // neutral default input border (P03)
   success: '#098926', // --success
+  successSoft: '#EAF7EE', // tinted success background (P12 当前设备 chip, V-03)
   info: '#ed990e', // --info
   fieldBg: '#f0f1f4', // --fg-3 (input background)
   border: 'rgba(17,19,23,0.05)', // --border

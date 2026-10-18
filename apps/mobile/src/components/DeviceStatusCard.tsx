@@ -4,12 +4,15 @@
 // kind comes from inferDeviceStatus (lastSeenAt inference — POL-17 replaces
 // it with real connection state); online cards tint the dot success-green
 // and dim nothing, offline cards grey the dot and soften the whole card
-// (prototype opacity .62). Tapping a card opens 设备管理 (P12).
+// (prototype opacity .62). Tapping a card opens 设备管理 (P12). The row
+// glyph follows the card platform (V-11): 'macos' -> computer graphic,
+// unknown -> phone graphic (never the person icon).
 
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { TabIcon } from './TabIcons';
 import type { DeviceCardModel } from '../lib/devicesUi';
+import { deviceIconForPlatform } from '../lib/devicesUi';
 import { colors } from '../theme/tokens';
 
 export function DeviceStatusCard({
@@ -22,7 +25,11 @@ export function DeviceStatusCard({
   const body = (
     <>
       <View style={[styles.avatar, !card.online && styles.avatarOff]}>
-        <TabIcon name="devices" color={card.online ? colors.accentDeep : colors.fg40} size={20} />
+        <TabIcon
+          name={deviceIconForPlatform(card.platform)}
+          color={card.online ? colors.accentDeep : colors.fg40}
+          size={20}
+        />
       </View>
       <View style={styles.texts}>
         <Text style={styles.title} numberOfLines={1}>
