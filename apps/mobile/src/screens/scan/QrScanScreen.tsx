@@ -2,10 +2,12 @@
 //
 // Entry: Home 「扫码授权登录」 row — only reachable while signed in (AuthGate
 // owns that guard for every route). Camera viewfinder with the ScanFrame
-// overlay; a decoded payload is parsed by parseQrPayload and either routed to
-// the confirm page (/qr-confirm) or rejected with the P10 「不是 Polo 登录二
-// 维码」 alert. Error 弹层收口在本屏：无效/非 Polo 在此拦截，过期/已拒绝等票
-// 据态由确认页回落到同款 alert。相册识码与手电筒是候选规则，本卡不做。
+// overlay; a decoded payload is parsed by parseQrPayload, then POSTed to
+// /api/auth/qr/scan (扫码登记 — marks this phone as the scanner and returns
+// the requester card) before routing to the confirm page (/qr-confirm) with
+// the requester param. A non-Polo payload or a scan failure (无票据 404 /
+// 确认窗口关闭 410 / …) surfaces the shared alert machine instead. 相册识码
+// 与手电筒是候选规则，本卡不做。
 
 import { useCallback, useMemo, useRef } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -13,9 +15,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import type { BarcodeType } from 'expo-camera';
 import { useRouter, useFocusEffect } from 'expo-router';
 
+import { qrLoginApi } from '../../api/qrLogin';
 import { ScanFrame } from '../../components/ScanFrame';
 import { parseQrPayload } from '../../lib/parseQrPayload';
-import { qrInvalidPayloadCopy } from '../../lib/qrLoginUi';
+import { qrErrorToAlertCopy, qrInvalidPayloadCopy } from '../../lib/qrLoginUi';
 import { colors, fontSize } from '../../theme/tokens';
 
 export function QrScanScreen() {
@@ -69,10 +72,27 @@ export function QrScanScreen() {
         return;
       }
       handlingRef.current = true;
-      router.push({
-        pathname: '/qr-confirm',
-        params: { qrId: payload.qrId, secret: payload.secret },
-      });
+      // 扫码登记 first: the scan call marks this phone as the scanner and
+      // returns the requester card (设备类型/ipMasked/发起时间) that the
+      // confirm page renders — the card data is handed over as a JSON param
+      // so the page never renders 「未知设备/—」 placeholders after a scan.
+      // Failures (404 无票据 / 410 qr_confirm_window_expired / …) surface the
+      // same alert machine; its dismissal re-arms the scanner via the lock.
+      void qrLoginApi
+        .scan({ qrId: payload.qrId, secret: payload.secret })
+        .then((scanView) => {
+          router.push({
+            pathname: '/qr-confirm',
+            params: {
+              qrId: payload.qrId,
+              secret: payload.secret,
+              requester: JSON.stringify(scanView.requester),
+            },
+          });
+        })
+        .catch((error: unknown) => {
+          showAlert(qrErrorToAlertCopy(error));
+        });
     },
     [router, showAlert],
   );

@@ -9,8 +9,10 @@ import { describe, expect, test } from 'bun:test';
 import { ApiError, NetworkError } from '../../api/client';
 import type { QrTicketStatus } from '../../api/qrLogin';
 import {
+  parseScanRequesterParam,
   qrErrorToAlertCopy,
   qrInvalidPayloadCopy,
+  requesterCardModel,
   requesterDeviceLabel,
   statusToUiState,
   ticketStatusAlertCopy,
@@ -155,4 +157,109 @@ test('all admin ticket statuses map without throwing', () => {
   for (const status of statuses) {
     expect(statusToUiState(status)).toBeTruthy();
   }
+});
+
+describe('requesterCardModel — P11 请求端核对卡（scan 契约回填）', () => {
+  const FALLBACK = new Date('2026-10-18T03:25:00.000Z');
+
+  test('完整 requester → 三行真实值（设备类型/ipMasked/发起时间）', () => {
+    expect(
+      requesterCardModel(
+        {
+          clientType: 'mac',
+          ipMasked: '112.65.*.*',
+          userAgent: 'PoloMac/0.16',
+          createdAt: '2026-10-18T03:24:05.000Z',
+        },
+        FALLBACK,
+      ),
+    ).toEqual({
+      device: 'Mac 客户端',
+      ip: '112.65.*.*',
+      requestedAtMs: Date.parse('2026-10-18T03:24:05.000Z'),
+    });
+  });
+
+  test('未知 clientType 回退 userAgent，缺失 ipMasked 保留 — 占位', () => {
+    const model = requesterCardModel(
+      { clientType: '', ipMasked: null, userAgent: 'PoloWeb/1.0', createdAt: null },
+      FALLBACK,
+    );
+    expect(model.device).toBe('PoloWeb/1.0');
+    expect(model.ip).toBe('—');
+    expect(model.requestedAtMs).toBe(FALLBACK.getTime());
+  });
+
+  test('畸形 createdAt（无法解析）回退本机扫码时间', () => {
+    const model = requesterCardModel(
+      { clientType: 'web', ipMasked: '1.2.*.*', userAgent: null, createdAt: 'not-a-date' },
+      FALLBACK,
+    );
+    expect(model.device).toBe('网页端');
+    expect(model.requestedAtMs).toBe(FALLBACK.getTime());
+  });
+
+  test('null requester 全量降级（未知设备/—/本机时间）', () => {
+    expect(requesterCardModel(null, FALLBACK)).toEqual({
+      device: '未知设备',
+      ip: '—',
+      requestedAtMs: FALLBACK.getTime(),
+    });
+  });
+});
+
+describe('parseScanRequesterParam — 路由参数安全解析', () => {
+  test('合法 JSON 解析为 QrScanRequesterView（含 createdAt）', () => {
+    expect(
+      parseScanRequesterParam(
+        JSON.stringify({
+          clientType: 'mac',
+          ipMasked: '112.65.*.*',
+          userAgent: 'PoloMac/0.16',
+          createdAt: '2026-10-18T03:24:05.000Z',
+        }),
+      ),
+    ).toEqual({
+      clientType: 'mac',
+      ipMasked: '112.65.*.*',
+      userAgent: 'PoloMac/0.16',
+      createdAt: '2026-10-18T03:24:05.000Z',
+    });
+  });
+
+  test('字段缺省/类型不对逐项降级', () => {
+    expect(parseScanRequesterParam('{"clientType":42}')).toEqual({
+      clientType: '',
+      ipMasked: null,
+      userAgent: null,
+      createdAt: null,
+    });
+  });
+
+  test('垃圾输入（非 JSON/非对象/空）返回 null → 确认页回落 status 视图', () => {
+    expect(parseScanRequesterParam('not json')).toBeNull();
+    expect(parseScanRequesterParam('"str"')).toBeNull();
+    expect(parseScanRequesterParam('')).toBeNull();
+    expect(parseScanRequesterParam(undefined)).toBeNull();
+    expect(parseScanRequesterParam(['{"clientType":"mac"}', 'ignored'])?.clientType).toBe('mac');
+  });
+});
+
+describe('qrErrorToAlertCopy — scan 端点新增错误码', () => {
+  test('410 qr_confirm_window_expired → 过期弹层语义', () => {
+    const copy = qrErrorToAlertCopy(
+      new ApiError({ status: 410, errorCode: 'qr_confirm_window_expired' }),
+    );
+    expect(copy.title).toBe('二维码已过期');
+    expect(copy.message).toBe('请让电脑或网页端刷新二维码后重新扫码');
+  });
+
+  test('404 无票据（not_found/NOT_FOUND）→ 无效弹层', () => {
+    expect(
+      qrErrorToAlertCopy(new ApiError({ status: 404, errorCode: 'not_found' })).title,
+    ).toBe('二维码无效');
+    expect(
+      qrErrorToAlertCopy(new ApiError({ status: 404, errorCode: 'NOT_FOUND' })).title,
+    ).toBe('二维码无效');
+  });
 });

@@ -2,8 +2,8 @@
 // (P12) — POL-16. Extracted from the RN components so bun test can assert
 // the list/empty rendering decisions without a renderer:
 //   - which of the two screen shapes renders (empty guidance vs card list);
-//   - per-card copy (three-state badge via inferDeviceStatus + macDeviceId
-//     as the display title — admin exposes no Mac display name);
+//   - per-card copy (three-state badge via inferDeviceStatus + the Mac 标题:
+//     macName 优先，空回退 macDeviceId，最后 未知电脑);
 //   - the P02 footer lines (dual-channel + privacy) and the provisional
 //     status note (POL-17 replaces the inference with live state);
 //   - the P12 本机 masked phone + section titles.
@@ -12,8 +12,13 @@ import type { DeviceView } from '../api/devices';
 import type { TabIconName } from '../components/TabIcons';
 import { inferDeviceStatus } from './deviceStatus';
 
-/** Admin exposes no Mac display name — the stable macDeviceId is the title. */
-export function macDisplayName(device: Pick<DeviceView, 'macDeviceId'>): string {
+/**
+ * Mac 标题回退链：macName（admin bind/list 新增，可空）优先，空白回退
+ * macDeviceId，仍为空兜底 未知电脑 — P02 卡片/P12 管理页/会话列表共用。
+ */
+export function macDisplayName(device: Pick<DeviceView, 'macName' | 'macDeviceId'>): string {
+  const macName = typeof device.macName === 'string' ? device.macName.trim() : '';
+  if (macName) return macName;
   return device.macDeviceId || '未知电脑';
 }
 

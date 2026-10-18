@@ -26,6 +26,7 @@ function device(overrides: Partial<DeviceView> = {}): DeviceView {
     name: 'Douglas 的 iPhone',
     platform: 'ios',
     macDeviceId: 'mac-7F3A-92C1-0D8E',
+    macName: null,
     pushToken: null,
     lastSeenAt: new Date(NOW - 30_000).toISOString(),
     boundAt: new Date(NOW - 86_400_000).toISOString(),
@@ -34,10 +35,21 @@ function device(overrides: Partial<DeviceView> = {}): DeviceView {
   };
 }
 
-describe('macDisplayName', () => {
-  test('admin exposes no Mac display name — macDeviceId is the title', () => {
-    expect(macDisplayName({ macDeviceId: 'mac-7F3A' })).toBe('mac-7F3A');
-    expect(macDisplayName({ macDeviceId: '' })).toBe('未知电脑');
+describe('macDisplayName — macName 优先回退链', () => {
+  test('macName 非空优先显示（P02/P12 标题）', () => {
+    expect(macDisplayName({ macName: '书房的 MacBook Pro', macDeviceId: 'mac-7F3A' })).toBe(
+      '书房的 MacBook Pro',
+    );
+  });
+
+  test('macName 空/纯空白回退 macDeviceId', () => {
+    expect(macDisplayName({ macName: null, macDeviceId: 'mac-7F3A' })).toBe('mac-7F3A');
+    expect(macDisplayName({ macName: '', macDeviceId: 'mac-7F3A' })).toBe('mac-7F3A');
+    expect(macDisplayName({ macName: '   ', macDeviceId: 'mac-7F3A' })).toBe('mac-7F3A');
+  });
+
+  test('两者皆空兜底 未知电脑', () => {
+    expect(macDisplayName({ macName: null, macDeviceId: '' })).toBe('未知电脑');
   });
 });
 

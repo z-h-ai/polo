@@ -34,7 +34,7 @@ type FlowState =
   | { step: 'scan' }
   | { step: 'manual' }
   | { step: 'confirm'; code: string; wsUrl: string | null; deadlineMs: number; observedAtMs: number }
-  | { step: 'success'; reused: boolean }
+  | { step: 'success'; reused: boolean; macName: string | null }
   | { step: 'limit' };
 
 /** This phone's self-report name for the Device row (P12 本机 style). */
@@ -103,7 +103,7 @@ export function PairFlowScreen() {
         macDeviceId: result.device.macDeviceId,
         wsUrl,
       });
-      setState({ step: 'success', reused: result.reused });
+      setState({ step: 'success', reused: result.reused, macName: result.device.macName });
     } catch (error) {
       if (isBindLimitError(error)) {
         setState({ step: 'limit' });
@@ -170,6 +170,7 @@ export function PairFlowScreen() {
       return (
         <PairSuccessScreen
           reused={state.reused}
+          macName={state.macName}
           onGoMessages={goMessages}
           onBackToList={goDeviceList}
         />

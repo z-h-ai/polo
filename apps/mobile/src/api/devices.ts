@@ -19,7 +19,8 @@
 //        -> { revokedCount, devices: DeviceView[] }
 //
 // DeviceView (admin toDeviceView): id / name / platform / macDeviceId /
-// pushToken / lastSeenAt (ISO | null) / boundAt (ISO) / revoked.
+// macName (可空 — Mac 自报备注名，bind/list 响应均携带) / pushToken /
+// lastSeenAt (ISO | null) / boundAt (ISO) / revoked.
 //
 // Error codes pass through verbatim as ApiError (client.ts contract); the UI
 // layer maps them to copy — nothing is swallowed or translated here:
@@ -46,6 +47,11 @@ export interface DeviceView {
   name: string;
   platform: string;
   macDeviceId: string;
+  /**
+   * Mac 自报备注名（可空）— the P02/P12 display title prefers it and falls
+   * back to macDeviceId (see devicesUi.macDisplayName).
+   */
+  macName: string | null;
   pushToken: string | null;
   lastSeenAt: string | null;
   boundAt: string;
@@ -95,6 +101,7 @@ interface DeviceViewWire {
   name?: unknown;
   platform?: unknown;
   macDeviceId?: unknown;
+  macName?: unknown;
   pushToken?: unknown;
   lastSeenAt?: unknown;
   boundAt?: unknown;
@@ -114,6 +121,7 @@ function toDeviceView(data: DeviceViewWire): DeviceView {
     name: typeof data.name === 'string' ? data.name : '',
     platform: typeof data.platform === 'string' ? data.platform : '',
     macDeviceId: data.macDeviceId,
+    macName: typeof data.macName === 'string' ? data.macName : null,
     pushToken: typeof data.pushToken === 'string' ? data.pushToken : null,
     lastSeenAt: typeof data.lastSeenAt === 'string' ? data.lastSeenAt : null,
     boundAt: data.boundAt,

@@ -2,13 +2,14 @@
 //   确认态: target Mac info card + 「配对码剩余 m:ss」 countdown chip + the
 //           binding-scope copy; 确认绑定 triggers the admin bind (atomic
 //           code redemption — admin is the only source of binding truth).
-//   成功态: 「绑定成功」 + 去发消息 (session placeholder, P04) + 返回设备列表.
+//   成功态: nav title = the bound Mac's macName (可空，回退 添加电脑) +
+//           「绑定成功」 + 去发消息 (session placeholder, P04) + 返回设备列表.
 //   错误态: device_bind_limit_reached (P04 第 3 屏) — 该电脑已绑定 5 台手机,
 //           with 前往设备管理 as the primary action.
 // The countdown is informational (see pairingUi.ts): admin bind is the
 // authority; when it hits 0 the chip disappears and the confirm copy nudges
-// a re-scan. Bind response carries no Mac display name, so copy addresses
-// 「这台电脑」 instead of the prototype's placeholder name.
+// a re-scan. The bind response's macName (可空) names the success page; the
+// confirm frame copy still addresses 「这台电脑」 (no name before binding).
 
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -114,22 +115,26 @@ function InfoRow({ label, value, mono = false }: { label: string; value: string;
   );
 }
 
-/** P04 第 2 屏：绑定成功反馈. */
+/** P04 第 2 屏：绑定成功反馈（nav title 用 bind 响应的 macName，可空回退）. */
 export function PairSuccessScreen({
   reused,
+  macName,
   onGoMessages,
   onBackToList,
 }: {
   /** reused=true: the same phone re-paired with the same Mac (复用契约). */
   reused: boolean;
+  /** Bound Mac's 备注名 — blank/null falls back to the 添加电脑 title. */
+  macName: string | null;
   onGoMessages: () => void;
   onBackToList: () => void;
 }) {
+  const trimmedMacName = typeof macName === 'string' ? macName.trim() : '';
   return (
     <View style={styles.screen}>
       <View style={styles.navBar}>
         <View style={styles.back} />
-        <Text style={styles.title}>添加电脑</Text>
+        <Text style={styles.title}>{trimmedMacName || '添加电脑'}</Text>
         <View style={styles.navSpacer} />
       </View>
       <View style={[styles.body, styles.centerBody]}>
