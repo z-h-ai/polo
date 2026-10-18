@@ -38,6 +38,7 @@ const DEVICE = {
   name: 'Douglas 的 iPhone',
   platform: 'ios',
   macDeviceId: 'mac-7F3A-92C1-0D8E',
+  macName: '书房的 MacBook Pro',
   pushToken: null,
   lastSeenAt: '2026-10-17T08:00:00.000Z',
   boundAt: '2026-10-17T07:00:00.000Z',
@@ -187,6 +188,22 @@ describe('devicesApi.list', () => {
     expect(calls[0]?.kind).toBe('request');
     expect(calls[0]?.path).toBe('/api/devices/list');
     expect(rows).toEqual([DEVICE]);
+  });
+
+  test('macName 可空：缺省/非字符串回退 null（macDisplayName 兜底 macDeviceId）', async () => {
+    const { client } = makeClient(() => ({
+      devices: [
+        { ...DEVICE, macName: undefined },
+        { ...DEVICE, id: 'dev-2', macName: 42 },
+      ],
+    }));
+    const api = createDevicesApi(client);
+
+    const rows = await api.list();
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.macName).toBeNull();
+    expect(rows[1]?.macName).toBeNull();
   });
 
   test('an empty account maps to []', async () => {

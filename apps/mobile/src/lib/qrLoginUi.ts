@@ -6,7 +6,7 @@
 // Every alert offers 重新扫码 + 返回 (P10 错误弹层收口在 QrScanScreen 语义).
 
 import { ApiError, NetworkError } from '../api/client';
-import type { QrTicketStatus } from '../api/qrLogin';
+import type { QrRequesterView, QrScanRequesterView, QrTicketStatus } from '../api/qrLogin';
 
 /** Confirm-page states derived from the ticket status machine. */
 export type QrConfirmUiState =
@@ -104,6 +104,13 @@ export function qrErrorToAlertCopy(error: unknown): QrErrorAlertCopy {
     // admin: 同一票据已被其他账号确认（403）
     case 'forbidden':
       return { title: '无法授权', message: '该二维码已被其他账号确认，请让对方重新出示二维码' };
+    // admin scan 端点：确认窗口已关闭（410）— 过期弹层语义
+    case 'qr_confirm_window_expired':
+      return { title: '二维码已过期', message: '请让电脑或网页端刷新二维码后重新扫码' };
+    // admin scan 端点：票据不存在（404）— 与 qr_login_invalid 同弹层
+    case 'not_found':
+    case 'NOT_FOUND':
+      return { title: '二维码无效', message: '请让电脑或网页端刷新二维码后重新扫码' };
     case 'rate_limited':
       return { title: '操作过于频繁', message: '请稍等片刻后再试' };
     case 'UNAUTHORIZED':
@@ -127,4 +134,73 @@ export function requesterDeviceLabel(clientType: string, userAgent: string | nul
     default:
       return userAgent ? userAgent.slice(0, 40) : '未知设备';
   }
+}
+
+/** P11 requester card view model — the three real rows, each degrading alone. */
+export interface RequesterCardModel {
+  device: string;
+  ip: string;
+  /** 发起时间 epoch ms — admin's createdAt, else the phone's scan time. */
+  requestedAtMs: number;
+}
+
+function isoToEpochMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Builds the P11 requester card from the scan endpoint's requester view (仅
+ * 核对展示，不参与授权). The scan route supplies the real values; each field
+ * degrades independently so a sparse admin response still renders: unknown
+ * clientType falls back to the userAgent (then 未知设备), a missing ipMasked
+ * keeps the — placeholder, and a missing/unparseable createdAt falls back to
+ * the phone's scan time.
+ */
+export function requesterCardModel(
+  requester:
+    | (QrRequesterView & { createdAt?: string | null })
+    | null,
+  fallbackTime: Date,
+): RequesterCardModel {
+  if (!requester) {
+    return {
+      device: requesterDeviceLabel('', null),
+      ip: '—',
+      requestedAtMs: fallbackTime.getTime(),
+    };
+  }
+  return {
+    device: requesterDeviceLabel(requester.clientType, requester.userAgent),
+    ip: requester.ipMasked ?? '—',
+    requestedAtMs: isoToEpochMs(requester.createdAt) ?? fallbackTime.getTime(),
+  };
+}
+
+/**
+ * Safe parse of the /qr-confirm route's `requester` JSON param (set by the
+ * scan screen from the scan response). Returns null for absent/garbage
+ * values — a deep link straight to the confirm page simply falls back to the
+ * status view's requester instead of crashing.
+ */
+export function parseScanRequesterParam(
+  value: string | string[] | undefined | null,
+): QrScanRequesterView | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!data || typeof data !== 'object') return null;
+  const record = data as Record<string, unknown>;
+  return {
+    clientType: typeof record.clientType === 'string' ? record.clientType : '',
+    ipMasked: typeof record.ipMasked === 'string' ? record.ipMasked : null,
+    userAgent: typeof record.userAgent === 'string' ? record.userAgent : null,
+    createdAt: typeof record.createdAt === 'string' ? record.createdAt : null,
+  };
 }

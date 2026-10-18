@@ -1,11 +1,15 @@
 // Confirm screen for QR login authorization (POL-15, prototype P11).
 //
-// Opened by the scan screen with { qrId, secret }. Flow: poll status once for
-// the requester card (仅核对，不参与授权 — C3), then the user either 确认登录
-// (POST confirm with this phone's JWT) or 不是我，拒绝. Terminal tickets and
-// api failures fall back to the P10 alert (重新扫码 / 返回). Both action
-// buttons are disabled while a request is in flight (no double submits), and
-// failures surface a retryable alert instead of failing silently.
+// Opened by the scan screen with { qrId, secret, requester } — the requester
+// JSON comes from the POST /api/auth/qr/scan response, so the card renders
+// the real 请求端 info (设备类型 / ipMasked / 发起时间 from admin's createdAt)
+// instead of placeholders; a deep link without the param falls back to the
+// status view's requester (仅核对，不参与授权 — C3, the「以上信息仅用于核对」
+// footnote stays). Flow: the user either 确认登录 (POST confirm with this
+// phone's JWT) or 不是我，拒绝. Terminal tickets and api failures fall back
+// to the P10 alert (重新扫码 / 返回). Both action buttons are disabled while
+// a request is in flight (no double submits), and failures surface a
+// retryable alert instead of failing silently.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -14,8 +18,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { qrLoginApi } from '../../api/qrLogin';
 import type { QrStatusView } from '../../api/qrLogin';
 import {
+  parseScanRequesterParam,
   qrErrorToAlertCopy,
-  requesterDeviceLabel,
+  requesterCardModel,
   statusToUiState,
   ticketStatusAlertCopy,
 } from '../../lib/qrLoginUi';
@@ -49,7 +54,11 @@ function formatTimestamp(date: Date): string {
 
 export function QrConfirmScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ qrId?: string | string[]; secret?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    qrId?: string | string[];
+    secret?: string | string[];
+    requester?: string | string[];
+  }>();
   const qrId = firstParam(params.qrId);
   const secret = firstParam(params.secret);
 
@@ -57,9 +66,12 @@ export function QrConfirmScreen() {
   const [view, setView] = useState<QrStatusView | null>(null);
   const [remainingSec, setRemainingSec] = useState(0);
 
-  // Local clock at open: admin's status view exposes no request timestamp
-  // (contract gap noted in the card report), so 时间 shows when this phone
-  // opened the confirm page.
+  // Real requester card from the scan response (see parseScanRequesterParam);
+  // null for deep links — the card then falls back to the status view.
+  const [scanRequester] = useState(() => parseScanRequesterParam(params.requester));
+
+  // Local clock at open: the fallback 发起时间 when the scan param carried no
+  // parseable createdAt (admin contract gap covered by the scan endpoint).
   const [scannedAt] = useState(() => new Date());
 
   const busy = phase === 'confirming' || phase === 'rejecting';
@@ -197,9 +209,18 @@ export function QrConfirmScreen() {
     }
   }, [busy, qrId, secret, showRescanAlert, showRetryAlert]);
 
-  const deviceLabel = useMemo(
-    () => requesterDeviceLabel(view?.requester?.clientType ?? '', view?.requester?.userAgent ?? null),
-    [view],
+  // P11 requester card: prefer the scan response's requester (it carries
+  // createdAt), fall back to the status view's, and degrade field by field.
+  const card = useMemo(
+    () =>
+      requesterCardModel(
+        scanRequester ??
+          (view?.requester
+            ? { ...view.requester, createdAt: null }
+            : null),
+        scannedAt,
+      ),
+    [scanRequester, view, scannedAt],
   );
 
   if (phase === 'checking') {
@@ -218,7 +239,7 @@ export function QrConfirmScreen() {
         </View>
         <Text style={styles.successTitle}>已授权</Text>
         <Text style={styles.successMessage}>
-          {deviceLabel} 将自动完成登录。{'\n'}本次授权已记录到登录审计。
+          {card.device} 将自动完成登录。{'\n'}本次授权已记录到登录审计。
         </Text>
         <Pressable
           accessibilityRole="button"
@@ -280,17 +301,19 @@ export function QrConfirmScreen() {
         </View>
 
         <View style={styles.card}>
+          {/* P11 requester card — real values from the scan endpoint's
+              requester (设备类型/ipMasked/发起时间); each row degrades alone. */}
           <View style={styles.row}>
             <Text style={styles.rowLabel}>设备</Text>
-            <Text style={styles.rowValue}>{deviceLabel}</Text>
+            <Text style={styles.rowValue}>{card.device}</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>位置/IP</Text>
-            <Text style={styles.rowValue}>{view?.requester?.ipMasked ?? '—'}</Text>
+            <Text style={styles.rowValue}>{card.ip}</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>时间</Text>
-            <Text style={styles.rowValue}>{formatTimestamp(scannedAt)}</Text>
+            <Text style={styles.rowValue}>{formatTimestamp(new Date(card.requestedAtMs))}</Text>
           </View>
           <Text style={styles.cardFootnote}>以上信息仅用于核对，不作为登录依据</Text>
         </View>
