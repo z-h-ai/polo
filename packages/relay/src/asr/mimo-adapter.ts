@@ -28,13 +28,12 @@
  * relay 不缓存音频：帧序列拼装完整即转发调用，无论成败调用结束即丢弃缓冲。
  * 不打日志（service 层日志仅含 supplier/时长/结果码，无音频内容与密钥）。
  *
- * 已知风险（如实标注，本卡不改 service）：service finishSession 在客户端 end 后
- * 仅等 finalWaitMs（默认 5s）就发送 asr_final 并按实测秒 settle 收口 —— FILE 模式
- * 长音频（≈300s 整段 ≈13MB base64 上送 + MiMo 推理）的首包/final 到达很可能 >5s，
- * 届时 App 收到空文本 final、连接被提前关闭（计费按实测秒结算，不多扣不少扣，
- * 属 UX 风险非资金风险）。建议后续卡：FILE 模式按 maxDurationSec 量级放宽
- * finalWaitMs，或「上游在途且尚未出首包则不收口」（需 service 感知 adapter mode，
- * 属 POL-20 service 改动，本卡范围外）。
+ * 已知风险（FIX-5 已修）：service finishSession 原先在客户端 end 后仅等全局
+ * finalWaitMs（默认 5s）就发送 asr_final 并按实测秒 settle 收口 —— FILE 模式
+ * 长音频（≈300s 整段 ≈13MB base64 上送 + MiMo 推理）的 final 到达常 >5s，届时
+ * App 收到空文本 final、连接被提前关闭。现 FILE 模式按 per-mode finalWait
+ * （POLO_RELAY_ASR_FILE_FINAL_WAIT_MS，默认 30s）等待，且转写期间 SSE 渐进
+ * partial 出字即顺延截止（出字=活性）；墙钟守卫（330s）仍是硬上界。
  */
 
 import { ASR_MARKUP_PERMILLE } from './capabilities.ts'

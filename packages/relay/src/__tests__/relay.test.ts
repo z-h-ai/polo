@@ -11,7 +11,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { RelayAuth, AdminClient } from '../auth.ts'
 import { SignJWT, UnsecuredJWT } from 'jose'
-import type { RelayConfig } from '../config.ts'
+import { loadRelayConfig, type RelayConfig } from '../config.ts'
 import { startRelayServer, type RelayServerHandle } from '../server.ts'
 
 const SECRET_A = 'relay-test-secret-a-0123456789abcdef'
@@ -97,6 +97,8 @@ function baseConfig(adminUrl: string, overrides: Partial<RelayConfig> = {}): Rel
     heartbeatIntervalMs: 0,
     heartbeatTimeoutMs: 60_000,
     maxPayloadBytes: 1_048_576,
+    revokeRecheckMs: 15_000,
+    asrFileFinalWaitMs: 30_000,
     ...overrides,
   }
 }
@@ -760,5 +762,134 @@ describe('relay auth degraded semantics (unit)', () => {
     })
     const foreign = await signToken(SECRET_B)
     expect((await auth.authenticate(foreign)).ok).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FIX-4: 撤销复核定时器（PRD §⑤ 60s 承诺 —— authCacheTtl 60s + 心跳 30s ≈ 90s 上界不够）
+// ---------------------------------------------------------------------------
+
+describe('relay revoke recheck (FIX-4)', () => {
+  const cleanup: Array<() => void> = []
+  afterAll(() => {
+    for (const fn of cleanup) fn()
+  })
+  const track = <T extends { stop(): void }>(x: T): T => {
+    cleanup.push(() => x.stop())
+    return x
+  }
+
+  test('revoked token is force-closed 4401 by the recheck sweep within one interval (auth cache bypassed)', async () => {
+    // 心跳关闭 + authCacheTtl 60s：旧路径（心跳期 re-auth）不可能触发 ——
+    // 唯一能把撤销传进来的只能是独立复核定时器。
+    const admin = track(startMockAdmin())
+    const relay = track(startRelay(admin, { heartbeatIntervalMs: 0, authCacheTtlMs: 60_000, revokeRecheckMs: 100 }))
+    const token = await signToken(SECRET_A)
+    admin.approve(token, 'user-1')
+
+    const phone = connectClient(wsUrl(relay.port, token, 'phone', 'phone-rc'))
+    await phone.opened
+    const validateAtConnect = admin.counts.validate
+
+    admin.revoke(token)
+    const startedAt = Date.now()
+    const closed = await phone.closed
+    expect(closed.code).toBe(4401)
+    expect(closed.reason).toBe('token_revoked')
+    // 生效上界：一个复核间隔 + 一次 RTT（≤1s，严格优于 PRD 60s 承诺）。
+    expect(Date.now() - startedAt).toBeLessThanOrEqual(1_000)
+    // 复核绕过 authCache：撤销后必然再次打到 admin introspection。
+    expect(admin.counts.validate).toBeGreaterThan(validateAtConnect)
+  }, 5_000)
+
+  test('admin unreachable during recheck → connection stays (degraded); closes 4401 once admin answers 401', async () => {
+    const approved = new Map<string, string>()
+    let mode: 'ok' | 'down' | 'revoke' = 'ok'
+    const fetchImpl = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input)
+      if (!url.endsWith('/api/auth/validate')) throw new Error(`unexpected path: ${url}`)
+      if (mode === 'down') throw new Error('admin down')
+      const token = ((init?.headers as Record<string, string> | undefined)?.authorization ?? '').replace(/^Bearer\s+/i, '')
+      if (mode === 'revoke') return Response.json({ error: 'unauthorized', message: 'unauthorized' }, { status: 401 })
+      const userId = approved.get(token)
+      if (!userId) return Response.json({ error: 'unauthorized', message: 'unauthorized' }, { status: 401 })
+      return Response.json({ valid: true, user: { id: userId } })
+    }) as unknown as typeof fetch
+    const token = await signToken(SECRET_A)
+    approved.set(token, 'user-1')
+    const admin = new AdminClient({ baseUrl: 'http://admin.test', fetchImpl })
+    const relay = track(
+      startRelayServer({
+        config: baseConfig('http://admin.test', { heartbeatIntervalMs: 0, authCacheTtlMs: 60_000, revokeRecheckMs: 100 }),
+        adminClient: admin,
+        logger: () => {},
+      }),
+    )
+
+    const phone = connectClient(wsUrl(relay.port, token, 'phone', 'phone-rcd'))
+    await phone.opened
+
+    // admin 不可达：复核跳过本轮，连接保持（degraded 语义不受复核影响）。
+    mode = 'down'
+    const stillOpen = await Promise.race([
+      phone.closed.then(() => false as const),
+      Bun.sleep(400).then(() => true as const), // ≥4 个复核周期都跳过
+    ])
+    expect(stillOpen).toBe(true)
+
+    // admin 恢复并回报 401：下一个复核周期立即收口 4401。
+    mode = 'revoke'
+    const closed = await phone.closed
+    expect(closed.code).toBe(4401)
+    expect(closed.reason).toBe('token_revoked')
+  }, 5_000)
+})
+
+describe('RelayAuth.recheckToken (FIX-4 unit)', () => {
+  function authWith(fetchBehavior: () => Promise<Response>): RelayAuth {
+    const fetchImpl = (async () => fetchBehavior()) as unknown as typeof fetch
+    const admin = new AdminClient({ baseUrl: 'http://admin.test', fetchImpl })
+    return new RelayAuth(admin, { secret: SECRET_A, issuer: 'polo-admin', audience: 'polo-client' }, { authCacheTtlMs: 60_000 })
+  }
+
+  test('200+valid → "valid"; 401 → "revoked" and the cached-valid entry no longer masks revocation', async () => {
+    let revoked = false
+    const auth = authWith(async () => {
+      if (revoked) return Response.json({ error: 'unauthorized', message: 'unauthorized' }, { status: 401 })
+      return Response.json({ valid: true, user: { id: 'user-1' } })
+    })
+    const token = await signToken(SECRET_A)
+    // 预热 introspectionCache（valid 记录在 authCacheTtl 内一直有效）。
+    expect((await auth.authenticate(token)).ok).toBe(true)
+    expect(await auth.recheckToken(token)).toBe('valid')
+
+    revoked = true
+    expect(await auth.recheckToken(token)).toBe('revoked')
+    // 若复核不清理缓存，authenticate 会在整个 TTL 内继续放行已撤销 token。
+    expect((await auth.authenticate(token)).ok).toBe(false)
+  })
+
+  test('admin unreachable → "unreachable" (caller skips the round, degraded untouched)', async () => {
+    const auth = authWith(async () => {
+      throw new Error('admin down')
+    })
+    const token = await signToken(SECRET_A)
+    expect(await auth.recheckToken(token)).toBe('unreachable')
+  })
+
+  test('200+{valid:false} → "revoked"', async () => {
+    const auth = authWith(async () => Response.json({ valid: false }))
+    const token = await signToken(SECRET_A)
+    expect(await auth.recheckToken(token)).toBe('revoked')
+  })
+})
+
+describe('relay config env 收口 (FIX-4/5)', () => {
+  test('defaults: revokeRecheckMs=15000, asrFileFinalWaitMs=30000; env overrides honored', () => {
+    const base = { POLO_RELAY_JWT_SECRET: 'relay-config-test-secret-0123456789abcdef' }
+    expect(loadRelayConfig(base).revokeRecheckMs).toBe(15_000)
+    expect(loadRelayConfig(base).asrFileFinalWaitMs).toBe(30_000)
+    expect(loadRelayConfig({ ...base, POLO_RELAY_REVOKE_RECHECK_MS: '5000' }).revokeRecheckMs).toBe(5_000)
+    expect(loadRelayConfig({ ...base, POLO_RELAY_ASR_FILE_FINAL_WAIT_MS: '45000' }).asrFileFinalWaitMs).toBe(45_000)
   })
 })

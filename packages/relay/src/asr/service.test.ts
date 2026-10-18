@@ -141,12 +141,75 @@ function supplierConfig(): AsrSupplierConfig {
     suppliers: {
       mock: { supplier: 'mock', mode: 'STREAM', rateCard: card },
       mimo: { supplier: 'mimo', mode: 'FILE', rateCard: { pricePerHourCny: null, pricePerRequestCny: null, markupPermille: 1300, mock: false } },
+      // FIX-5 测试供应商（latefile）：lateFinalAdapter 注册用。
+      latefile: { supplier: 'latefile', mode: 'FILE', rateCard: card },
     },
   }
 }
 
 function mockAdapter(): MockAsrAdapter {
   return new MockAsrAdapter({ partialScript: ['partial-one', 'partial-two', 'partial-three', 'partial-four'], finalText: 'final-text' })
+}
+
+/**
+ * FIX-5 测试用确定性 adapter：final 在 finalDelayMs 后才上抛（FILE 长音频转写
+ * 慢的形态），可按脚本在等待期间发渐进 partial（模拟 MiMo SSE 增量）。
+ */
+function lateFinalAdapter(opts: {
+  id?: string
+  mode?: 'STREAM' | 'FILE'
+  finalDelayMs: number
+  finalText: string
+  partialScript?: Array<{ atMs: number; text: string }>
+}): AsrAdapter {
+  const mode = opts.mode ?? 'FILE'
+  return {
+    id: opts.id ?? 'latefile',
+    mode,
+    capabilities: {
+      realtimeStreaming: mode === 'STREAM',
+      maxDurationSec: 300,
+      languages: ['zh'],
+      audio: { encoding: 'pcm_s16le', sampleRate: 16_000 },
+    },
+    rateCard: { pricePerHourCny: 4.5, pricePerRequestCny: null, markupPermille: 1300, mock: true },
+    isConfigured: () => true,
+    startStream(ctx) {
+      let meteredBytes = 0
+      let partialSeq = 0
+      let aborted = false
+      const timers: Array<ReturnType<typeof setTimeout>> = []
+      const arm = (atMs: number, fn: () => void): void => {
+        const timer = setTimeout(() => {
+          if (!aborted) fn()
+        }, atMs)
+        timer.unref?.()
+        timers.push(timer)
+      }
+      for (const p of opts.partialScript ?? []) {
+        const text = p.text
+        arm(p.atMs, () => {
+          partialSeq += 1
+          ctx.onPartial({ text, seq: partialSeq })
+        })
+      }
+      arm(opts.finalDelayMs, () => ctx.onFinal(opts.finalText))
+      return {
+        pushAudio: (bytes) => {
+          meteredBytes += bytes.length
+        },
+        finish: () => {}, // final 已按脚本定时上抛
+        abort: () => {
+          aborted = true
+          for (const t of timers) clearTimeout(t)
+        },
+        meterSeconds: () => meteredBytes / 32_000,
+      }
+    },
+    async transcribe() {
+      return { text: opts.finalText, seconds: 0 }
+    },
+  }
 }
 
 interface Harness {
@@ -156,7 +219,7 @@ interface Harness {
   stop(): void
 }
 
-function startHarness(opts: { preholdSeconds?: number; finalWaitMs?: number; cacheTtlMs?: number; maxSessionWallMs?: number } = {}): Harness {
+function startHarness(opts: { preholdSeconds?: number; finalWaitMs?: number; fileFinalWaitMs?: number; cacheTtlMs?: number; maxSessionWallMs?: number; extraAdapter?: AsrAdapter } = {}): Harness {
   const admin = startMockAdmin()
   let loads = 0
   const auth = new RelayAuth(
@@ -168,6 +231,7 @@ function startHarness(opts: { preholdSeconds?: number; finalWaitMs?: number; cac
   const streamAdapter: AsrAdapter = mockAdapter()
   registry.register(streamAdapter)
   registry.register(new MockAsrAdapter({ id: 'mimo', mode: 'FILE', realtimeStreaming: false }))
+  if (opts.extraAdapter) registry.register(opts.extraAdapter)
   const asr = new AsrService({
     auth,
     registry,
@@ -181,6 +245,7 @@ function startHarness(opts: { preholdSeconds?: number; finalWaitMs?: number; cac
     logger: () => {},
     preholdSeconds: opts.preholdSeconds ?? 60,
     finalWaitMs: opts.finalWaitMs ?? 1_000,
+    fileFinalWaitMs: opts.fileFinalWaitMs,
     maxSessionWallMs: opts.maxSessionWallMs,
   })
   const config: RelayConfig = {
@@ -196,6 +261,8 @@ function startHarness(opts: { preholdSeconds?: number; finalWaitMs?: number; cac
     heartbeatIntervalMs: 0,
     heartbeatTimeoutMs: 60_000,
     maxPayloadBytes: 1_048_576,
+    revokeRecheckMs: 15_000,
+    asrFileFinalWaitMs: 30_000,
   }
   const relay = startRelayServer({ config, logger: () => {}, auth, asr })
   return {
@@ -577,6 +644,112 @@ describe('/asr interruption & edge cases', () => {
     expect(closed.reason).toBe('session_timeout')
     await eventually(() => h.admin.settleCalls.length === 1)
     // 墙钟超限不等于全退：按服务端实测秒结算（settle 补扣语义由 admin 承接）
+    expect(h.admin.settleCalls[0]).toMatchObject({ action: 'settle', actualSeconds: 0.01 })
+  }, 10_000)
+})
+
+// ---------------------------------------------------------------------------
+// FIX-5: FILE 模式 final-wait（长音频转写 >5s，全局 5s 收口会以空文本 asr_final 提前关闭）
+// ---------------------------------------------------------------------------
+
+describe('/asr FILE final-wait (FIX-5)', () => {
+  const cleanup: Array<() => void> = []
+  const track = <T extends { stop(): void }>(x: T): T => {
+    cleanup.push(() => x.stop())
+    return x
+  }
+  afterAll(() => {
+    for (const fn of cleanup) fn()
+  })
+
+  test('FILE: transcription final arriving long after the STREAM wait is awaited (per-mode wait)', async () => {
+    // STREAM wait=300ms；FILE wait=2000ms（生产默认 30s 的等比缩短）；FILE adapter
+    // 800ms 后才 final（≈ 8s 长音频转写的缩短版）——旧全局 finalWaitMs 会在 300ms
+    // 以空文本提前收口。
+    const h = track(startHarness({
+      finalWaitMs: 300,
+      fileFinalWaitMs: 2_000,
+      extraAdapter: lateFinalAdapter({
+        mode: 'FILE',
+        finalDelayMs: 800,
+        finalText: 'late-file-final',
+        partialScript: [{ atMs: 600, text: '渐进-1' }],
+      }),
+    }))
+    const token = await signToken('user-1')
+    h.admin.approve(token, 'user-1')
+
+    const client = connect(asrUrl(h.relay.port, token, { deviceId: 'phone-file', supplier: 'latefile' }))
+    await client.opened
+    const ready = (await client.waitFor((f) => f.type === 'asr_ready')) as Extract<AsrServerFrame, { type: 'asr_ready' }>
+    expect(ready.mode).toBe('FILE')
+
+    client.sendText(audioFrame(1))
+    client.sendText(JSON.stringify({ type: 'end' }))
+
+    const final = (await client.waitFor((f) => f.type === 'asr_final', 3_000)) as Extract<AsrServerFrame, { type: 'asr_final' }>
+    expect(final.text).toBe('late-file-final')
+    const closed = await client.closed
+    expect(closed.code).toBe(1000)
+    await eventually(() => h.admin.settleCalls.length === 1)
+    // 计费按服务端实测秒结算，不因等待 final 而变化。
+    expect(h.admin.settleCalls[0]).toMatchObject({ action: 'settle', actualSeconds: 0.01 })
+  }, 10_000)
+
+  test('FILE: partials during transcription refresh the final deadline (活性刷新), final still delivered', async () => {
+    // FILE wait=500ms；partial 在 300/600/900ms 到达（每次出字顺延 500ms 截止），
+    // final 1200ms —— 无活性刷新时 500ms 截止即以空文本收口。
+    const h = track(startHarness({
+      finalWaitMs: 300,
+      fileFinalWaitMs: 500,
+      extraAdapter: lateFinalAdapter({
+        mode: 'FILE',
+        finalDelayMs: 1_200,
+        finalText: 'late-but-streaming',
+        partialScript: [{ atMs: 300, text: 'p1' }, { atMs: 600, text: 'p2' }, { atMs: 900, text: 'p3' }],
+      }),
+    }))
+    const token = await signToken('user-1')
+    h.admin.approve(token, 'user-1')
+
+    const client = connect(asrUrl(h.relay.port, token, { deviceId: 'phone-file-live', supplier: 'latefile' }))
+    await client.opened
+    await client.waitFor((f) => f.type === 'asr_ready')
+
+    client.sendText(audioFrame(1))
+    client.sendText(JSON.stringify({ type: 'end' }))
+
+    for (const text of ['p1', 'p2', 'p3']) {
+      const partial = (await client.waitFor((f) => f.type === 'asr_partial')) as Extract<AsrServerFrame, { type: 'asr_partial' }>
+      expect(partial.text).toBe(text)
+    }
+    const final = (await client.waitFor((f) => f.type === 'asr_final', 4_000)) as Extract<AsrServerFrame, { type: 'asr_final' }>
+    expect(final.text).toBe('late-but-streaming')
+    const closed = await client.closed
+    expect(closed.code).toBe(1000)
+  }, 10_000)
+
+  test('STREAM: final-wait timeout behavior unchanged (empty final at expiry, settle by measured seconds)', async () => {
+    const h = track(startHarness({
+      finalWaitMs: 300,
+      extraAdapter: lateFinalAdapter({ mode: 'STREAM', finalDelayMs: 60_000, finalText: 'never-in-time' }),
+    }))
+    const token = await signToken('user-1')
+    h.admin.approve(token, 'user-1')
+
+    const client = connect(asrUrl(h.relay.port, token, { deviceId: 'phone-stream-tw', supplier: 'latefile' }))
+    await client.opened
+    const ready = (await client.waitFor((f) => f.type === 'asr_ready')) as Extract<AsrServerFrame, { type: 'asr_ready' }>
+    expect(ready.mode).toBe('STREAM')
+
+    client.sendText(audioFrame(1))
+    client.sendText(JSON.stringify({ type: 'end' }))
+
+    const final = (await client.waitFor((f) => f.type === 'asr_final', 2_000)) as Extract<AsrServerFrame, { type: 'asr_final' }>
+    expect(final.text).toBe('')
+    const closed = await client.closed
+    expect(closed.code).toBe(1000)
+    await eventually(() => h.admin.settleCalls.length === 1)
     expect(h.admin.settleCalls[0]).toMatchObject({ action: 'settle', actualSeconds: 0.01 })
   }, 10_000)
 })

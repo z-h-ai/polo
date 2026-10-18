@@ -45,6 +45,14 @@ import {
 } from './types.ts'
 import { volcanoAsrOptionsFromEnv, VolcanoStreamAsrAdapter } from './volcano-adapter.ts'
 
+/**
+ * FIX-5：FILE 模式 end 后等待供应商 final 的默认时长。STREAM 保持 5s；FILE 整段
+ * 转写（≤300s 音频 + MiMo 推理 + base64 上送）常 >5s —— 全局 5s 会以空文本
+ * asr_final 提前收口（计费不丢但 UX 坏）。env POLO_RELAY_ASR_FILE_FINAL_WAIT_MS
+ * 可调（config.ts 收口为 asrFileFinalWaitMs）。仍受墙钟守卫（330s）硬上界约束。
+ */
+export const ASR_FILE_FINAL_WAIT_MS = 30_000
+
 /** Per-connection /asr state; attached at WsData.asr (envelope connections never set it). */
 export interface AsrConnectionState {
   token: string
@@ -67,6 +75,12 @@ export interface AsrConnectionState {
   wallTimer?: ReturnType<typeof setTimeout>
   finalText: string
   resolveFinal?: (text: string) => void
+  /**
+   * FIX-5：收尾（end 之后）等待 final 的可顺延截止 —— 收到任何渐进增量（如 MiMo
+   * SSE partial）即把截止时间后推一个 final wait，出字即活性。final 到达或超时
+   * 触发后清空；墙钟守卫（330s）仍是硬上界。
+   */
+  extendFinalWait?: () => void
 }
 
 export interface AsrServiceOptions {
@@ -80,8 +94,14 @@ export interface AsrServiceOptions {
   preholdSeconds?: number
   /** 每连接限流 msg/s（与信封路由同款滑动窗口）。 */
   maxMsgPerSec?: number
-  /** end 后等待 final 的时长（测试缩短常数）。 */
+  /** end 后等待 final 的时长（测试缩短常数）——STREAM 模式。 */
   finalWaitMs?: number
+  /**
+   * end 后等待 final 的时长 —— FILE 模式（FIX-5）。FILE 整段转写（≤300s 音频）
+   * 常超过 STREAM 的 5s，全局短 wait 会以空文本 asr_final 提前收口；默认 30s，
+   * env POLO_RELAY_ASR_FILE_FINAL_WAIT_MS（经 config.asrFileFinalWaitMs 收口）。
+   */
+  fileFinalWaitMs?: number
   /**
    * 单连接墙钟上限（自 prehold 起算）。admin PENDING TTL = 60+300 = 360s，settle
    * 迟到会被 EXPIRED 全退 —— 慢滴/挂死/死连接路径必须由本守卫按实测秒强制收口。
@@ -103,6 +123,7 @@ export class AsrService {
   private readonly preholdSeconds: number
   private readonly maxMsgPerSec: number
   private readonly finalWaitMs: number
+  private readonly fileFinalWaitMs: number
   private readonly maxSessionWallMs: number
 
   constructor(private readonly options: AsrServiceOptions) {
@@ -111,6 +132,7 @@ export class AsrService {
     this.preholdSeconds = options.preholdSeconds ?? ASR_PREHOLD_SECONDS
     this.maxMsgPerSec = options.maxMsgPerSec ?? 20
     this.finalWaitMs = options.finalWaitMs ?? 5_000
+    this.fileFinalWaitMs = options.fileFinalWaitMs ?? ASR_FILE_FINAL_WAIT_MS
     this.maxSessionWallMs = options.maxSessionWallMs ?? ASR_SESSION_WALL_GUARD_SECONDS * 1_000
   }
 
@@ -361,6 +383,9 @@ export class AsrService {
     return adapter.startStream({
       userId: state.userId,
       onPartial: (partial) => {
+        // FIX-5：收尾期间的渐进增量（如 MiMo SSE partial）即活性 —— 顺延 final
+        // 截止，慢转写只要还在出字就不以空文本提前收口。
+        if (state.ending) state.extendFinalWait?.()
         this.sendFrame(ws, { type: 'asr_partial', text: partial.text, seq: partial.seq })
       },
       onFinal: (text) => {
@@ -399,16 +424,46 @@ export class AsrService {
       return
     }
     handle.finish()
+
+    // FIX-5：final 截止按 adapter 模式区分 —— STREAM 5s；FILE 30s（长音频整段
+    // 转写常 >5s，空文本提前收口属 UX 缺陷）。等待期间任何渐进增量经
+    // state.extendFinalWait 把截止时间后推一个 wait（出字=活性）；final 到达或
+    // 截止触发后结算收口，墙钟守卫（330s）始终是硬上界。
+    const waitMs = this.finalWaitMsFor(state)
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+    const stopWaiting = (): void => {
+      if (deadlineTimer) clearTimeout(deadlineTimer)
+      deadlineTimer = undefined
+      state.extendFinalWait = undefined
+    }
     const waitFinal = new Promise<string>((resolve) => {
       state.resolveFinal = resolve
       if (state.finalText) resolve(state.finalText)
     })
-    void Promise.race([waitFinal, Bun.sleep(this.finalWaitMs).then(() => state.finalText)]).then((text) => {
+    void waitFinal.then((text) => {
+      stopWaiting()
       if (state.closed) return
       this.sendFrame(ws, { type: 'asr_final', text, seconds: handle.meterSeconds() })
       void this.settle(state, 'auto')
       this.close(ws, 1000, 'settled')
     })
+    state.extendFinalWait = () => {
+      if (deadlineTimer) clearTimeout(deadlineTimer)
+      deadlineTimer = setTimeout(() => {
+        deadlineTimer = undefined
+        state.extendFinalWait = undefined
+        // 截止触发：以当前已有文本（可能为空）收口 —— 计费按实测秒结算不丢。
+        state.resolveFinal?.(state.finalText)
+      }, waitMs)
+      deadlineTimer.unref?.()
+    }
+    state.extendFinalWait()
+  }
+
+  /** FIX-5：per-mode final wait —— FILE 30s（fileFinalWaitMs），其余（STREAM）5s。 */
+  private finalWaitMsFor(state: AsrConnectionState): number {
+    const adapter = state.supplierId ? this.options.registry.get(state.supplierId) : undefined
+    return adapter?.mode === 'FILE' ? this.fileFinalWaitMs : this.finalWaitMs
   }
 
   private cancelSession(ws: AsrWsLike): void {
@@ -433,8 +488,9 @@ export class AsrService {
   /**
    * 墙钟守卫：prehold 生效时挂上。触发 = 会话墙钟逼近 admin PENDING TTL（360s），
    * 按服务端实测秒强制 settle 收口 —— 慢滴音频 / 到顶挂死 / 死连接都由此兜住，
-   * 不给「EXPIRED 全退白嫖」留窗口；正常会话（实时音频 ≤300s + finalWait 5s）
-   * 恒早于 330s，不受影响。
+   * 不给「EXPIRED 全退白嫖」留窗口。正常会话（实时音频 ≤300s + STREAM finalWait
+   * 5s）恒早于 330s；FILE finalWait 30s（FIX-5）下满时长会话理论上可触及守卫
+   * 边界 —— 此时仍按实测秒结算收口，资金口径不变（计费不丢不超）。
    */
   private armSessionWallGuard(ws: AsrWsLike): void {
     const state = ws.data.asr
@@ -506,6 +562,8 @@ export interface CreateDefaultAsrServiceOptions {
   logger?: RelayLogger
   now?: () => number
   env?: Record<string, string | undefined>
+  /** FIX-5：FILE 模式 final wait（config.asrFileFinalWaitMs 收口，缺省 30s）。 */
+  fileFinalWaitMs?: number
 }
 
 /** env/本地配置 + 火山/MiMo/mock 注册表 + admin 计费客户端的默认组装（测试可整体注入覆盖）。 */
@@ -523,6 +581,7 @@ export function createDefaultAsrService(options: CreateDefaultAsrServiceOptions)
     logger: options.logger,
     now: options.now,
     maxMsgPerSec: options.maxMsgPerSec,
+    fileFinalWaitMs: options.fileFinalWaitMs,
   })
 }
 

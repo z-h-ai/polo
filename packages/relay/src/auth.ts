@@ -206,6 +206,9 @@ export type AuthenticateResult =
 
 export type AccessCheckResult = 'allowed' | 'denied' | 'unauthorized' | 'unreachable'
 
+/** Outcome of a cache-bypassing revocation recheck (FIX-4). */
+export type RecheckResult = 'valid' | 'revoked' | 'unreachable'
+
 export interface RelayAuthOptions {
   authCacheTtlMs: number
   now?: () => number
@@ -288,6 +291,32 @@ export class RelayAuth {
     if (result.httpStatus === 200 && typeof result.data?.allowed === 'boolean') {
       this.accessCache.set(cacheKey, result.data.allowed)
       return result.data.allowed ? 'allowed' : 'denied'
+    }
+    return 'unreachable'
+  }
+
+  /**
+   * FIX-4 revocation recheck: direct admin introspection that bypasses every
+   * cache, so a mid-session revocation is observed within one sweep interval
+   * (≤ POLO_RELAY_REVOKE_RECHECK_MS + one RTT) instead of authCacheTtl +
+   * heartbeat ≈ 90s. Admin unreachable / non-2xx-but-not-401/403 → 'unreachable':
+   * the caller skips the round and degraded semantics stay untouched. On
+   * 'revoked' the stale cached-valid entry is dropped and the token is
+   * negative-cached so new handshakes fail fast; on 'valid' the introspection
+   * cache is refreshed with the fresh admin answer.
+   */
+  async recheckToken(token: string): Promise<RecheckResult> {
+    const result = await this.admin.introspect(token)
+    if (!result.reachable) return 'unreachable'
+    const cacheKey = hashToken(token)
+    if (result.httpStatus === 200 && result.data?.valid) {
+      this.introspectionCache.set(cacheKey, result.data)
+      return 'valid'
+    }
+    if (result.httpStatus === 401 || result.httpStatus === 403 || (result.httpStatus === 200 && result.data !== undefined)) {
+      this.introspectionCache.delete(cacheKey)
+      this.negativeCache.set(cacheKey, true)
+      return 'revoked'
     }
     return 'unreachable'
   }

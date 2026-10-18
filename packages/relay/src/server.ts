@@ -7,6 +7,11 @@
  * - Handshake: `?token=<admin JWT>&side=phone|mac&deviceId=<id>`; dual-layer
  *   auth (local HS256 + admin introspection, 60s cache). Mac side additionally
  *   proves its binding via check-access.
+ * - Revocation recheck (FIX-4): an independent timer (POLO_RELAY_REVOKE_RECHECK_MS,
+ *   default 15s) re-introspects every online connection bypassing the auth
+ *   cache, so a revoked token is closed 4401 within ~15s — inside the PRD §⑤
+ *   60s promise — instead of authCacheTtl(60s)+heartbeat(30s) ≈ 90s worst case.
+ *   Admin unreachable → skip the round, degraded semantics untouched.
  * - Routing: phone→mac requires check-access (60s cache, 401/403 → close);
  *   offline Macs stage envelopes in the 5-minute in-memory queue.
  * - Heartbeat: server app-level `{type:"ping"}` every 30s; a connection with
@@ -109,7 +114,14 @@ export function startRelayServer(options: StartRelayServerOptions): RelayServerH
   const auth = options.auth ?? new RelayAuth(admin, jwt, { authCacheTtlMs: config.authCacheTtlMs, now })
   const asr = options.asr !== undefined
     ? options.asr
-    : createDefaultAsrService({ auth, adminBaseUrl: config.adminBaseUrl, maxMsgPerSec: config.maxMsgPerSec, logger: log, now })
+    : createDefaultAsrService({
+        auth,
+        adminBaseUrl: config.adminBaseUrl,
+        maxMsgPerSec: config.maxMsgPerSec,
+        logger: log,
+        now,
+        fileFinalWaitMs: config.asrFileFinalWaitMs,
+      })
 
   const connections = new Map<string, ServerWebSocket<WsData>>()
   let nextConnId = 1
@@ -358,6 +370,39 @@ export function startRelayServer(options: StartRelayServerOptions): RelayServerH
     : null
   heartbeatTimer?.unref?.()
 
+  // FIX-4 (PRD §⑤「最长 60 秒内全网断开」): independent revocation-recheck timer.
+  // The legacy path only re-authenticates within [authCacheTtl(60s) + heartbeat
+  // sweep(30s)] ≈ 90s worst case. This sweep bypasses the auth cache entirely
+  // and re-introspects every online connection against admin every
+  // revokeRecheckMs (default 15s), so revocation lands in ≤ interval + one RTT.
+  // Connection count is small per PRD, so the extra introspection load is
+  // bounded; admin unreachable → skip the round (debug log), degraded
+  // semantics untouched.
+  async function revokeRecheckTick(): Promise<void> {
+    const targets = [...connections.values()]
+    await Promise.all(targets.map((ws) => recheckConnection(ws)))
+  }
+
+  async function recheckConnection(ws: ServerWebSocket<WsData>): Promise<void> {
+    const { persona, token } = ws.data.identity
+    const connId = ws.data.connId
+    const result = await auth.recheckToken(token)
+    if (result !== 'revoked') {
+      if (result === 'unreachable') log(`recheck skipped reason=admin_unreachable persona=${persona} connId=${connId}`)
+      return
+    }
+    // 复核在途时连接可能已被顶替/断开：只对仍然在线的同一连接执行收口。
+    const current = connections.get(persona)
+    if (!current || current.data.connId !== connId) return
+    log(`closed reason=token_revoked source=revoke_recheck persona=${persona} connId=${connId}`)
+    dropConnection(current, CLOSE_CODE.UNAUTHORIZED, 'token_revoked')
+  }
+
+  const revokeRecheckTimer = config.revokeRecheckMs > 0
+    ? setInterval(() => void revokeRecheckTick(), config.revokeRecheckMs)
+    : null
+  revokeRecheckTimer?.unref?.()
+
   function handshakeErrorResponse(status: number, code: string, message: string): Response {
     return Response.json({ ok: false, error: { code, message } }, { status })
   }
@@ -448,6 +493,7 @@ export function startRelayServer(options: StartRelayServerOptions): RelayServerH
     queue,
     stop(): void {
       if (heartbeatTimer) clearInterval(heartbeatTimer)
+      if (revokeRecheckTimer) clearInterval(revokeRecheckTimer)
       queue.dispose()
       server.stop(true)
     },
