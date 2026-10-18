@@ -10,9 +10,16 @@ export const colors = {
   accent: '#8a75cd', // --accent
   accentDeep: '#53497a', // logo gradient end (prototype inline value)
   accentSoft: 'rgba(138,117,205,0.09)', // tinted backgrounds
+  accentSoftSolid: '#eae8f5', // .avatar.acc tint pre-flattened over --background (opaque, maskable)
   destructive: '#e6000c', // --destructive
   destructiveBg: 'rgba(230,0,12,0.08)', // errbar background
   destructiveBorder: 'rgba(230,0,12,0.2)', // errbar border
+  dangerBg: 'rgba(230,0,12,0.1)', // .btnD background (不是我，拒绝)
+  dangerBorder: 'rgba(230,0,12,0.25)', // .btnD border
+  warning: '#8c5f27', // .infobar copy (anti-phishing hint)
+  warningBg: 'rgba(237,153,14,0.1)', // .infobar background
+  warningBorder: 'rgba(237,153,14,0.25)', // .infobar border
+  fieldBorder: 'rgba(17,19,23,0.15)', // neutral default input border (P03)
   success: '#098926', // --success
   info: '#ed990e', // --info
   fieldBg: '#f0f1f4', // --fg-3 (input background)

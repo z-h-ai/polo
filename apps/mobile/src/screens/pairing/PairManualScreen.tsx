@@ -6,12 +6,20 @@
 // render in the errbar except the limit case, which the flow container turns
 // into the P04 整屏错误态).
 
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useState } from 'react';
+import type { TextStyle } from 'react-native';
 
 import { sanitizePairingCodeInput } from '../../lib/pairingPayload';
 import { isPairingCodeReady } from '../../lib/pairingUi';
 import { colors, fontSize, radius } from '../../theme/tokens';
+
+// V-05: on web the UA paints an amber focus ring on the autofocused input
+// (headless Chromium AccentColor), which read as an error state. RNW honors
+// the outline* longforms but RN core types don't declare them → cast.
+const webOutlineReset = (Platform.OS === 'web'
+  ? { outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' }
+  : {}) as TextStyle;
 
 export function PairManualScreen({
   error,
@@ -26,6 +34,7 @@ export function PairManualScreen({
   onBack: () => void;
 }) {
   const [code, setCode] = useState('');
+  const [fieldFocused, setFieldFocused] = useState(false);
   const ready = isPairingCodeReady(code);
 
   return (
@@ -48,7 +57,7 @@ export function PairManualScreen({
           </View>
         ) : null}
         <TextInput
-          style={styles.codeField}
+          style={[styles.codeField, fieldFocused && styles.codeFieldFocused]}
           placeholder="······"
           placeholderTextColor={colors.fg40}
           keyboardType="number-pad"
@@ -56,6 +65,8 @@ export function PairManualScreen({
           maxLength={6}
           value={code}
           onChangeText={(value) => setCode(sanitizePairingCodeInput(value))}
+          onFocus={() => setFieldFocused(true)}
+          onBlur={() => setFieldFocused(false)}
           editable={!busy}
           autoFocus
         />
@@ -141,13 +152,17 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: radius.field,
     backgroundColor: colors.fieldBg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
+    borderWidth: 1,
+    borderColor: colors.fieldBorder, // V-05: neutral gray, not an error signal
     textAlign: 'center',
     fontSize: 18,
     fontWeight: '600',
     letterSpacing: 10,
     color: colors.foreground,
+    ...webOutlineReset,
+  },
+  codeFieldFocused: {
+    borderColor: colors.accent, // focus keeps the accent edge (V-05 allowance)
   },
   hint: {
     fontSize: fontSize.hint,
