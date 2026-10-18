@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, existsSync 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { SessionToolContext } from '../context.ts';
-import { handleRenderUi } from './render-ui.ts';
+import { handleRenderUi, classifyGenUiIssue, type GenUiIssueLike } from './render-ui.ts';
 import {
   RenderUiSchema,
   RENDER_UI_MAX_PAYLOAD_BYTES,
@@ -324,5 +324,245 @@ describe('render_ui handler', () => {
     });
 
     expect(result.isError).toBe(false);
+  });
+});
+
+// ============================================================
+// Error-code taxonomy (P2-3)
+// ============================================================
+
+describe('render_ui error-code taxonomy', () => {
+  // Minimal ctx — the taxonomy paths under test never touch the filesystem
+  // (no data-table components), so no temp dirs are needed.
+  const taxonomyCtx: SessionToolContext = {
+    sessionId: 'taxonomy',
+    workspacePath: '/tmp',
+    sourcesPath: '/tmp/sources',
+    skillsPath: '/tmp/skills',
+    plansFolderPath: '/tmp/plans',
+    callbacks: {
+      onPlanSubmitted: () => {},
+      onAuthRequest: () => {},
+    },
+    fs: {
+      exists: () => false,
+      readFile: () => '',
+      readFileBuffer: () => Buffer.from(''),
+      writeFile: () => {},
+      isDirectory: () => false,
+      readdir: () => [],
+      stat: () => ({ size: 0, isDirectory: () => false }),
+    },
+    loadSourceConfig: () => null,
+    sessionPath: '/tmp/session',
+    dataPath: '/tmp/session/data',
+  };
+
+  /** Run a bad payload through the handler and return the tool error text. */
+  async function errorTextFor(payload: unknown): Promise<string> {
+    const result = await handleRenderUi(
+      taxonomyCtx,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      payload as any,
+    );
+    expect(result.isError).toBe(true);
+    const text = result.content[0]?.text ?? '';
+    expect(text).toContain('Invalid render_ui payload');
+    expect(text).toContain('Fix hints:');
+    return text;
+  }
+
+  it('classifies zod-native issue codes through the pure classifier', () => {
+    expect(classifyGenUiIssue({ code: 'unrecognized_keys', path: [], message: 'Unrecognized key: "action"' })).toBe('unrecognized-key');
+    expect(classifyGenUiIssue({ code: 'invalid_type', received: 'undefined', path: ['x'], message: 'Required' })).toBe('missing-required');
+    expect(classifyGenUiIssue({ code: 'invalid_type', received: 'number', path: ['x'], message: 'Expected string, received number' })).toBe('invalid-type');
+    expect(classifyGenUiIssue({ code: 'invalid_value', path: [], message: 'Invalid option: expected one of "a"|"b"' })).toBe('invalid-type');
+    expect(classifyGenUiIssue({ code: 'invalid_union', path: ['type'], message: 'Invalid input' })).toBe('invalid-type');
+    expect(classifyGenUiIssue({ code: 'invalid_union_discriminator', path: ['components', 0, 'type'], message: 'Invalid discriminator value' })).toBe('invalid-type');
+    expect(classifyGenUiIssue({ code: 'too_big', type: 'array', path: ['components'], message: 'Array must contain at most 8 element(s)' })).toBe('too-many-components');
+    expect(classifyGenUiIssue({ code: 'too_small', type: 'array', path: ['components'], message: 'Array must contain at least 1 element(s)' })).toBe('missing-required');
+    // Nested array constraints (fields/columns/series) are per-field, not the components array
+    expect(classifyGenUiIssue({ code: 'too_big', type: 'array', path: ['components', 0, 'fields'], message: 'Too big' })).toBe('invalid-type');
+    expect(classifyGenUiIssue({ code: 'too_big', origin: 'string', path: ['components', 0, 'label'], message: 'Too big' })).toBe('invalid-type');
+    // Unknown future zod codes fall through to the catch-all
+    expect(classifyGenUiIssue({ code: 'some_future_code', path: [], message: 'whatever' })).toBe('schema-invalid');
+  });
+
+  it('prefixes payload-too-large with its code and fix hint', async () => {
+    const text = await errorTextFor({
+      components: [{
+        id: 'big',
+        type: 'alert',
+        severity: 'info',
+        message: 'x'.repeat(RENDER_UI_MAX_PAYLOAD_BYTES),
+      }],
+    });
+    expect(text).toContain('[genui:payload-too-large]');
+    expect(text).toContain('Move data into a file via transform_data');
+  });
+
+  it('prefixes too-many-components with its code', async () => {
+    const text = await errorTextFor({
+      components: Array.from({ length: 9 }, (_, i) => ({
+        id: `alert-${i}`,
+        type: 'alert',
+        severity: 'info',
+        message: `m${i}`,
+      })),
+    });
+    expect(text).toContain('[genui:too-many-components]');
+  });
+
+  it('prefixes duplicate-component-id with its code', async () => {
+    const text = await errorTextFor({
+      components: [
+        { id: 'dup', type: 'alert', severity: 'info', message: 'first' },
+        { id: 'dup', type: 'alert', severity: 'warning', message: 'second' },
+      ],
+    });
+    expect(text).toContain('[genui:duplicate-component-id]');
+  });
+
+  it('prefixes duplicate-form-field-key with its code', async () => {
+    const text = await errorTextFor({
+      components: [{
+        id: 'f',
+        type: 'form',
+        fields: [
+          { key: 'email', label: 'Email', type: 'text' },
+          { key: 'email', label: 'Email again', type: 'text' },
+        ],
+      }],
+    });
+    expect(text).toContain('[genui:duplicate-form-field-key]');
+  });
+
+  it('prefixes duplicate action-button param keys as duplicate-form-field-key (same contract)', async () => {
+    const text = await errorTextFor({
+      components: [{
+        id: 'btns',
+        type: 'action-buttons',
+        buttons: [{
+          id: 'b1',
+          label: 'Go',
+          params: [
+            { key: 'region', label: 'Region', type: 'select', options: ['EMEA'] },
+            { key: 'region', label: 'Region again', type: 'select', options: ['APAC'] },
+          ],
+          action: { kind: 'send-message', promptTemplate: 'Break down {{region}}' },
+        }],
+      }],
+    });
+    expect(text).toContain('[genui:duplicate-form-field-key]');
+  });
+
+  it('prefixes select-options-mismatch with its code (select without options)', async () => {
+    const text = await errorTextFor({
+      components: [{
+        id: 'f',
+        type: 'form',
+        fields: [{ key: 'tier', label: 'Tier', type: 'select' }],
+      }],
+    });
+    expect(text).toContain('[genui:select-options-mismatch]');
+  });
+
+  it('prefixes select-options-mismatch when a non-select field carries options', async () => {
+    const text = await errorTextFor({
+      components: [{
+        id: 'f',
+        type: 'form',
+        fields: [{ key: 'name', label: 'Name', type: 'text', options: ['a', 'b'] }],
+      }],
+    });
+    expect(text).toContain('[genui:select-options-mismatch]');
+  });
+
+  it('prefixes missing-required with its code (absent required field)', async () => {
+    const text = await errorTextFor({
+      components: [{ id: 'rev', type: 'stat-card', value: 42 }],
+    });
+    expect(text).toContain('[genui:missing-required]');
+  });
+
+  it('prefixes missing-required for an empty components array', async () => {
+    const text = await errorTextFor({ components: [] });
+    expect(text).toContain('[genui:missing-required]');
+  });
+
+  it('prefixes invalid-type with its code (wrong value type)', async () => {
+    const text = await errorTextFor({
+      components: [{ id: 'a', type: 'alert', severity: 'info', message: 42 }],
+    });
+    expect(text).toContain('[genui:invalid-type]');
+  });
+
+  it('prefixes invalid-type for an unknown component type discriminator', async () => {
+    const text = await errorTextFor({
+      components: [{ id: 'x', type: 'mystery-card', label: 'y' }],
+    });
+    expect(text).toContain('[genui:invalid-type]');
+  });
+
+  it('prefixes unrecognized-key with its code (strict schema, unknown field)', async () => {
+    const text = await errorTextFor({
+      components: [{
+        id: 'f',
+        type: 'form',
+        fields: [{ key: 'email', label: 'Email', type: 'text' }],
+        action: 'send-message',
+      }],
+    });
+    expect(text).toContain('[genui:unrecognized-key]');
+  });
+
+  it('falls back to schema-invalid for unmatched custom cross-field rules', async () => {
+    // Both prompt and promptTemplate set — a custom superRefine rule with no
+    // dedicated code lands on the catch-all.
+    const text = await errorTextFor({
+      components: [{
+        id: 'btns',
+        type: 'action-buttons',
+        buttons: [{
+          id: 'b1',
+          label: 'Go',
+          action: {
+            kind: 'send-message',
+            prompt: 'Do it',
+            promptTemplate: 'Do {{x}}',
+          },
+        }],
+      }],
+    });
+    expect(text).toContain('[genui:schema-invalid]');
+  });
+
+  it('falls back to schema-invalid for the chart series/categories length rule', async () => {
+    const text = await errorTextFor({
+      components: [{
+        id: 'c',
+        type: 'chart',
+        chartType: 'bar',
+        categories: ['Q1', 'Q2'],
+        series: [{ name: 'rev', values: [1, 2, 3] }],
+      }],
+    });
+    expect(text).toContain('[genui:schema-invalid]');
+  });
+
+  it('deduplicates fix hints per code across repeated issues', async () => {
+    // Two same-code issues (both messages are numbers) — the issue prefix
+    // appears on both, but the hint section states the fix exactly once.
+    const text = await errorTextFor({
+      components: [
+        { id: 'a', type: 'alert', severity: 'info', message: 42 },
+        { id: 'b', type: 'alert', severity: 'info', message: 43 },
+      ],
+    });
+    const sections = text.split('Fix hints:');
+    const issueSection = sections[0] ?? '';
+    const hintSection = sections[1] ?? '';
+    expect(issueSection.split('[genui:invalid-type]').length - 1).toBe(2);
+    expect(hintSection.split("[genui:invalid-type] Match the field's expected type").length - 1).toBe(1);
   });
 });
