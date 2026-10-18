@@ -38,16 +38,16 @@ describe('parseGenUiComponents', () => {
   it('keeps unknown types so unknown entries render the fallback instead of being dropped', () => {
     const parsed = parseGenUiComponents({
       components: [
-        { type: 'chart', id: 'c1' },
+        { type: 'treemap', id: 'c1' },
         { type: 'stat-card', id: 's1', label: 'Keep', value: 1 },
       ],
     })
     expect(parsed.length).toBe(2)
     expect(parsed[0]!.id).toBe('c1')
-    expect((parsed[0] as { type?: string }).type).toBe('chart')
+    expect((parsed[0] as { type?: string }).type).toBe('treemap')
     expect(parsed[1]!.id).toBe('s1')
-    // No registered renderer for 'chart' → GenUICard renders GenUiUnknownFallback.
-    expect(hasGenUiRenderer('chart')).toBe(false)
+    // No registered renderer for 'treemap' → GenUICard renders GenUiUnknownFallback.
+    expect(hasGenUiRenderer('treemap')).toBe(false)
   })
 
   it('drops entries without a usable id', () => {
@@ -111,16 +111,19 @@ describe('mergeGenUiComponents', () => {
 })
 
 describe('hasGenUiRenderer (fallback decision)', () => {
-  it('registers all five P0 component types', () => {
+  it('registers the six static P0 component types plus the lazy chart renderer', () => {
     expect(hasGenUiRenderer('stat-card')).toBe(true)
     expect(hasGenUiRenderer('data-table')).toBe(true)
     expect(hasGenUiRenderer('alert')).toBe(true)
     expect(hasGenUiRenderer('progress')).toBe(true)
     expect(hasGenUiRenderer('action-buttons')).toBe(true)
+    expect(hasGenUiRenderer('form')).toBe(true)
+    // chart (iter/chart): registered through the lazy loader, same interface.
+    expect(hasGenUiRenderer('chart')).toBe(true)
   })
 
   it('falls back to the read-only JSON view for unknown types', () => {
-    expect(hasGenUiRenderer('chart')).toBe(false)
+    expect(hasGenUiRenderer('treemap')).toBe(false)
     expect(hasGenUiRenderer('')).toBe(false)
   })
 })

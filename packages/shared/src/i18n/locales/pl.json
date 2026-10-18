@@ -689,6 +689,8 @@
   "genui.app.publishedTo": "Opublikowano w organizacji {{org}}",
   "genui.app.publishing": "Publikowanie…",
   "genui.app.version": "v{{version}}",
+  "genui.chart.empty": "Ten wykres nie zawiera danych do wyświetlenia.",
+  "genui.chart.tooManySeries": "Zbyt wiele serii do wyświetlenia.",
   "genui.componentError": "Nie można wyświetlić tej karty.",
   "genui.dataTable.rowDetail": "Szczegóły",
   "genui.dataTable.rowValuesMissing": "Brakuje niektórych wartości w tym wierszu.",

@@ -689,6 +689,8 @@
   "genui.app.publishedTo": "Publicada en {{org}}",
   "genui.app.publishing": "Publicando…",
   "genui.app.version": "v{{version}}",
+  "genui.chart.empty": "Este gráfico no tiene datos representables.",
+  "genui.chart.tooManySeries": "Demasiadas series para representar.",
   "genui.componentError": "No se pudo mostrar esta tarjeta.",
   "genui.dataTable.rowDetail": "Detalles",
   "genui.dataTable.rowValuesMissing": "Faltan algunos valores en esta fila.",

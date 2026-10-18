@@ -689,6 +689,8 @@
   "genui.app.publishedTo": "Közzétéve itt: {{org}}",
   "genui.app.publishing": "Közzététel folyamatban…",
   "genui.app.version": "v{{version}}",
+  "genui.chart.empty": "Ebben a diagrammban nincs ábrázolható adat.",
+  "genui.chart.tooManySeries": "Túl sok adatsor a megjelenítéshez.",
   "genui.componentError": "Ez a kártya nem jeleníthető meg.",
   "genui.dataTable.rowDetail": "Részletek",
   "genui.dataTable.rowValuesMissing": "A sor egyes értékei hiányoznak.",

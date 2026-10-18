@@ -2,10 +2,11 @@
  * GenUICard - Renders declarative inline cards produced by the render_ui tool.
  *
  * The model sends a small payload ({ components: [...] }); this component
- * dispatches each entry to its registered renderer. The registry ships six
- * component types (stat-card, data-table, alert, progress, action-buttons,
- * form) statically
- * data directory via MarkdownDatatableBlock's existing file-loading path.
+ * dispatches each entry to its registered renderer. Six component types
+ * (stat-card, data-table, alert, progress, action-buttons, form) render
+ * statically; `chart` (iter/chart) is the registry's first LAZY renderer —
+ * GenUiChart.tsx is the only module importing recharts and loads on the first
+ * chart card, so the main bundle never carries it.
  *
  * Unrecognized component types (newer registry entries on other app versions)
  * and components whose renderer throws fall back to a read-only JSON view so
@@ -133,6 +134,24 @@ export interface GenUiForm {
   submitLabel?: string
 }
 
+/** One named value series of a chart (iter/chart); values align 1:1 with categories. */
+export interface GenUiChartSeries {
+  name: string
+  unit?: string
+  values: number[]
+}
+
+export interface GenUiChart {
+  type: 'chart'
+  id: string
+  title?: string
+  chartType: 'bar' | 'line' | 'funnel' | 'pie'
+  categories: string[]
+  series: GenUiChartSeries[]
+  /** Reserved for semantic coloring; the renderer ignores it in this release. */
+  goodWhen?: GenUiGoodWhen
+}
+
 export type GenUiComponent =
   | GenUiStatCard
   | GenUiDataTable
@@ -140,6 +159,7 @@ export type GenUiComponent =
   | GenUiProgress
   | GenUiActionButtons
   | GenUiForm
+  | GenUiChart
 
 // ── Tolerant parsing (models may emit slightly-off shapes; never crash) ──────
 
@@ -1036,9 +1056,32 @@ function FormView({ component, sessionId }: { component: GenUiForm; sessionId?: 
   )
 }
 
-// ── Component registry (static imports for P0) ──────────────────────────────
+// ── Component registry ───────────────────────────────────────────────────────
 
 type GenUiComponentRenderer = React.ComponentType<{ component: GenUiComponent; sessionId?: string }>
+
+/**
+ * `chart` (iter/chart) is the first true lazy registry entry: recharts is
+ * imported only inside GenUiChart.tsx, and this dynamic import splits it into
+ * its own chunk that loads on the first chart card. The loader interface is
+ * unchanged — the entry still satisfies GenUiComponentRenderer; Suspense
+ * holds the card chrome open while the chunk arrives, and the per-component
+ * error boundary above still catches anything the renderer throws.
+ */
+const GenUiChartView = React.lazy(() =>
+  import('./GenUiChart').then(module => ({ default: module.GenUiChartView })),
+)
+
+/** Loading placeholder: the shared card chrome with a pulse block. */
+function GenUiChartLoadingFallback() {
+  return (
+    <div className="rounded-[8px] overflow-hidden border bg-muted/10">
+      <div className="px-3 py-2.5">
+        <div className="h-[168px] rounded-[6px] bg-muted/50 animate-pulse" />
+      </div>
+    </div>
+  )
+}
 
 const GENUI_COMPONENT_REGISTRY: Record<string, GenUiComponentRenderer> = {
   'stat-card': ({ component }) => <StatCardView component={component as GenUiStatCard} />,
@@ -1047,6 +1090,11 @@ const GENUI_COMPONENT_REGISTRY: Record<string, GenUiComponentRenderer> = {
   'progress': ({ component }) => <ProgressView component={component as GenUiProgress} />,
   'action-buttons': ({ component, sessionId }) => <ActionButtonsView component={component as GenUiActionButtons} sessionId={sessionId} />,
   'form': ({ component, sessionId }) => <FormView component={component as GenUiForm} sessionId={sessionId} />,
+  'chart': ({ component }) => (
+    <React.Suspense fallback={<GenUiChartLoadingFallback />}>
+      <GenUiChartView component={component as GenUiChart} />
+    </React.Suspense>
+  ),
 }
 
 /** Whether a component type has a registered renderer (else the JSON fallback renders) */

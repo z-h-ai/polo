@@ -8,11 +8,12 @@ import {
 } from './genui-catalog.ts';
 
 describe('genui builtin catalog descriptors', () => {
-  it('covers the six builtin components with unique types', () => {
+  it('covers the seven builtin components with unique types', () => {
     const types = GENUI_BUILTIN_COMPONENT_DESCRIPTORS.map(d => d.type);
     expect(types.sort()).toEqual([
       'action-buttons',
       'alert',
+      'chart',
       'data-table',
       'form',
       'progress',

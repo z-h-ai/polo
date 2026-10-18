@@ -28,6 +28,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   GenUIActionButtonsWithIdSchema,
   GenUIAlertSchema,
+  GenUIChartSchema,
   GenUIDataTableSchema,
   GenUIFormSchema,
   GenUIProgressSchema,
@@ -49,6 +50,7 @@ export const GENUI_COMPONENT_SCHEMAS: Record<string, z.ZodObject<z.ZodRawShape>>
   'progress': GenUIProgressSchema,
   'action-buttons': GenUIActionButtonsWithIdSchema,
   'form': GenUIFormSchema,
+  'chart': GenUIChartSchema,
 };
 
 /** Component types of a snapshot version, in canonical order. */

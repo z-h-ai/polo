@@ -689,6 +689,8 @@
   "genui.app.publishedTo": "Veröffentlicht in {{org}}",
   "genui.app.publishing": "Wird veröffentlicht…",
   "genui.app.version": "v{{version}}",
+  "genui.chart.empty": "In diesem Diagramm gibt es keine darstellbaren Daten.",
+  "genui.chart.tooManySeries": "Zu viele Datenreihen zum Rendern.",
   "genui.componentError": "Diese Karte konnte nicht angezeigt werden.",
   "genui.dataTable.rowDetail": "Details",
   "genui.dataTable.rowValuesMissing": "Einige Werte in dieser Zeile fehlen.",

@@ -216,6 +216,34 @@ export const GenUIDataTableSchema = GenUIBase.extend({
   // field fails validation with a clear message instead of being stripped.
 }).strict();
 
+/**
+ * chart (iter/chart): the sixth component, a CLOSED FORM — exactly four chart
+ * types, 2-24 categories, 1-3 bounded series, everything optional except the
+ * shape itself. Unlike data-table there is no `src`: chart payloads are
+ * inline by design (few points), with the array-level superRefine's 4KB cap
+ * as the natural backstop. `.strict()` rejects unknown keys so a future
+ * escape hatch cannot grow silently; the categories/values equal-length rule
+ * lives on the components array superRefine (a refine here would wrap this
+ * member in ZodEffects and break the discriminated union — same constraint
+ * as the button params rule).
+ */
+export const GenUIChartSchema = GenUIBase.extend({
+  type: z.literal('chart'),
+  chartType: z.enum(['bar', 'line', 'funnel', 'pie'])
+    .describe("'bar' for comparisons/rankings across categories (flips to a horizontal ranking when one series spans 4+ categories), 'line' for trends over an ordered axis, 'funnel' for stage-to-stage drop-off, 'pie' for share of a whole."),
+  categories: z.array(z.string().max(60)).min(2).max(24)
+    .describe('Category labels: x-axis ticks (bar/line), funnel stages top-to-bottom, or pie slices. Every series "values" array must have exactly one value per category.'),
+  series: z.array(z.object({
+    name: z.string().max(60).describe('Series label shown in the legend and tooltip.'),
+    unit: z.string().max(12).optional().describe('Optional unit suffix shown in tooltips (e.g. "%", "万台").'),
+    values: z.array(z.number()).min(2).max(48)
+      .describe('One number per category — same length and order as "categories" (mismatch is rejected).'),
+  })).min(1).max(3)
+    .describe('1-3 data series. pie/funnel render the first series only.'),
+  goodWhen: z.enum(['up', 'down', 'neutral']).optional()
+    .describe('Reserved for semantic coloring of future chart variants; accepted today but does not change rendering.'),
+}).strict();
+
 export const GenUIAlertSchema = GenUIBase.extend({
   type: z.literal('alert'),
   severity: z.enum(['info', 'success', 'warning', 'error']),
@@ -365,6 +393,7 @@ export const GenUIComponentSchema = z.discriminatedUnion('type', [
   GenUIProgressSchema,
   GenUIActionButtonsWithIdSchema,
   GenUIFormSchema,
+  GenUIChartSchema,
 ]);
 
 /**
@@ -381,7 +410,8 @@ export type GenUIComponent =
   | z.infer<typeof GenUIAlertSchema>
   | z.infer<typeof GenUIProgressSchema>
   | z.infer<typeof GenUIActionButtonsWithIdSchema>
-  | z.infer<typeof GenUIFormSchema>;
+  | z.infer<typeof GenUIFormSchema>
+  | z.infer<typeof GenUIChartSchema>;
 
 /** Pre-validation counterpart of GenUIComponent — the `.default()` fields (`goodWhen`, `semantics`, column `type`) are still optional. */
 export type GenUIComponentInput =
@@ -390,7 +420,8 @@ export type GenUIComponentInput =
   | z.input<typeof GenUIAlertSchema>
   | z.input<typeof GenUIProgressSchema>
   | z.input<typeof GenUIActionButtonsWithIdSchema>
-  | z.input<typeof GenUIFormSchema>;
+  | z.input<typeof GenUIFormSchema>
+  | z.input<typeof GenUIChartSchema>;
 
 /**
  * Loose view of a component for the cross-field rules — the dynamic schema
@@ -402,6 +433,8 @@ type GenUiComponentLike = {
   id: string;
   type: string;
   fields?: Array<{ key: string; type: string; options?: string[] }>;
+  categories?: unknown;
+  series?: Array<{ values?: unknown }>;
 };
 
 /**
@@ -461,6 +494,27 @@ export function buildGenUiComponentsArraySchema(componentSchema: z.ZodTypeAny) {
                 code: z.ZodIssueCode.custom,
                 path: [index, 'fields', fieldIndex, 'options'],
                 message: `options are only valid on select fields (field "${field.key}").`,
+              });
+            }
+          });
+        }
+        // chart (iter/chart) cross-field rule: every series must carry exactly
+        // one value per category, in category order. Lives on the array like
+        // the form rules — a superRefine on the chart member itself would
+        // wrap it in ZodEffects and break the discriminated union. Guarded
+        // with Array.isArray because the loose component view cannot assume
+        // the chart member parsed (the per-field constraints already ran);
+        // the narrowed arrays are bound to consts because narrowing does not
+        // survive into the forEach callback.
+        if (component.type === 'chart' && Array.isArray(component.categories) && Array.isArray(component.series)) {
+          const categoryCount = component.categories.length;
+          component.series.forEach((series, seriesIndex) => {
+            const values = series?.values;
+            if (Array.isArray(values) && values.length !== categoryCount) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, 'series', seriesIndex, 'values'],
+                message: `series[${seriesIndex}].values has ${values.length} entries but the chart declares ${categoryCount} categories — values and categories must match in length and order.`,
               });
             }
           });
@@ -745,6 +799,7 @@ Use this instead of plain text when the answer is actionable or data-dense.
 **Components** (1-8 per call, discriminated by "type"):
 - \`stat-card\`: single metric + optional delta/trend
 - \`data-table\`: sortable/filterable table, file-backed ONLY — write rows with transform_data and pass "src"; inline rows are rejected. Optional per-row interactivity: "rowAction" (a button per row whose {{col.key}} template is sent as the next user message), "detailTemplate" (a per-row Details link that prefills the input without sending), "columns[].link" (render a column's values as external links).
+- \`chart\`: closed-form chart with INLINE data (no "src" needed): "chartType" \`bar\` (comparisons/rankings; auto-renders horizontal for 4+ categories with one series), \`line\` (trends), \`funnel\` (stage drop-off), \`pie\` (share of a whole); 2-24 categories x 1-3 bounded series. Use \`chart\` for distributions, trends, shares and funnels; keep \`data-table\` when the user needs row-level detail.
 - \`alert\`: info/success/warning/error banner
 - \`progress\`: running/success/error indicator with optional percent
 - \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input; optional \`confirm\` (message ≤300 chars) shows an in-place confirmation bar first, optional \`params\` + \`promptTemplate\` collect 1-8 per-click values and interpolate \`{{key}}\` before sending — use \`confirm\` for high-stakes actions and \`params\` instead of hardcoding variable values into the prompt
@@ -757,7 +812,7 @@ Use this instead of plain text when the answer is actionable or data-dense.
 - badge table columns can map values to colors via \`"badgeColors"\`: \`{"高": "error", "中": "warning", "低": "success"}\`; unmapped values stay neutral.
 
 **Rules:**
-- Keep the payload small: skeleton inline, data in files. Payloads over 4096 bytes are rejected.
+- Keep the payload small: skeleton inline, data in files. Payloads over 4096 bytes are rejected. \`chart\` is the exception — its few bounded points ride inline.
 - Give every component a unique stable "id" — reusing an id in a later call updates that card in place.
 - If this tool returns a validation error, fix the payload and retry once.
 - Prefer datatable/spreadsheet blocks for static display; prefer render_ui when the user should act.`,

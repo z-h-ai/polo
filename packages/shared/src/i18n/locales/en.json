@@ -689,6 +689,8 @@
   "genui.app.publishedTo": "Published to {{org}}",
   "genui.app.publishing": "Publishing…",
   "genui.app.version": "v{{version}}",
+  "genui.chart.empty": "No plottable data in this chart.",
+  "genui.chart.tooManySeries": "Too many series to render.",
   "genui.componentError": "This card couldn't be displayed.",
   "genui.dataTable.rowDetail": "Details",
   "genui.dataTable.rowValuesMissing": "Some values in this row are missing.",

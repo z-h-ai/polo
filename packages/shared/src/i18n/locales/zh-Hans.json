@@ -689,6 +689,8 @@
   "genui.app.publishedTo": "已发布到 {{org}}",
   "genui.app.publishing": "发布中…",
   "genui.app.version": "v{{version}}",
+  "genui.chart.empty": "此图表没有可绘制的数据。",
+  "genui.chart.tooManySeries": "系列过多，无法渲染。",
   "genui.componentError": "该卡片无法显示。",
   "genui.dataTable.rowDetail": "详情",
   "genui.dataTable.rowValuesMissing": "该行部分字段缺失。",

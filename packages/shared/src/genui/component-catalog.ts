@@ -176,6 +176,7 @@ const BUILTIN_COMPONENT_NAMES: Record<string, string> = {
   'progress': 'Progress',
   'action-buttons': 'Action buttons',
   'form': 'Form',
+  'chart': 'Chart',
 }
 
 // ── Process-wide singleton ───────────────────────────────────────────────────

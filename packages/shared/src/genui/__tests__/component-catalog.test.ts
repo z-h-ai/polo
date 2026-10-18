@@ -82,9 +82,9 @@ describe('canonicalGenUiJson / schema hash', () => {
 })
 
 describe('builtin catalog', () => {
-  test('registers the six builtins through the same interface as third-party', () => {
+  test('registers the seven builtins through the same interface as third-party', () => {
     const catalog = createBuiltinGenUiComponentCatalog()
-    expect(catalog.size).toBe(6)
+    expect(catalog.size).toBe(7)
     for (const descriptor of GENUI_BUILTIN_COMPONENT_DESCRIPTORS) {
       const component = catalog.get(descriptor.type)!
       expect(component).toBeDefined()
