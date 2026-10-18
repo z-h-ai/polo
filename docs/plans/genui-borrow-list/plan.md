@@ -337,3 +337,15 @@ token 均为 chars/4 估算口径（报告内已标注）。P1-1 瘦身以 rende
 - `bun run lint`：`scripts/check-raw-sends.sh`、`check-task-tool-checks.sh` 在 HEAD 未跟踪，lint:ipc-sends / lint:tool-name-checks 127 退出。
 - lint:electron 4 错（onboarding 阴影类）、lint:ui 3 错（block-markers/TurnCard 1501 既有 boxShadow）、lint:shared 0 错 20 警——均与本轮改动无关（含 my-files 定向核对）。
 - 套件级：server-core 全量 47 fail、electron 全量 48 fail、shared 全量 13 fail（poison-pill esbuild metafile、callback server 时序、managed proxy 并发、i18n parity productSpaceSkills）——stash 前后失败数逐一相同；单文件重跑相关用例全绿。
+
+### Wave-1 Review 修复轮（PASS-with-notes 处置，全部 fixed）
+
+P1 + 6 项 P2 已全部修复（`fix(genui): address Wave-1 review findings`），门槛复跑全绿（session-tools-core + ui 689 pass / 0 fail，typecheck:all exit 0，lint 定向与基线逐项相同）。
+
+- **P1 标题配对错挂（fixed）**：扫描器从"type→其后最近 title"单向窗口改为**字符距离双向最近**归属（以相邻两个 type 为界不跨组件；tie 归后继 type——schema 字段序惯例；首 type 之前/末 type 之后的 title 归该端 type）。补回归：schema 字段序（id,title,type）多组件（即 reviewer 复现用例）、混合顺序四组件、title 前置单组件、同 type 双 title 取首个。
+- **P2-1 th align-top（fixed）**：`align-top` 移入 `enableColumnFilters` 条件分支，markdown 富块路径（未开筛选）恢复与 Wave-1 前完全一致的 class 列表。
+- **P2-2 封顶注释（fixed + recorded）**：dto.ts 常量注释改为如实描述——received ≥8192 即停、末次冲刷可超出一个缓冲块，非逐字节输出上限。另记偏离：plan P0-2 方案里 "delta 单块 ≤2KB" 规格未实现（实际单块 = 250ms 窗口内缓冲量，正常速率下远小于 2KB 但无硬保证）；不改实现。
+- **P2-3 seq 乱序守卫（fixed）**：累积器实现 plan 风险表承诺的单调性守卫——每 (sessionId, toolUseId) 记 lastSeq，非严格递增即丢弃（丢弃也记录该 seq，重放同 seq 再拒）；App.tsx 传 `event.seq`；无 seq 调用向后兼容。补 4 个单测（乱序/重复/重放、clear 后重置、跨 toolUseId 独立、无 seq 兼容）。
+- **P2-4 lockstep 双向（fixed）**：GenUICard 导出 `GENUI_COMPONENT_TYPES`（registry keys 派生），测试改为双向集合相等断言——registry 加渲染器不更新骨架白名单同样红。
+- **P2-5 会话切换缓冲滞留（fixed）**：接上最小缝隙——ChatDisplay 既有的会话切换检测 effect（deps 含 `session?.id`）在切换时 `clearGenUiToolInputDeltasForSession(前一会话)`；TurnCard 的 per-toolUseId 清理仍兜底同会话内调用收尾。
+- **P2-6 TurnCard 工具名（fixed）**：新增 `isRenderUiActivityToolName`（ui 侧，语义镜像发射侧 isRenderUiToolName：`render_ui` 与 `mcp__session__render_ui` 都认），TurnCard 的进行中筛选与 completed 卡片筛选两处统一走它；配正反单测。

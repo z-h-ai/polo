@@ -77,4 +77,40 @@ describe('genuiToolInputDeltas accumulator', () => {
     expect(getGenUiToolInputPartials('nope').size).toBe(0)
     expect(getGenUiToolInputPartials(null)).toBe(getGenUiToolInputPartials(undefined))
   })
+
+  it('drops out-of-order, duplicate, and replayed seq chunks (monotonicity guard)', () => {
+    // In-order delivery accumulates
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'a', 1)
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'b', 2)
+    expect(getGenUiToolInputPartials('sess-a').get('toolu_1')).toBe('ab')
+
+    // Duplicate (same seq) and reordered (lower seq) chunks are dropped
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'DUP', 2)
+    expect(getGenUiToolInputPartials('sess-a').get('toolu_1')).toBe('ab')
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'OLD', 1)
+    expect(getGenUiToolInputPartials('sess-a').get('toolu_1')).toBe('ab')
+
+    // The dropped seq was still recorded: replaying a higher-but-seen seq is
+    // accepted only when strictly greater than the last ACCEPTED seq.
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'c', 3)
+    expect(getGenUiToolInputPartials('sess-a').get('toolu_1')).toBe('abc')
+  })
+
+  it('seq state is per toolUseId and resets on clear', () => {
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'x', 5)
+    clearGenUiToolInputDelta('sess-a', 'toolu_1')
+    // After a clear the seq ledger is empty — a fresh call may restart at 1
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'y', 1)
+    expect(getGenUiToolInputPartials('sess-a').get('toolu_1')).toBe('y')
+
+    // A different toolUseId in the same session has its own ledger
+    appendGenUiToolInputDelta('sess-a', 'toolu_2', 'z', 1)
+    expect(getGenUiToolInputPartials('sess-a').get('toolu_2')).toBe('z')
+  })
+
+  it('accepts chunks without a seq (backwards-compatible callers)', () => {
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'x', 3)
+    appendGenUiToolInputDelta('sess-a', 'toolu_1', 'y')
+    expect(getGenUiToolInputPartials('sess-a').get('toolu_1')).toBe('xy')
+  })
 })

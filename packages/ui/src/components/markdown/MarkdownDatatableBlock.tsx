@@ -791,7 +791,14 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             {parsed.columns.map((col) => (
               <th
                 key={col.key}
-                className={cn('py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap align-top', colAlign(col.type, col.align))}
+                // align-top only when a filter control may stack under the
+                // label — the markdown rich-block path (no filters) keeps the
+                // exact pre-filter class list.
+                className={cn(
+                  'py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap',
+                  enableColumnFilters && 'align-top',
+                  colAlign(col.type, col.align),
+                )}
                 onClick={() => handleSort(col.key)}
               >
                 <span className="inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors">

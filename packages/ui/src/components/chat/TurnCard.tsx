@@ -39,7 +39,7 @@ import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
 import { GenUICard, mergeGenUiComponents, parseGenUiComponents } from './GenUICard'
-import { extractGenUiSkeletons, type GenUiSkeleton } from './genuiSkeleton'
+import { extractGenUiSkeletons, isRenderUiActivityToolName, type GenUiSkeleton } from './genuiSkeleton'
 import { useGenUiToolInputPartials, getGenUiToolInputPartials, clearGenUiToolInputDelta } from './genuiToolInputDeltas'
 import {
   type GenUiAppCardProps,
@@ -2914,7 +2914,7 @@ export const TurnCard = React.memo(function TurnCard({
   const genUiComponents = useMemo(
     () => mergeGenUiComponents(
       sortedActivities
-        .filter(a => a.type === 'tool' && a.toolName === 'mcp__session__render_ui' && a.status === 'completed')
+        .filter(a => a.type === 'tool' && isRenderUiActivityToolName(a.toolName) && a.status === 'completed')
         .map(a => parseGenUiComponents(a.toolInput))
         .filter(group => group.length > 0)
     ),
@@ -2929,7 +2929,7 @@ export const TurnCard = React.memo(function TurnCard({
   // accumulator only, never in message state or persistence.
   const inProgressRenderUiActivities = useMemo(
     () => sortedActivities.filter(
-      a => a.type === 'tool' && a.toolName === 'mcp__session__render_ui'
+      a => a.type === 'tool' && isRenderUiActivityToolName(a.toolName)
         && (a.status === 'running' || a.status === 'pending')
     ),
     [sortedActivities]

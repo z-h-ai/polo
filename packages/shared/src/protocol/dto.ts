@@ -880,10 +880,12 @@ export const GENUI_BRIDGE_CAPABILITIES = [GENUI_BRIDGE_CAPABILITY_UI_EVENT] as c
 export const GENUI_TOOL_INPUT_DELTA_FLUSH_MS = 250
 
 /**
- * Hard cap on the TOTAL characters emitted per toolUseId across all its
- * tool_input_delta events. Once reached the emitter goes silent and the
- * renderer waits for the completed tool call (graceful degradation — the
- * full payload arrives with tool_start/tool_result anyway).
+ * Cap on tool_input_delta emission per toolUseId: once the emitter has
+ * RECEIVED this many input characters for the call, it flushes what is
+ * buffered and goes silent (the completed tool call remains the authoritative
+ * payload path). Not a byte-exact output guarantee — the final flush at the
+ * threshold carries everything accumulated since the previous flush, so the
+ * emitted total may overshoot by up to one buffered chunk.
  */
 export const GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS = 8192
 

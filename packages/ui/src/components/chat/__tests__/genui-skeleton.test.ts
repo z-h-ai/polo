@@ -7,8 +7,22 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { GENUI_SKELETON_COMPONENT_TYPES, extractGenUiSkeletons } from '../genuiSkeleton'
-import { hasGenUiRenderer } from '../GenUICard'
+import { GENUI_SKELETON_COMPONENT_TYPES, extractGenUiSkeletons, isRenderUiActivityToolName } from '../genuiSkeleton'
+import { GENUI_COMPONENT_TYPES, hasGenUiRenderer } from '../GenUICard'
+
+describe('isRenderUiActivityToolName (aligned with the emission-side predicate)', () => {
+  it('accepts both the MCP-prefixed and the bare render_ui name', () => {
+    expect(isRenderUiActivityToolName('mcp__session__render_ui')).toBe(true)
+    expect(isRenderUiActivityToolName('render_ui')).toBe(true)
+  })
+
+  it('rejects every other tool', () => {
+    expect(isRenderUiActivityToolName('mcp__session__generate_app')).toBe(false)
+    expect(isRenderUiActivityToolName('mcp__session__call_llm')).toBe(false)
+    expect(isRenderUiActivityToolName('Bash')).toBe(false)
+    expect(isRenderUiActivityToolName(undefined)).toBe(false)
+  })
+})
 
 describe('extractGenUiSkeletons — recognition', () => {
   it('recognizes a fully-closed type and pairs the nearest following title', () => {
@@ -87,9 +101,40 @@ describe('extractGenUiSkeletons — multi-component payloads', () => {
     ])
   })
 
-  it('a title never leaks across components (window bounded by the next type)', () => {
-    // Second component has no title of its own before the third component's
-    // type appears — it must NOT steal the third component's title.
+  it('schema field order (id, title, type) pairs each title with its OWN component (P1 regression)', () => {
+    // The model-visible JSON Schema declares id/title before type (GenUIBase),
+    // so models emit titles PRECEDING their type. A forward-only window loses
+    // the first title and misattributes the last one to the wrong component.
+    const partial = [
+      '{"components":[',
+      '{"id":"a","title":"Alpha","type":"data-table","src":"data/x.json","columns":[{"key":"k","label":"K"}]},',
+      '{"id":"b","title":"Beta","type":"alert","severity":"info","message":"m"}',
+    ].join('')
+    expect(extractGenUiSkeletons(partial)).toEqual([
+      { type: 'data-table', title: 'Alpha' },
+      { type: 'alert', title: 'Beta' },
+    ])
+  })
+
+  it('mixed field orders: every title lands on its own component', () => {
+    const partial = [
+      '{"components":[',
+      '{"id":"a","title":"First","type":"stat-card"},',          // title before type
+      '{"id":"b","type":"progress","title":"Second"},',           // title after type
+      '{"id":"c","title":"Third","type":"form","fields":[{"key":"f","label":"F"}]},', // before
+      '{"id":"d","type":"chart","title":"Fourth"',                 // after, truncated tail
+    ].join('')
+    expect(extractGenUiSkeletons(partial)).toEqual([
+      { type: 'stat-card', title: 'First' },
+      { type: 'progress', title: 'Second' },
+      { type: 'form', title: 'Third' },
+      { type: 'chart', title: 'Fourth' },
+    ])
+  })
+
+  it('a title never attaches across a component boundary (nearest of the two adjacent types wins)', () => {
+    // "Late title" sits closer to the alert type than to the form type —
+    // it belongs to the alert, and the form gets no title, never a borrow.
     const partial = '{"type":"form","fields":[{"key":"a"}]},{"type":"alert","title":"Late title"'
     expect(extractGenUiSkeletons(partial)).toEqual([
       { type: 'form' },
@@ -97,9 +142,14 @@ describe('extractGenUiSkeletons — multi-component payloads', () => {
     ])
   })
 
-  it('title before type (schema field order id/title/type) yields the type without a title', () => {
-    const partial = '{"id":"rev","title":"Q3","type":"stat-card"'
-    expect(extractGenUiSkeletons(partial)).toEqual([{ type: 'stat-card' }])
+  it('a title before the first type belongs to that first type', () => {
+    const partial = '{"title":"Leading","type":"stat-card"'
+    expect(extractGenUiSkeletons(partial)).toEqual([{ type: 'stat-card', title: 'Leading' }])
+  })
+
+  it('keeps the first title when a malformed payload yields two titles for one type', () => {
+    const partial = '{"type":"alert","title":"One","title":"Two"'
+    expect(extractGenUiSkeletons(partial)).toEqual([{ type: 'alert', title: 'One' }])
   })
 
   it('dedupes identical type+title skeletons across components', () => {
@@ -121,7 +171,13 @@ describe('extractGenUiSkeletons — multi-component payloads', () => {
   })
 })
 
-describe('GENUI_SKELETON_COMPONENT_TYPES — registry lockstep', () => {
+describe('GENUI_SKELETON_COMPONENT_TYPES — registry lockstep (bidirectional)', () => {
+  it('matches the GenUICard renderer registry exactly, both directions', () => {
+    // Set equality: a registry renderer without a skeleton whitelist entry is
+    // just as wrong as a whitelisted type without a renderer.
+    expect([...GENUI_SKELETON_COMPONENT_TYPES].sort()).toEqual([...GENUI_COMPONENT_TYPES].sort())
+  })
+
   it('contains exactly the render_ui component whitelist', () => {
     expect([...GENUI_SKELETON_COMPONENT_TYPES].sort()).toEqual([
       'action-buttons',

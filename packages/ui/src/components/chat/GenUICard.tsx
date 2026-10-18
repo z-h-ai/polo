@@ -1100,6 +1100,9 @@ const GENUI_COMPONENT_REGISTRY: Record<string, GenUiComponentRenderer> = {
   ),
 }
 
+/** Component type keys of the registry (derivation, not a second list). */
+export const GENUI_COMPONENT_TYPES: readonly string[] = Object.keys(GENUI_COMPONENT_REGISTRY)
+
 /** Whether a component type has a registered renderer (else the JSON fallback renders) */
 export function hasGenUiRenderer(type: string): boolean {
   return Object.prototype.hasOwnProperty.call(GENUI_COMPONENT_REGISTRY, type)

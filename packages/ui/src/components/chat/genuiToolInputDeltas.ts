@@ -19,6 +19,14 @@ import { useSyncExternalStore } from 'react'
 /** sessionId → toolUseId → accumulated partial input JSON. */
 const buffers = new Map<string, Map<string, string>>()
 
+/**
+ * Last accepted seq per (sessionId, toolUseId). Deltas are accepted only on
+ * strictly increasing seq — a reordered or duplicated emission (IPC fan-out,
+ * racing windows) must never splice the same chunk twice or rewind the
+ * partial (the plan's risk-table "drop out-of-order seq" commitment).
+ */
+const lastSeqByTool = new Map<string, Map<string, number>>()
+
 type Listener = () => void
 const listeners = new Set<Listener>()
 
@@ -40,25 +48,51 @@ function notify(): void {
   for (const listener of listeners) listener()
 }
 
-/** Append one delta chunk to a tool call's accumulated partial input. */
-export function appendGenUiToolInputDelta(sessionId: string, toolUseId: string, delta: string): void {
+/**
+ * Append one delta chunk to a tool call's accumulated partial input.
+ * When `seq` is provided it must be strictly greater than the last accepted
+ * seq for the tool call; otherwise the chunk is dropped (monotonicity guard
+ * against reordered/duplicated delivery — the dropped seq is still recorded
+ * so a subsequent replay of it is rejected too).
+ */
+export function appendGenUiToolInputDelta(
+  sessionId: string,
+  toolUseId: string,
+  delta: string,
+  seq?: number,
+): void {
   if (!sessionId || !toolUseId || !delta) return
-  let byTool = buffers.get(sessionId)
-  if (!byTool) {
-    byTool = new Map()
-    buffers.set(sessionId, byTool)
+  if (seq !== undefined) {
+    let byTool = lastSeqByTool.get(sessionId)
+    if (!byTool) {
+      byTool = new Map()
+      lastSeqByTool.set(sessionId, byTool)
+    }
+    const last = byTool.get(toolUseId)
+    if (last !== undefined && seq <= last) return
+    byTool.set(toolUseId, seq)
   }
-  byTool.set(toolUseId, (byTool.get(toolUseId) ?? '') + delta)
+  let buffersByTool = buffers.get(sessionId)
+  if (!buffersByTool) {
+    buffersByTool = new Map()
+    buffers.set(sessionId, buffersByTool)
+  }
+  buffersByTool.set(toolUseId, (buffersByTool.get(toolUseId) ?? '') + delta)
   snapshotCache = null
   notify()
 }
 
 /** Forget one tool call's buffer (call finished / failed / left the turn). */
 export function clearGenUiToolInputDelta(sessionId: string, toolUseId: string): void {
-  const byTool = buffers.get(sessionId)
-  if (!byTool || !byTool.has(toolUseId)) return
-  byTool.delete(toolUseId)
-  if (byTool.size === 0) buffers.delete(sessionId)
+  const buffersByTool = buffers.get(sessionId)
+  if (!buffersByTool || !buffersByTool.has(toolUseId)) return
+  buffersByTool.delete(toolUseId)
+  if (buffersByTool.size === 0) buffers.delete(sessionId)
+  const seqByTool = lastSeqByTool.get(sessionId)
+  if (seqByTool) {
+    seqByTool.delete(toolUseId)
+    if (seqByTool.size === 0) lastSeqByTool.delete(sessionId)
+  }
   snapshotCache = null
   notify()
 }
@@ -67,6 +101,7 @@ export function clearGenUiToolInputDelta(sessionId: string, toolUseId: string): 
 export function clearGenUiToolInputDeltasForSession(sessionId: string): void {
   if (!buffers.has(sessionId)) return
   buffers.delete(sessionId)
+  lastSeqByTool.delete(sessionId)
   snapshotCache = null
   notify()
 }
