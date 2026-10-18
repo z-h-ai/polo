@@ -432,7 +432,7 @@ function CoinGlyph({ color, size }: { color: string; size: number }) {
       }}
     >
       <Text style={{ color, fontSize: size * 0.55, fontWeight: '700', lineHeight: size * 0.6 }}>
-        ¥
+        $
       </Text>
     </View>
   );
