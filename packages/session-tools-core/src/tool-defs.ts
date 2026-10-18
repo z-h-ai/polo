@@ -166,9 +166,15 @@ export const GenUIStatCardSchema = GenUIBase.extend({
   type: z.literal('stat-card'),
   label: z.string().max(80),
   value: z.union([z.number(), z.string().max(40)]),
+  format: z.enum(['number', 'percent', 'currency']).optional()
+    .describe("How to render `value`: 'number' adds thousands separators; 'percent' treats a decimal fraction as a share (0.093 → 9.3%); 'currency' adds thousands separators plus the `currency` prefix. Omit to display `value` verbatim (e.g. with a unit suffix)."),
+  currency: z.string().max(8).optional()
+    .describe("Currency symbol or code used by format 'currency' (e.g. '$', 'CNY')."),
   unit: z.string().max(12).optional(),
   delta: z.number().optional().describe('Decimal, e.g. 0.152 = +15.2%'),
   trend: z.enum(['up', 'down', 'flat']).optional(),
+  goodWhen: z.enum(['up', 'down', 'neutral']).default('up')
+    .describe("Which delta direction is good news, controlling the delta color: 'up' (default) colors rises green / falls red; 'down' is inverted — rises red, falls green (queue length, error rate, loss ratio); 'neutral' always renders the delta muted."),
 });
 
 // Column types align with the datatable rich-block contract in system.ts
@@ -176,6 +182,10 @@ const GenUITableColumnSchema = z.object({
   key: z.string().max(60),
   label: z.string().max(80),
   type: z.enum(['text', 'number', 'currency', 'percent', 'boolean', 'date', 'badge']).default('text'),
+  semantics: z.enum(['rate', 'share', 'change']).default('change')
+    .describe("Meaning of a percent column, deciding its rendering: 'change' (default) is an up/down move — signed, green/red; 'rate' is a level/ratio (loss rate, utilization) and 'share' a proportion of a whole — both rendered unsigned and neutral so 6.8% never looks like good news."),
+  badgeColors: z.record(z.string(), z.enum(['info', 'success', 'warning', 'error'])).optional()
+    .describe('badge columns only: cell value → color chip, e.g. {"高": "error", "中": "warning", "低": "success"}. Values not in the map stay neutral.'),
 });
 
 export const GenUIDataTableSchema = GenUIBase.extend({
@@ -259,7 +269,30 @@ export const GenUIComponentSchema = z.discriminatedUnion('type', [
   GenUIFormSchema,
 ]);
 
-export type GenUIComponent = z.infer<typeof GenUIComponentSchema>;
+/**
+ * Per-member inference, not `z.infer` of the whole union: with a third
+ * `.default()` field in the union the full-union instantiation exceeds TS's
+ * depth budget and every consumer sees `{}` for the component type (it
+ * silently degraded render-ui.ts and the schema tests to `unknown`). Members
+ * infer fine individually, and the assembled array schema below pins this
+ * type with a cast — runtime validation is untouched.
+ */
+export type GenUIComponent =
+  | z.infer<typeof GenUIStatCardSchema>
+  | z.infer<typeof GenUIDataTableSchema>
+  | z.infer<typeof GenUIAlertSchema>
+  | z.infer<typeof GenUIProgressSchema>
+  | z.infer<typeof GenUIActionButtonsWithIdSchema>
+  | z.infer<typeof GenUIFormSchema>;
+
+/** Pre-validation counterpart of GenUIComponent — the `.default()` fields (`goodWhen`, `semantics`, column `type`) are still optional. */
+export type GenUIComponentInput =
+  | z.input<typeof GenUIStatCardSchema>
+  | z.input<typeof GenUIDataTableSchema>
+  | z.input<typeof GenUIAlertSchema>
+  | z.input<typeof GenUIProgressSchema>
+  | z.input<typeof GenUIActionButtonsWithIdSchema>
+  | z.input<typeof GenUIFormSchema>;
 
 /**
  * Loose view of a component for the cross-field rules — the dynamic schema
@@ -338,7 +371,10 @@ export function buildGenUiComponentsArraySchema(componentSchema: z.ZodTypeAny) {
     });
 }
 
-const GenUIComponentsArraySchema = buildGenUiComponentsArraySchema(GenUIComponentSchema);
+// The explicit type pin goes with the per-member GenUIComponent union above:
+// left to inference, the union-in-array instantiation collapses to `{}` in
+// consumers (see the GenUIComponent doc comment).
+const GenUIComponentsArraySchema = buildGenUiComponentsArraySchema(GenUIComponentSchema) as unknown as z.ZodType<GenUIComponent[]>;
 
 export const RenderUiSchema = z.object({
   components: GenUIComponentsArraySchema,
@@ -615,6 +651,12 @@ Use this instead of plain text when the answer is actionable or data-dense.
 - \`progress\`: running/success/error indicator with optional percent
 - \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input
 - \`form\`: 1-12 fields (text/number/select/date) the user fills in; submitting sends the serialized values object as the next user message (fixed semantics — no action config)
+
+**Value semantics** (pick per meaning, not per sign):
+- percent table columns render as up/down moves (+, green/red) by default. For levels and proportions — loss rate, utilization, weight, share — set the column \`"semantics"\`: \`"rate"\` or \`"share"\` so values render unsigned and neutral.
+- \`stat-card\` accepts \`"format"\`: \`"number"\` (thousands separators) | \`"percent"\` (0.093 → 9.3%) | \`"currency"\` (thousands + \`"currency"\` prefix). Omit \`format\` to show the raw value (e.g. with a unit).
+- \`stat-card\` \`"goodWhen"\` controls delta coloring: \`"down"\` (queues, errors, costs — a rise is bad news) renders increases red and decreases green; \`"neutral"\` renders the delta muted. Default \`"up"\` keeps rises green.
+- badge table columns can map values to colors via \`"badgeColors"\`: \`{"高": "error", "中": "warning", "低": "success"}\`; unmapped values stay neutral.
 
 **Rules:**
 - Keep the payload small: skeleton inline, data in files. Payloads over 4096 bytes are rejected.

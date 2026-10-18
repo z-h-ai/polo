@@ -54,6 +54,10 @@ interface ColumnDef {
   label: string
   type?: 'text' | 'number' | 'currency' | 'percent' | 'boolean' | 'date' | 'badge'
   align?: 'left' | 'center' | 'right'
+  /** percent columns only: change = up/down move (signed, colored); rate/share = unsigned, neutral */
+  semantics?: 'rate' | 'share' | 'change'
+  /** badge columns only: cell value → chip color; unmatched values stay neutral */
+  badgeColors?: Record<string, 'info' | 'success' | 'warning' | 'error'>
 }
 
 interface DatatableData {
@@ -73,7 +77,53 @@ type SortDir = 'asc' | 'desc' | null
 
 // ── Cell formatting ──────────────────────────────────────────────────────────
 
-function formatCell(value: unknown, type?: ColumnDef['type']): React.ReactNode {
+export type BadgeColorName = 'info' | 'success' | 'warning' | 'error'
+
+/** Chip classes per declared badge color; `warning` rides the amber `info` token (no separate warning color in the theme). */
+const BADGE_COLOR_CLASSES: Record<BadgeColorName, string> = {
+  info: 'bg-accent/10 text-accent',
+  success: 'bg-success/10 text-success',
+  warning: 'bg-info/10 text-info',
+  error: 'bg-destructive/10 text-destructive',
+}
+const BADGE_NEUTRAL_CLASS = 'bg-muted text-muted-foreground'
+
+/**
+ * Unsigned, magnitude-aware percent for rate/share semantics columns
+ * (decimal fraction in: 0.068 → "6.8%"). No sign, no coloring — a share or a
+ * loss rate is not an up/down move, so "+" and green/red would mislead.
+ * Thousands separators kick in past 1000%; precision tightens as magnitudes
+ * shrink so sub-1% rates keep their digits.
+ */
+export function formatNeutralPercent(pct: number): string {
+  const scaled = pct * 100
+  const abs = Math.abs(scaled)
+  const maxFractionDigits = abs >= 1000 ? 1 : abs >= 1 ? 2 : 4
+  return scaled.toLocaleString('en-US', { maximumFractionDigits: maxFractionDigits }) + '%'
+}
+
+/**
+ * Chip class for a badge cell. When the column declares `badgeColors`, the
+ * cell value is matched against it case-insensitively — a hit renders that
+ * color, a miss stays neutral (a declared map replaces the builtin guesses).
+ * Without `badgeColors`, the builtin status-word mapping applies unchanged.
+ */
+export function resolveBadgeChipClass(value: string, badgeColors?: ColumnDef['badgeColors']): string {
+  if (badgeColors) {
+    const needle = value.toLowerCase()
+    for (const [key, color] of Object.entries(badgeColors)) {
+      if (key.toLowerCase() === needle) return BADGE_COLOR_CLASSES[color]
+    }
+    return BADGE_NEUTRAL_CLASS
+  }
+  const s = value.toLowerCase()
+  if (s === 'active' || s === 'passing' || s === 'success' || s === 'done') return BADGE_COLOR_CLASSES.success
+  if (s === 'revoked' || s === 'failed' || s === 'error') return BADGE_COLOR_CLASSES.error
+  return BADGE_NEUTRAL_CLASS
+}
+
+function formatCell(value: unknown, col: ColumnDef): React.ReactNode {
+  const type = col.type
   if (value === null || value === undefined) return <span className="text-muted-foreground/40">—</span>
   switch (type) {
     case 'currency': {
@@ -84,6 +134,10 @@ function formatCell(value: unknown, type?: ColumnDef['type']): React.ReactNode {
     case 'percent': {
       const pct = typeof value === 'number' ? value : Number(value)
       if (isNaN(pct)) return String(value)
+      // rate/share: unsigned, neutral. change (default): signed + green/red.
+      if (col.semantics === 'rate' || col.semantics === 'share') {
+        return <span className="tabular-nums">{formatNeutralPercent(pct)}</span>
+      }
       const formatted = (pct * 100).toFixed(1) + '%'
       const positive = pct > 0
       return <span className={cn('tabular-nums', positive && 'text-success', pct < 0 && 'text-destructive')}>{positive ? '+' : ''}{formatted}</span>
@@ -96,12 +150,7 @@ function formatCell(value: unknown, type?: ColumnDef['type']): React.ReactNode {
     case 'boolean':
       return value ? <span className="text-success">Yes</span> : <span className="text-muted-foreground">No</span>
     case 'badge': {
-      const s = String(value).toLowerCase()
-      const color = s === 'active' || s === 'passing' || s === 'success' || s === 'done'
-        ? 'bg-success/10 text-success'
-        : s === 'revoked' || s === 'failed' || s === 'error'
-        ? 'bg-destructive/10 text-destructive'
-        : 'bg-muted text-muted-foreground'
+      const color = resolveBadgeChipClass(String(value), col.badgeColors)
       return <span className={cn('inline-block px-1.5 py-0.5 rounded text-[11px] font-medium', color)}>{String(value)}</span>
     }
     default:
@@ -475,7 +524,7 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
       <tr key={i} className="border-b border-foreground/[0.03] last:border-0 hover:bg-foreground/[0.015] transition-colors">
         {parsed.columns.map((col) => (
           <td key={col.key} className={cn('py-2 px-3 whitespace-nowrap', colAlign(col.type, col.align))}>
-            {formatCell(row[col.key], col.type)}
+            {formatCell(row[col.key], col)}
           </td>
         ))}
       </tr>

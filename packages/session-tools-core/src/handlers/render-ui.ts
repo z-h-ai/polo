@@ -24,10 +24,16 @@ import { isPathWithinDirectory } from '../runtime/path-security.ts';
 import {
   RenderUiSchema,
   type GenUIComponent,
+  type GenUIComponentInput,
 } from '../tool-defs.ts';
 
+/**
+ * Pre-validation tool input: fields the schema defaults (`goodWhen`,
+ * `semantics`, column `type`) stay optional here — safeParse materializes
+ * them into the output-side GenUIComponent.
+ */
 export interface RenderUiArgs {
-  components: GenUIComponent[];
+  components: GenUIComponentInput[];
 }
 
 /** Format Zod issues into a compact, model-actionable summary. */

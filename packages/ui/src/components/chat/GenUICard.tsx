@@ -16,11 +16,13 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, TrendingDown, TrendingUp, Minus } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import { MarkdownDatatableBlock } from '../markdown/MarkdownDatatableBlock'
+import { MarkdownDatatableBlock, formatNeutralPercent } from '../markdown/MarkdownDatatableBlock'
 
 // ── Payload types (renderer-side mirror of the render_ui tool schema) ────────
 
 export type GenUiTrend = 'up' | 'down' | 'flat'
+export type GenUiStatValueFormat = 'number' | 'percent' | 'currency'
+export type GenUiGoodWhen = 'up' | 'down' | 'neutral'
 
 export interface GenUiStatCard {
   type: 'stat-card'
@@ -28,16 +30,26 @@ export interface GenUiStatCard {
   title?: string
   label: string
   value: string | number
+  /** How to render `value`; omit to display it verbatim (e.g. with a unit). */
+  format?: GenUiStatValueFormat
+  /** Currency symbol/code for format 'currency' ('$' renders as $1,234; a multi-char code gets a space: CNY 1,234). */
+  currency?: string
   unit?: string
   /** Decimal fraction per the tool schema (0.152 = +15.2%). */
   delta?: number
   trend?: GenUiTrend
+  /** Which delta direction is good news; drives the delta color, default 'up'. */
+  goodWhen?: GenUiGoodWhen
 }
 
 export interface GenUiTableColumn {
   key: string
   label: string
   type?: 'text' | 'number' | 'currency' | 'percent' | 'boolean' | 'date' | 'badge'
+  /** percent columns: 'change' (default) renders signed + green/red; 'rate'/'share' render unsigned + neutral. */
+  semantics?: 'rate' | 'share' | 'change'
+  /** badge columns: cell value → chip color; unmatched values stay neutral. */
+  badgeColors?: Record<string, 'info' | 'success' | 'warning' | 'error'>
 }
 
 export interface GenUiDataTable {
@@ -226,7 +238,55 @@ export function formatStatDelta(delta: number): string {
   return `${percent > 0 ? '+' : ''}${percent}%`
 }
 
+/**
+ * Render a stat-card `value` per the optional `format` hint: 'percent' treats
+ * the schema's decimal fraction as a share (0.093 → 9.3%), 'number' and
+ * 'currency' add thousands separators ('currency' prefixed by the declared
+ * symbol — a multi-char code gets a separating space). Without `format` (or
+ * when the value does not survive numeric coercion) the value shows verbatim,
+ * so a formatted stat can never blank out or double-render a unit.
+ */
+export function formatStatValue(
+  value: string | number,
+  format?: GenUiStatValueFormat,
+  currency?: string,
+): string {
+  if (!format) return String(value)
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) return String(value)
+  switch (format) {
+    case 'percent':
+      return formatNeutralPercent(num)
+    case 'currency': {
+      const prefix = currency && currency.length > 0 ? currency : ''
+      const separator = prefix.length > 1 ? ' ' : ''
+      return `${prefix}${separator}${num.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+    }
+    case 'number':
+    default:
+      return num.toLocaleString('en-US')
+  }
+}
+
+/**
+ * Delta color sentiment from the trend arrow and the declared `goodWhen`
+ * direction. Default 'up' reproduces the historical mapping (rises green,
+ * falls red); 'down' inverts it (queues, error rates, costs — a rise is bad);
+ * 'neutral' mutes the color. The arrow icon itself always shows the real
+ * direction — only the color flips. No trend (or flat) stays muted.
+ */
+export function resolveStatDeltaTone(
+  trend: GenUiTrend | undefined,
+  goodWhen: GenUiGoodWhen | undefined,
+): 'success' | 'destructive' | 'muted' {
+  if (!trend || trend === 'flat' || goodWhen === 'neutral') return 'muted'
+  const up = trend === 'up'
+  const good = goodWhen === 'down' ? !up : up
+  return good ? 'success' : 'destructive'
+}
+
 function StatCardView({ component }: { component: GenUiStatCard }) {
+  const deltaTone = resolveStatDeltaTone(component.trend, component.goodWhen)
   return (
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
       {component.title && (
@@ -238,16 +298,16 @@ function StatCardView({ component }: { component: GenUiStatCard }) {
         <div className="min-w-0">
           <div className="text-[12px] text-muted-foreground truncate">{component.label}</div>
           <div className="text-[20px] font-semibold tabular-nums leading-tight truncate">
-            {String(component.value)}
+            {formatStatValue(component.value, component.format, component.currency)}
             {component.unit && <span className="text-[13px] font-normal text-muted-foreground ml-1">{component.unit}</span>}
           </div>
         </div>
         {component.delta !== undefined && (
           <span className={cn(
             'shrink-0 inline-flex items-center gap-1 text-[12px] font-medium tabular-nums',
-            component.trend === 'up' && 'text-success',
-            component.trend === 'down' && 'text-destructive',
-            (!component.trend || component.trend === 'flat') && 'text-muted-foreground',
+            deltaTone === 'success' && 'text-success',
+            deltaTone === 'destructive' && 'text-destructive',
+            deltaTone === 'muted' && 'text-muted-foreground',
           )}>
             {component.trend === 'up' && <TrendingUp className="w-3 h-3" />}
             {component.trend === 'down' && <TrendingDown className="w-3 h-3" />}

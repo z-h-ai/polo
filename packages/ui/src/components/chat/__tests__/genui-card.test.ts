@@ -4,6 +4,8 @@ import {
   mergeGenUiComponents,
   hasGenUiRenderer,
   formatStatDelta,
+  formatStatValue,
+  resolveStatDeltaTone,
 } from '../GenUICard'
 
 describe('parseGenUiComponents', () => {
@@ -136,5 +138,63 @@ describe('formatStatDelta (schema delta is a decimal fraction: 0.152 = +15.2%)',
   it('rounds to one decimal place', () => {
     expect(formatStatDelta(0.15234)).toBe('+15.2%')
     expect(formatStatDelta(-0.02689)).toBe('-2.7%')
+  })
+})
+
+describe('formatStatValue (optional stat-card format hint)', () => {
+  it('shows the value verbatim without a format (zero regression)', () => {
+    expect(formatStatValue(0.093)).toBe('0.093')
+    expect(formatStatValue(42)).toBe('42')
+    expect(formatStatValue('1,234 台')).toBe('1,234 台')
+  })
+
+  it('renders percent from the schema’s decimal fraction', () => {
+    expect(formatStatValue(0.093, 'percent')).toBe('9.3%')
+    expect(formatStatValue(0.1, 'percent')).toBe('10%')
+    expect(formatStatValue(0, 'percent')).toBe('0%')
+  })
+
+  it('adds thousands separators for number and currency', () => {
+    expect(formatStatValue(1234567.891, 'number')).toBe('1,234,567.891')
+    expect(formatStatValue(1234.5, 'currency', '$')).toBe('$1,234.5')
+    // Multi-char currency codes get a separating space; symbols do not.
+    expect(formatStatValue(1234.5, 'currency', 'CNY')).toBe('CNY 1,234.5')
+    expect(formatStatValue(1234.5, 'currency')).toBe('1,234.5')
+  })
+
+  it('falls back to the raw string when the value is not numeric', () => {
+    expect(formatStatValue('N/A', 'percent')).toBe('N/A')
+    expect(formatStatValue('N/A', 'currency', '$')).toBe('N/A')
+  })
+
+  it('accepts numeric strings', () => {
+    expect(formatStatValue('0.093', 'percent')).toBe('9.3%')
+    expect(formatStatValue('1234.5', 'currency', '$')).toBe('$1,234.5')
+  })
+})
+
+describe('resolveStatDeltaTone (goodWhen direction semantics)', () => {
+  it('keeps rises green / falls red by default (zero regression)', () => {
+    expect(resolveStatDeltaTone('up', undefined)).toBe('success')
+    expect(resolveStatDeltaTone('down', undefined)).toBe('destructive')
+    expect(resolveStatDeltaTone('up', 'up')).toBe('success')
+    expect(resolveStatDeltaTone('down', 'up')).toBe('destructive')
+  })
+
+  it('inverts the color for goodWhen down (queue growth +45% renders red)', () => {
+    expect(resolveStatDeltaTone('up', 'down')).toBe('destructive')
+    expect(resolveStatDeltaTone('down', 'down')).toBe('success')
+  })
+
+  it('mutes the color for goodWhen neutral', () => {
+    expect(resolveStatDeltaTone('up', 'neutral')).toBe('muted')
+    expect(resolveStatDeltaTone('down', 'neutral')).toBe('muted')
+  })
+
+  it('stays muted without a trend or on flat, regardless of goodWhen', () => {
+    expect(resolveStatDeltaTone(undefined, 'up')).toBe('muted')
+    expect(resolveStatDeltaTone('flat', 'up')).toBe('muted')
+    expect(resolveStatDeltaTone(undefined, 'down')).toBe('muted')
+    expect(resolveStatDeltaTone('flat', 'down')).toBe('muted')
   })
 })
