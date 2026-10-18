@@ -243,6 +243,10 @@ export function createPressToTalkMachine(deps: PressToTalkDeps) {
   };
 
   const listeners = new Set<() => void>();
+  // useSyncExternalStore 的 getSnapshot 缓存（React #185）: getState 在一次
+  // patch 周期内必须返回同一引用——每次新建对象会让 React 判定 store 在渲染间
+  // 永远「已变化」→ 'The result of getSnapshot should be cached' 无限重渲染。
+  let snapshotCache: VoiceSnapshot | null = null;
   const session = {
     current: null as AsrSessionLike | null,
     gen: 0,
@@ -267,14 +271,18 @@ export function createPressToTalkMachine(deps: PressToTalkDeps) {
 
   function patch(partial: Partial<VoiceState>): void {
     state = { ...state, ...partial };
+    snapshotCache = null; // 状态已变——失效缓存，下一次 getState 重算
     for (const listener of listeners) listener();
   }
 
   function snapshot(): VoiceSnapshot {
-    return {
-      ...state,
-      preholdChipLabel: preholdChipLabel(state.elapsedSec, state.preholdSeconds),
-    };
+    if (snapshotCache === null) {
+      snapshotCache = {
+        ...state,
+        preholdChipLabel: preholdChipLabel(state.elapsedSec, state.preholdSeconds),
+      };
+    }
+    return snapshotCache;
   }
 
   function showToast(message: string, kind: VoiceToastKind = 'info'): void {
@@ -865,6 +873,7 @@ export type PressToTalkMachine = ReturnType<typeof createPressToTalkMachine>;
 
 export function usePressToTalk(deps: PressToTalkDeps): PressToTalkMachine {
   const [machine] = useState(() => createPressToTalkMachine(deps));
+  // getState 必须返回缓存快照（patch 时失效）——见 machine 内 snapshotCache 注释。
   useSyncExternalStore(machine.subscribe, machine.getState, machine.getState);
   useEffect(() => () => machine.dispose(), [machine]);
   return machine;

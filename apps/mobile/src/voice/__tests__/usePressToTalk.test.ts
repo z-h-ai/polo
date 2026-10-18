@@ -792,6 +792,34 @@ describe('connect 返回晚于本地取消（孤儿 socket 收口）', () => {
 });
 
 // ---------------------------------------------------------------------------
+// React #185 回归：getSnapshot 引用稳定（useSyncExternalStore 契约）
+// ---------------------------------------------------------------------------
+
+describe('getState 快照引用稳定（React #185 回归）', () => {
+  test('同一 patch 周期内 getState 返回同一引用；patch 后换新引用', async () => {
+    const harness = makeHarness();
+    const first = harness.machine.getState();
+    expect(harness.machine.getState()).toBe(first); // 未变化 → 缓存引用
+    await harness.press(); // patch 发生（phase: recording）
+    const second = harness.machine.getState();
+    expect(second).not.toBe(first);
+    expect(second.phase).toBe('recording');
+    expect(harness.machine.getState()).toBe(second); // 再次稳定
+  });
+
+  test('subscribe 监听器在 patch 时被通知（useSyncExternalStore 数据源契约）', async () => {
+    const harness = makeHarness();
+    let notifications = 0;
+    const unsubscribe = harness.machine.subscribe(() => {
+      notifications += 1;
+    });
+    await harness.press();
+    expect(notifications).toBeGreaterThan(0);
+    unsubscribe();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 纯函数：wav 容器 / 本地 metering
 // ---------------------------------------------------------------------------
 

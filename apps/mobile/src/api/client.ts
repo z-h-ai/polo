@@ -115,7 +115,8 @@ export function createApiClient(deps: {
   baseUrl?: string;
   timeoutMs?: number;
 }): ApiClient {
-  const doFetch = deps.fetch ?? fetch;
+  // 惰性解析全局 fetch：预览/测试夹具在模块求值后替换 globalThis.fetch 也能生效。
+  const doFetch: FetchLike = deps.fetch ?? ((input, init) => globalThis.fetch(input as Parameters<FetchLike>[0], init));
   const baseUrl = (deps.baseUrl ?? apiBaseUrl).replace(/\/+$/, '');
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const authExpiredListeners = new Set<() => void>();

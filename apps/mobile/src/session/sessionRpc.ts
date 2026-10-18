@@ -484,6 +484,7 @@ let wired = false;
 
 /** Idempotent app entry point — call on session-screen mount / tab focus. */
 export function ensureSessionWiring(): void {
+  if (process.env.EXPO_PUBLIC_PREVIEW_MODE === '1') return; // 视觉验收夹具：不接真实连接
   if (wired) return;
   sessionController.attach();
   wired = true;
