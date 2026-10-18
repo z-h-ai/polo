@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GenUI 迭代方案可视化 · 哪些要迭代、怎么迭代</title>
+<style>
+  :root{
+    --ink:#1a2332; --ink-soft:#4a5568; --ink-faint:#718096;
+    --paper:#f7f8fa; --card:#fff; --line:#e2e8f0;
+    --accent:#3b5bdb; --accent-soft:#edf2ff;
+    --polo:#0b7285; --polo-soft:#e3fafc;
+    --open:#c2255c; --open-soft:#ffdeeb;
+    --good:#2b8a3e; --good-soft:#ebfbee;
+    --bad:#c92a2a; --bad-soft:#fff5f5;
+    --warn:#e67700; --warn-soft:#fff9db;
+    --code-bg:#0f1420; --code-ink:#d5dce8;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--paper);color:var(--ink);line-height:1.75;font-size:15px}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 26px 90px}
+  header.hero{background:linear-gradient(135deg,#123 0%,#1c3a5e 55%,#0b7285 140%);color:#fff;padding:52px 26px 42px;margin-bottom:32px}
+  header.hero .wrap{padding-bottom:0}
+  .hero h1{margin:0 0 10px;font-size:29px}
+  .hero .sub{color:#bcd3e8;font-size:15px;max-width:880px}
+  .hero .meta{margin-top:20px;display:flex;flex-wrap:wrap;gap:9px}
+  .chip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:3px 13px;font-size:12.5px;color:#dff0fa}
+  nav.toc{position:sticky;top:0;z-index:60;background:rgba(247,248,250,.96);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);margin-bottom:30px}
+  nav.toc .wrap{display:flex;flex-wrap:wrap;gap:3px;padding-top:8px;padding-bottom:8px}
+  nav.toc a{color:var(--ink-soft);text-decoration:none;font-size:13px;padding:5px 11px;border-radius:8px}
+  nav.toc a:hover{background:var(--accent-soft);color:var(--accent)}
+  h2{font-size:22px;margin:52px 0 6px;padding-top:10px;border-top:3px solid var(--accent);display:table}
+  h2 .no{color:var(--accent);font-family:ui-monospace,monospace;margin-right:8px}
+  h3{font-size:16.5px;margin:26px 0 8px}
+  p{margin:10px 0;color:var(--ink-soft)}
+  p strong,li strong{color:var(--ink)}
+  ul,ol{padding-left:22px;color:var(--ink-soft)}
+  li{margin:5px 0}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#edf0f4;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:12.5px;color:#34405e}
+  pre{background:var(--code-bg);color:var(--code-ink);border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:12.5px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre code{background:none;border:none;padding:0;color:inherit}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:16px 0}
+  .tag{display:inline-block;font-size:11.5px;font-weight:600;border-radius:5px;padding:1px 8px;margin-right:4px;vertical-align:1px;white-space:nowrap}
+  .tag.p0{background:var(--bad-soft);color:var(--bad)} .tag.p1{background:var(--warn-soft);color:var(--warn)} .tag.p2{background:#eef1f5;color:var(--ink-faint)}
+  .tag.polo{background:var(--polo-soft);color:var(--polo)} .tag.good{background:var(--good-soft);color:var(--good)} .tag.bad{background:var(--bad-soft);color:var(--bad)}
+  .callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:13px 17px;margin:14px 0;color:#2c3f7a}
+  .demo-note{font-size:12px;color:var(--ink-faint);margin-top:8px}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:#fff;padding:6px 16px;color:var(--ink)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button:disabled{opacity:.5;cursor:not-allowed}
+
+  /* wave map */
+  .waves{display:grid;grid-template-columns:1fr 34px 1fr 34px 1fr;gap:0;margin:18px 0}
+  .wave{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .wave h4{margin:0 0 4px;font-size:14px}
+  .wave .when{font-size:12px;color:var(--ink-faint);margin-bottom:10px}
+  .wave-1 h4{color:var(--bad)} .wave-2 h4{color:var(--warn)} .wave-3 h4{color:var(--polo)}
+  .wave-item{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:8px 0;font-size:13px;background:#fbfcfe}
+  .wave-item b{display:block;font-size:13px}
+  .wave-item span{font-size:12px;color:var(--ink-faint)}
+  .wave-arrow{display:flex;align-items:center;justify-content:center;color:#b3bdcc;font-size:20px}
+  @media(max-width:900px){.waves{grid-template-columns:1fr}.wave-arrow{transform:rotate(90deg);padding:4px 0}}
+
+  /* chat mock shared */
+  .chat-row{display:flex;gap:10px;align-items:flex-start;margin:10px 0}
+  .avatar{width:30px;height:30px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff}
+  .avatar.ai{background:var(--accent)} .avatar.user{background:#8a94a6}
+  .bubble{background:var(--card);border:1px solid var(--line);border-radius:4px 12px 12px 12px;padding:10px 14px;max-width:640px;font-size:13.5px}
+  .bubble.user-said{border-radius:12px 4px 12px 12px;background:#eef1f6}
+
+  /* demo: table */
+  .mini-table{border-collapse:collapse;width:100%;font-size:12.5px;margin:6px 0}
+  .mini-table th,.mini-table td{border-bottom:1px solid var(--line);padding:5px 9px;text-align:left}
+  .mini-table th{background:#f1f4f9;cursor:pointer;white-space:nowrap}
+  .mini-table td.num{font-family:ui-monospace,monospace}
+  .up{color:var(--good);font-weight:600} .down{color:var(--bad);font-weight:600}
+  .fchips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+  .fchip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:2px 12px;font-size:12.5px;cursor:pointer;color:var(--ink-soft)}
+  .fchip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .path-toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:12.5px;margin:8px 0}
+  .path-toggle button{border:none;border-radius:0;padding:5px 14px;font-size:12.5px}
+  .path-toggle button.on{background:var(--accent);color:#fff}
+  .latency{font-family:ui-monospace,monospace;font-size:12px;padding:2px 8px;border-radius:5px;margin-left:8px}
+  .latency.ok{background:var(--good-soft);color:var(--good)} .latency.slow{background:var(--bad-soft);color:var(--bad)}
+  .spinner{display:inline-block;width:13px;height:13px;border:2px solid #c8d2e8;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .thinking{color:var(--ink-faint);font-size:12.5px;padding:6px 0}
+
+  /* demo: stream */
+  .stream-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px}
+  @media(max-width:860px){.stream-grid{grid-template-columns:1fr}}
+  .stream-box{border:1px solid var(--line);border-radius:10px;background:var(--code-bg);color:var(--code-ink);font-family:ui-monospace,monospace;font-size:11.5px;line-height:1.6;padding:12px;height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+  .render-box{border:1px dashed var(--line);border-radius:10px;background:#fbfcfe;height:250px;overflow-y:auto;padding:12px;font-size:13px}
+  .skel-card{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;background:#fff;padding:10px 12px;margin:6px 0}
+  .skel-card .t{font-weight:600;font-size:13px}
+  .skel-card .s{font-size:12px;color:var(--ink-faint)}
+  .skel-line{height:9px;border-radius:4px;background:linear-gradient(90deg,#e6ebf4 25%,#f4f7fb 50%,#e6ebf4 75%);background-size:200% 100%;animation:shimmer 1.2s infinite;margin:7px 0}
+  @keyframes shimmer{to{background-position:-200% 0}}
+  .tl{position:relative;height:16px;border-radius:4px;background:#eef1f5;margin-top:8px;overflow:hidden}
+  .tl .skelseg{position:absolute;top:0;bottom:0;background:var(--accent-soft);border-left:2px solid var(--accent);display:none}
+  .tl-cap{font-size:11.5px;color:var(--ink-faint);margin-top:4px;font-family:ui-monospace,monospace}
+  .toolchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#f4f6fa;border-radius:999px;padding:3px 12px;font-size:12px;color:var(--ink-soft)}
+  .progress{height:6px;border-radius:3px;background:#e6ebf4;overflow:hidden;margin:8px 0}
+  .progress>i{display:block;height:100%;background:var(--accent);width:0%;transition:width .15s}
+
+  /* token bars */
+  .tokbar{margin:12px 0}
+  .tokbar .lbl{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+  .tokbar .bar{height:26px;border-radius:6px;background:#eef1f5;overflow:hidden;position:relative}
+  .tokbar .bar>i{display:block;height:100%;border-radius:6px;transition:width .6s}
+  .tokbar .val{position:absolute;right:8px;top:3px;font-size:12px;font-weight:600;color:#fff}
+  .tokbar.now>i{background:linear-gradient(90deg,#c2255c,#e8590c)}
+  .tokbar.goal>i{background:linear-gradient(90deg,#2b8a3e,#40c057)}
+  .tokbar.ref>i{background:linear-gradient(90deg,#3b5bdb,#74a0f7)}
+  .tokbar .val.dark{color:#34405e}
+
+  /* flow diagram */
+  .flow{display:flex;align-items:stretch;gap:0;margin:10px 0;flex-wrap:wrap}
+  .fnode{border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 12px;font-size:12.5px;text-align:center;flex:1;min-width:120px;display:flex;flex-direction:column;justify-content:center}
+  .fnode b{display:block;font-size:13px}
+  .fnode .sz{font-family:ui-monospace,monospace;font-size:11px;color:var(--ink-faint)}
+  .fnode.bad-node{border-color:#f1b8b8;background:var(--bad-soft)}
+  .fnode.good-node{border-color:#b2e3bc;background:var(--good-soft)}
+  .farrow{display:flex;align-items:center;padding:0 4px;color:#b3bdcc;font-size:16px}
+  .time-badge{display:inline-block;font-family:ui-monospace,monospace;font-size:11px;border-radius:5px;padding:1px 7px;margin-top:4px}
+  .time-badge.slow{background:var(--bad-soft);color:var(--bad)} .time-badge.fast{background:var(--good-soft);color:var(--good)}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){.grid2{grid-template-columns:1fr}}
+  .steps{counter-reset:st;margin:10px 0;padding:0;list-style:none}
+  .steps>li{counter-increment:st;position:relative;padding:6px 0 6px 38px;margin:0}
+  .steps>li::before{content:counter(st);position:absolute;left:0;top:6px;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center}
+  .files{font-size:12px;color:var(--ink-faint);background:#f4f6fa;border:1px dashed var(--line);border-radius:8px;padding:8px 12px;margin-top:8px;word-break:break-all}
+  footer{margin-top:70px;color:var(--ink-faint);font-size:12.5px;border-top:1px solid var(--line);padding-top:18px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>GenUI 迭代方案可视化</h1>
+    <div class="sub">承接 <strong>对比评审报告</strong> 与 <strong>实施 Plan</strong>：用可交互的方式讲清楚<strong>哪 8 项需要迭代、每一项迭代完用户看到什么变化</strong>。页面内所有演示均为<strong>行为示意模拟</strong>（非真实产品截图），数据为演示值，标注 est. 的为估算。</div>
+    <div class="meta">
+      <span class="chip">📅 2026-10-18</span>
+      <span class="chip">依据：docs/plans/genui-borrow-list/plan.md（draft）</span>
+      <span class="chip">基线 genui/impl@4b07b30c</span>
+      <span class="chip">自包含 · 可交互 · 无外部资源</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#map">迭代地图</a>
+  <a href="#p01">P0-1 视图闭环</a>
+  <a href="#p02">P0-2 骨架流式</a>
+  <a href="#p11">P1-1 schema 瘦身</a>
+  <a href="#p12">P1-2 chart 组件</a>
+  <a href="#p13">P1-3 画布增量</a>
+  <a href="#p2">P2 配套项</a>
+  <a href="#cadence">迭代节奏</a>
+</div></nav>
+
+<div class="wrap">
+
+<!-- ============ MAP ============ -->
+<h2 id="map"><span class="no">◎</span>迭代地图：8 项分三波，先并行止血，再纵深改造</h2>
+<p>依赖关系决定顺序：<strong>「尺子」（P2-2a 实测脚本）必须先行</strong>，否则瘦身效果无法证明；P0 两项互不依赖可并行开工；chart 依赖瘦身后的 schema 一次性完成版本演进。</p>
+<div class="waves">
+  <div class="wave wave-1">
+    <h4>第 1 波 · 止血 + 立尺子</h4>
+    <div class="when">立即启动 · 互相并行</div>
+    <div class="wave-item"><b>P2-2a 实测脚本</b><span>schema token 计数，一切优化的前置尺子</span></div>
+    <div class="wave-item"><b>P0-1 视图闭环</b><span>筛选/下钻留在客户端，交互延迟秒级→毫秒级</span></div>
+    <div class="wave-item"><b>P0-2 骨架流式</b><span>生成中先出骨架卡，首卡提前 est.1-4s ⚠️需会签</span></div>
+    <div class="wave-item"><b>P2-3 错误码</b><span>校验失败→稳定错误码，提升一次重试成功率</span></div>
+  </div>
+  <div class="wave-arrow">➜</div>
+  <div class="wave wave-2">
+    <h4>第 2 波 · 纵深优化</h4>
+    <div class="when">第 1 波尺子就绪后</div>
+    <div class="wave-item"><b>P1-1 schema 瘦身</b><span>依赖 P2-2a 基线；输入 token est.4-6K → ≤2K</span></div>
+    <div class="wave-item"><b>P1-3 画布增量编辑</b><span>数据迭代脱离 512KB 全量重写 ⚠️需会签</span></div>
+  </div>
+  <div class="wave-arrow">➜</div>
+  <div class="wave wave-3">
+    <h4>第 3 波 · 表达力 + 活化</h4>
+    <div class="when">schema 瘦身完成后</div>
+    <div class="wave-item"><b>P1-2 chart 组件</b><span>依赖 P1-1；schemaVersion 1→2 首次演进</span></div>
+    <div class="wave-item"><b>P2-1 画布数据自动刷新</b><span>依赖 P1-3；文件变更自动推送</span></div>
+  </div>
+</div>
+<div class="callout">两个⚠️项（P0-2 协议事件、P1-3 webview 数据推送）触及安全面，按 plan-first 协议需<strong>技术负责人会签后</strong>才能开工——这是节奏图上唯一的硬闸门。</div>
+
+<!-- ============ P0-1 ============ -->
+<h2 id="p01"><span class="no">1</span>P0-1 · 纯视图交互客户端闭环 <span class="tag p0">第 1 波</span></h2>
+<p><strong>要迭代什么：</strong>现在表格的排序/分组已经在客户端，但<strong>筛选</strong>没有；更重要的是边界没有制度化——模型会为"换个地区看看"生成走模型的按钮。<strong>迭代后：视图态操作（筛选/排序/分组/列选择）全部本地完成，action-buttons 只留给语义动作。</strong></p>
+
+<div class="card">
+  <h3 style="margin-top:0">现场对比演示：点下面的筛选 chips 感受两种路径</h3>
+  <div class="path-toggle" id="p01path">
+    <button class="on" data-path="local">迭代后 · 客户端路径</button>
+    <button data-path="model">现状 · 走模型路径</button>
+  </div>
+  <div class="fchips" id="p01chips"></div>
+  <div id="p01status" class="thinking" style="min-height:24px"></div>
+  <table class="mini-table" id="p01table">
+    <thead><tr>
+      <th data-k="region">地区 ⇅</th><th data-k="revenue">营收 (USD) ⇅</th><th data-k="growth">同比增速 ⇅</th><th data-k="deal">单数 ⇅</th>
+    </tr></thead>
+    <tbody id="p01body"></tbody>
+  </table>
+  <div class="demo-note">示意演示：数据为演示值。"走模型路径"模拟一轮会话往返（此处压缩为 ~2.5s 动画，真实场景含上下文装配与生成，通常更久）。</div>
+</div>
+
+<p><strong>怎么迭代（3 步）：</strong></p>
+<ol class="steps">
+  <li><strong>先写边界契约</strong>（1 行字）：render_ui 工具描述与 system prompt 增加 "view-state operations are client-side; reserve action-buttons for semantic follow-ups"，顺手修 system.ts 里已知的 "no host bridge" 口径漂移。</li>
+  <li><strong>表格加列筛选</strong>：文本列 = 值去重 chips（即上方演示形态），数值列 = 区间；全部 ephemeral React state，<strong>不进 schema、不持久化</strong>（与 confirm-flow 门链同一原则，回放语义零影响）。</li>
+  <li><strong>测试收口</strong>：筛选纯函数单测 + 既有 <code>genui-datatable-rows.test.ts</code> 保持全绿（证明没有破坏既有行操作/回放）。</li>
+</ol>
+<div class="files">改动文件：packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx（已有 sortKey/groupKey 基础）· GenUICard.tsx · session-tools-core/tool-defs.ts · prompts/system.ts</div>
+
+<!-- ============ P0-2 ============ -->
+<h2 id="p02"><span class="no">2</span>P0-2 · render_ui 骨架流式预览 <span class="tag p0">第 1 波</span><span class="tag bad">⚠️ 需会签</span></h2>
+<p><strong>要迭代什么：</strong>现在卡片要等工具调用<strong>完全结束</strong>才出现（TurnCard 只认 <code>completed</code>）。迭代后：模型还在生成 payload 时，先出现"正在构建 data-table《Sales by Region》"的<strong>骨架卡</strong>（只有类型+标题，不含业务数据），完成后无缝替换为正式卡片。<strong>底线不动摇：用户依然永远看不到未通过校验的 UI。</strong></p>
+
+<div class="card">
+  <h3 style="margin-top:0">现场对比：同一次生成，左右同步播放</h3>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <button class="primary" id="p02play">▶ 播放对比</button>
+    <span id="p02clock" style="font-family:ui-monospace,monospace;font-size:13px;color:var(--ink-faint)">t = 0.0s</span>
+    <span style="font-size:12px;color:var(--ink-faint)">左＝现状（等 completed）｜右＝迭代后（骨架先出）· 同一份输出流驱动</span>
+  </div>
+  <div class="progress"><i id="p02prog"></i></div>
+  <div style="font-size:12px;color:var(--ink-faint);margin-bottom:4px">模型输出流（render_ui 的 tool input 增量，~800 字节示意）</div>
+  <div class="stream-box" id="p02stream" style="height:120px"></div>
+  <div class="grid2" style="margin-top:12px;gap:12px">
+    <div>
+      <div style="font-size:13px;font-weight:700;color:var(--bad);margin-bottom:4px">现状 · 卡片等工具调用 completed</div>
+      <div class="render-box" id="p02renderOld" style="height:236px"></div>
+      <div class="tl"></div>
+      <div class="tl-cap">用户见到第一张卡：t = <b id="p02tOld">—</b>（此前只有工具运行指示）</div>
+    </div>
+    <div>
+      <div style="font-size:13px;font-weight:700;color:var(--good);margin-bottom:4px">迭代后 · 检测到完整 type+title 即出骨架</div>
+      <div class="render-box" id="p02renderNew" style="height:236px"></div>
+      <div class="tl"><i class="skelseg" id="p02skelseg"></i></div>
+      <div class="tl-cap">骨架可见：t = <b id="p02tSkel">—</b> · 正式卡：t = <b id="p02tNew">—</b>（蓝色段＝骨架在场时间）</div>
+    </div>
+  </div>
+  <div id="p02verdict" class="callout" style="display:none"></div>
+  <div class="demo-note">示意演示（流速度可视化加速；时间为页面实测）。骨架检测只认<strong>已完整闭合</strong>的 <code>"type"</code>/<code>"title"</code> 键值对；业务数据只在 <code>completed</code> 且 Zod 校验通过后出现——"永不显示无效 UI"的底线两侧都不变。</div>
+</div>
+
+<p><strong>怎么迭代（4 步，最险一步先写失败测试）：</strong></p>
+<ol class="steps">
+  <li><strong>先写隔离失败测试</strong>：断言 tab 协议页<strong>收不到</strong>新事件 <code>tool_input_delta</code>（对齐 POO-103 把 <code>ui_state</code> 排除在 SessionEvent 联合外的同一纪律）——这步是本项的安全锚，测试不绿不继续。</li>
+  <li><strong>加窄协议事件</strong>：只对 <code>render_ui</code> 发射（按 toolName 过滤）、250ms 节流、累计 8KB 即停；Claude 路径从 SDK 流的 input_json_delta 发射（原料已核实存在），Pi 路径维持现状降级。</li>
+  <li><strong>骨架扫描器</strong>：纯函数，从累积的 partial JSON 里提取完整的 type/title 键值对 → 骨架卡（上图右栏形态）。</li>
+  <li><strong>completed 替换</strong>：走既有 <code>mergeGenUiComponents</code> 的 id 合并路径，骨架 → 正式卡无缝切换。</li>
+</ol>
+<div class="files">改动文件：protocol/dto.ts（新事件+常量）· claude-agent.ts（发射）· SessionManager.ts（扇出隔离 ⚠️）· TurnCard.tsx（累积+骨架）· 新增 genuiSkeleton.ts + 测试</div>
+
+<!-- ============ P1-1 ============ -->
+<h2 id="p11"><span class="no">3</span>P1-1 · 工具 schema 瘦身 <span class="tag p1">第 2 波</span></h2>
+<p><strong>要迭代什么：</strong>render_ui 的工具 schema（zodToJsonSchema 产物）估算 <strong>4-6K token，每个会话每轮都付</strong>——比 OpenUI 描述 40+ 组件的 5,031 token 还贵，而我们只有 6 个组件。迭代后：结构留 schema、语义进目录一行式，目标 <strong>≤2K</strong>。</p>
+
+<div class="card">
+  <h3 style="margin-top:0">token 消耗对比（模型每轮可见的输入成本）</h3>
+  <div class="tokbar now"><div class="lbl"><span>现状 · render_ui schema（估算）</span></div><div class="bar"><i style="width:100%"></i><span class="val">est. ~5,000 tok</span></div></div>
+  <div class="tokbar goal"><div class="lbl"><span>迭代后目标</span></div><div class="bar"><i style="width:40%"></i><span class="val dark">≤ 2,000 tok</span></div></div>
+  <div class="tokbar ref"><div class="lbl"><span>参照 · OpenUI 全组件库 system prompt（实测 40+ 组件）</span></div><div class="bar"><i style="width:100%;background:#a5b8ea"></i><span class="val dark">5,031 tok</span></div></div>
+  <div class="grid2" style="margin-top:14px">
+    <div>
+      <div style="font-size:12.5px;color:var(--ink-faint)">现状：三处重复说同一件事</div>
+<pre><code>// schema 里 describe() 写一遍
+value: z.number().describe(
+  'Metric value. Numbers render with ' +
+  'locale formatting…')
+// system.ts 再写一遍
+// "stat-card (single metric + delta)…"
+// 目录 one-liner 第三遍</code></pre>
+    </div>
+    <div>
+      <div style="font-size:12.5px;color:var(--ink-faint)">迭代后：一处一责</div>
+<pre><code>// schema 只留结构
+value: z.number()
+// 目录 one-liner 承接语义（160 字符
+// sanitize 信任边界不变）
+// `- stat-card — single metric with
+//    optional delta and trend`</code></pre>
+    </div>
+  </div>
+  <div class="demo-note">第 1 波的 P2-2a 脚本先量出真实基线（当前 4-6K 为估算值），柱状图以实测数字刷新后再动刀。</div>
+</div>
+
+<p><strong>怎么迭代（4 步）：</strong></p>
+<ol class="steps">
+  <li><strong>实测</strong>：schema-size 脚本量 Claude <code>.shape</code> 与 Pi JSON Schema 两条路径的字节/token，基线写回 Plan。</li>
+  <li><strong>三处去重</strong>：schema describe() / system.ts 节 / 目录 one-liner 的重复语义只留一处（结构必需留 schema，用法性进目录）。</li>
+  <li><strong>约束下沉</strong>：非功能性 min/max 字符约束改为目录一句话（Zod 校验仍在，只是模型侧少付 token）。</li>
+  <li><strong>复测 + 防回归</strong>：前后对比表 + CI 阈值（超基线 +20% 报警）；错误率观测（配套 P2-3 错误码）确保瘦身不伤生成质量。</li>
+</ol>
+<div class="files">改动文件：session-tools-core/tool-defs.ts · genui-catalog.ts · prompts/system.ts · 新增 scripts/genui-bench/schema-size.ts</div>
+
+<!-- ============ P1-2 ============ -->
+<h2 id="p12"><span class="no">4</span>P1-2 · chart 组件（重开 ADR 0021）<span class="tag p1">第 3 波</span></h2>
+<p><strong>要迭代什么：</strong>现在要出一张图只有两条路——降级成表格，或升级成 512KB 整页 HTML。ADR 0021 自己写的重启条件 (a)"交互循环落地且 schema 稳定"已被 POO-103 满足，<strong>决策可以正式重开</strong>：经 render_ui registry 缝新增 <code>chart</code> 卡类型。</p>
+
+<div class="card">
+  <h3 style="margin-top:0">迭代后的 chart 卡长这样（样机）</h3>
+  <div class="chat-row"><div class="avatar ai">AI</div><div class="bubble">
+    <div style="font-weight:600;font-size:13px;margin-bottom:2px">月度营收趋势</div>
+    <svg viewBox="0 0 460 150" style="width:100%;max-width:520px" role="img" aria-label="bar chart demo">
+      <g font-size="9" fill="#8a94a6">
+        <text x="18" y="145">10月</text><text x="88" y="145">11月</text><text x="158" y="145">12月</text><text x="228" y="145">1月</text><text x="298" y="145">2月</text><text x="368" y="145">3月</text>
+      </g>
+      <g>
+        <rect x="12"  y="88"  width="34" height="47" rx="3" fill="#74a0f7"/>
+        <rect x="82"  y="80"  width="34" height="55" rx="3" fill="#74a0f7"/>
+        <rect x="152" y="70"  width="34" height="65" rx="3" fill="#4c7ef3"/>
+        <rect x="222" y="74"  width="34" height="61" rx="3" fill="#74a0f7"/>
+        <rect x="292" y="58"  width="34" height="77" rx="3" fill="#4c7ef3"/>
+        <rect x="362" y="44"  width="34" height="91" rx="3" fill="#3b5bdb"/>
+      </g>
+      <line x1="8" y1="135" x2="410" y2="135" stroke="#dfe5ee" stroke-width="1"/>
+      <text x="418" y="48" font-size="10" fill="#3b5bdb" font-weight="700">234K</text>
+      <text x="418" y="92" font-size="10" fill="#8a94a6">198K</text>
+    </svg>
+    <div style="font-size:11.5px;color:var(--ink-faint)">payload ≤4KB + 数据在 data/revenue.json（与 data-table 同一 src 文件化语义）</div>
+  </div></div>
+  <div class="grid2" style="margin-top:10px">
+    <div class="fnode bad-node"><b>现状 · 要出图</b><span class="sz">整页 HTML ≤512KB · webview · 全量重写迭代</span><span class="time-badge slow">生成慢 / 成本高</span></div>
+    <div class="fnode good-node"><b>迭代后 · chart 卡</b><span class="sz">payload ≤4KB + src 文件 · 行内卡片 · id 原地更新</span><span class="time-badge fast">输出 token 与首卡延迟双降</span></div>
+  </div>
+  <div class="demo-note">样机为自研极简 SVG 形态（bar/line 起步，无轴库、无 CDN、无运行时加载——严格落在 ADR 0021 自己划的缝里）。</div>
+</div>
+
+<p><strong>怎么迭代（5 步）：</strong></p>
+<ol class="steps">
+  <li><strong>决策先行</strong>：新 ADR supersede 0021 的 P1 决定，引用其预设缝"render_ui registry 新卡类型"。</li>
+  <li><strong>schema 演进</strong>：chart 加入 SCHEMAS map；<code>GENUI_RENDER_UI_SCHEMA_VERSION</code> 1→2 并注册 v1 快照——<strong>POO-104 预留的回放机制迎来第一个真实消费者</strong>（旧 v1 卡片按生成时版本校验，未知版本 fail-closed 只读视图兜底）。</li>
+  <li><strong>渲染器</strong>：ChartCardView（SVG bar/line 最小集：网格线+数值标签）注册进 GENUI_COMPONENT_REGISTRY。</li>
+  <li><strong>handler 复用</strong>：src containment 校验走 data-table 同一路径（realpath 限会话 data/）。</li>
+  <li><strong>复测 token</strong>：用第 2 波的尺子确认 chart 的加入量，视觉走真实截图验收。</li>
+</ol>
+<div class="files">改动文件：docs/adr/00NN（新）· tool-defs.ts · genui-schema.ts（版本+快照）· genui-catalog.ts · GenUICard.tsx · render-ui.ts + 新测试</div>
+
+<!-- ============ P1-3 ============ -->
+<h2 id="p13"><span class="no">5</span>P1-3 · 画布应用增量编辑 <span class="tag p1">第 2 波</span><span class="tag bad">⚠️ 需会签</span></h2>
+<p><strong>要迭代什么：</strong>现在改画布应用里的一条数据，模型也要重发整个 512KB HTML（updateOf 全量重写）。迭代后：<strong>数据与结构分离</strong>——可变状态放 data/ JSON，改数据只需一个新工具 <code>update_app_data</code> 写小文件 + 秒级推送给已挂载的卡。</p>
+
+<div class="card">
+  <h3 style="margin-top:0">迭代前后：用户说"把预算改成 50 万"之后发生什么</h3>
+  <div style="font-size:12px;color:var(--ink-faint);margin-bottom:4px">现状链路</div>
+  <div class="flow">
+    <div class="fnode"><b>用户</b><span class="sz">"把预算改成 50 万"</span></div><div class="farrow">➜</div>
+    <div class="fnode bad-node"><b>模型重新生成整页 HTML</b><span class="sz">≤512KB 逐 token 输出</span><span class="time-badge slow">数十秒 · 高 token 成本</span></div><div class="farrow">➜</div>
+    <div class="fnode bad-node"><b>webview 整页重载</b><span class="sz">version+1 全量替换</span></div>
+  </div>
+  <div style="font-size:12px;color:var(--ink-faint);margin:10px 0 4px">迭代后链路</div>
+  <div class="flow">
+    <div class="fnode"><b>用户</b><span class="sz">"把预算改成 50 万"</span></div><div class="farrow">➜</div>
+    <div class="fnode good-node"><b>update_app_data</b><span class="sz">写 data/state.json（~1KB）</span><span class="time-badge fast">秒级 · 低成本</span></div><div class="farrow">➜</div>
+    <div class="fnode good-node"><b>ui_state 点对点推送</b><span class="sz">既有通道 · 不广播</span></div><div class="farrow">➜</div>
+    <div class="fnode good-node"><b>卡片局部更新</b><span class="sz">结构不动 · 无重载</span></div>
+  </div>
+  <div class="demo-note">机制：bundle 用 <code>&lt;meta name="polo-app-data"&gt;</code> 声明数据依赖（≤3 个文件），attach 时宿主注入初值、更新时经既有 postUiStateToCard 推送——全部走既有围栏（realpath 限会话 data/、≤1MB、ephemeral 不持久化），零新信任根。</div>
+</div>
+
+<p><strong>怎么迭代（4 步）：</strong></p>
+<ol class="steps">
+  <li><strong>围栏先行</strong>：先写路径逃逸/符号链接/超限的失败测试（仿 webview-genui-partition.isolated.ts 的写法），再实现 meta 声明解析 + attach 注入。</li>
+  <li><strong>新工具</strong>：<code>update_app_data(appId, dataSrc)</code>，注册条件完全复用 generate_app 的 canvas 资格矩阵与三层 deny。</li>
+  <li><strong>模型侧引导</strong>：generate_app 工具描述加一句"mutable state 放 data/ JSON、数据迭代用 update_app_data、结构变化才 updateOf"。</li>
+  <li><strong>端到端验证</strong>：update → 已挂载卡收到新 ui_state；未挂载时仅落盘、下次 attach 注入。</li>
+</ol>
+<div class="files">改动文件：tool-defs.ts · 新增 handlers/update-app-data.ts · ui-card-registry.ts（meta 读取+注入）· handlers/genui.ts · dto.ts 常量 + 测试</div>
+
+<!-- ============ P2 ============ -->
+<h2 id="p2"><span class="no">6</span>P2 配套三项（小而必要）</h2>
+<div class="grid2">
+  <div class="card">
+    <h4 style="margin:0 0 6px"><span class="tag p2">第 1 波</span>P2-2 · 自有基准（尺子）</h4>
+    <p style="font-size:13.5px">三层：<strong>a</strong> schema/payload token 计数脚本（第 1 波就位，P1-1 的前置）；<strong>b</strong> 格式投影对比（未来任何格式实验用）；<strong>c</strong> 真实生成基准（N 条 prompt × 模型 × 4 次，量结构有效率/首卡延迟，需预算单独立项）。</p>
+    <div class="files">scripts/genui-bench/schema-size.ts（新）</div>
+  </div>
+  <div class="card">
+    <h4 style="margin:0 0 6px"><span class="tag p2">第 1 波</span>P2-3 · 错误码 taxonomy</h4>
+    <p style="font-size:13.5px">Zod issues → 稳定错误码（unknown-component / missing-required / payload-too-large…）→ 每码一句修复提示。模型重试一次成功率提升；错误码计数同时是 P1-1 瘦身前后的质量观测数据源。</p>
+    <div class="files">handlers/render-ui.ts + errorcodes 测试（新）</div>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <h4 style="margin:0 0 6px"><span class="tag p2">第 3 波</span>P2-1 · 画布数据自动刷新（P1-3 跟进）</h4>
+    <p style="font-size:13.5px">声明文件变化 → fs watch（防抖 ≥1s）→ 既有 ui_state 通道自动推送。画布应用从静态快照变为会话内活体，等价 OpenUI 的 Query 轮询但数据源<strong>限定在会话 data/ 围栏内</strong>。会话删除/卡卸载即注销 watch。跨会话/网络数据源明确不做（不破坏围栏模型）。</p>
+  </div>
+</div>
+
+<!-- ============ cadence ============ -->
+<h2 id="cadence"><span class="no">7</span>迭代怎么跑：节奏、闸门、验收</h2>
+<div class="card">
+  <ol class="steps">
+    <li><strong>Plan 评审</strong>（当前）：plan.md 为 draft——工程师评审 + 两个⚠️项（P0-2 / P1-3）技术负责人会签，置 <code>accepted</code> 后才允许动 genui/impl。</li>
+    <li><strong>按波推进</strong>：每波内并行、波间按依赖；每项收口跑 <code>bun test</code>（相关测试文件）+ <code>typecheck:all</code> + <code>lint</code>，证据贴卡（self-verify）。</li>
+    <li><strong>每波验收</strong>：browser/visual 项（P0-1 筛选操作、P0-2 首卡提前、P1-2 chart 截图、P1-3 端到端推送）组一张集中验收卡，真实会话里走查。</li>
+    <li><strong>防回归</strong>：schema token 进 CI 阈值；协议隔离测试（协议页收不到 tool_input_delta / ui_state）永久保留。</li>
+    <li><strong>质量观测</strong>：P2-3 错误码计数对比 P1-1 前后的一次重试成功率——瘦身不达质量线即回滚该批精简。</li>
+  </ol>
+  <div class="callout" style="margin-bottom:0">明确不迭代的（报告 §6）：DSL 化输出、多框架渲染器、A2UI、浏览器直连工具、40+ 组件扩张——每一条都有拒绝理由，不因对方热闹而重开。</div>
+</div>
+
+<footer>
+  Polo AI · GenUI 迭代方案可视化 · 2026-10-18 · 依据 docs/plans/genui-borrow-list/plan.md（draft，genui/impl@4b07b30c）与 docs/reports/2026-10-18-genui-vs-openui.html · 页面内演示为行为示意（演示数据），est. 为估算值 · 自包含无外部资源
+</footer>
+
+</div>
+
+<script>
+/* ---------------- P0-1 demo ---------------- */
+(function(){
+  var rows=[
+    {region:"EMEA",revenue:1320000,growth:0.152,deal:38},
+    {region:"North America",revenue:2140000,growth:0.083,deal:57},
+    {region:"APAC",revenue:980000,growth:0.211,deal:29},
+    {region:"LATAM",revenue:420000,growth:0.041,deal:12},
+    {region:"Middle East",revenue:510000,growth:0.178,deal:15}
+  ];
+  var path="local", filter="全部", sortK=null, sortDir=1;
+  var chips=["全部"].concat(rows.map(function(r){return r.region}));
+  var chipBox=document.getElementById("p01chips");
+  chips.forEach(function(c){
+    var b=document.createElement("button"); b.className="fchip"+(c===filter?" active":""); b.textContent=c;
+    b.onclick=function(){ filter=c; renderChips(); apply(); };
+    chipBox.appendChild(b);
+  });
+  function renderChips(){
+    [].forEach.call(chipBox.children,function(b){ b.classList.toggle("active",b.textContent===filter); });
+  }
+  var status=document.getElementById("p01status"), body=document.getElementById("p01body");
+  function fmtRow(r){
+    var g=(r.growth*100).toFixed(1);
+    return "<tr><td><b>"+r.region+"</b></td><td class='num'>"+r.revenue.toLocaleString()+"</td><td class='num "+(r.growth>=0?"up":"down")+"'>"+(r.growth>=0?"+":"")+g+"%</td><td class='num'>"+r.deal+"</td></tr>";
+  }
+  function paint(list){
+    body.innerHTML=list.map(fmtRow).join("")||"<tr><td colspan=4 class='thinking'>无匹配行</td></tr>";
+  }
+  function apply(){
+    var list=rows.filter(function(r){return filter==="全部"||r.region===filter});
+    if(sortK){ list=list.slice().sort(function(a,b){
+      var x=a[sortK],y=b[sortK]; return (x<y?-1:x>y?1:0)*sortDir; }); }
+    if(path==="local"){
+      status.innerHTML="<span class='latency ok'>本地筛选 · ~0ms</span> 视图态操作不再付一轮模型往返";
+      paint(list);
+    }else{
+      status.innerHTML="<span class='spinner'></span>发送给模型 → 等待响应（模拟一轮会话往返）…";
+      body.innerHTML="";
+      setTimeout(function(){
+        status.innerHTML="<span class='latency slow'>走模型 · ~2.5s（演示压缩值）</span> 同样的筛选结果，代价是一整轮上下文+生成";
+        paint(list);
+      },2500);
+    }
+  }
+  [].forEach.call(document.querySelectorAll("#p01table th"),function(th){
+    th.onclick=function(){
+      var k=th.getAttribute("data-k");
+      if(sortK===k){sortDir*=-1}else{sortK=k;sortDir=1}
+      apply();
+    };
+  });
+  var tog=document.getElementById("p01path");
+  tog.addEventListener("click",function(e){
+    var b=e.target.closest("button"); if(!b)return;
+    path=b.getAttribute("data-path");
+    [].forEach.call(tog.querySelectorAll("button"),function(x){x.classList.toggle("on",x===b)});
+    apply();
+  });
+  apply();
+})();
+
+/* ---------------- P0-2 demo ---------------- */
+(function(){
+  var payload='{"components":[{"id":"sales","type":"data-table","title":"Sales by Region","columns":[{"key":"region","label":"Region","type":"text"},{"key":"revenue","label":"Revenue","type":"currency"},{"key":"growth","label":"YoY Growth","type":"percent"},{"key":"deals","label":"Deals","type":"number"},{"key":"owner","label":"Owner","type":"text"}],"src":"/session/data/sales_by_region.json","pageSize":20},{"id":"kpi","type":"stat-card","title":"Q3 Revenue","label":"Total revenue","value":4200000,"unit":"USD","delta":0.152,"trend":"up","format":"currency","currency":"USD"},{"id":"next","type":"action-buttons","title":"Next steps","buttons":[{"id":"drill","label":"Drill into EMEA","style":"primary","action":{"kind":"send-message","prompt":"Break down EMEA revenue by country for Q3"}}]}]}';
+  function el(id){return document.getElementById(id)}
+  var stream=el("p02stream"), oldBox=el("p02renderOld"), newBox=el("p02renderNew"),
+      prog=el("p02prog"), play=el("p02play"), clock=el("p02clock"),
+      skelSeg=el("p02skelseg"), verdict=el("p02verdict"),
+      tOld=el("p02tOld"), tSkel=el("p02tSkel"), tNew=el("p02tNew");
+  var timer=null;
+  function toolchip(){
+    return '<div class="toolchip"><span class="spinner"></span>render_ui 运行中…</div>'+
+           '<div class="thinking" style="padding-top:10px">卡片内容不可见——TurnCard 只渲染 status === \'completed\' 的工具输入（现状行为）。</div>';
+  }
+  function skelCard(type,title){
+    return '<div class="skel-card"><div class="t">'+title+'</div><div class="s"><span class="spinner"></span>正在构建 '+type+' · 校验后填充数据</div><div class="skel-line" style="width:88%"></div><div class="skel-line" style="width:70%"></div><div class="skel-line" style="width:79%"></div></div>';
+  }
+  function finalCards(){
+    return '<div class="skel-card" style="border-left-color:var(--good)"><div class="t">Sales by Region</div><div class="s" style="color:var(--good)">✓ 校验通过 · 正式卡片（示意）</div><table class="mini-table"><thead><tr><th>Region</th><th>Revenue</th><th>Growth</th></tr></thead><tbody><tr><td><b>EMEA</b></td><td class="num">1,320,000</td><td class="num up">+15.2%</td></tr><tr><td><b>North America</b></td><td class="num">2,140,000</td><td class="num up">+8.3%</td></tr><tr><td><b>APAC</b></td><td class="num">980,000</td><td class="num up">+21.1%</td></tr></tbody></table></div>'
+      +'<div class="skel-card" style="border-left-color:var(--good)"><div class="t">Q3 Revenue</div><div class="s" style="color:var(--good)">✓ 4,200,000 USD <span class="up">▲ +15.2%</span></div></div>';
+  }
+  play.onclick=function(){
+    if(timer){clearInterval(timer);timer=null}
+    stream.textContent=""; oldBox.innerHTML=toolchip(); newBox.innerHTML="";
+    prog.style.width="0%"; verdict.style.display="none"; skelSeg.style.display="none";
+    tOld.textContent="—"; tSkel.textContent="—"; tNew.textContent="—";
+    var i=0, acc="", skel1=false, skel2=false, tS1=0, t0=performance.now();
+    timer=setInterval(function(){
+      var step=Math.min(i+5,payload.length);
+      acc=payload.slice(0,step);
+      stream.textContent=acc; stream.scrollTop=stream.scrollHeight;
+      var pct=step/payload.length;
+      prog.style.width=(pct*100)+"%";
+      clock.textContent="t = "+((performance.now()-t0)/1000).toFixed(1)+"s";
+      if(!skel1 && acc.indexOf('"type":"data-table"')>=0 && acc.indexOf('"title":"Sales by Region"')>=0){
+        skel1=true; tS1=(performance.now()-t0)/1000;
+        tSkel.textContent=tS1.toFixed(1)+"s";
+        newBox.innerHTML=skelCard("data-table","Sales by Region");
+        skelSeg.style.display="block"; skelSeg.style.left=(pct*100)+"%";
+      }
+      if(skel1 && !skel2 && acc.indexOf('"type":"stat-card"')>=0 && acc.indexOf('"title":"Q3 Revenue"')>=0){
+        skel2=true; newBox.innerHTML+=skelCard("stat-card","Q3 Revenue");
+      }
+      i=step;
+      if(i>=payload.length){
+        clearInterval(timer); timer=null;
+        var tEnd=(performance.now()-t0)/1000;
+        tOld.textContent=tEnd.toFixed(1)+"s"; tNew.textContent=tEnd.toFixed(1)+"s";
+        oldBox.innerHTML=finalCards(); newBox.innerHTML=finalCards();
+        clock.textContent="t = "+tEnd.toFixed(1)+"s（完成）";
+        verdict.style.display="block";
+        verdict.innerHTML="<strong>同一次生成，两种体验（页面实测时间）：</strong>现状侧用户等 <b>"+tEnd.toFixed(1)+"s</b> 才见到第一张卡；迭代侧 <b>"+tS1.toFixed(1)+"s</b> 就看到结构预告，提前 <b>"+(tEnd-tS1).toFixed(1)+"s</b>。第二张骨架卡（stat-card）也在流式中途出现——多组件回合逐张亮起。业务数据两侧都在 <code>completed</code> 校验通过后填充，底线不变。";
+      }
+    },32);
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GenUI 方案对比评审：OpenUI vs Polo genui/impl</title>
+<style>
+  :root {
+    --ink: #1a2332;
+    --ink-soft: #4a5568;
+    --ink-faint: #718096;
+    --paper: #f7f8fa;
+    --card: #ffffff;
+    --line: #e2e8f0;
+    --accent: #3b5bdb;
+    --accent-soft: #edf2ff;
+    --polo: #0b7285;
+    --polo-soft: #e3fafc;
+    --open: #c2255c;
+    --open-soft: #ffdeeb;
+    --good: #2b8a3e;
+    --good-soft: #ebfbee;
+    --bad: #c92a2a;
+    --bad-soft: #fff5f5;
+    --warn: #e67700;
+    --warn-soft: #fff9db;
+    --code-bg: #0f1420;
+    --code-ink: #d5dcE8;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--paper); color: var(--ink);
+    line-height: 1.75; font-size: 15px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px 80px; }
+
+  header.hero {
+    background: linear-gradient(135deg, #1c2a4a 0%, #2b3a67 60%, #3b5bdb 130%);
+    color: #fff; padding: 56px 28px 44px; margin-bottom: 36px;
+  }
+  header.hero .wrap { padding-bottom: 0; }
+  .hero h1 { margin: 0 0 10px; font-size: 30px; font-weight: 700; letter-spacing: .5px; }
+  .hero .sub { color: #c8d3f0; font-size: 15px; max-width: 860px; }
+  .hero .meta { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip {
+    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22);
+    border-radius: 999px; padding: 4px 14px; font-size: 12.5px; color: #e6ecff;
+  }
+
+  nav.toc {
+    position: sticky; top: 0; z-index: 50; background: rgba(247,248,250,.96);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); margin-bottom: 34px;
+  }
+  nav.toc .wrap { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 8px; padding-bottom: 8px; }
+  nav.toc a {
+    color: var(--ink-soft); text-decoration: none; font-size: 13px;
+    padding: 5px 12px; border-radius: 8px;
+  }
+  nav.toc a:hover { background: var(--accent-soft); color: var(--accent); }
+
+  h2 {
+    font-size: 22px; margin: 54px 0 6px; padding-top: 10px;
+    border-top: 3px solid var(--accent); display: table; padding-left: 2px;
+  }
+  h2 .no { color: var(--accent); font-family: ui-monospace, monospace; margin-right: 8px; }
+  h3 { font-size: 17px; margin: 30px 0 8px; }
+  p { margin: 10px 0; color: var(--ink-soft); }
+  p strong, li strong { color: var(--ink); }
+  ul, ol { padding-left: 22px; color: var(--ink-soft); }
+  li { margin: 5px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #edf0f4; border: 1px solid var(--line); border-radius: 4px;
+    padding: 1px 6px; font-size: 12.5px; color: #34405e;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-size: 12.5px; line-height: 1.65;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  pre code { background: none; border: none; padding: 0; color: inherit; font-size: inherit; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 20px 24px; margin: 16px 0;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+
+  table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 13.5px; margin: 14px 0; }
+  th, td { border: 1px solid var(--line); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f4f9; font-weight: 600; color: var(--ink); white-space: nowrap; }
+  td { color: var(--ink-soft); }
+  tr:nth-child(even) td { background: #fbfcfe; }
+  .table-scroll { overflow-x: auto; }
+
+  .tag {
+    display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 5px;
+    padding: 1px 8px; margin-right: 4px; vertical-align: 1px; white-space: nowrap;
+  }
+  .tag.open { background: var(--open-soft); color: var(--open); }
+  .tag.polo { background: var(--polo-soft); color: var(--polo); }
+  .tag.good { background: var(--good-soft); color: var(--good); }
+  .tag.bad { background: var(--bad-soft); color: var(--bad); }
+  .tag.warn { background: var(--warn-soft); color: var(--warn); }
+  .tag.neutral { background: #eef1f5; color: var(--ink-faint); }
+
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--accent-soft);
+    border-radius: 0 10px 10px 0; padding: 14px 18px; margin: 16px 0; color: #2c3f7a;
+  }
+  .callout.warn { border-color: var(--warn); background: var(--warn-soft); color: #7a4a00; }
+  .callout.good { border-color: var(--good); background: var(--good-soft); color: #1e5e2c; }
+  .callout.bad { border-color: var(--bad); background: var(--bad-soft); color: #8c2020; }
+
+  .versus { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 18px 0; }
+  @media (max-width: 860px) { .versus { grid-template-columns: 1fr; } }
+  .versus .side { border-radius: 12px; padding: 18px 20px; border: 1px solid var(--line); background: var(--card); }
+  .versus .side h4 { margin: 0 0 10px; font-size: 15px; }
+  .versus .side.open-side h4 { color: var(--open); }
+  .versus .side.polo-side h4 { color: var(--polo); }
+  .versus .side ul { padding-left: 18px; margin: 0; font-size: 13.5px; }
+  .versus .side li { margin: 6px 0; }
+
+  .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+  .metric { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .metric .num { font-size: 24px; font-weight: 700; color: var(--accent); font-family: ui-monospace, monospace; }
+  .metric .lbl { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+  .metric.open .num { color: var(--open); }
+  .metric.polo .num { color: var(--polo); }
+
+  .borrow {
+    border: 1px solid var(--line); border-left: 5px solid var(--accent);
+    background: var(--card); border-radius: 0 12px 12px 0; padding: 18px 22px; margin: 14px 0;
+  }
+  .borrow.p0 { border-left-color: var(--bad); }
+  .borrow.p1 { border-left-color: var(--warn); }
+  .borrow.p2 { border-left-color: var(--ink-faint); }
+  .borrow h4 { margin: 0 0 8px; font-size: 15.5px; }
+  .borrow .meta-line { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 8px; }
+  .borrow p { margin: 6px 0; font-size: 14px; }
+
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+  details[open] summary { margin-bottom: 8px; }
+
+  footer { margin-top: 70px; color: var(--ink-faint); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 20px; }
+  .src-list { font-size: 12.5px; color: var(--ink-faint); }
+  .src-list li { margin: 3px 0; word-break: break-all; }
+
+  @media print {
+    nav.toc { display: none; }
+    header.hero { background: #1c2a4a !important; }
+    .card, .borrow, details { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>GenUI 方案对比评审</h1>
+    <div class="sub">开源框架 <strong>OpenUI</strong>（thesysdev/openui，"ChatGPT Intelligent UI 开源复现"）vs 我们 <strong>genui/impl</strong> 分支（POO-101~104 + 三个迭代）——架构差异、优劣对比与可借鉴清单。</div>
+    <div class="meta">
+      <span class="chip">📅 2026-10-18</span>
+      <span class="chip">调研对象：OpenUI @ 2026-10-17（Lang 1.0.1）· genui/impl @ 4b07b30c</span>
+      <span class="chip">证据：两路子代理实读源码 / 仓库文档 / 基准样本</span>
+      <span class="chip">自包含页面 · 无外部资源</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <a href="#tldr">结论速览</a>
+    <a href="#overview">方案速览</a>
+    <a href="#dims">逐维度对比</a>
+    <a href="#deep">关键差异深读</a>
+    <a href="#proscons">优劣势</a>
+    <a href="#borrow">可借鉴清单</a>
+    <a href="#notborrow">不建议照搬</a>
+    <a href="#sources">证据来源</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<!-- ================= TL;DR ================= -->
+<h2 id="tldr"><span class="no">0</span>结论速览（TL;DR）</h2>
+<div class="callout">
+  <strong>一句话结论：两者不是同一层的东西。</strong>OpenUI 是"渲染层接管"的通用 Generative UI 框架（模型输出紧凑 DSL，前端渐进渲染）；我们是"agent 工具调用 + 安全围栏"的产品内实现（模型输出受控 JSON / 沙箱 HTML，交互回流会话）。<strong>安全纵深、审计发布链、数据文件化、会话整合我们明显更强；流式渐进渲染、组件丰富度、客户端响应式运行时、token 工程是对方明显更强、且是我们下一步最值得借鉴的四个点。</strong>
+</div>
+<ul>
+  <li><strong>流式是我们最大的体验差距。</strong>OpenUI token 到即渲染（首屏 4.9s vs JSON 方案 14.2s 的口径）；我们的卡片在工具调用 <code>completed</code> 之后才出现（<code>TurnCard.tsx:2911</code> 只取完成态 activity），大表格 / 多组件回合用户等得更久。</li>
+  <li><strong>token 成本上双方走的是两条不同的路，且互补。</strong>OpenUI 用紧凑 DSL 省输出 token（-52.8%）；我们用"4KB payload 上限 + 数据必须走 <code>transform_data</code> 文件"从结构上让大额数据根本不经过模型输出。但我们的隐性大头在输入侧：render_ui 的 JSON Schema 工具定义估算 15–25KB（约 4–6K token），比 OpenUI 全组件库的 system prompt（5,031 token / 40+ 组件）还贵——<strong>这是最安全、性价比最高的优化点</strong>。</li>
+  <li><strong>对方的"generate vs execute 分离"运行时值得吸收：</strong>过滤 / 刷新 / 下钻这类纯视图操作在前端完成、不回模型。我们的交互目前全部坍缩为"塞回聊天输入框"，纯查看操作也要付一次模型往返的延迟和成本。</li>
+  <li><strong>画布应用全量重写（512KB）是成本黑点。</strong>对方增量编辑一屏 UI 只需改 2–3 行（约 60 token）；我们的 <code>updateOf</code> 每次全量重发。</li>
+  <li><strong>外部文章两处事实需要勘误：</strong>"需要 Node.js 24" 不实（仓库 engines 为 <code>node ^20.19 || &gt;=22.12</code>）；"OpenRouter" 只是官方 demo 的便利项，框架本身不依赖。"-52.8% token" 是同 AST 格式投影基准，真实生成对比里结构有效率只差 0.8 个百分点（96.5% vs 95.7%），差距主要在成本与失败形态。</li>
+</ul>
+
+<!-- ================= Overview ================= -->
+<h2 id="overview"><span class="no">1</span>方案速览</h2>
+
+<div class="versus">
+  <div class="side open-side">
+    <h4>OpenUI（thesysdev/openui）<span class="tag open">开源框架</span></h4>
+    <ul>
+      <li><strong>定位：</strong>"The Open Standard for Generative UI"，框架无关的全栈 GenUI 方案；MIT；11,645 stars / 794 forks。</li>
+      <li><strong>原理：</strong>模型不写网页代码，输出自研 DSL <strong>OpenUI Lang</strong>（行导向赋值语句、位置参数、命名引用），前端从注册组件库里渐进渲染。</li>
+      <li><strong>流式：</strong>每 chunk 全量重解析 + <code>autoClose()</code> 括号补齐容错 + 行级静默跳过；部分渲染代替白屏。</li>
+      <li><strong>组件：</strong>内置 40+ 组件（Table / Charts(Recharts) / Form / Calendar / Carousel / Tabs / Map 类…），两个预置库（通用 + 聊天优化）。</li>
+      <li><strong>运行时：</strong><code>Query/Mutation</code> + <code>$var</code> 响应式，交互（过滤 / 提交 / 刷新）不经模型；工具默认在浏览器执行。</li>
+      <li><strong>生态：</strong>React / Vue / Svelte / Angular 渲染器 + email + A2UI 桥 + LangChain/Vercel AI SDK 集成（Lang 1.0 特性目前 React-only）。</li>
+      <li><strong>维护：</strong>Thesys Inc 单公司主导，Changesets 高频发布（Lang 1.0 于 2026-10-12），配套商业托管（Gateway / Autofix / 观测云）。</li>
+    </ul>
+  </div>
+  <div class="side polo-side">
+    <h4>Polo genui/impl<span class="tag polo">产品内实现</span></h4>
+    <ul>
+      <li><strong>定位：</strong>Electron 桌面 agent 的两条 GenUI 轨道：内联卡片（render_ui）+ 画布应用（generate_app）；相对 baseline +11,878 行 / 90 文件，17 个提交（POO-101~104 + formatting / row-actions / confirm-flow）。</li>
+      <li><strong>原理：</strong>模型调用 session 工具输出<strong>受控 JSON</strong>（6 组件判别联合，payload ≤4KB）或<strong>单文件 HTML</strong>（≤512KB，updateOf 全量重写）。</li>
+      <li><strong>渲染：</strong>完成后一次性渲染；同 id 复用 = 卡片原地更新；未知 type 回退只读 JSON 视图（信息永不丢失）。</li>
+      <li><strong>数据：</strong>表格行数据 schema 层硬拒绝 inline，必须先 <code>transform_data</code> 落会话 <code>data/</code> 再用 <code>src</code> 引用——大额数据不经过模型输出。</li>
+      <li><strong>交互：</strong>全部坍缩为"塞回聊天输入框"（send-message / fill-input）+ 画布 ui-event 深链（六步校验、10 ev/s 限速、capability 声明）。</li>
+      <li><strong>安全：</strong>三层纵深（生成侧实体解码静态扫描 → 运行时请求围栏 file:/data:/blob: + deny-all 权限 → ui-event 所有权绑定）；审计先行的 pin / publish 链。</li>
+      <li><strong>治理：</strong>组织级远端 rollout × 用户级 kill switch 两级闸门；schema 版本化快照 + 发布链确定性 zip。</li>
+    </ul>
+  </div>
+</div>
+
+<h3>同一个"销售表"在两种方案下的样子</h3>
+<div class="grid2">
+  <div>
+    <p style="margin-top:0"><span class="tag open">OpenUI Lang</span> 模型直接输出（433 字节，来自仓库 <code>benchmarks/samples/simple-table.oui</code>）：</p>
+<pre><code>root = Stack([title, tbl])
+title = TextContent("Employees (Sample)", "large-heavy")
+tbl = Table(cols, rows)
+cols = [Col("Name", "string"), Col("Department", "string"),
+        Col("Salary", "number"), Col("YoY change (%)", "number")]
+rows = [["Ava Patel", "Engineering", 132000, 6.5], ...]</code></pre>
+  </div>
+  <div>
+    <p style="margin-top:0"><span class="tag polo">Polo render_ui</span> 模型输出工具调用 JSON（数据另行落文件，来自 <code>render-ui.test.ts</code>）：</p>
+<pre><code>{ "components": [{
+  "id": "sales", "type": "data-table",
+  "title": "Sales by Region",
+  "columns": [
+    {"key":"region","label":"Region","type":"text"},
+    {"key":"revenue","label":"Revenue","type":"currency"}],
+  "src": "/abs/.../data/sales_by_region.json",
+  "pageSize": 20 }] }</code></pre>
+  </div>
+</div>
+<div class="callout warn">
+  <strong>注意对照点：</strong>OpenUI 的行数据仍在模型输出流里（基准均值 1,362 token/屏）；我们的行数据在文件里，payload 恒 ≤4KB——<strong>数据密集场景我们更省，布局密集场景对方更省</strong>。同时对方靠命名语句 + 位置参数消灭了 <code>"component"/"props"/"children"</code> 重复键，这正是它 -52.8% 的机制来源，也是我们 JSON 里付的"格式税"。
+</div>
+
+<!-- ================= Dimensions ================= -->
+<h2 id="dims"><span class="no">2</span>逐维度对比</h2>
+<div class="table-scroll">
+<table>
+  <tr><th style="width:130px">维度</th><th>OpenUI</th><th>Polo genui/impl</th><th style="width:120px">相对结论</th></tr>
+  <tr>
+    <td><strong>模型输出格式</strong></td>
+    <td>自研行式 DSL（OpenUI Lang 1.0）：位置参数、命名引用、前向引用、<code>$var</code> 状态、三元 / 二元表达式——表达力接近一门小程序语言</td>
+    <td>工具调用 JSON（Zod 判别联合，6 组件）+ 单文件 HTML 字符串；<code>.strict()</code> 拒绝未知键</td>
+    <td><span class="tag open">对方强</span>表达力 / 紧凑度；<span class="tag polo">我们强</span>结构保证</td>
+  </tr>
+  <tr>
+    <td><strong>输出 token 成本</strong></td>
+    <td>格式投影基准 -52.8% vs Vercel json-render；真实生成均值 1,362 token/屏（json-render 3,258 / A2UI 2,823）</td>
+    <td>render_ui payload ≤4KB 硬上限；表格行数据文件化（输出侧天然便宜）；画布 HTML ≤512KB 但每次全量重发</td>
+    <td><span class="tag neutral">各有阵地</span>布局省 vs 数据省</td>
+  </tr>
+  <tr>
+    <td><strong>输入 token 成本</strong></td>
+    <td>40+ 组件库 system prompt 实测 5,031 token（json-render 7,651 / A2UI 12,610）</td>
+    <td>render_ui 工具描述 ~650–700 tok + 目录 ~150 tok + system prompt 两节 ~400 tok；但 inputSchema 估算 <strong>4–6K token</strong>（15–25KB JSON Schema，未实测）</td>
+    <td><span class="tag open">对方效率高约一个量级</span>（按每组件成本算）</td>
+  </tr>
+  <tr>
+    <td><strong>流式渲染</strong></td>
+    <td>真流式：每 chunk 重解析 + autoClose + 行级容错；骨架先出、数据行后出；部分渲染代替白屏（首屏 4.9s vs 14.2s 口径）</td>
+    <td>非流式：TurnCard 只渲染 <code>status === 'completed'</code> 的工具输入；校验失败重试对用户不可见（只见最终成功卡）</td>
+    <td><span class="tag open">对方明显强</span></td>
+  </tr>
+  <tr>
+    <td><strong>组件丰富度</strong></td>
+    <td>内置 40+（含 Charts/Calendar/Carousel/Tabs/Modal/Steps…）+ 自定义组件注册 + <code>library.extend</code> 派生</td>
+    <td>6 个（stat-card / data-table / alert / progress / action-buttons / form）；<strong>无 chart</strong>（ADR 0021 刻意推迟，理由：库外链与运行时、无确定消费者）；表达力出口 = 画布 HTML</td>
+    <td><span class="tag open">对方明显强</span>（但见 §4 逃生舱分析）</td>
+  </tr>
+  <tr>
+    <td><strong>交互模型</strong></td>
+    <td>客户端响应式运行时：$var 联动、Query 自动重取（支持轮询）、Mutation 经 @Run——<strong>视图类交互零模型往返</strong></td>
+    <td>内联卡交互 = 塞回聊天输入框（params→confirm→execute 门链）；画布 = ui-event 深链回会话（modelContext ≤2KB 注入下一轮）；表格排序 / 过滤已在客户端</td>
+    <td><span class="tag open">对方强</span>；<span class="tag polo">我们强</span>在语义动作可审计（全部进对话记录）</td>
+  </tr>
+  <tr>
+    <td><strong>安全与可控</strong></td>
+    <td>schema 白名单 + 非可执行 DSL（无沙箱必要）；工具默认<strong>浏览器执行</strong>，无 per-tool 权限模型，授权靠应用自觉；错误码体系完整（unknown-component / type-mismatch…）</td>
+    <td>三层纵深（静态扫描实体解码+data:递归解包 → 请求围栏+deny-all 权限+无弹窗无导航 → 六步 ui-event 校验+所有权 registry+限速）；审计先行 pin/publish；能力集从 attach 文档提取、渲染器声明不算数</td>
+    <td><span class="tag polo">我们明显强</span>（企业 / 桌面级 vs Web 应用级）</td>
+  </tr>
+  <tr>
+    <td><strong>数据获取</strong></td>
+    <td>内置：<code>Query("tool", args, defaults, refreshSec)</code> 加载即执行，$var 依赖自动重取，toolProvider 可接 MCP</td>
+    <td>数据必须经 agent 侧 <code>transform_data</code> 落文件（会话 data/ 内，realpath 包含校验）；画布应用无运行时数据绑定，靠 ui-event payloadSrc（≤1MB）回读</td>
+    <td><span class="tag open">对方强</span>灵活性；<span class="tag polo">我们强</span>边界清晰</td>
+  </tr>
+  <tr>
+    <td><strong>生态 / 多平台</strong></td>
+    <td>React/Vue/Svelte/Angular + email + browser-bundle(CDN) + A2UI 协议桥 + LangChain/Vercel AI SDK/Mastra；无 Python SDK</td>
+    <td>Electron + React 单平台；但深度整合自家会话生命周期 / tab-browser / admin 发布链 / Creator Skill bundle 格式</td>
+    <td><span class="tag neutral">目标不同</span>：通用生态 vs 产品整合</td>
+  </tr>
+  <tr>
+    <td><strong>版本化与回放</strong></td>
+    <td>Lang 规范版本化（0.5 / 1.0），渲染器包滞后（三框架停在 0.5）；无卡片级 schema 版本回放</td>
+    <td><code>GENUI_RENDER_UI_SCHEMA_VERSION=1</code> + 快照注册表按生成时版本回放校验（未知版本 fail-closed 只读视图）；schemaHash 轮换；确定性 zip 字节可复现</td>
+    <td><span class="tag polo">我们强</span></td>
+  </tr>
+  <tr>
+    <td><strong>渐进发布治理</strong></td>
+    <td>无对应物（框架不管产品 rollout）</td>
+    <td>组织级 <code>/api/capabilities</code> 远端开关 × 用户级设置 kill switch，两级相交；web_app artifact policy 只能收紧；每回合资格重算、会话中途关 toggle 即时生效</td>
+    <td><span class="tag polo">我们强</span>（产品必需项，对方不涉足）</td>
+  </tr>
+  <tr>
+    <td><strong>成熟度 / 风险</strong></td>
+    <td>11.6k stars、极活跃；但单公司主导、重名争议（#353）、流式健壮性 issue（#355 图表崩溃 / #990 更新深度爆栈 / #1440 fence 空白）、过宽容错被用户抱怨（#582）、1.0 特性 React-only</td>
+    <td>分支内实现 + 密集测试（partition / registry / ui-event / schema 全有隔离测试）；已知口径漂移：system.ts 画布一节仍写 "no host bridge"，与 POO-103 实际的 ui-event 桥不一致（权威在工具描述）</td>
+    <td><span class="tag neutral">场景不同</span>：我们要自己长期养</td>
+  </tr>
+</table>
+</div>
+
+<!-- ================= Deep dive ================= -->
+<h2 id="deep"><span class="no">3</span>关键差异深读</h2>
+
+<h3>3.1 token 哲学：紧凑 DSL vs 数据文件化（互补，不是对立）</h3>
+<p>OpenUI 的 -52.8% 来自四个结构性手段：<strong>位置参数</strong>消灭重复键、<strong>命名语句 + 引用</strong>让子组件平铺不嵌套、键名无引号、<strong>top-down 生成</strong>（骨架行先出）。它优化的是"布局与控件的描述成本"。</p>
+<p>我们的路线是<strong>让大额数据根本不走模型输出</strong>：payload 4KB 硬上限 + <code>data-table</code> 的 <code>src</code> 强制文件化 + 画布数据 payloadSrc ≤1MB。一张 2 万行的表，对方要模型逐行吐出来，我们只是 <code>transform_data</code> 产物。<strong>在"数据密集"场景我们的输出 token 成本接近常数，对方线性增长。</strong></p>
+<div class="callout bad">
+  <strong>但我们有一块被忽视的输入侧成本：</strong>render_ui 的 inputSchema（zodToJsonSchema 产物）估算 15–25KB ≈ 4–6K token，<strong>每个会话每轮都付</strong>。OpenUI 用 5,031 token 描述了 40+ 组件，我们用相近的 token 描述 6 个组件。原因是 JSON Schema 工具定义天然冗长（60 个叶子字段的类型 / 描述 / 约束全量序列化），而对方只注入"组件签名行"（如 <code>Form(id: string, buttons: Buttons, controls: FormControl[]) — Form container</code>）。<strong>这里不需要换输出格式就能吃到大部分收益——见借鉴清单 P1-1。</strong>
+</div>
+
+<h3>3.2 流式：渐进渲染 vs 完成后渲染</h3>
+<p>OpenUI 的流式实现工程上其实"简单粗暴"：每个 chunk 到达就<strong>全量重解析</strong>整个前缀，靠解析快换简单性；截断输入用 <code>autoClose()</code> 补引号补括号，无效行静默跳过；错误扣到流结束才上报。生产管线还叠了一层"解析错误 → 小 sanitizer 模型只修坏行"的自修复（宣称 &lt;1% 屏幕损坏触达用户）。</p>
+<p>我们的"完成后渲染"换来的是<strong>用户永远看不到无效 UI</strong>：Zod 全量校验失败 → 工具错误带 issue 列表 → 模型修复重试一次 → 只渲染成功 payload。代价是大 payload 的首卡延迟（模型边生成边算，用户在等）。</p>
+<p><strong>两者可以折中：</strong>骨架预览（partial JSON 容错解析出组件类型和标题先占位）+ 完成后校验替换正式内容，既保住"永不显示坏 UI"的底线，又拿到首屏提前量。Claude API 本身流式提供 tool input delta，管线原料是现成的。</p>
+
+<h3>3.3 交互模型：generate vs execute 分离 vs 聊天回路</h3>
+<p>这是两个方案<strong>最深的架构分歧</strong>。OpenUI 的口号是"generate vs execute 分离"：模型只生成一次接线（Query / Mutation / $var），之后过滤、排序、刷新、提交全部在前端运行时执行，<strong>不惊动模型</strong>。</p>
+<p>我们把一切交互坍缩为"下一条用户消息"：按钮 = send-message/fill-input，表单提交 = values JSON 作为用户消息，行操作 = 模板插值后发送。好处是<strong>每个语义动作都落在对话记录里，可审计、可追溯、用户全程知情</strong>；代价是纯视图操作（换个筛选、钻个维度）也要付一轮模型往返的延迟与费用。</p>
+<p><strong>边界其实很清晰：</strong>"视图态"操作（筛选 / 排序 / 图表联动 / 刷新已落盘的数据）应该留在客户端；"语义"动作（触发分析、执行任务、改变世界状态）走聊天回路。我们的 data-table 已经在客户端做排序过滤了——这条路已经开了个头，只是没有形成体系。</p>
+
+<h3>3.4 逃生舱策略：无逃生舱 vs 大逃生舱</h3>
+<p>OpenUI <strong>没有逃生舱</strong>：模型只能用注册组件，表达力上限就是组件库。要新表达力，得开发注册新组件。</p>
+<p>我们有<strong>一个大逃生舱</strong>：generate_app 直接产完整 HTML（跑在三层围栏的 webview 里）。这解释了为什么我们的内联组件可以只有 6 个——复杂 UI 走画布。代价是：画布应用每次迭代 512KB 全量重写、模型要写整页 HTML（生成慢、易错）、且画布内容无法被宿主结构化理解（对模型回流的只有 ≤2KB 的 modelContext）。</p>
+<p>对方路径的问题反过来：<strong>没有逃生舱</strong>，地图、复杂可视化都依赖组件库持续扩张（他们内置 40+ 还在长）。我们的双层结构（6 内联组件 + 画布）本质上是"80% 场景用高结构化低保真，20% 场景用低结构化高保真"——这个分层本身是对的，问题只在中间层太薄：chart、简单布局组合这类"中等复杂度"需求目前要么降级成表格、要么升级成整页 HTML。</p>
+
+<!-- ================= Pros & Cons ================= -->
+<h2 id="proscons"><span class="no">4</span>优劣势对比</h2>
+
+<h3>4.1 我们相对 OpenUI 的优势（保持并对外讲清楚）</h3>
+<div class="card">
+  <ol>
+    <li><strong>安全纵深是代差级的。</strong>对方的安全模型是"schema 白名单 + 非可执行 DSL"，工具默认跑在浏览器里、无 per-tool 权限；我们是生成侧扫描（实体解码 + data: URI 递归解包）→ 运行时请求围栏（仅 file:/data:/blob:）+ deny-all 权限 + 无弹窗无导航 → ui-event 六步校验（sender↔card 所有权绑定、attach 时文档 capability 提取为信任根、10 ev/s 限速）。<strong>桌面 + 企业场景这是硬需求，对方方案不能直接替代。</strong></li>
+    <li><strong>数据文件化让输出 token 成本近常数。</strong>对方均值 1,362 token/屏全部从模型输出流里过；我们的表格行进 <code>transform_data</code> 文件，payload 恒 ≤4KB。数据密集场景成本与延迟双双占优。</li>
+    <li><strong>交互全程可审计。</strong>语义动作必然进对话记录；画布事件带 modelContext 注入防线（剥 system-reminder 字样、码点安全截断、注入式攻击有专门测试）。</li>
+    <li><strong>版本化回放 + 确定性发布链。</strong>schema 快照按生成时版本回放（未知版本 fail-closed）；pin/publish 审计先行、确定性 zip 字节可复现、远端 policy 只能收紧。对方没有对应物。</li>
+    <li><strong>产品级 rollout 治理。</strong>组织开关 × 用户 kill switch 两级相交、资格矩阵每回合重算、Pi 子进程三层 deny——渐进发布需要的旋钮齐全。</li>
+    <li><strong>与既有会话 / tab / admin 体系深度整合</strong>（pin 进启动器、publish 走既有 Creator App 链），这是框架型方案给不了的。</li>
+  </ol>
+</div>
+
+<h3>4.2 我们相对 OpenUI 的劣势（对方强项 = 我们的差距）</h3>
+<div class="card">
+  <ol>
+    <li><strong>无流式渐进渲染</strong>——首卡延迟差距的最大来源；对方骨架先出、数据后至，我们整块等校验。</li>
+    <li><strong>组件表达力薄。</strong>6 vs 40+；无 chart（Mermaid xychart 只是过渡）、无布局组合（Stack/Tabs/Card 层级）、无日历 / 轮播等。中间层缺位，需求被两头挤压。</li>
+    <li><strong>纯视图交互也要付模型往返。</strong>对方 $var 响应式 + Query 重取在前端闭环；我们换个筛选也是一轮会话。</li>
+    <li><strong>画布应用全量重写。</strong>512KB updateOf vs 对方改 2–3 行（~60 token）的增量编辑；长迭代会话里成本与延迟都被放大。</li>
+    <li><strong>输入侧 token 效率低。</strong>工具 schema 估算 4–6K token vs 对方 5K token 描述 40+ 组件（签名式 prompt）。</li>
+    <li><strong>画布无运行时数据绑定。</strong>对方 Query/refreshSec 让应用活起来；我们的画布是静态快照，要更新只能靠模型重写。</li>
+  </ol>
+</div>
+
+<h3>4.3 OpenUI 自身的坑（我们不必羡慕的部分）</h3>
+<div class="card">
+  <ul>
+    <li><strong>过宽容错是把双刃剑：</strong>无效行静默跳过（#582 用户抱怨想更严格）、<code>stripFences</code> 行中 fence 整段空白（#1440）、流式图表 null 崩溃（#355）、assistant-ui 更新深度爆栈（#990）——流式健壮性是他们自己也还在修的领域。</li>
+    <li><strong>框架运行时不對等：</strong>Lang 1.0 特性（自定义函数 / 动作 / 存储协议）React-only，Vue/Svelte/Angular 停在 0.5。</li>
+    <li><strong>工具浏览器执行 + 无权限模型：</strong>docs 明言 Renderer 是 client component、函数跑在浏览器，鉴权靠应用自觉——在他们的 Web 场景成立，在我们的桌面 agent 场景不成立。</li>
+    <li><strong>单公司主导 + 商业化分流：</strong>核心开源但 Gateway/Autofix 是托管服务；重名争议（与 W3C OpenUI）未解。</li>
+    <li><strong>DSL 的隐藏成本：</strong>自定义格式 = 自建解析器 + prompt 工程 + 模型适配全要自己扛；他们真实生成对比里结构有效率 96.5%（即每屏 ~3.5% 概率结构性失败要靠容错兜）——JSON 工具调用在模型侧的"原生正确率"更高，这是我们的结构性红利。</li>
+  </ul>
+</div>
+
+<!-- ================= Borrow list ================= -->
+<h2 id="borrow"><span class="no">5</span>可借鉴清单（按优先级）</h2>
+<p>以下每项都标注了落地缝隙（seam）——即 genui/impl 里已经存在的、专门为这类扩展预留的接口。<strong>优先级按「体验收益 × 实现风险」排定</strong>，P0 = 建议下一迭代立项，P1 = 排期，P2 = 观察项。</p>
+
+<div class="borrow p0">
+  <h4>P0-1 · 纯视图交互的客户端闭环（generate vs execute 分离）</h4>
+  <div class="meta-line">收益：高（交互延迟从一轮会话 → 毫秒级，省模型费用） · 风险：低 · 缝隙：<code>MarkdownDatatableBlock</code> 已有客户端排序 / 过滤 + <code>renderColumnCell/renderRowAction</code> 钩子；action 语义已二分（send-message / fill-input）</div>
+  <p><strong>借鉴点：</strong>OpenUI 的 $var 响应式让"视图态"操作零模型往返。把这条边界制度化：<strong>视图态操作（筛选、图表联动、列选择、刷新已落盘数据、下钻导航）在前端完成；语义动作（触发分析 / 执行任务）保持走聊天回路。</strong></p>
+  <p><strong>具体起步：</strong>data-table 增加"客户端下钻视图"（点击行 → 本地按维度重聚合，数据文件已全量在客户端，transform_data 产物就是全量数据）+ 图表组件（见 P1-3）的图例 / 区间筛选。send-message 只留给真正需要模型的位置。</p>
+</div>
+
+<div class="borrow p0">
+  <h4>P0-2 · render_ui 骨架流式预览</h4>
+  <div class="meta-line">收益：高（首卡出现时间大幅提前） · 风险：中（需容错解析，但显示层可保守） · 缝隙：Claude API 已流式提供 tool input delta；TurnCard 的 activity 解析点（<code>TurnCard.tsx:2911</code>）是唯一消费口</div>
+  <p><strong>借鉴点：</strong>OpenUI 的 autoClose + 部分渲染。我们不需要学它的"边流边渲染真组件"，学它的分层：<strong>partial JSON 容错解析出「组件类型 + 标题」先出骨架占位卡，completed 后过 Zod 校验再替换正式内容。</strong></p>
+  <p><strong>边界保住我们的原则：</strong>骨架不渲染业务数据（防显示后回缩），只显示"正在构建 data-table「Sales by Region」…"级别的结构预告——用户感知从"黑箱等待"变成"看得见的装配"。</p>
+</div>
+
+<div class="borrow p1">
+  <h4>P1-1 · 工具 schema 瘦身（签名式 prompt，最大性价比）</h4>
+  <div class="meta-line">收益：高（每会话每轮省 est. 3–5K token 输入） · 风险：低 · 缝隙：POO-104 的两层索引已确立"目录进描述、schema 永不进 prompt"原则——把它推进到 schema 本身</div>
+  <p><strong>借鉴点：</strong>OpenUI 5,031 token 描述 40+ 组件，靠的是"组件签名行"（<code>Form(id, buttons, controls) — Form container</code>）而非全量 JSON Schema。我们的 zodToJsonSchema 产物估算 15–25KB，其中 describe() 文本约 2KB，其余是结构性冗余。</p>
+  <p><strong>做法：</strong>(a) 收紧 zodToJsonSchema 输出（剔除默认值重复、精简约束序列化）；(b) 把字段级语义说明继续往目录描述层挪（那里已有 160 字符 / 条的 sanitize 信任边界）；(c) 评估 <code>generate_app</code> 的"单字符串参数 + 协议写在描述里"模式是否适用于 render_ui 的低频组件。<strong>先实测（当前 4–6K 是估算值），再动手。</strong></p>
+</div>
+
+<div class="borrow p1">
+  <h4>P1-2 · chart 组件重启评估（ADR 0021 的条件 a 已满足）</h4>
+  <div class="meta-line">收益：中高（补齐中间层最明显的洞） · 风险：中 · 缝隙：ADR 0021 预设的两条缝——render_ui registry 新卡类型，或 bundle policy 白名单 vendored 单文件</div>
+  <p><strong>事实：</strong>ADR 0021 的重启条件是 "(a) P2 交互循环落地且卡片 schema 稳定"。<strong>POO-103 ui-event 交互循环已落地、schemaVersion=1 已冻结——条件 a 成立，该 ADR 可以正式重开。</strong>OpenUI 的经验佐证需求真实性：Charts 是其高频组件（benchmark 七场景有 chart-with-data，流式崩溃 issue #355 也恰恰出在图表——说明用得多）。</p>
+  <p><strong>落地路径 honor 既有约束：</strong>选无外链 / 无运行时加载的方案（ADR 已点名"vendored 单文件片段"），走 registry 新卡类型缝；数据同样文件化（src 模式），schema 加入 GENUI_COMPONENT_SCHEMAS 与快照注册表。</p>
+</div>
+
+<div class="borrow p1">
+  <h4>P1-3 · 画布应用增量编辑（替代 512KB 全量重写）</h4>
+  <div class="meta-line">收益：中高（长迭代会话的延迟 / 成本 / 版本噪声三降） · 风险：中 · 缝隙：ui-event payloadSrc 已支持 ≤1MB 会话 data/ 内 JSON 回读；genui-apps 目录已有 version.json 簿记</div>
+  <p><strong>借鉴点：</strong>OpenUI top-down 生成 + 改 2–3 行 patch（~60 token）的增量编辑。<strong>我们不需要给 HTML 打 patch——把"数据"和"结构"分离：</strong>引导模型把可变状态放 <code>app.js</code> 里从 data/ JSON 读取（generate_app 描述里已有 payloadSrc 通道），迭代时只 <code>transform_data</code> 更新数据文件，应用经 Query 式轮询（见 P2-1）自刷新；结构变化才走 updateOf。</p>
+</div>
+
+<div class="borrow p2">
+  <h4>P2-1 · 画布运行时数据绑定（Query / 轮询）</h4>
+  <div class="meta-line">收益：中（画布应用"活"起来） · 风险：中 · 缝隙：ui-event 深链协议 + payloadSrc 通道现成</div>
+  <p>给画布应用一个声明式的数据刷新能力：bundle 声明依赖的 data/ 文件列表，宿主在文件变化时经既有 <code>ui_state</code> 协议事件推送新内容（点对点、永不广播的机制已在）。等价于 OpenUI 的 <code>Query(refreshSec)</code>，但数据源限定在会话 data/ 围栏内——比对方的浏览器 fetch 收敛得多。</p>
+</div>
+
+<div class="borrow p2">
+  <h4>P2-2 · 自有 token / 延迟 / 有效率基准</h4>
+  <div class="meta-line">收益：中（决策不再拍脑袋） · 风险：无 · 缝隙：无依赖，纯新增</div>
+  <p>照抄 OpenUI 的两层方法论：(a) 格式投影基准（同一 UI 的 payload / schema token 计数）；(b) 真实生成基准（N 条贴近用户措辞的 prompt × 模型 × 重复次数，量结构有效率 / 均值 token / 首卡延迟）。<strong>P1-1 和任何"要不要 DSL 化"的决策都应先有这套尺子。</strong>他们的结论也提醒尺度：格式省 52.8% 不等于可靠性差 52.8%——两轴要分开量。</p>
+</div>
+
+<div class="borrow p2">
+  <h4>P2-3 · 结构化错误码 taxonomy 辅助重试</h4>
+  <div class="meta-line">收益：低中（重试成功率与轮次） · 风险：无 · 缝隙：render-ui.ts 已把 Zod issues 格式化回给模型（"fix and retry once"）</div>
+  <p>OpenUI 的错误码体系（unknown-component / missing-required / type-mismatch / excess-args…）设计为可直接回传 LLM 修正。把我们的 Zod issue → 稳定错误码 → 针对性修复提示做一层映射，提升一次重试成功率。</p>
+</div>
+
+<!-- ================= Not borrow ================= -->
+<h2 id="notborrow"><span class="no">6</span>不建议照搬的部分</h2>
+<div class="card">
+  <ul>
+    <li><strong>全面 DSL 化 render_ui 输出。</strong>收益已被我们 4KB 上限 + 数据文件化封顶（输出侧最多省 ~2K token/回合）；代价是自建解析器、双后端（Claude SDK 原生 JSON 工具 / Pi JSON Schema 代理）都要改、模型侧结构正确率从"JSON 原生红利"跌到 ~96.5%。<strong>先把 P1-1（schema 瘦身）吃掉，DSL 只在基准证明剩余收益显著时再评估。</strong></li>
+    <li><strong>多框架渲染器 / A2UI / email 导出。</strong>我们是 Electron + React 单平台产品，无互操作需求；这是框架型项目的生存需求，不是我们的。</li>
+    <li><strong>工具浏览器直连执行。</strong>与我们的围栏模型直接冲突（对方文档自己承认鉴权靠应用自觉）。若做画布数据绑定，走 P2-1 的会话 data/ 限定通道。</li>
+    <li><strong>逐 chunk 全量重解析的流式实现。</strong>性能上可行但对 Electron 渲染进程不友好；我们要做也是 partial-JSON 增量解析 + 骨架层保守渲染（P0-2 的形态）。</li>
+    <li><strong>40+ 组件的全量扩张。</strong>对方没有逃生舱所以必须广铺组件；我们有画布兜底，内联组件应按"真实使用频率"补（chart 之后的候选应来自会话数据，不是对方目录）。</li>
+  </ul>
+</div>
+
+<!-- ================= Conclusion ================= -->
+<h2 id="conclusion"><span class="no">7</span>结论</h2>
+<div class="callout good">
+  <p style="margin-top:0"><strong>我们的双层架构（6 个高结构化内联组件 + 三层围栏画布）和安全 / 治理纵深是对方给不了的，方向不用改。</strong>对方真正领先的是"体验工程"四件套：<strong>流式渐进渲染、客户端响应式运行时、紧凑 prompt 工程、增量编辑</strong>——其中前三项都能在不动我们安全模型的前提下，通过 genui/impl 已预留的缝隙（目录两层索引、DataTable 客户端钩子、ui-event payloadSrc、activity 解析点）吸收进来。</p>
+  <p style="margin-bottom:0"><strong>建议的下一步：</strong>实测 render_ui schema 真实 token 数 → 立项 P0-1（客户端视图闭环）+ P0-2（骨架流式）→ 排期 P1-1（schema 瘦身）与 P1-2（重开 ADR 0021 chart 决策）→ 建立自有基准（P2-2）作为后续一切格式实验的前置尺子。另有两处文档口径漂移（system.ts 画布节 "no host bridge" 未随 POO-103 更新；spec-poloai-protocol-bidirectional.md v2 方向描述与实现不符）建议顺手修掉。</p>
+</div>
+
+<!-- ================= Sources ================= -->
+<h2 id="sources"><span class="no">8</span>证据来源</h2>
+
+<details open>
+  <summary>外部：OpenUI 调研（GitHub 仓库 API + 文档源码 + 基准样本实测文件）</summary>
+  <ul class="src-list">
+    <li>github.com/thesysdev/openui — README、<code>benchmarks/README.md</code>（基准方法论：GPT-5.2 / temperature 0 / tiktoken / 60 tok/s）、<code>benchmarks/samples/*</code>（simple-table.oui 433B vs C1 JSON 1,466B 等原始样本）</li>
+    <li><code>docs/content/docs/openui-lang/</code> — specification/v0.5 与 1.0、syntax、renderer（流式机制与错误码表）、defining-components（签名式 prompt）、queries-mutations（浏览器执行警示原文）、comparison、architecture（top-down / 60-token patch）、system-prompts</li>
+    <li><code>docs/content/blog/generative-ui-benchmark.mdx</code> — 真实生成基准（46 prompt × 6 模型 × 4 次 = 1,104/格式；96.5% / 1,362 tok / 5,031 sysprompt / $2.27 vs $5.85）与 sanitizer 自修复管线</li>
+    <li><code>packages/lang-core/src/parser/</code> — statements.ts（autoClose / 行级静默跳过注释原文）、merge、index（createStreamingParser / compileSchema）</li>
+    <li><code>packages/{vue,svelte,angular}-lang/README.md</code> — "Lang 1.0 features need the React renderer" 原文；<code>packages/react-ui/src/components/</code> 目录实测 40+ 组件；<code>packages/a2ui/README.md</code> — A2UI profile 桥</li>
+    <li>Issues：#353（重名）#355（流式图表崩溃）#582（解析过宽）#990（更新深度爆栈）#1127（重复 ID 不一致）#1440（fence 空白）</li>
+    <li>对比背景：github.com/vercel-labs/json-render（18.7k stars，RFC 6902 JSONL + 36 shadcn 组件）、github.com/google/A2UI（16.7k stars，v0.9.1 stable / v1.0 RC）</li>
+    <li>仓库 engines 实测：<code>node ^20.19.0 || &gt;=22.12.0</code>（勘误原文"Node.js 24"）；OpenRouter 仅见于 <code>docs/app/api/playground/stream/route.ts</code> demo 后端</li>
+  </ul>
+</details>
+
+<details>
+  <summary>内部：genui/impl 调研（分支 4b07b30c，17 提交 / +11,878 行 / 90 文件；复核命令：<code>git show genui/impl:&lt;path&gt;</code>）</summary>
+  <ul class="src-list">
+    <li>工具与 schema：<code>packages/session-tools-core/src/tool-defs.ts:155-511</code>（6 组件判别联合 / 4KB 上限 / 512KB HTML / 两种 action）、<code>handlers/render-ui.ts</code>、<code>handlers/generate-app.ts:121-290</code>（实体解码 + data: 递归扫描）、<code>genui-schema.ts</code>（动态联合 + 版本快照）</li>
+    <li>目录生态：<code>packages/session-tools-core/src/genui-catalog.ts</code>（一行式目录 / 160 字符 sanitize）、<code>packages/shared/src/genui/component-catalog.ts</code>（注册表 / schemaHash / bundle 格式 / "渲染器永不进 renderer 进程"注释）、<code>genui/app-publish.ts</code>（确定性 zip / policy 闸门）</li>
+    <li>渲染层：<code>packages/ui/src/components/chat/GenUICard.tsx</code>（静态注册表 / 未知 type 回退 / 格式化语义 / 门链规划器）、<code>GenUiAppCard.tsx</code>（webview / 分区 / 身份查询参数）、<code>TurnCard.tsx:2911-2920</code>（completed-only 渲染证据）</li>
+    <li>围栏与事件：<code>apps/electron/src/main/webview-security.ts</code>（请求围栏 / deny-all / 导航封锁）、<code>genui-ui-event.ts</code>（六步校验 / 限速）、<code>ui-card-registry.ts</code>（二维所有权）、<code>handlers/genui.ts</code>（审计先行 pin / publish）</li>
+    <li>会话与治理：<code>packages/server-core/src/sessions/SessionManager.ts:1236-1289</code>（资格矩阵 / widget state 注入与 sanitize）、<code>packages/shared/src/config/generative-ui.ts</code>（两级闸门）、<code>web-app-policy.ts</code>（只能收紧）</li>
+    <li>决策文档：<code>docs/adr/0021-defer-chart-library-for-genui-cards.md</code>（无 chart 的原因与重启条件）、<code>docs/spec-poloai-protocol-bidirectional.md</code>（v2 预留位，未随实现更新）</li>
+    <li>token 成本表：工具描述 / 目录 / system prompt 节为字节实测；inputSchema 4–6K token 为<strong>估算值</strong>（工作树无 node_modules，zodToJsonSchema 未实际运行）——动手前先实测</li>
+  </ul>
+</details>
+
+<details>
+  <summary>调研过程说明</summary>
+  <ul class="src-list">
+    <li>工具链：agent-reach skill（<code>~/.agents/skills/agent-reach</code>，2026-10-18 安装）路由：GitHub 走 gh CLI、网页走 web-reader MCP 通道；Jina Reader 匿名通道被 IP 限流未使用。</li>
+    <li>两路并行子代理（外部方案 / 内部分支），全部结论要求附文件路径或 URL，可直接复核。</li>
+    <li>本页面自包含（内联 CSS / 无外链 / 无字体请求）——与我们自己的画布围栏标准一致。</li>
+  </ul>
+</details>
+
+<footer>
+  Polo AI · GenUI 方案对比评审 · 2026-10-18 · 调研范围：OpenUI（Lang 1.0.1，2026-10-17 快照）vs genui/impl @ 4b07b30c（基线 genui/baseline = dev @ e7c0e6bd）· 估算值均已显式标注
+</footer>
+
+</div>
+</body>
+</html>
