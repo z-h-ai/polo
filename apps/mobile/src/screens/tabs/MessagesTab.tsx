@@ -1,19 +1,31 @@
-// 消息 Tab (POL-19, prototype M01).
+// 消息 Tab (POL-19 shell, M01; POL-18 wires the session card).
 //
 // Two states like M01:
-//   - 空态 (default until POL-18 wires the session data): big glyph,
-//     还没有消息, 副文, 「去绑定电脑」 primary button -> /pair (the POL-16
-//     pairing flow), boundary chip about 多会话管理.
-//   - 有会话占位: conversation-card structure in place (device name + time +
-//     summary + unread bubble + task-result chip); tapping the card is a
-//     no-op until the session page exists (POL-18). Below the list sits the
-//     greyed-out P3 system-push mock row with its 「P3 · 示意」 badge.
+//   - 空态 (no bound device): big glyph, 还没有消息, 副文, 「去绑定电脑」
+//     primary button -> /pair, boundary chip about 多会话管理.
+//   - 会话卡 (POL-18): bound device → one M01 card (device name + time +
+//     summary + unread bubble + task-result chip from the live session store);
+//     tapping opens the P05 session page. Below the list sits the greyed-out
+//     P3 system-push mock row with its 「P3 · 示意」 badge.
+//
+// Focus wiring (POL-18): the admin devices list is the binding source of
+// truth — the newest binding selects the connection target
+// (connectionTarget.set via selectDeviceRow, POL-17 leftover responsibility)
+// and starts the idempotent session event-stream wiring.
 
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 
+import { devicesApi } from '../../api/devices';
+import type { DeviceView } from '../../api/devices';
 import { LargeTitle } from '../../components/LargeTitle';
 import { TabIcon } from '../../components/TabIcons';
+import { macDisplayName } from '../../lib/devicesUi';
+import { formatClock, conversationChipFor } from '../../session/eventCard';
+import { selectDeviceRow } from '../../session/connectionBootstrap';
+import { ensureSessionWiring } from '../../session/sessionRpc';
+import { lastUserEntry, useSessionStore } from '../../session/sessionStore';
 import { colors, fontSize } from '../../theme/tokens';
 
 export const EMPTY_TITLE = '还没有消息';
@@ -22,6 +34,8 @@ export const BIND_BUTTON_LABEL = '去绑定电脑';
 export const BOUNDARY_CHIP =
   '当前支持绑定多台电脑，每台电脑 1 个会话 · 多会话管理即将上线';
 export const PUSH_HINT = '离开 App 时，任务结果将通过系统通知提醒 · 即将上线';
+/** Summary line before the first message exists. */
+export const FRESH_BINDING_SUMMARY = '绑定成功，发条消息试试吧';
 
 /** Structural placeholder for the M1-11/P05 session list (POL-18 fills it). */
 export interface ConversationSummary {
@@ -35,13 +49,70 @@ export interface ConversationSummary {
   taskChip: string | null;
 }
 
+/** Live M01 card summary: newest binding + the session store's last activity. */
+export function useConversationSummaries(): ConversationSummary[] {
+  const [device, setDevice] = useState<DeviceView | null>(null);
+  const entries = useSessionStore((state) => state.entries);
+  const connStatus = useSessionStore((state) => state.connStatus);
+
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      devicesApi
+        .list()
+        .then((rows) => {
+          if (!alive) return;
+          const first = rows[0] ?? null;
+          setDevice(first);
+          if (first) {
+            // POL-17 leftover responsibility, closed here (POL-18).
+            selectDeviceRow(first);
+            ensureSessionWiring();
+          }
+        })
+        .catch(() => {
+          // Keep whatever the previous focus produced; the devices tab owns
+          // list-error UX — this tab only needs the newest binding.
+        });
+      return () => {
+        alive = false;
+      };
+    }, []),
+  );
+
+  if (!device) return [];
+  const lastUser = lastUserEntry({ entries });
+  const lastEntry = entries.length > 0 ? entries[entries.length - 1] : null;
+  const online = connStatus === 'online-lan' || connStatus === 'online-relay';
+  return [
+    {
+      id: device.id,
+      deviceName: macDisplayName(device),
+      online,
+      lastTime: lastEntry ? formatClock(lastEntry.atMs) : '',
+      summary: lastUser?.text ?? FRESH_BINDING_SUMMARY,
+      unread: 0, // 已读回执不做 (card 不做 list)
+      taskChip: conversationChipFor(lastUser?.turn),
+    },
+  ];
+}
+
 export function MessagesTab({
-  conversations = [],
+  conversations,
 }: {
   conversations?: ConversationSummary[];
 }) {
   const router = useRouter();
-  const hasConversations = conversations.length > 0;
+  const derived = useConversationSummaries();
+  const list = conversations ?? derived;
+  const hasConversations = list.length > 0;
+
+  const openSession = useCallback(
+    (conversation: ConversationSummary) => {
+      router.push({ pathname: '/session', params: { name: conversation.deviceName } });
+    },
+    [router],
+  );
 
   return (
     <View style={styles.screen}>
@@ -54,7 +125,7 @@ export function MessagesTab({
         showsVerticalScrollIndicator={false}
       >
         {hasConversations ? (
-          <ConversationList conversations={conversations} />
+          <ConversationList conversations={list} onPressConversation={openSession} />
         ) : (
           <EmptyState onPressBind={() => router.push('/pair')} />
         )}
@@ -89,11 +160,21 @@ function EmptyState({ onPressBind }: { onPressBind: () => void }) {
   );
 }
 
-function ConversationList({ conversations }: { conversations: ConversationSummary[] }) {
+function ConversationList({
+  conversations,
+  onPressConversation,
+}: {
+  conversations: ConversationSummary[];
+  onPressConversation: (conversation: ConversationSummary) => void;
+}) {
   return (
     <View style={styles.list}>
       {conversations.map((conversation) => (
-        <ConversationCard key={conversation.id} conversation={conversation} />
+        <ConversationCard
+          key={conversation.id}
+          conversation={conversation}
+          onPress={() => onPressConversation(conversation)}
+        />
       ))}
       <Text style={styles.pushHint}>{PUSH_HINT}</Text>
       {/* P3 system-push mock: greyed out, not pressable, 「P3 · 示意」 badge. */}
@@ -115,10 +196,21 @@ function ConversationList({ conversations }: { conversations: ConversationSummar
   );
 }
 
-function ConversationCard({ conversation }: { conversation: ConversationSummary }) {
-  // Press target reserved for the POL-18 session page; no navigation yet.
+function ConversationCard({
+  conversation,
+  onPress,
+}: {
+  conversation: ConversationSummary;
+  onPress: () => void;
+}) {
+  // POL-18: opens the P05 session page for this Mac.
   return (
-    <View style={styles.card}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`打开与 ${conversation.deviceName} 的会话`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+    >
       <View style={styles.cardAvatarWrap}>
         <View style={styles.cardAvatar}>
           <TabIcon name="devices" color={colors.accentDeep} size={20} />
@@ -142,7 +234,7 @@ function ConversationCard({ conversation }: { conversation: ConversationSummary 
         ) : null}
       </View>
       <UnreadBubble count={conversation.unread} />
-    </View>
+    </Pressable>
   );
 }
 
@@ -248,6 +340,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderRadius: 14,
     padding: 14,
+  },
+  cardPressed: {
+    opacity: 0.8,
   },
   cardAvatarWrap: {
     position: 'relative',

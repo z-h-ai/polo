@@ -20,6 +20,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ApiError, NetworkError } from '../../api/client';
 import { devicesApi } from '../../api/devices';
 import type { DevicePlatform } from '../../api/devices';
+import { selectConnectionTarget } from '../../session/connectionBootstrap';
 import {
   isBindLimitError,
   pairingCodeDeadline,
@@ -84,11 +85,23 @@ export function PairFlowScreen() {
     if (busy) return;
     setBusy(true);
     setManualError(null);
+    // POL-18 wiring: keep the QR's LAN hint (manual entry has none) so the
+    // connection manager can try Wi-Fi direct before falling back to relay.
+    const wsUrl = fromConfirm && state.step === 'confirm' ? state.wsUrl : null;
     try {
       const result = await devicesApi.bind({
         code,
         name: phoneDisplayName(),
         platform: devicePlatform(),
+      });
+      // POL-17 leftover responsibility, closed here (POL-18): the fresh bind
+      // row (phoneDeviceId = device.id) + the bound Mac + the scanned wsUrl
+      // go into connectionTarget.set(); the manager starts immediately so
+      // 「去发消息」 lands on a live session.
+      selectConnectionTarget({
+        phoneDeviceId: result.device.id,
+        macDeviceId: result.device.macDeviceId,
+        wsUrl,
       });
       setState({ step: 'success', reused: result.reused });
     } catch (error) {
@@ -108,7 +121,7 @@ export function PairFlowScreen() {
     } finally {
       setBusy(false);
     }
-  }, [busy]);
+  }, [busy, state]);
 
   const goMessages = useCallback(() => {
     router.dismissAll();

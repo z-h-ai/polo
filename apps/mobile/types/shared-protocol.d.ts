@@ -64,6 +64,77 @@ export interface MessageEnvelope {
 }
 
 // ---------------------------------------------------------------------------
+// @polo-ai/shared/protocol — session RPC surface (POL-18)
+// Mirrors packages/shared/src/protocol/dto.ts as of main@f2023b23. The mobile
+// session layer only consumes the fields below; extend when more are needed —
+// a missing symbol fails loudly in tsc by design.
+// ---------------------------------------------------------------------------
+
+/** Mirror of packages/core/src/types/message.ts TypedError (fields the UI reads). */
+export interface TypedError {
+  code: string;
+  title: string;
+  message: string;
+  canRetry: boolean;
+  retryDelayMs?: number;
+  originalError?: string;
+}
+
+/**
+ * Mirror of packages/shared/src/protocol/dto.ts:171 SessionEvent (main →
+ * renderer push on RPC_CHANNELS.sessions.EVENT = 'session:event'). Trimmed to
+ * the variants the phone session page reacts to; unknown variants arrive at
+ * runtime and are ignored by the store.
+ */
+export type SessionEvent =
+  | { type: 'text_delta'; sessionId: string; delta: string; turnId?: string }
+  | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
+  | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; turnId?: string; parentToolUseId?: string; timestamp?: number }
+  | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
+  | { type: 'task_progress'; sessionId: string; toolUseId: string; elapsedSeconds: number; turnId?: string }
+  | { type: 'error'; sessionId: string; error: string; timestamp?: number }
+  | { type: 'typed_error'; sessionId: string; error: TypedError; timestamp?: number }
+  | { type: 'complete'; sessionId: string; hasUnread?: boolean }
+  // Real dto type: `message` is a full Message object (SessionManager builds an
+  // info-role Message for the interrupt notice) — never a display string.
+  | { type: 'interrupted'; sessionId: string; message?: Message; queuedMessages?: string[] }
+  | { type: 'status'; sessionId: string; message: string; statusType?: 'compacting' }
+  | { type: 'info'; sessionId: string; message: string; statusType?: string; level?: 'info' | 'warning' | 'error' | 'success'; timestamp?: number }
+  | { type: 'user_message'; sessionId: string; message: Message; status: 'accepted' | 'queued' | 'processing'; optimisticMessageId?: string }
+  | { type: 'session_created'; sessionId: string }
+  | { type: 'session_deleted'; sessionId: string };
+
+/** Minimal shape of the user/assistant message carried by user_message. */
+export interface Message {
+  id: string;
+  role?: string;
+  content?: unknown;
+}
+
+/** Mirror of dto.ts SendMessageOptions (only what the phone sends). */
+export interface SendMessageOptions {
+  skillSlugs?: string[];
+  optimisticMessageId?: string;
+}
+
+/** Subset of CreateSessionOptions the phone may pass. */
+export interface CreateSessionOptions {
+  name?: string;
+}
+
+/** Subset of the Session row returned by sessions:create (phone reads .id). */
+export interface SessionInfo {
+  id: string;
+  name?: string;
+}
+
+/** Subset of WorkspaceInfo returned by server:getWorkspaces. */
+export interface WorkspaceInfo {
+  id: string;
+  name?: string;
+}
+
+// ---------------------------------------------------------------------------
 // @polo-ai/server-core/transport/client (WS-RPC client used by the LAN channel)
 // ---------------------------------------------------------------------------
 

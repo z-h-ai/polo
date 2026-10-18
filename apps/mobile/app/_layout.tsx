@@ -48,6 +48,8 @@ export default function RootLayout() {
         {/* POL-16: pairing flow + device management (placeholder route removed). */}
         <Stack.Screen name="pair" />
         <Stack.Screen name="device-manage" />
+        {/* POL-18: session page (messages + event cards + offline staging). */}
+        <Stack.Screen name="session" />
       </Stack>
     </AuthGate>
   );

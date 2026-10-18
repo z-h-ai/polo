@@ -21,6 +21,7 @@ import { NetworkError } from '../../api/client';
 import { DeviceStatusCard } from '../../components/DeviceStatusCard';
 import { LargeTitle } from '../../components/LargeTitle';
 import { TabIcon } from '../../components/TabIcons';
+import { selectDeviceRow } from '../../session/connectionBootstrap';
 import { deviceListShape, DEVICE_EMPTY_COPY, DEVICE_LIST_FOOTER_LINES } from '../../lib/devicesUi';
 import { colors, fontSize } from '../../theme/tokens';
 
@@ -100,8 +101,20 @@ export function DeviceListScreen() {
             {loadError ? (
               <Text style={styles.staleHint}>{loadError}，显示的是最近一次结果</Text>
             ) : null}
-            {shape.cards.map((card) => (
-              <DeviceStatusCard key={card.key} card={card} onPress={goManage} />
+            {shape.cards.map((card, index) => (
+              <DeviceStatusCard
+                key={card.key}
+                card={card}
+                onPress={() => {
+                  // POL-18 wiring: tapping a device card selects it as the
+                  // connection target (phoneDeviceId/macDeviceId from the
+                  // admin row; a previously captured wsUrl is kept) before
+                  // the P02 manage navigation.
+                  const row = devices[index];
+                  if (row) selectDeviceRow(row);
+                  goManage();
+                }}
+              />
             ))}
             <View style={styles.footer}>
               {DEVICE_LIST_FOOTER_LINES.map((line) => (
