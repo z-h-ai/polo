@@ -320,6 +320,93 @@ function defaultGranularity(type: ColumnDef['type'], options: GranularityOption[
   return options.length > 1 ? options[1]!.value : options[0]!.value
 }
 
+// ── Client-side column filters (P0-1 view-state boundary) ────────────────────
+//
+// View-state operations (filter/sort/group) are the table's own concern —
+// they never round-trip through the model. Filter state lives in component
+// React state only: ephemeral, never in the datatable spec, never persisted,
+// never exported into share URLs. Opt-in via `enableColumnFilters` (GenUICard
+// DataTableView); the markdown ```datatable rich block path must behave
+// exactly as before.
+
+/** Max distinct text values for which a column still gets filter chips. */
+export const DATATABLE_FILTER_CHIP_MAX_DISTINCT = 12
+
+/** One column's active filter: text equality via chip, or a numeric range. */
+export type ColumnFilter =
+  | { kind: 'text'; value: string }
+  | { kind: 'range'; min?: number; max?: number }
+
+/** Active filters keyed by column key. */
+export type ColumnFilters = Record<string, ColumnFilter>
+
+export function isNumericFilterColumnType(type?: ColumnDef['type']): boolean {
+  return type === 'number' || type === 'currency' || type === 'percent'
+}
+
+/**
+ * Distinct display values of a text-ish column in first-appearance order,
+ * or null when the column has more than `maxDistinct` distinct values (no
+ * chips then — avoids chip explosions on free-form columns). Null/undefined
+ * cell values never become chips.
+ */
+export function computeTextFilterChips(
+  rows: Record<string, unknown>[],
+  columnKey: string,
+  maxDistinct: number = DATATABLE_FILTER_CHIP_MAX_DISTINCT,
+): string[] | null {
+  const seen = new Set<string>()
+  for (const row of rows) {
+    const value = row[columnKey]
+    if (value === null || value === undefined) continue
+    seen.add(String(value))
+    if (seen.size > maxDistinct) return null
+  }
+  return [...seen]
+}
+
+/** Parse one min/max bound input; empty or non-numeric input → undefined (ignored). */
+export function parseFilterBound(raw: string): number | undefined {
+  const trimmed = raw.trim()
+  if (trimmed === '') return undefined
+  const parsed = Number(trimmed)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+function rowMatchesFilter(row: Record<string, unknown>, columnKey: string, filter: ColumnFilter): boolean {
+  const value = row[columnKey]
+  if (value === null || value === undefined) return false
+  if (filter.kind === 'text') {
+    return String(value) === filter.value
+  }
+  const num = typeof value === 'number' ? value : Number(value)
+  if (Number.isNaN(num)) return false
+  if (filter.min !== undefined && num < filter.min) return false
+  if (filter.max !== undefined && num > filter.max) return false
+  return true
+}
+
+/** Filters with a concrete constraint set — empty bounds/text are dropped. */
+function isConcreteFilter(filter: ColumnFilter): boolean {
+  if (filter.kind === 'text') return filter.value !== ''
+  return filter.min !== undefined || filter.max !== undefined
+}
+
+/** Active (concrete) filters as ordered entries for status rendering. */
+export function activeColumnFilterEntries(filters: ColumnFilters): Array<[string, ColumnFilter]> {
+  return Object.entries(filters).filter(([, filter]) => isConcreteFilter(filter))
+}
+
+/** Apply every concrete filter conjunctively (AND across columns). */
+export function applyColumnFilters(
+  rows: Record<string, unknown>[],
+  filters: ColumnFilters,
+): Record<string, unknown>[] {
+  const active = activeColumnFilterEntries(filters)
+  if (active.length === 0) return rows
+  return rows.filter(row => active.every(([key, filter]) => rowMatchesFilter(row, key, filter)))
+}
+
 // ── Error boundary ───────────────────────────────────────────────────────────
 
 class DatatableErrorBoundary extends React.Component<
@@ -358,9 +445,18 @@ export interface MarkdownDatatableBlockProps {
     defaultCell: React.ReactNode,
   ) => React.ReactNode
   renderRowAction?: (row: Record<string, unknown>) => React.ReactNode
+  /**
+   * Opt-in client-side column filters (P0-1 view-state boundary): text
+   * columns get value chips (≤12 distinct values), numeric columns get
+   * min/max range inputs. Default false — the markdown ```datatable rich
+   * block path renders exactly as before. Only GenUICard's DataTableView
+   * passes true. Filter state is ephemeral component state: it never enters
+   * the spec/schema, is never persisted, and never leaks into export URLs.
+   */
+  enableColumnFilters?: boolean
 }
 
-export function MarkdownDatatableBlock({ code, className, renderColumnCell, renderRowAction }: MarkdownDatatableBlockProps) {
+export function MarkdownDatatableBlock({ code, className, renderColumnCell, renderRowAction, enableColumnFilters = false }: MarkdownDatatableBlockProps) {
   const { t } = useTranslation()
   const { onReadFile } = usePlatform()
 
@@ -435,6 +531,11 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
   const [groupKey, setGroupKey] = React.useState<string | null>(null)
   const [groupGranularity, setGroupGranularity] = React.useState<string>('exact')
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(new Set())
+  // Ephemeral column-filter state (P0-1). rangeInputs keeps the raw input
+  // strings so a half-typed/invalid bound stays visible in the input but is
+  // simply not applied (parseFilterBound drops it).
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFilters>({})
+  const [rangeInputs, setRangeInputs] = React.useState<Record<string, { min: string; max: string }>>({})
   const { scrollRef, maskImage } = useScrollFade()
 
   const handleSort = React.useCallback((key: string) => {
@@ -445,9 +546,63 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     })
   }, [])
 
-  const processedRows = React.useMemo(() => {
+  // ── Column filter interactions (only reachable when enableColumnFilters) ──
+
+  const toggleTextFilter = React.useCallback((key: string, value: string) => {
+    setColumnFilters((prev) => {
+      const current = prev[key]
+      if (current?.kind === 'text' && current.value === value) {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
+      return { ...prev, [key]: { kind: 'text', value } }
+    })
+  }, [])
+
+  const setRangeFilter = React.useCallback((key: string, bound: 'min' | 'max', raw: string) => {
+    setRangeInputs((prev) => ({
+      ...prev,
+      [key]: { min: '', max: '', ...prev[key], [bound]: raw },
+    }))
+    const parsed = parseFilterBound(raw)
+    setColumnFilters((prev) => {
+      const base: { kind: 'range'; min?: number; max?: number } =
+        prev[key]?.kind === 'range' ? prev[key] : { kind: 'range' }
+      const next: { kind: 'range'; min?: number; max?: number } = { ...base, [bound]: parsed }
+      const copy = { ...prev }
+      if (next.min === undefined && next.max === undefined) delete copy[key]
+      else copy[key] = next
+      return copy
+    })
+  }, [])
+
+  const clearFilters = React.useCallback(() => {
+    setColumnFilters({})
+    setRangeInputs({})
+  }, [])
+
+  // Filter chips per text column (numeric columns use range inputs instead).
+  const textChipValues = React.useMemo(() => {
+    const map = new Map<string, string[] | null>()
+    if (!enableColumnFilters || !parsed) return map
+    for (const col of parsed.columns) {
+      if (isNumericFilterColumnType(col.type)) continue
+      map.set(col.key, computeTextFilterChips(parsed.rows, col.key))
+    }
+    return map
+  }, [enableColumnFilters, parsed])
+
+  // View-state pipeline: filter FIRST, then sort, then group — grouping
+  // counts and row actions all see the filtered set (user-visible rows only).
+  const filteredRows = React.useMemo(() => {
     if (!parsed) return []
-    let rows = [...parsed.rows]
+    if (!enableColumnFilters) return parsed.rows
+    return applyColumnFilters(parsed.rows, columnFilters)
+  }, [parsed, enableColumnFilters, columnFilters])
+
+  const processedRows = React.useMemo(() => {
+    let rows = [...filteredRows]
     // Sort
     if (sortKey && sortDir) {
       rows.sort((a, b) => {
@@ -463,7 +618,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
       })
     }
     return rows
-  }, [parsed, sortKey, sortDir])
+  }, [filteredRows, sortKey, sortDir])
 
   const granularityOptions = React.useMemo(() => {
     if (!parsed) return new Map<string, GranularityOption[]>()
@@ -495,7 +650,8 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     })
   }, [])
 
-  const hasActiveControls = (sortKey !== null && sortDir !== null) || groupKey !== null
+  const activeFilterCount = enableColumnFilters ? activeColumnFilterEntries(columnFilters).length : 0
+  const hasActiveControls = (sortKey !== null && sortDir !== null) || groupKey !== null || activeFilterCount > 0
 
   const clearControls = React.useCallback(() => {
     setSortKey(null)
@@ -503,6 +659,8 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     setGroupKey(null)
     setGroupGranularity('exact')
     setCollapsedGroups(new Set())
+    setColumnFilters({})
+    setRangeInputs({})
   }, [])
 
   // Loading state for file-backed datatable
@@ -540,6 +698,65 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
   // The optional GenUI action column widens every grid span by one.
   const columnCount = parsed.columns.length + (renderRowAction ? 1 : 0)
 
+  // Per-column filter control rendered under the header label. Clicks are
+  // stopped so they never trigger the th's sort handler.
+  const renderColumnFilterControl = (col: ColumnDef) => {
+    if (!enableColumnFilters) return null
+    const active = columnFilters[col.key]
+    if (isNumericFilterColumnType(col.type)) {
+      const raw = rangeInputs[col.key] ?? { min: '', max: '' }
+      return (
+        <div className="mt-1 flex items-center gap-1 whitespace-normal" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={raw.min}
+            onChange={(e) => setRangeFilter(col.key, 'min', e.target.value)}
+            placeholder={t('datatable.filterMin')}
+            aria-label={`${col.label} ${t('datatable.filterMin')}`}
+            className="w-14 px-1 py-0.5 text-[11px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <span className="text-muted-foreground/50 text-[11px]">–</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={raw.max}
+            onChange={(e) => setRangeFilter(col.key, 'max', e.target.value)}
+            placeholder={t('datatable.filterMax')}
+            aria-label={`${col.label} ${t('datatable.filterMax')}`}
+            className="w-14 px-1 py-0.5 text-[11px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </div>
+      )
+    }
+    const chips = textChipValues.get(col.key)
+    if (!chips || chips.length === 0) return null
+    return (
+      <div className="mt-1 flex flex-wrap gap-1 whitespace-normal" onClick={(e) => e.stopPropagation()}>
+        {chips.map((chip) => {
+          const isActive = active?.kind === 'text' && active.value === chip
+          return (
+            <button
+              key={chip}
+              type="button"
+              aria-pressed={isActive}
+              onClick={() => toggleTextFilter(col.key, chip)}
+              className={cn(
+                'px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors',
+                'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                isActive
+                  ? 'bg-accent/10 text-accent border-accent/30'
+                  : 'bg-background text-muted-foreground border-foreground/10 hover:text-foreground hover:border-foreground/25',
+              )}
+            >
+              {chip}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
   const renderRows = (rows: Record<string, unknown>[]) =>
     rows.map((row, i) => (
       <tr key={i} className="border-b border-foreground/[0.03] last:border-0 hover:bg-foreground/[0.015] transition-colors">
@@ -574,13 +791,14 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             {parsed.columns.map((col) => (
               <th
                 key={col.key}
-                className={cn('py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap', colAlign(col.type, col.align))}
+                className={cn('py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap align-top', colAlign(col.type, col.align))}
                 onClick={() => handleSort(col.key)}
               >
                 <span className="inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors">
                   {col.label}
                   <SortIcon dir={sortKey === col.key ? sortDir : null} />
                 </span>
+                {renderColumnFilterControl(col)}
               </th>
             ))}
             {renderRowAction && <th className="py-2 px-3 whitespace-nowrap" aria-hidden="true" />}
@@ -769,6 +987,22 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             {parsed.title || t('datatable.defaultTitle')}
           </span>
         </div>
+
+        {/* Active filter status (P0-1 view-state, ephemeral) */}
+        {activeFilterCount > 0 && (
+          <div className="px-3 py-1.5 border-b bg-accent/[0.04] flex items-center justify-between gap-2">
+            <span className="text-[12px] text-muted-foreground">
+              {t('datatable.filterStatus', { shown: filteredRows.length, total: parsed.rows.length })}
+            </span>
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-[12px] text-accent hover:underline rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              {t('common.clearAll')}
+            </button>
+          </div>
+        )}
 
         {/* Table with max height and scroll fade */}
         {tableContent(true, true)}

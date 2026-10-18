@@ -815,7 +815,8 @@ Use this instead of plain text when the answer is actionable or data-dense.
 - Keep the payload small: skeleton inline, data in files. Payloads over 4096 bytes are rejected. \`chart\` is the exception — its few bounded points ride inline.
 - Give every component a unique stable "id" — reusing an id in a later call updates that card in place.
 - If this tool returns a validation error, fix the payload and retry once.
-- Prefer datatable/spreadsheet blocks for static display; prefer render_ui when the user should act.`,
+- Prefer datatable/spreadsheet blocks for static display; prefer render_ui when the user should act.
+- View-state operations (filter/sort/group) are handled client-side by the table; reserve action-buttons for semantic follow-ups that need the model.`,
 
   generate_app: `Create a self-contained single-file HTML app that renders in a sandboxed webview card in the chat.
 

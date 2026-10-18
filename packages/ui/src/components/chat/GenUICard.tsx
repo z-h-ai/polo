@@ -576,6 +576,8 @@ const GENUI_ROW_ACTION_STYLES = cn(
  *
  * Row-level extras (iter/row-actions) are attached via the block's optional
  * render hooks; a table without any renders through the unchanged plain path.
+ * Client-side column filters (P0-1 view-state boundary) are enabled for all
+ * GenUI tables — the markdown ```datatable rich block stays filter-free.
  */
 function DataTableView({ component, sessionId }: { component: GenUiDataTable; sessionId?: string }) {
   const { t } = useTranslation()
@@ -585,7 +587,7 @@ function DataTableView({ component, sessionId }: { component: GenUiDataTable; se
   const hasRowExtras = component.rowAction !== undefined
     || component.detailTemplate !== undefined
     || component.columns.some(col => col.link === true)
-  if (!hasRowExtras) return <MarkdownDatatableBlock code={spec} />
+  if (!hasRowExtras) return <MarkdownDatatableBlock code={spec} enableColumnFilters />
 
   const { rowAction, detailTemplate, columns } = component
   const firstColumnKey = columns[0]?.key
@@ -617,6 +619,7 @@ function DataTableView({ component, sessionId }: { component: GenUiDataTable; se
   return (
     <MarkdownDatatableBlock
       code={spec}
+      enableColumnFilters
       renderColumnCell={(col, row, defaultCell) => {
         // Drill-down lives in the first column, next to the default cell.
         const detailButton = col.key === firstColumnKey ? renderDetailButton?.(row) : undefined
