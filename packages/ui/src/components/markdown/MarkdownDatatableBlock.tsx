@@ -561,10 +561,10 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
   }, [])
 
   const setRangeFilter = React.useCallback((key: string, bound: 'min' | 'max', raw: string) => {
-    setRangeInputs((prev) => ({
-      ...prev,
-      [key]: { min: '', max: '', ...prev[key], [bound]: raw },
-    }))
+    setRangeInputs((prev) => {
+      const current = prev[key] ?? { min: '', max: '' }
+      return { ...prev, [key]: { ...current, [bound]: raw } }
+    })
     const parsed = parseFilterBound(raw)
     setColumnFilters((prev) => {
       const base: { kind: 'range'; min?: number; max?: number } =
