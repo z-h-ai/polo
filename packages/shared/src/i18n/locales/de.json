@@ -687,6 +687,8 @@
   "genui.app.publishing": "Wird veröffentlicht…",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "Diese Karte konnte nicht angezeigt werden.",
+  "genui.dataTable.rowDetail": "Details",
+  "genui.dataTable.rowValuesMissing": "Einige Werte in dieser Zeile fehlen.",
   "genui.form.requiredMissing": "Dieses Feld ist erforderlich.",
   "genui.form.submit": "Absenden",
   "genui.unknownType": "Unbekannter Kartentyp \"{{type}}\" — Rohdaten werden angezeigt.",

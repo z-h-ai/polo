@@ -687,6 +687,8 @@
   "genui.app.publishing": "Publicando…",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "No se pudo mostrar esta tarjeta.",
+  "genui.dataTable.rowDetail": "Detalles",
+  "genui.dataTable.rowValuesMissing": "Faltan algunos valores en esta fila.",
   "genui.form.requiredMissing": "Este campo es obligatorio.",
   "genui.form.submit": "Enviar",
   "genui.unknownType": "Tipo de tarjeta desconocido \"{{type}}\": se muestran los datos en bruto.",

@@ -16,6 +16,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, TrendingDown, TrendingUp, Minus } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import { usePlatform } from '../../context/PlatformContext'
 import { MarkdownDatatableBlock } from '../markdown/MarkdownDatatableBlock'
 
 // ── Payload types (renderer-side mirror of the render_ui tool schema) ────────
@@ -38,6 +39,14 @@ export interface GenUiTableColumn {
   key: string
   label: string
   type?: 'text' | 'number' | 'currency' | 'percent' | 'boolean' | 'date' | 'badge'
+  /** Source-link column: values render as links opened via PlatformActions.onOpenUrl (iter/row-actions). */
+  link?: boolean
+}
+
+/** Optional per-row action button on a data-table (iter/row-actions). */
+export interface GenUiDataTableRowAction {
+  label: string
+  promptTemplate: string
 }
 
 export interface GenUiDataTable {
@@ -47,6 +56,10 @@ export interface GenUiDataTable {
   columns: GenUiTableColumn[]
   src: string
   pageSize?: number
+  /** Per-row action button: {{col.key}} placeholders are filled from the clicked row and the prompt is sent. */
+  rowAction?: GenUiDataTableRowAction
+  /** Per-row drill-down: filled template prefills the chat input (fill semantics — no send). */
+  detailTemplate?: string
 }
 
 export interface GenUiAlert {
@@ -215,6 +228,117 @@ export function dispatchGenUiSubmitInput(sessionId: string): void {
   window.dispatchEvent(new CustomEvent('craft:submit-input', { detail: { sessionId } }))
 }
 
+// ── Row-level template fill and source links (iter/row-actions) ──────────────
+
+const GENUI_HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}
+
+/**
+ * HTML-escape a value string for attribute/text rendering contexts
+ * (defense in depth — row values are model/data-controlled).
+ */
+export function escapeGenUiHtml(value: string): string {
+  return value.replace(/[&<>"']/g, ch => GENUI_HTML_ESCAPES[ch]!)
+}
+
+export interface GenUiTemplateFill {
+  /** Raw filled text — the string dispatched into the chat-input pipeline. */
+  text: string
+  /** HTML-escaped filled text — for title/attribute contexts. */
+  escapedText: string
+  /** Placeholder keys whose row value was missing (the placeholder became ''). */
+  missingKeys: string[]
+}
+
+/**
+ * Fill `{{col.key}}` placeholders in a rowAction/detailTemplate from a
+ * data-table row. A missing value (absent key, null/undefined/'') makes the
+ * placeholder the empty string and is reported in missingKeys so the button
+ * title can hint at the gap; unknown placeholders therefore degrade to ''.
+ *
+ * `text` keeps the RAW values — the chat input pipeline is plain text, and
+ * sending escaped entities would corrupt the prompt (e.g. "AT&T" must not
+ * become "AT&amp;T"). `escapedText` carries the HTML-escaped variant for
+ * rendering contexts. Object values serialize as JSON.
+ */
+export function fillGenUiTemplate(template: string, row: Record<string, unknown>): GenUiTemplateFill {
+  const missingKeys: string[] = []
+  let text = ''
+  let escapedText = ''
+  let lastIndex = 0
+  for (const match of template.matchAll(/\{\{([^{}]+)\}\}/g)) {
+    const literal = template.slice(lastIndex, match.index)
+    text += literal
+    escapedText += escapeGenUiHtml(literal)
+    const key = match[1]!.trim()
+    const value = row[key]
+    if (value === null || value === undefined || value === '') {
+      missingKeys.push(key)
+    } else {
+      const raw = typeof value === 'object' ? JSON.stringify(value) : String(value)
+      text += raw
+      escapedText += escapeGenUiHtml(raw)
+    }
+    lastIndex = match.index! + match[0].length
+  }
+  const tail = template.slice(lastIndex)
+  text += tail
+  escapedText += escapeGenUiHtml(tail)
+  return { text, escapedText, missingKeys }
+}
+
+export interface GenUiCellLink {
+  href: string
+  /** Display override when the row value is a { value, link } object. */
+  label?: string
+}
+
+/**
+ * Only http(s) may reach the platform URL handler: data-table cells are
+ * model/data-controlled, so javascript:/data:/vbscript: (and non-URLs) never
+ * open. Same policy as the markdown renderer's default URL transform.
+ */
+export function isSafeGenUiHref(href: string): boolean {
+  try {
+    const url = new URL(href)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve the link behind a link-column cell: the row value is either the URL
+ * itself, or an object carrying the URL on its `link` field (the model's way
+ * to give e.g. a clause number its source document) with an optional display
+ * override on `value`/`text`/`label`. Returns null when nothing safely
+ * linkable is present — the caller falls back to the default cell rendering.
+ */
+export function resolveGenUiCellLink(value: unknown): GenUiCellLink | null {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const link = (value as { link?: unknown }).link
+    if (typeof link === 'string' && isSafeGenUiHref(link.trim())) {
+      const display = (value as { value?: unknown; text?: unknown; label?: unknown }).value
+        ?? (value as { text?: unknown }).text
+        ?? (value as { label?: unknown }).label
+      return {
+        href: link.trim(),
+        label: display === null || display === undefined ? undefined : String(display),
+      }
+    }
+    return null
+  }
+  if (value === null || value === undefined || Array.isArray(value)) return null
+  const raw = String(value).trim()
+  if (raw === '' || !isSafeGenUiHref(raw)) return null
+  return { href: raw }
+}
+
 // ── Component renderers ──────────────────────────────────────────────────────
 
 /**
@@ -261,18 +385,136 @@ function StatCardView({ component }: { component: GenUiStatCard }) {
 }
 
 /**
- * Delegates to MarkdownDatatableBlock by building its file-backed spec JSON.
- * Rows always come from the `src` file (the schema forbids inline rows);
- * the GenUI pageSize hint is not forwarded — the block's own scroll/max-height
- * behavior applies.
+ * The spec JSON handed to MarkdownDatatableBlock. Row-action/detail/link
+ * behavior deliberately stays OUT of the spec (the block renders data only;
+ * behavior is attached via its optional render hooks), so a plain table's
+ * spec is identical to the pre-row-actions payload.
  */
-function DataTableView({ component }: { component: GenUiDataTable }) {
-  const spec = JSON.stringify({
+export function buildGenUiDataTableSpec(component: GenUiDataTable): string {
+  return JSON.stringify({
     src: component.src,
     title: component.title,
     columns: component.columns,
   })
-  return <MarkdownDatatableBlock code={spec} />
+}
+
+// Row-level controls share the card's tinted accent language (same tokens as
+// ACTION_BUTTON_STYLES), densified for table rows.
+const GENUI_ROW_LINK_STYLES = cn(
+  'text-accent underline underline-offset-2 decoration-accent/40 hover:decoration-accent',
+  'transition-colors rounded-[2px]',
+  'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+  'disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline',
+)
+
+const GENUI_ROW_ACTION_STYLES = cn(
+  'h-[22px] px-2 text-[11px] font-medium rounded-[5px] transition-all',
+  'bg-accent/5 text-accent hover:bg-accent/10 shadow-tinted',
+  'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+  'disabled:opacity-50 disabled:cursor-not-allowed',
+)
+
+/**
+ * Delegates to MarkdownDatatableBlock by building its file-backed spec JSON.
+ * Rows always come from the `src` file (the schema forbids inline rows);
+ * the GenUI pageSize hint is not forwarded — the block's own scroll/max-height
+ * behavior applies.
+ *
+ * Row-level extras (iter/row-actions) are attached via the block's optional
+ * render hooks; a table without any renders through the unchanged plain path.
+ */
+function DataTableView({ component, sessionId }: { component: GenUiDataTable; sessionId?: string }) {
+  const { t } = useTranslation()
+  const { onOpenUrl } = usePlatform()
+
+  const spec = buildGenUiDataTableSpec(component)
+  const hasRowExtras = component.rowAction !== undefined
+    || component.detailTemplate !== undefined
+    || component.columns.some(col => col.link === true)
+  if (!hasRowExtras) return <MarkdownDatatableBlock code={spec} />
+
+  const { rowAction, detailTemplate, columns } = component
+  const firstColumnKey = columns[0]?.key
+
+  /** Button title: the escaped filled template, plus a hint when values were missing. */
+  const rowButtonTitle = (fill: GenUiTemplateFill): string =>
+    fill.missingKeys.length > 0
+      ? `${fill.escapedText} (${t('genui.dataTable.rowValuesMissing')})`
+      : fill.escapedText
+
+  // 「详情」 drill-down — fill semantics: prefill the input, never auto-send.
+  const renderDetailButton = detailTemplate === undefined
+    ? undefined
+    : (row: Record<string, unknown>) => {
+      const fill = fillGenUiTemplate(detailTemplate, row)
+      return (
+        <button
+          type="button"
+          disabled={!sessionId}
+          title={!sessionId ? undefined : rowButtonTitle(fill)}
+          onClick={() => { if (sessionId) dispatchGenUiInsertText(fill.text, sessionId) }}
+          className={GENUI_ROW_LINK_STYLES}
+        >
+          {t('genui.dataTable.rowDetail')}
+        </button>
+      )
+    }
+
+  return (
+    <MarkdownDatatableBlock
+      code={spec}
+      renderColumnCell={(col, row, defaultCell) => {
+        // Drill-down lives in the first column, next to the default cell.
+        const detailButton = col.key === firstColumnKey ? renderDetailButton?.(row) : undefined
+        if (col.link === true) {
+          const link = resolveGenUiCellLink(row[col.key])
+          if (link) {
+            const raw = row[col.key]
+            const display = link.label
+              ?? (raw === null || raw === undefined ? '' : String(raw))
+            const linkButton = (
+              <button
+                type="button"
+                disabled={!onOpenUrl}
+                title={link.href}
+                onClick={() => { if (onOpenUrl) onOpenUrl(link.href) }}
+                className={GENUI_ROW_LINK_STYLES}
+              >
+                {display}
+              </button>
+            )
+            return detailButton
+              ? <span className="inline-flex items-center gap-2">{linkButton}{detailButton}</span>
+              : linkButton
+          }
+        }
+        if (detailButton) {
+          return <span className="inline-flex items-center gap-2">{defaultCell}{detailButton}</span>
+        }
+        return defaultCell
+      }}
+      renderRowAction={rowAction === undefined
+        ? undefined
+        : (row) => {
+          const fill = fillGenUiTemplate(rowAction.promptTemplate, row)
+          return (
+            <button
+              type="button"
+              disabled={!sessionId || fill.text.trim() === ''}
+              title={!sessionId ? undefined : rowButtonTitle(fill)}
+              onClick={() => {
+                if (!sessionId) return
+                dispatchGenUiInsertText(fill.text, sessionId)
+                dispatchGenUiSubmitInput(sessionId)
+              }}
+              className={GENUI_ROW_ACTION_STYLES}
+            >
+              {rowAction.label}
+            </button>
+          )
+        }}
+    />
+  )
 }
 
 // `warning` maps to the amber `info` token — the theme has no separate warning color
@@ -498,7 +740,7 @@ type GenUiComponentRenderer = React.ComponentType<{ component: GenUiComponent; s
 
 const GENUI_COMPONENT_REGISTRY: Record<string, GenUiComponentRenderer> = {
   'stat-card': ({ component }) => <StatCardView component={component as GenUiStatCard} />,
-  'data-table': ({ component }) => <DataTableView component={component as GenUiDataTable} />,
+  'data-table': ({ component, sessionId }) => <DataTableView component={component as GenUiDataTable} sessionId={sessionId} />,
   'alert': ({ component }) => <AlertView component={component as GenUiAlert} />,
   'progress': ({ component }) => <ProgressView component={component as GenUiProgress} />,
   'action-buttons': ({ component, sessionId }) => <ActionButtonsView component={component as GenUiActionButtons} sessionId={sessionId} />,

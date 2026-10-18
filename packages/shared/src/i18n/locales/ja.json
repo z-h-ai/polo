@@ -687,6 +687,8 @@
   "genui.app.publishing": "公開中…",
   "genui.app.version": "v{{version}}",
   "genui.componentError": "このカードを表示できませんでした。",
+  "genui.dataTable.rowDetail": "詳細",
+  "genui.dataTable.rowValuesMissing": "この行の一部の値が不足しています。",
   "genui.form.requiredMissing": "この項目は必須です。",
   "genui.form.submit": "送信",
   "genui.unknownType": "不明なカードタイプ「{{type}}」— 生データを表示しています。",
