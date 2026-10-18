@@ -17,6 +17,15 @@
  * (`interactive: false`); their interaction loops require the poloai:// v2
  * bridge, so the model-side index (render_ui description) renders their
  * entries with an explicit read-only note.
+ *
+ * Replay-wiring scope (明示口径, POO-104): the schema-snapshot registry replay
+ * validation needs ships as library code (session-tools-core genui-schema:
+ * getGenUiComponentSchemasForSnapshot / validateGenUiComponentsForSnapshot),
+ * but the card persistence/replay path that CALLS it is deferred to the
+ * change that introduces a second schema version. Lossless today: with a
+ * builtin-only catalog the dynamic schema is identical to the static union,
+ * so every persisted card was built under the schema its descriptor's
+ * schemaVersion still names.
  */
 
 import { createHash } from 'node:crypto'
@@ -276,7 +285,8 @@ export function validateGenUiComponentBundle(raw: unknown): { ok: true; bundle: 
  *    instead of going through this interface).
  * 2. The bundle's schema document freezes at install time; cards generated
  *    with it persist schemaVersion and replay validates against that snapshot
- *    (session-tools-core getGenUiComponentSchemasForSnapshot).
+ *    (session-tools-core getGenUiComponentSchemasForSnapshot — the registry
+ *    ships now, the replay call site is deferred; see the header scope note).
  * 3. capabilities must be a subset of what the host bridge actually supports;
  *    anything else fails closed at registration.
  */

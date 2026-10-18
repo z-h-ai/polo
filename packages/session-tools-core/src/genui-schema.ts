@@ -12,6 +12,15 @@
  * never the current registry — old sessions = old schema snapshot + current
  * theme. An unknown snapshot version fails closed (null): the renderer's
  * tolerant JSON fallback view (§5.7 必备件) renders instead.
+ *
+ * Scope of the POO-104 submission (明示口径): the snapshot registry and its
+ * validators (getGenUiComponentSchemasForSnapshot /
+ * validateGenUiComponentsForSnapshot) ship as LIBRARY CODE ONLY — no
+ * production call site in this commit. The card persistence/replay path that
+ * consumes them is deferred to the change that introduces a second schema
+ * version. The deferral is lossless today: with a builtin-only catalog the
+ * dynamic schema is IDENTICAL to the static canonical union, so a wired-up
+ * replay path would accept exactly what the current renderer accepts.
  */
 
 import { z } from 'zod';
@@ -102,8 +111,10 @@ export function getGenUiComponentJsonSchemas(): Record<string, Record<string, un
 
 /**
  * Replay-snapshot registry: schema version → the component schemas that were
- * current. Version 1 is the POO-101..103 builtin set. Future schema work
- * bumps GENUI_RENDER_UI_SCHEMA_VERSION and ADDS an entry here — never edits a
+ * current. Version 1 is the POO-101..103 builtin set, and the only entry
+ * until a second version exists (see the header's POO-104 scope note: the
+ * replay call site is deferred, not missing). Future schema work bumps
+ * GENUI_RENDER_UI_SCHEMA_VERSION and ADDS an entry here — never edits a
  * historical one (persisted cards validate against it forever).
  */
 const GENUI_COMPONENT_SCHEMA_SNAPSHOTS: Record<number, Record<string, z.ZodObject<z.ZodRawShape>>> = {

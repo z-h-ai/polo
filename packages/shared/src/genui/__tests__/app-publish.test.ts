@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { unzipSync } from 'fflate'
@@ -79,6 +79,22 @@ describe('collectGenUiAppPublishFiles', () => {
     }
   })
 
+  test('refuses a symlinked index.html even when its target lies outside the app directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'genui-publish-'))
+    const outsideDir = mkdtempSync(join(tmpdir(), 'genui-publish-outside-'))
+    const outsideFile = join(outsideDir, 'secret.html')
+    writeFileSync(outsideFile, '<html>private</html>', 'utf-8')
+    try {
+      symlinkSync(outsideFile, join(dir, 'index.html'))
+      const result = collectGenUiAppPublishFiles(dir)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error).toContain('not a regular file')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(outsideDir, { recursive: true, force: true })
+    }
+  })
+
   test('fails closed on an unreadable app directory', () => {
     const result = collectGenUiAppPublishFiles(join(tmpdir(), 'genui-publish-does-not-exist'))
     expect(result.ok).toBe(false)
@@ -97,9 +113,14 @@ describe('buildGenUiAppArtifactZip', () => {
     expect(new TextDecoder().decode(archive['index.html']!)).toBe('<html></html>')
   })
 
-  test('is deterministic for the same input', () => {
+  test('is byte-identical across a wall-clock window (pinned entry mtime)', async () => {
     const files: GenUiAppPublishFile[] = [{ path: 'index.html', bytes: new TextEncoder().encode('<html></html>') }]
-    expect(Buffer.from(buildGenUiAppArtifactZip(files)).equals(Buffer.from(buildGenUiAppArtifactZip(files)))).toBe(true)
+    const first = Buffer.from(buildGenUiAppArtifactZip(files))
+    // Cross a 2-second boundary: any unpinned wall-clock field (mtime with
+    // 2-second DOS resolution) would rotate the bytes between these two calls.
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    const second = Buffer.from(buildGenUiAppArtifactZip(files))
+    expect(second.equals(first)).toBe(true)
   })
 })
 

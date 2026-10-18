@@ -169,6 +169,7 @@ function createPinRequestId(): string {
 
 export const GENUI_APP_PUBLISH_EVENT = 'craft:publish-genui-app'
 export const GENUI_APP_PUBLISH_RESULT_EVENT = 'craft:publish-genui-app-result'
+export const GENUI_APP_PUBLISH_TARGET_EVENT = 'craft:genui-publish-target'
 
 export interface GenUiAppPublishRequest {
   requestId: string
@@ -181,6 +182,21 @@ export interface GenUiAppPublishResult {
   requestId: string
   ok: boolean
   error?: string
+  /** Display name of the organization the artifact was published into. */
+  organizationName?: string
+}
+
+/**
+ * The Electron bridge announces the publish target so a card can gate its
+ * publish button: `hasActiveTarget: false` disables it — the bridge
+ * deliberately has no inactive-organization fallback, so without an active
+ * organization there is nothing to publish into. `hasActiveTarget: true`
+ * carries the target's display name for the button title. No announcement
+ * (bridge unavailable, RPC failed) means unknown, not absent.
+ */
+export interface GenUiAppPublishTarget {
+  hasActiveTarget: boolean
+  organizationName: string | null
 }
 
 export function dispatchGenUiAppPublish(request: GenUiAppPublishRequest): void {
@@ -349,10 +365,34 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
 
   // POO-104 publish: Main packages the bundle and the Electron bridge pushes
   // it through the CreatorArtifact upload chain. Only a real bundle file in a
-  // real session can publish — the same gating as the pin action.
-  const canPublish = Boolean(indexPath && sessionId)
+  // real session can publish — the same gating as the pin action — and the
+  // packaging API must actually exist: a structural check (not the global
+  // electronAPI typing, which would leak Electron types into this shared
+  // package) keeps the button out of non-Electron shells (webui) where no
+  // bridge serves the CustomEvent.
+  const hasElectronPublishBridge = typeof (window as {
+    electronAPI?: { packageGenUiAppArtifact?: unknown }
+  }).electronAPI?.packageGenUiAppArtifact === 'function'
+  const canPublish = Boolean(indexPath && sessionId && hasElectronPublishBridge)
   const [publishState, setPublishState] = React.useState<'idle' | 'pending' | 'published' | 'error'>('idle')
   const [publishError, setPublishError] = React.useState<string | null>(null)
+  // Publish target from the bridge's announcement: hasActiveTarget=false
+  // disables the button (no active organization — the bridge has no inactive
+  // fallback); null = unknown, the button stays enabled and a click surfaces
+  // the precise error from the bridge.
+  const [publishTarget, setPublishTarget] = React.useState<GenUiAppPublishTarget | null>(null)
+  const [publishedOrg, setPublishedOrg] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<GenUiAppPublishTarget>).detail
+      if (!detail || typeof detail.hasActiveTarget !== 'boolean') return
+      setPublishTarget(detail)
+      if (!detail.hasActiveTarget) setPublishedOrg(null)
+    }
+    window.addEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, listener)
+    return () => window.removeEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, listener)
+  }, [])
 
   const handlePublish = React.useCallback(() => {
     if (!canPublish || publishState === 'pending') return
@@ -363,6 +403,9 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       unsubscribe()
       if (result.ok) {
         setPublishState('published')
+        // The result's org name is authoritative; the announcement is the
+        // pre-click fallback for the button title.
+        setPublishedOrg(result.organizationName ?? publishTarget?.organizationName ?? null)
       } else {
         setPublishState('error')
         setPublishError(result.error ?? t('genui.app.publishFailed'))
@@ -374,7 +417,19 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       appId,
       title,
     })
-  }, [appId, canPublish, publishState, sessionId, t, title])
+  }, [appId, canPublish, publishState, publishTarget, sessionId, t, title])
+
+  // Button tooltip: unavailable target explains why the button is disabled;
+  // a known target org is named in both the pre-click hint and the published
+  // result — with several organizations the destination is the visible fact.
+  const publishUnavailable = publishTarget?.hasActiveTarget === false
+  const publishTitle = publishUnavailable
+    ? t('genui.app.publishNoTarget')
+    : publishedOrg
+      ? publishState === 'published'
+        ? t('genui.app.publishedTo', { org: publishedOrg })
+        : t('genui.app.publishHintTo', { org: publishedOrg })
+      : t('genui.app.publishHint')
 
   return (
     <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
@@ -406,8 +461,12 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
           <button
             type="button"
             onClick={handlePublish}
-            disabled={publishState === 'pending' || publishState === 'published'}
-            title={t('genui.app.publishHint')}
+            disabled={
+              publishState === 'pending'
+              || publishState === 'published'
+              || publishUnavailable
+            }
+            title={publishTitle}
             className={cn(
               'shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border transition-colors',
               publishState === 'published'

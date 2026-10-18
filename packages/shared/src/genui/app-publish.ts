@@ -20,7 +20,7 @@
  * and layout rules are unit-testable without touching a real app directory.
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import type { WebAppArtifactPolicyState } from '../config/web-app-policy.ts'
@@ -65,7 +65,10 @@ export function collectGenUiAppPublishFiles(appDir: string): GenUiAppPublishColl
     }
     const filePath = join(appDir, name)
     try {
-      if (!statSync(filePath).isFile()) {
+      // lstat (not stat): an entry that is a symlink is refused even when its
+      // target is a regular file — a publishable payload must be real bytes
+      // inside the app directory, never a link that could point anywhere.
+      if (!lstatSync(filePath).isFile()) {
         return { ok: false, error: `App bundle entry is not a regular file: "${name}"` }
       }
       files.push({ path: name, bytes: new Uint8Array(readFileSync(filePath)) })
@@ -80,17 +83,29 @@ export function collectGenUiAppPublishFiles(appDir: string): GenUiAppPublishColl
 }
 
 /**
+ * Fixed entry mtime so identical payloads zip to identical bytes: the entry
+ * order is the caller's (collect sorts by name) and the wall clock never
+ * enters the archive. This is the DOS-epoch year fflate encodes losslessly
+ * — mtime 0 would land in 1970 and trip fflate's err(10). Noon UTC (not
+ * midnight) keeps the LOCAL calendar date of the instant inside 1980 for
+ * every timezone: fflate derives the DOS fields from local getFullYear(),
+ * and midnight UTC reads as 1979 (err(10) again) west of UTC.
+ */
+const GENUI_APP_ARTIFACT_MTIME = Date.UTC(1980, 0, 1, 12)
+
+/**
  * Zip the payload at the root layout (no enclosing directory — the upload
  * chain's normalizeCreatorAppPayloadRoot only tolerates one accidental wrapper,
- * and a canonical publish should not need the tolerance). Deterministic: the
- * entry order is the caller's (collect sorts by name).
+ * and a canonical publish should not need the tolerance). Deterministic: see
+ * GENUI_APP_ARTIFACT_MTIME — entry order plus the pinned mtime make the
+ * archive byte-reproducible.
  */
 export function buildGenUiAppArtifactZip(files: readonly GenUiAppPublishFile[]): Uint8Array {
   const archiveEntries: Record<string, Uint8Array> = {}
   for (const file of files) {
     archiveEntries[file.path] = file.bytes
   }
-  return zipSync(archiveEntries, { level: 9 })
+  return zipSync(archiveEntries, { level: 9, mtime: GENUI_APP_ARTIFACT_MTIME })
 }
 
 export type GenUiAppPublishPolicyVerdict =
