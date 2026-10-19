@@ -354,3 +354,18 @@ P1 + 6 项 P2 已全部修复（`fix(genui): address Wave-1 review findings`）�
 
 - **视觉验收**：PASS-with-notes（0 V1 / 6 V2 建议）。验收形态为代码级设计合规审查（对照 polo-ai-design-system 通用 token/状态合同 + packages/ui 既有卡片家族惯例）；该 Skill 声明模块不含聊天卡片，故以仓库惯例为主要参照。V2 建议清单：Spinner 无效尺寸类改字号驱动、"No rows" 硬编码英文宜 i18n、非法数值输入加 aria-invalid 微提示、chips 圆角 4px vs 家族 6px 统一、全屏视图缺筛选状态条、chip 加 max-w truncate。均记录待下轮，不阻塞。
 - **E2E 基线判定**：AGENTS.md 两套真实集成在本 worktree 环境为基线红——runtime 11 pass/10 fail、managed 1 pass/5 fail。**逐名比对证实 HEAD(5fcd866b) 与基线(825742ab) 失败集合完全相同**（SIGINT/SIGTERM/…stop 超时、owned-CLI Skills/HOME、empty provider stream、managed cancel/owner-death/desktop-death/quit/controlled 链路），属环境既有问题（含 bun install 时 @vscode/ripgrep postinstall 失败），与本轮改动无关；**Wave-1 新增 E2E 失败 = 0**。针对性 genui 套件 689 pass / 0 fail、typecheck:all exit 0、lint 无新增为本轮绿色证据。
+
+## Wave-1.5 修复批次（12 条发现，2026-10-19）
+
+Flash 补跑复核产生的 12 条已确认发现（F1 错误码映射 + F2 导出所见即所得 + N3-N12 视觉与文案），分支 `iter/genui-wave1-fixes`，按组拆三个 commit。
+
+### 产品决策：导出与复制 = 当前视图（F2，方案 A）
+
+**语义定死**：datatable 全屏 overlay 的导出/复制行集 = 当前视图（筛选 + 排序后的 `processedRows`），分组只是展示层——导出为拍平后的当前视图行序，折叠分组不缩小导出集。范围对用户可见：overlay 副标题在有筛选时切换为「已筛选 {{shown}}/{{total}}」（新键 `datatable.rowCountFiltered`，无筛选维持原 `datatable.rowCount`）；导出下拉触发按钮 title 与菜单头展示「当前视图 x/y 行」（新键 `table.exportScope` / `table.exportScopeRows`）。前置项（known-V5）：激活筛选状态条在全屏 overlay 内同步渲染（`renderFilterStatusBar` 双处复用），消除「看不见的筛选」导出子集暗坑。
+
+**行为变更（已批准）**：markdown datatable 富块路径（有排序、无筛选）的导出/复制从**原始序**变为**排序后序**——这是统一视图语义的直接结果，非回归。
+
+### 其余发现处置
+
+- **F1**：运行时 zod 3.25.76 的枚举违规 issue code 为 `invalid_enum_value`（v4 才是 `invalid_value`），归入 invalid-type 码；测试走真实 `RenderUiSchema.safeParse`（stat-card `trend: "bogus"`）断言分类码与 `[genui:invalid-type]` 文本。
+- **N3/N4/N7-N12**：chips 容器 max-width + chip truncate；boolean chip 复用 Yes/No 单元格文案；骨架 `data-search-exclude`、gap-2、友好类型名模板（`genui.skeleton.types.*` 7 类型 ×7 locale）；选中 chip hover、状态条清除按钮 cursor-pointer、筛选计数 aria-live、清除按钮专用键 `datatable.clearFilters`（与 `common.clearAll` 语义区分）。
