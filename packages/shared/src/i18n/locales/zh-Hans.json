@@ -437,6 +437,7 @@
   "creatorSkills.errors.localFileRequired": "请选择当前设备上的 ZIP 文件。",
   "creatorSkills.errors.project_skill_conflict": "同名项目级 Skill 具有更高优先级。",
   "creatorSkills.errors.reference_unavailable": "无法访问这个参考文件。",
+  "creatorSkills.errors.skill_delete_refused": "无法删除该 Skill。Polo 内置 Skill 为只读，且此工作区没有可删除的副本。",
   "creatorSkills.errors.skill_validation_failed": "Skill 包未通过校验。",
   "creatorSkills.errors.unknown": "Creator Skill 请求失败。",
   "creatorSkills.errors.upload_expired": "上传已过期，请重新开始上传。",

@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import { TestAgent, createMockBackendConfig, createMockWorkspace } from './test-utils.ts'
 import { clearBundledAssetsRoot, setBundledAssetsRoot, getBundledAssetsRoot } from '../../utils/paths.ts'
 import { BUNDLED_SKILLS_ASSET_DIRNAME } from '../../skills/bundled.ts'
+import { invalidateSkillsCache } from '../../skills/storage.ts'
 
 class Consumer extends TestAgent {
   check(tool: string, input: Record<string, unknown>) { return this.checkCanonicalSkillUse(tool, input) }
@@ -171,5 +172,122 @@ it('both agent backends share the BaseAgent skill pipeline instead of carrying t
     const source = await readFile(join(agentDir, '..', backend), 'utf-8')
     expect(source.includes('loadAllSkills')).toBe(false)
     expect(source.includes('loadBundledSkills')).toBe(false)
+  }
+})
+
+// ---------------------------------------------------------------
+// Discovery consistency (POO-110 S1 fix): natural-language discovery
+// advertises the effective version of a bundled slug, so a user
+// workspace copy shadows the bundled readPath instead of the turn
+// pointing at instructions the skill system no longer resolves to.
+// ---------------------------------------------------------------
+
+it('with a workspace override, personal discovery advertises the user copy and an explicit mention reads it too', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'polo-bundled-override-'))
+  const savedAssetsRoot = getBundledAssetsRoot()
+  try {
+    const bundled = await writeBundledFixture(root, BUNDLED_SLUG, 'Upload an App to Polo', 'Explain how to submit an App.')
+    const userDir = join(root, 'skills', BUNDLED_SLUG)
+    await mkdir(userDir, { recursive: true })
+    const userBody = '---\nname: "Upload an App to Polo"\ndescription: "Explain how to submit an App."\n---\n\nUser override instructions.\n'
+    await writeFile(join(userDir, 'SKILL.md'), userBody)
+    setBundledAssetsRoot(join(root, 'electron'))
+    invalidateSkillsCache()
+
+    const agent = new Consumer(createMockBackendConfig({
+      workspace: createMockWorkspace({ rootPath: root }),
+      localGlobalSkillsRoot: join(root, 'global-skills'),
+    }))
+
+    // Natural language: discovery data must point at the effective copy.
+    const discoveryTurn = agent.chat('please explain how to submit an App')
+    const discoveryEvent = await discoveryTurn.next()
+    expect(discoveryEvent.value.type).not.toBe('error')
+    await discoveryTurn.return(undefined as never)
+    const discoveryMessage = agent.chatCalls[0]!.message
+    expect(discoveryMessage).toContain(`"readPath":"${join(userDir, 'SKILL.md')}"`)
+    expect(discoveryMessage).toContain('"source":"workspace"')
+    expect(discoveryMessage).not.toContain(bundled.file)
+
+    // Explicit mention resolves to the same effective copy: the injected
+    // read directive names the user file, never the bundled one.
+    const mentionTurn = agent.chat(`[skill:${BUNDLED_SLUG}] explain the submission flow`)
+    const mentionEvent = await mentionTurn.next()
+    expect(mentionEvent.value.type).not.toBe('error')
+    await mentionTurn.return(undefined as never)
+    expect(agent.chatCalls[1]!.message).toContain(`- ${join(userDir, 'SKILL.md')} (skill: ${BUNDLED_SLUG})`)
+    expect(agent.chatCalls[1]!.message).not.toContain(bundled.file)
+  } finally {
+    if (savedAssetsRoot === undefined) clearBundledAssetsRoot()
+    else setBundledAssetsRoot(savedAssetsRoot)
+    invalidateSkillsCache()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('without an override, personal discovery keeps advertising the bundled skill itself', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'polo-bundled-fresh-'))
+  const savedAssetsRoot = getBundledAssetsRoot()
+  try {
+    const bundled = await writeBundledFixture(root, BUNDLED_SLUG, 'Upload an App to Polo', 'Explain how to submit an App.')
+    setBundledAssetsRoot(join(root, 'electron'))
+    invalidateSkillsCache()
+
+    const agent = new Consumer(createMockBackendConfig({
+      workspace: createMockWorkspace({ rootPath: root }),
+      localGlobalSkillsRoot: join(root, 'global-skills'),
+    }))
+
+    const turn = agent.chat('please explain how to submit an App')
+    const event = await turn.next()
+    expect(event.value.type).not.toBe('error')
+    await turn.return(undefined as never)
+    const message = agent.chatCalls[0]!.message
+    expect(message).toContain(`"readPath":"${bundled.file}"`)
+    expect(message).toContain('"source":"bundled"')
+  } finally {
+    if (savedAssetsRoot === undefined) clearBundledAssetsRoot()
+    else setBundledAssetsRoot(savedAssetsRoot)
+    invalidateSkillsCache()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('an enterprise space with local Skills disabled still discovers the bundled skill even when a workspace copy exists', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'polo-bundled-enterprise-override-'))
+  const savedAssetsRoot = getBundledAssetsRoot()
+  try {
+    const bundled = await writeBundledFixture(root, BUNDLED_SLUG, 'Upload an App to Polo', 'Explain how to submit an App.')
+    const userDir = join(root, 'skills', BUNDLED_SLUG)
+    await mkdir(userDir, { recursive: true })
+    await writeFile(join(userDir, 'SKILL.md'), '---\nname: "Upload an App to Polo"\ndescription: "Explain how to submit an App."\n---\nUser override.')
+    setBundledAssetsRoot(join(root, 'electron'))
+    invalidateSkillsCache()
+
+    const agent = new Consumer(createMockBackendConfig({
+      workspace: createMockWorkspace({ rootPath: root }),
+      localGlobalSkillsRoot: join(root, 'global-skills'),
+      canonicalSkills: {
+        allowLocalSkills: async () => false,
+        load: async () => [],
+        authorize: async () => {},
+        finish: async () => {},
+      },
+    }))
+
+    const turn = agent.chat('please explain how to submit an App')
+    const event = await turn.next()
+    expect(event.value.type).not.toBe('error')
+    await turn.return(undefined as never)
+    const message = agent.chatCalls[0]!.message
+    // Enterprise isolation holds: only the app-shipped copy is advertised.
+    expect(message).toContain(`"readPath":"${bundled.file}"`)
+    expect(message).toContain('"source":"bundled"')
+    expect(message).not.toContain(join(userDir, 'SKILL.md'))
+  } finally {
+    if (savedAssetsRoot === undefined) clearBundledAssetsRoot()
+    else setBundledAssetsRoot(savedAssetsRoot)
+    invalidateSkillsCache()
+    await rm(root, { recursive: true, force: true })
   }
 })

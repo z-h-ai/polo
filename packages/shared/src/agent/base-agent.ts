@@ -69,7 +69,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
 import { formatCanonicalSkillDiscovery } from './canonical-skill-discovery.ts';
-import { loadAllSkills, loadBundledSkills, GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../skills/storage.ts';
+import { loadAllSkills, loadBundledSkills, loadEffectiveBundledSkills, GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../skills/storage.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -1002,7 +1002,7 @@ ${formattedMessages}
     catch { return 'Canonical Skill is unavailable for this account, ProductSpace or current version'; }
   }
 
-  protected extractSkillPaths(message: string, canonical: import('../skills/types.ts').LoadedSkill[] = [], allowLocal = true): {
+  protected extractSkillPaths(message: string, canonical: import('../skills/types.ts').LoadedSkill[] = [], allowLocal = true, bundledSkills?: import('../skills/types.ts').LoadedSkill[]): {
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
@@ -1012,8 +1012,9 @@ ${formattedMessages}
     // Bundled app skills stay discoverable in every ProductSpace; allowLocal
     // keeps hiding only the personal global/workspace/project legacy roots.
     // loadAllSkills already contains the bundled tier when local skills are
-    // allowed, so only the restricted branch loads it separately here.
-    const skills = [...(allowLocal ? loadAllSkills(workspaceRoot, projectRoot, this.config.localGlobalSkillsRoot) : loadBundledSkills()), ...canonical];
+    // allowed, so only the restricted branch loads it separately here (the
+    // caller may hand in an already-loaded list so a turn reads it once).
+    const skills = [...(allowLocal ? loadAllSkills(workspaceRoot, projectRoot, this.config.localGlobalSkillsRoot) : bundledSkills ?? loadBundledSkills()), ...canonical];
     const skillSlugs = skills.map(s => s.slug);
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);
@@ -1097,7 +1098,9 @@ ${formattedMessages}
     this.canonicalSkillPaths = canonical.map(skill => join(skill.path, 'SKILL.md'));
     const allowLocal = this.config.canonicalSkills ? await this.config.canonicalSkills.allowLocalSkills?.().catch(() => false) ?? false : true;
     this.localSkillsAllowed = allowLocal;
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, canonical, allowLocal);
+    // One bundled read per turn, shared by mention resolution and discovery.
+    const bundledSkills = allowLocal ? undefined : loadBundledSkills();
+    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, canonical, allowLocal, bundledSkills);
     this.activeCanonicalSkillPaths = [...skillPaths.values()].filter(path => this.canonicalSkillPaths.includes(path));
     if (this.activeCanonicalSkillPaths.length) {
       const denied = await this.checkCanonicalSkillUse('Skill', {});
@@ -1132,8 +1135,15 @@ ${formattedMessages}
     const directive = this.formatSkillDirective(skillPaths);
     // Bundled app Skills are advertised for natural-language discovery in every
     // ProductSpace; canonicalSkillPaths stays canonical-only so bundled reads
-    // never consume SkillTurn authorization.
-    const discovery = formatCanonicalSkillDiscovery([...loadBundledSkills(), ...canonical],message,(attachments ?? []).map(file=>file.name),allowLocal);
+    // never consume SkillTurn authorization. In a personal space a same-slug
+    // user skill is the reachable version of the bundled concept — advertise
+    // that effective entry (and only it, no other global skills) so the
+    // discovery readPath never disagrees with mentions and the list RPC. An
+    // enterprise space reads the bundled tier directly and inherits nothing.
+    const discoverableBundled = allowLocal
+      ? loadEffectiveBundledSkills(this.config.workspace?.rootPath ?? this.workingDirectory, this.config.session?.workingDirectory, this.config.localGlobalSkillsRoot)
+      : bundledSkills!;
+    const discovery = formatCanonicalSkillDiscovery([...discoverableBundled, ...canonical],message,(attachments ?? []).map(file=>file.name),allowLocal);
     const messageParts = [branchSeedContext, transferredSessionContext, discovery, directive, cleanMessage].filter(Boolean);
     const effectiveMessage = messageParts.join('\n\n');
 

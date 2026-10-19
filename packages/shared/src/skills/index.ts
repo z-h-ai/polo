@@ -15,6 +15,7 @@ export {
   loadSkillBySlug,
   loadBundledSkills,
   loadBundledSkill,
+  loadEffectiveBundledSkills,
   getSkillIconPath,
   deleteSkill,
   skillExists,

@@ -437,6 +437,7 @@
   "creatorSkills.errors.localFileRequired": "Válassz helyi ZIP-fájlt erről az eszközről.",
   "creatorSkills.errors.project_skill_conflict": "Az ilyen sluggal rendelkező projektszintű Skill elsőbbséget élvez.",
   "creatorSkills.errors.reference_unavailable": "Ez a referencia nem érhető el.",
+  "creatorSkills.errors.skill_delete_refused": "Ez a Skill nem távolítható el. A Polo beépített Skilljei csak olvashatók, és ebben a munkaterületen nincs eltávolítható példány.",
   "creatorSkills.errors.skill_validation_failed": "A Skill csomag nem ment át az ellenőrzésen.",
   "creatorSkills.errors.unknown": "A Creator Skill kérés sikertelen.",
   "creatorSkills.errors.upload_expired": "A feltöltés lejárt. Indítsd újra.",

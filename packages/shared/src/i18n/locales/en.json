@@ -437,6 +437,7 @@
   "creatorSkills.errors.localFileRequired": "Choose a local ZIP file from this device.",
   "creatorSkills.errors.project_skill_conflict": "A project-level Skill with this slug takes priority.",
   "creatorSkills.errors.reference_unavailable": "This reference is unavailable.",
+  "creatorSkills.errors.skill_delete_refused": "This Skill cannot be removed. Built-in Polo Skills are read-only, and this workspace has no removable copy of it.",
   "creatorSkills.errors.skill_validation_failed": "The Skill package did not pass validation.",
   "creatorSkills.errors.unknown": "Creator Skill request failed.",
   "creatorSkills.errors.upload_expired": "The upload has expired. Start the upload again.",

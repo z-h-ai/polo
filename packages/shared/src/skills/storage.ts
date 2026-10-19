@@ -256,6 +256,19 @@ export function loadBundledSkill(slug: string): LoadedSkill | null {
 }
 
 /**
+ * The bundled tier as actually reachable under the full priority order: for
+ * each app-shipped slug, the skill a user lookup resolves to. Without a
+ * same-slug user skill that is the bundled entry itself; with one it is the
+ * effective user skill, which stays a personal-space asset. Discovery and
+ * mentions must agree on this view so a user override never leaves the
+ * shadowed bundled readPath advertised.
+ */
+export function loadEffectiveBundledSkills(workspaceRoot: string, projectRoot?: string, globalSkillsRoot = GLOBAL_AGENT_SKILLS_DIR): LoadedSkill[] {
+  const all = loadAllSkills(workspaceRoot, projectRoot, globalSkillsRoot);
+  return loadBundledSkills().map(bundled => all.find(skill => skill.slug === bundled.slug) ?? bundled);
+}
+
+/**
  * Load all skills from all sources (bundled, global, workspace, project)
  * Skills with the same slug are overridden by higher-priority sources.
  * Priority: bundled (lowest) < global < workspace < project (highest)
@@ -265,6 +278,10 @@ export function loadBundledSkill(slug: string): LoadedSkill | null {
  * late assets-root registration, an app upgrade or a test that swaps roots
  * can never reuse a result computed against a different root. Call
  * invalidateSkillsCache() on working directory changes or skill file events.
+ * Note: the config watcher only listens on user directories, so in a dev
+ * checkout an edit to the bundled source tree itself stays invisible for up
+ * to the 5-minute TTL (packaged apps ship static bundled skills, so this only
+ * affects dev iteration; restart or clear the cache to see the change).
  *
  * @param workspaceRoot - Absolute path to workspace root
  * @param projectRoot - Optional project root (working directory) for project-level skills

@@ -437,7 +437,9 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     await assertOriginalNativeSkillScope(scope, scope.fenceGeneration)
     return skills.map(skill => {
       const installation = installedBySlug.get(skill.slug)
-      return installation && skill.source === 'workspace'
+      // Legacy ledger metadata belongs to user-owned workspace copies only —
+      // never to a canonical row that happens to share its slug.
+      return installation && skill.source === 'workspace' && !skill.canonicalInstallation
         ? { ...skill, creatorInstallation: installation }
         : skill
     })
@@ -642,9 +644,12 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         code: 'workspace_read_only',
       })
     }
-    // Bundled app Skills ship inside the client and cannot be uninstalled.
-    const { loadBundledSkill } = await import('@polo-ai/shared/skills')
-    if (loadBundledSkill(skillSlug)) return false
+    // Bundled app Skills ship inside the client and cannot be uninstalled —
+    // but only while the user has no own copy: a same-slug workspace Skill is
+    // a regular user asset whose deletion must not be vetoed by the bundled
+    // directory it shadows (deleting it leaves the bundled original in place).
+    const { loadBundledSkill, skillExists } = await import('@polo-ai/shared/skills')
+    if (!skillExists(workspace.rootPath, skillSlug) && loadBundledSkill(skillSlug)) return false
     if (skillSlug.startsWith('canonical-')) {
       const scope = await requireTrustedSkillsScope()
       const original = (await readCanonicalSkillInstallations(workspace.rootPath, scope, { nativeMutationFacts: true }))

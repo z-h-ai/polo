@@ -437,6 +437,7 @@
   "creatorSkills.errors.localFileRequired": "Wybierz lokalny plik ZIP z tego urządzenia.",
   "creatorSkills.errors.project_skill_conflict": "Skill na poziomie projektu o tym slugu ma pierwszeństwo.",
   "creatorSkills.errors.reference_unavailable": "Ten materiał referencyjny jest niedostępny.",
+  "creatorSkills.errors.skill_delete_refused": "Tego Skillu nie można usunąć. Wbudowane Skille Polo są tylko do odczytu, a ten obszar roboczy nie ma usuwalnej kopii.",
   "creatorSkills.errors.skill_validation_failed": "Pakiet Skill nie przeszedł walidacji.",
   "creatorSkills.errors.unknown": "Żądanie Creator Skill nie powiodło się.",
   "creatorSkills.errors.upload_expired": "Przesyłanie wygasło. Rozpocznij je ponownie.",

@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { bindCanonicalSkillContextResolver, loadProductSpaceSkills, type CanonicalSkillScope } from '../canonical-skills'
 import { clearBundledAssetsRoot, setBundledAssetsRoot, getBundledAssetsRoot } from '@polo-ai/shared/utils/paths'
-import { BUNDLED_SKILLS_ASSET_DIRNAME, getBundledSkillsRoot } from '@polo-ai/shared/skills'
+import { BUNDLED_SKILLS_ASSET_DIRNAME, getBundledSkillsRoot, loadBundledSkills, invalidateSkillsCache } from '@polo-ai/shared/skills'
 
 const scope: CanonicalSkillScope = {
   accountId: randomUUID(),
@@ -109,5 +109,19 @@ it('the dev checkout ships both upload guide Skills and they state that upload i
     expect(source).toMatch(/^name: "/m)
     expect(source).toContain('has not connected')
     expect(source.toLowerCase()).not.toContain('curl ')
+  }
+
+  // The real consumer of this frontmatter is the Polo skill parser, where
+  // `name` is a display name and `icon` is an optional emoji — generic
+  // external validators that reject those fields do not apply to this repo.
+  invalidateSkillsCache()
+  const parsed = loadBundledSkills()
+  for (const [slug, icon, name] of [
+    ['polo-upload-app', '📦', 'Upload an App to Polo'],
+    ['polo-upload-skill', '🚀', 'Upload a Skill to Polo'],
+  ] as const) {
+    const skill = parsed.find(row => row.slug === slug)
+    expect(skill?.metadata.name).toBe(name)
+    expect(skill?.metadata.icon).toBe(icon)
   }
 })

@@ -437,6 +437,7 @@
   "creatorSkills.errors.localFileRequired": "このデバイス上のローカル ZIP ファイルを選択してください。",
   "creatorSkills.errors.project_skill_conflict": "同じ slug のプロジェクトレベル Skill が優先されます。",
   "creatorSkills.errors.reference_unavailable": "この参考ファイルは利用できません。",
+  "creatorSkills.errors.skill_delete_refused": "このスキルは削除できません。Polo 内蔵スキルは読み取り専用で、このワークスペースには削除可能なコピーがありません。",
   "creatorSkills.errors.skill_validation_failed": "Skill パッケージは検証に合格しませんでした。",
   "creatorSkills.errors.unknown": "Creator Skill のリクエストに失敗しました。",
   "creatorSkills.errors.upload_expired": "アップロードの有効期限が切れました。もう一度開始してください。",

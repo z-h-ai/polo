@@ -437,6 +437,7 @@
   "creatorSkills.errors.localFileRequired": "Wähle eine lokale ZIP-Datei von diesem Gerät.",
   "creatorSkills.errors.project_skill_conflict": "Ein projektbezogener Skill mit diesem Slug hat Vorrang.",
   "creatorSkills.errors.reference_unavailable": "Diese Referenz ist nicht verfügbar.",
+  "creatorSkills.errors.skill_delete_refused": "Dieser Skill kann nicht entfernt werden. Eingebaute Polo-Skills sind schreibgeschützt und dieser Workspace hat keine entfernbare Kopie.",
   "creatorSkills.errors.skill_validation_failed": "Das Skill-Paket hat die Validierung nicht bestanden.",
   "creatorSkills.errors.unknown": "Die Creator-Skill-Anfrage ist fehlgeschlagen.",
   "creatorSkills.errors.upload_expired": "Der Upload ist abgelaufen. Starte ihn erneut.",

@@ -40,7 +40,7 @@ These files are used by electron-builder or the app directly, not synced to user
 | `generate-icons.sh` | Icon generation script |
 | `bridge-mcp-server/` | Bundled MCP server for Codex/Copilot API source bridge |
 | `pi-agent-server/` | Pi backend model subprocess bundle (staged at build time) |
-| `builtin-skills/` | Read-only app-shipped Skills (`*/SKILL.md`) served in place via `getBundledSkillsRoot()` — never synced to user home and never copied out; users cannot edit or remove them, and a same-slug user Skill always overrides one (POO-110) |
+| `builtin-skills/` | Read-only app-shipped Skills (`*/SKILL.md`) served in place via `getBundledSkillsRoot()` — never synced to user home and never copied out; users cannot edit or remove them, and a same-slug user Skill always overrides one (POO-110). Dev note: edits here are picked up after restart or a skills-cache clear (5-minute TTL; the watcher only listens on user directories). |
 
 ## Removed Resources
 

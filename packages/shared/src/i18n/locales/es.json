@@ -437,6 +437,7 @@
   "creatorSkills.errors.localFileRequired": "Elige un archivo ZIP local de este dispositivo.",
   "creatorSkills.errors.project_skill_conflict": "Un Skill de proyecto con este slug tiene prioridad.",
   "creatorSkills.errors.reference_unavailable": "Esta referencia no está disponible.",
+  "creatorSkills.errors.skill_delete_refused": "Este Skill no se puede eliminar. Los Skills integrados de Polo son de solo lectura y este espacio de trabajo no tiene ninguna copia eliminable.",
   "creatorSkills.errors.skill_validation_failed": "El paquete del Skill no superó la validación.",
   "creatorSkills.errors.unknown": "La solicitud de Creator Skill falló.",
   "creatorSkills.errors.upload_expired": "La carga ha caducado. Iníciala de nuevo.",
