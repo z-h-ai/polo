@@ -39,4 +39,21 @@ describe('paymentHandoffUrl', () => {
     expect(() => paymentHandoffUrl('javascript:alert(1)', ticket)).toThrow('invalid_admin_origin')
     expect(() => paymentHandoffUrl('https://user:pass@admin.example.com', ticket)).toThrow('invalid_admin_origin')
   })
+
+  it('forces HTTPS for every non-loopback host (R1B-4)', () => {
+    // A remote or LAN plaintext origin lets a man-in-the-middle rewrite the
+    // handoff document and read the ticket from location.hash; the server's
+    // canonical-origin gate cannot help a non-browser redeemer afterwards.
+    expect(() => paymentHandoffUrl('http://remote.example', ticket)).toThrow('invalid_admin_origin')
+    expect(() => paymentHandoffUrl('http://192.168.1.5', ticket)).toThrow('invalid_admin_origin')
+    expect(() => paymentHandoffUrl('http://admin.internal.example:8443', ticket)).toThrow('invalid_admin_origin')
+    // HTTPS stays fine everywhere.
+    expect(new URL(paymentHandoffUrl('https://remote.example', ticket)).protocol).toBe('https:')
+  })
+
+  it('keeps the controlled loopback development exception (R1B-4)', () => {
+    expect(new URL(paymentHandoffUrl('http://localhost:3000', ticket)).protocol).toBe('http:')
+    expect(new URL(paymentHandoffUrl('http://127.0.0.1:3000', ticket)).protocol).toBe('http:')
+    expect(new URL(paymentHandoffUrl('http://[::1]:3000', ticket)).protocol).toBe('http:')
+  })
 })

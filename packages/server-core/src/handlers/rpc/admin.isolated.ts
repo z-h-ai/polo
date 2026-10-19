@@ -502,6 +502,10 @@ mock.module('@polo-ai/shared/config', () => ({
   setAdminConfigVersion: (version: string | undefined) => {
     configState.adminConfigVersion = version
   },
+  // R1-1: admin.ts also imports these two persistence entrypoints at module
+  // load; the harness must export them or the whole file fails to link.
+  setGenerativeUiRemoteCapability: () => {},
+  setWebAppArtifactPolicy: () => {},
   getLlmConnections: () => configState.connections,
   addLlmConnection: (connection: TestConnection) => {
     if (configState.connections.some(item => item.slug === connection.slug)) return false
@@ -5425,12 +5429,17 @@ describe('Current-space payment browser handoff', () => {
     expect(url.hash).toBe(`#ticket=${handoffTicket.ticket}`)
   })
   it('refuses a ticket that does not bind the fenced account and space', async () => {
-    const h = await setup()
+    // Each mismatch runs on its OWN login: a FORBIDDEN answer ends the desktop
+    // session by the shared callOrganization semantics (403 is session-ending
+    // outside catalog scope), which is the conservative direction but must not
+    // mask the per-scoped fence assertion.
     adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal' }] })
     adminClientBehavior.issuePaymentHandoff = async () => ({ ...handoffTicket, productSpaceId: 'space-other' })
-    expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
+    expect(await (await setup()).paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null }))
+      .toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
     adminClientBehavior.issuePaymentHandoff = async () => ({ ...handoffTicket, accountId: 'user-9' })
-    expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
+    expect(await (await setup()).paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null }))
+      .toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
   })
   it('denies current enterprise member even if another listed enterprise is owned', async () => {
     const h = await setup()
