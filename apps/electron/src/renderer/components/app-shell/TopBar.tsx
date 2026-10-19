@@ -300,17 +300,22 @@ export function TopBar() {
             >
               <TabIcon tab={tab} />
               <span className="min-w-0 flex-1 truncate whitespace-nowrap">{tab.title}</span>
-              <button
-                type="button"
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 hover:text-foreground"
-                aria-label={t("topbar.tabs.close", { title: tab.title })}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  closeTab(tab.id)
-                }}
-              >
-                <Icons.X className="h-3.5 w-3.5" strokeWidth={1.5} />
-              </button>
+              {/* POO-104: the assistant is a permanent entry — no close
+                  control, so a mis-click next door can never yank the
+                  workbench back to Home. Regular webapp tabs keep theirs. */}
+              {tab.id !== POLO_TAB_ID && (
+                <button
+                  type="button"
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 hover:text-foreground"
+                  aria-label={t("topbar.tabs.close", { title: tab.title })}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    closeTab(tab.id)
+                  }}
+                >
+                  <Icons.X className="h-3.5 w-3.5" strokeWidth={1.5} />
+                </button>
+              )}
             </div>
           )
         })}
