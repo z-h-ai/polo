@@ -303,7 +303,7 @@ export function MyCirclesPage() {
     <div className="h-full min-h-0 overflow-y-auto">
       <main
         style={workbenchStyle}
-        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
+        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
         data-testid="my-circles-page"
       >
         {/* Prototype `.subpage-heading`: back button + eyebrow + THE single
@@ -346,7 +346,7 @@ export function MyCirclesPage() {
 
         {phase === 'idle' && (
           <div
-            className="mt-[24px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
+            className="mt-[24px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs text-muted-foreground"
             data-testid="my-circles-idle-banner"
           >
             {t('poo70.c3.state.idle')}
@@ -355,7 +355,7 @@ export function MyCirclesPage() {
 
         {phase === 'loading' && (
           <div
-            className="mt-[24px] rounded-[13px] border border-border bg-surface px-4 py-4 text-sm text-muted-foreground"
+            className="mt-[24px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-4 text-sm text-muted-foreground"
             data-testid="my-circles-loading"
           >
             {t('poo70.c3.state.loading')}
@@ -364,7 +364,7 @@ export function MyCirclesPage() {
 
         {phase === 'empty' && (
           <div
-            className="mt-[24px] grid justify-items-center gap-[10px] rounded-[16px] border border-border bg-surface px-[20px] py-[28px] text-center"
+            className="mt-[24px] grid justify-items-center gap-[10px] rounded-[16px] border border-border bg-surface client-material-card px-[20px] py-[28px] text-center"
             data-testid="my-circles-empty"
           >
             <h2 className="m-0 text-[18px] font-bold text-foreground">{t('poo70.c3.state.emptyTitle')}</h2>
@@ -453,7 +453,7 @@ export function MyCirclesPage() {
                 onChange={event => setQuery(event.target.value)}
                 placeholder={t('poo70.c3.search.placeholder')}
                 data-testid="my-circles-search"
-                className="min-h-[38px] w-full appearance-none rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
+                className="min-h-[38px] w-full appearance-none rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
               />
             </label>
             <label className="grid gap-[6px] text-[12px] text-muted-foreground">
@@ -462,7 +462,7 @@ export function MyCirclesPage() {
                 value={filter}
                 onChange={event => setFilter(event.target.value as MyCirclesEntitlementFilter)}
                 data-testid="my-circles-filter"
-                className="min-h-[38px] rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground"
+                className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground"
               >
                 <option value="all">{t('poo70.c3.filter.all')}</option>
                 <option value="valid">{t('poo70.c3.filter.valid')}</option>
@@ -480,7 +480,7 @@ export function MyCirclesPage() {
 
         {searchNoMatch && (
           <div
-            className="mt-[24px] grid justify-items-center gap-[10px] rounded-[16px] border border-border bg-surface px-[20px] py-[28px] text-center"
+            className="mt-[24px] grid justify-items-center gap-[10px] rounded-[16px] border border-border bg-surface client-material-card px-[20px] py-[28px] text-center"
             data-testid="my-circles-no-match"
           >
             <p className="m-0 text-[14px] text-foreground">{t('poo70.c3.state.noMatch')}</p>

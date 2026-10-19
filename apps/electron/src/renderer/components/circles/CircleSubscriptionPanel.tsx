@@ -417,7 +417,7 @@ export function CircleSubscriptionPanel({
 
       {/* Detail rows: price / period / validity each appear EXACTLY ONCE
       (Spec §13.13 订阅页文案去重). */}
-      <dl className="m-0 mt-[14px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs">
+      <dl className="m-0 mt-[14px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs">
         <div className="flex flex-wrap items-baseline justify-between gap-[8px]">
           <dt className="m-0 text-muted-foreground">{t('poo70.c6.detail.periodLabel')}</dt>
           <dd
@@ -488,7 +488,7 @@ export function CircleSubscriptionPanel({
       Suppressed for the leave/early-termination state (POO-70 visual review
       R1 F3): a projected 续期 would contradict the revoked authorization. */}
       {isPaid && readyPreview && !endedBeforePeriodEnd && (
-        <div className="mt-[14px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs">
+        <div className="mt-[14px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs">
           <p className="m-0 text-muted-foreground">{t('poo70.c6.preview.projectedTermLabel')}</p>
           <p
             className="m-0 mt-[4px] text-[13px] font-medium text-foreground"
@@ -548,7 +548,7 @@ export function CircleSubscriptionPanel({
       expired membership — 到期不显示为购买上限. */}
       {showCap && (
         <div
-          className="mt-[14px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs"
+          className="mt-[14px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs"
           data-testid="circle-subscription-cap"
           role="status"
         >
@@ -648,7 +648,7 @@ export function CircleSubscriptionPanel({
       entitlement judgment (G5). */}
       {order.phase === 'loading' && (
         <div
-          className="mt-[14px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
+          className="mt-[14px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs text-muted-foreground"
           data-testid="circle-subscription-order-loading"
           role="status"
         >
@@ -676,7 +676,7 @@ export function CircleSubscriptionPanel({
 
       {order.phase === 'ready' && (
         <div
-          className="mt-[14px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs"
+          className="mt-[14px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs"
           data-testid="circle-subscription-order"
         >
           <p className="m-0 font-medium text-foreground">{t('poo70.c6.order.title')}</p>

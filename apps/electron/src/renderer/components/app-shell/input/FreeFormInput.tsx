@@ -1620,7 +1620,7 @@ export function FreeFormInput({
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.98 }}
                           transition={{ duration: 0.16, ease: [0.2, 0, 0.2, 1] }}
-                          className="inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[6px] bg-foreground/2 pl-1.5 pr-2 py-1 text-[13px] text-foreground/80 select-none transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          className="inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[6px] bg-foreground/2 pl-1.5 pr-2 py-1 text-[13px] text-foreground/80 select-none transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring client-material-fg-secondary"
                           onClick={(event) => {
                             const rect = event.currentTarget.getBoundingClientRect()
                             onFollowUpClick?.(item, {
@@ -1660,8 +1660,8 @@ export function FreeFormInput({
                             </TooltipContent>
                           </Tooltip>
                           <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap pr-0.5 text-left">
-                            <span className="italic text-foreground/60">{selectedExcerpt}</span>
-                            <span className="mx-1 text-foreground/40">·</span>
+                            <span className="italic text-foreground/60 client-material-fg-muted">{selectedExcerpt}</span>
+                            <span className="mx-1 text-foreground/40 client-material-fg-muted">·</span>
                             <span>{noteExcerpt}</span>
                           </span>
                         </motion.button>
@@ -1948,7 +1948,7 @@ export function FreeFormInput({
               onClick={onRequestExpand}
               onMouseEnter={onRequestExpand}
               aria-label={t('chat.tapToType')}
-              className="flex-1 h-7 mx-1 flex items-center justify-center text-foreground/30 hover:text-foreground/60 transition-colors cursor-pointer rounded-[6px] hover:bg-foreground/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex-1 h-7 mx-1 flex items-center justify-center text-foreground/30 hover:text-foreground/60 transition-colors cursor-pointer rounded-[6px] hover:bg-foreground/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring client-material-fg-muted client-material-fg-hover"
             >
               <ChevronUp className="h-4 w-4" />
             </button>
@@ -2141,8 +2141,8 @@ function WorkingDirectoryBadge({
               hasFolder ? (
                 <span className="flex flex-col gap-0.5">
                   <span className="font-medium">{t("chat.workingDirectory")}</span>
-                  <span className="text-xs opacity-70">{formatPathForDisplay(workingDirectory, homeDir)}</span>
-                  {gitBranch && <span className="text-xs opacity-70">{t("chat.onBranch", { branch: gitBranch })}</span>}
+                  <span className="text-xs opacity-70 client-material-fg-muted">{formatPathForDisplay(workingDirectory, homeDir)}</span>
+                  {gitBranch && <span className="text-xs opacity-70 client-material-fg-muted">{t("chat.onBranch", { branch: gitBranch })}</span>}
                 </span>
               ) : t("chat.chooseWorkingDirectory")
             }

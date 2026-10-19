@@ -225,7 +225,9 @@ export function TopBar() {
       data-testid="app-topbar"
       className={cn(
         clientWorkbenchFocusClassName,
-        "fixed left-0 right-0 top-0 z-panel flex items-center gap-[12px] bg-background/92 backdrop-blur-[18px] titlebar-drag-region max-md:gap-1.5",
+        // POO-105 材质作用域内 Header 与底板同层同色、任何滚动状态不显示细线
+        // （.client-material-bar 覆盖背景/模糊/边线）；未标记宿主保持原分层。
+        "fixed left-0 right-0 top-0 z-panel flex items-center gap-[12px] bg-background/92 backdrop-blur-[18px] titlebar-drag-region client-material-bar max-md:gap-1.5",
         // The hairline keeps its 1px slot in both states so the bar never
         // changes height when the main scroller crosses the top edge.
         showHeaderLine ? "border-b border-border" : "border-b border-transparent",
@@ -266,8 +268,8 @@ export function TopBar() {
           className={cn(
             "titlebar-no-drag inline-flex h-[36px] flex-none items-center justify-center gap-[8px] rounded-[9px] px-[12px] text-[12px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:w-9 max-md:px-0",
             isHome
-              ? "bg-background text-foreground shadow-minimal"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+              ? "bg-background text-foreground shadow-minimal client-material-card"
+              : "text-muted-foreground hover:bg-foreground/5 client-material-fg-hover hover:text-foreground client-material-fg-secondary",
           )}
         >
           <Icons.House className="size-[17px] flex-none" strokeWidth={1.7} />
@@ -282,8 +284,8 @@ export function TopBar() {
               className={cn(
                 "titlebar-no-drag inline-flex h-[36px] min-w-[98px] max-w-[190px] flex-none items-center gap-[6px] rounded-[9px] px-[10px] text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring max-md:min-w-[96px] max-md:max-w-[140px]",
                 active
-                  ? "bg-background font-medium text-foreground shadow-minimal"
-                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+                  ? "bg-background font-medium text-foreground shadow-minimal client-material-card"
+                  : "text-muted-foreground hover:bg-foreground/5 client-material-fg-hover hover:text-foreground client-material-fg-secondary",
               )}
               draggable={tab.id !== POLO_TAB_ID}
               onClick={() => activateTab(tab.id)}
@@ -302,11 +304,12 @@ export function TopBar() {
               <span className="min-w-0 flex-1 truncate whitespace-nowrap">{tab.title}</span>
               {/* POO-104: the assistant is a permanent entry — no close
                   control, so a mis-click next door can never yank the
-                  workbench back to Home. Regular webapp tabs keep theirs. */}
+                  workbench back to Home. Regular webapp tabs keep theirs.
+                  POO-105: close control carries the material fg contract. */}
               {tab.id !== POLO_TAB_ID && (
                 <button
                   type="button"
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 hover:text-foreground"
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 client-material-fg-hover hover:text-foreground client-material-fg-muted"
                   aria-label={t("topbar.tabs.close", { title: tab.title })}
                   onClick={(event) => {
                     event.stopPropagation()
@@ -326,7 +329,7 @@ export function TopBar() {
         <div className="pointer-events-auto titlebar-no-drag flex flex-none items-center gap-0.5 rounded-md border border-foreground/8 bg-foreground/3 p-0.5">
           <button
             type="button"
-            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40 client-material-fg-secondary client-material-action"
             disabled={!activeWebAppNavigation?.canGoBack}
             onClick={() => activeWebAppNavigation?.goBack()}
             aria-label={t("topbar.nav.back")}
@@ -335,7 +338,7 @@ export function TopBar() {
           </button>
           <button
             type="button"
-            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40 client-material-fg-secondary client-material-action"
             disabled={!activeWebAppNavigation?.canGoForward}
             onClick={() => activeWebAppNavigation?.goForward()}
             aria-label={t("topbar.nav.forward")}
@@ -344,7 +347,7 @@ export function TopBar() {
           </button>
           <button
             type="button"
-            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40 client-material-fg-secondary client-material-action"
             disabled={!activeWebAppNavigation}
             onClick={() => activeWebAppNavigation?.reloadOrStop()}
             aria-label={activeWebAppNavigation?.isLoading ? t("topbar.nav.stop") : t("topbar.nav.reload")}
@@ -368,14 +371,14 @@ export function TopBar() {
               data-testid="topbar-runtime"
               aria-label={t("topbar.runtime.label")}
               aria-haspopup="dialog"
-              className="titlebar-no-drag flex h-[34px] items-center gap-[7px] rounded-[9px] px-[9px] text-[12px] font-medium text-muted-foreground outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="titlebar-no-drag flex h-[34px] items-center gap-[7px] rounded-[9px] px-[9px] text-[12px] font-medium text-muted-foreground outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring client-material-fg-secondary"
             >
               <span
                 className={cn(
                   "size-[7px] flex-none rounded-full",
                   runningCount > 0
                     ? "bg-success ring-[3px] ring-success/15"
-                    : "bg-foreground/40",
+                    : "bg-foreground/40 client-material-fg-muted-bg",
                 )}
               />
               <span className="whitespace-nowrap [@media(max-width:1080px)]:hidden">
@@ -459,7 +462,7 @@ export function TopBar() {
               type="button"
               data-testid="topbar-notifications"
               aria-label={t("topbar.notifications.label")}
-              className="titlebar-no-drag relative grid size-[32px] place-items-center rounded-[8px] text-foreground/50 outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="titlebar-no-drag relative grid size-[32px] place-items-center rounded-[8px] text-foreground/50 outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring client-material-fg-muted"
             >
               <Icons.Bell className="size-4" strokeWidth={1.7} />
               {unreadSessions.length > 0 && (

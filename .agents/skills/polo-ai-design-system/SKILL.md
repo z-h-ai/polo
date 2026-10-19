@@ -5,7 +5,7 @@ description: Apply the polo-ai repository design system within its declared plat
 
 # polo-ai Design System
 
-Adoption revision: `poo70-client-design-r2-20261004`. Mode: `extracted`.
+Adoption revision: `poo105-client-material-r1-20261019`. Mode: `extracted`.
 
 ## Applicability
 
@@ -18,11 +18,11 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 
 ## Sources
 
-- `docs/client-journey-review/spec.md` — authority; 当前产品唯一来源 master-r15-closure；§13.8—13.13 覆盖旧设计指令; SHA-256 `269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7`
-- `.agents/skills/polo-ai-design-system/references/foundations.md` — authority; 本次原型提取与消费边界；明确确认/实现事实/待复看范围; SHA-256 `1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d`
+- `docs/client-journey-review/spec.md` — authority; 当前产品唯一来源 master-r15-closure；§13.8—13.14 覆盖旧设计指令; SHA-256 `5759981c0b54a1f0b51e21100936929b8e9a81045f1fd0a4a1e804e6fca5eb70`
+- `.agents/skills/polo-ai-design-system/references/foundations.md` — authority; 本次原型提取与消费边界；明确确认/实现事实/待复看范围; SHA-256 `aee33459786fa0843c410416eecaca1dda5a46f549e5b018d8d94588f6a6f8d5`
 - `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css` — authority; b82fa1e5 基础样式，按最新原型逐字节提取；当前外层工作台样式维护源; SHA-256 `fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a`
-- `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css` — authority; 导航/Header、首页和统一圈子列表已明确增量；按最终CSS cascade消费; SHA-256 `75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591`
-- `apps/electron/src/renderer/index.css` — implementation; 本轮工作树Renderer样式事实；不是发布版或新的产品设计授权; SHA-256 `91fb77782a6d5dadb2cff70f05a88fa2ec67672e50dc2362020aa5b393d13449`
+- `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css` — authority; 导航/Header、首页、统一圈子列表及 POO-105 微透材质增量；按最终CSS cascade消费; SHA-256 `be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70`
+- `apps/electron/src/renderer/index.css` — implementation; 本轮工作树Renderer样式事实；不是发布版或新的产品设计授权; SHA-256 `866187c7be4e5a4b04fec3335594db2e2d1804fb0067fead8c982cbff04bea5e`
 - `docs/mvp-complete-flow-hifi/sources/g4-product.css` — implementation; POO-41 ef3528ef 历史冻结样式；不覆盖当前Spec; SHA-256 `fe62101ae60d6a11021f98af04e20b1eba97920eb41d7f49d4f9751dd6bb0218`
 - `docs/mvp-complete-flow-hifi/sources/g4-review-record.md` — implementation; 2026-08-11 历史冻结范围记录，非当前全页Acceptance; SHA-256 `56fdd07ddaf3f5525736b124cac3cdc14ecb6953703283f0a09730effdbd7843`
 - `docs/mvp-complete-flow-hifi/sources/renderer-index.css` — implementation; 01f4447c固定Renderer快照，只作历史比较; SHA-256 `964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf`
@@ -38,6 +38,7 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 - Token family `圆角/阴影/层级` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`; use its actual values rather than duplicating them here.
 - Token family `工作区尺寸/间距/密度/桌面断点` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`; use its actual values rather than duplicating them here.
 - Token family `当前导航与首页/圈子增量样式` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`; use its actual values rather than duplicating them here.
+- Token family `POO-105 默认浅色微透材质与前景令牌（--client-material-*）` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`; use its actual values rather than duplicating them here.
 - `登录表单` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 密码/验证码切换及手机号自动注册，复用真实认证；不新增独立注册页
 - `工作台顶栏` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`: 顶部首页与已打开App标签，账号菜单切换空间，主体滚离顶部才出现边线；无第二排资源Tab
 - `工作区布局` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 读取最大宽度/内边距及断点；工作区纵向滚动，主内容不出现非预期横向溢出
@@ -48,6 +49,7 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 - `确认对话框` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 明确原对象的确认/取消及失败恢复；用edge圆角/panel阴影，不以模拟按钮选择业务结果
 - `系统态与恢复` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 准备/加载/错误/离线/失权/主动重试，各自保留真实事实和最小恢复操作
 - `浏览器交接` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 只承接原对象并主动核对，不复制网页支付/管理，不自动重复业务写
+- `微透材质表面` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`: data-client-material=light 且非 dark 才生效；canvas/list/reading/card/brand 表面加 24px blur，前景与 placeholder 实色，真禁用实色灰；缺标记回落既有不透明样式
 
 ## Themes and viewports
 
@@ -68,12 +70,15 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 - 管理技能页面和Polo助手内部代码暂缓；真实助手UI继续复用Renderer，转译示意不能成为重写标准。
 - 仅产品页面可进入客户端；review-shell按钮、模拟结果、虚构账号金额订单及第三方应用内部内容不进入生产。
 - 未建立完整政策注册或生产parity绑定；来源/结构检查不证明execution_ready或业务验收。
+- POO-105微透材质只在data-client-material=light且非dark的作用域消费：表面用--client-material-*加24px blur，前景/placeholder实色，真禁用实色灰；确认摘录见references/poo105-confirmation.md，固定快照与绑定见assets/prototypes/poo105-materials/。
+- 生产组件盘点读references/component-inventory.md（2026-10-18 dev@e7c0e6bd只读登记）：modules之外的renderer面仅为登记不获得设计授权；skill组件与生产落点交叉映射在清单§4，token桥梁为apps/electron/src/renderer/lib/client-workbench-style.ts；配套展示docs/reports/2026-10-18-polo-design-component-library.html非权威。
 
 ## Checks
 
 - `python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py`
 - `python3 docs/mvp-complete-flow-hifi/tools/build_review.py`
 - `POLO_REVIEW_EVIDENCE=/tmp/poo70-design-structure python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py`
+- `python3 docs/mvp-complete-flow-hifi/tools/check_navigation_header.py`
 
 ## Decisions
 
@@ -81,21 +86,22 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 - `D-NAV-HEADER` confirmed: Spec §13.9：去第二排资源Tab，圈子个人首页入口，管理技能在助手卡内，Header仅主体滚动后显示细线 (source `docs/client-journey-review/spec.md`)
 - `D-HOME-CIRCLE` confirmed: Spec §13.11—13.13：我的应用标题、共享应用卡、圈子统一列表与详情文案去重、退出仅订阅区 (source `docs/client-journey-review/spec.md`)
 - `D-ASSISTANT-REUSE` confirmed: Spec §13.11：真实助手UI复用当前Renderer；本批暂缓技能管理及助手内部应用代码 (source `.agents/skills/polo-ai-design-system/references/foundations.md`)
-- `D-PAGE-VISUAL` suggested: 整页布局待复看；当前提取只是目标实现事实；集中visual smoke不升级parity (source `.agents/skills/polo-ai-design-system/references/foundations.md`)
+- `D-PAGE-VISUAL` confirmed: 布局与业务沿当前真实Renderer实现，不做整页视觉parity验收；页面视觉按已确认材质合同与b82fa1e5基线执行 (source `.agents/skills/polo-ai-design-system/references/foundations.md`)
+- `D-POO105-MATERIAL` confirmed: Spec §13.14：默认浅色微透材质、Header与底板同层无滚动细线、前景/placeholder实色、选中accent 9%、真禁用实色灰；深色与第三方App不套用 (source `docs/client-journey-review/spec.md`)
 
 When a bound source changes, locate affected rules and pages before refreshing this Skill. Preserve confirmations whose source and scope did not change.
 
 
 ## Design coverage
 
-- color: explicit — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 已确认b82fa1e5色彩与当前增量cascade；使用实际CSS颜色
+- color: explicit — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 已确认b82fa1e5色彩、当前增量cascade及POO-105 --client-material-*材质令牌（自基础色color-mix派生）；使用实际CSS颜色
 - typography: explicit — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 源CSS定义字体/字号/行高阶梯；不能套全局新字体覆盖助手
 - layout: derived — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 原型提取几何为目标实现事实，具体新组合布局待复看
 - size: derived — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 控件/头像/工作区实际尺寸来自源CSS和最终cascade
 - spacing: derived — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 组件内外间距读取源CSS/断点，不建立第二份数值表
 - radius: explicit — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 源CSS radius与组件例外分别使用
 - density: derived — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 目录/卡片/统一圈子列表沿实际CSS；不恢复紧凑灰黑方案
-- states: explicit — .agents/skills/polo-ai-design-system/references/foundations.md; loading/empty/error/recovery/focus/disabled与恢复合同明确
+- states: explicit — .agents/skills/polo-ai-design-system/references/foundations.md; loading/empty/error/recovery/focus/disabled与恢复合同明确；材质作用域内真禁用改实色灰表达，不用整容器opacity
 - responsive: derived — .agents/skills/polo-ai-design-system/references/foundations.md; 1440×900及1024×768目标，800×600额外回归；媒体查询按最终规则
 
 ## Asset ownership and component lifecycle
@@ -116,13 +122,7 @@ Generated wrappers never delete or overwrite assets. Readiness and hashes are no
 - 确认对话框: foundation, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
 - 系统态与恢复: foundation, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
 - 浏览器交接: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
-
-## Production component inventory
-
-- `references/component-inventory.md` — 2026-10-18 基于 `dev@e7c0e6bd` 的生产组件只读登记:packages/ui 与 renderer 的技术组件、Icon 体系、各业务面组件与 file:line 来源、token 双体系对照、组件化合并建议、死代码与待复核清单。
-- 登记不改变视觉授权与 modules 声明:modules 之外的 renderer 面(助手壳、设置、自动化、messaging 等)仅为登记,不因登记获得设计授权;生产组件留在原拥有模块,只引用不复制。
-- 上述清单的 10 个 skill 组件与生产落点的交叉映射(如 首页目录↔`components/tab-browser/HomePage.tsx`、圈子统一列表↔`components/circles/MyCirclesPage.tsx`、确认对话框↔`components/circles/LeaveCircleDialog.tsx`)记录在清单 §4;token 桥梁为 `apps/electron/src/renderer/lib/client-workbench-style.ts`。
-- 配套展示产物(非权威):`docs/reports/2026-10-18-polo-design-component-library.html` 消费本 Skill token 的组件库页;不作为第二设计目录或数值表维护。
+- 微透材质表面: foundation, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
 
 ## Task-scoped scene source
 

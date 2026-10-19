@@ -1,0 +1,79 @@
+{
+  "captured_at": "2026-10-19T10:20+08:00",
+  "host": "packaged Electron (bun run electron:dist:dev:mac) — Polo AI.app, CDP :9223",
+  "worktree": "POO-105/refactor/optimize-bg-transpare",
+  "account": "alice (polo_admin_manual seed)",
+  "gate_state": "system appearance = Dark at launch → material withdrawn (data-client-material absent); craft-theme mode=light override applied in-app (no OS setting changed) → material published",
+  "assertions": [
+    {
+      "item": "canvas 93%",
+      "selector": ".client-material-canvas",
+      "computed": "color(srgb 0.984314 0.984314 0.980392 / 0.93)",
+      "contract": "#fbfbfa @ 93% (rgba(251,251,250,.93))",
+      "verdict": "bit-identical"
+    },
+    {
+      "item": "list column 94%",
+      "selector": ".client-material-list (assistant navigator)",
+      "computed": "color(srgb 1 1 1 / 0.94) + backdrop-filter blur(24px)",
+      "contract": "surface @ 94%, blur 24px",
+      "verdict": "bit-identical"
+    },
+    {
+      "item": "card 98%",
+      "selector": "home product cards, [role=menu] popover",
+      "computed": "color(srgb 1 1 1 / 0.98) + backdrop-filter blur(24px)",
+      "contract": "surface @ 98%, blur 24px",
+      "verdict": "bit-identical (portals inherit root tokens)"
+    },
+    {
+      "item": "selected nav",
+      "selector": ".client-material-selected (assistant '所有会话')",
+      "computed": "color(srgb 0.431373 0.337255 0.811765 / 0.09) + color rgb(57, 45, 101)",
+      "contract": "rgba(110,86,207,.09) + #392d65",
+      "verdict": "bit-identical"
+    },
+    {
+      "item": "Header BG-01 at rest",
+      "selector": "[class*='client-material-bar']",
+      "computed": "background rgba(0,0,0,0); border-bottom-color rgba(0,0,0,0); backdrop-filter blur(24px); box-shadow none",
+      "contract": "bar transparent (no second 93% board), lineless, blur reserved",
+      "verdict": "pass"
+    },
+    {
+      "item": "Header BG-01 scrolled",
+      "method": "viewport reduced to 900×560 → real content overflow → scrollTop = scrollHeight",
+      "computed": "background rgba(0,0,0,0); border-bottom-color rgba(0,0,0,0); box-shadow none; only translucent surface within top 60px is the canvas itself",
+      "contract": "any scroll state shows no layered background and no hairline",
+      "verdict": "pass"
+    },
+    {
+      "item": "dark/custom host withdrawal (F1 runtime)",
+      "method": "launch with OS Dark; later light override in-app",
+      "computed": "data-client-material absent while isDark=true (system) — login + workbench rendered with legacy opaque styles",
+      "contract": "material only under default light theme",
+      "verdict": "pass"
+    }
+  ],
+  "login_page_reference": {
+    "note": "same packaged binary, prior session",
+    "values": {
+      "brand": "rgba(247,247,248,.94)",
+      "canvas": "rgba(251,251,250,.93)",
+      "disabled_button": "bg rgb(226,228,232) / color rgb(116,121,131) / opacity 1 / cursor not-allowed"
+    }
+  },
+  "deferred": [
+    "custom/Scenic theme startup flash (frame-blocking fix, behavioral change)",
+    "card backdrop-filter GPU cost on low-end GPUs",
+    "vibrancy perception on solid desktop wallpaper (subjective)"
+  ],
+  "screenshots": [
+    "login-light-material.png",
+    "workbench-home.png",
+    "workbench-assistant-three-column.png",
+    "workbench-scrolled-small-viewport.png",
+    "account-menu-portal-card.png",
+    "workbench-space-boundary-toast.png"
+  ]
+}

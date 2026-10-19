@@ -4,6 +4,7 @@ import { TabContent } from './TabContent'
 import { TopBar } from '@/components/app-shell/TopBar'
 import { useTabShell } from '@/context/TabShellContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
+import { useClientMaterialScope } from '@/lib/client-workbench-style'
 import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
 
 interface TabShellProps {
@@ -26,6 +27,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps) {
   const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab } = useTabShell()
+  // POO-105 默认浅色微透材质（Spec §13.14）：宿主根承载材质标记与派生令牌，
+  // 深色/未标记宿主保持既有不透明样式。放在窄窗判定之前，hook 顺序不受早退影响。
+  useClientMaterialScope()
   // Frozen narrow-window boundary (Review R38, restores the POO-41 contract):
   // at/below the frozen 640px line EVERY route fails closed to the frozen
   // WindowWidthGuard — the POO-41 authoritative 390x844 result is the guard
@@ -135,7 +139,9 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
   }
 
   return (
-    <div className="h-full min-h-0 bg-background">
+    // 材质作用域内 shell 根是唯一画布板：页面画布不再自绘不透明背景，
+    // 93% 底板直接承在窗口原生材质上；未标记宿主保持 bg-background。
+    <div className="h-full min-h-0 bg-background client-material-canvas">
       {/* The unified workbench bar (brand + tabs + space/account actions).
           Rendered inside the hydration gate: pre-hydration the boundary above
           returns first, so a stale previous-scope bar never surfaces. */}

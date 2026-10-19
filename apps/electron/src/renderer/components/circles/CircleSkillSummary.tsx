@@ -97,7 +97,7 @@ export function CircleSkillSummary({ skills }: CircleSkillSummaryProps) {
           data-artifact-id={skill.artifactId}
           data-artifact-status={skill.artifactStatus}
           data-stable-version-id={skill.stableVersionId ?? ''}
-          className="flex items-start gap-[14px] rounded-[14px] border border-foreground/10 bg-surface px-[16px] py-[14px]"
+          className="flex items-start gap-[14px] rounded-[14px] border border-foreground/10 bg-surface client-material-card px-[16px] py-[14px]"
         >
           <span
             aria-hidden="true"

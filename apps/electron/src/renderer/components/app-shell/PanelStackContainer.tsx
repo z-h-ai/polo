@@ -138,7 +138,8 @@ export function PanelStackContainer({
               data-panel-role="navigator"
               className={cn(
                 'h-full w-full overflow-hidden relative',
-                'bg-background shadow-middle',
+                // POO-105：会话导航列表面在材质作用域内取列表面（94% 表面）。
+                'bg-background shadow-middle client-material-list',
               )}
               style={{
                 // Compact mode runs flush to the viewport floor — no rounded bottom.
@@ -230,7 +231,8 @@ export function PanelStackContainer({
           transition={transition}
           className={cn(
             'h-full overflow-hidden relative shrink-0 z-[2]',
-            'bg-background shadow-middle',
+            // POO-105：会话导航列表面在材质作用域内取列表面（94% 表面）。
+            'bg-background shadow-middle client-material-list',
           )}
           style={{
             borderTopLeftRadius: RADIUS_INNER,

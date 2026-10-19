@@ -105,7 +105,7 @@ export function PhoneAuthStep({
   // Prototype `.button.primary.auth-primary`: accent fill, on-accent 12px
   // label, hover darkens to accent 86% + black.
   const primaryButtonClassName
-    = "inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50"
+    = "inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50 client-material-control"
 
   if (form.mode === "entry") {
     return (
@@ -193,7 +193,7 @@ export function PhoneAuthStep({
             type="button"
             onClick={handleEditPhone}
             disabled={isBusy}
-            className="text-accent hover:underline disabled:opacity-50"
+            className="text-accent hover:underline disabled:opacity-50 client-material-action"
           >
             {t("onboarding.adminLogin.editPhone")}
           </button>
@@ -246,7 +246,7 @@ export function PhoneAuthStep({
           type="button"
           disabled={isBusy || !canSend}
           onClick={sendCode}
-          className="inline-flex min-h-[28px] w-full items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground transition-colors hover:bg-foreground-5 disabled:pointer-events-none disabled:opacity-50"
+          className="inline-flex min-h-[28px] w-full items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground transition-colors hover:bg-foreground-5 disabled:pointer-events-none disabled:opacity-50 client-material-control"
         >
           {resendSeconds > 0
             ? t("onboarding.adminLogin.resendIn", { count: resendSeconds })

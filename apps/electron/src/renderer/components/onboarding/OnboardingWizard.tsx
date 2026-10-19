@@ -1,4 +1,4 @@
-import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
+import { useClientWorkbenchStyle, useClientMaterialScope, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
 import { cn } from "@/lib/utils"
 import { WelcomeStep } from "./WelcomeStep"
 import type { ApiSetupMethod } from "./APISetupStep"
@@ -170,6 +170,7 @@ export function OnboardingWizard({
   }
 
   const workbenchStyle = useClientWorkbenchStyle()
+  useClientMaterialScope()
   const isLogin = state.step === 'admin-login'
 
   return (
@@ -177,7 +178,9 @@ export function OnboardingWizard({
       data-testid="onboarding-wizard"
       style={isLogin ? workbenchStyle : undefined}
       className={cn(
-        isLogin ? "bg-background overflow-y-auto " + clientWorkbenchFocusClassName : "bg-foreground-2 overflow-y-auto",
+        // POO-105：登录根是材质作用域的画布板（93% 底板）；空间准备等其他
+        // 步骤保持实色 foreground-2，不在浅色材质合同范围内。
+        isLogin ? "bg-background overflow-y-auto client-material-canvas " + clientWorkbenchFocusClassName : "bg-foreground-2 overflow-y-auto",
         !className?.includes('h-full') && "h-dvh",
         className
       )}

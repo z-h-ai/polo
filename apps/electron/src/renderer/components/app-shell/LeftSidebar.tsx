@@ -652,7 +652,8 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
           link.compact ? "py-[3px]" : "py-[5px]",
           "px-2",
           link.variant === "default"
-            ? "bg-foreground/[0.07]"
+            // POO-105：材质作用域内选中导航项取强调色 9% 背景（Spec §13.14）。
+            ? "bg-foreground/[0.07] client-material-selected"
             // Highlight on hover, context menu open (data-state), or EditPopover active (data-edit-active)
             : "hover:bg-sidebar-hover data-[state=open]:bg-sidebar-hover data-[edit-active=true]:bg-sidebar-hover",
           extraClassName,

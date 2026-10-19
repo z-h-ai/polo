@@ -242,7 +242,7 @@ export function SessionItem({
           <Flag className="h-3.5 w-3.5 text-info" />
         </div>
       ) : item.lastMessageAt ? (
-        <span className="text-[11px] text-foreground/40 whitespace-nowrap">
+        <span className="text-[11px] text-foreground/40 whitespace-nowrap client-material-fg-muted">
           {formatDistanceToNowStrict(new Date(item.lastMessageAt), { locale: shortTimeLocale as Locale, roundingMethod: 'floor' })}
         </span>
       ) : undefined}
