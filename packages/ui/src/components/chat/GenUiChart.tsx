@@ -15,6 +15,17 @@
  * can carry anything parseGenUiComponents lets through, so the renderer plans
  * first (planGenUiChart) and never crashes on off shapes — it degrades to the
  * GenUiUnknownFallback-style placeholder instead.
+ *
+ * View-state interactions (P0-1b): legend chips toggle a series' visibility
+ * and the x-axis brush narrows the rendered category window. Both are pure
+ * client-side view state — ephemeral React state inside this card — honoring
+ * the tool-description boundary contract ("view-state operations are
+ * client-side; reserve action-buttons for semantic follow-ups"): no schema
+ * field, no persistence, no action/send-message round-trip, and replay
+ * semantics are untouched. The interaction decisions live in exported pure
+ * helpers (visibleGenUiChartSeries / toggleGenUiChartSeriesHidden /
+ * resolveGenUiChartRange) so the interactive layer is fully determined by
+ * unit-tested functions, same doctrine as the plan layer.
  */
 
 import * as React from 'react'
@@ -22,6 +33,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Bar,
   BarChart,
+  Brush,
   CartesianGrid,
   Cell,
   Funnel,
@@ -39,6 +51,7 @@ import {
 } from 'recharts'
 import type { TooltipValueType } from 'recharts'
 import { AlertTriangle } from 'lucide-react'
+import { cn } from '../../lib/utils'
 import type { GenUiChart } from './GenUICard'
 
 // ── Payload-shape mirrors (renderer-side, tolerant) ──────────────────────────
@@ -183,6 +196,68 @@ export function truncateGenUiChartTick(value: unknown, max = 14): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
+// ── View-state interaction logic (P0-1b, pure; unit-tested directly) ────────
+
+/**
+ * Minimum category count before the x-axis range brush earns its footprint —
+ * below this the whole plot already fits on screen and a brush is noise.
+ */
+export const GENUI_CHART_RANGE_MIN_CATEGORIES = 8
+
+/** Inclusive category-index window of the x-axis range filter. */
+export interface GenUiChartRange {
+  startIndex: number
+  endIndex: number
+}
+
+/** Whether the range-filter affordance renders for this row count. */
+export function genUiChartRangeFilterEnabled(rowCount: number): boolean {
+  return rowCount >= GENUI_CHART_RANGE_MIN_CATEGORIES
+}
+
+/**
+ * Normalize a brush-reported window against the CURRENT row count. Returns
+ * null when nothing is narrowed — no window, garbage values (a recharts
+ * change event can omit either index), a full-width selection, or an empty
+ * plot — so callers render the status row exactly when a real filter is on.
+ * A reversed window (endIndex < startIndex) collapses to the start index.
+ */
+export function resolveGenUiChartRange(
+  range: GenUiChartRange | null | undefined,
+  rowCount: number,
+): GenUiChartRange | null {
+  if (!range || rowCount < 1) return null
+  if (!Number.isFinite(range.startIndex) || !Number.isFinite(range.endIndex)) return null
+  const startIndex = Math.min(Math.max(0, Math.floor(range.startIndex)), rowCount - 1)
+  const endIndex = Math.min(Math.max(startIndex, Math.floor(range.endIndex)), rowCount - 1)
+  if (startIndex === 0 && endIndex === rowCount - 1) return null
+  return { startIndex, endIndex }
+}
+
+/**
+ * Toggle one series' visibility (identity = its name, the same key the rows
+ * use). Pure: returns a fresh set, never mutates the input — stale names
+ * (a series the payload no longer carries) are inert downstream.
+ */
+export function toggleGenUiChartSeriesHidden(hidden: ReadonlySet<string>, name: string): Set<string> {
+  const next = new Set(hidden)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  return next
+}
+
+/**
+ * The series that render: legend chips, Bar/Line elements, and the tooltip
+ * all derive from this one list so a hidden series disappears from the whole
+ * view while the underlying rows (and the payload) stay untouched.
+ */
+export function visibleGenUiChartSeries<T extends { name: string }>(
+  series: readonly T[],
+  hidden: ReadonlySet<string>,
+): T[] {
+  return series.filter(series => !hidden.has(series.name))
+}
+
 // ── Shared styling (token-derived) ───────────────────────────────────────────
 
 const AXIS_TICK_STYLE = { fill: 'var(--foreground-50)', fontSize: 11 } as const
@@ -227,6 +302,77 @@ function ChartCard({ title, children }: { title?: string; children: React.ReactN
 }
 
 /**
+ * Click-to-toggle series legend (replaces the recharts <Legend> on multi-
+ * series bar/line): same chip family as the datatable column filters. The
+ * color dot keeps the series' declaration-order palette slot so hiding a
+ * neighbor never recolors a visible series. Pressed = series visible;
+ * hidden chips go muted + line-through but stay clickable to restore.
+ */
+function SeriesLegendChips({
+  series,
+  hiddenSeries,
+  onToggle,
+}: {
+  series: ReadonlyArray<{ name: string }>
+  hiddenSeries: ReadonlySet<string>
+  onToggle: (name: string) => void
+}) {
+  return (
+    <div className="mb-1.5 flex flex-wrap items-center gap-1">
+      {series.map((series, index) => {
+        const isHidden = hiddenSeries.has(series.name)
+        return (
+          <button
+            key={`${series.name}-${index}`}
+            type="button"
+            aria-pressed={!isHidden}
+            onClick={() => onToggle(series.name)}
+            className={cn(
+              'flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors',
+              'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              isHidden
+                ? 'bg-background text-muted-foreground/50 border-foreground/10 line-through'
+                : 'bg-background text-muted-foreground border-foreground/10 hover:text-foreground hover:border-foreground/25',
+            )}
+          >
+            <span
+              aria-hidden
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ background: GENUI_CHART_SERIES_COLORS[index % GENUI_CHART_SERIES_COLORS.length] }}
+            />
+            {series.name}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * X-axis range brush (vertical bar/line only — the horizontal ranking and the
+ * share-of-whole views have no left-to-right category axis to narrow).
+ * Colors come from the same foreground ramp as the grid/axes; the trough is
+ * near-invisible so the slider reads as card chrome, not content.
+ */
+function chartRangeBrush(rowCount: number, onRangeChange: (range: GenUiChartRange | null) => void) {
+  return (
+    <Brush
+      dataKey="__category"
+      height={22}
+      travellerWidth={8}
+      fill="var(--foreground-5)"
+      stroke="var(--foreground-20)"
+      tickFormatter={(value: unknown) => truncateGenUiChartTick(value, 10)}
+      onChange={(state: { startIndex?: number; endIndex?: number }) =>
+        onRangeChange(resolveGenUiChartRange(
+          { startIndex: state.startIndex ?? 0, endIndex: state.endIndex ?? rowCount - 1 },
+          rowCount,
+        ))}
+    />
+  )
+}
+
+/**
  * Placeholder in the GenUiUnknownFallback style: warning header + reason
  * (plus the raw payload when the chartType itself is unrecognizable, so the
  * data is never lost).
@@ -260,7 +406,12 @@ function ChartPlaceholder({
 
 type ChartPlanOk = Extract<GenUiChartPlan, { kind: 'ok' }>
 
-function BarChartView({ plan }: { plan: ChartPlanOk }) {
+/**
+ * `brush` is the range-filter element for the vertical variants (null when
+ * the chart is too short to filter); the legend itself moved out of the plot
+ * into SeriesLegendChips above the container.
+ */
+function BarChartView({ plan, brush }: { plan: ChartPlanOk; brush?: React.ReactNode }) {
   const unitByName = new Map(plan.series.map(series => [series.name, series.unit]))
   if (plan.horizontal) {
     // Ranking variant: categories as rows, best read top-to-bottom.
@@ -302,7 +453,6 @@ function BarChartView({ plan }: { plan: ChartPlanOk }) {
         />
         <YAxis tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} width={44} />
         {chartTooltip(name => unitByName.get(name), { fill: 'var(--foreground-5)' })}
-        {plan.series.length > 1 && <Legend iconType="circle" wrapperStyle={LEGEND_WRAPPER_STYLE} />}
         {plan.series.map((series, index) => (
           <Bar
             key={index}
@@ -312,12 +462,13 @@ function BarChartView({ plan }: { plan: ChartPlanOk }) {
             maxBarSize={28}
           />
         ))}
+        {brush}
       </BarChart>
     </ResponsiveContainer>
   )
 }
 
-function LineChartView({ plan }: { plan: ChartPlanOk }) {
+function LineChartView({ plan, brush }: { plan: ChartPlanOk; brush?: React.ReactNode }) {
   const unitByName = new Map(plan.series.map(series => [series.name, series.unit]))
   return (
     <ResponsiveContainer width="100%" height={GENUI_CHART_HEIGHT}>
@@ -332,7 +483,6 @@ function LineChartView({ plan }: { plan: ChartPlanOk }) {
         />
         <YAxis tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} width={44} />
         {chartTooltip(name => unitByName.get(name), { stroke: 'var(--foreground-20)' })}
-        {plan.series.length > 1 && <Legend iconType="circle" wrapperStyle={LEGEND_WRAPPER_STYLE} />}
         {plan.series.map((series, index) => (
           <Line
             key={index}
@@ -345,6 +495,7 @@ function LineChartView({ plan }: { plan: ChartPlanOk }) {
             connectNulls
           />
         ))}
+        {brush}
       </LineChart>
     </ResponsiveContainer>
   )
@@ -407,17 +558,92 @@ export interface GenUiChartViewProps {
   sessionId?: string
 }
 
+/**
+ * The interactive body: legend toggle + range filter state lives here (and
+ * nowhere else — no schema field, no persistence). The `key` on the instance
+ * from GenUiChartView pins the view to the payload CONTENT: a card update
+ * (same id, new JSON) remounts the body, so ephemeral view state and the
+ * chart's internal brush window can never leak across payloads, while
+ * unrelated parent re-renders keep the user's filters alive.
+ */
+function InteractiveChartBody({ component, plan }: { component: GenUiChart; plan: ChartPlanOk }) {
+  const { t } = useTranslation()
+  const [hiddenSeries, setHiddenSeries] = React.useState<ReadonlySet<string>>(() => new Set())
+  const [activeRange, setActiveRange] = React.useState<GenUiChartRange | null>(null)
+  // Remount nonce for the chart subtree: the recharts brush window is
+  // uncontrolled internal state, so "Reset" restores the full view by
+  // remounting it, not by reaching into recharts internals.
+  const [viewNonce, setViewNonce] = React.useState(0)
+
+  // Legend chips are a multi-series bar/line affordance: only there does a
+  // legend entry correspond to a series (pie legends list slices, and
+  // pie/funnel plot the first series only).
+  const supportsSeriesToggle = (component.chartType === 'bar' || component.chartType === 'line')
+    && plan.series.length > 1
+  // Range filter: vertical bar/line with enough categories to be worth a brush.
+  const showRangeFilter = (component.chartType === 'bar' || component.chartType === 'line')
+    && !plan.horizontal
+    && genUiChartRangeFilterEnabled(plan.rows.length)
+
+  const visibleSeries = visibleGenUiChartSeries(plan.series, hiddenSeries)
+  const displayPlan: ChartPlanOk = visibleSeries.length === plan.series.length
+    ? plan
+    : { ...plan, series: visibleSeries }
+  const brush = showRangeFilter ? chartRangeBrush(plan.rows.length, setActiveRange) : undefined
+
+  const resetView = () => {
+    setHiddenSeries(new Set())
+    setActiveRange(null)
+    setViewNonce(nonce => nonce + 1)
+  }
+
+  return (
+    <div>
+      {supportsSeriesToggle && (
+        <SeriesLegendChips
+          series={plan.series}
+          hiddenSeries={hiddenSeries}
+          onToggle={name => setHiddenSeries(prev => toggleGenUiChartSeriesHidden(prev, name))}
+        />
+      )}
+      <div key={viewNonce}>
+        {component.chartType === 'bar' && <BarChartView plan={displayPlan} brush={brush} />}
+        {component.chartType === 'line' && <LineChartView plan={displayPlan} brush={brush} />}
+        {component.chartType === 'pie' && <PieChartView plan={displayPlan} />}
+        {component.chartType === 'funnel' && <FunnelChartView plan={displayPlan} />}
+      </div>
+      {activeRange && (
+        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span>
+            {t('genui.chart.filterStatus', {
+              shown: activeRange.endIndex - activeRange.startIndex + 1,
+              total: plan.rows.length,
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={resetView}
+            className="text-muted-foreground underline-offset-2 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-[4px]"
+          >
+            {t('genui.chart.resetFilters')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function GenUiChartView({ component }: GenUiChartViewProps) {
   const plan = planGenUiChart(component)
   if (plan.kind === 'placeholder') {
     return <ChartPlaceholder reason={plan.reason} component={component} />
   }
+  // Content-addressed key: any payload change (same-card update) resets the
+  // ephemeral view state with the card; replayed/hover re-renders keep it.
+  const payloadKey = JSON.stringify(component)
   return (
     <ChartCard title={component.title}>
-      {component.chartType === 'bar' && <BarChartView plan={plan} />}
-      {component.chartType === 'line' && <LineChartView plan={plan} />}
-      {component.chartType === 'pie' && <PieChartView plan={plan} />}
-      {component.chartType === 'funnel' && <FunnelChartView plan={plan} />}
+      <InteractiveChartBody key={payloadKey} component={component} plan={plan} />
     </ChartCard>
   )
 }

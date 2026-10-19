@@ -693,6 +693,8 @@
   "genui.app.publishing": "公開中…",
   "genui.app.version": "v{{version}}",
   "genui.chart.empty": "このチャートには描画できるデータがありません。",
+  "genui.chart.filterStatus": "{{total}}カテゴリ中{{shown}}件を表示",
+  "genui.chart.resetFilters": "リセット",
   "genui.chart.tooManySeries": "系列が多すぎて描画できません。",
   "genui.componentError": "このカードを表示できませんでした。",
   "genui.dataTable.rowDetail": "詳細",
