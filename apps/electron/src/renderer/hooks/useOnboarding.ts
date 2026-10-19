@@ -70,6 +70,7 @@ interface UseOnboardingReturn {
   // Credentials
   handleSubmitCredential: (data: ApiKeySubmitData) => void
   handleAdminLogin: (identifier: string, password: string) => void
+  handleAdminCancelLogin: () => Promise<void>
   handleAdminSendPhoneCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
   handleAdminVerifyPhoneCode: (phone: string, code: string) => Promise<boolean>
   handleAdminRelogin: () => void
@@ -818,6 +819,33 @@ export function useOnboarding({
     }
   }, [finishAdminAuthentication])
 
+  const authCancellationRef = useRef(false)
+  const handleAdminCancelLogin = useCallback(async () => {
+    if (authCancellationRef.current) return
+    authCancellationRef.current = true
+    cancelInFlightAuth()
+    // Keep the single-flight slot until Main acknowledges the cancellation;
+    // otherwise a fresh login could race ahead of the logout fence.
+    authInFlightRef.current = true
+    const epoch = authGateRef.current.begin()
+    try {
+      const result = await window.electronAPI.adminLogout()
+      if (!authGateRef.current.isCurrent(epoch)) return
+      if (result.success) {
+        setState(s => ({ ...s, step: 'admin-login', loginStatus: 'idle', errorMessage: undefined }))
+      } else {
+        setState(s => resolveAdminLoginFailureState(s, result))
+      }
+    } catch (error) {
+      if (authGateRef.current.isCurrent(epoch)) {
+        setState(s => resolveAdminLoginFailureState(s, error))
+      }
+    } finally {
+      authCancellationRef.current = false
+      if (authGateRef.current.isCurrent(epoch)) authInFlightRef.current = false
+    }
+  }, [cancelInFlightAuth])
+
   const handleAdminRelogin = useCallback(() => {
     cancelInFlightAuth()
     setState(resolveAdminReloginState)
@@ -1294,6 +1322,7 @@ export function useOnboarding({
     handleSelectApiSetupMethod,
     handleSubmitCredential,
     handleAdminLogin,
+    handleAdminCancelLogin,
     handleAdminSendPhoneCode,
     handleAdminVerifyPhoneCode,
     handleAdminRelogin,

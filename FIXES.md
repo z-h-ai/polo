@@ -141,3 +141,87 @@
 ## 提交范围
 
 仅提交本次修复源码、回归测试、用户提供的 FIX-BRIEF.md 和本报告。测试产生的临时文件不入库；未修改既有验收证据、生成协议、语言包或其他工作树。代码回归通过不替代 POO-77/78/79 的后续独立真实产品重验收。
+
+## R3 Findings 修复（R3FIX）
+
+### 来源与范围
+
+本轮固定基线 `371f6c8e8f9be7182b2d92ec9d5b6e40c3153b82`，仅在 `fix/poo77-79-r3-findings-20261019` 修复 TASK-FIX-R3.md 指定的五项 Client 缺陷。需求权威仍为 `docs/client-journey-review/spec.md`（SHA-256 `269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7`），按 PC-F01、PC-F09/10、§13.2/13.3/13.9/13.12 的登录意图、导航、空间隔离和失败恢复规则实现；P70-* 是开发计划中的需求映射，不另作第二份需求源。设计系统的 Spec 绑定与当前文件一致，复用现有控件与 `common.cancel` 翻译，不修改设计源或生成原型。
+
+失败事实来自固定 R3（这些历史回执不作为修复后的验收）：
+
+- POO-79：`/Users/wow/project/z-h-ai/polo-dir/dev/.pipeline/poo77-79-r3-acceptance-20261019-033017/runtime/client/.pipeline/runs/poo77-79-r3-acceptance-20261019-033017/accept-poo79-r3-codex/product-findings.json`，P79-NAV-01/02、P79-AUTH-01/02。
+- 同一 runs 树的 `poo77-79-r3-acceptance-20261019-033017-poo78/accept-poo78-r3-a2-codex/product-findings.json`，P78-V4-01/02。
+- 同一 runs 树的 `poo77-79-r3-acceptance-20261019-033017-poo77/accept-poo77-r3-a3-codex/product-findings.json`，P77-A3-01/02。
+
+### R3FIX-01：顶栏首页与品牌真正返回首页
+
+**根因**：TopBar 的两个入口只调用 TabShell 的 `activateHome()`。圈子详情本来就在 Home 标签中，因此重复激活标签不会改变 ClientPage 路由，旧详情仍显示。
+
+**改动**：`components/app-shell/TopBar.tsx` 的两个入口共用 `goHome`：先通过现有 ClientPageContext 执行 `navigate({ kind: 'home' })`，再激活 Home 标签。复用 R2 的 home 根栈折叠，清除旧详情历史；详情局部返回仍沿原路径。
+
+**回归**：`TabShell.scope-isolation.isolated.ts` 新用例挂载真实 TabShell、TabShellProvider、ClientPageProvider、Home Router 和 ModalProvider；进入详情后分别点击首页/品牌，验证 route=home、canGoBack=false，back 不会复活详情。已有 `CircleDetailPage.interaction.isolated.ts` 的局部返回断言保留。修复前真实入口断言失败，修复后通过。
+
+### R3FIX-02：返回圈子列表保留搜索与筛选
+
+**根因**：`MyCirclesPage` 用一个 effect 恢复偏好，另一个 effect 保存初始空值。生产入口使用 React.StrictMode；列表仅随路由卸载、外层 relations provider 仍存活时，effect 重放可先把空值写入缓存，再用空缓存覆盖刚恢复的值。旧测试卸载整个 provider，未覆盖该组合。
+
+**改动**：`components/circles/MyCirclesPage.tsx` 在 state 初始化时读取偏好，scope 变化时于 render 阶段重新封装该 scope 的状态；单个 effect 只保存已绑定的 view。继续使用既有 accountId + personalProductSpaceId + epoch 键，不新增持久化副本。账号/空间/epoch 变化使用独立默认状态，旧 scope 的值不进入新 scope。
+
+**回归**：`MyCirclesPage.interaction.isolated.ts` 新增保持真实 relations provider 的路由卸载/重挂，以及 StrictMode 下搜索 design + valid 后离开/返回的组合；StrictMode 用例修复前收到空搜索，修复后正确恢复。原账号 A→B→A 隔离断言和全部既有筛选断言继续通过，未降低 F2 断言。
+
+### R3FIX-03：密码等待期可取消并拒绝晚到回执
+
+**根因**：密码忙态只有禁用控件；统一认证意图 gate 只处理其他离开动作，密码页没有可调用的取消入口，且 renderer 单独丢弃回执不足以阻止原生凭据写入。
+
+**改动**：`AdminLoginStep` 在密码忙态显示可操作的取消按钮并接收 Esc；复用 `common.cancel`。`App`→`OnboardingWizard`→`AdminLoginStep` 接通 `useOnboarding.handleAdminCancelLogin`。取消先作废 renderer auth gate，再调用已有受信 `adminLogout()`，使用 R3FIX-04 的原生 attempt 围栏。等待 Main 确认前继续占用单次请求槽，避免新登录先于取消围栏落地；取消成功留在登录入口，失败保留可解释的错误。旧成功回执不会触发认证完成。
+
+**回归**：`AdminLoginStep.interaction.isolated.ts` 分别点击按钮和按 Esc，验证取消可用、密码字段仍锁定。`useOnboarding.test.ts` 延迟登录和注销响应，验证调用原生注销、确认前不允许第二次登录、取消后 idle、旧成功无完成回调、之后允许新意图。既有密码/手机单次请求及陈旧回执用例保留。
+
+### R3FIX-04：注销作废原生在途登录
+
+**根因**：登录开始时取得 loginAttempt，提交凭据前已在 coordinator 临界区核对 attempt；但两个注销入口都只捕获现有 session，从未递增 attempt。无 session 分支甚至直接返回成功，因此旧 HTTP 200 仍能通过提交核对。
+
+**改动**：`packages/server-core/src/handlers/rpc/admin.ts` 在同一 coordinator 临界区内通过 `captureForLogout` 先递增 loginAttempt，再读取 session。原生 `admin.LOGOUT` 与通用 `auth.LOGOUT` 的 `endCurrentSession` 都消费此入口，覆盖有旧会话和无会话两条分支。继续复用既有临界区内的 latest-attempt 核对、会话 generation 和最终删除 CAS；登录提交与注销围栏串行化，账号切换仍通过新 attempt 使旧登录失效，不增加 RPC 或 renderer 授权能力。
+
+**回归**：`admin.isolated.ts` 参数化两个注销入口 × 有/无旧 session（4 例）：延迟 A 登录→注销→确认无凭据→释放成功响应，必须返回 `SESSION_CHANGED`，凭据仍为空，也不能启动 A 会话。四例修复前全部复现 success=true，修复后通过。既有换账号、旧注销清理晚于新账号提交、refresh/validate CAS、执行停止围栏回归继续通过。
+
+### R3FIX-05：无缓存目录失败显示失败与主动重试
+
+**根因**：`useAppCatalog` 的失败 DTO 与 thrown error 两条分支均无条件设置 accessMode=offline。目录投影优先消费 accessMode，因此首次 503、catalog=null 也被归为离线缓存，绕过 HomePage 已有的加载失败/重试卡。
+
+**改动**：`hooks/useAppCatalog.ts` 保留授权拒绝的独立分支；其他失败只有当前作用域确有 catalogRef 缓存才设置 offline，无缓存时保留 errorCode、accessMode=null，让既有 HomePage 失败卡提供 `sync(true)`。继续沿用上下文切换清空 ref 的隔离机制；保留有缓存的 offline 语义，不自动打开 App。
+
+**回归**：`useAppCatalog.interaction.isolated.ts` 分别覆盖返回 503 和抛异常的无缓存失败、显式 force sync 恢复、无自动 start；既有缓存保留、offline、denied、账号/空间隔离继续通过。`HomePage.complete-directory.test.ts` 经真实 MemberCatalogProvider + useAppCatalog 验证失败卡、无 offline banner、可用重试按钮、重试不带 knownRevision、恢复后不自动 open。新 UI 回归也在替换为基线 hook 时确认失败，随后恢复修复源码并复跑通过。
+
+### R3FIX 验证记录
+
+依赖安装命令 `bun install`，lockfile 未改变。所有测试均逐文件独立进程运行，路径有 `./` 前缀；完整输出先写文件，保留退出码，未通过管道截断测试结果。运行器为每个子进程创建临时 HOME 和 POLO_AI_CONFIG_DIR，先在同一环境断言 `os.homedir()` 等于临时目录且不是 `/Users/wow`，再执行测试。通用注销用例会触达 homedir 下 config 路径，故它们仅在该隔离证明通过后执行；未读写用户配置。
+
+最终定向回归：**19 个独立套件，444 pass，0 fail，19 个退出码均为 0**。完整原始输出为根目录 `verify.log`（未跟踪，匹配既有 `*.log` 忽略规则）。本轮一次性运行器及辅助证据留在忽略目录 `.pipeline/r3fix/`；本机可用 `python3 .pipeline/r3fix/run-tests.py verify.log` 重跑相同 19 套件，各原始命令也逐条记录于 verify.log。
+
+| 验证 | 文件/命令 | 结果 |
+| --- | --- | --- |
+| 顶栏、路由、scope | TabShell.scope-isolation、ClientPageContext.test、ClientPageContext.isolated、TopBar.registry-poller、TopBar.product-space-menu | 全绿 |
+| 圈子相邻交互 | MyCirclesPage、CircleDetailPage、CircleSubscriptionPanel 的 interaction.isolated | 全绿 |
+| 认证 | AdminLoginStep.interaction.isolated、useOnboarding.test、preload admin-api.test、原生 admin.isolated | 全绿 |
+| 目录与权益 | useAppCatalog.interaction.isolated、useAppCatalog.test、useMemberCircles.test、home-app-directory.test、member-circle-view.test、HomePage.complete-directory、HomePage.offline-start.interaction.isolated | 全绿 |
+| Electron 类型 | `bun run typecheck:electron` | 退出 0 |
+| Server Core 类型 | `cd packages/server-core && bun run tsc --noEmit` | 退出 0 |
+| Renderer 构建 | `bun run --cwd packages/shared build` 后 `bun run electron:build:renderer` | 退出 0；初次缺 shared 派生产物，按既有生成命令生成后通过 |
+| Main 构建 | `bun run electron:build:main` | 退出 0，Build complete and verified |
+| 定向 lint 对照 | 对 7 个修改的 renderer 生产文件执行 ESLint，并用 stdin 输入固定基线源码逐项对照 | 新增诊断 0；基线与当前均有 2 error / 20 warning，未伪称全量 lint 通过 |
+
+**受控浏览器与视觉**：本轮临时 Vite 页面消费真实 AdminLoginStep + useOnboarding，以及 HomePage + MemberCatalogProvider + useAppCatalog，RPC 为明确标注的 fixture。无头 Chromium 实际点击取消、按 Esc、释放晚到成功、执行目录错误后的重试；结果 PASS，页面异常 0、自动 open 0。已打开并检查 1440×900、1024×768 的登录忙态截图，以及目录失败/恢复截图，取消按钮可见且可用，失败卡明确显示重试。证据位于 `.pipeline/r3fix/browser-result.json`、`browser-check.log`、`login-busy-1440.png`、`login-busy-1024.png`、`login-cancelled-1440.png`、`home-load-failed-1024.png`、`home-recovered-1024.png`。这是受控 renderer 验证，不替代协调方在本分支 HEAD 上执行 POO-77/78/79 独立真实产品验收。
+
+**扩大检查的基线问题**：额外运行 `HomePage.round2.interaction.isolated.ts` 和 `packages/server-core/src/handlers/rpc/admin.test.ts` 后，发现两条已有首页失败和一处套件加载错误。将本次所有修改的生产文件暂时逐字替换为 `371f6c8e` 源码，在同一隔离环境重复两套件后，再逐字恢复修复源码；结果与失败名称完全相同：
+
+- `prepares a resolved bundle through the install dialog and publishes the re-resolved launch`：期望 resolveLaunch 两次，实际三次；该文件 mock 了 useAppCatalog，并不执行本轮改动的 hook。
+- `keeps a withdrawn tombstone visible and non-launchable, with the uninstall entry while installed locally`：期待 toast，实际没有；首页撤权行的既有禁用行为与测试预期不一致。
+- `admin.test.ts` 的 `@polo-ai/shared/admin` 模块 mock 缺 `SKILL_TURN_CONTRACT_VERSION`，在加载时失败；原生生命周期的独立 `admin.isolated.ts` 124 项全部通过。
+
+扩大检查当前/基线日志分别为 `.pipeline/r3fix/expanded-current.log`、`expanded-baseline.log`。本轮未放宽这些断言，也未改范围外安装、撤权和 Skill 契约代码。登录页两处任意 shadow 类 lint 错误及 20 条 hook 警告同样属于基线，逐项对照证据为 `lint-comparison.json`；建议另行修复对应样式来源和旧测试契约。整个仓库全量测试及正式 POO-77/78/79 验收未在本轮执行。
+
+### 待用户决策
+
+无阻塞五项修复的产品裁决。保留上述范围外基线问题供后续单独处理。提交仅包含五项修复源码、隔离回归和本 FIXES.md 记录；TASK-FIX-R3.md、USER-AUTHORIZATION-R3FIX.md 保持 untracked，verify.log 和临时预览/浏览器脚本、截图不入库。不修改 dev、不 push、不编辑任务卡正文；是否合入 dev 仍由用户决定。

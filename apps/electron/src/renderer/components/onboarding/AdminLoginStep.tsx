@@ -26,6 +26,7 @@ interface AdminLoginStepProps {
   onSendPhoneCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
   onVerifyPhoneCode: (phone: string, code: string) => Promise<boolean>
   onSubmit: (identifier: string, password: string) => void
+  onCancel?: () => void
 }
 
 const STORY_POINTS = [
@@ -42,6 +43,7 @@ export function AdminLoginStep({
   onSendPhoneCode,
   onVerifyPhoneCode,
   onSubmit,
+  onCancel,
 }: AdminLoginStepProps) {
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
@@ -61,6 +63,17 @@ export function AdminLoginStep({
       setLoginMode(resolvePreferredAdminLoginMode(phoneAuthEnabled))
     }
   }, [phoneAuthEnabled])
+
+  useEffect(() => {
+    if (!isLoading || loginMode !== 'password' || !onCancel) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onCancel()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isLoading, loginMode, onCancel])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -243,6 +256,16 @@ export function AdminLoginStep({
                     t("onboarding.adminLogin.continue")
                   )}
                 </button>
+
+                {isLoading && onCancel ? (
+                  <button
+                    type="button"
+                    onClick={onCancel}
+                    className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                ) : null}
 
                 {phoneAuthEnabled ? (
                   <AdminLoginMethodSwitch

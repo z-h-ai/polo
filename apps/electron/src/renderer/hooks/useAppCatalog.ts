@@ -940,7 +940,7 @@ export function useAppCatalog() {
           loading: false,
           refreshing: false,
           errorCode: failureCode,
-          accessMode: 'offline',
+          accessMode: catalogRef.current ? 'offline' : null,
           // A failed refresh invalidates stale circle relations (fail-closed):
           // the relation entry must not re-echo the previous Catalog.
           creatorCircles: [],
@@ -1063,7 +1063,7 @@ export function useAppCatalog() {
           loading: false,
           refreshing: false,
           errorCode,
-          accessMode: 'offline',
+          accessMode: catalogRef.current ? 'offline' : null,
           creatorCircles: [],
         }))
       }

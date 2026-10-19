@@ -233,23 +233,23 @@ export function MyCirclesPage() {
     () => (scope ? myCirclesViewPreferencesKey(scope) : null),
     [scope],
   )
-  const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<MyCirclesEntitlementFilter>('all')
+  // Initialize and re-seal before effects run. StrictMode replays mount
+  // effects: restoring in one effect and persisting initial defaults in a
+  // second would erase the saved toolbar before the replay can restore it.
+  const readView = () => ({
+    scopeKey,
+    query: loadMyCirclesViewPreferences(scopeKey)?.query ?? '',
+    filter: loadMyCirclesViewPreferences(scopeKey)?.filter ?? 'all' as MyCirclesEntitlementFilter,
+  })
+  const [view, setView] = useState(readView)
+  if (view.scopeKey !== scopeKey) setView(readView())
+  const { query, filter } = view
+  const setQuery = (query: string) => setView(current => ({ ...current, query }))
+  const setFilter = (filter: MyCirclesEntitlementFilter) => setView(current => ({ ...current, filter }))
 
-  // Restore THIS scope's toolbar state when the fence binds or changes; an
-  // absent scope (idle/denied) resets to the defaults instead of keeping the
-  // previous binding's filters on screen.
   useEffect(() => {
-    const preferences = loadMyCirclesViewPreferences(scopeKey)
-    setQuery(preferences?.query ?? '')
-    setFilter(preferences?.filter ?? 'all')
-  }, [scopeKey])
-
-  // Persist on every change so returning from circle-detail (same live scope)
-  // restores the exact search/filter combination.
-  useEffect(() => {
-    saveMyCirclesViewPreferences(scopeKey, { query, filter })
-  }, [scopeKey, query, filter])
+    saveMyCirclesViewPreferences(view.scopeKey, { query: view.query, filter: view.filter })
+  }, [view])
 
   const rows = useMemo(
     () => (resource.circles ?? []).map(circle => normalizeMemberCircleRow(circle, resource.memberships ?? [], t)),

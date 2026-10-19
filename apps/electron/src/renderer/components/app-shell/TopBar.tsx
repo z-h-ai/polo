@@ -113,6 +113,10 @@ export function TopBar() {
   // out of this contract's scope); the narrow-window guard below the shell
   // replaces the whole bar, so mobile stays out of scope as well.
   const clientPage = useOptionalClientPage()
+  const goHome = () => {
+    clientPage?.navigate({ kind: 'home' })
+    activateHome()
+  }
   const showHeaderLine = showNavigation
     ? true
     : (clientPage?.isHeaderLineVisible ?? false)
@@ -234,7 +238,7 @@ export function TopBar() {
         <button
           type="button"
           data-testid="topbar-brand"
-          onClick={activateHome}
+          onClick={goHome}
           aria-label={t("topbar.brand.home")}
           className="titlebar-no-drag flex min-w-[82px] items-center gap-[9px] rounded-[8px] outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-w-[34px]"
         >
@@ -255,7 +259,7 @@ export function TopBar() {
         <button
           type="button"
           data-testid="topbar-home-tab"
-          onClick={activateHome}
+          onClick={goHome}
           aria-label={t("topbar.home")}
           aria-current={isHome ? "page" : undefined}
           className={cn(

@@ -477,6 +477,17 @@ class AdminSessionCoordinator {
     })
   }
 
+  /** Logout/cancel invalidates pending auth even when no tokens exist yet. */
+  async captureForLogout(manager: CredentialManager): Promise<AdminSessionSnapshot | null> {
+    return this.runExclusive(async () => {
+      this.loginAttempt += 1
+      const tokens = await manager.getAdminTokens()
+      return tokens && !this.isCurrentSessionEnding(tokens)
+        ? this.createSnapshot(tokens)
+        : null
+    })
+  }
+
   async isCurrent(
     manager: CredentialManager,
     expected: AdminSessionSnapshot,
@@ -1549,7 +1560,7 @@ export function registerAdminHandlers(
   server.handle(RPC_CHANNELS.admin.LOGOUT, async () => {
     const adminUrl = getAdminUrl()
     const manager = getCredentialManager()
-    const session = await sessions.capture(manager)
+    const session = await sessions.captureForLogout(manager)
     if (!session) return { success: true }
 
     const ended = await endAdminSession(
@@ -3190,7 +3201,7 @@ export function registerAdminHandlers(
   return {
     async endCurrentSession(beforeDelete): Promise<AdminSessionEndResult> {
       const manager = getCredentialManager()
-      const session = await sessions.capture(manager)
+      const session = await sessions.captureForLogout(manager)
       if (session) {
         return await endAdminSession(
           manager,
