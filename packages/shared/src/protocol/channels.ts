@@ -404,6 +404,10 @@ export const RPC_CHANNELS = {
     OPEN_EDITOR: 'skills:openEditor',
     OPEN_FINDER: 'skills:openFinder',
     CHANGED: 'skills:changed',
+    // Management-workbench view of the same discovery, without the enablement
+    // filter — a disabled skill must stay listed or it could never be
+    // re-enabled (POO-106 S1, B1). The composer keeps consuming GET (SM-09).
+    GET_UNFILTERED: 'skills:getUnfiltered',
     LIST_MANAGED: 'skills:listManaged',
     SET_MANAGED_ENABLEMENT: 'skills:setManagedEnablement',
   },

@@ -27,9 +27,10 @@ let statusBySlug: Record<string, {
   managed: boolean
   shadowedBuiltin: boolean
 }> = {}
+let inventoryRows: ReturnType<typeof skill>[] = []
 
 mock.module('@/hooks/useManagedSkills', () => ({
-  useManagedSkills: () => ({ statusBySlug, revision: 0, refresh: async () => {}, setSkillEnabled, setSkillsEnabledBulk: async () => ({ succeeded: [], failed: [] }) }),
+  useManagedSkills: () => ({ statusBySlug, inventoryRows, revision: 0, refresh: async () => {}, setSkillEnabled, setSkillsEnabledBulk: async () => ({ succeeded: [], failed: [] }) }),
 }))
 mock.module('@/context/ProductSpaceContext', () => ({
   useOptionalProductSpaceContext: () => ({ activeProductSpace: { kind: productSpaceKind } }),
@@ -151,6 +152,7 @@ beforeEach(async () => {
   workspaceRemote = false
   toastError.mockClear()
   setSkillEnabled.mockClear()
+  inventoryRows = []
   statusBySlug = {
     'review-skill': enabledRow,
     'bundled-one': bundledRow,
@@ -214,14 +216,70 @@ describe('SkillsListPanel managed enablement', () => {
     expect(toastError.mock.calls[0][0]).toBe('Settings not saved')
   })
 
+  it('toasts the mapped friendly message, not the raw error code (M3)', async () => {
+    const consoleError = mock(() => {})
+    const saved = console.error
+    console.error = consoleError
+    setSkillEnabled.mockImplementation(async () => { throw new Error('revision_conflict') })
+    renderPanel()
+    fireEvent.click(screen.getByRole('switch', { name: 'Disable skill: Review Skill' }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
+    console.error = saved
+    expect(toastError.mock.calls[0][0]).toBe('Settings not saved')
+    expect((toastError.mock.calls[0][1] as { description: string }).description).toBe(
+      'The skill list just changed elsewhere. Try again.',
+    )
+    // The raw code stays available for diagnostics.
+    expect(consoleError).toHaveBeenCalledWith(
+      '[skills] Managed skill enablement write failed:',
+      'revision_conflict',
+    )
+  })
+
+  it('keeps a disabled inventory-only row listed with its switch (B1)', async () => {
+    // The filtered composer list no longer contains the disabled row; only the
+    // unfiltered inventory does. The panel must still render it (B1).
+    inventoryRows = [...rows, skill('archived-skill', 'Archived Skill', 'workspace')]
+    statusBySlug = {
+      ...statusBySlug,
+      'archived-skill': {
+        slug: 'archived-skill', source: 'workspace', enabled: false, toggleable: true, managed: false, shadowedBuiltin: false,
+      },
+    }
+    renderPanel()
+    expect(rowFor('Archived Skill')).toBeTruthy()
+    const toggle = screen.getByRole('switch', { name: 'Enable skill: Archived Skill' })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+    await waitFor(() => expect(setSkillEnabled).toHaveBeenCalledTimes(1))
+    expect(setSkillEnabled.mock.calls[0][0]).toMatchObject({ slug: 'archived-skill' })
+    expect(setSkillEnabled.mock.calls[0][1]).toBe(true)
+  })
+
+  it('does not duplicate rows present in both filtered and unfiltered lists (B1)', () => {
+    inventoryRows = [...rows]
+    renderPanel()
+    expect(screen.getAllByRole('option', { name: /Review Skill/ })).toHaveLength(1)
+    expect(screen.getAllByRole('option', { name: /Bundled One/ })).toHaveLength(1)
+  })
+
   it('renders a disabled switch with the scope hint outside the personal/local scope (K3)', () => {
     productSpaceKind = 'enterprise'
     renderPanel()
     const blocked = screen.getByRole('switch', { name: 'Disable skill: Review Skill' })
     expect(blocked.getAttribute('aria-disabled')).toBe('true')
+    expect(blocked.getAttribute('aria-checked')).toBe('true')
     expect(blocked.getAttribute('title')).toBe(
       'Skills can only be enabled or disabled for your personal space in a local workspace.',
     )
+  })
+
+  it('drives the scope-blocked aria-checked state from the row status (N2)', () => {
+    productSpaceKind = 'enterprise'
+    statusBySlug = { 'review-skill': { ...enabledRow, enabled: false } }
+    renderPanel()
+    const blocked = screen.getByRole('switch', { name: 'Enable skill: Review Skill' })
+    expect(blocked.getAttribute('aria-checked')).toBe('false')
   })
 
   it('treats a remote workspace as out of scope too (K3)', () => {

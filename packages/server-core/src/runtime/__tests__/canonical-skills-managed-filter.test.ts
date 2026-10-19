@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { loadProductSpaceSkills, bindCanonicalSkillContextResolver, type CanonicalSkillScope } from '../canonical-skills'
-import { setManagedSkillsRoot, writeManagedSkillEnablement } from '../managed-skill-enablement'
+import { managedSkillEnablementFilePath, setManagedSkillsRoot, writeManagedSkillEnablement } from '../managed-skill-enablement'
 import { setBundledAssetsRoot, clearBundledAssetsRoot, getBundledAssetsRoot } from '@polo-ai/shared/utils/paths'
 import { BUNDLED_SKILLS_ASSET_DIRNAME, invalidateSkillsCache } from '@polo-ai/shared/skills'
 
@@ -85,9 +85,27 @@ describe('loadProductSpaceSkills managed-enablement filter', () => {
   it('reflects a revision bump without an explicit cache invalidation', async () => {
     expect(slugs(await loadProductSpaceSkills(workspaceRoot, SCOPE))).toContain('review-skill')
     writeManagedSkillEnablement({ accountId: SCOPE.accountId, workspaceRoot, slug: 'review-skill', source: 'workspace', enabled: false })
-    // The composition memo keys on the enablement file identity, which moves
-    // with every revision bump — no invalidateSkillsCache() call needed here.
+    // The composition memo keys on the enablement document identity, which
+    // moves with every revision bump — no invalidateSkillsCache() call needed.
     expect(slugs(await loadProductSpaceSkills(workspaceRoot, SCOPE))).not.toContain('review-skill')
+  })
+
+  it('refreshes the disabled set when mtime and size repeat across writes (M2)', async () => {
+    writeManagedSkillEnablement({ accountId: SCOPE.accountId, workspaceRoot, slug: 'review-skill', source: 'workspace', enabled: false })
+    expect(slugs(await loadProductSpaceSkills(workspaceRoot, SCOPE))).not.toContain('review-skill')
+    const filePath = managedSkillEnablementFilePath(SCOPE.accountId, workspaceRoot)
+    const staleStats = statSync(filePath)
+    // Re-enable the 12-char slug, then disable another 12-char slug: same byte
+    // length. Pinning the earlier mtime reproduces the exact mtime+size
+    // collision the memo key must survive.
+    writeManagedSkillEnablement({ accountId: SCOPE.accountId, workspaceRoot, slug: 'review-skill', source: 'workspace', enabled: true })
+    writeManagedSkillEnablement({ accountId: SCOPE.accountId, workspaceRoot, slug: 'rival-skillx', source: 'workspace', enabled: false })
+    utimesSync(filePath, staleStats.mtimeMs / 1000, staleStats.mtimeMs / 1000)
+    const repeated = statSync(filePath)
+    expect(`${repeated.mtimeMs}:${repeated.size}`).toBe(`${staleStats.mtimeMs}:${staleStats.size}`)
+    const after = slugs(await loadProductSpaceSkills(workspaceRoot, SCOPE))
+    expect(after).toContain('review-skill')
+    expect(after).not.toContain('rival-skillx')
   })
 
   it('returns only bundled skills in an active enterprise space', async () => {

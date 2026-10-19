@@ -125,8 +125,17 @@ export function writeManagedSkillEnablement(input: {
     atomicWriteFileSync(filePath, `${JSON.stringify(next, null, 2)}\n`, 0o600)
     return { ok: true, revision: next.revision }
   })
+  if (result.ok) enablementGeneration += 1
   return result
 }
+
+/**
+ * In-process write counter. Two same-millisecond, same-byte-length writes
+ * (disable → enable back to back) can leave mtime+size unchanged, so every
+ * local write also moves this counter — the memo key in canonical-skills never
+ * repeats across revisions (plan §3.3).
+ */
+let enablementGeneration = 0
 
 /** File identity used by callers that memoize per-scope reads across revisions. */
 export function managedSkillEnablementFingerprint(
@@ -134,11 +143,11 @@ export function managedSkillEnablementFingerprint(
   workspaceRoot: string,
 ): string {
   const filePath = managedSkillEnablementFilePath(accountId, workspaceRoot)
-  if (!existsSync(filePath)) return 'missing'
+  if (!existsSync(filePath)) return `gen${enablementGeneration}:missing`
   try {
     const stats = statSync(filePath)
-    return `${stats.mtimeMs}:${stats.size}`
+    return `gen${enablementGeneration}:${stats.mtimeMs}:${stats.size}`
   } catch {
-    return 'missing'
+    return `gen${enablementGeneration}:missing`
   }
 }

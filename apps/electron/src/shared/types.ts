@@ -1349,6 +1349,9 @@ export interface ElectronAPI {
 
   // Skills
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
+  // Same discovery without the enablement filter; only the management list
+  // consumes it — the composer keeps getSkills (POO-106 S1, SM-09).
+  getSkillsUnfiltered(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
   deleteSkill(input: {
     workspaceId: string

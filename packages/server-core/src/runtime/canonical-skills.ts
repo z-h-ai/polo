@@ -140,9 +140,11 @@ export function createCanonicalSkillTurnController(workspaceRoot: string) {
 }
 
 /**
- * Memoized disabled-slug reads keyed by the enablement file's own identity
- * (mtime + size, which moves with every revision bump), so composition can
- * stay hot without ever reusing a stale enablement set.
+ * Memoized disabled-slug reads keyed by the enablement document's identity:
+ * the in-process write generation (every local write moves it) plus the file's
+ * mtime + size (which catches writes from other processes), so composition can
+ * stay hot without ever reusing a stale enablement set — plan §3.3 keys the
+ * cache on the revision, and this identity moves with every revision bump.
  */
 interface EnablementMemo { fingerprint: string; disabled: Set<string> }
 const disabledLocalSkillsMemo = new Map<string, EnablementMemo>()

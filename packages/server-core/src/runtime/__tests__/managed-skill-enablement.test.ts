@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import {
   managedSkillEnablementFilePath,
+  managedSkillEnablementFingerprint,
   readDisabledManagedSkillSlugs,
   readManagedSkillEnablementDocument,
   setManagedSkillsRoot,
@@ -100,5 +101,23 @@ describe('managed skill enablement store', () => {
     writeFileSync(filePath, '{ not json', { mode: 0o600 })
     expect(readManagedSkillEnablementDocument(ACCOUNT, WORKSPACE_A).revision).toBe(0)
     expect(readDisabledManagedSkillSlugs(ACCOUNT, WORKSPACE_A)).toEqual(new Set())
+  })
+
+  it('moves the fingerprint even when mtime and size repeat across writes (M2)', () => {
+    const filePath = managedSkillEnablementFilePath(ACCOUNT, WORKSPACE_A)
+    // rev 1: one 12-char slug disabled.
+    writeManagedSkillEnablement({ accountId: ACCOUNT, workspaceRoot: WORKSPACE_A, slug: 'review-skill', source: 'workspace', enabled: false })
+    const stale = managedSkillEnablementFingerprint(ACCOUNT, WORKSPACE_A)
+    const staleStats = statSync(filePath)
+    // rev 2 empties the document, rev 3 disables another 12-char slug: same
+    // byte length as rev 1. Pinning the old mtime reproduces the exact
+    // mtime+size collision an mtime+size-only key would miss.
+    writeManagedSkillEnablement({ accountId: ACCOUNT, workspaceRoot: WORKSPACE_A, slug: 'review-skill', source: 'workspace', enabled: true })
+    writeManagedSkillEnablement({ accountId: ACCOUNT, workspaceRoot: WORKSPACE_A, slug: 'rival-skillx', source: 'workspace', enabled: false })
+    utimesSync(filePath, staleStats.mtimeMs / 1000, staleStats.mtimeMs / 1000)
+    const repeated = statSync(filePath)
+    expect(`${repeated.mtimeMs}:${repeated.size}`).toBe(`${staleStats.mtimeMs}:${staleStats.size}`)
+    expect(managedSkillEnablementFingerprint(ACCOUNT, WORKSPACE_A)).not.toBe(stale)
+    expect(readDisabledManagedSkillSlugs(ACCOUNT, WORKSPACE_A)).toEqual(new Set(['rival-skillx']))
   })
 })

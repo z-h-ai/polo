@@ -66,6 +66,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // workspaces get no toggle at all (POO-106 S1, K3).
   RPC_CHANNELS.skills.LIST_MANAGED,
   RPC_CHANNELS.skills.SET_MANAGED_ENABLEMENT,
+  // skills — unfiltered management inventory of the local workspace; remote
+  // workspaces resolve no local rows and the panel falls back to GET (POO-106 S1).
+  RPC_CHANNELS.skills.GET_UNFILTERED,
 
   // system — local OS info
   RPC_CHANNELS.system.VERSIONS,

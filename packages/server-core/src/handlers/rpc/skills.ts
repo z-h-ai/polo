@@ -327,6 +327,7 @@ export function assertCreatorSkillCommitAllowed(check: {
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
+  RPC_CHANNELS.skills.GET_UNFILTERED,
   RPC_CHANNELS.skills.GET_FILES,
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.OPEN_EDITOR,
@@ -576,19 +577,31 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   }
   server.handle(RPC_CHANNELS.productSpace.UNINSTALL_SKILL, uninstallCanonical)
 
-  // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
-  server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, _workingDirectory?: string) => {
+  // Shared read path for the composer channel (filtered, SM-09) and the
+  // management-workbench channel (unfiltered): a disabled skill must stay
+  // listed in the management view or it could never be re-enabled (B1).
+  const readWorkspaceSkills = async (ctx: RequestContext, workspaceId: string, unfiltered: boolean): Promise<LoadedSkill[]> => {
     await requireTrustedSkillsScope()
     if (isRuntimeOfflineReadOnly()) return [] // No fresh permission; restored UI history remains separate.
-    const workspace = getBoundWorkspace(_ctx, workspaceId, deps)
+    const workspace = getBoundWorkspace(ctx, workspaceId, deps)
     if (!workspace) return []
     await ensureRecovered(workspace.rootPath)
-    const activeSessionId = getClientActiveSession(_ctx.clientId, workspace.id)
+    const activeSessionId = getClientActiveSession(ctx.clientId, workspace.id)
     const effectiveWorkingDir = activeSessionId
       ? await deriveSessionWorkingDirectory(deps, workspace, activeSessionId) : undefined
-    const skills = await loadSkillsWithCreatorState(workspace.rootPath, effectiveWorkingDir)
-    deps.platform.logger?.info(`SKILLS_GET: Loaded ${skills.length} skills from ${workspace.rootPath}`)
+    const skills = await loadSkillsWithCreatorState(workspace.rootPath, effectiveWorkingDir, unfiltered)
+    deps.platform.logger?.info(`SKILLS_GET: Loaded ${skills.length}${unfiltered ? ' unfiltered' : ''} skills from ${workspace.rootPath}`)
     return skills
+  }
+
+  // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
+  server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, _workingDirectory?: string) => {
+    return readWorkspaceSkills(_ctx, workspaceId, false)
+  })
+
+  // Same discovery without the enablement filter, for the management list only.
+  server.handle(RPC_CHANNELS.skills.GET_UNFILTERED, async (_ctx, workspaceId: string) => {
+    return readWorkspaceSkills(_ctx, workspaceId, true)
   })
 
   // Get files in a skill directory
@@ -793,7 +806,16 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const input = SetManagedSkillEnablementRequestSchema.safeParse(rawInput)
     if (!input.success) return managedSkillEnablementError('VALIDATION_ERROR')
     await requireTrustedSkillsScope()
-    assertSkillsWritable()
+    // The offline refusal is part of the declared error-code contract, so it is
+    // reported as a structured result instead of a thrown transport error (N1).
+    try {
+      assertSkillsWritable()
+    } catch (error) {
+      if ((error as { code?: unknown }).code === 'OFFLINE_READ_ONLY') {
+        return managedSkillEnablementError('OFFLINE_READ_ONLY')
+      }
+      throw error
+    }
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace || workspace.remoteServer) return managedSkillEnablementError('workspace_context_mismatch')
     await ensureRecovered(workspace.rootPath)

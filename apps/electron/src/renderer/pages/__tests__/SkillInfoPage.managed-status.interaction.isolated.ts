@@ -99,6 +99,8 @@ beforeEach(async () => {
     configurable: true,
     value: {
       getSkills: async () => skills,
+      // Unfiltered management rows (B1); the detail page reads them only for metadata.
+      getSkillsUnfiltered: async () => skills,
       // Read-only enablement facts for the detail page.
       listManagedSkills: async () => ({
         ok: true as const,

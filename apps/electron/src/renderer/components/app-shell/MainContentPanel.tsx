@@ -230,7 +230,7 @@ export function MainContentPanel({
     try {
       const { failed } = await setSkillsEnabledBulk(statuses, enabled)
       if (failed.length === 0) clearSkillSelection()
-      else toast.error(t('skillsList.enableFailed'), { description: `${failed.length}` })
+      else toast.error(t('skillsList.enableFailed'), { description: t('skillsList.batchEnableFailed', { count: failed.length }) })
     } finally {
       setBatchEnablementPending(false)
     }

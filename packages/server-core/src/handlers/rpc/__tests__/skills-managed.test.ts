@@ -237,12 +237,35 @@ describe('skills.setManagedEnablement', () => {
     })).toEqual({ ok: false, errorCode: 'workspace_context_mismatch' })
   })
 
-  it('refuses writes in the offline read-only view (K4)', async () => {
+  it('refuses writes in the offline read-only view as a structured error (K4/N1)', async () => {
     setRuntimeOfflineReadOnly(true)
     const { invoke } = createHarness()
     await expect(invoke(RPC_CHANNELS.skills.SET_MANAGED_ENABLEMENT, {
       workspaceId: WORKSPACE_ID, slug: 'review-skill', source: 'workspace', enabled: false,
-    })).rejects.toThrow(/offline read-only/i)
+    })).resolves.toEqual({ ok: false, errorCode: 'OFFLINE_READ_ONLY' })
+  })
+})
+
+describe('skills.getUnfiltered', () => {
+  it('keeps a disabled row listed with its metadata while skills.GET filters it (B1)', async () => {
+    const { invoke } = createHarness()
+    const set = await invoke(RPC_CHANNELS.skills.SET_MANAGED_ENABLEMENT, {
+      workspaceId: WORKSPACE_ID, slug: 'review-skill', source: 'workspace', enabled: false,
+    })
+    expect(set.ok).toBe(true)
+    const unfiltered = await invoke(RPC_CHANNELS.skills.GET_UNFILTERED, WORKSPACE_ID) as Array<{ slug: string; metadata: { name: string } }>
+    expect(unfiltered.find(skill => skill.slug === 'review-skill')?.metadata.name).toBe('Review Skill')
+    // The composer channel keeps the filtered view (SM-09) — only the
+    // management workbench sees the disabled row.
+    const filtered = await invoke(RPC_CHANNELS.skills.GET, WORKSPACE_ID) as Array<{ slug: string }>
+    expect(filtered.map(skill => skill.slug)).not.toContain('review-skill')
+  })
+
+  it('returns an empty list for an unknown workspace and in the offline view', async () => {
+    const { invoke } = createHarness()
+    expect(await invoke(RPC_CHANNELS.skills.GET_UNFILTERED, 'ws-unknown')).toEqual([])
+    setRuntimeOfflineReadOnly(true)
+    expect(await invoke(RPC_CHANNELS.skills.GET_UNFILTERED, WORKSPACE_ID)).toEqual([])
   })
 })
 

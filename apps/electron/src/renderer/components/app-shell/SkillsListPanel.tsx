@@ -10,6 +10,7 @@ import { EntityPanel } from '@/components/ui/entity-panel'
 import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { skillSelection } from '@/hooks/useEntitySelection'
 import { useManagedSkills } from '@/hooks/useManagedSkills'
+import { managedEnablementErrorKey, managedEnablementErrorCode } from '@/lib/managed-skill-enablement-copy'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { SkillMenu } from './SkillMenu'
 import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
@@ -48,12 +49,21 @@ export function SkillsListPanel({
   // Enablement is a personal-space, local-workspace concept (POO-106 S1, K3).
   const productSpace = useOptionalProductSpaceContext()
   const isPersonalLocalScope = productSpace?.activeProductSpace.kind === 'personal' && !activeWorkspace?.remoteServer
-  const { statusBySlug, setSkillEnabled } = useManagedSkills(workspaceId)
+  const { statusBySlug, inventoryRows, setSkillEnabled } = useManagedSkills(workspaceId)
 
   // Send to Workspace dialog state
   const [sendDialogOpen, setSendDialogOpen] = React.useState(false)
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
+
+  // The filtered `skills` prop also feeds the composer (SM-09), so the
+  // management list renders the union with the unfiltered inventory: a
+  // disabled row stays listed and its switch can re-enable it (B1).
+  const listedSkills = React.useMemo(() => {
+    const listed = new Set(skills.map(skill => skill.slug))
+    const inventoryOnly = inventoryRows.filter(skill => !listed.has(skill.slug))
+    return inventoryOnly.length > 0 ? [...skills, ...inventoryOnly] : skills
+  }, [skills, inventoryRows])
 
   const handleToggle = async (skill: LoadedSkill, enabled: boolean) => {
     const status = statusBySlug[skill.slug]
@@ -61,15 +71,16 @@ export function SkillsListPanel({
     try {
       await setSkillEnabled(status, enabled)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(t('skillsList.enableFailed'), { description: message })
+      const errorCode = managedEnablementErrorCode(err)
+      console.error('[skills] Managed skill enablement write failed:', errorCode)
+      toast.error(t('skillsList.enableFailed'), { description: t(managedEnablementErrorKey(errorCode)) })
     }
   }
 
   return (
     <>
     <EntityPanel<LoadedSkill>
-      items={skills}
+      items={listedSkills}
       getId={(s) => s.slug}
       selection={skillSelection}
       selectedId={selectedSkillSlug}
@@ -191,7 +202,7 @@ export function SkillsListPanel({
           ) : scopeBlocked ? (
             <span
               role="switch"
-              aria-checked="true"
+              aria-checked={enabled}
               aria-disabled="true"
               aria-label={`${toggleLabel}: ${skill.metadata.name}`}
               title={t('skillsList.enablementScopeHint')}
