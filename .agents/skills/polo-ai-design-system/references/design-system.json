@@ -22,7 +22,7 @@
   "sources": [
     {
       "path": "docs/client-journey-review/spec.md",
-      "sha256": "5759981c0b54a1f0b51e21100936929b8e9a81045f1fd0a4a1e804e6fca5eb70",
+      "sha256": "d5233ff5bddd72362ef6c6dd0459b128253ef451e90287c9195fedb6a98264db",
       "role": "authority",
       "scope": "当前产品唯一来源 master-r15-closure；§13.8—13.14 覆盖旧设计指令"
     },

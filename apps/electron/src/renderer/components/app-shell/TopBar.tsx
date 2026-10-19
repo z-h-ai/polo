@@ -1,4 +1,4 @@
-import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchMenuClassName, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName } from '@/components/ui/client-workbench'
+import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchMenuClassName } from '@/components/ui/client-workbench'
 /**
  * TopBar - The single global workbench bar (frozen POO-41 `.workbench-bar`
  * semantics, unified with the tab strip per the POO-70 hifi prototype).
@@ -20,7 +20,7 @@ import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbench
  * the new scope's own tabs hydrate (Review R33 fail-closed boundary).
  */
 
-import { useEffect, useInsertionEffect, useMemo, useRef, useState } from "react"
+import { useInsertionEffect, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import * as Icons from "lucide-react"
@@ -37,7 +37,6 @@ import { isMac, isWebUI } from "@/lib/platform"
 import { useOptionalActionRegistry } from "@/actions"
 import { AppMenu } from "@/components/AppMenu"
 import { getSessionTitle } from "@/utils/session"
-import type { ExecutionSummary } from "@polo-ai/shared/product-spaces"
 import {
   ChevronRight,
   LogOut,
@@ -52,23 +51,9 @@ import {
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import { ProductSpaceSwitcher, CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
 import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
 import poloAppIcon from "../../../../resources/icon.png"
-import {
-  ACTIVE_EXECUTION_STATUSES,
-  createRegistryExecutionPoller,
-  snapshotBelongsToActiveScope,
-  type OwnedExecutionSnapshot,
-} from "./registry-execution-poller"
 
 const MAX_NOTIFICATION_ITEMS = 6
 
@@ -121,11 +106,9 @@ export function TopBar() {
     : (clientPage?.isHeaderLineVisible ?? false)
 
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
-  const [ownedSnapshot, setOwnedSnapshot] = useState<OwnedExecutionSnapshot | null>(null)
-  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null)
-  const [runtimeDialogOpen, setRuntimeDialogOpen] = useState(false)
-  const accountId = productSpace?.accountId ?? null
-  const activeProductSpaceId = productSpace?.activeProductSpaceId ?? null
+  // POO107-01: the TopBar runtime count and its execution dialog are removed.
+  // The active-execution registry itself stays — space switching (PC-F06) and
+  // the App close confirmation still consume it.
   const paymentScope = useRef(productSpace)
   useInsertionEffect(() => {
     paymentScope.current = productSpace
@@ -149,56 +132,6 @@ export function TopBar() {
     } catch { if (paymentScope.current === scope) toast.error(t("topbar.account.paymentError")) }
   }
 
-
-  // Trusted ProductSpace active-execution registry: the count and the runtime
-  // dialog read ONLY from productSpaceListActiveExecutions (never from the
-  // Catalog). The snapshot is owned by the (accountId, activeProductSpaceId)
-  // tuple: a scope change clears it immediately and publishes nothing until
-  // THIS scope's own successful response arrives. Each scope owns a poller
-  // loop whose scheduling is fully dispose-guarded (see
-  // createRegistryExecutionPoller), so a late in-flight response from a
-  // previous scope can neither publish nor keep polling.
-  useEffect(() => {
-    setOwnedSnapshot(null)
-    setSelectedExecutionId(null)
-    if (!accountId || !activeProductSpaceId) {
-      return
-    }
-    const poller = createRegistryExecutionPoller({
-      accountId,
-      productSpaceId: activeProductSpaceId,
-      fetchExecutions: async (scopeAccountId, scopeProductSpaceId) => {
-        const result = await window.electronAPI.productSpaceListActiveExecutions(
-          scopeAccountId,
-          scopeProductSpaceId,
-        )
-        return result.success ? result.executions : null
-      },
-      onSnapshot: (executions) => {
-        setOwnedSnapshot({
-          ownerAccountId: accountId,
-          ownerProductSpaceId: activeProductSpaceId,
-          executions,
-        })
-      },
-    })
-    return () => {
-      poller.dispose()
-    }
-  }, [accountId, activeProductSpaceId])
-
-  const activeExecutions = useMemo(() => {
-    if (!snapshotBelongsToActiveScope(ownedSnapshot, accountId, activeProductSpaceId)) {
-      return []
-    }
-    return ownedSnapshot.executions.filter((execution) => ACTIVE_EXECUTION_STATUSES.has(execution.status))
-  }, [ownedSnapshot, accountId, activeProductSpaceId])
-  const runningCount = activeExecutions.length
-  const selectedExecution = useMemo(() => (
-    selectedExecutionId
-      ? activeExecutions.find((execution) => execution.executionId === selectedExecutionId) ?? null
-      : null
-  ), [activeExecutions, selectedExecutionId])
   const unreadSessions = useMemo(() => (
     sessionMetas
       .filter((meta) => meta.hasUnread)
@@ -359,101 +292,8 @@ export function TopBar() {
         </div>
       )}
 
-      {/* === RIGHT: Runtime + Space control + Notifications + Account === */}
+      {/* === RIGHT: Space control + Notifications + Account === */}
       <div className="pointer-events-auto flex flex-none items-center gap-[8px] max-md:gap-1">
-        <Dialog open={runtimeDialogOpen} onOpenChange={(open) => {
-          setRuntimeDialogOpen(open)
-          if (!open) setSelectedExecutionId(null)
-        }}>
-          <DialogTrigger asChild>
-            <button
-              type="button"
-              data-testid="topbar-runtime"
-              aria-label={t("topbar.runtime.label")}
-              aria-haspopup="dialog"
-              className="titlebar-no-drag flex h-[34px] items-center gap-[7px] rounded-[9px] px-[9px] text-[12px] font-medium text-muted-foreground outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring client-material-fg-secondary"
-            >
-              <span
-                className={cn(
-                  "size-[7px] flex-none rounded-full",
-                  runningCount > 0
-                    ? "bg-success ring-[3px] ring-success/15"
-                    : "bg-foreground/40 client-material-fg-muted-bg",
-                )}
-              />
-              <span className="whitespace-nowrap [@media(max-width:1080px)]:hidden">
-                {runningCount > 0
-                  ? t("topbar.runtime.running", { count: runningCount })
-                  : t("topbar.runtime.none")}
-              </span>
-            </button>
-          </DialogTrigger>
-          <DialogContent style={workbenchStyle} overlayStyle={workbenchStyle} overlayClassName={clientWorkbenchOverlayClassName} aria-label={t("topbar.runtime.label")} className={clientWorkbenchDialogClassName}>
-            <DialogHeader>
-              <DialogTitle>{t("topbar.runtime.label")}</DialogTitle>
-              <DialogDescription>
-                {runningCount > 0
-                  ? t("topbar.runtime.running", { count: runningCount })
-                  : t("topbar.runtime.none")}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="px-[20px] pb-[18px]">
-            {activeExecutions.length === 0 ? (
-              <div className="rounded-lg border border-foreground/10 px-3 py-4 text-center text-[13px] text-muted-foreground">
-                {t("topbar.runtime.none")}
-              </div>
-            ) : (
-              <div className="max-h-[320px] space-y-1.5 overflow-y-auto" role="listbox" aria-label={t("topbar.runtime.label")}>
-                {activeExecutions.map((execution) => {
-                  const selected = execution.executionId === selectedExecutionId
-                  return (
-                    <button
-                      key={execution.executionId}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      onClick={() => setSelectedExecutionId(
-                        selected ? null : execution.executionId,
-                      )}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-[9px] border px-3 py-2 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        selected
-                          ? "border-accent/40 bg-accent/8"
-                          : "border-transparent hover:bg-foreground/4",
-                      )}
-                    >
-                      <span className="size-[7px] flex-none rounded-full bg-success" />
-                      <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-                        {execution.name}
-                      </span>
-                      <span className="flex-none text-[11px] text-muted-foreground">
-                        {t(`productSpace.exec.status.${execution.status}`)}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-            {selectedExecution && (
-              <div className="space-y-1 rounded-lg border border-border/60 bg-foreground/3 p-3 text-[12px]">
-                <p className="truncate font-medium text-foreground">{selectedExecution.name}</p>
-                <p className="text-muted-foreground">
-                  {t("topbar.runtime.status")}: {t(`productSpace.exec.status.${selectedExecution.status}`)}
-                </p>
-                {selectedExecution.errorCode && (
-                  <p className="break-all text-muted-foreground">
-                    {t("topbar.runtime.errorCode")}: {selectedExecution.errorCode}
-                  </p>
-                )}
-                <p className="break-all font-mono text-[11px] text-muted-foreground">
-                  {selectedExecution.executionId}
-                </p>
-              </div>
-            )}
-            </div>
-          </DialogContent>
-        </Dialog>
-
         <CurrentProductSpaceLabel />
 
         <DropdownMenu>

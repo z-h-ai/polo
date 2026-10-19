@@ -460,7 +460,7 @@
     "sources": [
       {
         "path": "docs/client-journey-review/spec.md",
-        "sha256": "5759981c0b54a1f0b51e21100936929b8e9a81045f1fd0a4a1e804e6fca5eb70"
+        "sha256": "d5233ff5bddd72362ef6c6dd0459b128253ef451e90287c9195fedb6a98264db"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -476,7 +476,7 @@
       },
       {
         "path": "apps/electron/src/renderer/index.css",
-        "sha256": "866187c7be4e5a4b04fec3335594db2e2d1804fb0067fead8c982cbff04bea5e"
+        "sha256": "b3dabc1562cf3a91e45f055935ff749183e87b75a0d9a8158a67948a1cf8eeeb"
       },
       {
         "path": "docs/mvp-complete-flow-hifi/sources/g4-product.css",
