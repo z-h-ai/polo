@@ -31,12 +31,13 @@
  * teardown — a released channel stops every push for its card.
  */
 
-import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync, watch } from 'node:fs'
 import { randomBytes } from 'node:crypto'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
   GENUI_APP_DATA_MAX_FILE_BYTES,
   GENUI_APP_DATA_MAX_SRC_LENGTH,
+  GENUI_APP_DATA_WATCH_DEBOUNCE_MS,
   isValidGenUiUiCardId,
 } from '@polo-ai/shared/protocol'
 import { extractPoloAppDataDeclarations } from './ui-card-registry'
@@ -136,6 +137,11 @@ export interface GenUiAppDataDeps {
   bridge: GenUiAppDataBridge
   /** Same managed-vs-storage data/ resolver the ui-event wiring uses. */
   resolveSessionDataPath: (sessionId: string) => string | null
+  /**
+   * P2-1 auto-refresh debounce (ms of quiet before a file change is pushed).
+   * Defaults to GENUI_APP_DATA_WATCH_DEBOUNCE_MS (≥1s); tests shrink it.
+   */
+  watchDebounceMs?: number
 }
 
 interface GenUiAppDataChannel {
@@ -160,11 +166,12 @@ export function setGenUiAppDataDeps(next: GenUiAppDataDeps | null): void {
   deps = next
 }
 
-/** Test/shutdown seam: drop every channel and dep. */
+/** Test/shutdown seam: drop every channel, dep and watcher. */
 export function __resetGenUiAppDataForTests(): void {
   deps = null
   channelsBySession.clear()
   channelsByGuest.clear()
+  disposeAllGenUiAppDataWatchers()
 }
 
 const GENUI_APP_PATH_PATTERN = /[/]genui-apps[/]([A-Za-z0-9][A-Za-z0-9_-]*)[/]index\.html$/
@@ -231,7 +238,8 @@ export function observeGenUiGuestForAppData(info: {
 
     // Initial injection (P1-3): the attached card starts with current data.
     injectGenUiAppDataForChannel(channel)
-    // P2-1 (auto-refresh) registers its per-declaration watchers here.
+    // P2-1: per-declaration fs watchers — file changes auto-refresh the card.
+    registerAppDataWatchers(channel)
   } catch (error) {
     mainLog.warn('[genui-app-data] guest observation failed:', toMessage(error))
   }
@@ -286,6 +294,195 @@ function postUiState(channel: GenUiAppDataChannel, state: unknown): boolean {
     modelContextTruncated: false,
   })
   return true
+}
+
+// ── P2-1: debounced fs-watch auto-refresh ────────────────────────────────────
+// One shared fs.watch per DIRECTORY (never per file): generate_app's own
+// writeAtomic and update_app_data both swap files by rename, which would
+// detach a file-level watch from the live inode. Directory events are
+// filtered down to the watched basenames, debounced (≥1s of quiet, the
+// shared constant), and routed through pushGenUiAppDataToDeclared — so a
+// change reaches EXACTLY the card(s) that declared that file, never a
+// broadcast. Watchers are non-persistent + unref'd: they die with the
+// process on app close and can never keep it alive.
+
+interface DirWatchEntry {
+  watcher: import('node:fs').FSWatcher
+  /** basename → refKeys interested in that basename */
+  refs: Map<string, Set<string>>
+  /** basename → pending debounce timer */
+  timers: Map<string, ReturnType<typeof setTimeout>>
+}
+
+interface AppDataWatchRef {
+  realDir: string
+  base: string
+  sessionId: string
+  cardId: string
+  /** Absolute candidate path of the declaration (rebuilt per push). */
+  candidatePath: string
+}
+
+const dirWatches = new Map<string, DirWatchEntry>()
+const watchRefs = new Map<string, AppDataWatchRef>()
+
+function makeRefKey(sessionId: string, cardId: string, candidatePath: string): string {
+  return `${sessionId}\u0000${cardId}\u0000${candidatePath}`
+}
+
+/**
+ * Register the P2-1 watchers for one channel's declarations. Only
+ * directories that resolve INSIDE the session data/ fence are ever watched;
+ * declarations that do not (or cannot) resolve are simply skipped.
+ */
+function registerAppDataWatchers(channel: GenUiAppDataChannel): void {
+  const dataDir = deps?.resolveSessionDataPath(channel.sessionId)
+  if (!dataDir) return
+  let realDataDir: string
+  try {
+    realDataDir = realpathSync(dataDir)
+  } catch {
+    return
+  }
+  for (const declaration of channel.declarations) {
+    const candidate = isAbsolute(declaration) ? resolve(declaration) : resolve(dataDir, declaration)
+    let realDir: string
+    try {
+      realDir = realpathSync(dirname(candidate))
+    } catch {
+      continue
+    }
+    // The watcher itself must never look outside the fence.
+    if (!isWithinRealPath(realDataDir, realDir)) continue
+    const refKey = makeRefKey(channel.sessionId, channel.cardId, candidate)
+    if (watchRefs.has(refKey)) continue
+    let entry = dirWatches.get(realDir)
+    if (!entry) {
+      try {
+        const watcher = watch(realDir, { persistent: false }, (_eventType, filename) => {
+          handleDirWatchEvent(realDir, filename)
+        })
+        watcher.on('error', () => disposeDirWatch(realDir))
+        watcher.unref?.()
+        entry = { watcher, refs: new Map(), timers: new Map() }
+        dirWatches.set(realDir, entry)
+      } catch (error) {
+        mainLog.warn('[genui-app-data] failed to watch declared data directory:', toMessage(error))
+        continue
+      }
+    }
+    const base = basename(candidate)
+    let refKeys = entry.refs.get(base)
+    if (!refKeys) {
+      refKeys = new Set()
+      entry.refs.set(base, refKeys)
+    }
+    refKeys.add(refKey)
+    watchRefs.set(refKey, { realDir, base, sessionId: channel.sessionId, cardId: channel.cardId, candidatePath: candidate })
+  }
+}
+
+function handleDirWatchEvent(realDir: string, filename: string | Buffer | null): void {
+  const entry = dirWatches.get(realDir)
+  if (!entry) return
+  // Some platforms deliver null filenames — fall back to every basename
+  // watched in this directory (the push path re-validates anyway).
+  const base = typeof filename === 'string'
+    ? filename
+    : filename instanceof Buffer
+      ? filename.toString('utf8')
+      : null
+  const candidates = base !== null && entry.refs.has(base)
+    ? [base]
+    : base === null
+      ? [...entry.refs.keys()]
+      : []
+  for (const name of candidates) {
+    scheduleDebouncedPush(realDir, name)
+  }
+}
+
+function scheduleDebouncedPush(realDir: string, base: string): void {
+  const entry = dirWatches.get(realDir)
+  const refKeys = entry?.refs.get(base)
+  if (!entry || !refKeys || refKeys.size === 0) return
+  // Trailing debounce: every event resets the quiet-period timer, so a burst
+  // of writes collapses into ONE push after the last one settles.
+  const existing = entry.timers.get(base)
+  if (existing) clearTimeout(existing)
+  const debounceMs = deps?.watchDebounceMs ?? GENUI_APP_DATA_WATCH_DEBOUNCE_MS
+  const timer = setTimeout(() => {
+    entry.timers.delete(base)
+    fireDebouncedPush(realDir, base)
+  }, debounceMs)
+  timer.unref?.()
+  entry.timers.set(base, timer)
+}
+
+function fireDebouncedPush(realDir: string, base: string): void {
+  const refKeys = dirWatches.get(realDir)?.refs.get(base)
+  if (!refKeys) return
+  // Same realDir+base always yields the same candidate path, so one path per
+  // session is enough; pushGenUiAppDataToDeclared re-resolves and re-fences
+  // it and routes to exactly the cards that declared the file.
+  const candidatePathBySession = new Map<string, string>()
+  for (const refKey of refKeys) {
+    const ref = watchRefs.get(refKey)
+    if (!ref) continue
+    if (!candidatePathBySession.has(ref.sessionId)) {
+      candidatePathBySession.set(ref.sessionId, ref.candidatePath)
+    }
+  }
+  for (const [sessionId, candidatePath] of candidatePathBySession) {
+    pushGenUiAppDataToDeclared(sessionId, candidatePath)
+  }
+}
+
+/** Release one watch ref; closes the directory watcher when the last ref goes. */
+function releaseWatchRef(refKey: string): void {
+  const ref = watchRefs.get(refKey)
+  if (!ref) return
+  watchRefs.delete(refKey)
+  const entry = dirWatches.get(ref.realDir)
+  if (!entry) return
+  const refKeys = entry.refs.get(ref.base)
+  refKeys?.delete(refKey)
+  if (refKeys && refKeys.size === 0) {
+    entry.refs.delete(ref.base)
+    const timer = entry.timers.get(ref.base)
+    if (timer) {
+      clearTimeout(timer)
+      entry.timers.delete(ref.base)
+    }
+  }
+  if (entry.refs.size === 0) disposeDirWatch(ref.realDir)
+}
+
+function disposeDirWatch(realDir: string): void {
+  const entry = dirWatches.get(realDir)
+  if (!entry) return
+  dirWatches.delete(realDir)
+  for (const timer of entry.timers.values()) clearTimeout(timer)
+  entry.timers.clear()
+  try {
+    entry.watcher.close()
+  } catch {
+    // Already closed — nothing to do.
+  }
+}
+
+/** Test seam: how many directory watchers are live right now. */
+export function __getGenUiAppDataWatchCountForTests(): number {
+  return dirWatches.size
+}
+
+/** Test/shutdown seam: close every watcher (app shutdown need not call this —
+ * the watchers are non-persistent and die with the process). */
+export function disposeAllGenUiAppDataWatchers(): void {
+  for (const realDir of [...dirWatches.keys()]) {
+    disposeDirWatch(realDir)
+  }
+  watchRefs.clear()
 }
 
 // ── Push entry points ────────────────────────────────────────────────────────
@@ -360,7 +557,9 @@ export function releaseGenUiAppDataChannel(sessionId: string, cardId: string): v
   if (channelsByGuest.get(channel.guestWebContentsId) === channel) {
     channelsByGuest.delete(channel.guestWebContentsId)
   }
-  // P2-1: the channel's watcher references are dropped here too.
+  // P2-1: the card's watcher references go with the channel — the directory
+  // watcher closes when its last reference is gone.
+  releaseChannelWatchRefs(sessionId, cardId)
 }
 
 /** Release the channel bound to one guest webContents (guest destroyed). */
@@ -380,4 +579,25 @@ export function clearGenUiAppDataForSession(sessionId: string): void {
     }
   }
   channelsBySession.delete(sessionId)
+  releaseSessionWatchRefs(sessionId)
+}
+
+/**
+ * Drop every watch ref of one session+card (P2-1 teardown for a card
+ * unmount). Watcher releases must be leak-free: the last ref of a directory
+ * closes the watch.
+ */
+function releaseChannelWatchRefs(sessionId: string, cardId: string): void {
+  const prefix = `${sessionId}\u0000${cardId}\u0000`
+  for (const refKey of [...watchRefs.keys()]) {
+    if (refKey.startsWith(prefix)) releaseWatchRef(refKey)
+  }
+}
+
+/** Drop every watch ref of one session (P2-1 teardown for session deletion). */
+function releaseSessionWatchRefs(sessionId: string): void {
+  const prefix = `${sessionId}\u0000`
+  for (const refKey of [...watchRefs.keys()]) {
+    if (refKey.startsWith(prefix)) releaseWatchRef(refKey)
+  }
 }

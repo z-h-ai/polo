@@ -19,12 +19,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const { readGenUiAppDataFile, setGenUiAppDataDeps, observeGenUiGuestForAppData, releaseGenUiAppDataForGuest, pushGenUiAppDataUpdate, clearGenUiAppDataForSession } = await import('../genui-app-data')
+const { readGenUiAppDataFile, setGenUiAppDataDeps, observeGenUiGuestForAppData, releaseGenUiAppDataForGuest, pushGenUiAppDataUpdate, clearGenUiAppDataForSession, releaseGenUiAppDataChannel, __getGenUiAppDataWatchCountForTests } = await import('../genui-app-data')
 // The real session-tools-core handler for the end-to-end composition (the
 // same import pattern the shared-side parity guard uses to cross packages).
 const { handleUpdateAppData } = await import('../../../../../packages/session-tools-core/src/handlers/update-app-data')
 const { extractPoloAppDataFromDocument, extractPoloAppDataDeclarations } = await import('../ui-card-registry')
-const { GENUI_APP_DATA_MAX_FILES_PER_CARD, GENUI_APP_DATA_MAX_FILE_BYTES, GENUI_APP_DATA_META_NAME, parseGenUiAppDataDeclaration } = await import('@polo-ai/shared/protocol')
+const { GENUI_APP_DATA_MAX_FILES_PER_CARD, GENUI_APP_DATA_MAX_FILE_BYTES, GENUI_APP_DATA_META_NAME, GENUI_APP_DATA_WATCH_DEBOUNCE_MS, parseGenUiAppDataDeclaration } = await import('@polo-ai/shared/protocol')
+
+/** Poll until the predicate holds (fs.watch delivery is asynchronous). */
+async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  return predicate()
+}
 
 let root: string
 let dataDir: string
@@ -378,5 +388,157 @@ describe('end-to-end: update_app_data → mounted card receives fresh ui_state',
     expect(fake.uiStates.length).toBe(0)
     expect(JSON.parse(readFileSync(join(dataDir, 'state.json'), 'utf-8'))).toEqual({ v: 1 })
     expect(result.content[0]?.text).toContain('injected when the card next attaches')
+  })
+})
+
+// ── P2-1: debounced fs-watch auto-refresh ────────────────────────────────────
+
+describe('P2-1 declared-file auto-refresh', () => {
+  const WATCH_DEBOUNCE_MS = 80
+
+  afterEach(() => {
+    clearGenUiAppDataForSession(SESSION_ID)
+    clearGenUiAppDataForSession('sess-other')
+    setGenUiAppDataDeps(null)
+  })
+
+  function observeWithWatch(bridge: ReturnType<typeof createFakeBridge>['bridge'], sessionId = SESSION_ID): void {
+    setGenUiAppDataDeps({
+      bridge,
+      resolveSessionDataPath: () => dataDir,
+      watchDebounceMs: WATCH_DEBOUNCE_MS,
+    })
+    observeGenUiGuestForAppData({
+      sessionId,
+      guestWebContentsId: GUEST_ID,
+      hostWebContentsId: 1,
+      src: writeAppDocument(`<meta name="${GENUI_APP_DATA_META_NAME}" content="state.json">`),
+    })
+  }
+
+  it('registers one directory watcher per attach', () => {
+    observeWithWatch(createFakeBridge().bridge)
+    expect(__getGenUiAppDataWatchCountForTests()).toBe(1)
+  })
+
+  it('shares one watcher between cards watching the same directory (refcounted)', () => {
+    const first = createFakeBridge()
+    observeWithWatch(first.bridge)
+    const second = createFakeBridge()
+    // Same data dir, different session/card — the directory watcher is shared.
+    setGenUiAppDataDeps({
+      bridge: second.bridge,
+      resolveSessionDataPath: () => dataDir,
+      watchDebounceMs: WATCH_DEBOUNCE_MS,
+    })
+    observeGenUiGuestForAppData({
+      sessionId: 'sess-other',
+      guestWebContentsId: GUEST_ID + 1,
+      hostWebContentsId: 1,
+      src: writeAppDocument(`<meta name="${GENUI_APP_DATA_META_NAME}" content="other.json">`),
+    })
+    expect(__getGenUiAppDataWatchCountForTests()).toBe(1)
+
+    releaseGenUiAppDataChannel(SESSION_ID, CARD_ID)
+    expect(__getGenUiAppDataWatchCountForTests()).toBe(1)
+    releaseGenUiAppDataChannel('sess-other', CARD_ID)
+    expect(__getGenUiAppDataWatchCountForTests()).toBe(0)
+  })
+
+  it('pushes a changed declared file to the card after the debounce quiet period', async () => {
+    const fake = createFakeBridge()
+    writeFileSync(join(dataDir, 'state.json'), '{"v":1}', 'utf-8')
+    observeWithWatch(fake.bridge)
+    // Initial injection already delivered v1.
+    expect(fake.uiStates.length).toBe(1)
+
+    writeFileSync(join(dataDir, 'state.json'), '{"v":2}', 'utf-8')
+    const delivered = await waitFor(() => fake.uiStates.length >= 2)
+    expect(delivered).toBe(true)
+    expect(fake.uiStates[1]).toMatchObject({ sessionId: SESSION_ID, cardId: CARD_ID, state: { v: 2 } })
+  })
+
+  it('never pushes a file the card did not declare (no broadcast)', async () => {
+    const fake = createFakeBridge()
+    observeWithWatch(fake.bridge)
+    writeFileSync(join(dataDir, 'undeclared.json'), '{"v":9}', 'utf-8')
+    await new Promise(resolve => setTimeout(resolve, WATCH_DEBOUNCE_MS * 6))
+    expect(fake.uiStates.length).toBe(0)
+  })
+
+  it('collapses a burst of writes into one debounced push', async () => {
+    const fake = createFakeBridge()
+    writeFileSync(join(dataDir, 'state.json'), '{"v":0}', 'utf-8')
+    observeWithWatch(fake.bridge)
+
+    // Rapid-fire writes inside one debounce window.
+    for (let v = 1; v <= 5; v++) {
+      writeFileSync(join(dataDir, 'state.json'), JSON.stringify({ v }), 'utf-8')
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    await waitFor(() => fake.uiStates.length >= 2)
+    await new Promise(resolve => setTimeout(resolve, WATCH_DEBOUNCE_MS * 3))
+    // Exactly one follow-up push beyond the attach injection, carrying the
+    // last settled value.
+    expect(fake.uiStates.length).toBe(2)
+    expect(fake.uiStates[1]).toMatchObject({ state: { v: 5 } })
+  })
+
+  it('routes a change only to the session that declared the file', async () => {
+    // One process-wide deps surface (as in the real wiring): a single bridge
+    // plus a per-session data/ resolver — the routing must be decided by the
+    // declaration match, not by which bridge happens to be installed.
+    const fake = createFakeBridge()
+    writeFileSync(join(dataDir, 'state.json'), '{"v":1}', 'utf-8')
+    writeFileSync(join(dataDir, 'theirs.json'), '{"v":1}', 'utf-8')
+    setGenUiAppDataDeps({
+      bridge: fake.bridge,
+      resolveSessionDataPath: () => dataDir,
+      watchDebounceMs: WATCH_DEBOUNCE_MS,
+    })
+    observeGenUiGuestForAppData({
+      sessionId: SESSION_ID,
+      guestWebContentsId: GUEST_ID,
+      hostWebContentsId: 1,
+      src: writeAppDocument(`<meta name="${GENUI_APP_DATA_META_NAME}" content="state.json">`),
+    })
+    observeGenUiGuestForAppData({
+      sessionId: 'sess-other',
+      guestWebContentsId: GUEST_ID + 1,
+      hostWebContentsId: 1,
+      src: writeAppDocument(`<meta name="${GENUI_APP_DATA_META_NAME}" content="theirs.json">`),
+    })
+    // Both cards hold their attach-time injection now.
+    const pushesAfterMount = fake.uiStates.length
+
+    writeFileSync(join(dataDir, 'state.json'), '{"v":2}', 'utf-8')
+    const delivered = await waitFor(() =>
+      fake.uiStates.some(push => push.sessionId === SESSION_ID && (push.state as { v?: number })?.v === 2))
+    expect(delivered).toBe(true)
+    // The other session's card — which declared theirs.json, not state.json —
+    // received nothing beyond its initial injection: point-to-point per
+    // declaration, never a broadcast.
+    expect(fake.uiStates.slice(pushesAfterMount).filter(push => push.sessionId === 'sess-other').length).toBe(0)
+  })
+
+  it('stops pushing after the guest is released and unregisters the watcher', async () => {
+    const fake = createFakeBridge()
+    observeWithWatch(fake.bridge)
+    expect(__getGenUiAppDataWatchCountForTests()).toBe(1)
+
+    releaseGenUiAppDataForGuest(GUEST_ID)
+    expect(__getGenUiAppDataWatchCountForTests()).toBe(0)
+
+    writeFileSync(join(dataDir, 'state.json'), '{"v":2}', 'utf-8')
+    await new Promise(resolve => setTimeout(resolve, WATCH_DEBOUNCE_MS * 6))
+    expect(fake.uiStates.length).toBe(0)
+  })
+
+  it('session teardown unregisters the watcher (leak-free)', () => {
+    const fake = createFakeBridge()
+    observeWithWatch(fake.bridge)
+    expect(__getGenUiAppDataWatchCountForTests()).toBe(1)
+    clearGenUiAppDataForSession(SESSION_ID)
+    expect(__getGenUiAppDataWatchCountForTests()).toBe(0)
   })
 })
