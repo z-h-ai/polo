@@ -15,6 +15,7 @@ import {
   applyColumnFilters,
   applyViewSort,
   computeTextFilterChips,
+  filterChipLabelKey,
   isNumericFilterColumnType,
   parseFilterBound,
   resolveDatatableViewScope,
@@ -66,6 +67,21 @@ describe('parseFilterBound (invalid input is ignored, not applied)', () => {
     expect(parseFilterBound('   ')).toBeUndefined()
     expect(parseFilterBound('abc')).toBeUndefined()
     expect(parseFilterBound('12abc')).toBeUndefined()
+  })
+})
+
+describe('filterChipLabelKey (N4: boolean chips read like the cells, matching stays raw)', () => {
+  const booleanCol = { key: 'active', label: 'Active', type: 'boolean' as const }
+  const textCol = { key: 'region', label: 'Region', type: 'text' as const }
+
+  it('maps boolean chip values to the Yes/No cell vocabulary', () => {
+    expect(filterChipLabelKey('true', booleanCol)).toBe('common.yes')
+    expect(filterChipLabelKey('false', booleanCol)).toBe('common.no')
+  })
+
+  it('keeps non-boolean chips and unexpected boolean values as the raw string', () => {
+    expect(filterChipLabelKey('EMEA', textCol)).toBeNull()
+    expect(filterChipLabelKey('maybe', booleanCol)).toBeNull()
   })
 })
 

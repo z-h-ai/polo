@@ -105,6 +105,16 @@ import {
 // ============================================================================
 
 /**
+ * Friendly skeleton type name (Wave-1.5 N5): the render_ui component registry
+ * key localized via genui.skeleton.types.*; a type without a mapped key
+ * degrades to the raw registry key (current behavior) instead of the full
+ * i18n key path. Resolved at call time — never at module level.
+ */
+function skeletonTypeDisplayName(type: string): string {
+  return i18n.t(`genui.skeleton.types.${type}`, { defaultValue: type })
+}
+
+/**
  * Simple markdown stripping for preview text.
  * Removes markdown syntax to show plain text preview.
  * Code block content is preserved as plain text.
@@ -3206,16 +3216,20 @@ export const TurnCard = React.memo(function TurnCard({
 
       {/* P0-2 render_ui skeleton previews - in-flight calls only (type+title, no data) */}
       {genUiSkeletons.length > 0 && (
-        <div className="mt-2 flex flex-col gap-2" data-testid="genui-skeletons">
+        <div className="mt-2 flex flex-col gap-2" data-testid="genui-skeletons" data-search-exclude="true">
           {genUiSkeletons.map(skeleton => (
             <div
               key={skeleton.key}
-              className="rounded-[8px] border bg-muted/10 px-3 py-2.5 flex items-center gap-2.5"
+              className="rounded-[8px] border bg-muted/10 px-3 py-2.5 flex items-center gap-2"
             >
               <Spinner className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
               <span className="text-[13px] text-muted-foreground truncate">
-                {i18n.t('genui.skeleton.building', { type: skeleton.type })}
-                {skeleton.title ? ` — ${skeleton.title}` : ''}
+                {skeleton.title
+                  ? i18n.t('genui.skeleton.buildingNamed', {
+                      name: skeletonTypeDisplayName(skeleton.type),
+                      title: skeleton.title,
+                    })
+                  : i18n.t('genui.skeleton.building', { name: skeletonTypeDisplayName(skeleton.type) })}
               </span>
             </div>
           ))}

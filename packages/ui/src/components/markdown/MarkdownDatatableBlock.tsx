@@ -365,6 +365,19 @@ export function computeTextFilterChips(
   return [...seen]
 }
 
+/**
+ * Chip display label (N4): boolean columns show Yes/No the way formatCell
+ * renders the cells, instead of the raw true/false the chip value carries.
+ * Filter MATCHING stays on the raw value — only the label is localized.
+ * Returns the i18n key to display, or null to show the raw chip value.
+ */
+export function filterChipLabelKey(chip: string, col: ColumnDef): string | null {
+  if (col.type !== 'boolean') return null
+  if (chip === 'true') return 'common.yes'
+  if (chip === 'false') return 'common.no'
+  return null
+}
+
 /** Parse one min/max bound input; empty or non-numeric input → undefined (ignored). */
 export function parseFilterBound(raw: string): number | undefined {
   const trimmed = raw.trim()
@@ -782,9 +795,12 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     const chips = textChipValues.get(col.key)
     if (!chips || chips.length === 0) return null
     return (
-      <div className="mt-1 flex flex-wrap gap-1 whitespace-normal" onClick={(e) => e.stopPropagation()}>
+      // max-width bounds this container's max-content contribution — the
+      // table is w-max, so without it flex-wrap could never fire (N3).
+      <div className="mt-1 flex flex-wrap gap-1 whitespace-normal max-w-[240px]" onClick={(e) => e.stopPropagation()}>
         {chips.map((chip) => {
           const isActive = active?.kind === 'text' && active.value === chip
+          const labelKey = filterChipLabelKey(chip, col)
           return (
             <button
               key={chip}
@@ -792,14 +808,14 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
               aria-pressed={isActive}
               onClick={() => toggleTextFilter(col.key, chip)}
               className={cn(
-                'px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors',
+                'px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors max-w-full truncate',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 isActive
-                  ? 'bg-accent/10 text-accent border-accent/30'
+                  ? 'bg-accent/10 text-accent border-accent/30 hover:bg-accent/15'
                   : 'bg-background text-muted-foreground border-foreground/10 hover:text-foreground hover:border-foreground/25',
               )}
             >
-              {chip}
+              {labelKey ? t(labelKey) : chip}
             </button>
           )
         })}
@@ -1020,15 +1036,15 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
   // hides why its row set is a subset).
   const renderFilterStatusBar = () => activeFilterCount > 0 ? (
     <div className="px-3 py-1.5 border-b bg-accent/[0.04] flex items-center justify-between gap-2">
-      <span className="text-[12px] text-muted-foreground">
+      <span className="text-[12px] text-muted-foreground" aria-live="polite">
         {t('datatable.filterStatus', { shown: filteredRows.length, total: parsed.rows.length })}
       </span>
       <button
         type="button"
         onClick={clearFilters}
-        className="text-[12px] text-accent hover:underline rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="text-[12px] text-accent hover:underline cursor-pointer rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
-        {t('common.clearAll')}
+        {t('datatable.clearFilters')}
       </button>
     </div>
   ) : null
