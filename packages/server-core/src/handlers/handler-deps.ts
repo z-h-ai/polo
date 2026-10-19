@@ -54,6 +54,11 @@ export interface HandlerDeps<
   /** Durable local Creator App publication store; tests may inject an isolated root. */
   creatorAppPublicationRoot?: string
   /**
+   * Durable managed-skill enablement store root (POO-106 S1); the desktop host
+   * injects its userData dir, headless hosts and tests fall back to CONFIG_DIR.
+   */
+  managedSkillsRoot?: string
+  /**
    * Host-owned session-ending hook invoked inside the trusted transition lock.
    * It must synchronously fence new and in-flight lifecycle result commits,
    * then return the promise for slow stop/cancel cleanup. The promise is awaited

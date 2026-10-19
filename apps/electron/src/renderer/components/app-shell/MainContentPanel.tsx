@@ -19,9 +19,11 @@ import * as React from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
 import { useAppShellContext } from '@/context/AppShellContext'
+import { useManagedSkills } from '@/hooks/useManagedSkills'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { StoplightProvider } from '@/context/StoplightContext'
 import {
@@ -131,6 +133,9 @@ export function MainContentPanel({
   const skillSelectionCount = skillSelection.useSelectionCount()
   const selectedSkillIds = skillSelection.useSelectedIds()
   const { clearMultiSelect: clearSkillSelection } = skillSelection.useSelection()
+  // POO-106 S1: batch enable/disable over the toggleable selected skills.
+  const { statusBySlug, setSkillsEnabledBulk } = useManagedSkills(activeWorkspaceId || undefined)
+  const [batchEnablementPending, setBatchEnablementPending] = useState(false)
 
   // Automation multi-select state
   const isAutomationMultiSelectActive = automationSelection.useIsMultiSelectActive()
@@ -214,6 +219,23 @@ export function MainContentPanel({
     })
   }, [selectedMetas, onSessionLabelsChange])
 
+  // Batch enablement: only rows the list panel would let you toggle (SM-06r).
+  // Failures keep their selection so the batch can be retried.
+  const handleBatchSetSkillsEnabled = useCallback(async (enabled: boolean) => {
+    const statuses = [...selectedSkillIds]
+      .map(slug => statusBySlug[slug])
+      .filter((status): status is NonNullable<typeof status> => Boolean(status?.toggleable))
+    if (statuses.length === 0) return
+    setBatchEnablementPending(true)
+    try {
+      const { failed } = await setSkillsEnabledBulk(statuses, enabled)
+      if (failed.length === 0) clearSkillSelection()
+      else toast.error(t('skillsList.enableFailed'), { description: t('skillsList.batchEnableFailed', { count: failed.length }) })
+    } finally {
+      setBatchEnablementPending(false)
+    }
+  }, [selectedSkillIds, statusBySlug, setSkillsEnabledBulk, clearSkillSelection, t])
+
   // Wrap content with StoplightProvider so PanelHeaders auto-compensate in focused mode.
   // Also renders the Send to Workspace dialog (portal-based, so it overlays regardless of position).
   const wrapWithStoplight = (content: React.ReactNode) => (
@@ -287,6 +309,8 @@ export function MainContentPanel({
           <MultiSelectPanel
             count={skillSelectionCount}
             entityType="skill"
+            onSetSkillsEnabled={handleBatchSetSkillsEnabled}
+            batchEnablementPending={batchEnablementPending}
             onSendToWorkspace={hasOtherWorkspaces ? () => openSendDialog('skill', selectedSkillIds) : undefined}
             onClearSelection={clearSkillSelection}
           />

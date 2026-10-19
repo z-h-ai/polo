@@ -1349,6 +1349,9 @@ export interface ElectronAPI {
 
   // Skills
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
+  // Same discovery without the enablement filter; only the management list
+  // consumes it — the composer keeps getSkills (POO-106 S1, SM-09).
+  getSkillsUnfiltered(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
   deleteSkill(input: {
     workspaceId: string
@@ -1360,6 +1363,9 @@ export interface ElectronAPI {
   } | false>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
+  // Managed local-skill enablement (POO-106 S1)
+  listManagedSkills(input: { workspaceId: string }): Promise<import('@polo-ai/shared/skills').ListManagedSkillsResponse | { ok: false; errorCode: string }>
+  setManagedSkillEnablement(input: import('@polo-ai/shared/skills').SetManagedSkillEnablementRequest): Promise<import('@polo-ai/shared/skills').SetManagedSkillEnablementResponse | { ok: false; errorCode: string; revision?: number }>
 
   // Skills change listener (live updates when skills are added/removed/modified)
   onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void

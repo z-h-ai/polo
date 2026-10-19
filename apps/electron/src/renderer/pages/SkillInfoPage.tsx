@@ -26,6 +26,8 @@ import {
 } from '@/lib/creator-skill-errors'
 import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import { refreshCreatorSkillSafetyStatus } from '@/lib/creator-skill-safety-refresh'
+import { useManagedSkills } from '@/hooks/useManagedSkills'
+import { isCanonicalManagedSkill } from '@polo-ai/shared/skills'
 import {
   creatorSkillSafetyCheckStatesAtom,
   creatorSkillSafetyIdentityKey,
@@ -65,6 +67,9 @@ export default function SkillInfoPage({
   const [updateProgress, setUpdateProgress] = useState<CreatorSkillOperationProgress | null>(null)
   const activeWorkspace = useActiveWorkspace()
   const canRevealLocally = !activeWorkspace?.remoteServer
+  // Read-only enablement state (POO-106 S1): the detail page never hosts a
+  // second toggle — the row-level switch is the single control (R4).
+  const { statusBySlug } = useManagedSkills(workspaceId || undefined)
 
   // Load skill data
   useEffect(() => {
@@ -346,6 +351,13 @@ export default function SkillInfoPage({
   const canDeleteSkill = skill?.source === 'workspace'
   // Bundled Skills ship inside the app: visible and readable, but not editable.
   const isBundledSkill = skill?.source === 'bundled'
+  // Enablement facts: bundled is always on; managed and shadowedBuiltin rows
+  // have no toggle anywhere (SM-18a/18e/18g).
+  const managedStatus = skill ? statusBySlug[skill.slug] : undefined
+  const isManagedSkill = skill ? isCanonicalManagedSkill(skill) : false
+  const isShadowedBuiltin = managedStatus?.shadowedBuiltin ?? false
+  const isDisabledLocally = !isBundledSkill && !isManagedSkill && !isShadowedBuiltin
+    && managedStatus?.toggleable === true && managedStatus.enabled === false
   const isSafeRollback = Boolean(
     availableVersion
     && creatorInstalledVersion
@@ -402,6 +414,12 @@ export default function SkillInfoPage({
 
       {skill && (
         <Info_Page.Content>
+          {isDisabledLocally && (
+            <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>{t('skillInfo.disabledLocallyHint')}</span>
+            </div>
+          )}
           {skill.creatorInstallation?.lastKnownStatus === 'revoked' ? (
             <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -502,6 +520,15 @@ export default function SkillInfoPage({
                  skill.source === 'global' ? t('skillInfo.sourceGlobal') :
                  skill.source === 'bundled' ? t('skillInfo.sourceBundled') :
                  t('skillInfo.sourceWorkspace')}
+              </Info_Table.Row>
+              <Info_Table.Row label={t('skillInfo.enablementState')}>
+                {isBundledSkill ? t('skillInfo.builtinAlwaysOn')
+                  : isManagedSkill ? t('skillInfo.enablementManagedHint')
+                    : isShadowedBuiltin ? (skill.source === 'global'
+                      ? t('skillsList.shadowedBuiltinGlobalHint')
+                      : t('skillsList.shadowedBuiltinHint'))
+                      : isDisabledLocally ? t('skillInfo.enabledStateOff')
+                        : t('skillInfo.enabledStateOn')}
               </Info_Table.Row>
               <Info_Table.Row label={t('common.location')}>
                 <button
