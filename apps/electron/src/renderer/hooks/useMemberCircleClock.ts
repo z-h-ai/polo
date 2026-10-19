@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
+import type { MemberCircleCurrentEntitlement } from '@polo-ai/shared/admin'
 
 interface MembershipPeriod {
   status: string
   billingKind: string
   currentPeriodEnd: string | null
+  currentEntitlement?: Pick<MemberCircleCurrentEntitlement, 'version' | 'state' | 'validUntil'>
 }
 
 /** Local display clock only: expiry never grants execution or sends a request. */
 export function useMemberCircleClock(periods: ReadonlyArray<MembershipPeriod>): number {
-  const key = JSON.stringify(periods.map(period => [period.status, period.billingKind, period.currentPeriodEnd]))
+  const key = JSON.stringify(periods.map(period => [period.status, period.billingKind, period.currentPeriodEnd, period.currentEntitlement?.version, period.currentEntitlement?.state, period.currentEntitlement?.validUntil]))
   const [snapshot, setSnapshot] = useState(() => ({ key, now: Date.now() }))
   let clock = snapshot
   if (clock.key !== key) {
@@ -16,9 +18,12 @@ export function useMemberCircleClock(periods: ReadonlyArray<MembershipPeriod>): 
     setSnapshot(clock)
   }
   const nextExpiry = periods.reduce((next, period) => {
-    if (period.status !== 'active' || period.billingKind !== 'paid') return next
-    const end = Date.parse(period.currentPeriodEnd ?? '')
-    return Number.isFinite(end) && end > clock.now ? Math.min(next, end) : next
+    if (period.status !== 'active') return next
+    const bounds = [period.billingKind === 'paid' ? period.currentPeriodEnd : null, period.currentEntitlement?.validUntil]
+    return bounds.reduce((nearest, bound) => {
+      const end = Date.parse(bound ?? '')
+      return Number.isFinite(end) && end > clock.now ? Math.min(nearest, end) : nearest
+    }, next)
   }, Infinity)
 
   useEffect(() => {

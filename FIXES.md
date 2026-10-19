@@ -144,7 +144,7 @@
 
 ## R4FIX 摘要
 
-R4FIX-01（到期状态）与 R4FIX-03（滚动恢复）已修复；19 个受影响套件 453 pass / 0 fail，类型/构建通过。R4FIX-02 仍受 Admin 当前期权益 DTO 缺口阻塞，独立复现 5 pass / 1 fail；本轮不能标记三项全部完成或全部相关测试全绿。
+R4FIX-01/02/03 的 Client 修复现已完成：第三轮消费 Admin currentEntitlement v1，六条未来取消订单复现已转绿；最终受影响回归 28 个独立进程、649 pass / 0 fail，类型检查、构建、定向 lint 和受控浏览器通过。第二轮的 DTO 阻塞及 458 pass / 1 fail 是 `74e21509` 的历史结果，原日志保留；当前结论与证据见下方「R4FIX-02 Client 闭环（R4C）」；不替代正式三卡 Acceptance。
 
 ## R3 Findings 修复（R3FIX）
 
@@ -233,9 +233,11 @@ R4FIX-01（到期状态）与 R4FIX-03（滚动恢复）已修复；19 个受影
 
 ## R4 Findings 修复（R4FIX）
 
+以下为第二轮 `74e21509` 的固定记录；其中 R4FIX-02 的阻塞已由第三轮契约交付和 Client 消费解除，见文末。
+
 基线：`5eda44445ef39dda295ac7033faabd378ee4fba5`。范围为 TASK-FIX-R4.md 的三项 Client 问题。固定 R4 证据为 `.pipeline/poo77-79-r4-acceptance-20261019-022614/RESULT.md` 与该 run 的 POO-78/79 product-findings.json；不改历史失败回执。产品权威仍为 Spec（SHA-256 `269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7`），沿用当前权益、到期拒绝、同账号/空间隔离和原导航规则。
 
-### Admin DTO 需求 / 待转 Admin（R4FIX-02）
+### Admin DTO 需求 / 待转 Admin（R4FIX-02，74e21509 历史记录）
 
 已只读核对 Admin 固定验收版本对应 worktree 的 `src/app/api/me/circle-memberships/route.ts`：paymentOrders 以 updatedAt 降序取五单，纠正投影也仅计算这五单。Client 的 `packages/shared/src/admin/member-circles.ts` 映射只包含 membership status/currentPeriodEnd 与这五单，未提供当前权益来源、当前期纠正结果或历史完整性标记。
 
@@ -270,3 +272,46 @@ Admin 侧需要确认并覆盖：六条未来 cancelled、五条以内未来 can
 - 受控 Chromium 实际运行生产 ClientHomeRouter/MyCirclesPage/CircleDetailPage/CircleSubscriptionPanel 与真实 context，注入明确的圈子 fixture；1024×768 长列表设置真实 DOM scrollTop=180，点击详情→订阅→等待真实时钟到期→返回，测得 before=180 / after=180。详情页头“待恢复”、面板“已到期”，无绿色有效；更换 scope 后滚动为 0、搜索为空。页面异常 0。已打开检查到期后与列表返回截图，证据为 `.pipeline/r4fix/browser-result.json`、`browser-check.log` 和同目录四张 PNG。这是受控页面与时钟验证，不等于真实 Main/支付或正式三卡 Acceptance。
 - R4FIX-02 缺口复现和对应实际 R4 DTO 仍未解决；已将权威来源、不可自洽原因、推荐字段与回归矩阵交给协调方参考。按 TASK-FIX-R4 的明确分工等待 Admin 契约，未擅自改 Admin 分支，也未修改当前未知 DTO 为成功。
 - Task 与授权文件保持 untracked；临时脚本、截图及运行器只在忽略目录。本轮仅在当前 baseline 分支提交，不 push、不合并 dev、不改任务卡正文。
+
+
+## R4FIX-02 Client 闭环（R4C）
+
+### 权威来源与适用版本
+
+执行 TASK-FIX-R4B-CLIENT.md；Client 基线 `74e2150959643e4f00dbee977e57c85d9f03112c`。本轮只读参考 Admin `fix/poo79-admin-session-20261019@d7f28c3f0823d921d2de4ed0161237d167a75f65`：
+
+- `shared-contract.md` 的 **Member Circle current entitlement contract (v1, 2026-10-19)**，SHA-256 `54545d696bef1a4a2815161c9c849a658c37c5fd3cc220a46619c88fdee2257d`。
+- `src/lib/creator-circles/current-entitlement.ts` 的实际投影，SHA-256 `8e397b32dee959026e461217267246763dff1139444c570bf6baa01cbe22d925`。当前权益独立于最近五单，纠正事务保留的资格由 state 表达；corrections 用于解释，不按“出现退款/争议”猜测资格。
+
+此前 F1 JSON 是固定历史接口快照，不覆盖本次已交付的增量 v1。Client 的 `packages/shared/src/admin/member-circles.ts` 是解析/映射维护源；类型由同一 Zod schema 推导，现有 admin index 的 export* 自动传播，无需手工维护另一份类型或改写历史快照。未跨仓库修改/提交 Admin。
+
+### 根因与改动
+
+**根因**：旧 Client 会剥离未登记的 currentEntitlement，仍从最近五单寻找 paid。六条未来 cancelled 挤掉当前 paid 后误判为无权益；若只改为 active + 将来到期日放行，又会丢失退款/争议限制。
+
+**共享解析**：新增可选的 MemberCircleCurrentEntitlement v1 schema 和映射，保留 version、membershipId、state、computedAt、currentPeriodEnd、validUntil、完整 source 与 corrections。校验 v1 版本/枚举/结构/日期和父 membership 的 ID、billingKind、period 绑定；未知版本、未知 state、半个对象、null 或错绑作为 invalid_response 拒绝，不剥掉字段再退回旧授权。来源与账本 ID 按契约作为 opaque string，不误加 UUID 约束；nullable 引用原样保留。字段整体缺省时仍省略该属性并走原有旧响应分支。
+
+**统一投影**：isMembershipCurrentlyPaidEntitled 在存在 v1 时只接受 entitled，同时要求原始关系仍 active、父子绑定一致、本机时间未超过 paid currentPeriodEnd 或 validUntil。not_entitled/unknown 不回退至历史 paid；部分退款/拒付按 state 的实际剩余资格处理，不从金额或历史 effectivePaymentStatus 再猜资格。缺字段时保留全部原有保守行为和断言。Home、列表、页头、订阅与返回核验复用这一投影；Main/Catalog 的实际启动核验保持原路径。
+
+**详情内容入口**：补全 CircleDetailPage 的 v1 来源失权集合，并交给既有完整目录投影；CircleContentPanel 对 v1 的 blocked 行显示禁用打开按钮。只有本圈来源时 unknown/not_entitled 拒绝；另有有效来源的共享作品仍可用。只对已携带新契约的成员启用此内容投影，旧响应保留既有 Catalog/失败提示行为，未改旧的“点击受限行给解释且不启动”断言。
+
+**时钟上界**：useMemberCircleClock 除 paid 期限外也调度 v1 validUntil，包括免费关系的过渡上界。原始 state 仍 entitled 时，本机越过边界也立即拒绝，不等待新回执。R4FIX-01 的自然到期、旧 paid、退款/争议与未来续费断言全部保留。
+
+### 回归与验证
+
+维护用例集中在 `lib/__tests__/member-circle-current-entitlement.test.ts`，使用同一 wire fixture 经真实 shared parser 后判断。原 `.pipeline/r4fix/current-paid-repro.test.ts` 已改为引用这份维护用例，保留原 0/1/4/6 条取消、pending + paid、到期拒绝六个场景，没有把“六条取消应继续可用”改为拒绝断言。历史红色输出仍在 `.pipeline/r4fix/current-paid-gap.log`，不覆盖。
+
+- 新维护套件 **25 pass / 0 fail**；原复现入口独立执行同一 25 项也全绿（最终 649 是测试进程输出之和，包含这次重复入口执行，不声称 649 个唯一场景）。另覆盖 v1 完整映射、opaque lineage、unsupported/malformed/mismatched 拒绝、unknown/not_entitled、两类纠正的保留/失权、free validUntil、旧响应兼容。
+- 新增真实 Home 按钮三态、真实详情内容按钮三态及多来源保留、订阅三态与免费上界计时器交互。详情新断言修复前 not_entitled/unknown 按钮仍可点，修复后禁用；原有断言未降低。
+- 新增真实 loopback HTTP → AdminClient → shared parser 的 v1 完整传递与错误版本拒绝，以及原生 LIST_MEMBERSHIPS handler 保留字段的回归。只修改测试，原生 handler 既有直接 DTO 传递即可，不新增通道或授权能力。
+- **最终受影响套件：28 个独立测试进程，649 pass / 0 fail，全部退出 0**。完整命令、输出、退出码在根目录 `verify-r4c.log`（忽略、不入库）；可用 `python3 .pipeline/r4cfix/run-tests.py verify-r4c.log` 复跑。每个用例路径均有 `./`，逐进程先证明临时 HOME 的 os.homedir 隔离，再执行测试；不直接访问用户 homedir。
+- `bun run typecheck:electron`、`cd packages/shared && bun run tsc --noEmit`、`cd packages/server-core && bun run tsc --noEmit` 全部退出 0。
+- `bun run --cwd packages/shared build`、`bun run electron:build:main`、`bun run electron:build:renderer` 全部退出 0。Renderer 仍有原有大 chunk 提示，没有构建失败。
+- 修改的五个 Electron 生产模块与 shared 解析模块定向 ESLint 均退出 0，0 error / 0 warning。
+- 受控 Chromium 使用原始 v1 wire fixture → 真实 parser → Home/list/subscription 组件：五条 cancelled 的 entitled 显示可用；即使最近历史为 paid，not_entitled 和 unknown 仍禁用；本地 validUntil 越界后自动禁用；自动打开 0、页面异常 0。已实际打开检查 1440×900 的可用/拒绝截图。回执和截图位于 `.pipeline/r4cfix/browser-result.json`、`browser-check.log`、`home-entitled-1440.png`、`home-not_entitled-1440.png`。详情内容的单源/多源在真实 Router/provider 组件测试验证，不冒充额外浏览器或真实支付/Main 启动验收。
+
+### 契约疑问与交付边界
+
+无阻塞本轮的契约疑问；第二轮的 Admin DTO 需求已由 v1 交付满足。新的未知版本/状态会拒绝，缺字段的旧响应保持既有行为；currentEntitlement 只约束显示/入口资格，不能代替分发、治理、激活、Catalog/Main 和离线执行门禁。
+
+本轮完成 Client 闭环与受控回归，未执行正式 POO-77/78/79 Acceptance、真实支付/短信或跨仓库部署。不重跑之前已证明为范围外的全仓失败，不把既有全量检查声明为绿色。TASK/授权文件保持 untracked，verify-r4c.log 与一次性脚本/截图不入库，仅当前 baseline 分支提交，不 push、不合并 dev、不改任务卡。

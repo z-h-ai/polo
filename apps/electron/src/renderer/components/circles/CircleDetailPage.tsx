@@ -18,7 +18,7 @@ import {
   type HomeAppDirectory,
 } from '@/lib/home-app-directory'
 import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
-import { isMembershipCurrentlyPaidEntitled, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
+import { isMembershipCurrentlyPaidEntitled, isMembershipEndedBeforePeriodEnd, selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
 import { CircleContentPanel } from './CircleContentPanel'
 import { CircleSubscriptionPanel } from './CircleSubscriptionPanel'
 import { CircleSupportPanel, type CircleSupportTarget } from './CircleSupportPanel'
@@ -276,6 +276,15 @@ export function CircleDetailPage({
   // ── H1 projection (the SAME directory instances the home consumes) ────────
   const activeProductSpace = catalog.productSpace?.activeProductSpace
   const spaceKind = activeProductSpace?.kind ?? null
+  // New current-period authority also governs content App entries. Legacy
+  // responses retain their established Catalog-only content behavior.
+  const lostCircleIds = useMemo(() => {
+    const memberships = (resource.memberships ?? []).filter(member => member.currentEntitlement !== undefined)
+    const ids = new Set(memberships.map(member => member.circle.circleId))
+    return selectLostCircleAuthorizationIds(
+      (resource.circles ?? []).filter(circle => ids.has(circle.circle.circleId)), memberships, now,
+    )
+  }, [resource.memberships, resource.circles, now])
   const directory = useMemo<HomeAppDirectory>(
     () => selectHomeAppDirectory(catalog.state.catalog, {
       accountId: catalog.productSpace?.accountId ?? null,
@@ -284,6 +293,7 @@ export function CircleDetailPage({
       loading: catalog.state.loading,
       errorCode: catalog.state.errorCode,
       accessMode: catalog.state.accessMode,
+      lostCircleIds,
     }),
     [
       catalog.productSpace?.accountId,
@@ -292,6 +302,7 @@ export function CircleDetailPage({
       catalog.state.catalog,
       catalog.state.errorCode,
       catalog.state.loading,
+      lostCircleIds,
       spaceKind,
     ],
   )

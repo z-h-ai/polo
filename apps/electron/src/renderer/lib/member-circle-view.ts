@@ -7,11 +7,10 @@
  * - Missing display fields stay EXPLICITLY not-ready: the creator display
  *   name is an `upstream_pending` capability fact (contract gap G1), never a
  *   name fabricated from `ownerUserId`.
- * - Entitlement judgments come ONLY from the correction-aware payment
- *   projection (`effectivePaymentStatus` / `correction`); the raw stored
- *   order status is display history and never an entitlement (G5). An absent
- *   projection stays `unknown` — unknown is a fact, not an error and not a
- *   success.
+ * - Current entitlement follows the bound v1 currentEntitlement state and
+ *   local time bounds. Per-order payment judgments remain correction-aware
+ *   history; legacy responses without v1 keep the conservative G5 adapter.
+ *   Raw stored order status never grants entitlement.
  * - Empty `entitlements` are a legitimate state (closed circle / unrunnable
  *   artifact source, G8) — never upgraded into an error or a fake entry.
  * - A renewal handoff whose `resolvedPurchaseUrl` failed closed is surfaced
@@ -117,25 +116,44 @@ export function isEntitlementJudgmentPaid(
 }
 
 /**
- * Whether the provider's CURRENT membership row still carries an active paid
- * entitlement. This intentionally separates a future renewal order from the
- * current term: the row must be active, its provider period must still run,
- * and the newest correction-aware source for that term must be paid (a partial
- * refund/dispute keeps the provider-retained remainder). Unpaid renewal
- * projections do not revoke the older paid source, while a definitive refund,
- * chargeback, expiry, suspension, elapsed period, or missing period fails closed. A
- * provider-omitted projection remains unknown and therefore defers to the
- * active provider row/current period; it is never treated as stored-paid
- * success. Free memberships are governed by their active lifecycle alone.
+ * Current-period display eligibility. V1 state is authoritative; corrections
+ * explain it, while recent attempts stay history. Lifecycle and local expiry
+ * can only restrict the provider result. Missing v1 retains the legacy
+ * correction-aware behavior below, including its conservative unpaid case.
+ * No result here bypasses Catalog/Main launch revalidation.
  */
 export function isMembershipCurrentlyPaidEntitled(
   membership: Pick<
     MemberMembership,
-    'status' | 'billingKind' | 'currentPeriodEnd' | 'paymentOrders'
+    'membershipId' | 'status' | 'billingKind' | 'currentPeriodEnd' | 'paymentOrders' | 'currentEntitlement'
   >,
   now: number = Date.now(),
 ): boolean {
   if (membership.status !== 'active') return false
+  const authority = membership.currentEntitlement
+  if (authority !== undefined) {
+    // Presence selects the v1 contract. Never fall back from unknown, denied
+    // or malformed authority to a paid-looking history row.
+    if (!authority || authority.version !== 1 || authority.state !== 'entitled'
+      || authority.membershipId !== membership.membershipId
+      || authority.source?.billingKind !== membership.billingKind
+      || !Number.isFinite(Date.parse(authority.computedAt))) return false
+    const periodMatches = authority.currentPeriodEnd === null
+      ? membership.currentPeriodEnd === null
+      : membership.currentPeriodEnd !== null
+        && Date.parse(authority.currentPeriodEnd) === Date.parse(membership.currentPeriodEnd)
+    if (!periodMatches) return false
+    if (authority.validUntil !== null) {
+      const until = Date.parse(authority.validUntil)
+      if (!Number.isFinite(until) || until <= now) return false
+    }
+    if (membership.billingKind === 'paid') {
+      const periodEnd = Date.parse(membership.currentPeriodEnd ?? '')
+      if (!Number.isFinite(periodEnd) || periodEnd <= now) return false
+    }
+    return true
+  }
+  // Compatibility for a response that omitted currentEntitlement entirely.
   if (membership.billingKind === 'free') return true
 
   const periodEnd = Date.parse(membership.currentPeriodEnd ?? '')
@@ -181,8 +199,8 @@ export function isMembershipCurrentlyPaidEntitled(
 
 /**
  * CircleIds whose creator-circle authorization is LOST — the same restricted
- * rule the C3 list rows apply (lifecycle not `active`, or the G5 projection
- * says the latest order is no longer paid), so the home directory, the circle
+ * rule the C3 list rows apply (current authority, lifecycle and local expiry;
+ * G5 history only on legacy responses), so the home directory, the circle
  * detail and the list can never disagree about one circle's authorization
  * (POO-70 visual review R1 F2; the H1 directory consumes the result as its
  * `lostCircleIds` input). A circle absent from the receipts is NOT in the
