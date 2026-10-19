@@ -360,7 +360,7 @@ describe('end-to-end: update_app_data → mounted card receives fresh ui_state',
     expect(fake.uiStates.length).toBe(0)
 
     const result = await handleUpdateAppData(
-      buildCtx((appId, dataPath) => { pushGenUiAppDataUpdate(SESSION_ID, appId, dataPath) }),
+      buildCtx((appId, dataPath) => pushGenUiAppDataUpdate(SESSION_ID, appId, dataPath)),
       { appId: 'app-1', dataSrc: 'state.json', data: { rows: [7, 8, 9] } },
     )
     expect(result.isError).toBeFalsy()
@@ -374,6 +374,27 @@ describe('end-to-end: update_app_data → mounted card receives fresh ui_state',
     expect(JSON.parse(readFileSync(join(dataDir, 'state.json'), 'utf-8'))).toEqual({ rows: [7, 8, 9] })
   })
 
+  it('keeps an update to an undeclared path storage-only (review P1-1)', async () => {
+    const fake = createFakeBridge()
+    mountCard(fake.bridge)
+
+    const undeclared = await handleUpdateAppData(
+      buildCtx((appId, dataPath) => pushGenUiAppDataUpdate(SESSION_ID, appId, dataPath)),
+      { appId: 'app-1', dataSrc: 'scratch.json', data: { note: 'not declared' } },
+    )
+    expect(undeclared.isError).toBeFalsy()
+    expect(JSON.parse(readFileSync(join(dataDir, 'scratch.json'), 'utf-8'))).toEqual({ note: 'not declared' })
+    expect(fake.uiStates.length).toBe(0)
+    expect(undeclared.content[0]?.text).toContain('polo-app-data')
+
+    const declared = await handleUpdateAppData(
+      buildCtx((appId, dataPath) => pushGenUiAppDataUpdate(SESSION_ID, appId, dataPath)),
+      { appId: 'app-1', dataSrc: 'state.json', data: { rows: [1] } },
+    )
+    expect(declared.isError).toBeFalsy()
+    expect(fake.uiStates.length).toBe(1)
+  })
+
   it('degrades to write-only when no card is mounted', async () => {
     // The app bundle exists (the model created one earlier) but no card is
     // attached — the update lands on disk only.
@@ -381,13 +402,13 @@ describe('end-to-end: update_app_data → mounted card receives fresh ui_state',
     const fake = createFakeBridge()
     setGenUiAppDataDeps({ bridge: fake.bridge, resolveSessionDataPath: () => dataDir })
     const result = await handleUpdateAppData(
-      buildCtx((appId, dataPath) => { pushGenUiAppDataUpdate(SESSION_ID, appId, dataPath) }),
+      buildCtx((appId, dataPath) => pushGenUiAppDataUpdate(SESSION_ID, appId, dataPath)),
       { appId: 'app-1', dataSrc: 'state.json', data: { v: 1 } },
     )
     expect(result.isError).toBeFalsy()
     expect(fake.uiStates.length).toBe(0)
     expect(JSON.parse(readFileSync(join(dataDir, 'state.json'), 'utf-8'))).toEqual({ v: 1 })
-    expect(result.content[0]?.text).toContain('injected when the card next attaches')
+    expect(result.content[0]?.text).toContain('polo-app-data')
   })
 })
 

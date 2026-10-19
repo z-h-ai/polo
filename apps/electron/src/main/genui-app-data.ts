@@ -469,6 +469,12 @@ function disposeDirWatch(realDir: string): void {
   } catch {
     // Already closed — nothing to do.
   }
+  // Drop the refs that pointed at this watcher so a later attach for the same
+  // (session, card, path) rebuilds instead of being suppressed by stale keys
+  // (review P2-2: otherwise an errored watcher silently kills auto-refresh).
+  for (const [refKey, ref] of [...watchRefs]) {
+    if (ref.realDir === realDir) watchRefs.delete(refKey)
+  }
 }
 
 /** Test seam: how many directory watchers are live right now. */
@@ -490,17 +496,26 @@ export function disposeAllGenUiAppDataWatchers(): void {
 /**
  * P1-3: push one freshly written app data file to the mounted card(s) of one
  * app id in one session (the update_app_data notification). Returns how many
- * cards received the update. The path is re-validated through the same fence
- * as every other read — a write can never smuggle an escape in at push time.
+ * cards received the update. Only DECLARED paths are pushed — matching the
+ * tool's contract that an update outside a declared path is invisible to the
+ * card — and the path is re-validated through the same fence as every other
+ * read, so a write can never smuggle an escape in at push time.
  */
 export function pushGenUiAppDataUpdate(sessionId: string, appId: string, dataPath: string): number {
   const dataDir = deps?.resolveSessionDataPath(sessionId)
   if (!dataDir) return 0
   const byCard = channelsBySession.get(sessionId)
   if (!byCard) return 0
+  let realDataPath: string
+  try {
+    realDataPath = realpathSync(dataPath)
+  } catch {
+    return 0
+  }
   let pushed = 0
   for (const channel of byCard.values()) {
     if (channel.appId !== appId) continue
+    if (!declaresResolvedPath(channel, dataDir, realDataPath)) continue
     if (pushDeclaration(channel, dataDir, dataPath)) pushed += 1
   }
   return pushed

@@ -161,14 +161,20 @@ export async function handleUpdateAppData(
   }
 
   // Mounted-card notification (Electron host). Absent seam → write-only:
-  // the content is injected on the card's next attach.
+  // the content is injected on the card's next attach. The host only pushes
+  // DECLARED paths (polo-app-data meta) — an undeclared write is storage-only.
   const delivered = ctx.notifyCanvasAppDataUpdated?.(appId, target.target);
+  const cards = typeof delivered === 'number' ? delivered : 0;
+  const deliveryNote =
+    typeof delivered === 'undefined'
+      ? 'No canvas host is wired right now — the content is injected when the card next attaches.'
+      : cards > 0
+        ? 'The new content was pushed to the mounted app card.'
+        : 'No mounted card currently declares this path, so nothing was pushed — only paths declared via the app\'s polo-app-data meta get live pushes and attach-time injection; this write is session-storage only.';
 
   const lines = [
     `App data updated: ${dataSrc} (${bytes} bytes).`,
-    delivered
-      ? 'The new content was pushed to the mounted app card.'
-      : 'No mounted card received the update right now — the content is injected when the card next attaches.',
+    deliveryNote,
     'Iterate further with update_app_data; reserve generate_app + updateOf for structural changes.',
   ];
   return successResponse(lines.join('\n'));

@@ -167,6 +167,25 @@ describe('handleUpdateAppData', () => {
     expect(result.content[0]?.text).toContain('pushed to the mounted app card');
   });
 
+  it('reports a declared-path push as delivered', async () => {
+    createApp();
+    const result = await handleUpdateAppData(ctx({
+      notifyCanvasAppDataUpdated: () => 2,
+    }), { appId: 'app-1a2b3c4d', dataSrc: 'state.json', data: { v: 3 } });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toContain('pushed to the mounted app card');
+  });
+
+  it('reports an undeclared-path update as storage-only (review P1-1)', async () => {
+    createApp();
+    const result = await handleUpdateAppData(ctx({
+      notifyCanvasAppDataUpdated: () => 0,
+    }), { appId: 'app-1a2b3c4d', dataSrc: 'scratch.json', data: { v: 4 } });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toContain('polo-app-data');
+    expect(result.content[0]?.text).toContain('session-storage only');
+  });
+
   it('writes to disk only when no canvas surface is wired (unmounted / non-desktop)', async () => {
     createApp();
     const result = await handleUpdateAppData(ctx(), { appId: 'app-1a2b3c4d', dataSrc: 'state.json', data: { v: 1 } });

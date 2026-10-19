@@ -95,7 +95,7 @@ export interface GenUiSessionManagerLike {
   queueGenUiModelContext?(sessionId: string, entry: { cardId: string; context: string }): boolean
   setGenUiSessionTeardownHook?(fn: (sessionId: string) => void): void
   /** P1-3 canvas app data channel push hook (optional for dep-less fakes). */
-  setGenUiAppDataPushHook?(fn: (sessionId: string, appId: string, dataPath: string) => void): void
+  setGenUiAppDataPushHook?(fn: (sessionId: string, appId: string, dataPath: string) => number | void): void
 }
 export interface GenUiSessionStorageLike {
   getSessionPath(workspaceRootPath: string, sessionId: string): string
@@ -149,9 +149,9 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
       onGuestDomReady: guestWebContentsId => injectGenUiAppDataForGuest(guestWebContentsId),
       onGuestDestroyed: guestWebContentsId => releaseGenUiAppDataForGuest(guestWebContentsId),
     })
-    sessionManager.setGenUiAppDataPushHook?.((sessionId, appId, dataPath) => {
-      pushGenUiAppDataUpdate(sessionId, appId, dataPath)
-    })
+    sessionManager.setGenUiAppDataPushHook?.((sessionId, appId, dataPath) =>
+      pushGenUiAppDataUpdate(sessionId, appId, dataPath),
+    )
   }
 
   server.handle(RPC_CHANNELS.genui.AUDIT_APP_PIN, async (ctx, request: GenUiAppPinAuditRequest): Promise<GenUiAppPinAuditResult> => {

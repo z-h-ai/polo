@@ -1675,9 +1675,9 @@ export class SessionManager implements ISessionManager {
       // no-id forms of set_session_labels above) — and the Electron-side hook
       // re-validates the data path against the session data/ fence before
       // anything is pushed to a card.
-      notifyCanvasAppDataUpdatedFn: this.guardManagedCallback(managed, 'self.notifyCanvasAppDataUpdatedFn', (appId: string, dataPath: string) => {
-        this.genUiAppDataPushHook?.(managed.id, appId, dataPath)
-      }),
+      notifyCanvasAppDataUpdatedFn: this.guardManagedCallback(managed, 'self.notifyCanvasAppDataUpdatedFn', (appId: string, dataPath: string) =>
+        this.genUiAppDataPushHook?.(managed.id, appId, dataPath),
+      ),
     }
   }
 
@@ -2179,9 +2179,9 @@ export class SessionManager implements ISessionManager {
    * data file (already confined to the session data/ directory by the tool
    * handler; the receiving side re-validates the fence before pushing).
    */
-  private genUiAppDataPushHook?: (sessionId: string, appId: string, dataPath: string) => void
+  private genUiAppDataPushHook?: (sessionId: string, appId: string, dataPath: string) => number | void
 
-  setGenUiAppDataPushHook(fn: (sessionId: string, appId: string, dataPath: string) => void): void {
+  setGenUiAppDataPushHook(fn: (sessionId: string, appId: string, dataPath: string) => number | void): void {
     this.genUiAppDataPushHook = fn
   }
 

@@ -438,7 +438,7 @@ export interface SessionToolContext {
    * card's next attach). The receiving side re-validates the path through
    * the session data/ fence; this callback never persists anything.
    */
-  notifyCanvasAppDataUpdated?: (appId: string, dataPath: string) => void;
+  notifyCanvasAppDataUpdated?: (appId: string, dataPath: string) => number | void;
 
   /** Restrict tool subprocess environments for a CLI one-shot Thread. */
   credentialIsolation?: boolean;

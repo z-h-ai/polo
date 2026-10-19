@@ -14,12 +14,13 @@ import {
   GENUI_APP_DATA_META_NAME,
   GENUI_APP_DATA_WATCH_DEBOUNCE_MS,
   GENUI_BRIDGE_CAPABILITIES_META_NAME,
+  GENUI_UI_EVENT_MAX_PAYLOAD_SRC_BYTES,
   parseGenUiAppDataDeclaration,
 } from '../dto'
 
 describe('GENUI app data channel constants (P1-3)', () => {
   it('mirrors the payloadSrc 1MB confinement and the update_app_data write cap', () => {
-    expect(GENUI_APP_DATA_MAX_FILE_BYTES).toBe(GENUI_APP_DATA_MAX_FILE_BYTES)
+    expect(GENUI_APP_DATA_MAX_FILE_BYTES).toBe(GENUI_UI_EVENT_MAX_PAYLOAD_SRC_BYTES)
     expect(GENUI_APP_DATA_MAX_FILE_BYTES).toBe(1024 * 1024)
     expect(UPDATE_APP_DATA_MAX_BYTES).toBe(GENUI_APP_DATA_MAX_FILE_BYTES)
   })

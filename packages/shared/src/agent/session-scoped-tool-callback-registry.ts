@@ -114,7 +114,7 @@ export interface SessionScopedToolCallbacks {
    * the Electron-installed push hook; absent outside the desktop surface, in
    * which case update_app_data degrades to write-to-disk only.
    */
-  notifyCanvasAppDataUpdatedFn?: (appId: string, dataPath: string) => void;
+  notifyCanvasAppDataUpdatedFn?: (appId: string, dataPath: string) => number | void;
 }
 
 // Registry of callbacks keyed by sessionId
