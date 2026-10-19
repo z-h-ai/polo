@@ -500,7 +500,8 @@ export class AdminClient {
    * different contractVersion fails closed with a dedicated error code so the
    * client can block business surfaces instead of guessing.
    */
-  async listProductSpaces(accessToken: string): Promise<ListProductSpacesResponse> {    const response = await this.request<unknown>(
+  async listProductSpaces(accessToken: string): Promise<ListProductSpacesResponse> {
+    const response = await this.request<unknown>(
       '/api/me/product-spaces',
       { method: 'GET', accessToken },
     );
