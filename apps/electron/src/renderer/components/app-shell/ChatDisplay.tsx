@@ -1145,13 +1145,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
   }, [])
 
-  // Set up scroll event listener
+  // Set up scroll event listener. Re-bound per session id so a null→session
+  // caller attaches after the viewport mounts instead of never (POO-111
+  // RECAP-04); `session?.id` is only a re-bind trigger here.
   React.useEffect(() => {
+    void session?.id
     const viewport = scrollViewportRef.current
     if (!viewport) return
     viewport.addEventListener('scroll', handleScroll)
     return () => viewport.removeEventListener('scroll', handleScroll)
-  }, [handleScroll])
+  }, [handleScroll, session?.id])
 
   // Auto-scroll using ResizeObserver for streaming content
   // Initial scroll is handled by ScrollOnMount (useLayoutEffect, before paint)
@@ -1482,6 +1485,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     return t('chat.recap.latestMessage')
   }, [recapTargetInfo, t])
 
+  // Stop bottom-follow *synchronously* on click. The browser only dispatches
+  // the scroll event for the reveal's scrollTo after the next rendering step,
+  // so a streaming chunk's already-pending 200ms gate timer could still fire
+  // with stickiness true and yank the user back down before that event lands.
+  const handleRecapClick = useCallback(() => {
+    isStickToBottomRef.current = false
+    stickyBottomScrollGateRef.current?.cancel()
+    recap.reveal()
+  }, [recap])
+
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
     allTurns.forEach((turn, index) => {
@@ -1585,7 +1598,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               <UserMessageRecap
                 preview={recapPreview}
                 ariaLabel={t('chat.recap.jumpToMessage')}
-                onClick={recap.reveal}
+                onClick={handleRecapClick}
                 compactMode={compactMode}
               />
             )}

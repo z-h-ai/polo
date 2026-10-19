@@ -3,6 +3,7 @@ import type { Turn } from '@polo-ai/ui'
 import type { Message, StoredAttachment } from '../../../../shared/types'
 import {
   RECAP_SESSION_ATTRIBUTE,
+  RECAP_TITLE_MAX_LENGTH,
   collapseRecapWhitespace,
   computeRecapScrollTop,
   createStickyBottomScrollGate,
@@ -12,6 +13,7 @@ import {
   resolveVisibleUserText,
   selectLatestSentUserTurn,
   tailwindPaddingTopPx,
+  truncateRecapTitle,
   type DeferredTimer,
 } from '../user-message-recap'
 
@@ -316,5 +318,22 @@ describe('createStickyBottomScrollGate — POO-111 debounce race regression', ()
     expect(harness.hasPending()).toBe(false)
     harness.advance(500)
     expect(runs).toEqual([2])
+  })
+})
+
+describe('truncateRecapTitle — native tooltip cap', () => {
+  test('keeps short previews verbatim', () => {
+    expect(truncateRecapTitle('short message')).toBe('short message')
+  })
+
+  test('caps very long previews at the follow-up-chip precedent length', () => {
+    const long = 'x'.repeat(600)
+    const truncated = truncateRecapTitle(long)
+    expect(truncated.length).toBe(RECAP_TITLE_MAX_LENGTH)
+    expect(truncated.endsWith('…')).toBe(true)
+  })
+
+  test('honors a custom limit', () => {
+    expect(truncateRecapTitle('abcdefghij', 5)).toBe('abcd…')
   })
 })

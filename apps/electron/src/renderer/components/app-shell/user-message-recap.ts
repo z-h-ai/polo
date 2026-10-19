@@ -72,8 +72,10 @@ export function resolveVisibleUserText(content: string, badges: ContentBadge[] |
   if (!badges || badges.length === 0) return content
 
   let text = content
-  // Replace from the end so earlier offsets stay valid.
-  const sorted = [...badges].sort((a, b) => b.start - a.start)
+  // Replace from the end so earlier offsets stay valid; the end tie-break
+  // keeps overlapping ranges (never seen in production) replacing
+  // deterministically, longest first.
+  const sorted = [...badges].sort((a, b) => (b.start - a.start) || (b.end - a.end))
   for (const badge of sorted) {
     const replacement = isEditRequestBadge(badge)
       ? ''
@@ -88,6 +90,19 @@ export function resolveVisibleUserText(content: string, badges: ContentBadge[] |
 /** Collapse all whitespace (incl. newlines) so the Recap stays one line. */
 export function collapseRecapWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
+}
+
+/** Upper bound for the native tooltip, matching the follow-up chip precedent. */
+export const RECAP_TITLE_MAX_LENGTH = 260
+
+/**
+ * Cap the tooltip so a very long message cannot produce a huge native title
+ * (same limit pattern as `truncateForChipTooltip` for follow-up chips).
+ * The on-screen Recap pill keeps its own truncation via CSS.
+ */
+export function truncateRecapTitle(text: string, maxLength = RECAP_TITLE_MAX_LENGTH): string {
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`
 }
 
 export type RecapPreviewSource =
