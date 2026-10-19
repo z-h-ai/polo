@@ -797,3 +797,46 @@ it('R3FIX restores the toolbar on a route remount under production StrictMode', 
   expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
   expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
 })
+
+
+it('R4FIX restores main scroll after route return under StrictMode, preserving query and filter', async () => {
+  const { StrictMode } = await import('react')
+  const tree = (withPage: boolean) => createElement(StrictMode, null,
+    pageTree({ accountId: 'account-a-fixture', withPage }))
+  const view = render(tree(true))
+  await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
+  fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
+  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  const scroller = screen.getByTestId('my-circles-page').parentElement!
+  scroller.scrollTop = 180
+  fireEvent.scroll(scroller)
+  view.rerender(tree(false))
+  view.rerender(tree(true))
+  expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(180)
+  expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
+  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+  view.rerender(pageTree({ accountId: 'account-b-fixture', contextVersion: 2 }))
+  await waitFor(() => expect(screen.getAllByTestId('circle-row')).toHaveLength(1))
+  expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(0)
+})
+
+it('R4FIX waits for same-scope data before restoring scroll and resets on account, space or epoch changes', async () => {
+  const original = makeInjectedResource({ phase: 'ready', circles: accountACircles(), memberships: accountAMemberships() })
+  const key = original.state.scope!
+  const tree = (resource: MemberCirclesResource, withPage = true) => createElement(I18nextProvider, { i18n },
+    createElement(MemberCircleResourceProvider, { resource, children: withPage ? createElement(MyCirclesPage) : null }))
+  const view = render(tree(original))
+  const scroller = screen.getByTestId('my-circles-page').parentElement!
+  scroller.scrollTop = 180
+  fireEvent.scroll(scroller)
+  view.rerender(tree(original, false))
+  const loading = { ...original, circles: null, memberships: null, state: { ...original.state, phase: 'loading' as const, circles: null, memberships: null } }
+  view.rerender(tree(loading))
+  expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(0)
+  view.rerender(tree(original))
+  expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(180)
+  for (const scope of [{ ...key, accountId: 'another-account' }, { ...key, personalProductSpaceId: 'another-space' }, { ...key, epoch: key.epoch + 1 }]) {
+    view.rerender(tree({ ...original, state: { ...original.state, scope } }))
+    expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(0)
+  }
+})

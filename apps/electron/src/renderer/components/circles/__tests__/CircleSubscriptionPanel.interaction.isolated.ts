@@ -781,3 +781,44 @@ describe('cross-circle isolation: switching circles drops state and invalidates 
     expect(screen.getByTestId('circle-subscription-circle-name').textContent).toBe('星河年度圈')
   })
 })
+
+
+describe('R4FIX current entitlement in subscription status', () => {
+  it('expires on the real clock without another receipt, despite stored active and older paid history', async () => {
+    const periodEnd = new Date(Date.now() + 180).toISOString()
+    const current = membershipFixture({
+      currentPeriodEnd: periodEnd,
+      paymentOrders: [membershipFixture().paymentOrders[0]!, {
+        ...membershipFixture().paymentOrders[0]!, orderId: 'older-paid',
+      }],
+    })
+    renderPanel({ membership: current, circle: circleFixture({ currentPeriodEnd: periodEnd }) })
+    expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).toBe('active')
+    await waitFor(() => {
+      expect(Date.now()).toBeGreaterThanOrEqual(Date.parse(periodEnd))
+      expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).not.toBe('active')
+    })
+    expect(screen.getByTestId('circle-subscription-status').className).not.toContain('bg-success')
+    expect(screen.getByTestId('circle-subscription-validity-value').textContent).not.toContain('有效至')
+    expect(current.status).toBe('active')
+  })
+
+  for (const effectivePaymentStatus of ['refunded', 'disputed', 'pending', 'cancelled', 'failed']) {
+    it(`uses correction-aware current entitlement for ${effectivePaymentStatus} ahead of an older paid order`, async () => {
+      renderPanel({ membership: membershipFixture({
+        paymentOrders: [{ ...membershipFixture().paymentOrders[0]!, orderId: 'latest-r4', effectivePaymentStatus },
+          membershipFixture().paymentOrders[0]!],
+      }) })
+      const status = screen.getByTestId('circle-subscription-status')
+      if (effectivePaymentStatus === 'refunded' || effectivePaymentStatus === 'disputed') {
+        expect(status.getAttribute('data-status')).not.toBe('active')
+        expect(status.className).not.toContain('bg-success')
+      } else expect(status.getAttribute('data-status')).toBe('active')
+    })
+  }
+
+  it('does not claim active on an expired paid circle fallback without a membership receipt', () => {
+    renderPanel({ membership: null, circle: circleFixture({ currentPeriodEnd: '2000-01-01T00:00:00.000Z' }) })
+    expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).not.toBe('active')
+  })
+})
