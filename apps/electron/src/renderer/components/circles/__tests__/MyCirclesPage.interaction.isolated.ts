@@ -687,7 +687,7 @@ describe('MyCirclesPage distinct system states (P70-CIRCLE-LIST-02)', () => {
 // -------------------------------------------------------------------------
 
 describe('MyCirclesPage navigation and toolbar restore (P70-CIRCLE-LIST-03)', () => {
-  it('navigates to circle-detail content with the STABLE circleId and returns home via back', async () => {
+  it('navigates with the STABLE circleId and the explicit home action clears all history (P-R2-01)', async () => {
     await renderReadyPage()
     // Set the stack to [home, circles] through the REAL ClientPageContext,
     // exactly like the home circles entry (P70-NAV-01).
@@ -700,11 +700,12 @@ describe('MyCirclesPage navigation and toolbar restore (P70-CIRCLE-LIST-03)', ()
     fireEvent.click(designRow.querySelector('[data-testid="circle-row-open"]')!)
     expect(observedRoute).toEqual({ kind: 'circle-detail', circleId: 'circle-design', section: 'content' })
 
-    // 返回首页 pops ONE stack entry (detail → circles), and the home ROOT is
-    // never popped below.
+    // This isolated harness keeps the list mounted while observing routes.
+    // 返回首页 always selects home, even with a detail in the history.
     fireEvent.click(screen.getByTestId('my-circles-back'))
-    expect(observedRoute).toEqual({ kind: 'circles' })
-    fireEvent.click(screen.getByTestId('my-circles-back'))
+    expect(observedRoute).toEqual({ kind: 'home' })
+    expect(probeClientPage!.canGoBack).toBe(false)
+    await act(async () => probeClientPage!.back())
     expect(observedRoute).toEqual({ kind: 'home' })
   })
 

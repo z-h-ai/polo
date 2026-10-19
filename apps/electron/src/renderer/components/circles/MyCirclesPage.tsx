@@ -287,14 +287,9 @@ export function MyCirclesPage() {
   }, [clientPage])
 
   const handleBack = useCallback(() => {
-    // The route stack root is home; back from circles returns there. Without
-    // the provider (isolated probes) the button does nothing — no fake exit.
-    if (!clientPage) return
-    if (clientPage.canGoBack) {
-      clientPage.back()
-    } else {
-      clientPage.navigate({ kind: 'home' })
-    }
+    // This control promises Home, regardless of the route used to reach the
+    // list. The shared home transition also clears prior detail history.
+    clientPage?.navigate({ kind: 'home' })
   }, [clientPage])
 
   return (

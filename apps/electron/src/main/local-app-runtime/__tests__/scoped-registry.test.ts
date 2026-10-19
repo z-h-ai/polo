@@ -373,6 +373,53 @@ describe('scoped local app runtime registry', () => {
     }
   })
 
+  it('P-R2-04: trusted legacy cleanup works behind logout fences and preserves data without reauthorizing A', async () => {
+    const operations: string[] = []
+    class CleanupManager extends LocalAppRuntimeManager {
+      override async readNativeInstallationEvidence(_appId: string) {
+        return { presence: 'installed' as const, versions: [{ version: '1.0.0', checksum: 'a'.repeat(64), admissionId: null }] }
+      }
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        operations.push(`stop:${appId}`)
+        return { appId, status: 'stopped' }
+      }
+      override async uninstall(appId: string, options = {}) {
+        operations.push(`uninstall:${appId}:${JSON.stringify(options)}`)
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir, managerFactory: options => new CleanupManager(options) })
+    const legacy = scope('account-a')
+    await registry.stop(legacy)
+    registry.fenceAccount('account-a')
+    operations.length = 0
+    await expect(registry.stop(legacy)).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await registry.removeLegacyInstallationState(legacy)
+    expect(operations).toEqual([
+      `stop:${createCatalogRuntimeAppId(legacy)}`,
+      `uninstall:${createCatalogRuntimeAppId(legacy)}:{"preserveData":true}`,
+    ])
+    await expect(registry.start(legacy)).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(registry.uninstall(legacy)).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(registry.getRuntimeStatus(scope('account-b'))).resolves.toMatchObject({ status: 'not_installed' })
+  })
+
+  it('P-R2-04: migration never uninstalls a native-admitted ProductSpace installation', async () => {
+    let uninstalled = false
+    class NativeManager extends LocalAppRuntimeManager {
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> { return { appId, status: 'stopped' } }
+      override async readNativeInstallationEvidence(_appId: string) {
+        return { presence: 'installed' as const, versions: [{ version: '1.0.0', checksum: 'a'.repeat(64), admissionId: '11111111-1111-4111-8111-111111111111' }] }
+      }
+      override async uninstall() { uninstalled = true }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir, managerFactory: options => new NativeManager(options) })
+    const installed = scope('account-a')
+    await registry.stop(installed)
+    registry.fenceAccount('account-a')
+    await registry.removeLegacyInstallationState(installed)
+    expect(uninstalled).toBe(false)
+  })
+
   it('stops only managers belonging to the requested account', async () => {
     const stopped: string[] = []
     class TrackingManager extends LocalAppRuntimeManager {

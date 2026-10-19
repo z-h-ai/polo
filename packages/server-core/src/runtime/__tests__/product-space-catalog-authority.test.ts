@@ -130,14 +130,40 @@ describe('ProductSpace Catalog authority', () => {
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.tombstones).toEqual([])
   })
 
-  it('drops an unconfirmed tombstone on the next verified empty Catalog', () => {
-    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
-    expect(recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-2', []))
-      .toHaveLength(1)
-    expect(recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-3', []))
-      .toEqual([])
-    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.tombstones)
-      .toEqual([])
+  it('P-R2-05: retains source-bound withdrawals through polling and disk reload without renewing their age', () => {
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry({
+      sources: [{ kind: 'creator_circle', name: 'Design Circle', circleId: 'circle-a' }],
+    })])
+    const [withdrawn] = recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-2', [])
+    expect(withdrawn!.withdrawnAt).toBeNumber()
+    for (let index = 0; index < 5; index++) {
+      const rows = recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', `empty-${index}`, [])
+      expect(rows).toEqual([withdrawn!])
+      expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.entries).toEqual([])
+    }
+    // A cache drop is a SAME-process reload, not a cold process. Use a real
+    // child to verify cold-start distrust before fresh revalidation.
+    const restarted = Bun.spawnSync({
+      cmd: [process.execPath, '-e', `
+        const mod = await import(${JSON.stringify(join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts'))})
+        const trustedBefore = mod.hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...${JSON.stringify(tuple())})
+        const rows = mod.recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'cold-fresh-empty', [])
+        console.log(JSON.stringify({ trustedBefore, rows }))
+      `],
+      env: { ...process.env }, stdout: 'pipe', stderr: 'pipe',
+    })
+    expect(restarted.exitCode).toBe(0)
+    expect(JSON.parse(restarted.stdout.toString())).toEqual({ trustedBefore: false, rows: [withdrawn!] })
+    __dropAuthorityProcessCacheForTests()
+    expect(recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'fresh-empty', [])).toEqual([withdrawn!])
+    expect(recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'restored', [entry({
+      version: { versionId: 'version-2', version: '2.0.0' },
+      sources: [{ kind: 'creator_circle', name: 'Restored Circle', circleId: 'circle-a' }],
+    })])).toEqual([])
+    const restored = getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
+    expect(restored.tombstones).toEqual([])
+    expect(String(restored.entries[0]!.versionId)).toBe('version-2')
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
   })
 
   it('never shares records or bindings across accounts or ProductSpaces', () => {

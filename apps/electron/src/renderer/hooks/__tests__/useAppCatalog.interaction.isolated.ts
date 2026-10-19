@@ -948,6 +948,57 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
     )
   })
 
+  it('P-R2-05: real persisted authority survives repeated reads, renderer remount, and fresh restoration', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { recordProductSpaceCatalogAuthoritativeEntries: record } = await import('../../../../../../packages/server-core/src/runtime/product-space-catalog-authority-commit')
+    const { resetProductSpaceCatalogAuthorityForTests: reset } = await import('../../../../../../packages/server-core/src/runtime/product-space-catalog-authority')
+    const previousConfig = process.env.POLO_AI_CONFIG_DIR
+    const config = mkdtempSync(join(tmpdir(), 'polo-r2-renderer-'))
+    process.env.POLO_AI_CONFIG_DIR = config
+    reset()
+    try {
+      let entries = [strictEntry()]
+      let revision = 0
+      const api = window.electronAPI as any
+      api.productSpaceGetCatalog = async () => {
+        const catalogRevision = `authority-${++revision}`
+        const withdrawn = record('account-a', 'organization-a', catalogRevision, entries)
+        return {
+          success: true, notModified: false, contractVersion: 1, catalogRevision,
+          productSpaceId: 'organization-a', accessMode: 'online', entries,
+          withdrawnEntries: withdrawn.map(row => ({ ...row, version: { versionId: row.versionId, version: row.version } })),
+        }
+      }
+      withdrawnInstallStatesInstalled()
+      const first = renderHook(() => useAppCatalog())
+      await waitFor(() => expect(first.result.current.state.catalog?.apps).toHaveLength(1))
+      entries = []
+      for (let poll = 0; poll < 4; poll++) {
+        await act(async () => { await first.result.current.sync(true) })
+        expect(first.result.current.state.catalog?.withdrawnApps).toHaveLength(1)
+        expect(first.result.current.state.catalog?.apps).toHaveLength(0)
+      }
+      first.unmount()
+      const reopened = renderHook(() => useAppCatalog())
+      await waitFor(() => expect(reopened.result.current.state.catalog?.withdrawnApps).toHaveLength(1))
+      const withdrawn = reopened.result.current.state.catalog!.withdrawnApps![0]!
+      expect(withdrawn.catalogSources).toEqual([{ kind: 'enterprise_import', name: 'Studio A' }])
+      await expect(reopened.result.current.resolveLaunch(withdrawn)).rejects.toThrow()
+      entries = [strictEntry({ versionId: 'version-restored', version: '3.0.0' })]
+      await act(async () => { await reopened.result.current.sync(true) })
+      expect(reopened.result.current.state.catalog?.withdrawnApps).toHaveLength(0)
+      expect(reopened.result.current.state.catalog?.apps[0]?.catalogVersion?.version).toBe('3.0.0')
+      reopened.unmount()
+    } finally {
+      reset()
+      if (previousConfig === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfig
+      rmSync(config, { recursive: true, force: true })
+    }
+  })
+
   it('does not create tombstones on version upgrades and keeps install states fresh', async () => {
     const api = window.electronAPI as any
     let entries = [strictEntry()]

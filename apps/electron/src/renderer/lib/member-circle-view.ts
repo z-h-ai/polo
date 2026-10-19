@@ -121,7 +121,7 @@ export function isEntitlementJudgmentPaid(
  * entitlement. This intentionally separates a future renewal order from the
  * current term: the row must be active, its provider period must still run,
  * and the newest correction-aware source for that term must be paid (a partial
- * refund/dispute keeps the provider-retained remainder). Pending renewal
+ * refund/dispute keeps the provider-retained remainder). Unpaid renewal
  * projections do not revoke the older paid source, while a definitive refund,
  * chargeback, expiry, suspension, elapsed period, or missing period fails closed. A
  * provider-omitted projection remains unknown and therefore defers to the
@@ -164,9 +164,13 @@ export function isMembershipCurrentlyPaidEntitled(
       hasCurrentSource = true
       break
     }
+    // Unpaid attempts never created a benefit to revoke. Skip their current
+    // projection and continue to the paid source; actual refund/dispute
+    // corrections still reject before an older paid row can mask them.
     if (
       judgment.effectivePaymentStatus !== 'pending'
-      && judgment.effectivePaymentStatus !== 'unknown'
+      && judgment.effectivePaymentStatus !== 'cancelled'
+      && judgment.effectivePaymentStatus !== 'failed'
     ) {
       return false
     }
