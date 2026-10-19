@@ -69,7 +69,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
 import { formatCanonicalSkillDiscovery } from './canonical-skill-discovery.ts';
-import { loadAllSkills, GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../skills/storage.ts';
+import { loadAllSkills, loadBundledSkills, GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../skills/storage.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -1009,7 +1009,11 @@ ${formattedMessages}
   } {
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
-    const skills = [...(allowLocal ? loadAllSkills(workspaceRoot, projectRoot, this.config.localGlobalSkillsRoot) : []), ...canonical];
+    // Bundled app skills stay discoverable in every ProductSpace; allowLocal
+    // keeps hiding only the personal global/workspace/project legacy roots.
+    // loadAllSkills already contains the bundled tier when local skills are
+    // allowed, so only the restricted branch loads it separately here.
+    const skills = [...(allowLocal ? loadAllSkills(workspaceRoot, projectRoot, this.config.localGlobalSkillsRoot) : loadBundledSkills()), ...canonical];
     const skillSlugs = skills.map(s => s.slug);
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);
@@ -1126,7 +1130,10 @@ ${formattedMessages}
 
     // Prepend read directive to the message so the model reads SKILL.md first.
     const directive = this.formatSkillDirective(skillPaths);
-    const discovery = formatCanonicalSkillDiscovery(canonical,message,(attachments ?? []).map(file=>file.name),allowLocal);
+    // Bundled app Skills are advertised for natural-language discovery in every
+    // ProductSpace; canonicalSkillPaths stays canonical-only so bundled reads
+    // never consume SkillTurn authorization.
+    const discovery = formatCanonicalSkillDiscovery([...loadBundledSkills(), ...canonical],message,(attachments ?? []).map(file=>file.name),allowLocal);
     const messageParts = [branchSeedContext, transferredSessionContext, discovery, directive, cleanMessage].filter(Boolean);
     const effectiveMessage = messageParts.join('\n\n');
 

@@ -5,6 +5,7 @@
  */
 
 export * from './types.ts';
+export { BUNDLED_SKILLS_ASSET_DIRNAME, getBundledSkillsRoot } from './bundled.ts';
 export {
   GLOBAL_AGENT_SKILLS_DIR,
   PROJECT_AGENT_SKILLS_DIR,
@@ -12,6 +13,8 @@ export {
   loadAllSkills,
   invalidateSkillsCache,
   loadSkillBySlug,
+  loadBundledSkills,
+  loadBundledSkill,
   getSkillIconPath,
   deleteSkill,
   skillExists,

@@ -192,6 +192,22 @@ export function setBundledAssetsRoot(dir: string): void {
 }
 
 /**
+ * Current assets root override, or undefined when unset.
+ * Lets hosts and tests snapshot/restore resolution state around it.
+ */
+export function getBundledAssetsRoot(): string | undefined {
+  return _assetsRoot;
+}
+
+/**
+ * Forget a previously registered assets root, restoring the unset state.
+ * Without this a snapshot/restore pair cannot restore "unset".
+ */
+export function clearBundledAssetsRoot(): void {
+  _assetsRoot = undefined;
+}
+
+/**
  * Resolve the path to a bundled assets subdirectory.
  *
  * All bundled assets now live in resources/ which electron-builder handles natively.

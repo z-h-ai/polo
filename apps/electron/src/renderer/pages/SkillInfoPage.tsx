@@ -344,6 +344,8 @@ export default function SkillInfoPage({
   // Get skill name for header
   const skillName = skill?.metadata.name || skillSlug
   const canDeleteSkill = skill?.source === 'workspace'
+  // Bundled Skills ship inside the app: visible and readable, but not editable.
+  const isBundledSkill = skill?.source === 'bundled'
   const isSafeRollback = Boolean(
     availableVersion
     && creatorInstalledVersion
@@ -389,7 +391,11 @@ export default function SkillInfoPage({
             canShowInFinder={canRevealLocally}
             onDelete={canDeleteSkill ? handleDelete : undefined}
             canDelete={canDeleteSkill}
-            deleteLabel={canDeleteSkill ? t('skillInfo.deleteSkill') : t('skillInfo.managedByProject')}
+            deleteLabel={
+              canDeleteSkill ? t('skillInfo.deleteSkill')
+                : isBundledSkill ? t('skillInfo.builtInNotRemovable')
+                  : t('skillInfo.managedByProject')
+            }
           />
         }
       />
@@ -473,7 +479,7 @@ export default function SkillInfoPage({
           {/* Metadata */}
           <Info_Section
             title={t('skillInfo.metadata')}
-            actions={
+            actions={isBundledSkill ? undefined : (
               // EditPopover for AI-assisted metadata editing (name, description in frontmatter)
               <EditPopover
                 trigger={<EditButton />}
@@ -483,7 +489,7 @@ export default function SkillInfoPage({
                   filePath: `${skill.path}/SKILL.md`,
                 }}
               />
-            }
+            )}
           >
             <Info_Table>
               <Info_Table.Row label={t('common.slug')} value={skill.slug} />
@@ -494,6 +500,7 @@ export default function SkillInfoPage({
               <Info_Table.Row label={t('common.source')}>
                 {skill.source === 'project' ? t('skillInfo.sourceProject') :
                  skill.source === 'global' ? t('skillInfo.sourceGlobal') :
+                 skill.source === 'bundled' ? t('skillInfo.sourceBundled') :
                  t('skillInfo.sourceWorkspace')}
               </Info_Table.Row>
               <Info_Table.Row label={t('common.location')}>
@@ -536,7 +543,7 @@ export default function SkillInfoPage({
           {/* Instructions */}
           <Info_Section
             title={t('skillInfo.instructions')}
-            actions={
+            actions={isBundledSkill ? undefined : (
               // EditPopover for AI-assisted editing with "Edit File" as secondary action
               <EditPopover
                 trigger={<EditButton />}
@@ -546,7 +553,7 @@ export default function SkillInfoPage({
                   filePath: `${skill.path}/SKILL.md`,
                 }}
               />
-            }
+            )}
           >
             <Info_Markdown maxHeight={540} fullscreen>
               {skill.content || t('skillInfo.noInstructions')}
