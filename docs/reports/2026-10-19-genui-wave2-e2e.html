@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<title>GenUI Wave-2 端到端验收报告 · 2026-10-19</title>
+<style>
+  body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#1a1a2e;line-height:1.65;background:#fafafa}
+  h1{font-size:1.6em;border-bottom:3px solid #4f46e5;padding-bottom:8px}
+  h2{font-size:1.25em;margin-top:2em;border-left:4px solid #4f46e5;padding-left:10px}
+  h3{font-size:1.05em;margin-top:1.4em}
+  table{border-collapse:collapse;width:100%;margin:12px 0;background:#fff}
+  th,td{border:1px solid #d5d5e2;padding:7px 10px;text-align:left;font-size:.92em;vertical-align:top}
+  th{background:#eef0fb}
+  .pass{color:#047857;font-weight:700}
+  .fail{color:#b91c1c;font-weight:700}
+  .warn{color:#b45309;font-weight:700}
+  code{background:#eceef8;padding:1px 5px;border-radius:3px;font-size:.88em}
+  .box{background:#fff;border:1px solid #d5d5e2;border-radius:8px;padding:14px 18px;margin:12px 0}
+  .verdict{background:#ecfdf5;border:2px solid #047857;border-radius:8px;padding:14px 18px;margin:16px 0;font-size:1.05em}
+  .small{font-size:.85em;color:#555}
+  ul{margin:6px 0}
+</style>
+</head>
+<body>
+<h1>GenUI Wave-2 端到端验收报告</h1>
+<p class="small">日期 2026-10-19 · 分支 <code>iter/genui-wave2</code>（基线 dev@a80431cb）· 流程 normal-coding-task-flow（coder → reviewer 循环 → E2E）· 本报告自包含无外部资源</p>
+
+<h2>1 · 范围与交付</h2>
+<table>
+<tr><th>清单项</th><th>交付</th><th>关键提交</th></tr>
+<tr><td><b>P1-3</b> 画布应用增量编辑（数据/结构分离）</td><td><code>&lt;meta name="polo-app-data"&gt;</code> 声明 + attach 时围栏注入 + 新 session 工具 <code>update_app_data</code>（containment + 原子写 + 点对点推送）；generate_app 描述追加数据/结构契约</td><td><code>8c6fef51</code> <code>92bde273</code></td></tr>
+<tr><td><b>P2-1</b> 画布数据自动刷新（Query 等价物）</td><td>SessionManager 对声明文件注册目录级 fs watch（引用计数共享、trailing 防抖 1s、persistent:false+unref），变更经 <code>postUiStateToCard</code> 点对点推送；三条注销路径齐备</td><td><code>f91e0903</code></td></tr>
+<tr><td><b>P0-1 扩展</b> 图表联动（客户端闭环）</td><td>GenUiChart 图例点击式 series toggle（bar/line，pie/funnel 保持只读）+ recharts Brush 区间筛选（纵向且 ≥8 类目）；全 ephemeral，零 action / 零 schema 变化 / 零持久化，payload remount 重置</td><td><code>c1ce757c</code></td></tr>
+<tr><td><b>P1-1</b> schema 瘦身（先实测再动手）</td><td>重估结论：<b>值得做、值得保持</b>。仅描述去重（四处）+ 非功能性约束撤除，零结构变化。模型可见 <b>3,507 → 2,302 tok（−34.4%，−1,205 tok/轮）</b>；9 个被行为测试钉住的长度帽保留；下一档（子集 schema / schemaVersion 2）超出本项边界，已记录建议</td><td><code>52b2cba8</code></td></tr>
+</table>
+
+<h2>2 · Review 循环</h2>
+<div class="box">
+<p><b>第 1 轮</b>（全量 diff 审查，含 mutation 推演验证测试真实性）：7 项清单 4 PASS / 3 PASS-with-notes，findings：<b class="fail">P1×1</b>（update 路径推送未按声明过滤，与工具描述承诺不符）+ P2×4。结论 CHANGES-REQUIRED。</p>
+<p><b>第 2 轮</b>（修复复审）：P1-1 修复为共用谓词的声明过滤 + 计数沿 hook 链传播 + handler 文案三分支；P2-1 恒真断言改为与 payloadSrc 常量真实对照；P2-2（disposeDirWatch 残留 refs 抑制重建）一并修复——该缺陷在修复前被新增挂载周期实测触发（两次 watch 测试 4s 超时），修复后消失，构成回归证据。结论 <b class="pass">APPROVED</b>（P0×0，P1×0）。修复提交 <code>8809c235</code>。</p>
+<p class="small">遗留（按约下轮，不阻塞）：P2-3 pi-agent 守卫直接单测（与 generate_app 守卫对称）；P2-4 记录项（ui_state 无文件标识、双推幂等、record 文件 generate_app 数字过时）。</p>
+</div>
+
+<h2>3 · 端到端验收</h2>
+<h3>3.1 方法</h3>
+<p>dev 基线（a80431cb）与集成分支各跑一次 <code>bun run test</code> 全量（600/603 文件），按<b>失败名集合差</b>判定——环境性存量失败每次运行存在 ±3 漂移，集合差比原始计数稳健。</p>
+<h3>3.2 结果</h3>
+<table>
+<tr><th>指标</th><th>dev 基线</th><th>iter/genui-wave2</th></tr>
+<tr><td>测试数 / 文件数</td><td>7,408 / 600</td><td>7,464 / 603（<b>+56 个新测试</b>）</td></tr>
+<tr><td>pass / fail / errors</td><td>7,152+ / 240 / 12</td><td>— / 239 / 12</td></tr>
+<tr><td>唯一失败名</td><td>235</td><td>234</td></tr>
+<tr><td>新增失败（分支有、基线无）</td><td colspan="2">3 个，全部位于 <code>local-app-runtime/manager.test.ts</code>——该套件在 dev 基线单独复跑同样 33/52 失败，为<b>存量环境性损坏</b>（失败子集逐次漂移），非本波引入</td></tr>
+<tr><td>消失失败（基线有、分支无）</td><td colspan="2">4 个，同属该 flaky 池（Creator Skill installer 计时、Bun 环境、LocalAppRuntimeManager），逐次漂移的镜像面</td></tr>
+</table>
+
+<div class="box">
+<h3>3.3 针对性与门禁证据（集成分支实测）</h3>
+<ul>
+<li>围栏/注入/端到端隔离套件 <code>genui-app-data.isolated.ts</code>：<b class="pass">37/0</b>（`..`、绝对路径、文件与中间目录符号链接、&gt;1MB、坏 JSON、NUL、≤3 声明、推送时逃逸拒绝、跨卡跨会话隔离、handler→ctx→push 端到端、watch 生命周期 8 例——真实 fs.watch）</li>
+<li>session-tools-core 全包 <b class="pass">277/0</b>（含 handler 20 围栏用例、门控 filtering 22 断言）；shared protocol+prompts <b class="pass">40/0</b>；ui+session-tools-core 合跑 <b class="pass">708/0</b>（Wave-2 inline 侧）</li>
+<li><code>bun run typecheck:all</code> <b class="pass">exit 0</b>；lint 三段（ui 3 / shared 0+20 / electron 4）与 dev 基线<b>逐字持平，零新增</b></li>
+<li>electron main 聚合套件失败集与 dev 基线<b>逐字一致</b>（1 fail+1 error 为存量 BrowserWindow mock 干扰）</li>
+<li>P1-1 数字复核：bench 复跑 after 列逐字节一致（render_ui schema 6,577 chars / ~1,645 tok；合计 9,207 / ~2,302）</li>
+</ul>
+</div>
+
+<div class="verdict">✅ <b>E2E 结论：通过</b> —— 零 Wave-2 引入的失败；+56 个新测试全绿；围栏、生命周期、回归面与数字主张全部被真实测试钉住。按用户指令进入 push 分支 → 合入 dev → push dev。</div>
+
+<h2>4 · 偏离与风险声明</h2>
+<ul>
+<li><b>模型偏差</b>：本环境 Agent 工具不支持按代理选模型，coder/reviewer 实际均运行在会话模型上（用户指定 coder glm-5.3-flash / reviewer glm-5.3；与 Wave-1 相同的已知偏差）。</li>
+<li><b>真机浏览器场景</b>：真实 webview 收推送 / watch 实时刷新以隔离单测覆盖（真实 fs + 真实 handler + 真围栏，fake 仅替 bridge 投递窄缝），未做真机会话实测；attach+dom-ready 双推按幂等消费兜底。</li>
+<li><b>整目录 rename</b> 会使 watch 静默失效（fail-soft，下次 attach 重建）；P2-2 修复消除了 error 后 refs 残留的抑制窗口。</li>
+<li>已知环境噪音（非本波引入，均 stash/基线对照证实）：lint:ipc-sends 缺脚本 127、host-executor-policy 3 失败（Bun.build metafile）、i18n parity 5 失败（productSpaceSkills 既有）、local-app-runtime / assistant-scope-persistence 存量失败池。</li>
+</ul>
+
+<h2>5 · 证据索引</h2>
+<p class="small">
+分支 <code>iter/genui-wave2</code>：8c6fef51 · f91e0903 · 92bde273 · fb4f9744（画布侧）｜ c1ce757c · 52b2cba8（inline 侧，含 <code>docs/plans/genui-borrow-list/wave2-inline-record.md</code>）｜ ac3cdc10（集成合并）｜ 8809c235（review 修复）<br>
+执行记录：plan.md Wave-2 节 + wave2-inline-record.md ｜ 方案依据：docs/reports/2026-10-18-genui-vs-openui.html §5 ｜ 基线日志：/tmp/wave2-baseline-full.log · 分支日志：/tmp/wave2-full-e2e.log
+</p>
+</body>
+</html>

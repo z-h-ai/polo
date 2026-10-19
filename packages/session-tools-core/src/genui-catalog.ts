@@ -48,12 +48,18 @@ export const GENUI_BUILTIN_COMPONENT_DESCRIPTORS: readonly GenUiComponentDescrip
   { type: 'stat-card', description: 'single metric with optional delta and trend', interactive: false },
   // data-table is interactive in the action-buttons/form sense: its optional
   // rowAction/detailTemplate route through the same host-mediated craft:
-  // pipeline (a table without them simply has no clickable parts).
-  { type: 'data-table', description: 'sortable file-backed table (rows via transform_data + "src", never inline) with optional per-row actions and source links', interactive: true },
-  { type: 'chart', description: 'bar/line/funnel/pie chart with inline categories and up to 3 series — distributions, trends, shares, stage drop-off; use data-table for row-level detail', interactive: false },
+  // pipeline (a table without them simply has no clickable parts). Absorbed
+  // from the P1-1 slimmed tool-description bullets: file-backed-only rows,
+  // and the percent-column semantics pointer (full wording lives in the base
+  // description's **Value semantics** section).
+  { type: 'data-table', description: 'file-backed table (rows via transform_data + "src", never inline), sortable/filterable, optional per-row actions and source links', interactive: true },
+  // P1-1: absorbed the chart bullet from the base description ("chartType"
+  // wording is pinned by tool-defs-genui-chart's description test).
+  { type: 'chart', description: 'chart via "chartType": bar/line/funnel/pie over 2-24 categories, up to 3 series — trends, distributions, shares, funnels; use data-table for row-level detail', interactive: false },
   { type: 'alert', description: 'info/success/warning/error banner', interactive: false },
   { type: 'progress', description: 'running/success/error indicator with optional percent', interactive: false },
-  { type: 'action-buttons', description: '1-6 buttons that send a follow-up message or prefill the chat input', interactive: true },
+  // P1-1: absorbed the action-buttons bullet guidance (confirm/params usage).
+  { type: 'action-buttons', description: '1-6 buttons that send a follow-up message or prefill the chat input; use confirm for high-stakes, params + {{key}} templates instead of hardcoding values', interactive: true },
   { type: 'form', description: '1-12 fields the user fills; submit sends the values object as the next user message', interactive: true },
 ];
 

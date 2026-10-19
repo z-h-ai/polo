@@ -26,6 +26,7 @@ import { handleConfigValidate } from './handlers/config-validate.ts';
 import { handleSkillValidate } from './handlers/skill-validate.ts';
 import { handleMermaidValidate } from './handlers/mermaid-validate.ts';
 import { handleGenerateApp } from './handlers/generate-app.ts';
+import { handleUpdateAppData } from './handlers/update-app-data.ts';
 import { handleSourceTest } from './handlers/source-test.ts';
 import {
   handleSourceOAuthTrigger,
@@ -156,62 +157,73 @@ export const RENDER_UI_MAX_PAYLOAD_BYTES = 4096;
 /** Max components per render_ui call. */
 export const RENDER_UI_MAX_COMPONENTS = 8;
 
+/**
+ * P1-1 schema slimming: usage-level field semantics live in ONE place — the
+ * render_ui base description (**Value semantics**) and the component catalog
+ * one-liners (genui-catalog.ts) — not in `.describe()` here. Describes that
+ * remain are structure-adjacent contracts the one-liners cannot hold (the
+ * 160-char catalog cap): id/placeholder interpolation, delta decimal format,
+ * the link value form. Non-functional string-length caps were stripped from
+ * the zod schema (wire + runtime) EXCEPT the ones behavior tests pin as
+ * validation contracts (chart label/name/unit, rowAction label/template
+ * bounds, stat-card currency, confirm message, param key/label) — the
+ * execution-time Zod pass (render-ui handler) still enforces everything
+ * that remains.
+ */
 const GenUIBase = z.object({
-  id: z.string().min(1).max(64)
-    .describe('Stable component id. Reusing an id in a later call updates that component.'),
-  title: z.string().max(120).optional().describe('Optional card header'),
+  id: z.string().min(1),
+  title: z.string().optional(),
 });
 
 export const GenUIStatCardSchema = GenUIBase.extend({
   type: z.literal('stat-card'),
-  label: z.string().max(80),
-  value: z.union([z.number(), z.string().max(40)]),
-  format: z.enum(['number', 'percent', 'currency']).optional()
-    .describe("How to render `value`: 'number' adds thousands separators; 'percent' treats a decimal fraction as a share (0.093 → 9.3%); 'currency' adds thousands separators plus the `currency` prefix. Omit to display `value` verbatim (e.g. with a unit suffix)."),
+  label: z.string(),
+  value: z.union([z.number(), z.string()]),
+  format: z.enum(['number', 'percent', 'currency']).optional(),
   currency: z.string().max(8).optional()
     .describe("Currency symbol or code used by format 'currency' (e.g. '$', 'CNY')."),
-  unit: z.string().max(12).optional(),
+  unit: z.string().optional(),
   delta: z.number().optional().describe('Decimal, e.g. 0.152 = +15.2%'),
   trend: z.enum(['up', 'down', 'flat']).optional(),
-  goodWhen: z.enum(['up', 'down', 'neutral']).default('up')
-    .describe("Which delta direction is good news, controlling the delta color: 'up' (default) colors rises green / falls red; 'down' is inverted — rises red, falls green (queue length, error rate, loss ratio); 'neutral' always renders the delta muted."),
+  goodWhen: z.enum(['up', 'down', 'neutral']).default('up'),
 });
 
 // Column types align with the datatable rich-block contract in system.ts
 const GenUITableColumnSchema = z.object({
-  key: z.string().max(60),
-  label: z.string().max(80),
+  key: z.string(),
+  label: z.string(),
   type: z.enum(['text', 'number', 'currency', 'percent', 'boolean', 'date', 'badge']).default('text'),
-  semantics: z.enum(['rate', 'share', 'change']).default('change')
-    .describe("Meaning of a percent column, deciding its rendering: 'change' (default) is an up/down move — signed, green/red; 'rate' is a level/ratio (loss rate, utilization) and 'share' a proportion of a whole — both rendered unsigned and neutral so 6.8% never looks like good news."),
-  badgeColors: z.record(z.string(), z.enum(['info', 'success', 'warning', 'error'])).optional()
-    .describe('badge columns only: cell value → color chip, e.g. {"高": "error", "中": "warning", "低": "success"}. Values not in the map stay neutral.'),
+  // Percent-column rendering semantics (rate/share vs change) are documented
+  // in the tool description's **Value semantics** section, not here.
+  semantics: z.enum(['rate', 'share', 'change']).default('change'),
+  badgeColors: z.record(z.string(), z.enum(['info', 'success', 'warning', 'error'])).optional(),
   // Source link (iter/row-actions): the value renders as a link and opens via
   // the platform URL handler — e.g. a clause number whose original text lives
   // at a URL the model puts in the data. href comes from the row value itself
   // (when it is an http(s) URL) or its { value, link } object form.
   link: z.boolean().optional()
-    .describe('Render this column\'s values as links that open externally. The row value is either the URL itself or an object { value, link }.')
+    .describe('Values render as external links; the row value is the URL itself or an object { value, link }.')
 });
 
 export const GenUIDataTableSchema = GenUIBase.extend({
   type: z.literal('data-table'),
   columns: z.array(GenUITableColumnSchema).min(1).max(24),
   // Hard rule: inline rows are NOT accepted — data must land on disk via
-  // transform_data first, then be referenced through "src".
-  src: z.string().min(1)
-    .describe('Path to a JSON rows file written by transform_data (absolute, or relative to the session data dir). Inline rows NOT accepted.'),
+  // transform_data first, then be referenced through "src". The catalog
+  // one-liner carries that contract to the model; validation errors repeat it.
+  src: z.string().min(1),
   pageSize: z.number().int().min(5).max(100).optional(),
   // Row-level actions (iter/row-actions) — all optional; a table without them
   // renders exactly like before. Placeholders {{col.key}} are filled from the
-  // clicked row's values; missing values become empty strings.
+  // clicked row's values; missing values become empty strings. The label /
+  // template length caps stay: tests pin them as validation contracts.
   rowAction: z.object({
     label: z.string().max(20),
     promptTemplate: z.string().max(500)
-      .describe('Sent as the next user message when the row\'s action button is clicked, with {{col.key}} placeholders replaced by that row\'s values. Example: "为 {{sku}} 生成补货工单".'),
+      .describe("Sent as the next user message when the row's action button is clicked; {{col.key}} is replaced by that row's values."),
   }).strict().optional(),
   detailTemplate: z.string().max(500).optional()
-    .describe('Per-row "Details" drill-down: {{col.key}} placeholders are replaced with that row\'s values and the filled text PREFILLS the chat input without sending (fill semantics, for follow-up questions).'),
+    .describe('Per-row Details: fills {{col.key}} from the row and prefills the chat input without sending.'),
   // Rejecting unknown keys here is what enforces "no inline rows": a `rows`
   // field fails validation with a clear message instead of being stripped.
 }).strict();
@@ -229,57 +241,59 @@ export const GenUIDataTableSchema = GenUIBase.extend({
  */
 export const GenUIChartSchema = GenUIBase.extend({
   type: z.literal('chart'),
-  chartType: z.enum(['bar', 'line', 'funnel', 'pie'])
-    .describe("'bar' for comparisons/rankings across categories (flips to a horizontal ranking when one series spans 4+ categories), 'line' for trends over an ordered axis, 'funnel' for stage-to-stage drop-off, 'pie' for share of a whole."),
+  // chartType selection guidance lives in the catalog one-liner; the closed
+  // enum is the structure. Label/name/unit caps stay: tests pin them.
+  chartType: z.enum(['bar', 'line', 'funnel', 'pie']),
   categories: z.array(z.string().max(60)).min(2).max(24)
-    .describe('Category labels: x-axis ticks (bar/line), funnel stages top-to-bottom, or pie slices. Every series "values" array must have exactly one value per category.'),
+    .describe('X-axis labels / funnel stages / pie slice names.'),
   series: z.array(z.object({
-    name: z.string().max(60).describe('Series label shown in the legend and tooltip.'),
-    unit: z.string().max(12).optional().describe('Optional unit suffix shown in tooltips (e.g. "%", "万台").'),
+    name: z.string().max(60),
+    unit: z.string().max(12).optional(),
     values: z.array(z.number()).min(2).max(48)
-      .describe('One number per category — same length and order as "categories" (mismatch is rejected).'),
+      .describe('One number per category, same order.'),
   })).min(1).max(3)
-    .describe('1-3 data series. pie/funnel render the first series only.'),
+    .describe('pie/funnel render the first series only.'),
   goodWhen: z.enum(['up', 'down', 'neutral']).optional()
-    .describe('Reserved for semantic coloring of future chart variants; accepted today but does not change rendering.'),
+    .describe('Reserved; not rendered yet.'),
 }).strict();
 
 export const GenUIAlertSchema = GenUIBase.extend({
   type: z.literal('alert'),
   severity: z.enum(['info', 'success', 'warning', 'error']),
-  message: z.string().max(500),
+  message: z.string(),
 });
 
 export const GenUIProgressSchema = GenUIBase.extend({
   type: z.literal('progress'),
   status: z.enum(['running', 'success', 'error']),
-  label: z.string().max(120),
+  label: z.string(),
   percent: z.number().min(0).max(100).optional().describe('Omit for indeterminate'),
 });
 
 /** One per-click parameter field the user fills before the action runs. */
 const GenUIActionButtonParamSchema = z.object({
-  key: z.string().max(40)
-    .describe('Placeholder name — "{{key}}" occurrences in promptTemplate are replaced with the filled value'),
+  // key/label caps stay: tool-defs-genui-action-buttons pins them (40/60).
+  key: z.string().max(40),
   label: z.string().max(60),
   type: z.enum(['text', 'number', 'select']).default('text'),
   required: z.boolean().default(false),
   // Same convention as form fields: only select params may carry options, and
   // a select param must — enforced by the button-level superRefine below.
-  options: z.array(z.string().max(80)).max(12).optional(),
+  options: z.array(z.string()).max(12).optional(),
 });
 
 const GenUIActionButtonSchema = z.object({
-  id: z.string().min(1).max(64),
-  label: z.string().min(1).max(40),
+  id: z.string().min(1),
+  label: z.string().min(1),
   style: z.enum(['primary', 'secondary', 'danger']).default('secondary'),
   // Optional pre-click gates (all UI-only — the backfill pipeline itself is
   // unchanged). confirm renders an in-place confirmation bar before the
   // action fires; params renders an in-place mini form whose values are
   // interpolated into promptTemplate.
   confirm: z.object({
+    // The 300-char cap stays: tool-defs-genui-action-buttons pins it.
     message: z.string().max(300)
-      .describe('Shown on the in-place confirmation bar before the action runs — state the consequence or impact'),
+      .describe('Shown on the in-place confirmation bar before the action runs — state the consequence.'),
   }).optional(),
   params: z.array(GenUIActionButtonParamSchema).max(8).optional(),
   // P0 only ships these two backfill actions; run-tool direct invocation is
@@ -287,16 +301,16 @@ const GenUIActionButtonSchema = z.object({
   action: z.discriminatedUnion('kind', [
     z.object({
       kind: z.literal('send-message'),
-      prompt: z.string().min(1).max(2000)
-        .describe('Sent as the next user message when clicked. Mutually exclusive with promptTemplate.')
+      prompt: z.string().min(1)
+        .describe('Sent as the next user message when clicked.')
         .optional(),
-      promptTemplate: z.string().min(1).max(2000)
-        .describe('Sent as the next user message when clicked, after every {{key}} placeholder is replaced by the value the user entered in the params form. Required when params is set.')
+      promptTemplate: z.string().min(1)
+        .describe('Sent as the next user message when clicked; every {{key}} is replaced by the value the user entered in the params form. Required when params is set.')
         .optional(),
     }),
     z.object({
       kind: z.literal('fill-input'),
-      text: z.string().min(1).max(2000)
+      text: z.string().min(1)
         .describe('Prefills the chat input without sending'),
     }),
   ]),
@@ -366,21 +380,21 @@ export const GenUIActionButtonsWithIdSchema = GenUIBase.extend({
 
 /** One form field (POO-103): text/number/select/date inputs the user fills. */
 const GenUIFormFieldSchema = z.object({
-  key: z.string().min(1).max(60)
+  key: z.string().min(1)
     .describe('Value key in the submitted JSON object'),
-  label: z.string().min(1).max(80),
+  label: z.string().min(1),
   type: z.enum(['text', 'number', 'select', 'date']).default('text'),
   required: z.boolean().optional(),
   // Only meaningful on select fields — the cross-field rule (select needs
   // options, others must not carry them) lives on the components array
   // superRefine, like every other cross-field rule.
-  options: z.array(z.string().min(1).max(80)).min(1).max(20).optional(),
+  options: z.array(z.string().min(1)).min(1).max(20).optional(),
 });
 
 export const GenUIFormSchema = GenUIBase.extend({
   type: z.literal('form'),
   fields: z.array(GenUIFormFieldSchema).min(1).max(12),
-  submitLabel: z.string().min(1).max(40).optional(),
+  submitLabel: z.string().min(1).optional(),
   // NOTE: no "action" field on purpose — form submit is FIXED send-message
   // semantics (the serialized values object becomes the next user message).
   // Unknown keys are rejected, so an "action" attempt fails validation.
@@ -545,6 +559,15 @@ export const RenderUiSchema = z.object({
 export const GENERATE_APP_MAX_HTML_BYTES = 512 * 1024;
 /** Max length of the app id / updateOf reference (also a traversal guard: ids never contain path separators). */
 export const GENERATE_APP_MAX_ID_LENGTH = 64;
+/**
+ * Hard cap on one update_app_data data file, serialized as UTF-8 JSON. Mirrors
+ * GENUI_APP_DATA_MAX_FILE_BYTES in @polo-ai/shared (this package must not
+ * import shared — it is a leaf dependency — so the value is pinned here and
+ * guarded by a test on the shared side, like the generate_app 512KB cap).
+ */
+export const UPDATE_APP_DATA_MAX_BYTES = 1024 * 1024;
+/** Max length of a dataSrc path (mirrors the payloadSrc bound on the shared side). */
+export const UPDATE_APP_DATA_MAX_SRC_LENGTH = 1024;
 
 const GENERATE_APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
@@ -562,6 +585,20 @@ export const GenerateAppSchema = z.object({
     .regex(GENERATE_APP_ID_PATTERN, 'updateOf must be an app id returned by a previous generate_app call')
     .optional()
     .describe('Id of an existing app to fully rewrite. Omit to create a new app.'),
+});
+
+export const UpdateAppDataSchema = z.object({
+  appId: z
+    .string()
+    .max(GENERATE_APP_MAX_ID_LENGTH)
+    .regex(GENERATE_APP_ID_PATTERN, 'appId must be an app id returned by a previous generate_app call')
+    .describe('Id of the existing app whose data you are updating.'),
+  dataSrc: z
+    .string()
+    .min(1)
+    .max(UPDATE_APP_DATA_MAX_SRC_LENGTH)
+    .describe('Destination path of the data file, relative to the session data/ directory (e.g. "state.json"). Use the same path the app\'s HTML declares via <meta name="polo-app-data" content="…">.'),
+  data: z.unknown().describe('The new JSON value for the data file (object, array, or scalar). Hard limit 1MB serialized.'),
 });
 
 export const ScriptSandboxSchema = z.object({
@@ -792,21 +829,12 @@ Use this tool when you need to transform large datasets (20+ rows) into structur
 
 **Security:** Runs in an isolated subprocess with no access to API keys or credentials. 30-second timeout.`,
 
-  render_ui: `Render interactive UI cards inline in the chat with declarative JSON components.
+  render_ui: `Render 1-8 interactive UI cards inline in the chat with declarative JSON components.
 
-Use this instead of plain text when the answer is actionable or data-dense.
-
-**Components** (1-8 per call, discriminated by "type"):
-- \`stat-card\`: single metric + optional delta/trend
-- \`data-table\`: sortable/filterable table, file-backed ONLY — write rows with transform_data and pass "src"; inline rows are rejected. Optional per-row interactivity: "rowAction" (a button per row whose {{col.key}} template is sent as the next user message), "detailTemplate" (a per-row Details link that prefills the input without sending), "columns[].link" (render a column's values as external links).
-- \`chart\`: closed-form chart with INLINE data (no "src" needed): "chartType" \`bar\` (comparisons/rankings; auto-renders horizontal for 4+ categories with one series), \`line\` (trends), \`funnel\` (stage drop-off), \`pie\` (share of a whole); 2-24 categories x 1-3 bounded series. Use \`chart\` for distributions, trends, shares and funnels; keep \`data-table\` when the user needs row-level detail.
-- \`alert\`: info/success/warning/error banner
-- \`progress\`: running/success/error indicator with optional percent
-- \`action-buttons\`: 1-6 buttons that send a follow-up message or prefill the chat input; optional \`confirm\` (message ≤300 chars) shows an in-place confirmation bar first, optional \`params\` + \`promptTemplate\` collect 1-8 per-click values and interpolate \`{{key}}\` before sending — use \`confirm\` for high-stakes actions and \`params\` instead of hardcoding variable values into the prompt
-- \`form\`: 1-12 fields (text/number/select/date) the user fills in; submitting sends the serialized values object as the next user message (fixed semantics — no action config)
+Use this instead of plain text when the answer is actionable or data-dense. The component catalog below is the per-type guide — what each "type" is for and how it behaves.
 
 **Value semantics** (pick per meaning, not per sign):
-- percent table columns render as up/down moves (+, green/red) by default. For levels and proportions — loss rate, utilization, weight, share — set the column \`"semantics"\`: \`"rate"\` or \`"share"\` so values render unsigned and neutral.
+- percent table columns render as up/down moves (+, green/red) by default. For levels and proportions — loss rate, utilization, weight, share — set the column \`"semantics"\`: \`"rate"\` or \`"share"\` so values render unsigned and neutral — 6.8% never looks like good news.
 - \`stat-card\` accepts \`"format"\`: \`"number"\` (thousands separators) | \`"percent"\` (0.093 → 9.3%) | \`"currency"\` (thousands + \`"currency"\` prefix). Omit \`format\` to show the raw value (e.g. with a unit).
 - \`stat-card\` \`"goodWhen"\` controls delta coloring: \`"down"\` (queues, errors, costs — a rise is bad news) renders increases red and decreases green; \`"neutral"\` renders the delta muted. Default \`"up"\` keeps rises green.
 - badge table columns can map values to colors via \`"badgeColors"\`: \`{"高": "error", "中": "warning", "低": "success"}\`; unmapped values stay neutral.
@@ -816,7 +844,7 @@ Use this instead of plain text when the answer is actionable or data-dense.
 - Give every component a unique stable "id" — reusing an id in a later call updates that card in place.
 - If this tool returns a validation error, fix the payload and retry once.
 - Prefer datatable/spreadsheet blocks for static display; prefer render_ui when the user should act.
-- View-state operations (filter/sort/group) are handled client-side by the table; reserve action-buttons for semantic follow-ups that need the model.`,
+- View-state operations (filter/sort/group, chart legend/range) are handled client-side by the cards; reserve action-buttons for semantic follow-ups that need the model.`,
 
   generate_app: `Create a self-contained single-file HTML app that renders in a sandboxed webview card in the chat.
 
@@ -829,10 +857,24 @@ Use this when the user needs a small interactive artifact — a calculator, a vi
 - Host bridge: the ONLY sanctioned deep link is \`poloai://action/ui-event/{sessionId}?cardId=…&eventId=…&type=button-click|value-change|submit&callbackId=…\` plus exactly one of \`payload\` (URL-encoded JSON object, ≤8KB) or \`payloadSrc\` (path of a JSON file inside the session data/ directory). It only works when the bundle declares \`<meta name="polo-bridge-capabilities" content="ui-event">\` AND the desktop observed that declaration in the exact document it attached — otherwise every event is rejected (capability_denied). Read \`poloCard\` and \`poloSession\` from the URL query the host appends to your file URL to fill in cardId/sessionId. REUSE one callbackId for every event of your card (it pairs the acks/errors; rotating it exhausts the host's per-page slots). At most 10 events per second per card. Inside the JSON payload: "modelContext" is a short summary for the assistant (hard 2KB cap, silently truncated — keep it tight); "privateState" is any JSON echoed back ONLY to your card via a ui_state message; other keys are ignored by the host.
 - Any other \`poloai://\` link is rejected.
 - Hard limit: 512 KB per bundle.
+- Mutable state: keep it in a data/ JSON declared via \`<meta name="polo-app-data" content="state.json">\` (path relative to the session data/ directory; at most 3 files per app, ≤1MB each). The host pushes the file's content to the card on attach and after every \`update_app_data\` — read it from the ui_state message, never by fetching the file.
 
-**Updates:** pass \`updateOf\` with the app id from a previous call to rewrite that app in place (version increments, full rewrite — send the COMPLETE html every time). Omit \`updateOf\` to create a new app.
+**Updates:** pass \`updateOf\` with the app id from a previous call to rewrite that app in place (version increments, full rewrite — send the COMPLETE html every time). Omit \`updateOf\` to create a new app. Keep mutable state in a data/ JSON declared via the polo-app-data meta; iterate data with update_app_data; reserve updateOf for structural changes.
 
 If this tool returns a validation error, fix the html and retry once.`,
+
+  update_app_data: `Update the data file of an existing generate_app canvas app WITHOUT rewriting its HTML — the fast path for data iterations.
+
+Use this whenever the change is only DATA (values, rows, series, options, labels) and the app's HTML already stays valid. Reserve generate_app + updateOf for STRUCTURAL changes (layout, new UI elements, changed logic).
+
+**Args:**
+- \`appId\`: the app id from a previous generate_app call.
+- \`dataSrc\`: destination path of the data file, relative to the session data/ directory. Use the exact path the app's HTML declares via \`<meta name="polo-app-data" content="…">\` (outside a declared path the card will not see the update).
+- \`data\`: the new JSON value (object, array, or scalar). Hard limit 1MB serialized.
+
+**Behavior:** validates the app id, writes the JSON atomically, and pushes the new content to the app's mounted card as a ui_state message so it re-renders immediately. When no card is mounted the file is still written — it is injected on the next attach.
+
+If this tool returns a validation error, fix the arguments and retry once.`,
 
   script_sandbox: `Run quick inline diagnostics in a sandboxed subprocess with network isolation.
 
@@ -1040,6 +1082,11 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // poloai:// bridge) before anything touches disk, then writes into the
   // session data dir only.
   { name: 'generate_app', description: TOOL_DESCRIPTIONS.generate_app, inputSchema: GenerateAppSchema, executionMode: 'registry', safeMode: 'allow', handler: handleGenerateApp },
+  // P1-3 canvas app data iteration — same gating as generate_app (the
+  // allowGenerateApp flag below covers both): desktop interactive turns with
+  // the generativeUI.canvas toggle on. Writes are confined to the session
+  // data/ directory and re-validated Main-side at push time.
+  { name: 'update_app_data', description: TOOL_DESCRIPTIONS.update_app_data, inputSchema: UpdateAppDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleUpdateAppData },
   { name: 'update_user_preferences', description: TOOL_DESCRIPTIONS.update_user_preferences, inputSchema: UpdatePreferencesSchema, executionMode: 'registry', safeMode: 'block', handler: handleUpdatePreferences },
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
@@ -1086,7 +1133,8 @@ export interface SessionToolFilterOptions {
    * UI canvas apps), and only while the generativeUI.canvas feature toggle is
    * on — same shape as allowRenderUi. Every non-desktop source and any
    * disabled toggle state fails closed. Defaults to false so backends must opt
-   * in explicitly.
+   * in explicitly. update_app_data (P1-3 canvas app data iteration) shares
+   * this gate — it is meaningless without generate_app.
    */
   allowGenerateApp?: boolean;
   /**
@@ -1122,7 +1170,7 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
     if (!allowRenderUi && def.name === 'render_ui') {
       return false;
     }
-    if (!allowGenerateApp && def.name === 'generate_app') {
+    if (!allowGenerateApp && (def.name === 'generate_app' || def.name === 'update_app_data')) {
       return false;
     }
     return true;

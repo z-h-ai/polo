@@ -124,4 +124,15 @@ export function attachSessionSelfManagementBindings(
     configurable: true,
     enumerable: true,
   });
+
+  // P1-3 canvas app data channel: direct pass-through — the SessionManager
+  // resolves the target session itself (the callback carries no session id,
+  // so no sid-defaulting wrapper is needed).
+  Object.defineProperty(context, 'notifyCanvasAppDataUpdated', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.notifyCanvasAppDataUpdatedFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
 }

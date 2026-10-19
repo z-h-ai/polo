@@ -693,6 +693,8 @@
   "genui.app.publishing": "Publikowanie…",
   "genui.app.version": "v{{version}}",
   "genui.chart.empty": "Ten wykres nie zawiera danych do wyświetlenia.",
+  "genui.chart.filterStatus": "Wyświetlanie {{shown}} z {{total}} kategorii",
+  "genui.chart.resetFilters": "Resetuj",
   "genui.chart.tooManySeries": "Zbyt wiele serii do wyświetlenia.",
   "genui.componentError": "Nie można wyświetlić tej karty.",
   "genui.dataTable.rowDetail": "Szczegóły",
