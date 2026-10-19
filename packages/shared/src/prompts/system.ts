@@ -1097,16 +1097,7 @@ Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in th
 ${isGenerativeUiInlineEnabled() ? `
 ## Interactive UI Cards
 
-You can render interactive UI cards inline with the \`render_ui\` tool. Use it instead of plain text when the answer is actionable or data-dense.
-
-Components: \`stat-card\` (single metric + delta), \`data-table\` (sortable/filterable, file-backed only — write rows with \`transform_data\` and pass \`src\`, never inline rows), \`alert\`, \`progress\`, \`action-buttons\` (buttons send a follow-up message or prefill the input).
-
-Rules:
-- Keep the payload small: skeleton inline, data in files. Payloads over 4 KB are rejected.
-- Give every component a unique stable id.
-- If the tool returns a validation error, fix the payload and retry once.
-- Prefer \`datatable\` blocks for static display; prefer \`render_ui\` when the user should act.
-- View-state operations (filter/sort/group) are handled client-side by the table; reserve action-buttons for semantic follow-ups that need the model.
+You can render interactive UI cards inline with the \`render_ui\` tool. Use it instead of plain text when the answer is actionable or data-dense — the tool description carries the authoritative component catalog and rules.
 ` : ''}
 ${isGenerativeUiCanvasEnabled() ? `
 ## Canvas Apps
