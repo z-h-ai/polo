@@ -578,6 +578,29 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
     )
   }
 
+  it('R3FIX uncached 503 shows load failure and an explicit retry through the real catalog hook', async () => {
+    const rpc = window.electronAPI
+    const getCatalog = rpc.productSpaceGetCatalog
+    let fail = true
+    const calls: Array<unknown[]> = []
+    rpc.productSpaceGetCatalog = (async (...args: Parameters<typeof getCatalog>) => {
+      calls.push(args)
+      if (fail) return { success: false as const, errorCode: 'SERVER_ERROR', status: 503, message: 'unavailable' }
+      return getCatalog(...args)
+    }) as typeof getCatalog
+    render(personalHomeTree())
+    await waitFor(() => expect(screen.getByTestId('home-directory-load-failed')).toBeTruthy())
+    expect(screen.queryByTestId('home-directory-offline-banner')).toBeNull()
+    const retry = screen.getByRole('button', { name: i18n.t('homeApps.actions.tryAgain') })
+    expect((retry as HTMLButtonElement).disabled).toBe(false)
+    fail = false
+    fireEvent.click(retry)
+    await waitFor(() => expect(screen.queryByTestId('home-directory-load-failed')).toBeNull())
+    expect(calls).toHaveLength(2)
+    expect(calls[1]![1]).toBeUndefined()
+    expect(openApp).not.toHaveBeenCalled()
+  })
+
   it('the personal circles entry navigates the client-page route stack to {kind:"circles"}', async () => {
     const view = render(personalHomeTree())
     await waitFor(() => {
