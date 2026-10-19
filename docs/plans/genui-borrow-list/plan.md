@@ -369,3 +369,9 @@ Flash 补跑复核产生的 12 条已确认发现（F1 错误码映射 + F2 导�
 
 - **F1**：运行时 zod 3.25.76 的枚举违规 issue code 为 `invalid_enum_value`（v4 才是 `invalid_value`），归入 invalid-type 码；测试走真实 `RenderUiSchema.safeParse`（stat-card `trend: "bogus"`）断言分类码与 `[genui:invalid-type]` 文本。
 - **N3/N4/N7-N12**：chips 容器 max-width + chip truncate；boolean chip 复用 Yes/No 单元格文案；骨架 `data-search-exclude`、gap-2、友好类型名模板（`genui.skeleton.types.*` 7 类型 ×7 locale）；选中 chip hover、状态条清除按钮 cursor-pointer、筛选计数 aria-live、清除按钮专用键 `datatable.clearFilters`（与 `common.clearAll` 语义区分）。
+
+### Wave-1.5 Review 与 E2E 结论（2026-10-19 收口）
+
+- **流程与模型分工**：normal-coding-task-flow；coder = GLM-5.3-Flash（dynamic-workflows 逐代理选模型，run dwfrun-4e4a129a → 修正轮 dwfrun-69a19b32），reviewer = GLM-5.3。
+- **Review**：首轮 PASS-with-notes（0 P0 / 1 P1 / 3 P2）。P1 = en/de/es/pl 三个 `_one` 键把 `{{total}}` 量化的名词写成单数（"Showing 1 of 10 row"），修复 commit c3cc03a5（12 键×4 locale，`_one` 与 `_other` 对齐，pl 属格 wierszy）；确认复审 fixed-confirmed → **终审 PASS**。P2 记录项：自述键数 121 实为 119 新 + 1 改造；F2 overlay→dropdown 接线只有纯函数测试无渲染级测试（后续加固点）；parity 的 productSpaceSkills 基线缺口与 TurnCard 既有 lint 旧错非本批。
+- **E2E 基线判定**：HEAD(c3cc03a5) 与基线 a80431cb 同环境复跑 AGENTS.md 两套真实集成，失败集合**逐名完全相同**（runtime 11 pass/10 fail、managed 1 pass/5 fail，均为既有环境问题）；**Wave-1.5 新增 E2E 失败 = 0**。绿色证据：针对性套件 702 pass / 0 fail（+13 新用例）、隔离+适配器 46 pass、typecheck:all exit 0、lint 与基线逐项相同、i18n parity 非基线缺失 0、lint:i18n:sorted/coverage 通过。
