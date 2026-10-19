@@ -225,6 +225,24 @@ Reviewed by: 工程师评审（本会话，对照 genui/impl@4b07b30c 只读核�
 ### Explicitly out of scope
 - 文件变更自动刷新/轮询（= P2-1，本项只做模型驱动的显式更新）；多文件数据集（≤3 个声明文件封顶）。
 
+#### P1-3 Wave-2 执行记录（2026-10-19，commit 8c6fef51 + 92bde273）
+
+**做了什么**（方案四步全部落地）：
+1. **声明**：shared dto.ts 新增 `GENUI_APP_DATA_META_NAME`（'polo-app-data'）、`GENUI_APP_DATA_MAX_FILES_PER_CARD`=3、`GENUI_APP_DATA_MAX_FILE_BYTES`=1MB（复用 payloadSrc 常量值）、`parseGenUiAppDataDeclaration()`（空白/逗号分词、去重、超 3 封顶、含 NUL 整体作废）。Main 侧在 ui-card-registry.ts 的 `extractPoloBridgeCapabilities` 旁新增 `extractPoloAppDataDeclarations(src)` / `extractPoloAppDataFromDocument(doc)`（与 capabilities 共用同一 `readAttachedDocument` 读文档脚手架——data: URL 与 ≤2MB file: 读入）。
+2. **初始注入**：新模块 `apps/electron/src/main/genui-app-data.ts`；did-attach 时 webview-security 把（sessionId, guestId, hostId, validated src）交给观察者，读取声明 → `readGenUiAppDataFile`（payloadSrc 同款围栏：realpath 后必须仍在会话 data/ 内、≤1MB stat+读后双检、JSON 解析）→ 经 `DeepLinkCallbackBridge.postUiStateToCard` 推给该卡。
+3. **update_app_data 工具**：`UpdateAppDataSchema`（tool-defs.ts）+ 新 handler `handlers/update-app-data.ts`（appId 存在性 + generate_app 同款 id pattern；dataSrc 用 `isPathWithinDirectoryForCreation` 符号链接感知 containment；1MB 序列化上限；temp+rename 原子写；写后 containment 复检）+ handlers/index.ts 注册模式导出；注册条件同 generate_app（`allowGenerateApp` 一个门控两个工具，getSessionToolDefs/getToolDefsAsJsonSchema/Pi 调用时守卫三处同步）。
+4. **模型侧契约**：generate_app 描述追加 polo-app-data 声明 + "iterate data with update_app_data; reserve updateOf for structural changes"；新工具描述完整；system.ts Canvas Apps 节同步改写（92bde273，修"全量重写"口径漂移——plan 风险表缓解项）。
+
+**与计划的偏离**（均已在代码注释注明）：
+- **参数 `{appId, dataSrc}` → `{appId, dataSrc, data}`**：dataSrc 按本仓库语义（payloadSrc/render_ui src）只能是"路径"；"原子写文件"必须携带内容，plan 方案里的 `{appId, dataSrc, }` 悬尾逗号亦提示第三参数在斟酌中。`data` 为任意 JSON 值，序列化 ≤1MB。
+- **postUiStateToCard 需要已注册 callbackId**：attach 时卡片尚未发过 ui-event，host 侧为每卡注册专用 state callback（`polo-data-<hex>`，符合 POLOAI_CALLBACK_ID_PATTERN）并 bind 到该 guest+session，之后每次推送前重申注册（桥 TTL 30 分钟会清理空闲 entry，幂等重注册兜底）——桥的 ownership 校验保持原样，只消费一个 per-page 槽位（≤8）。
+- **注入时机 = attach 推送 + dom-ready 补推一次**：attach 时的 executeJavaScript 投递可能早于页面 message listener 注册；dom-ready 时同一份已校验内容再推一次，对应用幂等。
+- **cardId/appId 在 attach 时的来源**：renderer 在 file: src 上追加 `?poloCard=`（GenUiAppCard 既有行为），Main 从已校验 src 的 query + `genui-apps/<appId>/index.html` 路径自行推导，绝不信任 RPC 声明。
+- **推送链路**：handler 的 `ctx.notifyCanvasAppDataUpdated`（session-tools-core 新可选 seam）→ callback registry 懒 getter（session-self-management-bindings，Claude/Pi 两路径共用）→ SessionManager `setGenUiAppDataPushHook` 反转（与 setGenUiSessionTeardownHook 同款）→ genui-app-data `pushGenUiAppDataUpdate`（推送前同函数再过围栏）。CLI/无 canvas 宿主 = 仅落盘。
+- **ui-card-registry 小重构**：`extractPoloBridgeCapabilities` 的文档读取抽为私有 `readAttachedDocument`，capabilities 行为不变（其 15 项既有单测不变绿）。
+
+**数字证据**：围栏/注入/e2e 单测 36 pass / 0 fail（`genui-app-data.isolated.ts`：`..` 逃逸、深层 `..`、绝对路径逃逸、符号链接文件/中间目录、>1MB、坏 JSON、NUL、≤3 声明封顶、注入、跨卡/跨会话隔离、推送时逃逸拒绝、handler→ctx→push 全链 e2e）；handler 单测 20 pass / 0 fail（含 dataSrc 逃逸/符号链接 8 例）；shared 常量+解析 9 pass / 0 fail（含与 session-tools-core 1MB 上限的 parity guard）；工具门控新增 6 断言全绿（filtering 22 pass / 0 fail）；session-tools-core 全包 275 pass / 0 fail；typecheck:all exit 0。
+
 ### Alternatives rejected
 - **HTML patch/diff 更新** — 给生成的 HTML 打结构 patch 复杂度高且易碎；数据/结构分离以 10% 的机制拿到 90% 的迭代收益。拒绝。
 - **webview 内 fetch data/ 文件** — file: origin 下 Chromium fetch 不可靠且绕过 Main 校验。拒绝。
@@ -238,6 +256,16 @@ Reviewed by: 工程师评审（本会话，对照 genui/impl@4b07b30c 只读核�
 **方案要点**：SessionManager 侧对声明文件注册 fs watch（会话删除/卡卸载即注销）；变更事件走既有 `postUiStateToCard` 点对点通道；防抖 ≥1s。**依赖 P1-3 落地，本项单独排期。**
 **优化点**：画布应用从静态快照变为会话内活体；不新增任何越出 data/ 围栏的数据通路。
 **Out of scope**：跨会话/网络数据源（明确不做——那会破坏围栏模型）。
+
+#### P2-1 Wave-2 执行记录（2026-10-19，commit f91e0903）
+
+**做了什么**（依赖 P1-3 通道，同一模块内实现）：
+- **fs watch**：`node:fs` 的 `fs.watch`（仓库无 chokidar 依赖）挂在**声明文件的父目录**上而非文件本身——generate_app/update_app_data 均以 rename 原子换文件，文件级 watch 会脱钩旧 inode；每个目录一个 watcher，多卡共享按引用计数。只 watch realpath 后仍位于会话 data/ 围栏内的目录。
+- **防抖**：trailing debounce，静默期 = `GENUI_APP_DATA_WATCH_DEBOUNCE_MS`（shared 常量 1000ms，测试注入 80ms）；抖动窗口内多次写折叠为一次推送；部分平台 filename 为 null 时退化为该目录全部被 watch 的 basename（推送路径本就重新校验）。
+- **点对点路由**：变更经 `pushGenUiAppDataToDeclared(sessionId, path)`——先按声明匹配（realpath 对 realpath），只推给**声明了该文件**的卡，永不广播；读+校验+推与任务 1 注入共用同一 `readGenUiAppDataFile`/`pushDeclaration` 函数。
+- **注销（泄漏=缺陷）**：卡片卸载（UNREGISTER_UI_CARD → `releaseGenUiAppDataChannel`）、guest 销毁（webview-security destroyed hook → `releaseGenUiAppDataForGuest`）、会话删除（既有 teardown hook 扩展 → `clearGenUiAppDataForSession`）三条路径全部释放该卡/会话的 watch 引用，最后一个引用释放即 `watcher.close()` 并清掉未决防抖 timer。watcher `persistent:false` + `unref`：应用关闭随进程消亡且不阻碍退出（另有 `disposeAllGenUiAppDataWatchers` 测试/关停 seam）。
+
+**数字证据**：watch 注册/共享引用计数/变更推送/非声明文件零推送/防抖折叠/跨会话路由/guest 释放后停推且注销/会话删除注销——8 项单测全绿（含在 genui-app-data.isolated.ts 的 36 pass / 0 fail 内，真实 fs.watch + 80ms 注入防抖）；typecheck:all exit 0。
 
 ---
 
@@ -354,3 +382,11 @@ P1 + 6 项 P2 已全部修复（`fix(genui): address Wave-1 review findings`）�
 
 - **视觉验收**：PASS-with-notes（0 V1 / 6 V2 建议）。验收形态为代码级设计合规审查（对照 polo-ai-design-system 通用 token/状态合同 + packages/ui 既有卡片家族惯例）；该 Skill 声明模块不含聊天卡片，故以仓库惯例为主要参照。V2 建议清单：Spinner 无效尺寸类改字号驱动、"No rows" 硬编码英文宜 i18n、非法数值输入加 aria-invalid 微提示、chips 圆角 4px vs 家族 6px 统一、全屏视图缺筛选状态条、chip 加 max-w truncate。均记录待下轮，不阻塞。
 - **E2E 基线判定**：AGENTS.md 两套真实集成在本 worktree 环境为基线红——runtime 11 pass/10 fail、managed 1 pass/5 fail。**逐名比对证实 HEAD(5fcd866b) 与基线(825742ab) 失败集合完全相同**（SIGINT/SIGTERM/…stop 超时、owned-CLI Skills/HOME、empty provider stream、managed cancel/owner-death/desktop-death/quit/controlled 链路），属环境既有问题（含 bun install 时 @vscode/ripgrep postinstall 失败），与本轮改动无关；**Wave-1 新增 E2E 失败 = 0**。针对性 genui 套件 689 pass / 0 fail、typecheck:all exit 0、lint 无新增为本轮绿色证据。
+
+## Wave-2 执行记录（2026-10-19，分支 iter/genui-wave2）
+
+P1-3 + P2-1 两项全部落地（基线 dev@a80431cb；commit `8c6fef51` → `f91e0903` → `92bde273` → 本文档更新）。画布应用获得"数据/结构分离"的迭代通道：bundle 以 `<meta name="polo-app-data" content="state.json">`（会话 data/ 相对路径，≤3 文件/卡、≤1MB/文件）声明可变状态，Main 在 attach 时亲自读 meta、把当前内容以 ui_state 推给该卡；模型用 `update_app_data`（`{appId, dataSrc, data}`，原子写 + 实时推送，未挂载仅落盘）迭代数据，`generate_app + updateOf` 保留给结构变化（工具描述与 system.ts 画布节已同步该契约）；声明文件变化再由 ≥1s 防抖的目录级 fs.watch 自动推送——只推给声明了该文件的那张卡。全程零新信任根：所有读写经 payloadSrc 同款 realpath 围栏，state callback 由 Main 注册并绑定到 guest，ui_state 依旧 ephemeral 永不持久化。
+
+- **测试**：针对性套件全绿——`genui-app-data.isolated.ts` 36 pass / 0 fail（围栏 16 + 注入/推送 10 + e2e 2 + P2-1 watch 8）、`update-app-data.test.ts` 20 / 0、shared `genui-app-data.test.ts` 9 / 0（含 1MB parity guard）、工具门控 filtering 22 / 0、session-tools-core 全包 275 / 0、shared protocol 34 / 0、prompts 6 / 0；electron 既有 genui 套件（ui-card-registry 15、genui-ui-event 23、webview-genui-partition 11、deep-link-callback-bridge 7、webview-security-logging 1）逐文件全绿不受影响。`bun run typecheck:all` exit 0。
+- **环境既存噪音（stash 对照证实与本轮无关）**：`lint:ipc-sends` 127（缺 scripts/check-raw-sends.sh）；lint:electron 4 错（onboarding 阴影类，Wave-1 已记录）；shared/agent poison-pill 与 assistant-scope-persistence 32/7 失败集合与基线逐名相同；同进程合并运行多个 electron isolated 套件时 bun mock.module 注册表互扰（'shell' export 报错）为基线既有，逐文件运行即绿。
+- **遗留风险**：(1) 初始注入依赖 dom-ready 补推兜底，极端慢加载页面上 ui_state 可能早于 listener——应用侧按"attach 后收到的 ui_state 即当前状态"消费即幂等；(2) state callback 占用每页 8 个桥槽位中的 1 个（TTL 内常驻，推送时幂等重注册）；(3) P2-1 目录级 watch 在声明文件被整目录替换（rename 目录）后失效——静默停推（fail-soft），下次 attach 重建；(4) 真机浏览器级验收（真实 webview 卡片收推送、fs watch 实时刷新）按验收总表仍属 browser 场景，本轮以隔离单测覆盖，未做真机会话实测。
