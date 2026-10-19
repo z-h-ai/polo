@@ -1669,6 +1669,15 @@ export class SessionManager implements ISessionManager {
         }
         return { ok: true, availability: 'next-turn' as const }
       }),
+      // P1-3 canvas app data channel: the update_app_data tool's write
+      // notification. The callback carries NO target session id — it always
+      // acts on its OWN managed session (same self-scoped discipline as the
+      // no-id forms of set_session_labels above) — and the Electron-side hook
+      // re-validates the data path against the session data/ fence before
+      // anything is pushed to a card.
+      notifyCanvasAppDataUpdatedFn: this.guardManagedCallback(managed, 'self.notifyCanvasAppDataUpdatedFn', (appId: string, dataPath: string) => {
+        this.genUiAppDataPushHook?.(managed.id, appId, dataPath)
+      }),
     }
   }
 
@@ -2159,6 +2168,21 @@ export class SessionManager implements ISessionManager {
 
   setGenUiSessionTeardownHook(fn: (sessionId: string) => void): void {
     this.genUiSessionTeardownHook = fn
+  }
+
+  /**
+   * P1-3 canvas app data channel: optional push hook installed by the desktop
+   * bootstrap so update_app_data's write notification reaches the Electron
+   * card channels without this class importing the Electron layer (same
+   * inversion as setGenUiSessionTeardownHook). Receives the owning session
+   * id, the generate_app appId and the absolute path of the freshly written
+   * data file (already confined to the session data/ directory by the tool
+   * handler; the receiving side re-validates the fence before pushing).
+   */
+  private genUiAppDataPushHook?: (sessionId: string, appId: string, dataPath: string) => void
+
+  setGenUiAppDataPushHook(fn: (sessionId: string, appId: string, dataPath: string) => void): void {
+    this.genUiAppDataPushHook = fn
   }
 
   /**

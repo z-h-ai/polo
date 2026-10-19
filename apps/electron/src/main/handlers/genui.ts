@@ -47,8 +47,17 @@ import {
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import { validateSessionId } from '@polo-ai/shared/sessions'
 import { GENUI_PINNED_APP_ID_PREFIX, type GenUiAppPinAuditRequest, type GenUiAppPinAuditResult, type GenUiAppPublishPackageRequest, type GenUiAppPublishPackageResult, type GenUiCardRegisterRequest, type GenUiCardRegisterResult, type GenUiCardUnregisterRequest, type GenUiCardUnregisterResult } from '../../shared/types'
-import { setGenUiGuestSrcValidator, setGenUiGuestDeepLinkForwarder } from '../webview-security'
+import { setGenUiGuestSrcValidator, setGenUiGuestDeepLinkForwarder, setGenUiGuestAppDataHooks } from '../webview-security'
 import { getUiCardRegistry } from '../ui-card-registry'
+import {
+  clearGenUiAppDataForSession,
+  injectGenUiAppDataForGuest,
+  observeGenUiGuestForAppData,
+  pushGenUiAppDataUpdate,
+  releaseGenUiAppDataChannel,
+  releaseGenUiAppDataForGuest,
+  setGenUiAppDataDeps,
+} from '../genui-app-data'
 import { setGenUiUiEventDeps, handleUiEventUrl } from '../genui-ui-event'
 import { getDeepLinkCallbackBridge } from '../deep-link-callback-bridge'
 import type { HandlerDeps } from './handler-deps'
@@ -85,6 +94,8 @@ export interface GenUiSessionManagerLike {
   hasLiveSession?(sessionId: string): boolean
   queueGenUiModelContext?(sessionId: string, entry: { cardId: string; context: string }): boolean
   setGenUiSessionTeardownHook?(fn: (sessionId: string) => void): void
+  /** P1-3 canvas app data channel push hook (optional for dep-less fakes). */
+  setGenUiAppDataPushHook?(fn: (sessionId: string, appId: string, dataPath: string) => void): void
 }
 export interface GenUiSessionStorageLike {
   getSessionPath(workspaceRootPath: string, sessionId: string): string
@@ -121,9 +132,25 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
     })
     sessionManager.setGenUiSessionTeardownHook?.(sessionId => {
       registry.clearSession(sessionId)
+      // P1-3/P2-1: the session's app data channels (and watchers) die with it.
+      clearGenUiAppDataForSession(sessionId)
     })
     setGenUiGuestDeepLinkForwarder((url, guestWebContentsId) => {
       handleUiEventUrl(url, guestWebContentsId)
+    })
+    // P1-3/P2-1 canvas app data channel: deps, attach/dom-ready observers and
+    // the update_app_data push hook. Everything fails closed while unset.
+    setGenUiAppDataDeps({
+      bridge: getDeepLinkCallbackBridge(),
+      resolveSessionDataPath: createSessionDataPathResolver(deps),
+    })
+    setGenUiGuestAppDataHooks({
+      onGuestAttached: info => observeGenUiGuestForAppData(info),
+      onGuestDomReady: guestWebContentsId => injectGenUiAppDataForGuest(guestWebContentsId),
+      onGuestDestroyed: guestWebContentsId => releaseGenUiAppDataForGuest(guestWebContentsId),
+    })
+    sessionManager.setGenUiAppDataPushHook?.((sessionId, appId, dataPath) => {
+      pushGenUiAppDataUpdate(sessionId, appId, dataPath)
     })
   }
 
@@ -306,6 +333,9 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
         return { ok: false, error: 'Card belongs to a different window' }
       }
       registry.unregisterCard(sessionId, cardId)
+      // P1-3/P2-1: a card unmount releases its app data channel — its watcher
+      // is unregistered and it can no longer receive data pushes.
+      releaseGenUiAppDataChannel(sessionId, cardId)
       // Unregistration is idempotent — a missed unmount (window closed before
       // the RPC) is already covered by the guest-destroyed hook Main-side.
       return { ok: true }

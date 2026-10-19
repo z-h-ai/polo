@@ -26,6 +26,7 @@ import { handleConfigValidate } from './handlers/config-validate.ts';
 import { handleSkillValidate } from './handlers/skill-validate.ts';
 import { handleMermaidValidate } from './handlers/mermaid-validate.ts';
 import { handleGenerateApp } from './handlers/generate-app.ts';
+import { handleUpdateAppData } from './handlers/update-app-data.ts';
 import { handleSourceTest } from './handlers/source-test.ts';
 import {
   handleSourceOAuthTrigger,
@@ -545,6 +546,15 @@ export const RenderUiSchema = z.object({
 export const GENERATE_APP_MAX_HTML_BYTES = 512 * 1024;
 /** Max length of the app id / updateOf reference (also a traversal guard: ids never contain path separators). */
 export const GENERATE_APP_MAX_ID_LENGTH = 64;
+/**
+ * Hard cap on one update_app_data data file, serialized as UTF-8 JSON. Mirrors
+ * GENUI_APP_DATA_MAX_FILE_BYTES in @polo-ai/shared (this package must not
+ * import shared — it is a leaf dependency — so the value is pinned here and
+ * guarded by a test on the shared side, like the generate_app 512KB cap).
+ */
+export const UPDATE_APP_DATA_MAX_BYTES = 1024 * 1024;
+/** Max length of a dataSrc path (mirrors the payloadSrc bound on the shared side). */
+export const UPDATE_APP_DATA_MAX_SRC_LENGTH = 1024;
 
 const GENERATE_APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
@@ -562,6 +572,20 @@ export const GenerateAppSchema = z.object({
     .regex(GENERATE_APP_ID_PATTERN, 'updateOf must be an app id returned by a previous generate_app call')
     .optional()
     .describe('Id of an existing app to fully rewrite. Omit to create a new app.'),
+});
+
+export const UpdateAppDataSchema = z.object({
+  appId: z
+    .string()
+    .max(GENERATE_APP_MAX_ID_LENGTH)
+    .regex(GENERATE_APP_ID_PATTERN, 'appId must be an app id returned by a previous generate_app call')
+    .describe('Id of the existing app whose data you are updating.'),
+  dataSrc: z
+    .string()
+    .min(1)
+    .max(UPDATE_APP_DATA_MAX_SRC_LENGTH)
+    .describe('Destination path of the data file, relative to the session data/ directory (e.g. "state.json"). Use the same path the app\'s HTML declares via <meta name="polo-app-data" content="…">.'),
+  data: z.unknown().describe('The new JSON value for the data file (object, array, or scalar). Hard limit 1MB serialized.'),
 });
 
 export const ScriptSandboxSchema = z.object({
@@ -829,10 +853,24 @@ Use this when the user needs a small interactive artifact — a calculator, a vi
 - Host bridge: the ONLY sanctioned deep link is \`poloai://action/ui-event/{sessionId}?cardId=…&eventId=…&type=button-click|value-change|submit&callbackId=…\` plus exactly one of \`payload\` (URL-encoded JSON object, ≤8KB) or \`payloadSrc\` (path of a JSON file inside the session data/ directory). It only works when the bundle declares \`<meta name="polo-bridge-capabilities" content="ui-event">\` AND the desktop observed that declaration in the exact document it attached — otherwise every event is rejected (capability_denied). Read \`poloCard\` and \`poloSession\` from the URL query the host appends to your file URL to fill in cardId/sessionId. REUSE one callbackId for every event of your card (it pairs the acks/errors; rotating it exhausts the host's per-page slots). At most 10 events per second per card. Inside the JSON payload: "modelContext" is a short summary for the assistant (hard 2KB cap, silently truncated — keep it tight); "privateState" is any JSON echoed back ONLY to your card via a ui_state message; other keys are ignored by the host.
 - Any other \`poloai://\` link is rejected.
 - Hard limit: 512 KB per bundle.
+- Mutable state: keep it in a data/ JSON declared via \`<meta name="polo-app-data" content="state.json">\` (path relative to the session data/ directory; at most 3 files per app, ≤1MB each). The host pushes the file's content to the card on attach and after every \`update_app_data\` — read it from the ui_state message, never by fetching the file.
 
-**Updates:** pass \`updateOf\` with the app id from a previous call to rewrite that app in place (version increments, full rewrite — send the COMPLETE html every time). Omit \`updateOf\` to create a new app.
+**Updates:** pass \`updateOf\` with the app id from a previous call to rewrite that app in place (version increments, full rewrite — send the COMPLETE html every time). Omit \`updateOf\` to create a new app. Keep mutable state in a data/ JSON declared via the polo-app-data meta; iterate data with update_app_data; reserve updateOf for structural changes.
 
 If this tool returns a validation error, fix the html and retry once.`,
+
+  update_app_data: `Update the data file of an existing generate_app canvas app WITHOUT rewriting its HTML — the fast path for data iterations.
+
+Use this whenever the change is only DATA (values, rows, series, options, labels) and the app's HTML already stays valid. Reserve generate_app + updateOf for STRUCTURAL changes (layout, new UI elements, changed logic).
+
+**Args:**
+- \`appId\`: the app id from a previous generate_app call.
+- \`dataSrc\`: destination path of the data file, relative to the session data/ directory. Use the exact path the app's HTML declares via \`<meta name="polo-app-data" content="…">\` (outside a declared path the card will not see the update).
+- \`data\`: the new JSON value (object, array, or scalar). Hard limit 1MB serialized.
+
+**Behavior:** validates the app id, writes the JSON atomically, and pushes the new content to the app's mounted card as a ui_state message so it re-renders immediately. When no card is mounted the file is still written — it is injected on the next attach.
+
+If this tool returns a validation error, fix the arguments and retry once.`,
 
   script_sandbox: `Run quick inline diagnostics in a sandboxed subprocess with network isolation.
 
@@ -1040,6 +1078,11 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // poloai:// bridge) before anything touches disk, then writes into the
   // session data dir only.
   { name: 'generate_app', description: TOOL_DESCRIPTIONS.generate_app, inputSchema: GenerateAppSchema, executionMode: 'registry', safeMode: 'allow', handler: handleGenerateApp },
+  // P1-3 canvas app data iteration — same gating as generate_app (the
+  // allowGenerateApp flag below covers both): desktop interactive turns with
+  // the generativeUI.canvas toggle on. Writes are confined to the session
+  // data/ directory and re-validated Main-side at push time.
+  { name: 'update_app_data', description: TOOL_DESCRIPTIONS.update_app_data, inputSchema: UpdateAppDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleUpdateAppData },
   { name: 'update_user_preferences', description: TOOL_DESCRIPTIONS.update_user_preferences, inputSchema: UpdatePreferencesSchema, executionMode: 'registry', safeMode: 'block', handler: handleUpdatePreferences },
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
@@ -1086,7 +1129,8 @@ export interface SessionToolFilterOptions {
    * UI canvas apps), and only while the generativeUI.canvas feature toggle is
    * on — same shape as allowRenderUi. Every non-desktop source and any
    * disabled toggle state fails closed. Defaults to false so backends must opt
-   * in explicitly.
+   * in explicitly. update_app_data (P1-3 canvas app data iteration) shares
+   * this gate — it is meaningless without generate_app.
    */
   allowGenerateApp?: boolean;
   /**
@@ -1122,7 +1166,7 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
     if (!allowRenderUi && def.name === 'render_ui') {
       return false;
     }
-    if (!allowGenerateApp && def.name === 'generate_app') {
+    if (!allowGenerateApp && (def.name === 'generate_app' || def.name === 'update_app_data')) {
       return false;
     }
     return true;

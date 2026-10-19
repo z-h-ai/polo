@@ -108,6 +108,13 @@ export interface SessionScopedToolCallbacks {
   getMessagingBindingsFn?: (sessionId: string) => Array<{ platform: string; channelId: string; threadId?: number; channelName?: string; enabled: boolean }>;
   /** Unbind messaging channels from a session. Returns count of removed bindings. */
   unbindMessagingChannelFn?: (sessionId: string, platform?: string) => number;
+  /**
+   * P1-3 canvas app data channel: push a freshly written app data file to the
+   * app's mounted card(s) as a ui_state message. Wired by SessionManager to
+   * the Electron-installed push hook; absent outside the desktop surface, in
+   * which case update_app_data degrades to write-to-disk only.
+   */
+  notifyCanvasAppDataUpdatedFn?: (appId: string, dataPath: string) => void;
 }
 
 // Registry of callbacks keyed by sessionId
