@@ -13,9 +13,12 @@ import {
   DATATABLE_FILTER_CHIP_MAX_DISTINCT,
   activeColumnFilterEntries,
   applyColumnFilters,
+  applyViewSort,
   computeTextFilterChips,
+  filterChipLabelKey,
   isNumericFilterColumnType,
   parseFilterBound,
+  resolveDatatableViewScope,
   type ColumnFilters,
 } from '../../markdown/MarkdownDatatableBlock'
 
@@ -64,6 +67,21 @@ describe('parseFilterBound (invalid input is ignored, not applied)', () => {
     expect(parseFilterBound('   ')).toBeUndefined()
     expect(parseFilterBound('abc')).toBeUndefined()
     expect(parseFilterBound('12abc')).toBeUndefined()
+  })
+})
+
+describe('filterChipLabelKey (N4: boolean chips read like the cells, matching stays raw)', () => {
+  const booleanCol = { key: 'active', label: 'Active', type: 'boolean' as const }
+  const textCol = { key: 'region', label: 'Region', type: 'text' as const }
+
+  it('maps boolean chip values to the Yes/No cell vocabulary', () => {
+    expect(filterChipLabelKey('true', booleanCol)).toBe('common.yes')
+    expect(filterChipLabelKey('false', booleanCol)).toBe('common.no')
+  })
+
+  it('keeps non-boolean chips and unexpected boolean values as the raw string', () => {
+    expect(filterChipLabelKey('EMEA', textCol)).toBeNull()
+    expect(filterChipLabelKey('maybe', booleanCol)).toBeNull()
   })
 })
 
@@ -145,5 +163,83 @@ describe('isNumericFilterColumnType (numeric columns get range inputs, not chips
     expect(isNumericFilterColumnType('boolean')).toBe(false)
     expect(isNumericFilterColumnType('date')).toBe(false)
     expect(isNumericFilterColumnType(undefined)).toBe(false)
+  })
+})
+
+describe('applyViewSort (sort step of the view pipeline)', () => {
+  const rows = [
+    { region: 'EMEA', revenue: 100 },
+    { region: 'APAC', revenue: 300 },
+    { region: 'AMER', revenue: 200 },
+  ]
+
+  it('sorts ascending/descending and does not mutate the input', () => {
+    expect(applyViewSort(rows, 'revenue', 'asc').map(r => r.revenue)).toEqual([100, 200, 300])
+    expect(applyViewSort(rows, 'revenue', 'desc').map(r => r.revenue)).toEqual([300, 200, 100])
+    expect(rows.map(r => r.revenue)).toEqual([100, 300, 200])
+  })
+
+  it('keeps the original order when no sort is active', () => {
+    expect(applyViewSort(rows, null, null)).toEqual(rows)
+  })
+})
+
+describe('resolveDatatableViewScope (F2 export WYSIWYG: export = current view)', () => {
+  const rows = [
+    { region: 'EMEA', revenue: 100 },
+    { region: 'APAC', revenue: 300 },
+    { region: 'AMER', revenue: 200 },
+    { region: 'EMEA', revenue: 50 },
+  ]
+
+  it('exports exactly the current view — filtered AND sorted, same order the table shows', () => {
+    const view = applyViewSort(
+      applyColumnFilters(rows, { region: { kind: 'text', value: 'EMEA' } }),
+      'revenue',
+      'desc',
+    )
+    const scope = resolveDatatableViewScope(view, rows.length, true)
+    // The export dropdown receives the view rows themselves — WYSIWYG contract
+    expect(scope.exportRows).toBe(view)
+    expect(scope.exportRows).toEqual([
+      { region: 'EMEA', revenue: 100 },
+      { region: 'EMEA', revenue: 50 },
+    ])
+    expect(scope.shownRows).toBe(2)
+    expect(scope.totalRows).toBe(4)
+  })
+
+  it('export set is grouping-independent: the flattened view, collapsed groups included', () => {
+    // Grouping never narrows the set — the scope only sees the view rows and
+    // has no notion of group collapse, so a grouped/collapsed view exports all
+    // of its rows in view order.
+    const view = applyViewSort(rows, 'revenue', 'asc')
+    const scope = resolveDatatableViewScope(view, rows.length, false)
+    expect(scope.exportRows).toHaveLength(rows.length)
+    expect(scope.exportRows).toBe(view)
+  })
+
+  it('switches the subtitle to the filtered shown/total count when filters are active', () => {
+    const view = applyColumnFilters(rows, { region: { kind: 'text', value: 'EMEA' } })
+    const scope = resolveDatatableViewScope(view, rows.length, true)
+    expect(scope.subtitleKey).toBe('datatable.rowCountFiltered')
+    expect(scope.subtitleParams).toEqual({ count: 2, shown: 2, total: 4 })
+  })
+
+  it('keeps the plain rowCount subtitle when no filters are active (behavior unchanged)', () => {
+    const scope = resolveDatatableViewScope(rows, rows.length, false)
+    expect(scope.subtitleKey).toBe('datatable.rowCount')
+    expect(scope.subtitleParams).toEqual({ count: 4 })
+    // Unfiltered view exports every row in original order when no sort is set
+    expect(scope.exportRows).toEqual(rows)
+    expect(scope.shownRows).toBe(4)
+  })
+
+  it('a sort without filters still changes the export order (approved WYSIWYG semantics)', () => {
+    // Pre-F2 the markdown rich block exported the original order even when
+    // sorted; the approved unified-view semantics export the sorted view.
+    const view = applyViewSort(rows, 'revenue', 'desc')
+    const scope = resolveDatatableViewScope(view, rows.length, false)
+    expect(scope.exportRows.map(r => r.revenue)).toEqual([300, 200, 100, 50])
   })
 })

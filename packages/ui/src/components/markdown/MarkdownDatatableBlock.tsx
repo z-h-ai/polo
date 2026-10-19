@@ -365,6 +365,19 @@ export function computeTextFilterChips(
   return [...seen]
 }
 
+/**
+ * Chip display label (N4): boolean columns show Yes/No the way formatCell
+ * renders the cells, instead of the raw true/false the chip value carries.
+ * Filter MATCHING stays on the raw value — only the label is localized.
+ * Returns the i18n key to display, or null to show the raw chip value.
+ */
+export function filterChipLabelKey(chip: string, col: ColumnDef): string | null {
+  if (col.type !== 'boolean') return null
+  if (chip === 'true') return 'common.yes'
+  if (chip === 'false') return 'common.no'
+  return null
+}
+
 /** Parse one min/max bound input; empty or non-numeric input → undefined (ignored). */
 export function parseFilterBound(raw: string): number | undefined {
   const trimmed = raw.trim()
@@ -405,6 +418,65 @@ export function applyColumnFilters(
   const active = activeColumnFilterEntries(filters)
   if (active.length === 0) return rows
   return rows.filter(row => active.every(([key, filter]) => rowMatchesFilter(row, key, filter)))
+}
+
+/** Sort step of the view-state pipeline (filter → sort → group). */
+export function applyViewSort(
+  rows: Record<string, unknown>[],
+  sortKey: string | null,
+  sortDir: SortDir,
+): Record<string, unknown>[] {
+  const sorted = [...rows]
+  if (sortKey && sortDir) {
+    sorted.sort((a, b) => {
+      const av = a[sortKey]
+      const bv = b[sortKey]
+      if (av === bv) return 0
+      if (av === null || av === undefined) return 1
+      if (bv === null || bv === undefined) return -1
+      const cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }
+  return sorted
+}
+
+/**
+ * Overlay subtitle + export/copy scope (Wave-1.5 F2, WYSIWYG): export and
+ * copy always operate on the CURRENT VIEW — the filter+sort output — and the
+ * scope is visible to the user (overlay subtitle count, export trigger title
+ * and menu header). Grouping is presentation-only: the export set is the
+ * flattened view, so collapsed groups export too.
+ */
+export interface DatatableViewScope {
+  /** Row set handed to TableExportDropdown — the current view, flattened. */
+  exportRows: Record<string, unknown>[]
+  /** Rows visible under the current filters. */
+  shownRows: number
+  /** Rows before filtering. */
+  totalRows: number
+  /** Subtitle i18n key: a filtered view shows shown/total, else the plain count. */
+  subtitleKey: string
+  subtitleParams: Record<string, unknown>
+}
+
+export function resolveDatatableViewScope(
+  viewRows: Record<string, unknown>[],
+  totalRows: number,
+  hasActiveFilters: boolean,
+): DatatableViewScope {
+  const shownRows = viewRows.length
+  return {
+    exportRows: viewRows,
+    shownRows,
+    totalRows,
+    subtitleKey: hasActiveFilters ? 'datatable.rowCountFiltered' : 'datatable.rowCount',
+    subtitleParams: hasActiveFilters
+      ? { count: shownRows, shown: shownRows, total: totalRows }
+      : { count: totalRows },
+  }
 }
 
 // ── Error boundary ───────────────────────────────────────────────────────────
@@ -601,24 +673,10 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     return applyColumnFilters(parsed.rows, columnFilters)
   }, [parsed, enableColumnFilters, columnFilters])
 
-  const processedRows = React.useMemo(() => {
-    let rows = [...filteredRows]
-    // Sort
-    if (sortKey && sortDir) {
-      rows.sort((a, b) => {
-        const av = a[sortKey]
-        const bv = b[sortKey]
-        if (av === bv) return 0
-        if (av === null || av === undefined) return 1
-        if (bv === null || bv === undefined) return -1
-        const cmp = typeof av === 'number' && typeof bv === 'number'
-          ? av - bv
-          : String(av).localeCompare(String(bv))
-        return sortDir === 'asc' ? cmp : -cmp
-      })
-    }
-    return rows
-  }, [filteredRows, sortKey, sortDir])
+  const processedRows = React.useMemo(
+    () => applyViewSort(filteredRows, sortKey, sortDir),
+    [filteredRows, sortKey, sortDir]
+  )
 
   const granularityOptions = React.useMemo(() => {
     if (!parsed) return new Map<string, GranularityOption[]>()
@@ -695,6 +753,11 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
   const groupColumnLabel = groupKey ? parsed.columns.find((c) => c.key === groupKey)?.label ?? groupKey : ''
 
+  // Export/copy scope (F2 WYSIWYG): the current view is the single source —
+  // the overlay subtitle, the export trigger title and the exported rows all
+  // read from it, so what the user sees is exactly what leaves the table.
+  const viewScope = resolveDatatableViewScope(processedRows, parsed.rows.length, activeFilterCount > 0)
+
   // The optional GenUI action column widens every grid span by one.
   const columnCount = parsed.columns.length + (renderRowAction ? 1 : 0)
 
@@ -732,9 +795,12 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     const chips = textChipValues.get(col.key)
     if (!chips || chips.length === 0) return null
     return (
-      <div className="mt-1 flex flex-wrap gap-1 whitespace-normal" onClick={(e) => e.stopPropagation()}>
+      // max-width bounds this container's max-content contribution — the
+      // table is w-max, so without it flex-wrap could never fire (N3).
+      <div className="mt-1 flex flex-wrap gap-1 whitespace-normal max-w-[240px]" onClick={(e) => e.stopPropagation()}>
         {chips.map((chip) => {
           const isActive = active?.kind === 'text' && active.value === chip
+          const labelKey = filterChipLabelKey(chip, col)
           return (
             <button
               key={chip}
@@ -742,14 +808,14 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
               aria-pressed={isActive}
               onClick={() => toggleTextFilter(col.key, chip)}
               className={cn(
-                'px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors',
+                'px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors max-w-full truncate',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 isActive
-                  ? 'bg-accent/10 text-accent border-accent/30'
+                  ? 'bg-accent/10 text-accent border-accent/30 hover:bg-accent/15'
                   : 'bg-background text-muted-foreground border-foreground/10 hover:text-foreground hover:border-foreground/25',
               )}
             >
-              {chip}
+              {labelKey ? t(labelKey) : chip}
             </button>
           )
         })}
@@ -965,6 +1031,24 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     </DropdownMenu>
   )
 
+  // Active filter status bar — shared by the inline view and the fullscreen
+  // overlay (F2: filters must stay visible where they apply, or the overlay
+  // hides why its row set is a subset).
+  const renderFilterStatusBar = () => activeFilterCount > 0 ? (
+    <div className="px-3 py-1.5 border-b bg-accent/[0.04] flex items-center justify-between gap-2">
+      <span className="text-[12px] text-muted-foreground" aria-live="polite">
+        {t('datatable.filterStatus', { shown: filteredRows.length, total: parsed.rows.length })}
+      </span>
+      <button
+        type="button"
+        onClick={clearFilters}
+        className="text-[12px] text-accent hover:underline cursor-pointer rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        {t('datatable.clearFilters')}
+      </button>
+    </div>
+  ) : null
+
   return (
     <DatatableErrorBoundary fallback={fallback}>
       <div className={cn('relative group rounded-[8px] overflow-hidden border bg-muted/10', className)}>
@@ -996,20 +1080,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
         </div>
 
         {/* Active filter status (P0-1 view-state, ephemeral) */}
-        {activeFilterCount > 0 && (
-          <div className="px-3 py-1.5 border-b bg-accent/[0.04] flex items-center justify-between gap-2">
-            <span className="text-[12px] text-muted-foreground">
-              {t('datatable.filterStatus', { shown: filteredRows.length, total: parsed.rows.length })}
-            </span>
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="text-[12px] text-accent hover:underline rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              {t('common.clearAll')}
-            </button>
-          </div>
-        )}
+        {renderFilterStatusBar()}
 
         {/* Table with max height and scroll fade */}
         {tableContent(true, true)}
@@ -1020,16 +1091,25 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
         isOpen={isFullscreen}
         onClose={() => setIsFullscreen(false)}
         title={parsed.title || t('datatable.defaultTitle')}
-        subtitle={t('datatable.rowCount', { count: parsed.rows.length })}
+        subtitle={t(viewScope.subtitleKey, viewScope.subtitleParams)}
         headerActions={
           <div className="flex items-center gap-1.5">
             {renderControlsDropdown(true)}
-            <TableExportDropdown columns={parsed.columns} rows={parsed.rows} filename={parsed.title || t('datatable.defaultTitle')} />
+            <TableExportDropdown
+              columns={parsed.columns}
+              rows={viewScope.exportRows}
+              shownRows={viewScope.shownRows}
+              totalRows={viewScope.totalRows}
+              filename={parsed.title || t('datatable.defaultTitle')}
+            />
           </div>
         }
       >
         <div className="px-6">
           <div className="bg-background shadow-minimal rounded-[12px] overflow-hidden">
+            {/* F2: filters stay visible in fullscreen — the overlayed table's
+                subset is explainable and its clear control stays reachable. */}
+            {renderFilterStatusBar()}
             {tableContent(false)}
           </div>
         </div>
