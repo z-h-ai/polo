@@ -57,6 +57,7 @@
     "./sources": "./src/sources/index.ts",
     "./sources/types": "./src/sources/types.ts",
     "./skills": "./src/skills/index.ts",
+    "./skills/managed": "./src/skills/managed.ts",
     "./creator-skills": {
       "types": "./dist/creator-skills/index.d.ts",
       "node": "./dist/creator-skills/index.cjs",

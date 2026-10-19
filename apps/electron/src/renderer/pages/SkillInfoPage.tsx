@@ -27,7 +27,7 @@ import {
 import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import { refreshCreatorSkillSafetyStatus } from '@/lib/creator-skill-safety-refresh'
 import { useManagedSkills } from '@/hooks/useManagedSkills'
-import { isCanonicalManagedSkill } from '@polo-ai/shared/skills'
+import { isCanonicalManagedSkill } from '@polo-ai/shared/skills/managed'
 import {
   creatorSkillSafetyCheckStatesAtom,
   creatorSkillSafetyIdentityKey,
