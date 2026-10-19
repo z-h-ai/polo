@@ -104,9 +104,9 @@ export function AdminLoginStep({
         }}
       />
 
-      <section className="relative grid min-h-[570px] grid-cols-[1.08fr_0.92fr] overflow-hidden rounded-[24px] border border-border bg-surface shadow-modal-small [@media(max-width:760px)]:grid-cols-1 [@media(max-width:760px)]:min-h-0 [@media(max-width:760px)]:rounded-[18px]">
+      <section className="relative grid min-h-[570px] grid-cols-[1.08fr_0.92fr] overflow-hidden rounded-[24px] border border-border bg-surface shadow-modal-small client-material-card [@media(max-width:760px)]:grid-cols-1 [@media(max-width:760px)]:min-h-0 [@media(max-width:760px)]:rounded-[18px]">
         {/* === LEFT: brand story (prototype `.login-story`) === */}
-        <div className="flex flex-col justify-between bg-foreground-3 p-[54px] [@media(max-width:760px)]:hidden">
+        <div className="flex flex-col justify-between bg-foreground-3 p-[54px] client-material-brand [@media(max-width:760px)]:hidden">
           <div>
             <div className="flex items-center gap-[9px] pb-[16px] pl-[8px] pt-[4px]">
               <span className="grid size-[26px] flex-none place-items-center rounded-[8px] bg-foreground text-[13px] font-extrabold text-background">
@@ -219,7 +219,7 @@ export function AdminLoginStep({
                       disabled={isLoading}
                       className={cn(
                         "absolute right-1.5 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-[8px] text-muted-foreground transition-colors",
-                        "hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                        "hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 client-material-action"
                       )}
                     >
                       {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -232,7 +232,7 @@ export function AdminLoginStep({
                 <button
                   type="submit"
                   disabled={isLoading || !identifier.trim() || !password || !consented}
-                  className="inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50 client-material-control"
                 >
                   {isLoading ? (
                     <>

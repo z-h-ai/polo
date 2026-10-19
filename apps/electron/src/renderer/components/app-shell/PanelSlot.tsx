@@ -114,6 +114,9 @@ export function PanelSlot({
           'h-full overflow-hidden relative @container/panel',
           !isOnly && isFocusedPanel ? 'shadow-panel-focused z-[1]' : 'shadow-middle z-0',
           'bg-foreground-2',
+          // POO-105：材质作用域内聚焦面板取阅读面（99% 表面 + blur），
+          // 非聚焦面板保持实色 elevated 底以维持三栏层次（Spec §13.14）。
+          (isOnly || isFocusedPanel) && 'client-material-reading',
         )}
         style={{
           // In multi-panel, unfocused panels override --background so all

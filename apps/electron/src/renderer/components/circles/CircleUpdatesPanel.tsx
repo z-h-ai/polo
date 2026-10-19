@@ -316,7 +316,7 @@ function CircleUpdatesReady({
   if (entries.length === 0) {
     return (
       <div
-        className="mt-[14px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
+        className="mt-[14px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs text-muted-foreground"
         data-testid="circle-updates-empty"
         role="status"
       >

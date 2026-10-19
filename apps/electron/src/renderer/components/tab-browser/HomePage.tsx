@@ -488,7 +488,7 @@ export function HomePage() {
     <div className="h-full min-h-0 overflow-y-auto">
     <main
       style={workbenchStyle}
-        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
+        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
       data-testid="home-app-hub"
     >
       {/* Prototype `.r14-home .home-hero`: 我的应用 title + space lead at
@@ -581,7 +581,7 @@ export function HomePage() {
               onChange={event => setQuery(event.target.value)}
               placeholder={t('poo70.h3.home.searchPlaceholder')}
               data-testid="home-directory-search"
-              className="min-h-[38px] w-full appearance-none rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
+              className="min-h-[38px] w-full appearance-none rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
             />
           </label>
           <label className="grid gap-[6px] text-[12px] text-muted-foreground">
@@ -590,7 +590,7 @@ export function HomePage() {
               value={sourceFilter}
               onChange={event => setSourceFilter(event.target.value)}
               data-testid="home-directory-source"
-              className="min-h-[38px] rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground"
+              className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground"
             >
               <option value="all">{t('poo70.h3.home.sourceAll')}</option>
               {sourceOptions.map(option => (
@@ -604,7 +604,7 @@ export function HomePage() {
               value={sortMode}
               onChange={event => setSortMode(event.target.value as HomeAppSortMode)}
               data-testid="home-directory-sort"
-              className="min-h-[38px] rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground"
+              className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground"
             >
               <option value="recent">{t('poo70.h3.home.sortRecent')}</option>
               <option value="frequent">{t('poo70.h3.home.sortFrequent')}</option>
@@ -657,7 +657,7 @@ export function HomePage() {
           {assistantVisible && <article
             data-testid="home-quick-entry-polo"
             onClick={openPoloAssistant}
-            className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-border bg-surface p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
+            className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
           >
             <span className="mb-[24px] min-[1081px]:mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
               <Icons.Sparkles className="size-[18px]" aria-hidden="true" />
@@ -689,14 +689,14 @@ export function HomePage() {
           {skillsOpen && <ProductSpaceSkillsDialog onClose={() => setSkillsOpen(false)} />}
           {phase === 'loading' && !catalog.state.catalog ? (
             <div
-              className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface"
+              className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface client-material-card"
               data-testid="home-directory-loading"
             >
               <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
             </div>
           ) : phase === 'error' && !catalog.state.catalog ? (
             <div
-              className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[20px] border border-foreground/10 bg-surface px-[24px] text-center"
+              className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[20px] border border-foreground/10 bg-surface client-material-card px-[24px] text-center"
               data-testid="home-directory-load-failed"
             >
               <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />

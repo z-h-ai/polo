@@ -161,7 +161,7 @@ export function CircleReturnPanel({
 
   return (
     <section
-      className="mx-auto mt-[54px] grid justify-items-center w-full max-w-[640px] rounded-[20px] border border-border bg-surface p-[32px] text-center shadow-middle"
+      className="mx-auto mt-[54px] grid justify-items-center w-full max-w-[640px] rounded-[20px] border border-border bg-surface client-material-card p-[32px] text-center shadow-middle"
       data-testid="circle-return-panel"
       data-return-kind={state.kind}
       data-return-phase={state.phase}
@@ -194,7 +194,7 @@ export function CircleReturnPanel({
       The mismatch state renders none of them (no disclosure). */}
       {state.phase !== 'account-mismatch' && (
         <dl
-          className="m-0 mt-[22px] w-full overflow-hidden rounded-[8px] border border-border bg-surface text-left"
+          className="m-0 mt-[22px] w-full overflow-hidden rounded-[8px] border border-border bg-surface client-material-card text-left"
           data-testid="circle-return-facts"
         >
           {isOrder && target.orderId && (
@@ -242,7 +242,7 @@ export function CircleReturnPanel({
       entitlement judgment (G5). */}
       {state.phase === 'verified' && state.orderFacts && (
         <dl
-          className="m-0 mt-[12px] w-full overflow-hidden rounded-[8px] border border-border bg-surface text-left"
+          className="m-0 mt-[12px] w-full overflow-hidden rounded-[8px] border border-border bg-surface client-material-card text-left"
           data-testid="circle-return-order"
         >
           <FactRow label={t('poo70.c8.order.storedStatus')} testId="circle-return-order-status">

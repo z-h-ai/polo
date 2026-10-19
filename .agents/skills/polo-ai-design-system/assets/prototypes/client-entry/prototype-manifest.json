@@ -2,9 +2,9 @@
   "schema_version": 1,
   "kind": "client-entry-consumer-index",
   "revision": "poo70-workbench-r15-closure",
-  "design_revision": "poo70-client-design-r2-20261004",
+  "design_revision": "poo105-client-material-r1-20261019",
   "source_manifest": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
-  "source_manifest_sha256": "7e01dbc8eebd78ef5d37ba707132d7ce48cfd934d4585b5f39caf6aa9cf7132b",
+  "source_manifest_sha256": "f9914d54d1a438dfde0a5762b7c7347235560e5431fe0f7afee9850bd2bb03b3",
   "product_export": "docs/mvp-complete-flow-hifi/prototype.html",
   "target": {
     "languages": [
@@ -66,7 +66,8 @@
       ],
       "surface": "mvp",
       "components": [
-        "登录表单"
+        "登录表单",
+        "微透材质表面"
       ]
     },
     {
@@ -448,7 +449,8 @@
         "工作台顶栏",
         "工作区布局",
         "应用卡",
-        "首页目录"
+        "首页目录",
+        "微透材质表面"
       ]
     },
     {
@@ -1565,7 +1567,8 @@
       "components": [
         "工作台顶栏",
         "工作区布局",
-        "圈子统一列表"
+        "圈子统一列表",
+        "微透材质表面"
       ]
     },
     {

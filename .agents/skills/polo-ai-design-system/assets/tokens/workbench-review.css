@@ -66,3 +66,24 @@ body:not([data-theme=dark]) .polo-assistant-body .source-content-panel{backgroun
 .circle-app-grid{margin-top:18px}.circle-app-grid .product-card{min-width:0}
 .annual-subscription{max-width:760px}.annual-subscription .state-facts{margin:20px 0}
 @media(max-width:850px){.circle-list .circle-card{grid-template-columns:44px minmax(0,1fr) auto;gap:14px;padding:20px}.circle-list .circle-avatar{width:44px;height:44px;font-size:18px;border-radius:14px}.circle-list .circle-card h2{font-size:17px}}
+
+/* POO-105 微透材质（2026-10-19 用户接受 explore-r5 A）：默认浅色专用，
+   由 data-client-material="light" 限定作用域；深色/自定义主题不套用。
+   需要透明度的表面从材质专用字面锚点（--client-material-base-*，即基础令牌
+   的规范 sRGB 值）color-mix 派生，前景/禁用族取 Spec §13.14 的字面色：
+   派生在原型与 Renderer 宿主求值一致，与确认的 rgba 值逐位等价；
+   透明度只作用于指定背景色，稳定前景（文字/图标/头像/输入内容）一律实色。 */
+:root{--client-material-base-background:#fbfbfa;--client-material-base-accent:#6e56cf;--client-material-canvas:color-mix(in srgb,var(--client-material-base-background) 93%,transparent);--client-material-list:color-mix(in srgb,var(--surface) 94%,transparent);--client-material-reading:color-mix(in srgb,var(--surface) 99%,transparent);--client-material-card:color-mix(in srgb,var(--surface) 98%,transparent);--client-material-brand:color-mix(in srgb,#f7f7f8 94%,transparent);--client-material-blur:24px;--client-material-fg-secondary:#45474f;--client-material-fg-muted:#60636a;--client-material-placeholder:#676a73;--client-material-selected-bg:color-mix(in srgb,var(--client-material-base-accent) 9%,transparent);--client-material-selected-fg:#392d65;--client-material-disabled-bg:#e2e4e8;--client-material-disabled-fg:#747983}
+body[data-client-material="light"]:not([data-theme=dark]) .workbench-bar,body[data-client-material="light"]:not([data-theme=dark]) .polo-host-bar{background:transparent;border-bottom-color:transparent;backdrop-filter:none;box-shadow:none}
+body[data-client-material="light"]:not([data-theme=dark]) .workbench-bar[data-scrolled="true"]{border-bottom-color:transparent}
+body[data-client-material="light"]:not([data-theme=dark]) .assistant-shell,body[data-client-material="light"]:not([data-theme=dark]) .assistant-sidebar{background:transparent}
+body[data-client-material="light"]:not([data-theme=dark]) .assistant-nav-item.active{background:var(--client-material-selected-bg);color:var(--client-material-selected-fg)}
+body[data-client-material="light"]:not([data-theme=dark]) .assistant-navigator{background:var(--client-material-list);backdrop-filter:blur(var(--client-material-blur))}
+body[data-client-material="light"]:not([data-theme=dark]) .assistant-main{background:var(--client-material-reading);backdrop-filter:blur(var(--client-material-blur))}
+body[data-client-material="light"]:not([data-theme=dark]) .product-card,body[data-client-material="light"]:not([data-theme=dark]) .result-card,body[data-client-material="light"]:not([data-theme=dark]) .detail-card,body[data-client-material="light"]:not([data-theme=dark]) .utility-card{background:var(--client-material-card);backdrop-filter:blur(var(--client-material-blur))}
+body[data-client-material="light"]:not([data-theme=dark]) .login-split{background:var(--client-material-card);backdrop-filter:blur(var(--client-material-blur))}
+body[data-client-material="light"]:not([data-theme=dark]) .login-story{background:var(--client-material-brand)}
+body[data-client-material="light"]:not([data-theme=dark]) .chat-composer,body[data-client-material="light"]:not([data-theme=dark]) .dialog{background:var(--client-material-card)}
+body[data-client-material="light"]:not([data-theme=dark]) input::placeholder,body[data-client-material="light"]:not([data-theme=dark]) textarea::placeholder{opacity:1;color:var(--client-material-placeholder)}
+body[data-client-material="light"]:not([data-theme=dark]) .button:disabled,body[data-client-material="light"]:not([data-theme=dark]) .card-action:disabled{opacity:1;border-color:transparent;background:var(--client-material-disabled-bg);color:var(--client-material-disabled-fg)}
+body[data-client-material="light"]:not([data-theme=dark]) .button:disabled:hover,body[data-client-material="light"]:not([data-theme=dark]) .card-action:disabled:hover{background:var(--client-material-disabled-bg);color:var(--client-material-disabled-fg)}

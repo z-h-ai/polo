@@ -90,7 +90,7 @@ export function MemberCircleRow({ model, onOpen, testId = 'circle-row' }: Member
       data-testid={testId}
       data-circle-id={model.circleId}
       data-entitlement-state={model.entitlementState}
-      className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-[20px] rounded-[20px] border border-border bg-surface p-[24px] shadow-xs transition-[border-color,box-shadow] hover:border-accent/35 hover:shadow-middle max-[850px]:grid-cols-[44px_minmax(0,1fr)_auto] max-[850px]:gap-[14px] max-[850px]:p-[20px]"
+      className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-[20px] rounded-[20px] border border-border bg-surface client-material-card p-[24px] shadow-xs transition-[border-color,box-shadow] hover:border-accent/35 hover:shadow-middle max-[850px]:grid-cols-[44px_minmax(0,1fr)_auto] max-[850px]:gap-[14px] max-[850px]:p-[20px]"
     >
       <span
         aria-hidden="true"

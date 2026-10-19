@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "repository": "polo-ai",
+  "policies": [
+    {
+      "id": "polo-ai-design-system",
+      "kind": "design",
+      "model": ".agents/skills/polo-ai-design-system/references/design-system.json",
+      "paths": [
+        "apps/electron/src/renderer",
+        "apps/electron/src/main",
+        "apps/electron/src/preload",
+        "docs/mvp-complete-flow-hifi",
+        ".agents/skills/polo-ai-design-system"
+      ],
+      "prototype_manifest": null
+    }
+  ]
+}

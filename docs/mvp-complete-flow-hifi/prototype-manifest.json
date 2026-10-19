@@ -454,17 +454,17 @@
   ],
   "default_story": "UI-refinement",
   "design": {
-    "revision": "poo70-client-design-r2-20261004",
-    "sha256": "cc9fce7c9298cf5a6d2e88b8fbec0584096dc03f011f9e067dcea975ba2c9c96",
+    "revision": "poo105-client-material-r1-20261019",
+    "sha256": "382b19ccb33d97970eeb77b48e1ece2f7e3d8dda7e3a76a57a33f7f23da0bd5d",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {
         "path": "docs/client-journey-review/spec.md",
-        "sha256": "269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7"
+        "sha256": "5759981c0b54a1f0b51e21100936929b8e9a81045f1fd0a4a1e804e6fca5eb70"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
-        "sha256": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d"
+        "sha256": "aee33459786fa0843c410416eecaca1dda5a46f549e5b018d8d94588f6a6f8d5"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
@@ -472,11 +472,11 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
-        "sha256": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591"
+        "sha256": "be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70"
       },
       {
         "path": "apps/electron/src/renderer/index.css",
-        "sha256": "91fb77782a6d5dadb2cff70f05a88fa2ec67672e50dc2362020aa5b393d13449"
+        "sha256": "866187c7be4e5a4b04fec3335594db2e2d1804fb0067fead8c982cbff04bea5e"
       },
       {
         "path": "docs/mvp-complete-flow-hifi/sources/g4-product.css",
@@ -45483,7 +45483,7 @@
       "label": "当前唯一客户端产品说明",
       "path": "docs/client-journey-review/spec.md",
       "revision": "master-r15-closure（2026-10-03）",
-      "sha256": "269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7"
+      "sha256": "5759981c0b54a1f0b51e21100936929b8e9a81045f1fd0a4a1e804e6fca5eb70"
     },
     {
       "id": "skill-terminology-review-r11",
@@ -45511,7 +45511,7 @@
       "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
       "label": "本轮全端共享样式（设计提案）",
       "revision": "poo70-workbench-r15",
-      "sha256": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591"
+      "sha256": "be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70"
     },
     {
       "id": "assistant-r12-source",
@@ -45566,29 +45566,29 @@
       "id": "client-workbench-template",
       "path": ".agents/skills/polo-ai-design-system/references/client-workbench.template.html",
       "label": "客户端产品页面唯一维护模板",
-      "revision": "poo70-client-design-r2-20261004",
-      "sha256": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8"
+      "revision": "poo105-client-material-r1-20261019",
+      "sha256": "d50590c7bbd5ed6df9e206c3568188ebd8b20f620475e88078dd1cf80886b8f7"
     },
     {
       "id": "workbench-base-css",
       "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
       "label": "最新原型提升的 b82fa1e5 基础样式",
-      "revision": "poo70-client-design-r2-20261004",
+      "revision": "poo105-client-material-r1-20261019",
       "sha256": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a"
     },
     {
       "id": "client-design-model",
       "path": ".agents/skills/polo-ai-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
-      "revision": "poo70-client-design-r2-20261004",
-      "sha256": "e78ebed5a1edd898558dfa6fbed7f33509ceb65f22d333db4208c00248cef457"
+      "revision": "poo105-client-material-r1-20261019",
+      "sha256": "df1e7d113b48d3aa84841bc90c8518a089be5281ec8fbf209851987aa54bdb88"
     },
     {
       "id": "client-design-foundations",
       "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
       "label": "当前客户端设计来源和消费边界",
-      "revision": "poo70-client-design-r2-20261004",
-      "sha256": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d"
+      "revision": "poo105-client-material-r1-20261019",
+      "sha256": "aee33459786fa0843c410416eecaca1dda5a46f549e5b018d8d94588f6a6f8d5"
     },
     {
       "id": "assistant-r12-review",

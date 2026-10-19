@@ -1,6 +1,6 @@
 # Polo 客户端设计来源与消费规则
 
-版本：`poo70-client-design-r2-20261004`。适用 Polo Electron 外层工作台、登录、首页、圈子列表与详情；不适用于 Admin、创作者网页或第三方应用内部。
+版本：`poo105-client-material-r1-20261019`（承 `poo70-client-design-r2-20261004`）。适用 Polo Electron 外层工作台、登录、首页、圈子列表与详情；不适用于 Admin、创作者网页或第三方应用内部。
 
 ## 来源及优先级
 
@@ -20,10 +20,21 @@ G4 `sources/g4-product.css`、`sources/g4-review-record.md`、固定 Renderer `s
 
 桌面验证视口为 1440×900、1024×768；800×600 是原型声明的额外窄窗回归，未扩大本批 YAML 验收范围。CSS 在 1080/760 及增量 1050/850 等断点适配，读取最终生效规则，不把媒体查询前的桌面值当窄窗值。主要工作区自行纵向滚动，不允许非预期横向溢出、截断操作或让嵌套滚动触发顶栏边线。
 
+## 微透材质合同（POO-105，用户 2026-10-19 接受 explore-r5 A）
+
+默认浅色增加「微透材质」层，权威确认摘录在 `references/poo105-confirmation.md`，固定参考快照在 `assets/prototypes/poo105-materials/approved-r5.html`（绑定见同目录 `source-binding.json`）。合同要点：
+
+- 作用域：`data-client-material="light"` 标记 + 默认浅色主题同时成立才生效——视觉暗色判定用 `isDark`（覆盖系统深色、Scenic 壁纸与深色专属自定义主题），存在自定义主题文件（`presetTheme`）时不投放；第三方 App 内部不套用。缺标记时全部回落既有不透明样式。
+- 表面：底板 canvas = 背景 93% 不透明度；列表面 list = 表面 94%；阅读面 reading = 表面 99%；卡片/表单 card = 表面 98%；登录品牌面 brand = 近背景 94%（#f7f7f8 系）。blur 统一 24px。令牌名 `--client-material-*`：需要透明度的表面从材质专用字面锚点（`--client-material-base-background` #fbfbfa、`--client-material-base-accent` #6e56cf）`color-mix` 派生，保证在原型与 Renderer 宿主求值一致；前景/禁用族直接取下方合同字面色，不维护第二套色表。
+- 前景：透明度只作用于背景色。文字、图标、头像、输入内容、placeholder 一律实色——主前景 `--foreground`；次级操作 #45474f 系（`--client-material-fg-secondary`）；次级文本 #60636a 系；placeholder #676a73 系且 `opacity:1`。
+- 选中：导航/标签选中用强调色 9% 背景（rgba(110,86,207,.09)）＋ #392d65 文字。
+- 真禁用：实色灰 #e2e4e8 底 / #747983 字（`--client-material-disabled-bg/fg`），`opacity:1`；禁止用整容器 opacity 淡化表达禁用。此条只约束「视觉禁用态」的画法，不把占位按钮 `opacity:1` 泛化成全局样式。
+- Header：材质作用域内 Header 与底板同层同色——bar 背景透明让唯一画布板透出，不画第二块色板（两层半透会叠出接近不透明的「假白」）；任何滚动状态都不出现分层背景与细线（见下方顶栏合同的裁决）。Renderer 顶栏为 fixed、悬浮于画布之上（内容区以 padding 让位，不与 bar 重叠），`blur(24px)` 为将来内容穿越预留可读性、不构成第二色板；原型布局 bar 无 blur。
+
 ## 页面与组件合同
 
 - 登录：`auth-root`、`login-split`、`login-panel`、既有表单控件及按钮。密码/验证码可切换；手机号首次验码自动注册，不新增独立注册页。发送中、倒计时、输入错误、提交失败、取消及我的空间准备/重试保留明确反馈，沿真实认证实现接线。
-- 顶栏：`workbench-bar`、首页与已打开 App 标签、运行状态、当前空间静态标识、通知及账号菜单。切换空间从账号菜单进入，顶栏没有独立空间切换下拉；不增加「应用/技能/圈子」第二排 Tab。主体在顶部时无边线，主体滚离顶部显示细线，返回顶部隐藏。内部聊天/列表滚动不能误触。
+- 顶栏：`workbench-bar`、首页与已打开 App 标签、运行状态、当前空间静态标识、通知及账号菜单。切换空间从账号菜单进入，顶栏没有独立空间切换下拉；不增加「应用/技能/圈子」第二排 Tab。主体在顶部时无边线，主体滚离顶部显示细线，返回顶部隐藏——POO-105 材质作用域内被 §微透材质合同 覆盖：Header 与底板同层，任何滚动状态都不显示细线；滚动线规则只对非材质作用域（深色/未标记宿主）保留。内部聊天/列表滚动不能误触。
 - 首页：标题「我的应用」；完整应用目录、搜索、排序、零记录、真空目录、失败与离线缓存各有真实状态。圈子是个人首页普通入口，企业首页不出现个人圈子。助手卡保留既有打开动作；管理技能入口的位置遵守 Spec，但本批不实施目标页。
 - 应用卡：首页与圈子共用 `product-card`、`app-art`、标题、创作者来源、打开动作及间距。不显示常驻左下角「可使用/有更新/两个有效来源」；标题下创作者信息用于辨识，详情才展开全部来源。按稳定作品 ID 去重，不按名称合并。失权原因由动作/详情说明；此样式合同不改变 Runtime、安装、打开或授权数据合同。
 - 圈子列表：一组「我的圈子」＋「查看圈子内容，管理订阅」，随后搜索、筛选及统一 `circle-card` 列表。固定头像、名称/创作者、摘要、权益/有效期，右侧「查看详情」。免费/月度/年度用轻量权益文字区分，不另造年度大卡；不能虚构创作者/内容字段。桌面列表及空态不新增粘贴分享链接入口。
@@ -34,7 +45,7 @@ G4 `sources/g4-product.css`、`sources/g4-review-record.md`、固定 Renderer `s
 
 ## 状态与可访问性
 
-覆盖 loading/preparing、empty、hover、focus-visible、disabled/submitting、error/retry、offline、expired、success、cancel/interruption 及返回原对象恢复。复用语义色；焦点按增量 CSS 使用强调色外框，禁用状态同时禁止动作。标题/label/按钮文字表达可操作对象；保留 prefers-reduced-motion；不添加仅用于挑选成功/失败的产品按钮。
+覆盖 loading/preparing、empty、hover、focus-visible、disabled/submitting、error/retry、offline、expired、success、cancel/interruption 及返回原对象恢复。复用语义色；焦点按增量 CSS 使用强调色外框，禁用状态同时禁止动作。标题/label/按钮文字表达可操作对象；保留 prefers-reduced-motion；不添加仅用于挑选成功/失败的产品按钮。POO-105 材质作用域内禁用视觉按 §微透材质合同 改为实色灰表达，替代增量 CSS 的 `button:disabled{opacity:.5}` 画法；焦点外框、reduced-motion 与禁止动作不变。
 
 ## 维护与检查
 

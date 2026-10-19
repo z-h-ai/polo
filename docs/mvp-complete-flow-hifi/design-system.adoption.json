@@ -18,17 +18,17 @@
     ]
   },
   "mode": "extracted",
-  "revision": "poo70-client-design-r2-20261004",
+  "revision": "poo105-client-material-r1-20261019",
   "sources": [
     {
       "path": "docs/client-journey-review/spec.md",
-      "sha256": "269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7",
+      "sha256": "5759981c0b54a1f0b51e21100936929b8e9a81045f1fd0a4a1e804e6fca5eb70",
       "role": "authority",
-      "scope": "当前产品唯一来源 master-r15-closure；§13.8—13.13 覆盖旧设计指令"
+      "scope": "当前产品唯一来源 master-r15-closure；§13.8—13.14 覆盖旧设计指令"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
-      "sha256": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
+      "sha256": "aee33459786fa0843c410416eecaca1dda5a46f549e5b018d8d94588f6a6f8d5",
       "role": "authority",
       "scope": "本次原型提取与消费边界；明确确认/实现事实/待复看范围"
     },
@@ -40,13 +40,13 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
-      "sha256": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+      "sha256": "be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70",
       "role": "authority",
-      "scope": "导航/Header、首页和统一圈子列表已明确增量；按最终CSS cascade消费"
+      "scope": "导航/Header、首页、统一圈子列表及 POO-105 微透材质增量；按最终CSS cascade消费"
     },
     {
       "path": "apps/electron/src/renderer/index.css",
-      "sha256": "91fb77782a6d5dadb2cff70f05a88fa2ec67672e50dc2362020aa5b393d13449",
+      "sha256": "b3dabc1562cf3a91e45f055935ff749183e87b75a0d9a8158a67948a1cf8eeeb",
       "role": "implementation",
       "scope": "本轮工作树Renderer样式事实；不是发布版或新的产品设计授权"
     },
@@ -133,6 +133,10 @@
     {
       "family": "当前导航与首页/圈子增量样式",
       "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css"
+    },
+    {
+      "family": "POO-105 默认浅色微透材质与前景令牌（--client-material-*）",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css"
     }
   ],
   "components": [
@@ -185,6 +189,11 @@
       "name": "浏览器交接",
       "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
       "reuse": "只承接原对象并主动核对，不复制网页支付/管理，不自动重复业务写"
+    },
+    {
+      "name": "微透材质表面",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "reuse": "data-client-material=light 且非 dark 才生效；canvas/list/reading/card/brand 表面加 24px blur，前景与 placeholder 实色，真禁用实色灰；缺标记回落既有不透明样式"
     }
   ],
   "interaction_states": [
@@ -202,12 +211,15 @@
     "仅维护Skill模板与样式；文档原型、消费manifest与兼容adoption是生成产物，不独立手改。",
     "管理技能页面和Polo助手内部代码暂缓；真实助手UI继续复用Renderer，转译示意不能成为重写标准。",
     "仅产品页面可进入客户端；review-shell按钮、模拟结果、虚构账号金额订单及第三方应用内部内容不进入生产。",
-    "未建立完整政策注册或生产parity绑定；来源/结构检查不证明execution_ready或业务验收。"
+    "未建立完整政策注册或生产parity绑定；来源/结构检查不证明execution_ready或业务验收。",
+    "POO-105微透材质只在data-client-material=light且非dark的作用域消费：表面用--client-material-*加24px blur，前景/placeholder实色，真禁用实色灰；确认摘录见references/poo105-confirmation.md，固定快照与绑定见assets/prototypes/poo105-materials/。",
+    "生产组件盘点读references/component-inventory.md（2026-10-18 dev@e7c0e6bd只读登记）：modules之外的renderer面仅为登记不获得设计授权；skill组件与生产落点交叉映射在清单§4，token桥梁为apps/electron/src/renderer/lib/client-workbench-style.ts；配套展示docs/reports/2026-10-18-polo-design-component-library.html非权威。"
   ],
   "checks": [
     "python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py",
     "python3 docs/mvp-complete-flow-hifi/tools/build_review.py",
-    "POLO_REVIEW_EVIDENCE=/tmp/poo70-design-structure python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py"
+    "POLO_REVIEW_EVIDENCE=/tmp/poo70-design-structure python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py",
+    "python3 docs/mvp-complete-flow-hifi/tools/check_navigation_header.py"
   ],
   "decisions": [
     {
@@ -236,9 +248,15 @@
     },
     {
       "id": "D-PAGE-VISUAL",
-      "status": "suggested",
-      "scope": "整页布局待复看；当前提取只是目标实现事实；集中visual smoke不升级parity",
+      "status": "confirmed",
+      "scope": "布局与业务沿当前真实Renderer实现，不做整页视觉parity验收；页面视觉按已确认材质合同与b82fa1e5基线执行",
       "source": ".agents/skills/polo-ai-design-system/references/foundations.md"
+    },
+    {
+      "id": "D-POO105-MATERIAL",
+      "status": "confirmed",
+      "scope": "Spec §13.14：默认浅色微透材质、Header与底板同层无滚动细线、前景/placeholder实色、选中accent 9%、真禁用实色灰；深色与第三方App不套用",
+      "source": "docs/client-journey-review/spec.md"
     }
   ],
   "coverage": [
@@ -246,7 +264,7 @@
       "dimension": "color",
       "status": "explicit",
       "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
-      "reason": "已确认b82fa1e5色彩与当前增量cascade；使用实际CSS颜色"
+      "reason": "已确认b82fa1e5色彩、当前增量cascade及POO-105 --client-material-*材质令牌（自基础色color-mix派生）；使用实际CSS颜色"
     },
     {
       "dimension": "typography",
@@ -288,7 +306,7 @@
       "dimension": "states",
       "status": "explicit",
       "source": ".agents/skills/polo-ai-design-system/references/foundations.md",
-      "reason": "loading/empty/error/recovery/focus/disabled与恢复合同明确"
+      "reason": "loading/empty/error/recovery/focus/disabled与恢复合同明确；材质作用域内真禁用改实色灰表达，不用整容器opacity"
     },
     {
       "dimension": "responsive",
@@ -629,6 +647,27 @@
         {
           "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
           "scene": "P-M07-RENEW-YEAR"
+        }
+      ]
+    },
+    {
+      "name": "微透材质表面",
+      "kind": "foundation",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-LOGIN-PASSWORD"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-PERSONAL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LIST"
         }
       ]
     }

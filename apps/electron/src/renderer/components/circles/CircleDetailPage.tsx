@@ -178,7 +178,7 @@ function CircleUnavailableState({
   if (phase === 'idle') {
     return (
       <div
-        className="mt-[16px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
+        className="mt-[16px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs text-muted-foreground"
         data-testid="circle-detail-unavailable-idle"
       >
         {t('poo70.c3.state.idle')}
@@ -429,7 +429,7 @@ export function CircleDetailPage({
         tabIndex={-1}
         data-circle-id={circleId}
         style={workbenchStyle}
-        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
+        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
       >
         {/* Prototype `.subpage-heading.circle-detail-heading`: back button +
         eyebrow + THE single identity heading (ready circles only). */}
@@ -604,7 +604,7 @@ export function CircleDetailPage({
               panel switches to its restore state on its own. */}
               {leave.state.outcome?.kind === 'left' && (
                 <div
-                  className="mt-[14px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs"
+                  className="mt-[14px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs"
                   data-testid="circle-detail-leave-outcome"
                   data-verification={leave.state.outcome.verification}
                 >

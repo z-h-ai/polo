@@ -1,10 +1,10 @@
 {
-  "revision": "poo70-workbench-r15-nav-header",
+  "revision": "poo70-workbench-r15-closure",
   "artifacts": {
-    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "e96107cd461358b714305c71899e28c4f1a0f1573a7f90c15deee4e3d87b661e",
-    "docs/mvp-complete-flow-hifi/prototype.html": "fb75b6e15a691bd9a93da09c8391eeb0dd85ddd9b9e8aaeaa09b1ebd297769d3",
-    "docs/mvp-complete-flow-hifi/review.html": "c0b6f5599a0021c3be90edb1896a3137cd44ae570f90c16b1876ea3d71ca72f2",
-    "design-demos/polo-client-source-baseline/prototype.html": "22a201feb45dd1eb90e6a2e45cebbef6b0129c672855910501f68fa17a76f3ef"
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "f9914d54d1a438dfde0a5762b7c7347235560e5431fe0f7afee9850bd2bb03b3",
+    "docs/mvp-complete-flow-hifi/prototype.html": "000091962343830e8ade72884e556f70f4d42aef79b027c185ae76271e7581ae",
+    "docs/mvp-complete-flow-hifi/review.html": "0d9dc9520b0108bf5dc79635aa01207dca6b1a33aa323193e00da9255cb8fcd0",
+    "design-demos/polo-client-source-baseline/prototype.html": "49fb928ef82fa09edba5ffa9f405466fb16c053c0e02169052da93697e9ce481"
   },
   "checks": [
     {
@@ -19,6 +19,11 @@
     },
     {
       "name": "desktop-1440x900 personal header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 personal material header unified with canvas",
       "passed": true,
       "detail": null
     },
@@ -63,6 +68,11 @@
       "detail": null
     },
     {
+      "name": "desktop-1440x900 enterprise material header unified with canvas",
+      "passed": true,
+      "detail": null
+    },
+    {
       "name": "desktop-1440x900 enterprise no horizontal overflow",
       "passed": true,
       "detail": null
@@ -88,7 +98,7 @@
       "detail": null
     },
     {
-      "name": "desktop-1440x900 line appears only after scroll",
+      "name": "desktop-1440x900 material keeps header lineless when scrolled",
       "passed": true,
       "detail": null
     },
@@ -98,12 +108,27 @@
       "detail": null
     },
     {
-      "name": "desktop-1440x900 line disappears on return to top",
+      "name": "desktop-1440x900 unmarked host still reveals line on scroll",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 material scope restores lineless header",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 controller clears scrolled state at top",
       "passed": true,
       "detail": null
     },
     {
       "name": "desktop-1440x900 assistant top is borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 material assistant scroll stays lineless",
       "passed": true,
       "detail": null
     },
@@ -134,6 +159,11 @@
     },
     {
       "name": "desktop-1024x768 personal header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 personal material header unified with canvas",
       "passed": true,
       "detail": null
     },
@@ -178,6 +208,11 @@
       "detail": null
     },
     {
+      "name": "desktop-1024x768 enterprise material header unified with canvas",
+      "passed": true,
+      "detail": null
+    },
+    {
       "name": "desktop-1024x768 enterprise no horizontal overflow",
       "passed": true,
       "detail": null
@@ -203,7 +238,7 @@
       "detail": null
     },
     {
-      "name": "desktop-1024x768 line appears only after scroll",
+      "name": "desktop-1024x768 material keeps header lineless when scrolled",
       "passed": true,
       "detail": null
     },
@@ -213,12 +248,27 @@
       "detail": null
     },
     {
-      "name": "desktop-1024x768 line disappears on return to top",
+      "name": "desktop-1024x768 unmarked host still reveals line on scroll",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 material scope restores lineless header",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 controller clears scrolled state at top",
       "passed": true,
       "detail": null
     },
     {
       "name": "desktop-1024x768 assistant top is borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 material assistant scroll stays lineless",
       "passed": true,
       "detail": null
     },
@@ -249,6 +299,11 @@
     },
     {
       "name": "desktop-800x600 personal header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 personal material header unified with canvas",
       "passed": true,
       "detail": null
     },
@@ -293,6 +348,11 @@
       "detail": null
     },
     {
+      "name": "desktop-800x600 enterprise material header unified with canvas",
+      "passed": true,
+      "detail": null
+    },
+    {
       "name": "desktop-800x600 enterprise no horizontal overflow",
       "passed": true,
       "detail": null
@@ -318,7 +378,7 @@
       "detail": null
     },
     {
-      "name": "desktop-800x600 line appears only after scroll",
+      "name": "desktop-800x600 material keeps header lineless when scrolled",
       "passed": true,
       "detail": null
     },
@@ -328,12 +388,27 @@
       "detail": null
     },
     {
-      "name": "desktop-800x600 line disappears on return to top",
+      "name": "desktop-800x600 unmarked host still reveals line on scroll",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 material scope restores lineless header",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 controller clears scrolled state at top",
       "passed": true,
       "detail": null
     },
     {
       "name": "desktop-800x600 assistant top is borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 material assistant scroll stays lineless",
       "passed": true,
       "detail": null
     },

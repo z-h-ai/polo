@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "task": "POO-105",
+  "title": "POO-105 微透材质固定参考绑定",
+  "snapshot": {
+    "path": ".agents/skills/polo-ai-design-system/assets/prototypes/poo105-materials/approved-r5.html",
+    "sha256": "04e1abad2d6b77d16ff181f8aa4b5a1bbece1cd44a5aa9a0090054286b147247",
+    "origin_path": ".pipeline/sdlc/POO-105/review/explore-r5/playground.html",
+    "origin_sha256": "04e1abad2d6b77d16ff181f8aa4b5a1bbece1cd44a5aa9a0090054286b147247",
+    "material_fingerprint": "8581043c0916d3add63951b06f6bb1b3f32f760ffac644758cd8618b983d185e",
+    "revision": "explore-r5",
+    "candidates": {
+      "A": "本任务已接受的范围（前景审查后增量）",
+      "A0": "r4 历史对照，不属于本任务范围"
+    }
+  },
+  "confirmation": {
+    "path": ".agents/skills/polo-ai-design-system/references/poo105-confirmation.md",
+    "thread": "thr_dbc33c8a42b7452c8f4f4a75d37c5eae",
+    "accept_event": "evt_5efcf4f9a7a24a68af32a77bdd72f32d",
+    "accept_quote": "同意，$supa-ai 出spec，出plan",
+    "accept_timestamp": "2026-10-19T14:52:59.584946+00:00",
+    "original_input": {
+      "path": ".pipeline/sdlc/POO-105/spec-plan-r1/base.md",
+      "sha256": "acdd488f3eebfa30a554cf9675064d62c1110f4f0d26f316083a0065369c2272"
+    }
+  },
+  "scenes": ["home", "chat", "login"],
+  "boundary": [
+    "只确认默认浅色材质、前景可见性与真禁用视觉方向",
+    "布局与业务沿当前真实实现，演示内容不构成需求",
+    "深色、自定义/Scenic 与第三方 App 内部不套用浅色值",
+    "本快照为固定版本参考，不持续手改；下游再生成不回写成 authority"
+  ]
+}

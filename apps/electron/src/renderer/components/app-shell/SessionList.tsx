@@ -741,7 +741,7 @@ export function SessionList({
           isSearchMode && !isSearchingContent ? (
             <div className="flex flex-col items-center justify-center py-12 px-4">
               <p className="text-sm text-muted-foreground">{t("session.noSessionsFound")}</p>
-              <p className="text-xs text-muted-foreground/60 mt-0.5">
+              <p className="text-xs text-muted-foreground/60 mt-0.5 client-material-fg-muted">
                 {t("session.noSessionsFoundDesc")}
               </p>
               <button

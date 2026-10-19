@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "model_sha256": "82511a07edfbc4fdff09cd836595a7d93580d51b2e922cd05727e9339e35b767",
+  "decisions": [
+    {
+      "id": "D-CURRENT-STYLE",
+      "basis": "confirmed_design",
+      "evidence": {
+        "source": "docs/client-journey-review/spec.md",
+        "section": "### 13.10 恢复旧版配色与风格（2026-10-03）",
+        "quote": "用户明确要求「配色和风格用回 b82fa1e5 的方案」。以该提交实际产物为视觉参考，恢复其背景、前景、紫色强调/语义色、字体层级、圆角、边框、阴影、卡片/表单/设置/弹窗风格及助手源组件样式。"
+      },
+      "reason": "沿用既有确认：b82fa1e5 是当前视觉基准；POO-105 材质合同在其上做透明度增量，不另起风格。"
+    },
+    {
+      "id": "D-NAV-HEADER",
+      "basis": "confirmed_design",
+      "evidence": {
+        "source": "docs/client-journey-review/spec.md",
+        "section": "### 13.9 首页入口与顶部滚动反馈（2026-10-03）",
+        "quote": "顶部 Header 固定，页面在顶部或内容不够滚动时不显示分隔线；页面主体向上滚动后才显示细线，回到顶部消失。"
+      },
+      "reason": "Header 结构与入口决策沿用 §13.9；POO-105 §13.14 仅在材质作用域内收窄其细线行为，非材质宿主仍按本条。"
+    },
+    {
+      "id": "D-HOME-CIRCLE",
+      "basis": "confirmed_design",
+      "evidence": {
+        "source": "docs/client-journey-review/spec.md",
+        "section": "### 13.11 首页、圈子与助手评审范围收敛（2026-10-03）",
+        "quote": "首页标题改为「我的应用」。应用卡不显示左下角常驻「可使用 / 有更新 / 两个有效来源」标签；来源信息保留在标题下方用于辨识创作者。"
+      },
+      "reason": "首页/圈子的页面结构与文案决策沿用 §13.11—13.13；POO-105 只改材质表面，不改布局与业务。"
+    },
+    {
+      "id": "D-ASSISTANT-REUSE",
+      "basis": "confirmed_design",
+      "evidence": {
+        "source": ".agents/skills/polo-ai-design-system/references/foundations.md",
+        "section": "## 页面与组件合同",
+        "quote": "助手：既有聊天、输入、附件及会话导航以当前 `apps/electron/src/renderer/` 为准，原型转译助手只作行为衔接。暂缓管理技能页面与打开助手后的 Polo 助手内部代码，不能从历史 `assistant-shell` 派生重写。"
+      },
+      "reason": "POO-105 不触及助手内部代码；材质作用域标记与令牌落在真实 Renderer 挂载层，符合既有复用边界。"
+    },
+    {
+      "id": "D-PAGE-VISUAL",
+      "basis": "confirmed_design",
+      "evidence": {
+        "source": ".agents/skills/polo-ai-design-system/references/foundations.md",
+        "section": "## 维护与检查",
+        "quote": "历史 evidence 绑定旧版本，不回写；最新生成检查不替代历史视觉 Review，也不证明真实 Electron/API/支付/安装验收。"
+      },
+      "reason": "页面视觉按材质合同+b82fa1e5基线实现，验收走任务清单的真实 Electron 真窗检查而非原型 parity。"
+    },
+    {
+      "id": "D-POO105-MATERIAL",
+      "basis": "confirmed_design",
+      "evidence": {
+        "source": "docs/client-journey-review/spec.md",
+        "section": "### 13.14 默认浅色微透材质与前景合同（POO-105，2026-10-19）",
+        "quote": "Header 与底板同层同色，不另设分层背景；此条在本作用域内替代 §13.9「主体滚离顶部后显示细线」与 §13.10 相关细线行为——材质作用域内任何滚动状态都不显示 Header 细线；细线规则只对非材质作用域保留。"
+      },
+      "reason": "本轮新增的权威材质合同：explore-r5 A 逐轮确认后用户同意出 spec/plan，摘录绑定 poo105-confirmation.md。"
+    }
+  ]
+}

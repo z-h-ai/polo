@@ -237,7 +237,7 @@ export function CircleSupportPanel({
 
   return (
     <section
-      className="mt-[24px] rounded-[13px] border border-border bg-surface px-[18px] py-[20px]"
+      className="mt-[24px] rounded-[13px] border border-border bg-surface client-material-card px-[18px] py-[20px]"
       data-testid="circle-support-panel"
       data-target-kind={target.kind}
       data-circle-id={target.circleId ?? undefined}

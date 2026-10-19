@@ -277,7 +277,8 @@ export function EntityRow({
           "entity-row-btn flex w-full items-start gap-2 pl-2 pr-4 py-3 text-left text-sm outline-none rounded-[8px]",
           "transition-[background-color] duration-75",
           (isSelected || isInMultiSelect)
-            ? "bg-foreground/3"
+            // POO-105：材质作用域内选中行取强调色 9% 背景（Spec §13.14）。
+            ? "bg-foreground/3 client-material-selected"
             : "hover:bg-foreground/2",
           (buttonProps as Record<string, unknown>)?.className as string | undefined,
         )}

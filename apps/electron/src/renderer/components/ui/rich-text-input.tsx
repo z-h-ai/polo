@@ -782,7 +782,8 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
           className={cn(
             'outline-none text-sm whitespace-pre-wrap break-words',
             'min-h-[1.5em]',
-            disabled && 'opacity-50 cursor-not-allowed',
+            // POO-105：材质作用域内真禁用用实色禁用前景表达，不整容器淡化。
+            disabled && 'opacity-50 cursor-not-allowed client-material-input-disabled',
             // Make text transparent when showing placeholder (so caret is still visible)
             showPlaceholder && 'text-transparent caret-foreground',
             className
@@ -808,7 +809,8 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
             placeholders={placeholderArray}
             intervalMs={5000}
             className={cn(
-              'absolute inset-0 text-sm text-muted-foreground pointer-events-none select-none',
+              // POO-105：材质作用域内 placeholder 实色（#676a73 系，opacity:1）。
+              'absolute inset-0 text-sm text-muted-foreground pointer-events-none select-none client-material-placeholder-fg',
               className
             )}
           />
