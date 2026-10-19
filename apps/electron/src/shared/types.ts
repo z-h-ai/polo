@@ -324,6 +324,93 @@ export type {
 } from '@polo-ai/shared/admin/types'
 import type { AppDefinition } from './tab-browser-types'
 
+/**
+ * Audit record for pinning a generate_app canvas app into the tab browser
+ * (POO-102). The renderer supplies ids/metadata only; Main derives the session
+ * directory from the workspace mapping and validates that `indexPath` points
+ * inside `genui-apps/<appId>/` before anything is written.
+ */
+/**
+ * Tab-browser app id namespace for pinned canvas apps: `gen-ui-app-<appId>`.
+ * Both the pin bridge (renderer) and the audit gate (Main) derive the id with
+ * this prefix, and Main rejects a request whose pinnedAppId is not exactly
+ * this derivation of its appId.
+ */
+export const GENUI_PINNED_APP_ID_PREFIX = 'gen-ui-app-'
+
+export interface GenUiAppPinAuditRequest {
+  sessionId: string
+  appId: string
+  title: string
+  indexPath: string
+  version?: number
+  /** Tab-browser app id the canvas app was pinned under. */
+  pinnedAppId: string
+}
+
+export interface GenUiAppPinAuditResult {
+  ok: boolean
+  error?: string
+}
+
+/**
+ * POO-103 ui-card registration. The renderer reports the ids of a mounted
+ * canvas webview; Main only honors it against its own attach observations
+ * (webview-security) and derives the host window id from the RPC context —
+ * the renderer never names the host.
+ */
+export interface GenUiCardRegisterRequest {
+  sessionId: string
+  cardId: string
+  guestWebContentsId: number
+}
+
+export interface GenUiCardRegisterResult {
+  ok: boolean
+  error?: string
+}
+
+export interface GenUiCardUnregisterRequest {
+  sessionId: string
+  cardId: string
+}
+
+export interface GenUiCardUnregisterResult {
+  ok: boolean
+  /** Set when a card exists but belongs to a different window. */
+  error?: string
+}
+
+/**
+ * POO-104 publish chain, packaging leg. The renderer names ONLY ids — Main
+ * derives the app directory from the calling window's workspace mapping
+ * (never from the request), packages the bundle into the upload ZIP, and
+ * returns the payload once. The renderer then submits it through the existing
+ * admin.PUBLISH_CREATOR_APP chain; the payload crosses this channel in the
+ * Main→renderer direction only.
+ */
+export interface GenUiAppPublishPackageRequest {
+  sessionId: string
+  appId: string
+  /** Display name for the artifact (audit + suggested artifact name). */
+  title: string
+}
+
+export interface GenUiAppPublishPackageResult {
+  ok: boolean
+  error?: string
+  /** Upload ZIP, base64. Present only on success. */
+  payloadBase64?: string
+  /** The analyzed static entry for the admin publish chain. */
+  entry?: { runtime: 'static'; path: string }
+  /** sha256 over the ZIP bytes (hex) — mirrors the upload-chain checksum. */
+  checksum?: string
+  sizeBytes?: number
+  fileCount?: number
+  /** Publish policy copy (SDK bridge requirement, catalog read-only note). */
+  policyNotice?: string
+}
+
 export interface AdminRpcErrorPayload {
   errorCode?: string
   message?: string
@@ -513,6 +600,9 @@ export interface ElectronAPI {
 
   // Session export/import (cross-workspace transfer)
   exportSession(sessionId: string): Promise<unknown>
+  /** Export a session bundle to a user-chosen JSON file (OS save dialog, main-process orchestrated).
+   *  Resolves to the written file path, or null when the user cancelled the save dialog. */
+  exportSessionToFile(sessionId: string): Promise<string | null>
   importSession(targetWorkspaceId: string, bundle: unknown, mode: 'move' | 'fork'): Promise<{ sessionId: string; warnings?: string[] }>
   exportRemoteSessionTransfer(sessionId: string): Promise<RemoteSessionTransferPayload>
   importRemoteSessionTransfer(targetWorkspaceId: string, payload: RemoteSessionTransferPayload): Promise<ImportRemoteSessionTransferResult>
@@ -644,6 +734,20 @@ export interface ElectronAPI {
   // Tab browser app launcher configuration
   getTabBrowserApps(): Promise<AppDefinition[]>
   saveTabBrowserApps(apps: AppDefinition[]): Promise<void>
+
+  // Generative UI canvas apps — append a pin record to the session's audit log.
+  // Main derives the session directory itself and validates the bundle path.
+  appendGenUiAudit(request: GenUiAppPinAuditRequest): Promise<GenUiAppPinAuditResult>
+
+  // Generative UI canvas cards (POO-103) — register/unregister a mounted
+  // canvas webview with the Main-owned UiCardRegistry. Main verifies the
+  // claimed guest against its own attach observations.
+  registerGenUiCard(request: GenUiCardRegisterRequest): Promise<GenUiCardRegisterResult>
+  unregisterGenUiCard(request: GenUiCardUnregisterRequest): Promise<GenUiCardUnregisterResult>
+
+  // Generative UI canvas app publish chain (POO-104) — package the
+  // session-local bundle into the upload payload behind Main's trust anchors.
+  packageGenUiAppArtifact(request: GenUiAppPublishPackageRequest): Promise<GenUiAppPublishPackageResult>
 
   // Local App Bundle installation and runtime
   localApps: {
@@ -1321,6 +1425,10 @@ export interface ElectronAPI {
   // Tools settings
   getBrowserToolEnabled(): Promise<boolean>
   setBrowserToolEnabled(enabled: boolean): Promise<void>
+  getGenerativeUiInlineEnabled(): Promise<boolean>
+  setGenerativeUiInlineEnabled(enabled: boolean): Promise<void>
+  getGenerativeUiCanvasEnabled(): Promise<boolean>
+  setGenerativeUiCanvasEnabled(enabled: boolean): Promise<void>
 
   // Appearance settings
   getRichToolDescriptions(): Promise<boolean>

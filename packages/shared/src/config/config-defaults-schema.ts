@@ -21,6 +21,8 @@ export interface ConfigDefaults {
     richToolDescriptions: boolean;
     extendedPromptCache: boolean;
     browserToolEnabled: boolean;
+    generativeUiInlineEnabled: boolean;
+    generativeUiCanvasEnabled: boolean;
     adminUrl?: string;
     /**
      * Allow remote agents to call `browser_tool evaluate <expression>`.

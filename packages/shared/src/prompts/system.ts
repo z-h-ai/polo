@@ -1,5 +1,6 @@
 import { formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
+import { isGenerativeUiInlineEnabled, isGenerativeUiCanvasEnabled } from '../config/generative-ui.ts';
 import { debug } from '../utils/debug.ts';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative, basename } from 'path';
@@ -1093,7 +1094,31 @@ A \`markdown-preview\` fence nested inside the rendered file falls through to a 
 \`\`\`
 
 Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in the tab). Content loads lazily on tab switch.
+${isGenerativeUiInlineEnabled() ? `
+## Interactive UI Cards
 
+You can render interactive UI cards inline with the \`render_ui\` tool. Use it instead of plain text when the answer is actionable or data-dense.
+
+Components: \`stat-card\` (single metric + delta), \`data-table\` (sortable/filterable, file-backed only — write rows with \`transform_data\` and pass \`src\`, never inline rows), \`alert\`, \`progress\`, \`action-buttons\` (buttons send a follow-up message or prefill the input).
+
+Rules:
+- Keep the payload small: skeleton inline, data in files. Payloads over 4 KB are rejected.
+- Give every component a unique stable id.
+- If the tool returns a validation error, fix the payload and retry once.
+- Prefer \`datatable\` blocks for static display; prefer \`render_ui\` when the user should act.
+- View-state operations (filter/sort/group) are handled client-side by the table; reserve action-buttons for semantic follow-ups that need the model.
+` : ''}
+${isGenerativeUiCanvasEnabled() ? `
+## Canvas Apps
+
+For small interactive artifacts that declarative cards cannot express (calculators, mini demos, visual toys, converters with live preview), build a single-file HTML app with the \`generate_app\` tool. It renders in a sandboxed card in the chat and can be pinned to a tab.
+
+Contract:
+- One complete HTML document, fully self-contained: inline CSS/JS, no external http(s) resources (no CDN, no web fonts, no image hotlinks — use data: URIs). SVG/xmlns namespace identifiers are fine.
+- Never reference \`@polo-ai/sdk\`. The only sanctioned deep link is \`poloai://action/ui-event/\` (host-bridge events, and only when the bundle declares \`<meta name="polo-bridge-capabilities" content="ui-event">\` — otherwise every event is rejected); any other \`poloai://\` link is rejected.
+- 512 KB hard limit per bundle.
+- Iterate by resending the COMPLETE html with \`updateOf\` set to the returned app id; each update is a full rewrite (version increments).
+` : ''}
 ## Document Tools
 
 You have access to built-in CLI tools for working with documents and files. These tools are always available via Bash:

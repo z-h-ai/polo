@@ -11,13 +11,18 @@
     "richToolDescriptions": true,
     "extendedPromptCache": false,
     "browserToolEnabled": true,
+    "generativeUiInlineEnabled": false,
     "adminUrl": "https://polo-admin.z-h-ai.com/",
-    "allowRemoteEvaluate": true
+    "allowRemoteEvaluate": true,
+    "generativeUiCanvasEnabled": false
   },
   "workspaceDefaults": {
     "thinkingLevel": "think",
     "permissionMode": "safe",
-    "cyclablePermissionModes": ["safe", "allow-all"],
+    "cyclablePermissionModes": [
+      "safe",
+      "allow-all"
+    ],
     "localMcpServers": {
       "enabled": true
     }

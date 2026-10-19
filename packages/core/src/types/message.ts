@@ -572,6 +572,11 @@ export type AgentEvent =
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
+  // P0-2 render_ui skeleton streaming: throttled, capped partial input for an
+  // in-flight render_ui tool call (Claude path only — the Pi subprocess has no
+  // equivalent stream event and simply skips skeletons). Renderer-internal:
+  // never enters the tab protocol page whitelist, never persisted.
+  | { type: 'tool_input_delta'; toolUseId: string; toolName: string; delta: string; seq: number }
   | {
       type: 'permission_request';
       requestId: string;

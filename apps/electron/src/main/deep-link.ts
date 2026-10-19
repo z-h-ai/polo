@@ -8,8 +8,12 @@
  * Compound format (hierarchical navigation):
  *   poloai://allSessions[/session/{sessionId}]            - Session list (all sessions)
  *   poloai://flagged[/session/{sessionId}]             - Session list (flagged filter)
+ *   poloai://archived[/session/{sessionId}]            - Session list (archived filter)
  *   poloai://state/{stateId}[/session/{sessionId}]     - Session list (state filter)
+ *   poloai://label/{labelId}[/session/{sessionId}]     - Session list (label filter; labelId percent-encoded)
+ *   poloai://view/{viewId}[/session/{sessionId}]       - Session list (view filter; viewId percent-encoded)
  *   poloai://sources[/source/{sourceSlug}]          - Sources list
+ *   poloai://automations[/{type}[/automation/{automationId}]] - Automations list (scheduled/event/agentic)
  *   poloai://settings[/{subpage}]                   - Settings (general, shortcuts, preferences)
  *
  * Action format:
@@ -263,9 +267,12 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
       }
     }
 
-    // Compound route prefixes
+    // Compound route prefixes — must stay in sync with the view-route
+    // prefixes in src/shared/route-parser.ts (COMPOUND_ROUTE_PREFIXES) and
+    // the routes.view builders in src/shared/routes.ts. Parity is enforced by
+    // __tests__/deep-link-route-parity.test.ts.
     const COMPOUND_ROUTE_PREFIXES = [
-      'allSessions', 'flagged', 'state', 'sources', 'settings', 'skills'
+      'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'settings'
     ]
 
     // poloai://allSessions/..., poloai://settings/..., etc. (compound routes)
@@ -404,6 +411,20 @@ export async function handleDeepLink(
   }
 
   mainLog.info('[DeepLink] Handling', logContext)
+
+  // POO-103: canvas-card ui-event loop. Consumed here and NEVER navigated —
+  // a ui-event URL aimed at a tab protocol page fails validation inside the
+  // handler (it owns no registered cards), keeping the tab webview trust
+  // model untouched.
+  if (target.action === 'ui-event') {
+    if (sourceWebContentsId == null) {
+      mainLog.warn('[DeepLink] ui-event without a source webContents — dropped', logContext)
+      return { success: true }
+    }
+    const { handleUiEventUrl } = await import('./genui-ui-event')
+    handleUiEventUrl(url, sourceWebContentsId)
+    return { success: true }
+  }
 
   if (target.action === 'send-message') {
     if (!target.callbackId || sourceWebContentsId == null) {

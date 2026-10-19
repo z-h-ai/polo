@@ -57,6 +57,10 @@ import {
 } from './types.ts';
 import { z, type ZodType } from 'zod';
 import {
+  GenerativeUiCapabilitySchema,
+  type GenerativeUiCapability,
+} from '../config/generative-ui.ts';
+import {
   NativeInstallationAdmissionRequestSchema, NativeInstallationAdmissionSchema,
   NativeInstallationReportSchema, NativeInstallationReceiptSchema,
   type NativeInstallationAdmissionRequest, type NativeInstallationAdmission,
@@ -92,6 +96,7 @@ import {
   CreatorSkillSafetyStatusBatchSchema,
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
+  WebAppArtifactPolicySchema,
   AppCatalogResponseSchema,
   AppReleaseDownloadSchema,
   AdminPlatformAppSchema,
@@ -901,6 +906,22 @@ export class AdminClient {
     return this.readSuccessResponse(response, CreatorArtifactCapabilitySchema);
   }
 
+  /**
+   * Read the generativeUI section of /api/capabilities. The section and its
+   * `inline` field are both optional — absent means enabled (backward
+   * compatible with servers predating the flag). Callers should feed the
+   * result into setGenerativeUiRemoteCapability to refresh the toggle cache.
+   */
+  async getGenerativeUiCapability(
+    accessToken: string,
+  ): Promise<GenerativeUiCapability> {
+    const response = await this.request<unknown>('/api/capabilities', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, GenerativeUiCapabilitySchema);
+  }
+
   async listCreatorArtifacts(
     accessToken: string,
     input: {
@@ -1007,6 +1028,22 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, SkillArchivePolicySchema);
+  }
+
+  /**
+   * Server-issued web_app artifact policy. The schema's max bounds are the
+   * client hard caps — a response above HARD_WEBAPP_BUNDLE_POLICY fails
+   * validation here rather than loosening the installer's ceiling (callers
+   * further clamp through clampWebAppArtifactPolicy).
+   */
+  async getWebAppArtifactPolicy(
+    accessToken: string,
+  ): Promise<{ enabled: boolean; maxBundleBytes: number; maxFileCount: number }> {
+    const response = await this.request<unknown>('/api/artifact-policies/web_app', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, WebAppArtifactPolicySchema);
   }
 
   async createCreatorSkillUploadGrant(

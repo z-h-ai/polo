@@ -7,6 +7,8 @@
 
 import { useAtom } from 'jotai'
 import { useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { backgroundTasksAtomFamily, type BackgroundTask } from '@/atoms/sessions'
 
 export interface UseBackgroundTasksOptions {
@@ -23,7 +25,8 @@ export interface UseBackgroundTasksResult {
   updateTaskProgress: (toolUseId: string, elapsedSeconds: number) => void
   /** Remove a task (when completed or killed) */
   removeTask: (toolUseId: string) => void
-  /** Kill a task (sends kill request via IPC) */
+  /** Kill a shell task (sends kill request via IPC). Agent tasks have no kill
+   *  channel yet - they stay running and the user is notified via toast. */
   killTask: (taskId: string, type: 'agent' | 'shell') => Promise<void>
 }
 
@@ -32,6 +35,7 @@ export interface UseBackgroundTasksResult {
  */
 export function useBackgroundTasks({ sessionId }: UseBackgroundTasksOptions): UseBackgroundTasksResult {
   const [tasks, setTasks] = useAtom(backgroundTasksAtomFamily(sessionId))
+  const { t } = useTranslation()
 
   const addTask = useCallback((task: Omit<BackgroundTask, 'elapsedSeconds'>) => {
     setTasks(prev => {
@@ -57,27 +61,28 @@ export function useBackgroundTasks({ sessionId }: UseBackgroundTasksOptions): Us
   }, [setTasks])
 
   const killTask = useCallback(async (taskId: string, type: 'agent' | 'shell') => {
-    // Find the task to get its toolUseId
-    const task = tasks.find(t => t.id === taskId)
-
-    if (type === 'shell') {
-      // Use KillShell IPC for shells
-      try {
-        await window.electronAPI.killShell(sessionId, taskId)
-      } catch {
-        // Shell may already be gone - that's OK, still remove from UI
-      }
-    } else {
-      // For agents, we don't have a direct kill mechanism yet
-      // The model would need to use TaskOutput to check status
-      console.warn('Killing agent tasks not yet implemented')
+    if (type !== 'shell') {
+      // There is no kill channel for background agents yet. Keep the task
+      // running and visible instead of silently dropping it from the UI.
+      toast.error(t('toast.cannotStopAgentTask'))
+      return
     }
 
-    // Always remove from UI after kill attempt
+    // Find the task to remove it from the UI after the kill request
+    const task = tasks.find(entry => entry.id === taskId)
+
+    // Use KillShell IPC for shells
+    try {
+      await window.electronAPI.killShell(sessionId, taskId)
+    } catch {
+      // Shell may already be gone - that's OK, still remove from UI
+    }
+
+    // Remove from UI after kill attempt (shell tasks only)
     if (task) {
-      setTasks(prev => prev.filter(t => t.id !== taskId))
+      setTasks(prev => prev.filter(entry => entry.id !== taskId))
     }
-  }, [sessionId, tasks, setTasks])
+  }, [sessionId, tasks, setTasks, t])
 
   return {
     tasks,

@@ -59,7 +59,7 @@ export interface TaskActionMenuProps {
  *
  * Provides contextual actions for background tasks:
  * - View Output: Opens task output in terminal overlay
- * - Stop Task: Kills shell tasks (agent tasks show warning)
+ * - Stop Task: Kills shell tasks via IPC (disabled for agent tasks - no kill channel yet)
  */
 export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, onShowTerminalOverlay, className }: TaskActionMenuProps) {
   const { t } = useTranslation()
@@ -110,6 +110,9 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
   }
 
   const handleStopTask = () => {
+    // No kill channel for background agents yet - the menu item is disabled,
+    // but guard here as well so the click can never reach onKillTask.
+    if (task.type === 'agent') return
     onKillTask(task.id)
     setOpen(false)
   }
@@ -163,16 +166,21 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
           {t('chat.viewOutput')}
         </StyledDropdownMenuItem>
 
-        {/* Stop Task - Only show for shell tasks (inserts kill command into input) */}
-        {task.type === 'shell' && (
-          <>
-            <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={handleStopTask}>
-              <Square />
-              {t('chat.stopTask')}
-            </StyledDropdownMenuItem>
-          </>
-        )}
+        {/* Stop Task - shells are killed via IPC; agent tasks have no kill
+            channel yet, so the item stays visible but disabled with a reason. */}
+        <StyledDropdownMenuSeparator />
+        <StyledDropdownMenuItem
+          onClick={handleStopTask}
+          disabled={task.type === 'agent'}
+          title={task.type === 'agent' ? t('toast.cannotStopAgentTask') : undefined}
+          className={
+            // Keep hover events so the title tooltip can show on the disabled item
+            task.type === 'agent' ? 'data-[disabled]:pointer-events-auto' : undefined
+          }
+        >
+          <Square />
+          {t('chat.stopTask')}
+        </StyledDropdownMenuItem>
       </StyledDropdownMenuContent>
     </DropdownMenu>
   )

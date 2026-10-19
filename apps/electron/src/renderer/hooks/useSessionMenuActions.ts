@@ -2,10 +2,10 @@
  * useSessionMenuActions
  *
  * Single source of truth for session-menu side effects (share / refresh title /
- * copy path / show in finder / open in new panel / share-submenu actions / label
- * toggle). Consumed by both `SessionMenu` (desktop dropdown / context menu) and
- * `CompactSessionMenu` (compact-mode drawer) so a new session action only has
- * to be wired through one place.
+ * copy path / show in finder / export to file / open in new panel /
+ * share-submenu actions / label toggle). Consumed by both `SessionMenu`
+ * (desktop dropdown / context menu) and `CompactSessionMenu` (compact-mode
+ * drawer) so a new session action only has to be wired through one place.
  *
  * Also owns **optimistic label state**: the parent's labels-changed pipeline
  * (`onLabelsChange` → IPC → server → `labels_changed` event → atom → re-render)
@@ -44,6 +44,8 @@ export interface SessionMenuActions {
   share: () => Promise<void>
   showInFinder: () => void
   copyPath: () => Promise<void>
+  /** Export the session bundle to a JSON file via the OS save dialog (no-op when cancelled). */
+  exportSession: () => Promise<void>
   refreshTitle: () => Promise<void>
   openInNewPanel: () => void
   /** Open the session's published share URL in the system browser (no-op if not shared). */
@@ -158,6 +160,29 @@ export function useSessionMenuActions({
     }
   }, [sessionId, t])
 
+  // Export-to-file runs a main-process save dialog (which can stay open
+  // arbitrarily long); the busy flag just guards against a double-fire from
+  // re-opening the menu and tapping Export again while a dialog is pending.
+  const [isExporting, setIsExporting] = React.useState(false)
+
+  const exportSession = React.useCallback(async () => {
+    if (isExporting) return
+    setIsExporting(true)
+    try {
+      const filePath = await window.electronAPI.exportSessionToFile(sessionId)
+      if (filePath) {
+        toast.success(t('sessionMenu.exportSuccess'))
+        // Reveal the file — failure to reveal is non-fatal (export succeeded).
+        window.electronAPI.showInFolder(filePath).catch(() => {})
+      }
+      // filePath === null → user cancelled the save dialog: no toast.
+    } catch {
+      toast.error(t('sessionMenu.exportFailed'))
+    } finally {
+      setIsExporting(false)
+    }
+  }, [sessionId, t, isExporting])
+
   const refreshTitle = React.useCallback(async () => {
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'refreshTitle' }) as { success: boolean; title?: string; error?: string } | undefined
     if (result?.success) {
@@ -208,6 +233,7 @@ export function useSessionMenuActions({
     share,
     showInFinder,
     copyPath,
+    exportSession,
     refreshTitle,
     openInNewPanel,
     openSharedInBrowser,

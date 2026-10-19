@@ -117,6 +117,13 @@ Generated wrappers never delete or overwrite assets. Readiness and hashes are no
 - 系统态与恢复: foundation, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
 - 浏览器交接: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
 
+## Production component inventory
+
+- `references/component-inventory.md` — 2026-10-18 基于 `dev@e7c0e6bd` 的生产组件只读登记:packages/ui 与 renderer 的技术组件、Icon 体系、各业务面组件与 file:line 来源、token 双体系对照、组件化合并建议、死代码与待复核清单。
+- 登记不改变视觉授权与 modules 声明:modules 之外的 renderer 面(助手壳、设置、自动化、messaging 等)仅为登记,不因登记获得设计授权;生产组件留在原拥有模块,只引用不复制。
+- 上述清单的 10 个 skill 组件与生产落点的交叉映射(如 首页目录↔`components/tab-browser/HomePage.tsx`、圈子统一列表↔`components/circles/MyCirclesPage.tsx`、确认对话框↔`components/circles/LeaveCircleDialog.tsx`)记录在清单 §4;token 桥梁为 `apps/electron/src/renderer/lib/client-workbench-style.ts`。
+- 配套展示产物(非权威):`docs/reports/2026-10-18-polo-design-component-library.html` 消费本 Skill token 的组件库页;不作为第二设计目录或数值表维护。
+
 ## Task-scoped scene source
 
 For a selected consumer manifest and scene ID, inspect the manifest first. If it declares `react_source`, run `product-ui-prototype/scripts/react_source.py <bundle> --scenes <IDs>` from the pinned framework checkout. Read the returned native JSX/TSX/CSS files, state/data, global entries, tokens, package and config once per task; follow additional imports when needed.

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polo AI 体验修复报告 · 2026-10-18 · 待裁决</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #171a23; --card2: #1d212c; --border: #2a2f3d;
+    --fg: #e7eaf2; --muted: #9aa3b5; --accent: #5b8cff; --ok: #34c98e; --warn: #e8b33e; --bad: #ef6a5c;
+    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 28px 80px; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 28px; }
+  h1 { font-size: 26px; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 13.5px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; vertical-align: 2px; }
+  .badge.pending { background: rgba(232,179,62,.14); color: var(--warn); border: 1px solid rgba(232,179,62,.4); }
+  .badge.ok { background: rgba(52,201,142,.12); color: var(--ok); border: 1px solid rgba(52,201,142,.4); }
+  h2 { font-size: 19px; margin: 40px 0 14px; padding-top: 8px; letter-spacing: -0.01em; }
+  h3 { font-size: 15.5px; margin: 0 0 4px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin: 14px 0; }
+  .card .id { font-family: var(--mono); font-size: 12.5px; color: var(--accent); font-weight: 700; }
+  .meta { font-size: 12.5px; color: var(--muted); font-family: var(--mono); }
+  p { margin: 8px 0; }
+  ul { margin: 6px 0 6px 20px; padding: 0; }
+  li { margin: 3px 0; }
+  code { font-family: var(--mono); font-size: 12.8px; background: var(--card2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; color: #c8d3f5; word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+  .ok-t { color: var(--ok); font-weight: 600; }
+  .warn-t { color: var(--warn); }
+  .muted-t { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 14px 0; }
+  .stat { background: var(--card2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .stat .n { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+  .stat .l { color: var(--muted); font-size: 12.5px; }
+  .risk { border-left: 3px solid var(--warn); padding-left: 12px; color: var(--muted); font-size: 13.5px; }
+  .note { border-left: 3px solid var(--accent); padding-left: 12px; font-size: 13.5px; }
+  pre { background: var(--card2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; font-family: var(--mono); font-size: 12.8px; color: #c8d3f5; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--border); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Polo AI 产品体验修复报告 <span class="badge pending">待用户裁决</span></h1>
+  <div class="sub">
+    来源：zcode 会话 sess_030156de-e4a5-491b-ba5c-e657062a53cf 的体验审查报告（F1–F8 + D3）·
+    基线：<code>dev @ e7c0e6bd</code> · 集成分支：<code>ux-baseline</code>（HEAD <code>eefffdcd</code>）·
+    生成时间：2026-10-18 · 修复方式：5 组并行 worktree + 独立审查 + 顺序合并
+  </div>
+</header>
+
+<h2>执行摘要</h2>
+<div class="grid">
+  <div class="stat"><div class="n">9 / 9</div><div class="l">问题修复（F1–F8 全改 + D3 按拍板方案落地）</div></div>
+  <div class="stat"><div class="n">31 个文件</div><div class="l">+1109 / −94 行（含 6 个新测试文件）</div></div>
+  <div class="stat"><div class="n">0 error</div><div class="l">typecheck、lint（触碰文件 35 warning 与基线持平，零净新增）</div></div>
+  <div class="stat"><div class="n">683 pass / 0 fail</div><div class="l">合并后基线上的全部定向测试（含新增 56 例）</div></div>
+</div>
+<p>所有修复已合并到集成分支 <code>ux-baseline</code>（自 <code>e7c0e6bd</code> 起建的专用基线；仓库既有的 <code>baseline</code> 分支属于另一条工作线，未触碰）。<b>尚未合入 <code>dev</code>——是否合入由你裁决</b>，操作命令见文末。既有 <code>baseline</code> 分支与 <code>wt-a-*</code> worktree 均未被改动。</p>
+
+<h2>分支拓扑与提交</h2>
+<table>
+  <tr><th>分支</th><th>提交</th><th>内容</th></tr>
+  <tr><td><code>fix/ux-menu</code></td><td><code>ac37ebbf</code></td><td>F1 应用内菜单重新挂载 + F7 webview 快捷键转发</td></tr>
+  <tr><td><code>fix/ux-deeplink</code></td><td><code>63ffdcc6</code></td><td>F3 深链白名单补齐 + 防漂移 parity 测试</td></tr>
+  <tr><td><code>fix/ux-app</code></td><td><code>dfe37d9c</code></td><td>F4 删除会话 + F8 重置/登出 失败反馈</td></tr>
+  <tr><td><code>fix/ux-chat</code></td><td><code>054821b6</code></td><td>F2 后台任务停止诚实化 + F5 停止生成 + F6 附件失败反馈</td></tr>
+  <tr><td><code>fix/ux-export</code></td><td><code>ffa1de99</code></td><td>D3 会话菜单「导出对话…」全旅程</td></tr>
+  <tr><td><code>ux-baseline</code></td><td><code>eefffdcd</code></td><td>以上五组经 --no-ff 顺序合并（5 个 merge commit，保留分组可追溯性）</td></tr>
+</table>
+<p class="sub">对应 worktree（保留供你检视代码）：<code>wt-menu / wt-deeplink / wt-app / wt-chat / wt-export / wt-baseline</code>，均位于 <code>polo-dir/</code> 下。</p>
+
+<h2>验证矩阵（在合并后的 <code>ux-baseline</code> 上执行）</h2>
+<table>
+  <tr><th>检查</th><th>命令 / 范围</th><th>结果</th></tr>
+  <tr><td>类型检查</td><td><code>cd apps/electron && bun run typecheck</code></td><td class="ok-t">0 错误</td></tr>
+  <tr><td>主进程测试（共享进程）</td><td><code>bun test ./apps/electron/src/main/__tests__/</code>（29 文件）</td><td class="ok-t">488 pass / 0 fail</td></tr>
+  <tr><td>深链套件 + 新 parity 测试 + D3 hook 测试</td><td><code>bun test</code> deep-link 全套 + deep-link-route-parity + useSessionMenuActions</td><td class="ok-t">161 pass / 0 fail</td></tr>
+  <tr><td>channel-map parity（D3 新 IPC 白名单）</td><td><code>bun test channel-map-parity.test.ts</code></td><td class="ok-t">5 pass / 0 fail</td></tr>
+  <tr><td>F7 匹配器 + 转发接线（隔离）</td><td><code>bun test --isolate menu-webview-shortcuts.isolated.ts</code></td><td class="ok-t">11 pass / 0 fail</td></tr>
+  <tr><td>F1 TopBar 挂载（隔离）</td><td><code>bun test --isolate TopBar.app-menu.isolated.ts</code></td><td class="ok-t">4 pass / 0 fail</td></tr>
+  <tr><td>既有 TopBar 账号菜单（隔离，适配后）</td><td><code>bun test --isolate TopBar.product-space-menu.isolated.ts</code></td><td class="ok-t">6 pass / 0 fail</td></tr>
+  <tr><td>R33 安全断言（隔离，适配后）</td><td><code>bun test --isolate TabShell.scope-isolation.isolated.ts</code>（全树恰好 1 个 live keydown listener）</td><td class="ok-t">4 pass / 0 fail</td></tr>
+  <tr><td>i18n 校验</td><td><code>sort-locales --check</code> + <code>check-i18n-coverage</code>（并修复了 en/zh-Hans 两文件既有的排序 drift）</td><td class="ok-t">通过</td></tr>
+  <tr><td>Lint（全部 17 个触碰源文件）</td><td><code>eslint &lt;touched files&gt;</code></td><td class="ok-t">0 error / 35 warning，与干净基线同文件集完全一致（零净新增）</td></tr>
+</table>
+
+<h2>逐项修复明细</h2>
+
+<div class="card">
+  <h3><span class="id">F1</span> 应用内菜单重新挂载 —— Windows/Linux 恢复完整菜单 UI</h3>
+  <p class="meta">fix/ux-menu · apps/electron/src/renderer/components/app-shell/TopBar.tsx · actions/registry.tsx + index.ts · main/menu.ts（注释）· 新测试 TopBar.app-menu.isolated.ts</p>
+  <p><b>修复：</b>TopBar 最左侧品牌按钮替换为 <code>&lt;AppMenu&gt;</code>（DesktopAppMenu/MobileAppMenu 及 schema 均为现成组件），Win/Linux 用户重新获得新聊天/编辑/视图/缩放/窗口/帮助入口。TopBar 位于 NavigationProvider 之上，全部 handler 走全局 <code>navigate()</code>（与同文件既有契约一致），语义逐一与 macOS 原生菜单广播的消费端对齐：新聊天→<code>action/new-session</code>（同 AppShell.handleNewChat）、设置/快捷键/偏好→<code>settings</code> 子页（同 App.tsx L1841-1846）、新窗口→<code>menuNewWindow()</code> RPC、侧栏/专注模式→action registry <code>execute()</code>（同 AppShell 注册的 handler）。新增 <code>useOptionalActionRegistry()</code> 供隔离测试优雅降级。<code>menu.ts:52-58</code> 过时注释改写为与现状一致的描述。macOS 上 logo 下拉照常显示（跨平台设计，与原生菜单走同一套广播通道）。</p>
+  <div class="risk"><b>备注：</b>品牌位视觉从「P + Polo 字标」变为 logo 下拉触发器，宽度略减；回首页由旁侧 Home tab 承担（本次任务指定方案）。<code>topbar.brand.home</code> i18n key 已无消费方，按最小改动原则未删除。</div>
+</div>
+
+<div class="card">
+  <h3><span class="id">F2</span> 后台任务「停止」对 agent 诚实化 —— 不再假装停成功</h3>
+  <p class="meta">fix/ux-chat · renderer/hooks/useBackgroundTasks.ts · components/app-shell/TaskActionMenu.tsx</p>
+  <p><b>修复（短期方案）：</b><code>killTask</code> 的 agent 分支不再从 UI 静默移除任务——改为 toast「暂不支持停止后台 Agent」并 return，任务保持可见，底层 agent 与 UI 状态不再撒谎。shell 分支行为完全不变。按钮层面：TaskActionMenu 对 agent 任务将 Stop 项渲染为 disabled + title 提示（复用同一 i18n key），并在 handler 内加守卫双保险；顺带修复了 hook 内 <code>t</code> 变量遮蔽。</p>
+  <div class="risk"><b>重要发现：</b>核查确认 <code>&lt;ActiveTasksBar&gt;</code>（停止按钮的实际渲染容器）目前在生产 UI 树中<b>未被挂载</b>（仅 playground 渲染；ChatDisplay 的 onKillTask props 流经 ChatInputZone→ActiveOptionBadges 但任务条未渲染）。因此本修复在生产环境的生效面是 hook 层诚实化（任何调用方都不再静默移除）；按钮禁用属于组件重新接入生产后的正确形态。长期方案（接通 agent kill 通道）未在本次范围。</div>
+</div>
+
+<div class="card">
+  <h3><span class="id">F3</span> 深链白名单补齐 —— automations/archived/label/view 可经 poloai:// 到达</h3>
+  <p class="meta">fix/ux-deeplink · main/deep-link.ts · main/deep-link-log.ts · 新测试 deep-link-route-parity.test.ts</p>
+  <p><b>修复：</b><code>COMPOUND_ROUTE_PREFIXES</code> 由 6 个扩至 10 个（新增 <code>automations / archived / label / view</code>），裸前缀与 workspace 两处引用同一数组同步生效；日志侧 <code>VIEW_HOSTS</code> 隐式枚举一并补齐。已核实四个新 host 与既有分支（join/product-spaces/workspace/action/circle-return 等）无冲突。新增防漂移测试：遍历 <code>routes.view</code> 全部 16 个 builder（36 例），断言 route-parser 可解析 + 裸前缀与 workspace 前缀两种深链形态的 view 还原一致——将来 routes.ts 新增路由而白名单没跟上会立刻红。</p>
+  <div class="note"><b>编码结论（实测）：</b>非特殊 scheme 的 URL.pathname 不解码 %XX，与 routes.ts 的 encodeURIComponent 拼接逐字节一致，测试用严格相等；空格/非 ASCII/斜杠编码的 label、view id 均有专门用例锁定。</div>
+</div>
+
+<div class="card">
+  <h3><span class="id">F4</span> 删除会话失败不再静默</h3>
+  <p class="meta">fix/ux-app · renderer/App.tsx</p>
+  <p><b>修复：</b><code>handleDeleteSession</code> 的 RPC 包 try/catch——失败 toast「删除失败，请重试」并 <code>return false</code>，会话保留在列表；已核实三处调用方的 false 语义（BatchSessionMenu 中止批次、AppShell 透传、ChatPage 忽略返回值），不会触发误导性成功提示。<code>handleAutoDeleteEmptySession</code>（fire-and-forget）补 <code>.catch</code> 仅记日志，不打扰用户。</p>
+</div>
+
+<div class="card">
+  <h3><span class="id">F5</span> 「停止生成」失败给出解释</h3>
+  <p class="meta">fix/ux-chat · renderer/components/app-shell/ChatDisplay.tsx</p>
+  <p><b>修复：</b><code>handleStop</code> 区分调用来源：用户点击（silent=false）取消失败时 toast「停止回复失败，请重试」；重定向内部调用（silent=true）保持静默。<code>isProcessing</code> 不做本地翻转——查证它完全由服务端事件驱动（event-processor/handlers/session.ts），本地翻转会和事实源打架。</p>
+</div>
+
+<div class="card">
+  <h3><span class="id">F6</span> 粘贴/拖入附件失败给出文件名</h3>
+  <p class="meta">fix/ux-chat · renderer/components/app-shell/input/FreeFormInput.tsx</p>
+  <p><b>修复：</b><code>readFileAsAttachment</code> 两个调用点全覆盖（craft:paste-files 事件循环 + processFileAttachment 共享 helper，后者被文件选择框/剪贴板粘贴/拖拽三处复用）：resolve-null 与 throw 两种失败形态均 toast「附件处理失败：&lt;文件名&gt;」。错误原因不可区分（实现里 FileReader onerror 丢弃错误对象且无大小/类型校验），故统一文案 + 文件名插值。</p>
+</div>
+
+<div class="card">
+  <h3><span class="id">F7</span> webview 内 6 个菜单快捷键复活</h3>
+  <p class="meta">fix/ux-menu · main/menu.ts（+106 行）· 新测试 menu-webview-shortcuts.isolated.ts（11 例）</p>
+  <p><b>修复（方案：主进程转发，渲染层零改动）：</b>新增 <code>installWebviewMenuShortcutForwarding()</code>：<code>app.on('web-contents-created')</code> 过滤 webview guest，挂 <code>before-input-event</code>；命中 6 组合（⌘N/⌘⇧N/⌘,/⌘./⌘B/⌘/）即 <code>preventDefault()</code> 并走与原生菜单 click 完全相同的路径——5 个动作发既有菜单广播（NEW_CHAT/OPEN_SETTINGS/TOGGLE_SIDEBAR/TOGGLE_FOCUS_MODE/KEYBOARD_SHORTCUTS），newWindow 在主进程复刻菜单 click（getFocusedWindow→getWorkspaceForWindow→createWindow）。匹配器为可导出纯函数（keyDown only、CmdOrCtrl 语义、反向修饰键/alt/意外 shift 判负）。<b>无双触发</b>：guest 输入事件本就不会到达宿主渲染层 keydown。安装幂等（模块级 flag），由 createApplicationMenu() 触发。</p>
+</div>
+
+<div class="card">
+  <h3><span class="id">F8</span> 重置/登出失败不再「确认框关了、纹丝不动」</h3>
+  <p class="meta">fix/ux-app · renderer/App.tsx</p>
+  <p><b>修复：</b><code>executeReset</code> 的 catch 补 toast「重置失败，请重试」，且失败时<b>不再关闭确认框</b>（<code>setShowResetDialog(false)</code> 从 finally 移至成功路径；早退分支——RPC 返回 success=false 或被并发 logout 取代——保持原有「关框+静默」语义并加注释说明）。<code>handleAdminLogout</code> 的 catch 补 toast「登出失败，请重试」（revoke 失败沿用既有 revokeFailed 提示）。</p>
+</div>
+
+<div class="card">
+  <h3><span class="id">D3</span> 会话「导出对话…」全旅程落地（按用户拍板方案）</h3>
+  <p class="meta">fix/ux-export · main/index.ts · preload/bootstrap.ts · shared/types.ts · hooks/useSessionMenuActions.ts · SessionMenu.tsx · CompactSessionMenu.tsx · 新测试 useSessionMenuActions.test.ts（5 例）</p>
+  <p><b>修复：</b>新增一条主进程直连 IPC <code>__session:exportToFile</code>（契约：<code>(sessionId) → Promise&lt;路径 | null&gt;</code>，null=用户取消）：workspace 解析（与 transfer 流一致，为空 throw）→ <code>sessionManager.exportSession</code> 取 bundle → 会话名安全化后作默认文件名（downloads 下 JSON）→ OS 保存对话框 → 写盘返回路径。渲染层在 <code>useSessionMenuActions</code> 单一动作源新增 <code>exportSession</code>：成功 → 成功 toast + <code>showInFolder</code> 揭示文件（证据闭环；reveal 失败不影响成功语义）；取消 → 静默；异常 → 错误 toast；busy flag 防对话框挂起期间重复触发。桌面菜单（SessionMenu，Copy Path 旁）与紧凑菜单（CompactSessionMenu）双入口一致。</p>
+  <div class="risk"><b>范围说明：</b>当前 workspace 为远程（remoteServer）时本地导出会失败并走错误 toast（范围内已接受，远程导出需另行走远程 server 的 sessions:export）；用户把文件存到 home/tmp/workspace 之外的位置时 reveal 会因服务端路径校验拒绝（文件已写出，仅「打开所在文件夹」不生效）。</div>
+</div>
+
+<h2>新增 i18n key（9 个 × 7 语言全部齐备，排序与覆盖校验通过）</h2>
+<table>
+  <tr><th>key</th><th>来源</th><th>en</th><th>zh-Hans</th></tr>
+  <tr><td><code>toast.failedToDeleteSession</code></td><td>F4</td><td>Failed to delete session. Please try again.</td><td>删除会话失败，请重试。</td></tr>
+  <tr><td><code>toast.resetFailed</code></td><td>F8</td><td>Reset failed. Please try again.</td><td>重置失败，请重试。</td></tr>
+  <tr><td><code>productSpace.logout.failed</code></td><td>F8</td><td>Could not sign out. Please try again.</td><td>登出失败，请重试。</td></tr>
+  <tr><td><code>toast.cannotStopAgentTask</code></td><td>F2</td><td>Stopping background agents is not supported yet</td><td>暂不支持停止后台 Agent</td></tr>
+  <tr><td><code>toast.stopResponseFailed</code></td><td>F5</td><td>Failed to stop the response. Please try again.</td><td>停止回复失败，请重试</td></tr>
+  <tr><td><code>toast.attachmentFailed</code></td><td>F6</td><td>Failed to process attachment: {{name}}</td><td>附件处理失败：{{name}}</td></tr>
+  <tr><td><code>sessionMenu.export</code></td><td>D3</td><td>Export Conversation...</td><td>导出对话...</td></tr>
+  <tr><td><code>sessionMenu.exportSuccess</code></td><td>D3</td><td>Conversation exported</td><td>对话已导出</td></tr>
+  <tr><td><code>sessionMenu.exportFailed</code></td><td>D3</td><td>Failed to export conversation</td><td>导出对话失败</td></tr>
+</table>
+<p class="sub">de / es / hu / ja / pl 已同步翻译。另：F4 顺带把 en.json / zh-Hans.json 既有的 <code>productSpaceSkills.*</code> 块排序 drift 规范化（key/值不变，仅位置），使 sort-locales 检查通过。</p>
+
+<h2>存量问题（非本次引入，已在干净基线上复核确认）</h2>
+<ul>
+  <li><code>locale-parity.test.ts</code> 7 例失败：<code>productSpaceSkills.*</code> 16 个 key 仅 en/zh-Hans 有翻译（de/es/hu/ja/pl 缺失）+ 1 个排序问题——改动前后完全一致，属既有债务。</li>
+  <li>App 挂载级隔离测试（auth-success-journey 等）在无 Electron 环境下存在存量失败（stash 对照失败数一致，输出无本次改动引入的新错误）。</li>
+  <li>AppShell 在删除 RPC 前乐观清空当前选中会话（删除失败时选中已清但会话仍在列表）——原有行为，本次未动。</li>
+  <li>BatchSessionMenu 批量删除中段失败时会同时出现一条错误 toast 与一条成功 toast（失败项现在至少有错误提示；彻底修需改批次流程，超出本次范围）。</li>
+  <li>worktree 内 pre-commit 引用的 <code>scripts/lint-i18n-staged.sh</code> 不存在，各组提交以手动逐项校验（sort/coverage/lint）替代。</li>
+</ul>
+
+<h2>裁决与操作指引</h2>
+<p><b>合入 dev（接受全部修复）：</b></p>
+<pre>cd /Users/oudouglas/project/z-h-ai/polo-dir/dev
+git merge --no-ff ux-baseline -m "Merge ux-baseline: F1-F8 UX fixes + D3 session export"</pre>
+<p><b>只想部分合入：</b>五个 fix 分支相互独立（仅语言包有少量已自动合并干净的交叠），可按需 cherry-pick <code>63ffdcc6 / dfe37d9c / 054821b6 / ffa1de99 / ac37ebbf</code>。</p>
+<p><b>放弃：</b>删除分支与 worktree 即可，dev 未受任何影响。</p>
+<p><b>裁决后清理 worktree（可选）：</b></p>
+<pre>cd /Users/oudouglas/project/z-h-ai/polo-dir/dev
+for w in menu deeplink app chat export baseline; do git worktree remove ../wt-$w --force; done
+git branch -D ux-baseline fix/ux-menu fix/ux-deeplink fix/ux-app fix/ux-chat fix/ux-export  # 仅在放弃或已合入后执行</pre>
+
+<footer>
+  本报告由并行修复流程生成：5 个独立 worktree 各自修复并自验 → 编排者逐组审查 diff（含 1 处 deps 补齐的收口 amend）→ 顺序合并至 ux-baseline → 合并后整体验证。所有命令输出可在对应 worktree 复跑复核。
+</footer>
+
+</div>
+</body>
+</html>

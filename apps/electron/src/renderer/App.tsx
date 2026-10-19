@@ -71,6 +71,7 @@ import {
   DocumentFormattedMarkdownOverlay,
   JSONPreviewOverlay,
 } from '@polo-ai/ui'
+import { appendGenUiToolInputDelta } from '@polo-ai/ui/chat/genuiToolInputDeltas'
 import { useLinkInterceptor, type FilePreviewState } from '@/hooks/useLinkInterceptor'
 import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
 import { useStaleSessionRecovery } from '@/hooks/useStaleSessionRecovery'
@@ -1669,6 +1670,16 @@ export default function App() {
         return
       }
 
+      // P0-2 render_ui skeleton streaming: renderer-internal channel. Feed the
+      // ephemeral accumulator and stop — the event must never reach the agent
+      // event processor (no message state) and by dto contract never reaches
+      // tab protocol pages either (whitelist excludes the type). seq rides
+      // along: the accumulator drops non-increasing deliveries.
+      if (event.type === 'tool_input_delta') {
+        appendGenUiToolInputDelta(sessionId, event.toolUseId, event.delta, event.seq)
+        return
+      }
+
       const agentEvent = event as unknown as AgentEvent
 
       // Track activity for stale session watchdog
@@ -1894,15 +1905,26 @@ export default function App() {
       }
     }
 
-    await window.electronAPI.deleteSession(sessionId)
+    try {
+      await window.electronAPI.deleteSession(sessionId)
+    } catch (error) {
+      console.error('Failed to delete session:', error)
+      // Keep the session in the list and tell the user instead of failing silently.
+      toast.error(t('toast.failedToDeleteSession'))
+      return false
+    }
     // Remove from per-session atom and metadata map (no sessionsAtom)
     removeSession(sessionId)
     return true
-  }, [store, removeSession])
+  }, [store, removeSession, t])
 
   // Auto-delete handler for empty sessions (fire-and-forget, no confirmation)
   const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
-    window.electronAPI.deleteSession(sessionId)
+    // Background cleanup: swallow RPC failures (logged only) so an empty
+    // session's removal never interrupts the user with a toast.
+    window.electronAPI.deleteSession(sessionId).catch((error) => {
+      console.error('Failed to auto-delete empty session:', error)
+    })
     removeSession(sessionId)
   }, [removeSession])
 
@@ -2613,7 +2635,13 @@ export default function App() {
     invalidateAccountSession()
     try {
       const result = await window.electronAPI.logout()
-      if (!result.success || !isCurrentLogout()) return
+      if (!result.success || !isCurrentLogout()) {
+        // Non-thrown outcome (RPC resolved with success=false) or a concurrent
+        // logout superseded this one: preserved legacy behavior — close the
+        // dialog silently without a toast.
+        setShowResetDialog(false)
+        return
+      }
       invalidateProductSpaceDeepLinkRefresh()
       // Reset all state
       clearProductSpaceAccount(logoutSnapshot.accountId)
@@ -2629,10 +2657,12 @@ export default function App() {
       // Reset onboarding hook state
       onboarding.reset()
       setAppState('onboarding')
+      setShowResetDialog(false)
     } catch (error) {
       console.error('Reset failed:', error)
-    } finally {
-      setShowResetDialog(false)
+      // Surface the failure and keep the confirmation dialog open so the
+      // user can retry (previously the dialog closed with no feedback).
+      toast.error(t('toast.resetFailed'))
     }
   }, [
     commitCurrentAdminUser,
@@ -2641,6 +2671,7 @@ export default function App() {
     invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
     resetAccountScopedClientState,
+    t,
   ])
 
   const handleAdminLogout = useCallback(async () => {
@@ -2692,6 +2723,9 @@ export default function App() {
       setAppState('onboarding')
     } catch (error) {
       console.error('Admin logout failed:', error)
+      // The logout RPC itself threw: leave the shell as-is (fail-closed) and
+      // tell the user instead of failing silently.
+      toast.error(t('productSpace.logout.failed'))
     }
   }, [
     commitCurrentAdminUser,

@@ -20,3 +20,18 @@ export {
 
 export { hasManagedCliMarkers, assertOwnedCliConnection, type CliConnectionProvenance } from './cli-connection-policy'
 export { desktopManagedConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor } from './desktop-managed'
+export {
+  setGenerativeUiRemoteCapability,
+  isGenerativeUiRemoteInlineDisabled,
+  isGenerativeUiRemoteCanvasDisabled,
+  isGenerativeUiInlineEnabled,
+  isGenerativeUiCanvasEnabled,
+  GenerativeUiCapabilitySchema,
+  type GenerativeUiCapability,
+} from './generative-ui'
+export {
+  setWebAppArtifactPolicy,
+  getWebAppArtifactPolicyState,
+  isWebAppArtifactPolicyEnabled,
+  type WebAppArtifactPolicyState,
+} from './web-app-policy'

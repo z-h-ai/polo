@@ -42,6 +42,16 @@ mock.module('@/context/ThemeContext', () => ({
   useOptionalTheme: () => undefined,
 }))
 
+// The TopBar's AppMenu (Polo logo dropdown) needs the App-level
+// ActionRegistryProvider for its hotkey labels; this reduced tree mounts
+// TabShell without it (adding the provider would add a second live window
+// keydown listener and break the R33 exactly-one-listener assertions), so the
+// menu trigger is stubbed. Its wiring has dedicated coverage in
+// TopBar.app-menu.isolated.ts.
+mock.module('@/components/AppMenu', () => ({
+  AppMenu: () => createElement('div', { 'data-testid': 'topbar-app-menu' }),
+}))
+
 // Fail-fast electronAPI for the reduced TabShell tree: subscriptions and the
 // localApps members the restored Home surface touches are enumerated; any
 // other access is a fixture gap and must throw.

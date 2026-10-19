@@ -163,6 +163,24 @@ export const RPC_CHANNELS = {
     GET_APPS: 'tab-browser:getApps',
     SAVE_APPS: 'tab-browser:saveApps',
   },
+  genui: {
+    // Canvas app (generate_app) pin audit. Main derives the session directory
+    // path itself and validates the bundle path before appending audit.jsonl —
+    // the renderer never names a writable path.
+    AUDIT_APP_PIN: 'genui:auditAppPin',
+    // POO-103: canvas card mount/unmount registration for the ui-event
+    // two-dimensional ownership model. Main only honors a registration whose
+    // guest webContents it observed attaching itself (webview-security) —
+    // the renderer reports ids, Main verifies them.
+    REGISTER_UI_CARD: 'genui:registerUiCard',
+    UNREGISTER_UI_CARD: 'genui:unregisterUiCard',
+    // POO-104 publish chain: Main packages the session-local canvas app into
+    // the upload payload (zip, root layout) behind the same trust anchors as
+    // the pin audit. The payload crosses this channel once, renderer → Main
+    // never — Main hands the packaged bytes BACK to the caller, which submits
+    // them through the existing admin.PUBLISH_CREATOR_APP chain.
+    PUBLISH_APP_AS_ARTIFACT: 'genui:publishAppArtifact',
+  },
   localApps: {
     GET_HOST_INFO: 'local-apps:getHostInfo',
     INSTALL: 'local-apps:install',
@@ -444,6 +462,10 @@ export const RPC_CHANNELS = {
   tools: {
     GET_BROWSER_TOOL_ENABLED: 'tools:getBrowserToolEnabled',
     SET_BROWSER_TOOL_ENABLED: 'tools:setBrowserToolEnabled',
+    GET_GENERATIVE_UI_INLINE_ENABLED: 'tools:getGenerativeUiInlineEnabled',
+    SET_GENERATIVE_UI_INLINE_ENABLED: 'tools:setGenerativeUiInlineEnabled',
+    GET_GENERATIVE_UI_CANVAS_ENABLED: 'tools:getGenerativeUiCanvasEnabled',
+    SET_GENERATIVE_UI_CANVAS_ENABLED: 'tools:setGenerativeUiCanvasEnabled',
   },
   caching: {
     GET_EXTENDED_PROMPT_CACHE: 'caching:getExtendedPromptCache',
