@@ -78,8 +78,15 @@ export const openAppTabAtom = atom(
 export const closeTabAtom = atom(
   null,
   (get, set, tabId: string) => {
-    if (tabId === HOME_TAB_ID || tabId === POLO_TAB_ID) {
+    if (tabId === HOME_TAB_ID) {
       set(activeTabIdAtom, HOME_TAB_ID)
+      return
+    }
+
+    // POO-104: the assistant tab is a permanent entry. A close request must
+    // be an idempotent no-op — it must never yank the active tab to Home
+    // while another app is focused, and never remove the tab itself.
+    if (tabId === POLO_TAB_ID) {
       return
     }
 

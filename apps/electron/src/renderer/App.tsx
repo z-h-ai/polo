@@ -3275,8 +3275,12 @@ export default function App() {
         <DismissibleLayerProvider>
         <ModalProvider>
         <TooltipProvider delayDuration={0}>
-          {/* Handle window close requests (X button, Cmd+W) - close modal first if open */}
-          <WindowCloseHandler />
+          {/* Handle window close requests (X button, Cmd+W) - close modal first if open.
+              POO-104: this is the only surface that mounts TabShellProvider, so it is
+              also the only one allowed to guard the permanent assistant tab against
+              a bare Cmd/Ctrl+W window close (screens below pass no guard, so a stale
+              tab atom can never swallow a legitimate close there). */}
+          <WindowCloseHandler assistantTabGuard />
 
           {/* Splash screen overlay - fades out when fully ready */}
           {showSplash && (
@@ -3462,8 +3466,8 @@ function MaybeProductSpaceProvider({
  * Component that handles window close requests.
  * Must be inside ModalProvider to access the modal registry.
  */
-function WindowCloseHandler() {
-  useWindowCloseHandler()
+function WindowCloseHandler({ assistantTabGuard = false }: { assistantTabGuard?: boolean }) {
+  useWindowCloseHandler({ assistantTabGuard })
   return null
 }
 
