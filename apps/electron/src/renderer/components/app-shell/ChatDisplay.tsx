@@ -68,6 +68,7 @@ import { ChatInputZone, type ChatInputStatusBanner, type StructuredInputState, t
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
+import { useUserMessageRecap } from "@/hooks/useUserMessageRecap"
 import { useNavigation } from "@/contexts/NavigationContext"
 import { useAppShellContext } from "@/context/AppShellContext"
 import { navigate, routes } from "@/lib/navigate"
@@ -75,6 +76,14 @@ import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
+import { UserMessageRecap } from "./UserMessageRecap"
+import {
+  createStickyBottomScrollGate,
+  resolveRecapPreview,
+  selectLatestSentUserTurn,
+  tailwindPaddingTopPx,
+  type StickyBottomScrollGate,
+} from "./user-message-recap"
 
 // ============================================================================
 // CSS Custom Highlight API helper
@@ -514,6 +523,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
+  // Debounced bottom-follow with a fire-time sticky re-check, so a Recap click
+  // that unstuck the bottom cannot be yanked back by an already-scheduled
+  // resize scroll (POO-111 race).
+  const stickyBottomScrollGateRef = React.useRef<StickyBottomScrollGate | null>(null)
+  if (!stickyBottomScrollGateRef.current) {
+    stickyBottomScrollGateRef.current = createStickyBottomScrollGate({
+      isSticky: () => isStickToBottomRef.current,
+    })
+  }
   // Mirror isFocusedPanel into a ref so the ResizeObserver closure reads the latest value
   const isFocusedPanelRef = React.useRef(isFocusedPanel)
   isFocusedPanelRef.current = isFocusedPanel
@@ -1157,8 +1175,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       if (prevSessionId) clearGenUiToolInputDeltasForSession(prevSessionId)
     }
 
-    // Debounced scroll for streaming - waits for layout to settle
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    // Debounced scroll for streaming - waits for layout to settle.
+    // The gate re-checks stickiness when the timer fires, so a Recap click
+    // that unstuck the bottom between schedule and fire is respected.
+    const stickyBottomScrollGate = stickyBottomScrollGateRef.current
 
     const resizeObserver = new ResizeObserver(() => {
       // Unfocused panels: always scroll to bottom instantly (user isn't reading them)
@@ -1171,12 +1191,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       if (!isStickToBottomRef.current) return
 
       // Clear pending scroll and wait for layout to settle
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
+      stickyBottomScrollGate?.schedule(() => {
         // Skip smooth scroll if we just did an instant scroll (session switch/lazy load)
         if (Date.now() < skipSmoothScrollUntilRef.current) return
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      }, 200)
+      })
     })
 
     // Observe the scroll content container (first child of viewport)
@@ -1187,7 +1206,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     return () => {
       resizeObserver.disconnect()
-      if (debounceTimer) clearTimeout(debounceTimer)
+      stickyBottomScrollGate?.cancel()
     }
   }, [session?.id])
 
@@ -1221,6 +1240,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     isStickToBottomRef.current = true
 
     requestAnimationFrame(() => {
+      // Re-check before executing: a Recap click may have unstuck the bottom
+      // after this scroll was scheduled.
+      if (!isStickToBottomRef.current) return
       messagesEndRef.current?.scrollIntoView({
         behavior: isFocusedPanelRef.current ? 'smooth' : 'instant',
       })
@@ -1274,8 +1296,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
 
     // Immediately scroll to bottom after sending - use requestAnimationFrame
-    // to ensure the DOM has updated with the new message
+    // to ensure the DOM has updated with the new message. Re-checks sticky so
+    // a Recap click landing in between is not overridden.
     requestAnimationFrame(() => {
+      if (!isStickToBottomRef.current) return
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     })
   }
@@ -1409,6 +1433,55 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const turns = allTurns.slice(startIndex)
   const hasMoreAbove = startIndex > 0
 
+  // ============================================================================
+  // Latest-user-message Recap (POO-111)
+  // ============================================================================
+
+  // The latest *sent* user turn — pending/queued sends never replace it, and
+  // interleaved system/error/auth turns don't hide it.
+  const recapTargetInfo = useMemo(() => selectLatestSentUserTurn(allTurns), [allTurns])
+  const recapTarget = useMemo(() => {
+    if (!recapTargetInfo) return null
+    return { turnKey: getTurnKey(recapTargetInfo.turn), turnIndex: recapTargetInfo.index }
+  }, [recapTargetInfo])
+
+  // Reveal offset derived from the same CHAT_LAYOUT spacing the message list
+  // uses (container padding + user-message top padding), so the target lands
+  // just below the fade mask without a second hardcoded constant.
+  const recapTopOffsetPx = compactMode
+    ? tailwindPaddingTopPx('py-4', 'pt-2')
+    : tailwindPaddingTopPx(CHAT_LAYOUT.containerPaddingY, CHAT_LAYOUT.userMessagePadding)
+
+  const ensureRecapTargetRendered = useCallback((turnIndex: number) => {
+    if (turnIndex < 0) return
+    setVisibleTurnCount(prev => Math.max(prev, allTurns.length - turnIndex))
+  }, [allTurns.length])
+
+  const recap = useUserMessageRecap({
+    sessionId: session?.id ?? null,
+    target: recapTarget,
+    startIndex,
+    scrollViewportRef,
+    turnRefs,
+    topOffsetPx: recapTopOffsetPx,
+    paused: messagesLoading,
+    ensureTargetRendered: ensureRecapTargetRendered,
+  })
+
+  // Single-line visible-text preview; single attachments show their file name,
+  // everything blank falls back to a localized "your latest message" label.
+  const recapPreview = useMemo(() => {
+    if (!recapTargetInfo) return ''
+    const resolved = resolveRecapPreview(recapTargetInfo.turn.message)
+    if (resolved.kind === 'text') return resolved.text
+    if (resolved.kind === 'attachments') {
+      return resolved.names.length === 1 && resolved.names[0]
+        ? resolved.names[0]
+        : t('chat.recap.attachmentsOnly', { count: resolved.names.length })
+    }
+    return t('chat.recap.latestMessage')
+  }, [recapTargetInfo, t])
+
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
     allTurns.forEach((turn, index) => {
@@ -1507,6 +1580,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <div className="flex flex-1 flex-col min-h-0 min-w-0 relative z-10">
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className="relative flex-1 min-h-0">
+            {/* Latest-user-message Recap — a sibling OUTSIDE the fade mask so the mask never dims it */}
+            {recap.visible && recapTarget && (
+              <UserMessageRecap
+                preview={recapPreview}
+                ariaLabel={t('chat.recap.jumpToMessage')}
+                onClick={recap.reveal}
+                compactMode={compactMode}
+              />
+            )}
             {/* Mask wrapper - fades content at top and bottom over transparent/image backgrounds */}
             <div
               className="h-full"
@@ -1584,6 +1666,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={compactMode ? { duration: 0 } : { duration: 0.1, ease: 'easeOut' }}
+                      data-recap-session={session.id}
                     >
                   {/* Scroll to bottom before paint - fires via useLayoutEffect */}
                   {/* Skip when search is active on session switch - scroll to first match instead */}
@@ -1629,6 +1712,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         <div
                           key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                          // Programmatic focus target for the Recap reveal
+                          // (not tabbable; keeps focus when the button unmounts).
+                          tabIndex={-1}
                           className={cn(
                             compactMode ? "pt-2 pb-1" : CHAT_LAYOUT.userMessagePadding,
                             "rounded-lg transition-all duration-200",
