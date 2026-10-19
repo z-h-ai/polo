@@ -17,7 +17,7 @@ mock.module('@/components/circles/ClientHomeRouter', () => ({ ClientHomeRouter: 
 mock.module('@/context/MemberCircleResourceContext', () => ({ MemberCircleResourceProvider: ({ children }: { children: React.ReactNode }) => children }))
 const { TabShellProvider, useTabShell } = await import('../TabShellContext')
 const { TabContent } = await import('@/components/tab-browser/TabContent')
-const { render, cleanup, fireEvent, waitFor, act } = await import('@testing-library/react')
+const { render, cleanup, fireEvent, waitFor, act, within } = await import('@testing-library/react')
 const space = { accountId: 'account-a', activeProductSpaceId: 'space-a', contextVersion: 1, productSpaceContextKey: 'scope-a', activeProductSpace: { id: 'space-a', kind: 'personal' } } as ProductSpaceContextValue
 const app = { id: 'artifact-a', organizationId: 'space-a', name: 'Test App', availability: 'available', catalogEntryId: 'entry-a', artifactInstanceId: 'artifact-a', catalogVersion: { versionId: 'version-a', version: '1.0.0' }, catalogSources: [{ kind: 'creator_circle', name: 'Circle', circleId: 'circle-a' }], rawAvailability: 'available', description: null, deliveryMode: 'local_service', sortOrder: 0 } as unknown as CatalogApp
 const launch = { contractVersion: 1, productSpaceId: 'space-a', catalogEntryId: 'entry-a', resolvedAt: '2099-01-01T00:00:00.000Z', expiresAt: '2099-01-01T00:10:00.000Z', subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-a', version: '1.0.0' }, payer: { kind: 'personal', accountId: 'account-a' }, delivery: { kind: 'bundle', downloadUrl: 'https://admin.example/never-persist-this-nonce', checksum: 'a'.repeat(64), sizeBytes: 123, runtime: 'js' } } as unknown as ResolveLaunchResponse
@@ -44,6 +44,10 @@ function Probe() {
 }
 const tree = (store: ReturnType<typeof createStore>, value: ProductSpaceContextValue) => createElement(I18nextProvider, { i18n }, createElement(Provider, { store }, createElement(ProductSpaceProvider, { value, children: null }, createElement(MemberCatalogProvider, { catalog, children: null }, createElement(TabShellProvider, { children: null, workspaceId: 'workspace-a', productSpaceScope: { accountId: value.accountId, productSpaceId: value.activeProductSpaceId } }, createElement(Probe))))))
 const mount = (store = createStore(), value = space) => ({ store, ...render(tree(store, value)) })
+/** Test fixtures only carry the fields the close decision reads (executionId); the full ExecutionSummary shape is irrelevant here. */
+const setListExecutions = (impl: () => Promise<unknown>) => {
+  window.electronAPI.productSpaceListActiveExecutions = impl as typeof window.electronAPI.productSpaceListActiveExecutions
+}
 beforeEach(() => { installed = false; start.mockReset(); start.mockImplementation(async () => ({ appId: 'artifact-a', version: '1.0.0', executionId: 'execution-a', runtimeGeneration: 1, scopeGeneration: 1, runtimeKind: 'js', uiUrl: 'http://127.0.0.1:43210/', platformApi: { status: 'available' } })); stop.mockReset(); stop.mockImplementation(async () => ({ status: 'stopped' })); window.localStorage.clear(); Object.defineProperty(window, 'electronAPI', { configurable: true, value: { localApps: { start, stop }, productSpaceListActiveExecutions: async () => ({ success: true, executions: [{ executionId: 'execution-a', status: 'running' }] }) } }) })
 afterEach(cleanup)
 it('install confirmation consumes the real handoff and opens the exact runtime once', async () => {
@@ -84,22 +88,69 @@ it('stale start completion after provider unmount stops only its exact generatio
   expect(view.store.get(openTabsAtom).some(tab => tab.url?.includes('43210'))).toBe(false)
 })
 
-it('background close retains the exact runtime; reopening focuses it without another start', async () => {
+it('an ended execution closes directly without the terminate dialog or a stop call', async () => {
   installed = true
   const view = mount()
   fireEvent.click(view.getByText('open fixture'))
   await waitFor(() => expect(view.getByTestId('active-url').textContent).toContain('43210'))
-  const guest = view.container.querySelector('webview')!
-  expect(guest).not.toBeNull()
+  setListExecutions(async () => ({ success: true, executions: [] }))
   fireEvent.click(view.getByText('close fixture'))
-  fireEvent.click(await view.findByRole('button', { name: i18n.t('homeApps.runtimeTab.background') }))
-  expect(view.container.querySelector('webview')).toBe(guest)
+  await waitFor(() => expect(view.store.get(openTabsAtom).some(tab => tab.appId === 'artifact-a')).toBe(false))
+  expect(view.queryByRole('dialog')).toBeNull()
   expect(stop).not.toHaveBeenCalled()
-  expect(view.store.get(openTabsAtom).find(tab => tab.appId === 'artifact-a')?.background).toBe(true)
+})
+
+it('an active execution asks with only Cancel and Stop-and-close, naming the App', async () => {
+  installed = true
+  const view = mount()
   fireEvent.click(view.getByText('open fixture'))
   await waitFor(() => expect(view.getByTestId('active-url').textContent).toContain('43210'))
-  expect(start).toHaveBeenCalledTimes(1)
-  expect(view.container.querySelector('webview')).toBe(guest)
+  fireEvent.click(view.getByText('close fixture'))
+  const dialog = await view.findByRole('dialog')
+  expect(within(dialog).getByText(i18n.t('homeApps.runtimeTab.closeTitle', { name: 'Test App' }))).not.toBeNull()
+  const actions = within(dialog).getAllByRole('button')
+  expect(actions.map(button => button.textContent)).toEqual([
+    i18n.t('common.cancel'),
+    i18n.t('homeApps.runtimeTab.stopAndClose'),
+  ])
+  expect(stop).not.toHaveBeenCalled()
+})
+
+it('a failed status check keeps the tab and retries until the state is confirmed', async () => {
+  installed = true
+  const view = mount()
+  fireEvent.click(view.getByText('open fixture'))
+  await waitFor(() => expect(view.getByTestId('active-url').textContent).toContain('43210'))
+  setListExecutions(async () => ({ success: false, errorCode: 'SERVER_ERROR' }))
+  fireEvent.click(view.getByText('close fixture'))
+  const dialog = await view.findByRole('dialog')
+  expect(within(dialog).getByText(i18n.t('homeApps.runtimeTab.statusUnknown'))).not.toBeNull()
+  expect(view.store.get(openTabsAtom).some(tab => tab.appId === 'artifact-a')).toBe(true)
+  expect(stop).not.toHaveBeenCalled()
+  setListExecutions(async () => ({ success: true, executions: [{ executionId: 'execution-a', status: 'running' }] }))
+  fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('homeApps.runtimeTab.retry') }))
+  expect(await view.findByRole('button', { name: i18n.t('homeApps.runtimeTab.stopAndClose') })).not.toBeNull()
+})
+
+it('a naturally ended execution closes after a failed exact stop instead of an error', async () => {
+  installed = true
+  const view = mount()
+  fireEvent.click(view.getByText('open fixture'))
+  await waitFor(() => expect(view.getByTestId('active-url').textContent).toContain('43210'))
+  let listCalls = 0
+  setListExecutions(async () => {
+    listCalls += 1
+    return listCalls === 1
+      ? { success: true, executions: [{ executionId: 'execution-a', status: 'running' }] }
+      : { success: true, executions: [] }
+  })
+  stop.mockImplementationOnce(async () => { throw new Error('process already gone') })
+  fireEvent.click(view.getByText('close fixture'))
+  fireEvent.click(await view.findByRole('button', { name: i18n.t('homeApps.runtimeTab.stopAndClose') }))
+  await waitFor(() => expect(view.store.get(openTabsAtom).some(tab => tab.appId === 'artifact-a')).toBe(false))
+  expect(view.queryByRole('alert')).toBeNull()
+  expect(stop).toHaveBeenCalledTimes(1)
+  expect(listCalls).toBe(2)
 })
 
 it('stop failure keeps the App and dialog; explicit retry closes only after exact STOP succeeds', async () => {
@@ -110,11 +161,51 @@ it('stop failure keeps the App and dialog; explicit retry closes only after exac
   stop.mockImplementationOnce(async () => { throw new Error('process still running') })
   fireEvent.click(view.getByText('close fixture'))
   fireEvent.click(await view.findByRole('button', { name: i18n.t('homeApps.runtimeTab.stopAndClose') }))
-  await view.findByRole('alert')
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
+  expect(view.getByRole('alert').textContent).toBe(i18n.t('homeApps.runtimeTab.stopFailed'))
   expect(view.store.get(openTabsAtom).some(tab => tab.appId === 'artifact-a')).toBe(true)
   fireEvent.click(view.getByRole('button', { name: i18n.t('homeApps.runtimeTab.stopAndClose') }))
   await waitFor(() => expect(view.store.get(openTabsAtom).some(tab => tab.appId === 'artifact-a')).toBe(false))
   expect(stop.mock.calls[1]![0]).toEqual({ kind: 'product_space_runtime_handle', executionId: 'execution-a', expectedRuntimeGeneration: 1 })
+})
+
+it('a close during an in-flight STOP neither stacks work nor re-enables the ask', async () => {
+  installed = true
+  const view = mount()
+  fireEvent.click(view.getByText('open fixture'))
+  await waitFor(() => expect(view.getByTestId('active-url').textContent).toContain('43210'))
+  stop.mockImplementationOnce(() => new Promise(() => {}))
+  fireEvent.click(view.getByText('close fixture'))
+  fireEvent.click(await view.findByRole('button', { name: i18n.t('homeApps.runtimeTab.stopAndClose') }))
+  expect(stop).toHaveBeenCalledTimes(1)
+  // Cmd/Ctrl+W and the × button both land here: the in-flight STOP must keep
+  // the dialog locked instead of resetting it for a second submission.
+  fireEvent.click(view.getByText('close fixture'))
+  expect(stop).toHaveBeenCalledTimes(1)
+  // The submit button stays in its loading shape; both actions stay locked.
+  expect(view.queryByRole('button', { name: i18n.t('homeApps.runtimeTab.stopAndClose') })).toBeNull()
+  expect((view.getByRole('button', { name: i18n.t('common.loading') }) as HTMLButtonElement).disabled).toBe(true)
+  expect((view.getByRole('button', { name: i18n.t('common.cancel') }) as HTMLButtonElement).disabled).toBe(true)
+})
+
+it('an unverifiable recheck after a failed stop asks about the unknown state instead of a stop failure', async () => {
+  installed = true
+  const view = mount()
+  fireEvent.click(view.getByText('open fixture'))
+  await waitFor(() => expect(view.getByTestId('active-url').textContent).toContain('43210'))
+  let listCalls = 0
+  setListExecutions(async () => {
+    listCalls += 1
+    if (listCalls === 1) return { success: true, executions: [{ executionId: 'execution-a', status: 'running' }] }
+    return { success: false, errorCode: 'SERVER_ERROR' }
+  })
+  stop.mockImplementationOnce(async () => { throw new Error('stop request lost') })
+  fireEvent.click(view.getByText('close fixture'))
+  fireEvent.click(await view.findByRole('button', { name: i18n.t('homeApps.runtimeTab.stopAndClose') }))
+  expect(await view.findByText(i18n.t('homeApps.runtimeTab.statusUnknown'))).not.toBeNull()
+  expect(view.queryByRole('alert')).toBeNull()
+  expect(view.store.get(openTabsAtom).some(tab => tab.appId === 'artifact-a')).toBe(true)
+  expect(view.getByRole('button', { name: i18n.t('homeApps.runtimeTab.retry') })).not.toBeNull()
 })
 
 it('A→B→A invalidates pending start and never exposes the old URL or title in the new generation', async () => {
@@ -140,6 +231,23 @@ it('cancel close keeps the current App without a STOP call', async () => {
   fireEvent.click(await view.findByRole('button', { name: i18n.t('common.cancel') }))
   expect(stop).not.toHaveBeenCalled()
   expect(view.getByTestId('active-url').textContent).toContain('43210')
+})
+
+it('Escape during the activity check holds the ask open, matching the disabled Cancel', async () => {
+  installed = true
+  let resolveCheck: (value: unknown) => void = () => {}
+  setListExecutions(() => new Promise(resolve => { resolveCheck = resolve }))
+  const view = mount()
+  fireEvent.click(view.getByText('open fixture'))
+  await waitFor(() => expect(view.getByTestId('active-url').textContent).toContain('43210'))
+  fireEvent.click(view.getByText('close fixture'))
+  const dialog = await view.findByRole('dialog')
+  expect((within(dialog).getByRole('button', { name: i18n.t('common.cancel') }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.keyDown(dialog, { key: 'Escape' })
+  expect(view.getByRole('dialog')).not.toBeNull()
+  expect(stop).not.toHaveBeenCalled()
+  resolveCheck({ success: true, executions: [{ executionId: 'execution-a', status: 'running' }] })
+  await waitFor(() => expect((within(view.getByRole('dialog')).getByRole('button', { name: i18n.t('common.cancel') }) as HTMLButtonElement).disabled).toBe(false))
 })
 
 it('local-account shell mounts without a ProductSpace provider or runtime consumer', async () => {
@@ -185,7 +293,7 @@ it('explicit reopen starts a fresh runtime after the original execution stopped'
   const view = mount()
   fireEvent.click(view.getByText('open fixture'))
   await waitFor(() => expect(view.getByTestId('active-url').textContent).toContain('43210'))
-  window.electronAPI.productSpaceListActiveExecutions = async () => ({ success: true, executions: [] })
+  setListExecutions(async () => ({ success: true, executions: [] }))
   fireEvent.click(view.getByText('open fixture'))
   await waitFor(() => expect(start).toHaveBeenCalledTimes(2))
   expect(view.store.get(openTabsAtom).filter(tab => tab.appId === 'artifact-a')).toHaveLength(1)

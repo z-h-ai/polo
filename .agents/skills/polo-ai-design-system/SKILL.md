@@ -18,7 +18,7 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 
 ## Sources
 
-- `docs/client-journey-review/spec.md` — authority; 当前产品唯一来源 master-r15-closure；§13.8—13.13 覆盖旧设计指令; SHA-256 `269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7`
+- `docs/client-journey-review/spec.md` — authority; 当前产品唯一来源 master-r15-closure；§13.8—13.13 覆盖旧设计指令; SHA-256 `867336f3868692247acab90630e2ac0ccff790784d0019af3ff528867832132b`
 - `.agents/skills/polo-ai-design-system/references/foundations.md` — authority; 本次原型提取与消费边界；明确确认/实现事实/待复看范围; SHA-256 `1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d`
 - `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css` — authority; b82fa1e5 基础样式，按最新原型逐字节提取；当前外层工作台样式维护源; SHA-256 `fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a`
 - `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css` — authority; 导航/Header、首页和统一圈子列表已明确增量；按最终CSS cascade消费; SHA-256 `75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591`

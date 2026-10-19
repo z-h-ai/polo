@@ -4,7 +4,7 @@
   "revision": "poo70-workbench-r15-closure",
   "design_revision": "poo70-client-design-r2-20261004",
   "source_manifest": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
-  "source_manifest_sha256": "7e01dbc8eebd78ef5d37ba707132d7ce48cfd934d4585b5f39caf6aa9cf7132b",
+  "source_manifest_sha256": "7f592e6ccec56e2329d451a1ee3de2bd0fe9c7358c60103435a865a7e62bcb9e",
   "product_export": "docs/mvp-complete-flow-hifi/prototype.html",
   "target": {
     "languages": [
