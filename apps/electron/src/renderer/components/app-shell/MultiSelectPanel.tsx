@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { Archive, Tag, CheckCircle2, Send } from 'lucide-react'
+import { Archive, Tag, CheckCircle2, Power, PowerOff, Send } from 'lucide-react'
 import { useTranslation, Trans } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
@@ -49,6 +49,10 @@ export interface MultiSelectPanelProps {
   onArchive?: () => void
   /** Callback when sending selected to another workspace */
   onSendToWorkspace?: () => void
+  /** Callback when enabling/disabling all selected skills (POO-106 S1, SM-06r) */
+  onSetSkillsEnabled?: (enabled: boolean) => void
+  /** True while a batch enablement write is in flight */
+  batchEnablementPending?: boolean
   /** Callback when clearing the selection */
   onClearSelection?: () => void
   /** Optional className for the container */
@@ -66,6 +70,8 @@ export function MultiSelectPanel({
   onToggleLabel,
   onArchive,
   onSendToWorkspace,
+  onSetSkillsEnabled,
+  batchEnablementPending = false,
   onClearSelection,
   className,
 }: MultiSelectPanelProps) {
@@ -171,6 +177,33 @@ export function MultiSelectPanel({
               />
             </StyledDropdownMenuContent>
           </DropdownMenu>
+        )}
+        {onSetSkillsEnabled && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={batchEnablementPending}
+              onClick={() => onSetSkillsEnabled(true)}
+              className="gap-2 bg-background shadow-minimal hover:bg-foreground/[0.03] disabled:opacity-50"
+            >
+              <Power className="w-4 h-4" />
+              {t('multiSelect.enableSkills')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={batchEnablementPending}
+              onClick={() => onSetSkillsEnabled(false)}
+              className="gap-2 bg-background shadow-minimal hover:bg-foreground/[0.03] disabled:opacity-50"
+            >
+              <PowerOff className="w-4 h-4" />
+              {t('multiSelect.disableSkills')}
+            </Button>
+            <p className="w-full text-center text-xs text-muted-foreground">
+              {t('skillsList.batchExcludesBuiltin')}
+            </p>
+          </>
         )}
         {onSendToWorkspace && (
           <Button

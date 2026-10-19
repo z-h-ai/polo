@@ -404,6 +404,8 @@ export const RPC_CHANNELS = {
     OPEN_EDITOR: 'skills:openEditor',
     OPEN_FINDER: 'skills:openFinder',
     CHANGED: 'skills:changed',
+    LIST_MANAGED: 'skills:listManaged',
+    SET_MANAGED_ENABLEMENT: 'skills:setManagedEnablement',
   },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',

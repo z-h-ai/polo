@@ -985,6 +985,9 @@ app.whenReady().then(async () => {
             sessionManager: sm,
             sessionStorage: sm.sessionStorage,
             platform: p,
+            // POO-106 S1: managed-skill enablement lives under the desktop
+            // userData dir, scoped per account × local workspace.
+            managedSkillsRoot: join(app.getPath('userData'), 'managed-skills'),
             windowManager: windowManager ?? undefined,
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,

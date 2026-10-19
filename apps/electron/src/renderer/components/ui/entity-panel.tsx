@@ -28,6 +28,8 @@ export interface EntityPanelProps<T> {
   selection: ReturnType<typeof createEntitySelection>
   onItemClick: (item: T) => void
   selectedId?: string | null
+  /** Exclude rows from multi-select toggles, ranges and select-all. */
+  isSelectable?: (item: T) => boolean
   emptyState?: React.ReactNode
   className?: string
   /** Extra data/aria attributes merged onto the inner list container.
@@ -42,6 +44,7 @@ export function EntityPanel<T>({
   selection,
   onItemClick,
   selectedId,
+  isSelectable,
   emptyState,
   className,
   containerProps,
@@ -55,6 +58,7 @@ export function EntityPanel<T>({
       onActivate: (item) => onItemClick(item),
     },
     multiSelect: true,
+    isSelectable,
     selectionStore,
   })
 

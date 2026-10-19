@@ -1,8 +1,13 @@
 import { SKILL_TURN_CONTRACT_VERSION, type SkillTurnBegin, type SkillTurnReceipt } from '@polo-ai/shared/admin'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
+import { isLocalEnablementTarget } from '@polo-ai/shared/skills'
 import type { CanonicalSkillSource, CanonicalSkillInstallation } from '@polo-ai/shared/creator-skills'
 import type { TrustedProductSpaceSummary, ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
+import {
+  managedSkillEnablementFingerprint,
+  readDisabledManagedSkillSlugs,
+} from './managed-skill-enablement'
 
 export interface CanonicalSkillScope { accountId: string; productSpaceId: string; fenceGeneration: number }
 export interface CanonicalSkillLaunch { context: TrustedProductSpaceSummary; launch: ResolveLaunchResponse; fetch: typeof fetch; assertCurrent: () => Promise<void> }
@@ -134,8 +139,29 @@ export function createCanonicalSkillTurnController(workspaceRoot: string) {
   }
 }
 
-/** Current-space discovery shared by RPC and file-watcher publications. */
-export async function loadProductSpaceSkills(workspaceRoot: string, scope: CanonicalSkillScope, workingDirectory?: string): Promise<LoadedSkill[]> {
+/**
+ * Memoized disabled-slug reads keyed by the enablement file's own identity
+ * (mtime + size, which moves with every revision bump), so composition can
+ * stay hot without ever reusing a stale enablement set.
+ */
+interface EnablementMemo { fingerprint: string; disabled: Set<string> }
+const disabledLocalSkillsMemo = new Map<string, EnablementMemo>()
+function readDisabledLocalSkillsMemoized(accountId: string, workspaceRoot: string): Set<string> {
+  const key = `${accountId} ${resolve(workspaceRoot)}`
+  const fingerprint = managedSkillEnablementFingerprint(accountId, workspaceRoot)
+  const cached = disabledLocalSkillsMemo.get(key)
+  if (cached && cached.fingerprint === fingerprint) return cached.disabled
+  const disabled = readDisabledManagedSkillSlugs(accountId, workspaceRoot)
+  disabledLocalSkillsMemo.set(key, { fingerprint, disabled })
+  return disabled
+}
+
+/**
+ * Current-space discovery without the enablement filter. The management
+ * inventory (skills.listManaged) builds on this: a disabled skill must stay
+ * visible there or it could never be re-enabled.
+ */
+export async function discoverProductSpaceSkills(workspaceRoot: string, scope: CanonicalSkillScope, workingDirectory?: string): Promise<LoadedSkill[]> {
   const context = await resolveCanonicalSkillContext(scope)
   const canonical = await loadCallableCanonicalSkills(workspaceRoot, scope)
   const { loadAllSkills, loadBundledSkills } = await import('@polo-ai/shared/skills')
@@ -147,7 +173,19 @@ export async function loadProductSpaceSkills(workspaceRoot: string, scope: Canon
     : context.kind === 'enterprise' && context.accessMode === 'active'
       ? loadBundledSkills()
       : []
+  // Recheck the space policy after the awaited discovery: a mid-flight
+  // personal→enterprise switch must not publish legacy-root skills.
   const current = await resolveCanonicalSkillContext(scope)
   if (current.kind !== context.kind || current.accessMode !== context.accessMode) throw new Error('Skill ProductSpace policy changed during discovery')
   return [...local, ...canonical]
+}
+
+/** Current-space discovery shared by RPC and file-watcher publications. */
+export async function loadProductSpaceSkills(workspaceRoot: string, scope: CanonicalSkillScope, workingDirectory?: string): Promise<LoadedSkill[]> {
+  const discovered = await discoverProductSpaceSkills(workspaceRoot, scope, workingDirectory)
+  // POO-106 S1: local user-tier skills the account disabled never enter agent
+  // composition. Bundled and canonical rows are not enablement targets at all
+  // (SM-18d/g), so a stray stored slug cannot disable them by accident.
+  const disabledSlugs = readDisabledLocalSkillsMemoized(scope.accountId, workspaceRoot)
+  return discovered.filter(skill => !isLocalEnablementTarget(skill) || !disabledSlugs.has(skill.slug))
 }

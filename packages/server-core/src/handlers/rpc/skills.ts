@@ -40,10 +40,22 @@ import {
   uninstallCreatorSkill,
   updateCreatorSkillInstallationMetadata,
 } from '@polo-ai/shared/creator-skills'
-import { resolveCanonicalSkill, canonicalSkillSourceFromLaunch, loadProductSpaceSkills } from '../../runtime/canonical-skills'
+import { resolveCanonicalSkill, canonicalSkillSourceFromLaunch, loadProductSpaceSkills, discoverProductSpaceSkills } from '../../runtime/canonical-skills'
+import {
+  readDisabledManagedSkillSlugs,
+  readManagedSkillEnablementDocument,
+  setManagedSkillsRoot,
+  writeManagedSkillEnablement,
+} from '../../runtime/managed-skill-enablement'
 import { readCanonicalSkillInstallations, installCanonicalSkill, canonicalSkillRoot, canonicalSkillIdentity, listCanonicalSkillRoots, recoverCanonicalSkillOperations } from '@polo-ai/shared/creator-skills'
 import { CatalogEntryIdSchema } from '@polo-ai/shared/product-spaces'
-import type { LoadedSkill } from '@polo-ai/shared/skills'
+import {
+  ListManagedSkillsRequestSchema,
+  SetManagedSkillEnablementRequestSchema,
+  isCanonicalManagedSkill,
+  managedSkillEnablementError,
+} from '@polo-ai/shared/skills'
+import type { LoadedSkill, ManagedSkillStatus } from '@polo-ai/shared/skills'
 import { getClientActiveSession } from './client-active-session'
 import {
   EXECUTION_STOP_DRAIN_TIMEOUT_MS,
@@ -319,6 +331,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.OPEN_EDITOR,
   RPC_CHANNELS.skills.OPEN_FINDER,
+  RPC_CHANNELS.skills.LIST_MANAGED,
+  RPC_CHANNELS.skills.SET_MANAGED_ENABLEMENT,
   RPC_CHANNELS.creatorSkills.GET_TARGET,
   RPC_CHANNELS.creatorSkills.INSTALL,
   RPC_CHANNELS.creatorSkills.CANCEL,
@@ -387,6 +401,7 @@ async function assertOriginalNativeSkillScope(scope: {accountId: string; product
 }
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
+  setManagedSkillsRoot(deps.managedSkillsRoot ?? null)
   const recoveryByWorkspaceRoot = new Map<string, Promise<void>>()
   const ensureRecovered = (workspaceRoot: string): Promise<void> => {
     const existing = recoveryByWorkspaceRoot.get(workspaceRoot)
@@ -421,6 +436,9 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   const loadSkillsWithCreatorState = async (
     workspaceRoot: string,
     workingDirectory?: string,
+    // The management inventory lists disabled skills too (it is the only place
+    // they can be re-enabled from), so it skips the composition filter.
+    unfiltered = false,
   ): Promise<LoadedSkill[]> => {
     const [, ledger] = await Promise.all([
       import('@polo-ai/shared/skills'),
@@ -433,7 +451,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     // Same composition rule as SessionManager/watcher discovery: personal
     // legacy tiers only in an active personal space, bundled app Skills in
     // every active space, canonical on top.
-    const skills = await loadProductSpaceSkills(workspaceRoot, scope, workingDirectory)
+    const skills = await (unfiltered ? discoverProductSpaceSkills : loadProductSpaceSkills)(workspaceRoot, scope, workingDirectory)
     await assertOriginalNativeSkillScope(scope, scope.fenceGeneration)
     return skills.map(skill => {
       const installation = installedBySlug.get(skill.slug)
@@ -717,6 +735,104 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       detached,
       ...(forceDeleteCredential ? { forceDeleteCredential } : {}),
     }
+  })
+
+  // ── Managed local-skill enablement (POO-106 S1) ─────────────────────────
+  // Bundled skills never appear here as toggle targets: they are always
+  // available (SM-18a/d) and user entries shadowing them are refused too (K1).
+
+  /** Inventory rows plus the per-entry enablement facts the UI renders. */
+  const buildManagedSkillInventory = async (
+    workspaceRoot: string,
+    workingDirectory?: string,
+  ): Promise<{ items: ManagedSkillStatus[]; revision: number }> => {
+    const accountId = (await requireTrustedSkillsScope()).accountId
+    const skills = await loadSkillsWithCreatorState(workspaceRoot, workingDirectory, true)
+    const disabledSlugs = readDisabledManagedSkillSlugs(accountId, workspaceRoot)
+    const { loadBundledSkill } = await import('@polo-ai/shared/skills')
+    const items = skills.map((skill): ManagedSkillStatus => {
+      if (skill.source === 'bundled') {
+        return { slug: skill.slug, source: skill.source, enabled: true, toggleable: false, managed: false, shadowedBuiltin: false }
+      }
+      const managed = isCanonicalManagedSkill(skill)
+      const shadowedBuiltin = Boolean(loadBundledSkill(skill.slug))
+      const toggleable = !managed && !shadowedBuiltin
+      return {
+        slug: skill.slug,
+        source: skill.source,
+        enabled: toggleable ? !disabledSlugs.has(skill.slug) : true,
+        toggleable,
+        managed,
+        shadowedBuiltin,
+      }
+    })
+    return { items, revision: readManagedSkillEnablementDocument(accountId, workspaceRoot).revision }
+  }
+
+  server.handle(RPC_CHANNELS.skills.LIST_MANAGED, async (ctx, rawInput: unknown) => {
+    const input = ListManagedSkillsRequestSchema.safeParse(rawInput)
+    if (!input.success) return managedSkillEnablementError('VALIDATION_ERROR')
+    await requireTrustedSkillsScope()
+    if (isRuntimeOfflineReadOnly()) return { ok: true as const, workspaceId: input.data.workspaceId, revision: 0, items: [] }
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
+    // A remote (or unknown) workspace has no local enablement scope: the UI
+    // treats missing rows as non-toggleable, which is exactly the K3 stance.
+    if (!workspace || workspace.remoteServer) {
+      return { ok: true as const, workspaceId: input.data.workspaceId, revision: 0, items: [] }
+    }
+    await ensureRecovered(workspace.rootPath)
+    const activeSessionId = getClientActiveSession(ctx.clientId, workspace.id)
+    const workingDirectory = activeSessionId
+      ? await deriveSessionWorkingDirectory(deps, workspace, activeSessionId).catch(() => undefined)
+      : undefined
+    const { items, revision } = await buildManagedSkillInventory(workspace.rootPath, workingDirectory)
+    return { ok: true as const, workspaceId: workspace.id, revision, items }
+  })
+
+  server.handle(RPC_CHANNELS.skills.SET_MANAGED_ENABLEMENT, async (ctx, rawInput: unknown) => {
+    const input = SetManagedSkillEnablementRequestSchema.safeParse(rawInput)
+    if (!input.success) return managedSkillEnablementError('VALIDATION_ERROR')
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
+    if (!workspace || workspace.remoteServer) return managedSkillEnablementError('workspace_context_mismatch')
+    await ensureRecovered(workspace.rootPath)
+    const { accountId } = await requireTrustedSkillsScope()
+    const inventory = await buildManagedSkillInventory(workspace.rootPath)
+    const current = inventory.items.find(item => item.slug === input.data.slug)
+    if (!current) {
+      // A bundled-only slug has no user-tier row at all; name the refusal
+      // precisely instead of a generic not-found (SM-18d defense in depth).
+      const { loadBundledSkill } = await import('@polo-ai/shared/skills')
+      if (loadBundledSkill(input.data.slug)) return managedSkillEnablementError('bundled_skill_not_disableable')
+      return managedSkillEnablementError('skill_not_found')
+    }
+    // Bundled entries never reach this inventory as user-tier rows, so the
+    // refusal below covers canonical/creator-managed and shadowedBuiltin (K8).
+    if (current.source !== input.data.source) {
+      // A forged user-tier write for a bundled-only slug lands here: name the
+      // refusal precisely instead of a generic not-found (SM-18d).
+      const { loadBundledSkill } = await import('@polo-ai/shared/skills')
+      if (loadBundledSkill(input.data.slug)) return managedSkillEnablementError('bundled_skill_not_disableable')
+      return managedSkillEnablementError('skill_not_found')
+    }
+    if (!current.toggleable) {
+      return current.shadowedBuiltin
+        ? managedSkillEnablementError('shadowed_builtin_not_toggleable')
+        : managedSkillEnablementError('managed_skill_not_toggleable')
+    }
+    const result = writeManagedSkillEnablement({
+      accountId,
+      workspaceRoot: workspace.rootPath,
+      slug: input.data.slug,
+      source: input.data.source,
+      enabled: input.data.enabled,
+      expectedRevision: input.data.expectedRevision,
+    })
+    if (!result.ok) return managedSkillEnablementError('revision_conflict', { revision: result.revision })
+    await broadcastSkillsChanged(workspace.id, workspace.rootPath)
+    deps.platform.logger?.info(`MANAGED_SKILLS: ${input.data.slug} ${input.data.enabled ? 'enabled' : 'disabled'} (revision ${result.revision})`)
+    return { ok: true as const, slug: input.data.slug, enabled: input.data.enabled, revision: result.revision }
   })
 
   server.handle(RPC_CHANNELS.creatorSkills.GET_TARGET, async (ctx, rawInput: unknown) => {

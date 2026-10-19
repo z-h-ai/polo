@@ -1360,6 +1360,9 @@ export interface ElectronAPI {
   }>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
+  // Managed local-skill enablement (POO-106 S1)
+  listManagedSkills(input: { workspaceId: string }): Promise<import('@polo-ai/shared/skills').ListManagedSkillsResponse | { ok: false; errorCode: string }>
+  setManagedSkillEnablement(input: import('@polo-ai/shared/skills').SetManagedSkillEnablementRequest): Promise<import('@polo-ai/shared/skills').SetManagedSkillEnablementResponse | { ok: false; errorCode: string; revision?: number }>
 
   // Skills change listener (live updates when skills are added/removed/modified)
   onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void
