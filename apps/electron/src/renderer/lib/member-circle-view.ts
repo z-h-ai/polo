@@ -191,6 +191,7 @@ export function isMembershipCurrentlyPaidEntitled(
 export function selectLostCircleAuthorizationIds(
   circles: ReadonlyArray<MemberCircleSnapshot>,
   memberships: ReadonlyArray<MemberMembership>,
+  now: number = Date.now(),
 ): Set<string> {
   const lost = new Set<string>()
   for (const circle of circles) {
@@ -200,7 +201,7 @@ export function selectLostCircleAuthorizationIds(
     ) ?? null
     const status = membership?.status ?? circle.status
     const currentEntitlement = membership
-      ? isMembershipCurrentlyPaidEntitled(membership)
+      ? isMembershipCurrentlyPaidEntitled(membership, now)
       : null
     if (status !== 'active' || currentEntitlement === false) lost.add(circleId)
   }

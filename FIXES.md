@@ -142,6 +142,10 @@
 
 仅提交本次修复源码、回归测试、用户提供的 FIX-BRIEF.md 和本报告。测试产生的临时文件不入库；未修改既有验收证据、生成协议、语言包或其他工作树。代码回归通过不替代 POO-77/78/79 的后续独立真实产品重验收。
 
+## R4FIX 摘要
+
+R4FIX-01（到期状态）与 R4FIX-03（滚动恢复）已修复；19 个受影响套件 453 pass / 0 fail，类型/构建通过。R4FIX-02 仍受 Admin 当前期权益 DTO 缺口阻塞，独立复现 5 pass / 1 fail；本轮不能标记三项全部完成或全部相关测试全绿。
+
 ## R3 Findings 修复（R3FIX）
 
 ### 来源与范围
@@ -225,3 +229,44 @@
 ### 待用户决策
 
 无阻塞五项修复的产品裁决。保留上述范围外基线问题供后续单独处理。提交仅包含五项修复源码、隔离回归和本 FIXES.md 记录；TASK-FIX-R3.md、USER-AUTHORIZATION-R3FIX.md 保持 untracked，verify.log 和临时预览/浏览器脚本、截图不入库。不修改 dev、不 push、不编辑任务卡正文；是否合入 dev 仍由用户决定。
+
+
+## R4 Findings 修复（R4FIX）
+
+基线：`5eda44445ef39dda295ac7033faabd378ee4fba5`。范围为 TASK-FIX-R4.md 的三项 Client 问题。固定 R4 证据为 `.pipeline/poo77-79-r4-acceptance-20261019-022614/RESULT.md` 与该 run 的 POO-78/79 product-findings.json；不改历史失败回执。产品权威仍为 Spec（SHA-256 `269f75b0a820098c1896463540b78e460a83ab1bd89051184add007f6a533fe7`），沿用当前权益、到期拒绝、同账号/空间隔离和原导航规则。
+
+### Admin DTO 需求 / 待转 Admin（R4FIX-02）
+
+已只读核对 Admin 固定验收版本对应 worktree 的 `src/app/api/me/circle-memberships/route.ts`：paymentOrders 以 updatedAt 降序取五单，纠正投影也仅计算这五单。Client 的 `packages/shared/src/admin/member-circles.ts` 映射只包含 membership status/currentPeriodEnd 与这五单，未提供当前权益来源、当前期纠正结果或历史完整性标记。
+
+例子：当前期付款 P 仍有效，之后创建六次未来取消尝试，DTO 只剩五条 cancelled，P 的身份和纠正事实均缺失。相同的 DTO 还可能隐藏已全退/争议的 P。单凭 active + 将来到期日放行会破坏已有 active + 全退/争议拒绝断言；以订单数量达到五条作为放行条件也没有权威依据。Client 不能从这份有损历史自洽判定当前期付款资格，且不得扩大最近五单推断、忽略纠正或伪造 paid。
+
+推荐由 Admin 提供与 membershipId 绑定、独立于最近五单的 `currentEntitlement` 投影：明确 entitled/not_entitled/unknown、计算时间、有效期上界，以及当前期来源与退款/争议纠正事实。它应复用 Catalog/resolve-launch 所消费的同一权威，不以最近订单状态代替当前期授权。Client 收到已确认的字段名/类型/枚举与真实响应后，扩展 shared schema + 映射并统一消费；保留生命周期和本机时钟到期拒绝，对缺字段的旧响应继续保持原有保守行为，不静默升级为新授权。
+
+Admin 侧需要确认并覆盖：六条未来 cancelled、五条以内未来 cancelled、含一条 pending、无未付尝试时仍 entitled；自然到期、全退及争议时 not_entitled；部分纠正以实际保留权益为准；原 paid 被最近五单挤出时结果仍完整。契约在本轮当前已读来源中尚未提供，Client 第 2 项保持“待 Admin 契约”，不得报告为已修复。未修改其他 Admin worktree 或任务文件。
+
+
+### R4FIX-01：到期后的订阅状态
+
+**根因**：CircleSubscriptionPanel 的 `resolveSubscriptionStatus` 直接返回存储的 membership.status，未消费列表/页头共用的 `isMembershipCurrentlyPaidEntitled`。自然时钟越过 currentPeriodEnd，原始 active 未更新，面板因此仍绿色有效。原列表/Home 的 memo 也不会仅因时间流逝主动重新计算。
+
+**改动**：订阅面板复用当前权益投影及 provider 到期时间，已到期/纠正失权不再作为 active 显示；原始关系与历史订单不改写，已保留的旧 paid 不掩盖到期/全退/争议。无 membership 的 paid circle 回退也检查有效期。新增轻量 `hooks/useMemberCircleClock.ts`，按已读到期时间唤醒并刷新本地显示，供首页、列表、详情页头和订阅面板共同消费；不发起认证、订单或启动请求，不制造业务资格。计时器在关系绑定变化/组件卸载时清理，长周期按系统 timeout 上限分段重排。
+
+**回归**：CircleSubscriptionPanel.interaction.isolated 新增真实短时钟越过到期点、无需重新读取/重挂载的断言；对照退款、争议、未来 pending/cancelled/failed + 当前 paid，另测缺 membership 的过期 paid circle。修复前自然到期、全退、争议、circle 回退共四项失败，修复后全部通过；既有部分退款/部分争议、到期、旧 paid 与未来续费对照保留。页面仍停留时也自动从绿色有效变为已到期，详情页头同时待恢复。
+
+### R4FIX-03：同 scope 列表滚动恢复
+
+**根因**：既有 accountId + personalProductSpaceId + epoch 的 view store 只有 query/filter，路由重挂后主容器 scrollTop 从 0 开始。
+
+**改动**：在同一个 view authority 增加 scrollTop，不新建持久化/模块缓存。保存真实主容器滚动事件，在同 scope 圈子数据就绪后的 layout effect 恢复；加载中不把临时 0 写回，账号/空间/epoch 切换重绑默认值。沿用 R3FIX 的 render 阶段恢复，避免 StrictMode effect 重放覆盖保存值。
+
+**回归**：MyCirclesPage.interaction.isolated 新增 StrictMode 下 query+valid+scrollTop=180 的路由卸载/返回，以及相同 scope loading→ready 后恢复、账号/空间/epoch 三轴隔离。两个独立新断言修复前均为 180→0，修复后 180→180，原有搜索/筛选/账号隔离断言未修改。DOM 交互测试以编程设置 scrollTop 并派发 scroll 事件模拟滚动，未把它声称为原生滚轮验证。
+
+### R4FIX 验证与边界
+
+- 完整输出：`verify-r4.log`（既有 `*.log` 忽略，不入库），前 19 个独立测试进程合计 **453 pass / 0 fail**。同一轮另执行 `.pipeline/r4fix/current-paid-repro.test.ts`：0/1/4 条未来取消、pending + paid、已到期拒绝共五项通过，六条取消挤出 paid 的期望仍失败；原始 5 pass / 1 fail 输出一并保留。整体记录 **458 pass / 1 fail**，不把 R4FIX-02 遗漏成绿色结果。
+- 所有测试路径均有 `./`，逐文件隔离进程，完整写文件并保留退出码。沿用第一轮隔离运行器：每个进程先核对临时 HOME 对应 `os.homedir()`，再执行用例，不读写用户 homedir。命令为 `python3 .pipeline/r4fix/run-tests.py verify-r4.log`，第 2 项缺口复现另用该运行器指定 `./.pipeline/r4fix/current-paid-repro.test.ts`，完整命令均记录于日志。
+- `bun run typecheck:electron` 与 `bun run electron:build:renderer` 均退出 0。六个修改/新增 renderer 生产模块 lint 退出 0（0 error；HomePage 两条既有 hiddenVersion 依赖 warning 保留）。本轮不涉及 Main 业务修改，不重复扩大已在 R3 明确的范围外全量检查。
+- 受控 Chromium 实际运行生产 ClientHomeRouter/MyCirclesPage/CircleDetailPage/CircleSubscriptionPanel 与真实 context，注入明确的圈子 fixture；1024×768 长列表设置真实 DOM scrollTop=180，点击详情→订阅→等待真实时钟到期→返回，测得 before=180 / after=180。详情页头“待恢复”、面板“已到期”，无绿色有效；更换 scope 后滚动为 0、搜索为空。页面异常 0。已打开检查到期后与列表返回截图，证据为 `.pipeline/r4fix/browser-result.json`、`browser-check.log` 和同目录四张 PNG。这是受控页面与时钟验证，不等于真实 Main/支付或正式三卡 Acceptance。
+- R4FIX-02 缺口复现和对应实际 R4 DTO 仍未解决；已将权威来源、不可自洽原因、推荐字段与回归矩阵交给协调方参考。按 TASK-FIX-R4 的明确分工等待 Admin 契约，未擅自改 Admin 分支，也未修改当前未知 DTO 为成功。
+- Task 与授权文件保持 untracked；临时脚本、截图及运行器只在忽略目录。本轮仅在当前 baseline 分支提交，不 push、不合并 dev、不改任务卡正文。

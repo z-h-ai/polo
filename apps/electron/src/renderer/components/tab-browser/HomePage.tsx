@@ -35,6 +35,7 @@ import {
   type HomeAppDirectory,
   type HomeAppDirectoryEntry,
 } from '@/lib/home-app-directory'
+import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
 import { selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
 import {
   formatBytes,
@@ -234,12 +235,14 @@ export function HomePage() {
   // restricted-circle ids mark the corresponding creator_circle sources lost
   // (the leave/revocation projection of §13.5: only the LAST valid source
   // failing blocks a work).
+  const entitlementNow = useMemberCircleClock(circlesResource?.memberships ?? circlesResource?.circles ?? [])
   const lostCircleIds = useMemo(
     () => selectLostCircleAuthorizationIds(
       circlesResource?.circles ?? [],
       circlesResource?.memberships ?? [],
+      entitlementNow,
     ),
-    [circlesResource?.circles, circlesResource?.memberships],
+    [circlesResource?.circles, circlesResource?.memberships, entitlementNow],
   )
   const directory = useMemo<HomeAppDirectory>(
     () => selectHomeAppDirectory(catalog.state.catalog, {

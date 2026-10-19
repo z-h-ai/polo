@@ -17,6 +17,7 @@ import {
   selectHomeAppDirectory,
   type HomeAppDirectory,
 } from '@/lib/home-app-directory'
+import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
 import { isMembershipCurrentlyPaidEntitled, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import { CircleContentPanel } from './CircleContentPanel'
 import { CircleSubscriptionPanel } from './CircleSubscriptionPanel'
@@ -127,10 +128,11 @@ export interface CircleDetailHeadingState {
 export function deriveCircleDetailHeadingState(
   circle: MemberCircleSnapshot,
   membership: MemberMembership | null,
+  now: number = Date.now(),
 ): CircleDetailHeadingState {
   const status = membership?.status ?? circle.status
   const currentEntitlement = membership
-    ? isMembershipCurrentlyPaidEntitled(membership)
+    ? isMembershipCurrentlyPaidEntitled(membership, now)
     : null
   return {
     status,
@@ -269,6 +271,7 @@ export function CircleDetailPage({
   const detailMainRef = useRef<HTMLElement>(null)
   const detail = resource.getCircle(circleId)
   const relationsPhase = resource.state.phase
+  const now = useMemberCircleClock(resource.memberships ?? resource.circles ?? [])
 
   // ── H1 projection (the SAME directory instances the home consumes) ────────
   const activeProductSpace = catalog.productSpace?.activeProductSpace
@@ -382,7 +385,7 @@ export function CircleDetailPage({
 
   // ── Heading facts (ready circles only; unknown renders no identity) ───────
   const heading = circleReady
-    ? deriveCircleDetailHeadingState(detail.circle, detail.membership)
+    ? deriveCircleDetailHeadingState(detail.circle, detail.membership, now)
     : null
   const countsLine = useMemo(() => {
     if (!heading) return ''

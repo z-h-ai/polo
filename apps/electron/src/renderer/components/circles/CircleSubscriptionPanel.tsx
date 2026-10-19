@@ -13,7 +13,8 @@ import {
   type MemberCircleRenewalPreviewResultPayload,
 } from '@/hooks/useMemberCircles'
 import { formatSubscriptionPrice } from '@/lib/format-subscription-price'
-import { isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
+import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
+import { isMembershipCurrentlyPaidEntitled, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import {
   selectCirclePurchaseHandoff,
 } from '@/lib/circle-purchase-url'
@@ -97,9 +98,17 @@ export interface CircleSubscriptionPanelProps {
 /** Effective membership lifecycle: the membership row wins, circle falls back. */
 export function resolveSubscriptionStatus(
   membership: MemberMembership | null,
-  circle: Pick<MemberCircleSnapshot, 'status'>,
+  circle: Pick<MemberCircleSnapshot, 'status'> & Partial<Pick<MemberCircleSnapshot, 'billingKind' | 'currentPeriodEnd'>>,
+  now: number = Date.now(),
 ): MemberMembership['status'] | MemberCircleSnapshot['status'] {
-  return membership?.status ?? circle.status
+  const status = membership?.status ?? circle.status
+  if (status !== 'active') return status
+  if (membership) return isMembershipCurrentlyPaidEntitled(membership, now) ? status : 'expired'
+  if (circle.billingKind === 'paid') {
+    const periodEnd = Date.parse(circle.currentPeriodEnd ?? '')
+    if (!Number.isFinite(periodEnd) || periodEnd <= now) return 'expired'
+  }
+  return status
 }
 
 /** Suspended/expired reason: the membership row is the only authoritative source. */
@@ -169,7 +178,8 @@ export function CircleSubscriptionPanel({
   const { t, i18n } = useTranslation()
   const resource = useMemberCircles()
 
-  const status = resolveSubscriptionStatus(membership, circle)
+  const now = useMemberCircleClock([membership ?? circle])
+  const status = resolveSubscriptionStatus(membership, circle, now)
   const billingKind = membership?.billingKind ?? circle.billingKind
   const isPaid = billingKind === 'paid'
   const membershipId = membership?.membershipId ?? null
@@ -340,7 +350,7 @@ export function CircleSubscriptionPanel({
   const endedBeforePeriodEnd = isMembershipEndedBeforePeriodEnd({
     status,
     currentPeriodEnd: currentPeriodEnd ?? null,
-  })
+  }, now)
 
   const statusLabel = status === 'active'
     ? t('poo70.c6.status.active')
