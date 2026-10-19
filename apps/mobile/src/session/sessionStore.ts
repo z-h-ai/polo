@@ -1,4 +1,4 @@
-// Session store (POL-18 card step 1) — the phone's single-session message
+// Session store (POL-243 card step 1) — the phone's single-session message
 // state layer on zustand.
 //
 // Scope: one bound Mac = one session (M1 MVP). The store owns:

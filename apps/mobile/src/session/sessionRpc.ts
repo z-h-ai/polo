@@ -1,5 +1,5 @@
-// Session RPC controller (POL-18 card step 3) — the message layer over the
-// POL-17 ConnectionManager.
+// Session RPC controller (POL-243 card step 3) — the message layer over the
+// POL-242 ConnectionManager.
 //
 //   send(text):
 //     local echo (sent) → Mac online?  yes → sessions:create (first time only)
@@ -467,7 +467,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : '发送失败，请重试';
 }
 
-/** App controller over the real POL-17 connection manager. */
+/** App controller over the real POL-242 connection manager. */
 export const sessionController = new SessionController({
   manager: connectionManagerRef(),
 });

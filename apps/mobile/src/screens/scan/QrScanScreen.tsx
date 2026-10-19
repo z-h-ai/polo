@@ -1,4 +1,4 @@
-// Scan screen for QR login authorization (POL-15, prototype P10).
+// Scan screen for QR login authorization (POL-240, prototype P10).
 //
 // Entry: Home 「扫码授权登录」 row — only reachable while signed in (AuthGate
 // owns that guard for every route). Camera viewfinder with the ScanFrame

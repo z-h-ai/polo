@@ -1,5 +1,5 @@
 // tsc-side view of @polo-ai/shared/protocol (+ server-core transport) for the
-// mobile app (POL-5; extended by POL-17).
+// mobile app (POL-230; extended by POL-242).
 //
 // Why a shim instead of the real source: the app tsconfig program carries
 // global typings that packages/* were never written against (expo-router's
@@ -12,7 +12,7 @@
 // (verified by `bunx expo export`); extend this file as App cards consume
 // more of the protocol — a missing export fails loudly in tsc.
 //
-// POL-17 additions mirror packages/shared/src/protocol/types.ts (MessageEnvelope)
+// POL-242 additions mirror packages/shared/src/protocol/types.ts (MessageEnvelope)
 // and packages/server-core/src/transport/{client,codec}.ts (WsRpcClient +
 // frame codec) as of main@58f4cb01. Runtime values do NOT live here: bun test
 // resolves these specifiers to this file (no runtime exports), so conn/ code
@@ -64,7 +64,7 @@ export interface MessageEnvelope {
 }
 
 // ---------------------------------------------------------------------------
-// @polo-ai/shared/protocol — session RPC surface (POL-18)
+// @polo-ai/shared/protocol — session RPC surface (POL-243)
 // Mirrors packages/shared/src/protocol/dto.ts as of main@f2023b23. The mobile
 // session layer only consumes the fields below; extend when more are needed —
 // a missing symbol fails loudly in tsc by design.

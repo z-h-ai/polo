@@ -1,5 +1,5 @@
 /**
- * Volcengine doubao streaming ASR adapter (POL-20 首发 STREAM 供应商, PRD §⑦).
+ * Volcengine doubao streaming ASR adapter (POL-245 首发 STREAM 供应商, PRD §⑦).
  *
  * Upstream: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel (豆包流式语音
  * 识别大模型), full-duplex binary framing per the Volcano speech protocol:

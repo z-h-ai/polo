@@ -95,7 +95,7 @@ export default function PhoneConnectionSettingsPage() {
 
 // ---------------------------------------------------------------------------
 // ① 连接状态（D02：已就绪 · 支持同一 Wi-Fi 直连与外网云中转）
-// 消费 M1-5/POL-12 的 relay:statusChanged 广播；首个事件到来前渲染默认离线态。
+// 消费 M1-5/POL-237 的 relay:statusChanged 广播；首个事件到来前渲染默认离线态。
 // ---------------------------------------------------------------------------
 
 function ConnectionStatusSection() {

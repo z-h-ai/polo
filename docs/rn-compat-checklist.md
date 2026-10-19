@@ -1,6 +1,6 @@
 # RN 兼容性清单（C6）+ 带内认证（C1）验证记录
 
-- 卡：POL-6（WsRpcClient RN 兼容性验证）
+- 卡：POL-231（WsRpcClient RN 兼容性验证）
 - 依据：PRD v1.6 §⑤「关键结论：WsRpc 带内认证，天然兼容 RN」与「RN 兼容性清单（C6）」；附录 C（2026-10-17 逐项复核）
 - 结论：**client.ts / server.ts / shared 三方源码零改动**，RN 兼容前提全部由可执行测试固化
 - 测试：`packages/server-core/src/transport/__tests__/rn-compat.test.ts`（bun test，9 例）

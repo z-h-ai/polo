@@ -1,4 +1,4 @@
-// Outbox (POL-18 card step 2) — local staging for messages sent while the Mac
+// Outbox (POL-243 card step 2) — local staging for messages sent while the Mac
 // is offline (PRD §⑥ R3, relay 5-minute queue mirror on the phone).
 //
 // Semantics:

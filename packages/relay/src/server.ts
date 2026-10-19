@@ -18,7 +18,7 @@
  *   no liveness evidence for 60s is terminated and its recent peers get
  *   `{type:"peer_disconnected"}`.
  * - Rate limit: per-connection sliding window, over-limit → close 4008.
- * - `/asr` (POL-20): streaming ASR proxy upgrade path — same dual-layer auth,
+ * - `/asr` (POL-245): streaming ASR proxy upgrade path — same dual-layer auth,
  *   own frames/close codes, billing prehold→settle埋点. Envelope routing
  *   semantics on every other path are unchanged (纯新增路径).
  *
@@ -71,7 +71,7 @@ export interface WsData {
   lastAuthAt: number
   limiter: SlidingWindowLimiter
   recentPeers: Set<string>
-  /** Set only for /asr streaming connections (POL-20); envelope connections never have it. */
+  /** Set only for /asr streaming connections (POL-245); envelope connections never have it. */
   asr?: AsrConnectionState
 }
 
@@ -88,7 +88,7 @@ export interface StartRelayServerOptions {
   /** Injectable clock for tests. */
   now?: () => number
   /**
-   * /asr streaming pipeline (POL-20). Defaults to the env-backed assembly
+   * /asr streaming pipeline (POL-245). Defaults to the env-backed assembly
    * (volcano + mock adapters); `null` disables the /asr path entirely.
    */
   asr?: AsrService | null
@@ -415,7 +415,7 @@ export function startRelayServer(options: StartRelayServerOptions): RelayServerH
         return Response.json({ ok: true, connections: connections.size })
       }
 
-      // POL-20: /asr streaming path — pure addition; every other path keeps the
+      // POL-245: /asr streaming path — pure addition; every other path keeps the
       // envelope semantics below untouched.
       if (url.pathname === '/asr') {
         if (!asr) return handshakeErrorResponse(404, 'asr_disabled', '/asr is disabled on this relay')

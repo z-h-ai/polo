@@ -1,4 +1,4 @@
-// Pairing flow container (POL-16) — the /pair route body.
+// Pairing flow container (POL-241) — the /pair route body.
 //
 // State machine over the P03/P04 prototype frames:
 //   scan    -> camera + ScanFrame; a decoded D02 payload moves to confirm
@@ -85,7 +85,7 @@ export function PairFlowScreen() {
     if (busy) return;
     setBusy(true);
     setManualError(null);
-    // POL-18 wiring: keep the QR's LAN hint (manual entry has none) so the
+    // POL-243 wiring: keep the QR's LAN hint (manual entry has none) so the
     // connection manager can try Wi-Fi direct before falling back to relay.
     const wsUrl = fromConfirm && state.step === 'confirm' ? state.wsUrl : null;
     try {
@@ -94,7 +94,7 @@ export function PairFlowScreen() {
         name: phoneDisplayName(),
         platform: devicePlatform(),
       });
-      // POL-17 leftover responsibility, closed here (POL-18): the fresh bind
+      // POL-242 leftover responsibility, closed here (POL-243): the fresh bind
       // row (phoneDeviceId = device.id) + the bound Mac + the scanned wsUrl
       // go into connectionTarget.set(); the manager starts immediately so
       // 「去发消息」 lands on a live session.

@@ -1,16 +1,16 @@
-// 消息 Tab (POL-19 shell, M01; POL-18 wires the session card).
+// 消息 Tab (POL-244 shell, M01; POL-243 wires the session card).
 //
 // Two states like M01:
 //   - 空态 (no bound device): big glyph, 还没有消息, 副文, 「去绑定电脑」
 //     primary button -> /pair, boundary chip about 多会话管理.
-//   - 会话卡 (POL-18): bound device → one M01 card (device name + time +
+//   - 会话卡 (POL-243): bound device → one M01 card (device name + time +
 //     summary + unread bubble + task-result chip from the live session store);
 //     tapping opens the P05 session page. Below the list sits the greyed-out
 //     P3 system-push mock row with its 「P3 · 示意」 badge.
 //
-// Focus wiring (POL-18): the admin devices list is the binding source of
+// Focus wiring (POL-243): the admin devices list is the binding source of
 // truth — the newest binding selects the connection target
-// (connectionTarget.set via selectDeviceRow, POL-17 leftover responsibility)
+// (connectionTarget.set via selectDeviceRow, POL-242 leftover responsibility)
 // and starts the idempotent session event-stream wiring.
 
 import { useCallback, useState } from 'react';
@@ -37,7 +37,7 @@ export const PUSH_HINT = '离开 App 时，任务结果将通过系统通知提�
 /** Summary line before the first message exists. */
 export const FRESH_BINDING_SUMMARY = '绑定成功，发条消息试试吧';
 
-/** Structural placeholder for the M1-11/P05 session list (POL-18 fills it). */
+/** Structural placeholder for the M1-11/P05 session list (POL-243 fills it). */
 export interface ConversationSummary {
   id: string;
   deviceName: string;
@@ -65,7 +65,7 @@ export function useConversationSummaries(): ConversationSummary[] {
           const first = rows[0] ?? null;
           setDevice(first);
           if (first) {
-            // POL-17 leftover responsibility, closed here (POL-18).
+            // POL-242 leftover responsibility, closed here (POL-243).
             selectDeviceRow(first);
             ensureSessionWiring();
           }
@@ -203,7 +203,7 @@ function ConversationCard({
   conversation: ConversationSummary;
   onPress: () => void;
 }) {
-  // POL-18: opens the P05 session page for this Mac.
+  // POL-243: opens the P05 session page for this Mac.
   return (
     <Pressable
       accessibilityRole="button"

@@ -1,4 +1,4 @@
-// P03 输码屏 (POL-16 第 2 屏).
+// P03 输码屏 (POL-241 第 2 屏).
 //
 // 6-digit manual entry as the scan-equivalent entry (P03: 与扫码等效入口):
 // errbar for 无效/过期 feedback, mono letter-spaced field, the 5-min one-time

@@ -1,4 +1,4 @@
-// PreviewSheet (POL-24 card step 5) — the P09 结构化预览 full-screen overlay.
+// PreviewSheet (POL-249 card step 5) — the P09 结构化预览 full-screen overlay.
 //
 // Four states (PRD §⑦ 后处理 + 预览交互):
 //   ① loading        正在结构化文本…（自动分段、去口头词）

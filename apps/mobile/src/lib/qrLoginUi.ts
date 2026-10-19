@@ -1,5 +1,5 @@
 // Pure mappers from qr-login wire states / api errors to UI states and copy
-// (POL-15). Copy follows the PRD v1.6 定稿 (prototype P10/P11):
+// (POL-240). Copy follows the PRD v1.6 定稿 (prototype P10/P11):
 //   过期     -> 「二维码已过期」+ 请让电脑或网页端刷新二维码后重新扫码 + 一键重新扫码
 //   非 Polo  -> 「这不是 Polo 登录二维码，请核对后再试」
 //   failCount ≥ 5 -> 票据作废（admin 回 qr_login_attempts_exceeded），同过期弹层语义

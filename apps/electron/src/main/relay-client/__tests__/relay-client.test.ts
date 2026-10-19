@@ -1,5 +1,5 @@
 /**
- * POL-12 relay-client tests.
+ * POL-237 relay-client tests.
  *
  * Strategy (per card step 7): a mock polo-relay is spun up with Bun.serve and
  * every envelope it builds/parses uses the real `@polo-ai/relay/envelope`

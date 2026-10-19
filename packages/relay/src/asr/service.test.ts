@@ -1,5 +1,5 @@
 /**
- * POL-20 /asr pipeline integration tests: handshake+能力下发、STREAM partial
+ * POL-245 /asr pipeline integration tests: handshake+能力下发、STREAM partial
  * 转发、计费 prehold→settle 流程、409/422 关闭码、中断/取消 refund、能力配置
  * 60s 缓存。polo-admin（鉴权 + 计费三端点）用 Bun.serve mock，契约对齐
  * main@c3257421；上游 adapter 用确定性 mock。时间敏感常数全部注入缩短。

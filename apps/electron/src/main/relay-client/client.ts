@@ -1,5 +1,5 @@
 /**
- * RelayClient — outbound WSS envelope client to polo-relay (POL-12, PRD v1.6 §⑥).
+ * RelayClient — outbound WSS envelope client to polo-relay (POL-237, PRD v1.6 §⑥).
  *
  * Protocol alignment with packages/relay (M1-4, verified against src/server.ts
  * and src/envelope.ts — do not guess from the card):

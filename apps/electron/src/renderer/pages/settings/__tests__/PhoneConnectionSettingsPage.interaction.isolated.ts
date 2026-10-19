@@ -1,5 +1,5 @@
 /**
- * PhoneConnectionSettingsPage 渲染交互测试（POL-13 卡步骤 6）。
+ * PhoneConnectionSettingsPage 渲染交互测试（POL-238 卡步骤 6）。
  *
  * bun test 无内置 DOM —— 与本仓 renderer 组件测试先例一致：本文件命名为
  * `*.interaction.isolated.ts`，由 scripts/run-isolated-tests.sh 以

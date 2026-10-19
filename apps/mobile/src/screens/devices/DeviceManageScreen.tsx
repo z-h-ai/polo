@@ -1,4 +1,4 @@
-// P12 设备管理屏 (POL-16).
+// P12 设备管理屏 (POL-241).
 //
 // Three sections per the prototype frame:
 //   本机: this phone (device display name + masked login phone + 当前设备 chip)

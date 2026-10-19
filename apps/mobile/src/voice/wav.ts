@@ -1,4 +1,4 @@
-// Pure audio helpers for the POL-24 voice flow — no React, no expo-audio, no
+// Pure audio helpers for the POL-249 voice flow — no React, no expo-audio, no
 // network. Everything here is unit-testable under bun test.
 //
 // Wire alignment (verified against packages/relay/src/asr — relay is the

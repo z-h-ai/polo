@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 
 import { SessionScreen } from '../src/screens/session/SessionScreen';
 
-// POL-18 session route. Receives { name } (the bound Mac display name) from
+// POL-243 session route. Receives { name } (the bound Mac display name) from
 // the messages-tab conversation card / device flow; back pops the stack.
 export default function SessionRoute() {
   const router = useRouter();

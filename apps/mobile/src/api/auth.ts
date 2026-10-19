@@ -1,6 +1,6 @@
-// Auth endpoint functions (POL-14).
+// Auth endpoint functions (POL-239).
 //
-// Thin wrappers around the admin endpoints that POL-14 depends on. Error
+// Thin wrappers around the admin endpoints that POL-239 depends on. Error
 // codes surface as ApiError verbatim — rate limits, remaining verification
 // attempts, lockouts and human-challenge requirements are NOT translated or
 // swallowed here; the UI layer maps codes to copy.

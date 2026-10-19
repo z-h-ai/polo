@@ -1,4 +1,4 @@
-// Voice post-process API (POL-24) — the M2-4 admin contract (POL-23 card):
+// Voice post-process API (POL-249) — the M2-4 admin contract (POL-248 card):
 //   POST /api/voice/post-process { text, lang? }
 //     → 200 { processedText, usage:{promptTokens,completionTokens}, provider, mocked }
 //     → 503 provider failure → App 降级展示识别原文（智能整理不可用）

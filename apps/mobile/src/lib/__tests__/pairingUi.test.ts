@@ -1,4 +1,4 @@
-// POL-16 unit tests for the pairing UI mappers: countdown math (5-min TTL,
+// POL-241 unit tests for the pairing UI mappers: countdown math (5-min TTL,
 // m:ss chip copy) and the admin error code -> copy mapping (错误码→文案).
 
 import { describe, expect, test } from 'bun:test';

@@ -20,7 +20,7 @@
  * 是增量 —— adapter 累计 delta 后以「到目前为止的全文」作为 partial 上抛
  * （seq 单调递增），App 侧同一帧协议与状态机照常工作。
  *
- * 计量与计费衔接（POL-20 service 不改）：meterSeconds = 实际上送音频字节 /
+ * 计量与计费衔接（POL-245 service 不改）：meterSeconds = 实际上送音频字节 /
  * 32000（16kHz s16le 口径，push 端封顶 300s×32000=9.6MB ≤ 10MB 上限），service
  * settle(asr_final.seconds) 与墙钟守卫照常消费该值。MiMo 侧任何失败（402/
  * 超时/格式/断流）统一以致命 upstream_error 上抛 —— service 层错误帧 +
@@ -179,7 +179,7 @@ export class MimoFileAsrAdapter implements AsrAdapter {
   }
 
   /**
-   * FILE 模式的流式接入位：service（POL-20，不改）在 prehold 成功后的首个音频
+   * FILE 模式的流式接入位：service（POL-245，不改）在 prehold 成功后的首个音频
    * 分片调 startStream，分片进本端缓冲（服务端实测计量封顶 300s），客户端 end
    * 触发 finish() → 整段拼装 → HTTP 调 MiMo → SSE 逐 chunk 经 onPartial 渐进
    * 上抛 → onFinal 收口。与火山 partial 转发机制完全同形。

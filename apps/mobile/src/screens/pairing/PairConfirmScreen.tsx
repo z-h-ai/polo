@@ -1,4 +1,4 @@
-// P04 配对确认屏 (POL-16) — three states in one file per the prototype frame:
+// P04 配对确认屏 (POL-241) — three states in one file per the prototype frame:
 //   确认态: target Mac info card + 「配对码剩余 m:ss」 countdown chip + the
 //           binding-scope copy; 确认绑定 triggers the admin bind (atomic
 //           code redemption — admin is the only source of binding truth).

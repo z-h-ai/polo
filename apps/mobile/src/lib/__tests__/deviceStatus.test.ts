@@ -1,8 +1,8 @@
-// POL-16 unit tests for the device list status inference (P02 三态) and the
+// POL-241 unit tests for the device list status inference (P02 三态) and the
 // manage-screen date/label helpers (P12).
 //
 // The wire carries only lastSeenAt, so 在线 is an INFERENCE (recent heartbeat
-// -> 在线·经云中转); POL-17's connection manager will replace it — these tests
+// -> 在线·经云中转); POL-242's connection manager will replace it — these tests
 // pin the heuristic the UI ships until then.
 
 import { describe, expect, test } from 'bun:test';

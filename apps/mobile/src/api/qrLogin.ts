@@ -1,5 +1,5 @@
 // QR login endpoints for the phone side of the three-party confirm flow
-// (POL-15; admin contract: src/app/api/auth/qr/{status,scan,confirm}/route.ts +
+// (POL-240; admin contract: src/app/api/auth/qr/{status,scan,confirm}/route.ts +
 // src/lib/qr-login/service.ts).
 //
 // Wire shapes (verified against polo-admin @ deb31d86; scan added by the

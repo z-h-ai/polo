@@ -1,4 +1,4 @@
-// Secondary action button with countdown display (POL-14, P01).
+// Secondary action button with countdown display (POL-239, P01).
 //
 // Idle: 获取验证码 (disabled + opacity .5 when the caller says so, e.g. empty
 // phone). Counting: 「已发送 · Ns 后可重发」/「限流 · Ns 后可重发」, rendered at

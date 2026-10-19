@@ -1,4 +1,4 @@
-// Viewfinder overlay for QR scanning (POL-15).
+// Viewfinder overlay for QR scanning (POL-240).
 //
 // Four corner brackets + a looping scan line, per prototype P10. Kept
 // dependency-free and camera-agnostic so the M1-9 pairing scan (P03) can

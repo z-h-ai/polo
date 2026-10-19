@@ -1,4 +1,4 @@
-// Session state for the mobile app (POL-14).
+// Session state for the mobile app (POL-239).
 //
 // zustand store holding the auth lifecycle:
 //   unauthenticated -> authenticating -> authenticated (and back).

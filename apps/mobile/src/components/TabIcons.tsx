@@ -1,4 +1,4 @@
-// Tab-bar icons and unread badge (POL-19).
+// Tab-bar icons and unread badge (POL-244).
 //
 // Pure react-native shapes mirroring the prototype line icons (#i-msg,
 // #i-mac, #i-user in polo-mobile-prototype.html). @expo/vector-icons is not a

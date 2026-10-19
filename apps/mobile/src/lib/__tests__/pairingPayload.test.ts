@@ -1,8 +1,8 @@
-// POL-16 unit tests for the pairing QR payload parser.
+// POL-241 unit tests for the pairing QR payload parser.
 //
-// The accepted surface mirrors the D02 convention (POL-13 Mac pairing panel):
+// The accepted surface mirrors the D02 convention (POL-238 Mac pairing panel):
 // JSON {"code":"246810","wsUrl":"ws://..."} plus the bare 6-digit code.
-// Failure modes are exhaustive: login-QR payloads (POL-15) must NOT be
+// Failure modes are exhaustive: login-QR payloads (POL-240) must NOT be
 // consumable as pairing codes and vice versa.
 
 import { describe, expect, test } from 'bun:test';
@@ -57,7 +57,7 @@ describe('parsePairingPayload — valid variants', () => {
 });
 
 describe('parsePairingPayload — invalid variants', () => {
-  test('qr-LOGIN payload is not a pairing code (POL-15 互斥)', () => {
+  test('qr-LOGIN payload is not a pairing code (POL-240 互斥)', () => {
     const raw = 'https://www.z-h-ai.com/qr-login?qrId=abc&secret=def';
     expect(parsePairingPayload(raw)).toEqual({ kind: 'invalid', reason: 'not_polo_payload' });
   });

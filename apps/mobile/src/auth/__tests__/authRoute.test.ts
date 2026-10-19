@@ -1,4 +1,4 @@
-// POL-19 unit tests for the root auth guard decision (bun test).
+// POL-244 unit tests for the root auth guard decision (bun test).
 //
 // Covers the AuthGate route matrix (hydration hold, authenticated bounce off
 // /login to the tabs root, signed-out redirect) and its integration with the

@@ -281,7 +281,7 @@ describe('mimo file adapter: streaming transcription', () => {
     handle.pushAudio(wavBytes(3_200))
     handle.finish()
     await eventually(() => got.errors.length === 1)
-    // service 层对 upstream_error 回错误帧 + refund 全退 + 4501（POL-20 已测）
+    // service 层对 upstream_error 回错误帧 + refund 全退 + 4501（POL-245 已测）
     expect(got.errors[0]!.code).toBe('upstream_error')
     expect(got.errors[0]!.message).toContain('402')
     expect(got.errors[0]!.message).toContain('insufficient_balance')

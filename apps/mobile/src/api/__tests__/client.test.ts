@@ -1,4 +1,4 @@
-// POL-14 unit tests for the api client (bun test, mock fetch).
+// POL-239 unit tests for the api client (bun test, mock fetch).
 //
 // Covers: 401 -> refresh -> replay success, refresh rejection clearing local
 // state + auth-expired notification, concurrent 401 single-flight refresh,
@@ -401,12 +401,12 @@ describe('api client', () => {
   });
 });
 
-// POL-15 regression: qr confirm/reject return *business* 401s
+// POL-240 regression: qr confirm/reject return *business* 401s
 // (qr_login_expired / invalid_credentials). These must surface verbatim as
 // ApiError without entering the refresh chain or wiping the session — the
 // credential is fine, only the ticket is dead. Admin emits these codes
 // lowercase ({ error: 'qr_login_expired' }); the client reads the `error` key.
-describe('api client — business 401 codes skip refresh (POL-15)', () => {
+describe('api client — business 401 codes skip refresh (POL-240)', () => {
   test.each(['qr_login_expired', 'invalid_credentials'])(
     '401 %s -> ApiError verbatim, no refresh, no wipe',
     async (code) => {

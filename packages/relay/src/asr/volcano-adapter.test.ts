@@ -1,5 +1,5 @@
 /**
- * POL-20 volcano STREAM adapter tests. 真连火山不做（需注入密钥，列人工）——
+ * POL-245 volcano STREAM adapter tests. 真连火山不做（需注入密钥，列人工）——
  * 上游用 Bun.serve mock WS，按火山二进制协议形状回帧，逐字节验证编解码。
  */
 

@@ -1,4 +1,4 @@
-// POL-15 unit tests for the qr-login UI mappers (bun test, pure functions).
+// POL-240 unit tests for the qr-login UI mappers (bun test, pure functions).
 //
 // Covers: the ticket status machine -> UI state mapping and the confirm
 // failure 文案流转 (secret 失败计数 1..4 -> 校验失败可重试，达 5 次作废 ->

@@ -1,5 +1,5 @@
 // Pure mappers from pairing wire data / api errors to UI states and copy
-// (POL-16). Copy follows the PRD v1.6 定稿 (prototype P03/P04):
+// (POL-241). Copy follows the PRD v1.6 定稿 (prototype P03/P04):
 //   过期/无效码 -> 「配对码无效或已过期，请在电脑上重新获取。」 (P03 errbar)
 //   已核销      -> 「该配对码已被使用，请在电脑上重新获取。」
 //   超上限      -> P04 第 3 屏整屏错误态 + 「前往设备管理」

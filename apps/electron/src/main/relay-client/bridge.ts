@@ -1,5 +1,5 @@
 /**
- * RelayLoopbackBridge (POL-12) — injects relay-routed phone traffic into the
+ * RelayLoopbackBridge (POL-237) — injects relay-routed phone traffic into the
  * embedded WsRpcServer as if each phone were a local WebSocket client.
  *
  * Design (card step 4, refined against the actual transport code):

@@ -282,7 +282,7 @@ let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
 let adminResumeValidationInFlight: Promise<void> | null = null
-// polo-relay outbound link (POL-12) — created after bootstrapServer resolves
+// polo-relay outbound link (POL-237) — created after bootstrapServer resolves
 let relayLink: import('./relay-client').RelayLink | null = null
 const electronRuntimeInstance = {
   instanceId: randomUUID(),
@@ -1104,7 +1104,7 @@ app.whenReady().then(async () => {
       }
 
       // ---------------------------------------------------------------------
-      // polo-relay client (POL-12, PRD v1.6 §⑥) — outbound WSS envelope link
+      // polo-relay client (POL-237, PRD v1.6 §⑥) — outbound WSS envelope link
       // plus loopback bridge that injects relay-routed phone traffic into the
       // embedded WsRpcServer above. Disabled (stays offline) when no relay
       // URL is configured; re-resolves URL/token on every reconnect attempt.
@@ -1549,7 +1549,7 @@ app.on('before-quit', (event) => {
     // Ensure Cmd+Q/app quit bypasses layered window close interception (Cmd+W behavior).
     windowManager?.setAppQuitting(true)
 
-    // polo-relay outbound link (POL-12) — stop reconnects and close sockets.
+    // polo-relay outbound link (POL-237) — stop reconnects and close sockets.
     try {
       relayLink?.stop()
       relayLink = null

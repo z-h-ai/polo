@@ -1,18 +1,18 @@
-// Pairing-QR payload parser (POL-16).
+// Pairing-QR payload parser (POL-241).
 //
 // Pure function so the scanner UI stays thin and the failure modes are unit
 // tested. Accepted payloads mirror what the Mac pairing panel renders into the
-// QR (PRD v1.6 §⑤ D02 convention, POL-13):
+// QR (PRD v1.6 §⑤ D02 convention, POL-238):
 //   {"code":"246810","wsUrl":"ws://192.168.31.42:8787"}
 //   - code: the 6-digit pairing code from admin /api/devices/pairing-code
 //     (admin pairingCodeSchema: ^\d{6}$ — the prototype's "8F3K2Q" example
 //     predates the admin charset; digits win as the authoritative contract)
-//   - wsUrl: LAN hint ONLY — passed through for the POL-17 connection
+//   - wsUrl: LAN hint ONLY — passed through for the POL-242 connection
 //     manager to try direct connect first. It is never an authorization
 //     input: authorization happens exclusively through admin bind validation.
 // Also accepted: the bare 6-digit code (a QR printed with just the code).
 //
-// Anything else — including the qr-LOGIN payloads from POL-15 — is invalid
+// Anything else — including the qr-LOGIN payloads from POL-240 — is invalid
 // with a machine-readable reason so the UI can show the right layer:
 // a login QR must not be silently consumed as a pairing code (and vice
 // versa), so https://.../qr-login?... lands on not_polo_payload here.

@@ -1,4 +1,4 @@
-// Confirm screen for QR login authorization (POL-15, prototype P11).
+// Confirm screen for QR login authorization (POL-240, prototype P11).
 //
 // Opened by the scan screen with { qrId, secret, requester } — the requester
 // JSON comes from the POST /api/auth/qr/scan response, so the card renders

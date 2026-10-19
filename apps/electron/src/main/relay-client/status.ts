@@ -1,5 +1,5 @@
 /**
- * Relay link status machine (POL-12, PRD v1.6 §⑥).
+ * Relay link status machine (POL-237, PRD v1.6 §⑥).
  *
  * Three states, per the card:
  *   - `online-relay`: the outbound relay link (WSS to polo-relay) is usable.

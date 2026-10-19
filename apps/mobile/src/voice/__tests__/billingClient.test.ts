@@ -1,4 +1,4 @@
-// POL-24 unit tests for the voice billing client layer (bun test; the network
+// POL-249 unit tests for the voice billing client layer (bun test; the network
 // and the admin API client are fakes — no real HTTP).
 //
 // Card 自检 matrix covered here:

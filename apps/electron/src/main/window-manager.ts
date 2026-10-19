@@ -95,7 +95,7 @@ export class WindowManager {
 
   /**
    * Broadcast an event to every live window. Used by main-process services
-   * that are not workspace-scoped (e.g. relay-client status, POL-12).
+   * that are not workspace-scoped (e.g. relay-client status, POL-237).
    * Routes through pushToWindow (RPC event sink with webContents.send
    * fallback) so it works before WS handshake completes.
    */

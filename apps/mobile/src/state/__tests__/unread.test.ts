@@ -1,4 +1,4 @@
-// POL-19 unit tests for the 消息 tab unread badge (bun test).
+// POL-244 unit tests for the 消息 tab unread badge (bun test).
 
 import { describe, expect, test } from 'bun:test';
 

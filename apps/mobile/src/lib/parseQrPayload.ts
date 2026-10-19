@@ -1,4 +1,4 @@
-// qrPayload parser (POL-15).
+// qrPayload parser (POL-240).
 //
 // Pure function so the scanner UI stays thin and the failure modes are unit
 // tested. Accepted payloads mirror what the admin qr-login service emits

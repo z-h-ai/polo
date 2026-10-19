@@ -1,4 +1,4 @@
-// Session RPC channel names (POL-18).
+// Session RPC channel names (POL-243).
 //
 // Mirror of packages/shared/src/protocol/channels.ts values actually used by
 // the phone session layer (values are the stable wire contract — handler

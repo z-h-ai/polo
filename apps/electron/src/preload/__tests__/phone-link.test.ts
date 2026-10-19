@@ -43,7 +43,7 @@ describe('phone link preload RPC chain', () => {
     ])
   })
 
-  it('subscribes relay link status broadcasts on the POL-12 channel', () => {
+  it('subscribes relay link status broadcasts on the POL-237 channel', () => {
     const on = mock((_channel: string, _callback: (...args: unknown[]) => void) => () => {})
     const api = buildPhoneLinkPreloadApi({
       invoke: mock(async () => ({})),

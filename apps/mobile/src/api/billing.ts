@@ -1,4 +1,4 @@
-// Voice billing HTTP API (POL-24 card step 4) — the M2-3 admin contract,
+// Voice billing HTTP API (POL-249 card step 4) — the M2-3 admin contract,
 // field-by-field mirror of packages/relay/src/asr/billing.ts (verified against
 // polo-admin src/app/api/billing/voice/{quote,prehold,settle}/route.ts):
 //   POST /api/billing/voice/quote   {supplier, seconds}          → VoiceQuote

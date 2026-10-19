@@ -1,19 +1,19 @@
-// Relay channel (POL-17 card step 2): the same WsRpc frame protocol, tunneled
+// Relay channel (POL-242 card step 2): the same WsRpc frame protocol, tunneled
 // through polo-relay envelopes (packages/relay, PRD v1.6 §⑥ 链路②).
 //
 // Wire semantics (verified against packages/relay/src/server.ts + envelope.ts
-// and the POL-12 Mac bridge — apps/electron/src/main/relay-client/{client,
+// and the POL-237 Mac bridge — apps/electron/src/main/relay-client/{client,
 // bridge}.ts — do not guess from the card):
 //   - Handshake happens at HTTP upgrade: the relay reads the admin JWT from
 //     the `Authorization: Bearer` header OR, for clients that cannot set WS
 //     headers (RN), from the `?token=` query param (server.ts:360-363 keeps
 //     both supported on purpose), plus `?side=phone&deviceId=<phoneDeviceId>`.
 //     The phone persona is `phone:<deviceId>` — deviceId is the phone's own
-//     admin device row id (POL-16 bind/list DeviceView.id).
+//     admin device row id (POL-241 bind/list DeviceView.id).
 //   - Frames: `{v:1, from:"phone:<id>", to:"mac:<id>", kind:"rpc", payload}`
 //     where payload is the RAW WsRpc frame string — including the very first
 //     WsRpc handshake frame, whose in-band `token` is validated end-to-end by
-//     the Mac's embedded server (POL-12 bridge pumps payload bytes untouched).
+//     the Mac's embedded server (POL-237 bridge pumps payload bytes untouched).
 //     So the admin JWT appears twice by design: query param (relay auth) and
 //     handshake payload (Mac auth).
 //   - The relay sends app-level `{type:"ping"}` every 30s; any frame (here:

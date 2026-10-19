@@ -1,6 +1,6 @@
 // P05 connection status bar — the thin 28px strip under the nav title.
 //
-// Four steady states from the POL-17 ConnectionManager (ConnStatus) plus the
+// Four steady states from the POL-242 ConnectionManager (ConnStatus) plus the
 // 安全态 override (auth fatal → 绑定已解除, destructive, P05 screen 5):
 //   online-lan      已连接 · Wi-Fi 直连   (green)
 //   online-relay    已连接 · 经云中转     (accent)

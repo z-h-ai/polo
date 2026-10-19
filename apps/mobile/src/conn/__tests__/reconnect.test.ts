@@ -1,4 +1,4 @@
-// POL-17 unit tests for src/conn/reconnect.ts — backoff sequence, close-code
+// POL-242 unit tests for src/conn/reconnect.ts — backoff sequence, close-code
 // classification (认证类不重试) and replay event sequencing (按序去重).
 
 import { describe, expect, test } from 'bun:test';

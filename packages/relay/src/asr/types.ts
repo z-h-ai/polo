@@ -1,5 +1,5 @@
 /**
- * ASR domain types & wire protocol for polo-relay (POL-20, PRD v1.6 §⑦).
+ * ASR domain types & wire protocol for polo-relay (POL-245, PRD v1.6 §⑦).
  *
  * 多供应商适配层：AsrAdapter = supplier + capabilities{realtimeStreaming,
  * maxDurationSec, languages} + rateCard + STREAM/FILE 双方法 + meterSeconds()

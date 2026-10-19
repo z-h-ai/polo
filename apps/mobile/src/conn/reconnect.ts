@@ -1,4 +1,4 @@
-// Reconnect/backoff primitives for the mobile conn layer (POL-17 card step 4).
+// Reconnect/backoff primitives for the mobile conn layer (POL-242 card step 4).
 //
 // Pure functions and classes only — every behavior here is unit tested in
 // src/conn/__tests__/reconnect.test.ts and reused by lanChannel/relayChannel/

@@ -1,5 +1,5 @@
 // Large left-aligned screen title shared by the three tab screens
-// (POL-19; mirrors the prototype .navbar large-title style in M01/P13).
+// (POL-244; mirrors the prototype .navbar large-title style in M01/P13).
 
 import { Text, View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

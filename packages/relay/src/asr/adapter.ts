@@ -1,5 +1,5 @@
 /**
- * AsrAdapter registry (POL-20, card step 2): Map<supplier, adapter>. A request
+ * AsrAdapter registry (POL-245, card step 2): Map<supplier, adapter>. A request
  * for an unknown supplier surfaces an explicit error frame — never a silent
  * fallthrough (App 按 code 决定重试或禁按).
  */

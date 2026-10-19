@@ -1,4 +1,4 @@
-// POL-14 unit tests for the auth/session layer (bun test).
+// POL-239 unit tests for the auth/session layer (bun test).
 //
 // Covers: tokenStore fallback behavior (memory backend, corrupt/missing
 // reads treated as signed out, throwing storage surviving in-memory),

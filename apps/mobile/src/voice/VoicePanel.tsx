@@ -1,4 +1,4 @@
-// VoicePanel (POL-24 card step 5) — the P06/P07/P08 按住面板 + 禁按/权限引导.
+// VoicePanel (POL-249 card step 5) — the P06/P07/P08 按住面板 + 禁按/权限引导.
 //
 // Renders (in priority order):
 //   insufficientPanel → P07 余额不足禁按态（置灰+锁+「语音积分不足」+去充值+积分规则）

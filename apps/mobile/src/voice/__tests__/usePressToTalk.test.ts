@@ -1,4 +1,4 @@
-// POL-24 unit tests for the PRD §⑦ 双模式状态机 (bun test; fake clock, no
+// POL-249 unit tests for the PRD §⑦ 双模式状态机 (bun test; fake clock, no
 // real timers, no network, no native audio — recorder/socket/billing are fakes).
 //
 // Card 自检 matrix covered here:
@@ -633,7 +633,7 @@ describe('握手失败与权限三态', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POL-24 评审补测：积压补发 / recognizing 取消 / 互切保留编辑 / 计费措辞 / 孤儿 socket
+// POL-249 评审补测：积压补发 / recognizing 取消 / 互切保留编辑 / 计费措辞 / 孤儿 socket
 // ---------------------------------------------------------------------------
 
 describe('STREAM 握手窗口积压补发（asr_ready 前后）', () => {

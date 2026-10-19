@@ -1,4 +1,4 @@
-// POL-18 unit tests for the local staging outbox (bun test; fake clock, no
+// POL-243 unit tests for the local staging outbox (bun test; fake clock, no
 // real timers, no connection).
 //
 // Card 自检 matrix covered here:

@@ -1,4 +1,4 @@
-// usePressToTalk (POL-24 card step 1) — the PRD §⑦ 双模式状态机.
+// usePressToTalk (POL-249 card step 1) — the PRD §⑦ 双模式状态机.
 //
 // Seven phases (PRD §⑦ 交互状态机, STREAM 基线 + FILE 降级):
 //

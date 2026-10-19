@@ -1,4 +1,4 @@
-// API base configuration (POL-14).
+// API base configuration (POL-239).
 //
 // The admin base URL comes from the EXPO_PUBLIC_API_URL environment variable,
 // which Expo inlines into the bundle at build time (app config extra is not

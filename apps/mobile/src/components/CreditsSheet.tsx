@@ -1,4 +1,4 @@
-// P13 积分规则半屏弹层 (POL-24) — four fixed blocks per the prototype:
+// P13 积分规则半屏弹层 (POL-249) — four fixed blocks per the prototype:
 // 积分怎么算 / 两种识别方式 / 积分从哪来 / 余额不足时.
 // Entry points: 禁按面板「查看积分规则」(P07) + 预览/面板引导. 去充值 is a
 // placeholder (充值支付页 = 运营侧, card 不做).

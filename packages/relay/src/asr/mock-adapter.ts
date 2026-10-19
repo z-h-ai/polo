@@ -1,5 +1,5 @@
 /**
- * Deterministic mock STREAM adapter (POL-20): 测试与本地联调用。无外部依赖、
+ * Deterministic mock STREAM adapter (POL-245): 测试与本地联调用。无外部依赖、
  * 零随机性 —— partial 序列按固定脚本推进，final 文本固定；meterSeconds 仍按
  * 真实收流字节数计量（与火山同口径 16kHz s16le），供计费流程测试断言。
  *

@@ -1,4 +1,4 @@
-// Pure presentation helpers for the 我的 tab (POL-19, P13 account card).
+// Pure presentation helpers for the 我的 tab (POL-244, P13 account card).
 
 import type { StoredUser } from '../auth/tokenStore';
 

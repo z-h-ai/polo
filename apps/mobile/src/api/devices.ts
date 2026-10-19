@@ -1,4 +1,4 @@
-// Device binding endpoints for the phone side of the pairing flow (POL-16).
+// Device binding endpoints for the phone side of the pairing flow (POL-241).
 //
 // Wire shapes (verified against polo-admin @ deb31d86: src/app/api/devices/*/
 // route.ts + src/lib/devices/{service,pairing}.ts):
@@ -10,7 +10,7 @@
 //        the token server-side)      body { code, name, platform, pushToken? }
 //        -> { device: DeviceView, reused }
 //        reused=true means the (userId, macDeviceId) row existed (revoked
-//        included) and was revived — the POL-8 复用契约: re-pairing the same
+//        included) and was revived — the POL-233 复用契约: re-pairing the same
 //        phone to the same Mac refreshes the original row.
 //   GET  /api/devices/list           (Bearer JWT)
 //        -> { devices: DeviceView[] }  active bindings only, newest first

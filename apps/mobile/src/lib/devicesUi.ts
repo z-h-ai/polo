@@ -1,11 +1,11 @@
 // Pure view-model builders for the device list (P02) and manage screens
-// (P12) — POL-16. Extracted from the RN components so bun test can assert
+// (P12) — POL-241. Extracted from the RN components so bun test can assert
 // the list/empty rendering decisions without a renderer:
 //   - which of the two screen shapes renders (empty guidance vs card list);
 //   - per-card copy (three-state badge via inferDeviceStatus + the Mac 标题:
 //     macName 优先，空回退 macDeviceId，最后 未知电脑);
 //   - the P02 footer lines (dual-channel + privacy) and the provisional
-//     status note (POL-17 replaces the inference with live state);
+//     status note (POL-242 replaces the inference with live state);
 //   - the P12 本机 masked phone + section titles.
 
 import type { DeviceView } from '../api/devices';
@@ -65,7 +65,7 @@ export function deviceListShape(devices: DeviceView[], nowMs: number): DeviceLis
   return { shape: 'list', cards: devices.map((device) => toDeviceCardModel(device, nowMs)) };
 }
 
-/** P02 底注（两行）+ 在线状态为推断的说明（POL-17 接实时状态后移除）. */
+/** P02 底注（两行）+ 在线状态为推断的说明（POL-242 接实时状态后移除）. */
 export const DEVICE_LIST_FOOTER_LINES: readonly string[] = [
   '同一 Wi-Fi 自动直连电脑，延迟更低；在外网也能用（经 Polo 云安全中转）',
   '消息只在你和你的电脑之间传输，授权可随时在「设备管理」撤销',

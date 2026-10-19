@@ -1,5 +1,5 @@
 /**
- * ASR supplier capability/config source (POL-20, card step 3).
+ * ASR supplier capability/config source (POL-245, card step 3).
  *
  * admin 是供应商配置事实源（默认供应商 + 速率卡，可配可切换）。admin 配置端点
  * 尚未实现（M2-3 后续接线）——本卡先以 env/本地配置读取 + 60s TTL 缓存兜底，

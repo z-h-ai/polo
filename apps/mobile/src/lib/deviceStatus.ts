@@ -1,10 +1,10 @@
-// Device list status inference (POL-16).
+// Device list status inference (POL-241).
 //
 // P02 shows three badge states (在线·Wi-Fi 直连 / 在线·经云中转 / 离线) but the
 // wire (admin DeviceView) carries no live connection data — only lastSeenAt.
 // This card therefore INFERS: a recently-heartbeat device renders as
 // 「在线 · 经云中转」, anything else as 「离线 · 最近在线 …」. Real connection
-// state (LAN direct vs relay, IP chip) is the POL-17 connection manager's
+// state (LAN direct vs relay, IP chip) is the POL-242 connection manager's
 // job — it will replace `kind: 'cloud'` with synthesized live states; the
 // UI copy below is shaped so only the mapping function changes.
 
@@ -13,7 +13,7 @@ import type { DeviceView } from '../api/devices';
 /**
  * lastSeenAt younger than this counts as 「在线 · 经云中转」. Aligned with the
  * relay/check-access 60s cache window (PRD §⑤: 解绑最长 60s 全网断开) plus
- * heartbeat slack — POL-17 replaces this heuristic with real state.
+ * heartbeat slack — POL-242 replaces this heuristic with real state.
  */
 export const ONLINE_WINDOW_MS = 5 * 60_000;
 

@@ -1,4 +1,4 @@
-// POL-15 unit tests for parseQrPayload (bun test, pure functions).
+// POL-240 unit tests for parseQrPayload (bun test, pure functions).
 //
 // Covers: the admin-emitted https payload, the polo:// deep-link form, host/
 // path/scheme validation, malformed URLs, missing/bad qrId+secret, and

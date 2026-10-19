@@ -1,4 +1,4 @@
-// Pure auth routing decision for the root guard (POL-19).
+// Pure auth routing decision for the root guard (POL-244).
 //
 // Extracted from AuthGate so the guard matrix is unit-testable without a
 // navigator: hydrated=false holds navigation, signed-in users bounced off

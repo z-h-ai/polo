@@ -1,10 +1,10 @@
-// LAN channel (POL-17 card step 1): WsRpcClient straight to the paired Mac.
+// LAN channel (POL-242 card step 1): WsRpcClient straight to the paired Mac.
 //
 // Card contract: direct connect over the wsUrl obtained at pairing, in-band
 // token handshake with the admin JWT (server-core client.ts sends `token`
 // inside the first handshake envelope — client.ts:412 — never in an HTTP
 // header, which is why the RN no-custom-header limitation does not apply on
-// this path; verified end-to-end by POL-6 / docs/rn-compat-checklist.md C1).
+// this path; verified end-to-end by POL-231 / docs/rn-compat-checklist.md C1).
 // Connection parameters: 5s handshake timeout (card), protocol-version check
 // and request timeout semantics stay on the library defaults.
 //
@@ -94,7 +94,7 @@ function defaultCreateClient(url: string, opts: WsRpcClientOptions): WsRpcClient
   // Lazy require: under bun test this specifier maps to the type shim (types/
   // shared-protocol.d.ts), which carries no runtime values — tests inject
   // `createClient` fakes instead. Metro resolves it through the rn resolver
-  // map to packages/server-core/src/transport/client.ts (RN-proven, POL-6).
+  // map to packages/server-core/src/transport/client.ts (RN-proven, POL-231).
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   const mod = require('@polo-ai/server-core/transport/client') as typeof import('@polo-ai/server-core/transport/client');
   return new mod.WsRpcClient(url, opts);

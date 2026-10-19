@@ -322,7 +322,7 @@ Object.assign(api, buildAdminPreloadApi(client, {
     : url => shell.openExternal(url),
 }))
 
-// 手机 ↔ Mac 配对（POL-13）：设置页「手机连接」面板的数据链
+// 手机 ↔ Mac 配对（POL-238）：设置页「手机连接」面板的数据链
 Object.assign(api, buildPhoneLinkPreloadApi(client))
 
 // ── performOAuth ─────────────────────────────────────────────────────────

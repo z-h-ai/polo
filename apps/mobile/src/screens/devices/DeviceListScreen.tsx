@@ -1,9 +1,9 @@
-// 设备 Tab 实体屏 (POL-16, prototype P02).
+// 设备 Tab 实体屏 (POL-241, prototype P02).
 //
 // Two shapes like P02:
 //   - 列表态: one DeviceStatusCard per bound Mac (three-state badge via
 //     lastSeenAt inference — 在线·经云中转 / 离线·最近在线…; the LAN-direct
-//     variant and real connection state land with the POL-17 connection
+//     variant and real connection state land with the POL-242 connection
 //     manager, noted in the footer), header 添加 entry -> /pair, row tap ->
 //     /device-manage (P12), footer dual-channel + privacy lines.
 //   - 空态: 还没有绑定电脑 guidance + 扫码添加电脑 -> /pair + 手动输入配对码
@@ -106,7 +106,7 @@ export function DeviceListScreen() {
                 key={card.key}
                 card={card}
                 onPress={() => {
-                  // POL-18 wiring: tapping a device card selects it as the
+                  // POL-243 wiring: tapping a device card selects it as the
                   // connection target (phoneDeviceId/macDeviceId from the
                   // admin row; a previously captured wsUrl is kept) before
                   // the P02 manage navigation.

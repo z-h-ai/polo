@@ -1,4 +1,4 @@
-// POL-16 unit tests for the devices api layer (bun test, mocked client).
+// POL-241 unit tests for the devices api layer (bun test, mocked client).
 //
 // Covers: request shapes (paths + bodies for all four endpoints), wire->view
 // validation, and verbatim pass-through of admin error codes per the card's

@@ -7,7 +7,7 @@ import { TabBadge, TabIcon, type TabIconName } from '../../src/components/TabIco
 import { useUnreadStore } from '../../src/state/unread';
 import { colors, fontSize } from '../../src/theme/tokens';
 
-// Bottom tab shell (POL-19): 消息 / 设备 / 我的, the only navigator of its
+// Bottom tab shell (POL-244): 消息 / 设备 / 我的, the only navigator of its
 // kind in the app. Selected tab is accent-tinted; bar totals >=78px including
 // the safe-area padding (candidate rule; minHeight instead of fixed height so
 // large insets never clip the bar).

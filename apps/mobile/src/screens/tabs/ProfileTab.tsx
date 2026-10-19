@@ -1,4 +1,4 @@
-// 我的 Tab (POL-19, prototype P13).
+// 我的 Tab (POL-244, prototype P13).
 //
 // P13 blocks, in order: account card (avatar + masked phone + user id), the
 // voice & credits card (static balance placeholder + greyed-out 充值 chip +

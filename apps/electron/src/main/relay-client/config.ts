@@ -1,5 +1,5 @@
 /**
- * Relay-client configuration (POL-12, PRD v1.6 §⑥ v1.2 环境变量策略).
+ * Relay-client configuration (POL-237, PRD v1.6 §⑥ v1.2 环境变量策略).
  *
  * The relay address is runtime configuration — never a hardcoded domain:
  *

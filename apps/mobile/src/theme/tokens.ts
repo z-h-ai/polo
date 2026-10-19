@@ -1,4 +1,4 @@
-// Design tokens for the mobile app (POL-14).
+// Design tokens for the mobile app (POL-239).
 //
 // Approximations of the prototype CSS variables (polo-mobile-prototype.html,
 // design tokens sourced from polo-client-design SOT / electron_renderer light).

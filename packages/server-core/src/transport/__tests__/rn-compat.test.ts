@@ -1,5 +1,5 @@
 /**
- * WsRpcClient React Native compatibility tests (POL-6, PRD v1.6 C1 + C6).
+ * WsRpcClient React Native compatibility tests (POL-231, PRD v1.6 C1 + C6).
  *
  * Proves that client.ts works unchanged inside an RN-like global environment:
  *  - a) RN globals (no process.versions.node, polyfilled Buffer/crypto, global
@@ -126,7 +126,7 @@ function sleep(ms: number): Promise<void> {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('WsRpcClient RN compatibility (POL-6)', () => {
+describe('WsRpcClient RN compatibility (POL-231)', () => {
   let server: WsRpcServer | null = null
 
   afterEach(() => {

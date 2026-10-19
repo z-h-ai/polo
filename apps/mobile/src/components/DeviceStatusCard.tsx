@@ -1,7 +1,7 @@
-// P02 三态设备卡 (POL-16).
+// P02 三态设备卡 (POL-241).
 //
 // One card per bound Mac: mac glyph + title + status badge row. The badge
-// kind comes from inferDeviceStatus (lastSeenAt inference — POL-17 replaces
+// kind comes from inferDeviceStatus (lastSeenAt inference — POL-242 replaces
 // it with real connection state); online cards tint the dot success-green
 // and dim nothing, offline cards grey the dot and soften the whole card
 // (prototype opacity .62). Tapping a card opens 设备管理 (P12). The row

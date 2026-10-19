@@ -138,7 +138,7 @@ export type TransportConnectionStatus =
   | 'failed'
 
 /**
- * Relay link status (POL-12) — defined in parallel to
+ * Relay link status (POL-237) — defined in parallel to
  * TransportConnectionStatus (which describes the renderer↔embedded-server
  * transport). This describes the Mac↔polo-relay outbound link:
  *   - online-relay: outbound relay WSS usable

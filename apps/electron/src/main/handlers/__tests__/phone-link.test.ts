@@ -1,9 +1,9 @@
 /**
- * phone-link 主进程 RPC 处理器测试（POL-13）。
+ * phone-link 主进程 RPC 处理器测试（POL-238）。
  *
  * 用假 RpcServer 捕获 registerPhoneLinkHandlers 注册的 4 个处理器，
  * mock AdminClient / admin 凭据 / 配置，验证：
- * - 转发 admin devices 三端点的请求/响应形状（POL-10 契约）
+ * - 转发 admin devices 三端点的请求/响应形状（POL-235 契约）
  * - 配对码相对 TTL → 接收端绝对过期时间的折算
  * - revoke 的 deviceId 入参校验（admin 侧 deviceId/macDeviceId 二选一）
  * - 未登录 admin 的统一失败

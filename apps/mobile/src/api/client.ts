@@ -1,4 +1,4 @@
-// Admin HTTP client for the mobile app (POL-14).
+// Admin HTTP client for the mobile app (POL-239).
 //
 // Mirrors the wire contract of packages/shared/src/admin/client.ts without
 // importing it (App side checks against apps/mobile/types/shared-protocol.d.ts
@@ -25,7 +25,7 @@ const MAX_RETRY_AFTER_SECONDS = 86_400;
  * business 401s with other codes (qr confirm: qr_login_expired,
  * invalid_credentials) — those must NOT enter the refresh/replay chain: the
  * token is fine, replaying cannot help, and treating them as auth failures
- * would wipe a perfectly good session and log the user out (POL-15).
+ * would wipe a perfectly good session and log the user out (POL-240).
  * Lowercase = admin wire codes (lib/auth), uppercase = client fallbacks.
  */
 const AUTH_401_CODES = new Set([
@@ -228,7 +228,7 @@ export function createApiClient(deps: {
       // A business 401 (recognizable non-auth code, e.g. qr_login_expired on
       // the qr confirm route) is terminal for the request: the credential is
       // valid, so neither the refresh rotation nor the replay can change the
-      // outcome. Surface it verbatim and keep the session (POL-15).
+      // outcome. Surface it verbatim and keep the session (POL-240).
       const firstCode = readErrorCode(data);
       if (firstCode !== null && !AUTH_401_CODES.has(firstCode)) {
         throw toApiError(response.status, data);

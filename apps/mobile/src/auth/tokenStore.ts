@@ -1,4 +1,4 @@
-// Long-lived credential storage for the mobile app (POL-14).
+// Long-lived credential storage for the mobile app (POL-239).
 //
 // Security contract (PRD §③): access/refresh tokens must live in
 // expo-secure-store (iOS Keychain / Android Keystore) and NEVER in plaintext

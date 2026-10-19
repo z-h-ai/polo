@@ -1,4 +1,4 @@
-// App-side ASR capability cache (POL-24) — the read-only mirror of the
+// App-side ASR capability cache (POL-249) — the read-only mirror of the
 // relay /asr handshake (asr_ready frame). PRD §⑦ 定案: 能力经握手下发，App 按
 // realtimeStreaming 自适应渲染、不内置供应商分支（裁决 P-R1-01 选项 B）。
 //

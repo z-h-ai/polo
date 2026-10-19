@@ -1,4 +1,4 @@
-// Microphone capture layer (POL-24 card step 2) over expo-audio SDK 58.
+// Microphone capture layer (POL-249 card step 2) over expo-audio SDK 58.
 //
 // One AudioStream per 按住 session (16kHz s16le mono — the relay /asr uplink
 // contract, packages/relay/src/asr/types.ts:35):

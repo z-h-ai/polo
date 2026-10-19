@@ -1,4 +1,4 @@
-// POL-19 regression guard for the expo-router file convention (bun test).
+// POL-244 regression guard for the expo-router file convention (bun test).
 //
 // The tab contract (tabConfig.ts) only names routes; the actual wiring lives
 // in app/ file names. These fs assertions keep the shell honest: the three tab
@@ -35,7 +35,7 @@ describe('expo-router route map', () => {
     }
   });
 
-  test('the POL-19 pair-placeholder route stays removed (replaced by /pair in POL-16)', () => {
+  test('the POL-244 pair-placeholder route stays removed (replaced by /pair in POL-241)', () => {
     expect(existsSync(join(APP_DIR, 'pair-placeholder.tsx'))).toBe(false);
   });
 

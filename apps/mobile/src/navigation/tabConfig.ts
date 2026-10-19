@@ -1,4 +1,4 @@
-// Bottom tab configuration (POL-19, aligned with prototype M01/P13 tab bar).
+// Bottom tab configuration (POL-244, aligned with prototype M01/P13 tab bar).
 //
 // Pure data (no React) so the tab contract is assertable in bun test: exactly
 // three tabs — 消息 / 设备 / 我的 — with 消息 owning the tabs root route.

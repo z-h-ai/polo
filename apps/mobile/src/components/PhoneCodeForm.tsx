@@ -1,4 +1,4 @@
-// Phone + code form (POL-14, P01).
+// Phone + code form (POL-239, P01).
 //
 // Covers the three prototype states:
 //  - 初始未发码: 获取验证码 disabled (opacity .5) until the phone number is

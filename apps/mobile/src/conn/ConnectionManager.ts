@@ -1,4 +1,4 @@
-// ConnectionManager (POL-17 card step 3) — the phone's dual-channel conn core.
+// ConnectionManager (POL-242 card step 3) — the phone's dual-channel conn core.
 //
 // Channels (src/conn/lanChannel.ts, src/conn/relayChannel.ts) each expose one
 // WsRpc-speaking connection. The manager owns POLICY on top of them:
@@ -84,11 +84,11 @@ export interface ConnectionTarget {
 /**
  * Holds the connection target chosen at pairing/selection time.
  *
- * POL-16 NOTE (dependency to close at integration): the admin DeviceView wire
- * (POL-16 devices.ts) carries `macDeviceId` but NOT the QR's wsUrl, and no
+ * POL-241 NOTE (dependency to close at integration): the admin DeviceView wire
+ * (POL-241 devices.ts) carries `macDeviceId` but NOT the QR's wsUrl, and no
  * on-phone binding storage exists yet — the pairing flow only passes the
  * scanned wsUrl through the confirm screen. Until a follow-up feeds both,
- * the app layer (POL-18/POL-19 wiring) must call `connectionTarget.set()`
+ * the app layer (POL-243/POL-244 wiring) must call `connectionTarget.set()`
  * with { phoneDeviceId, macDeviceId } from devicesApi.list() and the wsUrl
  * captured at scan time. Without a wsUrl the manager runs relay-only.
  */
@@ -633,7 +633,7 @@ function defaultCreateRelayChannel(args: {
 }
 
 // ---------------------------------------------------------------------------
-// App-wide singletons (POL-18/POL-19 consume these)
+// App-wide singletons (POL-243/POL-244 consume these)
 // ---------------------------------------------------------------------------
 
 /** Pairing/selection writes here (see ConnectionTargetHolder for the wsUrl gap). */

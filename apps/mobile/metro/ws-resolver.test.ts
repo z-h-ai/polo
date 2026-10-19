@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { SERVER_CORE_SOURCE_MAP, WS_STUB_PATH, resolveWithWsStub } from './ws-resolver';
 
-describe('metro ws stub resolver (POL-5)', () => {
+describe('metro ws stub resolver (POL-230)', () => {
   test("resolves 'ws' to the empty stub without calling the default resolver", () => {
     let defaultCalled = false;
     const result = resolveWithWsStub({
@@ -29,7 +29,7 @@ describe('metro ws stub resolver (POL-5)', () => {
   });
 });
 
-describe('metro server-core source map (POL-17)', () => {
+describe('metro server-core source map (POL-242)', () => {
   test('pins the transport client/codec subpaths to the real server-core sources', () => {
     for (const moduleName of Object.keys(SERVER_CORE_SOURCE_MAP)) {
       let defaultCalled = false;

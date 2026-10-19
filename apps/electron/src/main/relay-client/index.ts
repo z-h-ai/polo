@@ -1,5 +1,5 @@
 /**
- * relay-client module facade (POL-12) — assembles the outbound polo-relay
+ * relay-client module facade (POL-237) — assembles the outbound polo-relay
  * link, the loopback bridge into the embedded WsRpcServer, and the status
  * machine broadcast to renderer windows.
  *

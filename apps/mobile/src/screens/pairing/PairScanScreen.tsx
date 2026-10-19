@@ -1,9 +1,9 @@
-// P03 配对扫码屏 (POL-16).
+// P03 配对扫码屏 (POL-241).
 //
 // Viewfinder over the camera with the shared ScanFrame overlay; a decoded
 // payload goes through parsePairingPayload (D02: {code, wsUrl} JSON, wsUrl is
 // a LAN hint only — never an authorization input). A valid code is handed to
-// onCodeScanned; anything else (including the POL-15 qr-LOGIN payloads — a
+// onCodeScanned; anything else (including the POL-240 qr-LOGIN payloads — a
 // login QR must not be consumed as pairing) lands on the P03/P10-style alert
 // layer, 收口在本屏. 底部「手动输入配对码」备选入口 (P03)；页头提示「配对码
 // 5 分钟内有效 · 一次性使用」。相册识码与手电筒是候选规则，本卡不做。
@@ -28,7 +28,7 @@ export function PairScanScreen({
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
 
-  // Same lock discipline as QrScanScreen (POL-15): the camera keeps emitting
+  // Same lock discipline as QrScanScreen (POL-240): the camera keeps emitting
   // events until unmount; the lock prevents double-handling while navigating
   // or while an alert is up. Re-armed on focus (returning from the flow).
   const handlingRef = useRef(false);

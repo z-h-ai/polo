@@ -1,4 +1,4 @@
-// P12 解绑二次确认弹层 (POL-16).
+// P12 解绑二次确认弹层 (POL-241).
 //
 // Bottom-sheet Modal over a 50% dim, per the prototype frame: grab handle,
 // 「解绑 …？」 title, consequence copy, destructive 确认解绑 + 取消. Copy is

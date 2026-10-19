@@ -1,4 +1,4 @@
-// POL-18 unit tests — session store state machine + session controller flow
+// POL-243 unit tests — session store state machine + session controller flow
 // (bun test; ConnectionManager fully mocked, no network, fake clock).
 //
 // Card 自检 matrix:

@@ -1,4 +1,4 @@
-// POL-19 unit tests for the bottom tab contract (bun test).
+// POL-244 unit tests for the bottom tab contract (bun test).
 //
 // The shell promises exactly three tabs — 消息 / 设备 / 我的 — with 消息
 // owning the tabs root route (post-login landing page).

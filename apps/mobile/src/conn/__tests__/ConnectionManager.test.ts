@@ -1,4 +1,4 @@
-// POL-17 unit tests for the mobile conn layer (bun test, M0-2 手法:
+// POL-242 unit tests for the mobile conn layer (bun test, M0-2 手法:
 // WebSocket/连接对象全部 mock，绝无真实网络).
 //
 // Coverage per the card 自检 matrix:
@@ -353,7 +353,7 @@ describe('ConnectionManager 通道选择与粘滞', () => {
     expect(channels[0]!.connectCalls).toBe(2);
     channels[0]!.fail({ errorKind: 'network' });
 
-    // POL-14 refresh rotation lands in the session store mid-backoff
+    // POL-239 refresh rotation lands in the session store mid-backoff
     token = 'jwt-fresh';
     await clock.advance(2_000); // backoff(1) → cycle 3 re-reads the token
     expect(channels.length).toBe(2); // fresh token → rebuilt channel
@@ -515,7 +515,7 @@ const ackFrame = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-/** Mac → phone relay envelope with a raw WsRpc frame payload (POL-12 shape). */
+/** Mac → phone relay envelope with a raw WsRpc frame payload (POL-237 shape). */
 const macFrame = (frame: unknown): string =>
   JSON.stringify({ v: 1, from: 'mac:m1', to: 'phone:p1', kind: 'rpc', payload: JSON.stringify(frame) });
 
@@ -677,7 +677,7 @@ describe('relayChannel 握手 / 信封 / replay', () => {
 });
 
 // ---------------------------------------------------------------------------
-// lanChannel — WsRpcClient parameter mapping (real handshake is proven by POL-6)
+// lanChannel — WsRpcClient parameter mapping (real handshake is proven by POL-231)
 // ---------------------------------------------------------------------------
 
 class FakeWsRpcClient implements WsRpcClientLike {

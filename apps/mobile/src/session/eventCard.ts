@@ -1,4 +1,4 @@
-// Event-card + banner copy mapping (POL-18) — pure, no React, no conn module
+// Event-card + banner copy mapping (POL-243) — pure, no React, no conn module
 // graph. Every string the P05 session page renders derives here so the 文案
 // mapping is unit-testable (card step 6).
 //

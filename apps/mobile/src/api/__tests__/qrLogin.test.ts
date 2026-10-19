@@ -1,4 +1,4 @@
-// POL-15 unit tests for the qr login api layer (bun test, mocked client).
+// POL-240 unit tests for the qr login api layer (bun test, mocked client).
 //
 // Covers: request shapes (scan body, status path + auth flag, confirm/reject
 // bodies), wire->view validation, and verbatim pass-through of admin error

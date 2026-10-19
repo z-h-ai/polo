@@ -1,8 +1,8 @@
-// P05 会话页 (POL-18) — 消息气泡 + 事件卡流 + 连接状态条 + 离线暂存横幅 +
+// P05 会话页 (POL-243) — 消息气泡 + 事件卡流 + 连接状态条 + 离线暂存横幅 +
 // 安全态. Data comes from the session store; sends go through the
 // SessionController (sessions:create / sendMessage over the ConnectionManager).
 //
-// POL-24 voice flow: the 按住说话 mic (InputBar) drives the PRD §⑦ state
+// POL-249 voice flow: the 按住说话 mic (InputBar) drives the PRD §⑦ state
 // machine (usePressToTalk) — P06/P07/P08 面板 (VoicePanel), P09 预览
 // (PreviewSheet), P13 积分规则 (CreditsSheet). Voice sends reuse the same
 // SessionController path as typed messages.
@@ -78,7 +78,7 @@ export function SessionScreen({
   const scrollRef = useRef<ScrollViewInstance | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // POL-24: PCM pump bridge — useAudioStream's onBuffer is fixed at mount;
+  // POL-249: PCM pump bridge — useAudioStream's onBuffer is fixed at mount;
   // both the pump and the recorder route into the machine via mutable refs.
   const machineRef = useRef<PressToTalkMachine | null>(null);
   const pumpRef = useRef<((data: ArrayBuffer, sampleRate: number, timestamp: number) => void) | null>(null);

@@ -1,4 +1,4 @@
-// Voice billing client (POL-24 card step 4) — the App-side interaction layer
+// Voice billing client (POL-249 card step 4) — the App-side interaction layer
 // on top of src/api/billing.ts (M2-3 contract).
 //
 // Division of labour (verified against packages/relay/src/asr/service.ts —

@@ -1,4 +1,4 @@
-// Connection bootstrap (POL-18 wiring) — closes the POL-17 dependency note:
+// Connection bootstrap (POL-243 wiring) — closes the POL-242 dependency note:
 // the pairing flow's captured wsUrl and devicesApi.list()'s
 // phoneDeviceId/macDeviceId must land in connectionTarget.set() at pairing
 // success / device selection time; the connection manager lifecycle starts here.

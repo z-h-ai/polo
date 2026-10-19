@@ -6,11 +6,11 @@
  * - preload/phone-link.ts（buildPhoneLinkPreloadApi）
  * - renderer/pages/settings/PhoneConnectionSettingsPage.tsx（面板）
  *
- * 本文件与 apps/electron/src/shared/types.ts 保持独立（POL-12 并行避让）：
+ * 本文件与 apps/electron/src/shared/types.ts 保持独立（POL-237 并行避让）：
  * ElectronAPI 不在此扩展，renderer 通过 getPhoneLinkApi() 收窄访问。
  *
  * 契约事实源：
- * - polo-admin /api/devices/pairing-code|list|revoke（POL-10 交付）
+ * - polo-admin /api/devices/pairing-code|list|revoke（POL-235 交付）
  * - 二维码 payload = JSON {"code":"8F3K2Q","wsUrl":"ws://192.168.1.20:9100"}；
  *   wsUrl 仅为 LAN 连接提示、非授权依据；拿不到 LAN 地址时只放 code。
  * - 配对码 5min TTL、一次性；重签发作废旧码。
@@ -68,7 +68,7 @@ export interface PhoneLinkHostInfo {
   wsUrl: string | null
 }
 
-/** M1-5/POL-12 relay 链路状态（types.ts RelayLinkStatus 的本文件投影，避免直接依赖并行卡类型） */
+/** M1-5/POL-237 relay 链路状态（types.ts RelayLinkStatus 的本文件投影，避免直接依赖并行卡类型） */
 export type PhoneLinkRelayStatus = 'online-relay' | 'online-lan' | 'offline'
 
 /** renderer 暴露面（preload buildPhoneLinkPreloadApi 的返回契约） */
@@ -77,13 +77,13 @@ export interface PhoneLinkPreloadApi {
   phoneDeviceList(): Promise<PhoneDeviceListResult>
   phoneDeviceRevoke(deviceId: string): Promise<PhoneDeviceRevokeResult>
   phoneLinkGetHostInfo(): Promise<PhoneLinkHostInfo>
-  /** 订阅 relay 链路状态广播（POL-12 relay:statusChanged）；返回退订函数 */
+  /** 订阅 relay 链路状态广播（POL-237 relay:statusChanged）；返回退订函数 */
   phoneLinkOnRelayStatus(callback: (payload: { status: PhoneLinkRelayStatus }) => void): () => void
 }
 
 /**
  * 从 window.electronAPI 取手机连接 API。
- * ElectronAPI 类型在 types.ts（POL-12 并行避让不改动），这里做一次收窄断言；
+ * ElectronAPI 类型在 types.ts（POL-237 并行避让不改动），这里做一次收窄断言；
  * preload 未注入（旧包）时方法缺失，调用方以运行时可选链兜底。
  */
 export function getPhoneLinkApi(): PhoneLinkPreloadApi {

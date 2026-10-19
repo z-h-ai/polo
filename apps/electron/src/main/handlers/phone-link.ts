@@ -1,5 +1,5 @@
 /**
- * Phone Link handlers — 手机 ↔ Mac 配对（PRD v1.6 §⑤，POL-13）
+ * Phone Link handlers — 手机 ↔ Mac 配对（PRD v1.6 §⑤，POL-238）
  *
  * 三个 LOCAL_ONLY RPC 通道，把 renderer 的设置页请求转发到 polo-admin
  * devices 端点（AdminClient 模式同 handlers/local-apps.ts：本地凭据 + getAdminUrl）：
@@ -14,7 +14,7 @@
  * 派生稳定本机标识（formatLocalMacDeviceId）；M1-5 接入后只需替换
  * getLocalMacDeviceId() 一处。
  *
- * 注意：admin 契约字段以 polo-admin main@deb31d86 为准（POL-10）。
+ * 注意：admin 契约字段以 polo-admin main@deb31d86 为准（POL-235）。
  */
 
 import { createHash } from 'crypto'

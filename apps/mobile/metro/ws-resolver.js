@@ -2,7 +2,7 @@ const path = require('node:path');
 
 const WS_STUB_PATH = path.join(__dirname, 'stub-ws.js');
 
-// POL-17: the mobile conn layer consumes the server-core WsRpc transport.
+// POL-242: the mobile conn layer consumes the server-core WsRpc transport.
 // The package's exports map only exposes "./transport" (its index), whose
 // transitive `node:http`/`node:https` imports are unresolvable under Metro —
 // so the app pins the exact subpaths it needs to the real source files (same

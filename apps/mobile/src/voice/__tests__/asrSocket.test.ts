@@ -1,4 +1,4 @@
-// POL-24 评审补测：/asr 会话层握手超时必须就地关闭 socket（防 relay 侧
+// POL-249 评审补测：/asr 会话层握手超时必须就地关闭 socket（防 relay 侧
 // prehold 悬挂到 330s 墙钟守卫 + 客户端 handlers 泄漏）。bun test 真实定时器
 // （超时预算缩到毫秒级），WS 为注入的假件。
 

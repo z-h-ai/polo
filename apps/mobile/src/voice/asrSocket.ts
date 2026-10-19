@@ -1,5 +1,5 @@
-// /asr WebSocket session (POL-24 card step 3) — the App side of the relay
-// streaming pipeline (POL-20; wire verified against packages/relay/src/asr/
+// /asr WebSocket session (POL-249 card step 3) — the App side of the relay
+// streaming pipeline (POL-245; wire verified against packages/relay/src/asr/
 // {types,service,server}.ts — relay source is the contract, App adapts).
 //
 //   connect  GET {relay}/asr?side=phone&deviceId=<id>&token=<adminJWT>

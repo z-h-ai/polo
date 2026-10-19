@@ -1,4 +1,4 @@
-// Login screen (POL-14, P01).
+// Login screen (POL-239, P01).
 //
 // Logo block + phone/code form + send-success toast, mirroring the prototype:
 // white toast card with a green check, 「验证码已发送至 138 0000 8000，5 分钟内有效」.

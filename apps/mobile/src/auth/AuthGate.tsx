@@ -1,9 +1,9 @@
-// Login-state guard wrapping the root navigator (POL-14, decision extracted
-// into authRoute.ts by POL-19).
+// Login-state guard wrapping the root navigator (POL-239, decision extracted
+// into authRoute.ts by POL-244).
 //
 // Blocks rendering until the persisted session read completes, then routes by
 // auth status: signed out -> /login, signed in -> / ((tabs)/index = 消息 Tab
-// since POL-19). Server-side revocation (api client refresh failure) flips the
+// since POL-244). Server-side revocation (api client refresh failure) flips the
 // store back to unauthenticated and the user lands on the login screen
 // automatically.
 

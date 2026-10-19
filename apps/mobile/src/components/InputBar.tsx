@@ -1,4 +1,4 @@
-// P05 composer — text input + send, the 按住说话 mic entry (POL-24: press =
+// P05 composer — text input + send, the 按住说话 mic entry (POL-249: press =
 // start capture, release = transcribe, swipe-up = cancel; a locked mic renders
 // the P07 置灰+锁 press target whose tap opens the 禁按 panel) and the
 // greyed-out attachment button whose tap toasts 「图片和文件发送即将上线」(P3).
@@ -27,7 +27,7 @@ export function InputBar({
   onAttachmentPress: () => void;
   disabled?: boolean;
   disabledPlaceholder?: string;
-  /** POL-24 按住说话手势（VoicePanel 未接管 composer 时为空）. */
+  /** POL-249 按住说话手势（VoicePanel 未接管 composer 时为空）. */
   onMicPressStart?: () => void;
   onMicPressMove?: (dyPx: number) => void;
   onMicPressEnd?: () => void;
@@ -78,7 +78,7 @@ export function InputBar({
         blurOnSubmit={false}
         accessibilityLabel="输入消息"
       />
-      {/* 按住说话 (POL-24): grant=开始录音, move=上滑判定, release=松开转文字. */}
+      {/* 按住说话 (POL-249): grant=开始录音, move=上滑判定, release=松开转文字. */}
       <View
         accessibilityRole="button"
         accessibilityLabel={micLocked ? '语音积分不足' : '按住说话'}

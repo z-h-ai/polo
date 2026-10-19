@@ -1,4 +1,4 @@
-// POL-16 unit tests for the device list/manage view-model builders:
+// POL-241 unit tests for the device list/manage view-model builders:
 // the P02 empty-vs-list shape decision, per-card copy, footer lines, the P12
 // phone masking + section titles, and the unbind sheet copy contract.
 

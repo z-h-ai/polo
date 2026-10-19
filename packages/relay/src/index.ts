@@ -5,7 +5,7 @@
  * JWT_SECRET), POLO_ADMIN_BASE_URL, … — see src/config.ts and the repo-root
  * .env.example.
  *
- * /asr (POL-20): streaming ASR proxy on the same port. Supplier selection via
+ * /asr (POL-245): streaming ASR proxy on the same port. Supplier selection via
  * POLO_RELAY_ASR_DEFAULT_SUPPLIER (volcengine | mock — use `mock` for local
  * dev), rate-card overrides via POLO_RELAY_ASR_RATE_CARDS_JSON. Upstream
  * volcano credentials come only from VOLCENGINE_ASR_APPID /

@@ -1,5 +1,5 @@
 /**
- * /asr WebSocket streaming pipeline (POL-20, PRD v1.6 §⑦).
+ * /asr WebSocket streaming pipeline (POL-245, PRD v1.6 §⑦).
  *
  * 手机 → wss relay /asr → 供应商流式 ASR（决策一：计费权威 + API key 不落客户端
  * + admin 保持纯 HTTP）。单连接时序：

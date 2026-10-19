@@ -1,8 +1,8 @@
-// Unread-badge state for the 消息 tab (POL-19).
+// Unread-badge state for the 消息 tab (POL-244).
 //
 // Static placeholder wiring: the badge renders 0/1 per the shell card
 // ("静态 0/1 可切"); real unread counts arrive with the session/message cards
-// (POL-18). The reducer is pure so transitions are unit-testable.
+// (POL-243). The reducer is pure so transitions are unit-testable.
 
 import { create } from 'zustand';
 
