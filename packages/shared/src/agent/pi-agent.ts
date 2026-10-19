@@ -1815,6 +1815,14 @@ export class PiAgent extends BaseAgent {
           isError: true,
         };
       }
+      // P1-3: canvas app data iteration shares generate_app's gate — a
+      // session without canvas apps has nothing to update data for.
+      if (toolName === 'update_app_data' && !this.allowGenerateApp) {
+        return {
+          content: 'update_app_data is not available in this session. Create a canvas app with generate_app first, or present the data as markdown, a datatable block, or a render_ui card instead.',
+          isError: true,
+        };
+      }
 
       // call_llm uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'call_llm') {

@@ -698,6 +698,8 @@
   "genui.app.publishing": "Wird veröffentlicht…",
   "genui.app.version": "v{{version}}",
   "genui.chart.empty": "In diesem Diagramm gibt es keine darstellbaren Daten.",
+  "genui.chart.filterStatus": "{{shown}} von {{total}} Kategorien werden angezeigt",
+  "genui.chart.resetFilters": "Zurücksetzen",
   "genui.chart.tooManySeries": "Zu viele Datenreihen zum Rendern.",
   "genui.componentError": "Diese Karte konnte nicht angezeigt werden.",
   "genui.dataTable.rowDetail": "Details",

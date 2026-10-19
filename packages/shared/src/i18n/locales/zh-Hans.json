@@ -698,6 +698,8 @@
   "genui.app.publishing": "发布中…",
   "genui.app.version": "v{{version}}",
   "genui.chart.empty": "此图表没有可绘制的数据。",
+  "genui.chart.filterStatus": "显示 {{shown}}/{{total}} 个分类",
+  "genui.chart.resetFilters": "重置",
   "genui.chart.tooManySeries": "系列过多，无法渲染。",
   "genui.componentError": "该卡片无法显示。",
   "genui.dataTable.rowDetail": "详情",

@@ -66,6 +66,10 @@ export type { RenderTemplateArgs } from './render-template.ts';
 export { handleRenderUi } from './render-ui.ts';
 export type { RenderUiArgs } from './render-ui.ts';
 
+// Update App Data (Generative UI canvas app data iteration, P1-3)
+export { handleUpdateAppData } from './update-app-data.ts';
+export type { UpdateAppDataArgs } from './update-app-data.ts';
+
 // Send Developer Feedback
 export { handleSendDeveloperFeedback } from './send-developer-feedback.ts';
 export type { SendDeveloperFeedbackArgs } from './send-developer-feedback.ts';

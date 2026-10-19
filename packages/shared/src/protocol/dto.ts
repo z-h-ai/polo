@@ -870,6 +870,58 @@ export const GENUI_BRIDGE_CAPABILITY_UI_EVENT = 'ui-event'
 export const GENUI_BRIDGE_CAPABILITIES = [GENUI_BRIDGE_CAPABILITY_UI_EVENT] as const
 
 // ---------------------------------------------------------------------------
+// P1-3 canvas app data channel — `<meta name="polo-app-data" content="…">`
+// ---------------------------------------------------------------------------
+
+/**
+ * The `<meta name="polo-app-data" content="data/state.json">` declaration a
+ * generate_app bundle uses to declare its mutable-state JSON files (P1-3).
+ * Paths are relative to the session data/ directory. Main reads the meta from
+ * the exact attached document (same issue-at-mount discipline as the bridge
+ * capabilities above — no manifest trust root) and pushes the file contents
+ * to the mounted card as ui_state; `update_app_data` iterates the same files.
+ */
+export const GENUI_APP_DATA_META_NAME = 'polo-app-data'
+/** Hard cap on declared data files per card — a card cannot farm watchers. */
+export const GENUI_APP_DATA_MAX_FILES_PER_CARD = 3
+/**
+ * Hard cap on one declared data file read/write (UTF-8 bytes). Mirrors the
+ * payloadSrc confinement (big objects live in data/; the ui_state channel
+ * stays bounded). session-tools-core pins the same value for the
+ * update_app_data write cap — the parity guard lives in the shared-side test.
+ */
+export const GENUI_APP_DATA_MAX_FILE_BYTES = GENUI_UI_EVENT_MAX_PAYLOAD_SRC_BYTES
+/** Max characters of one declared path token (mirrors payloadSrc's bound). */
+export const GENUI_APP_DATA_MAX_SRC_LENGTH = 1024
+/** P2-1: minimum quiet period before a data-file change is pushed to the card. */
+export const GENUI_APP_DATA_WATCH_DEBOUNCE_MS = 1000
+
+/**
+ * Parse a Main-extracted `polo-app-data` meta content value into the declared
+ * data file paths. Tokens are whitespace/comma separated (same grammar as the
+ * bridge capabilities meta), deduped, and capped at
+ * GENUI_APP_DATA_MAX_FILES_PER_CARD — a declaration above the cap keeps its
+ * first entries and drops the rest (fail closed, never grows unbounded).
+ * Malformed tokens (empty, NUL, over-length) are dropped.
+ */
+export function parseGenUiAppDataDeclaration(content: string | undefined | null): string[] {
+  if (typeof content !== 'string') return []
+  // Fail closed on NUL: it can never legitimately appear in a real attribute
+  // value, so a content that carries one is malformed as a whole — the whole
+  // declaration is voided instead of being split into plausible halves.
+  if (content.includes('\0')) return []
+  const tokens = content.split(/[\s,]+/).filter(Boolean)
+  const seen = new Set<string>()
+  for (const token of tokens) {
+    if (token.length > GENUI_APP_DATA_MAX_SRC_LENGTH) continue
+    if (token.includes('\0')) continue
+    seen.add(token)
+    if (seen.size >= GENUI_APP_DATA_MAX_FILES_PER_CARD) break
+  }
+  return [...seen]
+}
+
+// ---------------------------------------------------------------------------
 // P0-2 render_ui skeleton streaming — emission parameters
 // ---------------------------------------------------------------------------
 
