@@ -28,8 +28,12 @@ export interface SkillMetadata {
   requiredSources?: string[];
 }
 
-/** Source of a loaded skill */
-export type SkillSource = 'global' | 'workspace' | 'project';
+/**
+ * Source of a loaded skill.
+ * `bundled` is the read-only app-shipped tier with the lowest priority;
+ * every user-controlled tier (global < workspace < project) overrides it by slug.
+ */
+export type SkillSource = 'bundled' | 'global' | 'workspace' | 'project';
 
 /**
  * Plugin name for project-level and global skills.

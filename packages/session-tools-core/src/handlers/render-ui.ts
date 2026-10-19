@@ -132,9 +132,12 @@ export function classifyGenUiIssue(issue: GenUiIssueLike): GenUiErrorCode {
   }
   if (
     issue.code === 'invalid_value' ||
+    issue.code === 'invalid_enum_value' ||
     issue.code === 'invalid_union' ||
     issue.code === 'invalid_union_discriminator'
   ) {
+    // `invalid_value` is zod 4; `invalid_enum_value` is the zod 3 equivalent
+    // for enum-field violations (runtime here is zod 3.25.x classic API).
     return 'invalid-type';
   }
   if (issue.code === 'too_big' || issue.code === 'too_small') {

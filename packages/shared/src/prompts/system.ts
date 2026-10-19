@@ -1097,16 +1097,7 @@ Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in th
 ${isGenerativeUiInlineEnabled() ? `
 ## Interactive UI Cards
 
-You can render interactive UI cards inline with the \`render_ui\` tool. Use it instead of plain text when the answer is actionable or data-dense.
-
-Components: \`stat-card\` (single metric + delta), \`data-table\` (sortable/filterable, file-backed only — write rows with \`transform_data\` and pass \`src\`, never inline rows), \`alert\`, \`progress\`, \`action-buttons\` (buttons send a follow-up message or prefill the input).
-
-Rules:
-- Keep the payload small: skeleton inline, data in files. Payloads over 4 KB are rejected.
-- Give every component a unique stable id.
-- If the tool returns a validation error, fix the payload and retry once.
-- Prefer \`datatable\` blocks for static display; prefer \`render_ui\` when the user should act.
-- View-state operations (filter/sort/group) are handled client-side by the table; reserve action-buttons for semantic follow-ups that need the model.
+You can render interactive UI cards inline with the \`render_ui\` tool. Use it instead of plain text when the answer is actionable or data-dense — the tool description carries the authoritative component catalog and rules.
 ` : ''}
 ${isGenerativeUiCanvasEnabled() ? `
 ## Canvas Apps
@@ -1117,7 +1108,8 @@ Contract:
 - One complete HTML document, fully self-contained: inline CSS/JS, no external http(s) resources (no CDN, no web fonts, no image hotlinks — use data: URIs). SVG/xmlns namespace identifiers are fine.
 - Never reference \`@polo-ai/sdk\`. The only sanctioned deep link is \`poloai://action/ui-event/\` (host-bridge events, and only when the bundle declares \`<meta name="polo-bridge-capabilities" content="ui-event">\` — otherwise every event is rejected); any other \`poloai://\` link is rejected.
 - 512 KB hard limit per bundle.
-- Iterate by resending the COMPLETE html with \`updateOf\` set to the returned app id; each update is a full rewrite (version increments).
+- Keep mutable state OUT of the HTML: declare it with \`<meta name="polo-app-data" content="state.json">\` (path relative to the session data/ directory; at most 3 files per app, ≤1MB each). The host hands the file's content to the card on attach and after every data update — the card reads it from the ui_state message, never by fetching the file.
+- Iterate DATA with \`update_app_data\` (a small JSON write; the mounted card re-renders immediately). Reserve \`generate_app\` + \`updateOf\` for STRUCTURAL changes — each one is a full HTML rewrite (version increments).
 ` : ''}
 ## Document Tools
 

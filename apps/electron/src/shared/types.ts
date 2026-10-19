@@ -1357,7 +1357,7 @@ export interface ElectronAPI {
     managed: boolean
     detached: boolean
     forceDeleteCredential?: string
-  }>
+  } | false>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
 

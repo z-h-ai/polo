@@ -73,6 +73,26 @@ type GenUiGuestDeepLinkForwarder = (url: string, guestWebContentsId: number) => 
 let genUiGuestDeepLinkForwarder: GenUiGuestDeepLinkForwarder | null = null
 
 /**
+ * P1-3/P2-1 canvas app data channel hooks, installed by the genui RPC handler
+ * registration (which owns the data-channel deps). did-attach carries the
+ * validated initial src so the observer can read the document's
+ * polo-app-data declaration; dom-ready re-injects once the page can actually
+ * receive postMessage; destroyed releases the card's channel and watcher.
+ * While unset the channel is simply inert — fail closed.
+ */
+export interface GenUiGuestAppDataHooks {
+  onGuestAttached(info: { sessionId: string; guestWebContentsId: number; hostWebContentsId: number; src: string }): void
+  onGuestDomReady(guestWebContentsId: number): void
+  onGuestDestroyed(guestWebContentsId: number): void
+}
+
+let genUiGuestAppDataHooks: GenUiGuestAppDataHooks | null = null
+
+export function setGenUiGuestAppDataHooks(hooks: GenUiGuestAppDataHooks | null): void {
+  genUiGuestAppDataHooks = hooks
+}
+
+/**
  * Wires the ui-event forwarding (from the genui handler registration, which
  * owns the ui-event deps). Setter injection keeps this module free of the
  * bridge/registry import graph. While unset, canvas-guest ui-event URLs are
@@ -261,6 +281,7 @@ export function __resetWebviewSecurityForTests(): void {
   genUiPolicySessions = new WeakSet()
   genUiGuestSrcValidator = null
   genUiGuestDeepLinkForwarder = null
+  genUiGuestAppDataHooks = null
   pendingGenUiAttaches = []
   delete trustedWebviewScopeResolver.getWorkspaceForWebContentsId
 }
@@ -528,10 +549,11 @@ export function installWebviewSecurityHandlers(): void {
         const pending = takePendingGenUiAttach(contents.id, guest)
         if (pending) {
           const registry = getUiCardRegistry()
+          const sessionId = sessionIdFromGenUiPartition(pending.partition)
           registry.noteGuestAttached({
             guestWebContentsId: guest.id,
             hostWebContentsId: contents.id,
-            sessionId: sessionIdFromGenUiPartition(pending.partition),
+            sessionId,
             partition: pending.partition,
             capabilities: extractPoloBridgeCapabilities(pending.src),
           })
@@ -539,6 +561,20 @@ export function installWebviewSecurityHandlers(): void {
           // to it — closed cards can never keep accepting events.
           guest.once('destroyed', () => {
             getUiCardRegistry().noteGuestDetached(guest.id)
+            genUiGuestAppDataHooks?.onGuestDestroyed(guest.id)
+          })
+          // P1-3: the canvas app data channel observes the same validated
+          // attach (declaration read from the exact initial src) and gets one
+          // dom-ready re-injection — the attach-time push can outrun the
+          // page's message listener.
+          genUiGuestAppDataHooks?.onGuestAttached({
+            sessionId,
+            guestWebContentsId: guest.id,
+            hostWebContentsId: contents.id,
+            src: pending.src,
+          })
+          guest.once('dom-ready', () => {
+            genUiGuestAppDataHooks?.onGuestDomReady(guest.id)
           })
         } else {
           windowLog.warn(

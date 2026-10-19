@@ -40,7 +40,7 @@ import {
   uninstallCreatorSkill,
   updateCreatorSkillInstallationMetadata,
 } from '@polo-ai/shared/creator-skills'
-import { resolveCanonicalSkill, canonicalSkillSourceFromLaunch, loadCallableCanonicalSkills, resolveCanonicalSkillContext } from '../../runtime/canonical-skills'
+import { resolveCanonicalSkill, canonicalSkillSourceFromLaunch, loadProductSpaceSkills } from '../../runtime/canonical-skills'
 import { readCanonicalSkillInstallations, installCanonicalSkill, canonicalSkillRoot, canonicalSkillIdentity, listCanonicalSkillRoots, recoverCanonicalSkillOperations } from '@polo-ai/shared/creator-skills'
 import { CatalogEntryIdSchema } from '@polo-ai/shared/product-spaces'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
@@ -422,24 +422,27 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     workspaceRoot: string,
     workingDirectory?: string,
   ): Promise<LoadedSkill[]> => {
-    const [{ loadAllSkills }, ledger] = await Promise.all([
+    const [, ledger] = await Promise.all([
       import('@polo-ai/shared/skills'),
       readCreatorSkillsLedger(workspaceRoot),
     ])
     const installedBySlug = new Map(ledger.installed
       .filter((item): item is import('@polo-ai/shared/creator-skills').LegacyInstalledCreatorSkill => typeof item.organizationId === 'string' && item.canonicalSource === undefined)
       .map(item => [item.slug, item]))
-    const local = loadAllSkills(workspaceRoot, workingDirectory).map(skill => {
+    const scope = { ...await requireTrustedSkillsScope(), fenceGeneration: getRuntimeFenceGeneration() }
+    // Same composition rule as SessionManager/watcher discovery: personal
+    // legacy tiers only in an active personal space, bundled app Skills in
+    // every active space, canonical on top.
+    const skills = await loadProductSpaceSkills(workspaceRoot, scope, workingDirectory)
+    await assertOriginalNativeSkillScope(scope, scope.fenceGeneration)
+    return skills.map(skill => {
       const installation = installedBySlug.get(skill.slug)
-      return installation && skill.source === 'workspace'
+      // Legacy ledger metadata belongs to user-owned workspace copies only —
+      // never to a canonical row that happens to share its slug.
+      return installation && skill.source === 'workspace' && !skill.canonicalInstallation
         ? { ...skill, creatorInstallation: installation }
         : skill
     })
-    const scope = { ...await requireTrustedSkillsScope(), fenceGeneration: getRuntimeFenceGeneration() }
-    const context = await resolveCanonicalSkillContext(scope)
-    const canonical = await loadCallableCanonicalSkills(workspaceRoot, scope)
-    await assertOriginalNativeSkillScope(scope, scope.fenceGeneration)
-    return [...(context.kind === 'personal' && context.accessMode === 'active' ? local : []), ...canonical]
   }
 
   const broadcastSkillsChanged = async (workspaceId: string, workspaceRoot: string) => {
@@ -641,6 +644,12 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         code: 'workspace_read_only',
       })
     }
+    // Bundled app Skills ship inside the client and cannot be uninstalled —
+    // but only while the user has no own copy: a same-slug workspace Skill is
+    // a regular user asset whose deletion must not be vetoed by the bundled
+    // directory it shadows (deleting it leaves the bundled original in place).
+    const { loadBundledSkill, skillExists } = await import('@polo-ai/shared/skills')
+    if (!skillExists(workspace.rootPath, skillSlug) && loadBundledSkill(skillSlug)) return false
     if (skillSlug.startsWith('canonical-')) {
       const scope = await requireTrustedSkillsScope()
       const original = (await readCanonicalSkillInstallations(workspace.rootPath, scope, { nativeMutationFacts: true }))
@@ -1026,6 +1035,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.skills.OPEN_EDITOR, async (ctx, workspaceId: string, skillSlug: string) => {
     const skill = await resolveVisibleSkill(ctx,workspaceId,skillSlug)
     if (skill.canonicalInstallation) throw new Error('Managed Skill instructions are read-only')
+    if (skill.source === 'bundled') throw new Error('Bundled Skill instructions are read-only')
     await deps.platform.openPath?.(join(skill.path,'SKILL.md'))
   })
   server.handle(RPC_CHANNELS.skills.OPEN_FINDER, async (ctx, workspaceId: string, skillSlug: string) => {

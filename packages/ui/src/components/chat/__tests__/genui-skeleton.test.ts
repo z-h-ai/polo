@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { GENUI_SKELETON_COMPONENT_TYPES, extractGenUiSkeletons, isRenderUiActivityToolName } from '../genuiSkeleton'
 import { GENUI_COMPONENT_TYPES, hasGenUiRenderer } from '../GenUICard'
 
@@ -194,5 +195,39 @@ describe('GENUI_SKELETON_COMPONENT_TYPES — registry lockstep (bidirectional)',
     for (const type of GENUI_SKELETON_COMPONENT_TYPES) {
       expect(hasGenUiRenderer(type)).toBe(true)
     }
+  })
+})
+
+describe('genui.skeleton.types — i18n lockstep (N5: skeleton names a friendly type, never a raw registry key)', () => {
+  // packages/ui/src/components/chat/__tests__/ → packages/shared/src/i18n/locales/
+  const readLocale = (locale: string): Record<string, unknown> =>
+    JSON.parse(
+      readFileSync(new URL(`../../../../../shared/src/i18n/locales/${locale}.json`, import.meta.url), 'utf-8'),
+    ) as Record<string, unknown>
+
+  for (const locale of ['en', 'zh-Hans']) {
+    it(`every registry type has a genui.skeleton.types key in ${locale}`, () => {
+      const messages = readLocale(locale)
+      for (const type of GENUI_COMPONENT_TYPES) {
+        const value = messages[`genui.skeleton.types.${type}`]
+        expect(typeof value).toBe('string')
+        expect(value as string).not.toBe('')
+        // the localized name must be a friendly label, not the raw key echoed back
+        expect(value as string).not.toContain('genui.skeleton.types')
+      }
+    })
+  }
+
+  it('the skeleton templates interpolate the friendly name, not the type key', () => {
+    const en = readLocale('en')
+    expect(en['genui.skeleton.building']).toContain('{{name}}')
+    expect(en['genui.skeleton.building']).not.toContain('{{type}}')
+    expect(en['genui.skeleton.buildingNamed']).toContain('{{name}}')
+    expect(en['genui.skeleton.buildingNamed']).toContain('{{title}}')
+    const zh = readLocale('zh-Hans')
+    expect(zh['genui.skeleton.building']).toContain('{{name}}')
+    expect(zh['genui.skeleton.building']).not.toContain('{{type}}')
+    expect(zh['genui.skeleton.buildingNamed']).toContain('{{name}}')
+    expect(zh['genui.skeleton.buildingNamed']).toContain('{{title}}')
   })
 })

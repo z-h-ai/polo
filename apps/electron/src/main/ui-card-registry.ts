@@ -24,9 +24,12 @@
 import { readFileSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
+  GENUI_APP_DATA_MAX_FILES_PER_CARD,
+  GENUI_APP_DATA_META_NAME,
   GENUI_BRIDGE_CAPABILITIES_META_NAME,
   GENUI_UI_CARD_ID_PATTERN,
   isValidGenUiUiCardId,
+  parseGenUiAppDataDeclaration,
   parseGenUiBridgeCapabilities,
 } from '@polo-ai/shared/protocol'
 import { validateSessionId } from '@polo-ai/shared/sessions'
@@ -231,26 +234,37 @@ export class UiCardRegistry {
  * lives and dies with this exact document version.
  */
 export function extractPoloBridgeCapabilities(src: string): string[] {
-  let document: string
+  const document = readAttachedDocument(src)
+  return document === null ? [] : extractCapabilitiesFromDocument(document)
+}
+
+export function extractPoloAppDataDeclarations(src: string): string[] {
+  const document = readAttachedDocument(src)
+  return document === null ? [] : extractPoloAppDataFromDocument(document)
+}
+
+/**
+ * The exact attached document behind a canvas initial src (data: URL payload
+ * or a bounded file: read). Anything unreadable, oversized, or of another
+ * scheme yields null — the caller fails closed to "no declaration".
+ */
+function readAttachedDocument(src: string): string | null {
   try {
     const parsed = new URL(src)
     if (parsed.protocol === 'data:') {
-      const decoded = decodeDataUrlPayload(src)
-      if (decoded === null) return []
-      document = decoded
-    } else if (parsed.protocol === 'file:') {
-      const path = fileURLToPathSafe(src)
-      if (!path) return []
-      const size = statSync(path).size
-      if (size > CAPABILITY_DOCUMENT_MAX_BYTES) return []
-      document = readFileSync(path, 'utf-8')
-    } else {
-      return []
+      return decodeDataUrlPayload(src)
     }
+    if (parsed.protocol === 'file:') {
+      const path = fileURLToPathSafe(src)
+      if (!path) return null
+      const size = statSync(path).size
+      if (size > CAPABILITY_DOCUMENT_MAX_BYTES) return null
+      return readFileSync(path, 'utf-8')
+    }
+    return null
   } catch {
-    return []
+    return null
   }
-  return extractCapabilitiesFromDocument(document)
 }
 
 /** Testable core: find the capabilities meta tag in document markup. */
@@ -266,6 +280,28 @@ export function extractCapabilitiesFromDocument(document: string): string[] {
     return parseGenUiBridgeCapabilities(content)
   }
   return []
+}
+
+/**
+ * P1-3: the `polo-app-data` declaration sibling of the capabilities meta —
+ * the mutable-state JSON files (session-data-relative paths) this exact
+ * document wants pushed/injected. Multiple meta tags are unioned, tokens are
+ * deduped and the per-card cap (GENUI_APP_DATA_MAX_FILES_PER_CARD) holds —
+ * a document can never farm more than the cap of data files.
+ */
+export function extractPoloAppDataFromDocument(document: string): string[] {
+  const metaTagPattern = /<meta\b[^>]*>/gi
+  const declared: string[] = []
+  for (const match of document.matchAll(metaTagPattern)) {
+    const tag = match[0]
+    const namePattern = new RegExp(`\\bname\\s*=\\s*(?:"${GENUI_APP_DATA_META_NAME}"|'${GENUI_APP_DATA_META_NAME}'|${GENUI_APP_DATA_META_NAME}(?=[\\s>]))`, 'i')
+    if (!namePattern.test(tag)) continue
+    const contentMatch = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)
+    const content = contentMatch?.[1] ?? contentMatch?.[2] ?? contentMatch?.[3]
+    declared.push(...parseGenUiAppDataDeclaration(content))
+    if (declared.length >= GENUI_APP_DATA_MAX_FILES_PER_CARD) break
+  }
+  return [...new Set(declared)].slice(0, GENUI_APP_DATA_MAX_FILES_PER_CARD)
 }
 
 function decodeDataUrlPayload(src: string): string | null {

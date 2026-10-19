@@ -504,6 +504,29 @@ describe('render_ui error-code taxonomy', () => {
     expect(text).toContain('[genui:invalid-type]');
   });
 
+  it('classifies zod3 invalid_enum_value as invalid-type through the REAL schema (behavioral)', async () => {
+    // Behavior-level: trigger the violation through RenderUiSchema.safeParse —
+    // zod 3 classic emits `invalid_enum_value` for enum-field violations
+    // (zod 4 emits `invalid_value`), and it must land on the invalid-type
+    // code with its fix hint, not the schema-invalid fallback.
+    const parsed = RenderUiSchema.safeParse({
+      components: [{ id: 'k', type: 'stat-card', label: 'x', value: 1, trend: 'bogus' }],
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const enumIssue = parsed.error.issues.find(i => i.code === 'invalid_enum_value');
+      expect(enumIssue).toBeDefined();
+      expect(classifyGenUiIssue(enumIssue!)).toBe('invalid-type');
+    }
+
+    const text = await errorTextFor({
+      components: [{ id: 'k', type: 'stat-card', label: 'x', value: 1, trend: 'bogus' }],
+    });
+    expect(text).toContain('[genui:invalid-type]');
+    expect(text).toContain("Match the field's expected type, enum value");
+    expect(text).not.toContain('[genui:schema-invalid]');
+  });
+
   it('prefixes unrecognized-key with its code (strict schema, unknown field)', async () => {
     const text = await errorTextFor({
       components: [{

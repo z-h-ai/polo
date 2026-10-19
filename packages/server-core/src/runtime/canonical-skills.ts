@@ -138,9 +138,15 @@ export function createCanonicalSkillTurnController(workspaceRoot: string) {
 export async function loadProductSpaceSkills(workspaceRoot: string, scope: CanonicalSkillScope, workingDirectory?: string): Promise<LoadedSkill[]> {
   const context = await resolveCanonicalSkillContext(scope)
   const canonical = await loadCallableCanonicalSkills(workspaceRoot, scope)
-  const { loadAllSkills } = await import('@polo-ai/shared/skills')
+  const { loadAllSkills, loadBundledSkills } = await import('@polo-ai/shared/skills')
+  // Bundled app Skills ship with the client and carry no personal scope, so an
+  // active enterprise space still discovers them while every personal legacy
+  // root stays closed. A read_only space starts no Skill work at all.
   const local = context.kind === 'personal' && context.accessMode === 'active'
-    ? loadAllSkills(workspaceRoot, workingDirectory) : []
+    ? loadAllSkills(workspaceRoot, workingDirectory)
+    : context.kind === 'enterprise' && context.accessMode === 'active'
+      ? loadBundledSkills()
+      : []
   const current = await resolveCanonicalSkillContext(scope)
   if (current.kind !== context.kind || current.accessMode !== context.accessMode) throw new Error('Skill ProductSpace policy changed during discovery')
   return [...local, ...canonical]

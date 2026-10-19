@@ -430,6 +430,16 @@ export interface SessionToolContext {
    */
   isGenerateAppEnabled?: () => boolean;
 
+  /**
+   * P1-3 canvas app data channel: push a freshly written app data file to the
+   * app's mounted card(s) as a ui_state message. Electron-only — hosts
+   * without a canvas surface leave it undefined and the update_app_data
+   * handler degrades to write-to-disk only (the content is injected on the
+   * card's next attach). The receiving side re-validates the path through
+   * the session data/ fence; this callback never persists anything.
+   */
+  notifyCanvasAppDataUpdated?: (appId: string, dataPath: string) => number | void;
+
   /** Restrict tool subprocess environments for a CLI one-shot Thread. */
   credentialIsolation?: boolean;
 }

@@ -22,6 +22,24 @@ export async function deleteWorkspaceSkillWithModifiedConfirmation(args: {
     workspaceId: args.workspaceId,
     skillSlug: args.slug,
   })
+  // A falsy response means the server refused (for example a built-in Skill
+  // with no user copy): it must surface as an error, never as a deletion.
+  if (typeof initial !== 'object' || initial === null) {
+    return {
+      status: 'error',
+      result: {
+        success: false,
+        operationId: crypto.randomUUID(),
+        errorCode: 'skill_delete_refused',
+        stage: 'prepare',
+        diagnostic: JSON.stringify({
+          errorCode: 'skill_delete_refused',
+          stage: 'prepare',
+        }),
+        retryable: false,
+      },
+    }
+  }
   if (!initial.detached) return { status: 'deleted' }
   if (!args.confirmPermanentDelete()) return { status: 'detached' }
   if (!initial.forceDeleteCredential) {

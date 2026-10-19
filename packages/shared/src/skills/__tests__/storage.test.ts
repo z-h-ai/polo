@@ -28,6 +28,7 @@ import {
   loadAllSkills,
   loadWorkspaceSkills,
   loadSkill,
+  loadBundledSkills,
   skillExists,
   listSkillSlugs,
   deleteSkill,
@@ -92,17 +93,26 @@ function createEmptySkillDir(skillsDir: string, slug: string): string {
   return skillDir;
 }
 
-/** Get the set of slugs currently in the real global skills directory */
+/**
+ * Get the set of user-owned global slugs currently in the real global skills
+ * directory. The read-only bundled tier ships with the app (when running from
+ * the monorepo root it resolves to real bundled skills), so it is excluded
+ * here and counted separately by getBundledBaselineCount().
+ */
 function getExistingGlobalSlugs(): Set<string> {
   const emptyWs = mkdtempSync(join(tmpdir(), 'skills-baseline-'));
   mkdirSync(join(emptyWs, 'skills'), { recursive: true });
   try {
     const skills = loadAllSkills(emptyWs);
-    // These are all global skills since the workspace is empty
-    return new Set(skills.map(s => s.slug));
+    return new Set(skills.filter(s => s.source === 'global').map(s => s.slug));
   } finally {
     rmSync(emptyWs, { recursive: true, force: true });
   }
+}
+
+/** Number of app-shipped bundled skills visible to this process (0 when none ship). */
+function getBundledBaselineCount(): number {
+  return loadBundledSkills().length;
 }
 
 // ============================================================
@@ -343,8 +353,8 @@ describe('loadAllSkills', () => {
 
     const skills = loadAllSkills(workspaceRoot, projectRoot);
 
-    // Should have baseline global skills + our 2 test skills
-    expect(skills.length).toBe(baselineGlobal.size + 2);
+    // Should have baseline global skills + bundled skills + our 2 test skills
+    expect(skills.length).toBe(baselineGlobal.size + getBundledBaselineCount() + 2);
 
     const wsSkill = skills.find(s => s.slug === `${TEST_PREFIX}ws`);
     const projSkill = skills.find(s => s.slug === `${TEST_PREFIX}proj`);
@@ -392,7 +402,7 @@ describe('loadAllSkills', () => {
     expect(overridden!.metadata.name).toBe('Workspace Override');
 
     // Total count should be same as baseline (overridden, not added)
-    expect(skills.length).toBe(baselineGlobal.size);
+    expect(skills.length).toBe(baselineGlobal.size + getBundledBaselineCount());
   });
 
   it('should override workspace skills with project skills (same slug)', () => {
@@ -406,8 +416,8 @@ describe('loadAllSkills', () => {
 
     const skills = loadAllSkills(workspaceRoot, projectRoot);
 
-    // Only 1 skill for this slug (project overrides workspace), plus baseline globals
-    expect(skills.length).toBe(baselineGlobal.size + 1);
+    // Only 1 skill for this slug (project overrides workspace), plus baseline globals and bundled
+    expect(skills.length).toBe(baselineGlobal.size + getBundledBaselineCount() + 1);
     const deploy = skills.find(s => s.slug === `${TEST_PREFIX}deploy`);
     expect(deploy).toBeDefined();
     expect(deploy!.source).toBe('project');
@@ -441,8 +451,8 @@ describe('loadAllSkills', () => {
     expect(skills.find(s => s.slug === `${TEST_PREFIX}only_ws`)!.source).toBe('workspace');
     expect(skills.find(s => s.slug === `${TEST_PREFIX}only_proj`)!.source).toBe('project');
 
-    // Total: baseline globals + shared (1, deduplicated) + only_ws + only_proj = baseline + 3
-    expect(skills.length).toBe(baselineGlobal.size + 3);
+    // Total: baseline globals + bundled + shared (1, deduplicated) + only_ws + only_proj
+    expect(skills.length).toBe(baselineGlobal.size + getBundledBaselineCount() + 3);
   });
 
   it('should handle missing project directory gracefully', () => {
@@ -453,7 +463,7 @@ describe('loadAllSkills', () => {
     // Pass a non-existent project root
     const skills = loadAllSkills(workspaceRoot, join(tempDir, 'nonexistent-project'));
 
-    expect(skills.length).toBe(baselineGlobal.size + 1);
+    expect(skills.length).toBe(baselineGlobal.size + getBundledBaselineCount() + 1);
     const wsSkill = skills.find(s => s.slug === `${TEST_PREFIX}ws_skill`);
     expect(wsSkill).toBeDefined();
     expect(wsSkill!.source).toBe('workspace');
@@ -475,7 +485,7 @@ describe('loadAllSkills', () => {
     expect(skills.find(s => s.slug === `${TEST_PREFIX}project_only`)).toBeUndefined();
     // Should contain the workspace skill
     expect(skills.find(s => s.slug === `${TEST_PREFIX}ws_skill`)).toBeDefined();
-    expect(skills.length).toBe(baselineGlobal.size + 1);
+    expect(skills.length).toBe(baselineGlobal.size + getBundledBaselineCount() + 1);
   });
 
   it('should return only global skills when workspace and project are empty', () => {
@@ -483,11 +493,15 @@ describe('loadAllSkills', () => {
 
     const skills = loadAllSkills(workspaceRoot);
 
-    // With empty workspace and no project, only global skills remain
-    expect(skills.length).toBe(baselineGlobal.size);
-    for (const skill of skills) {
+    // With empty workspace and no project every user-owned skill is global;
+    // the read-only bundled tier (when the app ships any) is covered by
+    // bundled.test.ts and asserted here only by exclusion.
+    const userSkills = skills.filter(s => s.source !== 'bundled');
+    expect(userSkills.length).toBe(baselineGlobal.size);
+    for (const skill of userSkills) {
       expect(skill.source).toBe('global');
     }
+    expect(skills.filter(s => s.source === 'bundled')).toHaveLength(getBundledBaselineCount());
   });
 
   it('should correctly assign source for workspace and project tiers', () => {
@@ -507,7 +521,7 @@ describe('loadAllSkills', () => {
     expect(testSkills.filter(s => s.source === 'project')).toHaveLength(1);
 
     // Global skills should all have source 'global'
-    const globalSkills = skills.filter(s => !s.slug.startsWith(TEST_PREFIX));
+    const globalSkills = skills.filter(s => s.source !== 'bundled' && !s.slug.startsWith(TEST_PREFIX));
     for (const skill of globalSkills) {
       expect(skill.source).toBe('global');
     }
