@@ -615,3 +615,18 @@ describe('registerMemberCircleHandlers', () => {
   })
 
 })
+
+describe('R4FIX-02 current entitlement RPC handoff', () => {
+  beforeEach(() => setSyncTrustedProductSpaceAccountId(ACCOUNT_ID))
+  afterEach(() => setSyncTrustedProductSpaceAccountId(null))
+  it('retains parsed current-period authority across the trusted native membership handler', async () => {
+    const { memberMembershipWireFixture } = await import('../../../../../shared/src/admin/__tests__/fixtures/current-entitlement')
+    const { parseMemberMembershipsResponse } = await import('../../../../../shared/src/admin/member-circles')
+    const harness = createHarness()
+    const dto = parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture()] })
+    harness.client.listMemberCircleMemberships = async () => dto
+    const result = await harness.invoke(RPC_CHANNELS.memberCircles.LIST_MEMBERSHIPS)
+    expect(result).toEqual({ success: true, memberships: dto.memberships })
+    expect((result as { memberships: typeof dto.memberships }).memberships[0]!.currentEntitlement?.state).toBe('entitled')
+  })
+})

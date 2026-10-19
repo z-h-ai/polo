@@ -1399,3 +1399,27 @@ describe('account mismatch reauthenticate CTA (P2-2)', () => {
     expect(note.textContent).toContain('account menu')
   })
 })
+
+describe('R4FIX-02 detail content uses current-period authority', () => {
+  for (const state of ['entitled', 'not_entitled', 'unknown'] as const) {
+    it(`gates the single-source App button using ${state}, retaining other valid sources`, async () => {
+      const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
+      circlesByAccount['account-a'] = [circleFixture({ circleId: 'circle-1', membershipId: 'ms-1', name: '当前期圈子', billingKind: 'paid' })]
+      const base = { ...membershipFixture({ circleId: 'circle-1', membershipId: 'ms-1', billingKind: 'paid' }), currentPeriodEnd: '2099-11-19T00:00:00.000Z' }
+      membershipsByAccount['account-a'] = [{
+        ...base,
+        currentEntitlement: currentEntitlementFixture({ membershipId: base.membershipId, state, currentPeriodEnd: base.currentPeriodEnd, validUntil: base.currentPeriodEnd }),
+        paymentOrders: Array.from({ length: 5 }, (_, i) => ({ orderId: `recent-${i}`, storedStatus: state === 'entitled' ? 'cancelled' : 'paid', amountMinor: 29900, currency: 'CNY', effectivePaymentStatus: state === 'entitled' ? 'cancelled' : 'paid', correction: null })),
+      }]
+      await renderAssembly()
+      await navigateToDetail('circle-1', 'content')
+      const single = document.querySelector('[data-catalog-entry-id="entry-solo"] [data-testid="circle-content-app-card"] button') as HTMLButtonElement
+      const multi = document.querySelector('[data-catalog-entry-id="entry-multi"] [data-testid="circle-content-app-card"] button') as HTMLButtonElement
+      expect(single).not.toBeNull()
+      expect(single.disabled).toBe(state !== 'entitled')
+      expect(multi.disabled).toBe(false)
+      expect(screen.getByTestId('circle-detail-heading-status').getAttribute('data-status')).toBe(state === 'entitled' ? 'valid' : 'restore')
+      expect(openAppSpy).not.toHaveBeenCalled()
+    })
+  }
+})

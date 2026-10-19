@@ -594,9 +594,9 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
         circles: [circle], memberships: [member],
       }
       stubCatalogEntries = [{ kind: 'app', catalogEntryId: 'r4-current', artifactInstanceId: 'artifact-r4-current', version: { versionId: 'r4-version', version: '1.0.0' }, name: 'Current App', description: '', availability: 'available', deliveryMode: 'remote_url', remoteUrl: 'https://current.example.com', sources: [{ kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Current Circle' }] }]
-      render(createElement(MemberCircleResourceProvider, { resource: resource as import('@/context/MemberCircleResourceContext').MemberCirclesResource, children: personalHomeTree() }))
+      render(createElement(MemberCircleResourceProvider, { resource: resource as unknown as import('@/context/MemberCircleResourceContext').MemberCirclesResource, children: personalHomeTree() }))
       await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
-      expect((screen.getByRole('button', { name: i18n.t('common.open'), exact: true }) as HTMLButtonElement).disabled).toBe(state !== 'entitled')
+      expect((screen.getByRole('button', { name: i18n.t('common.open') }) as HTMLButtonElement).disabled).toBe(state !== 'entitled')
       expect(openApp).not.toHaveBeenCalled()
     })
   }
