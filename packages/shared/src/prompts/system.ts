@@ -1117,7 +1117,8 @@ Contract:
 - One complete HTML document, fully self-contained: inline CSS/JS, no external http(s) resources (no CDN, no web fonts, no image hotlinks — use data: URIs). SVG/xmlns namespace identifiers are fine.
 - Never reference \`@polo-ai/sdk\`. The only sanctioned deep link is \`poloai://action/ui-event/\` (host-bridge events, and only when the bundle declares \`<meta name="polo-bridge-capabilities" content="ui-event">\` — otherwise every event is rejected); any other \`poloai://\` link is rejected.
 - 512 KB hard limit per bundle.
-- Iterate by resending the COMPLETE html with \`updateOf\` set to the returned app id; each update is a full rewrite (version increments).
+- Keep mutable state OUT of the HTML: declare it with \`<meta name="polo-app-data" content="state.json">\` (path relative to the session data/ directory; at most 3 files per app, ≤1MB each). The host hands the file's content to the card on attach and after every data update — the card reads it from the ui_state message, never by fetching the file.
+- Iterate DATA with \`update_app_data\` (a small JSON write; the mounted card re-renders immediately). Reserve \`generate_app\` + \`updateOf\` for STRUCTURAL changes — each one is a full HTML rewrite (version increments).
 ` : ''}
 ## Document Tools
 
