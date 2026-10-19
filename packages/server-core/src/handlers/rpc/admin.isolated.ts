@@ -129,6 +129,9 @@ const adminClientBehavior = {
   listProductSpaces: async (_accessToken: string): Promise<any> => {
     throw new Error('listProductSpaces behavior not configured')
   },
+  issuePaymentHandoff: async (_accessToken: string, _productSpaceId: string): Promise<any> => {
+    throw new Error('issuePaymentHandoff behavior not configured')
+  },
   getProductSpaceCatalog: async (_accessToken: string, _context: unknown): Promise<any> => {
     throw new Error('getProductSpaceCatalog behavior not configured')
   },
@@ -237,6 +240,11 @@ class MockAdminClient {
   async listProductSpaces(accessToken: string) {
     adminClientCalls.push({ method: 'listProductSpaces', args: [], accessToken })
     return adminClientBehavior.listProductSpaces(accessToken)
+  }
+
+  async issuePaymentHandoff(accessToken: string, productSpaceId: string) {
+    adminClientCalls.push({ method: 'issuePaymentHandoff', args: [productSpaceId], accessToken })
+    return adminClientBehavior.issuePaymentHandoff(accessToken, productSpaceId)
   }
 
   async getProductSpaceCatalog(accessToken: string, context: unknown) {
@@ -5388,19 +5396,41 @@ describe('ProductSpace App dedicated compute resolution', () => {
 })
 
 describe('Current-space payment browser handoff', () => {
+  const handoffTicket = {
+    ticket: 'A'.repeat(43),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    accountId: 'user-1',
+    productSpaceId: 'space-a',
+  }
   async function setup() {
     const h = createHarness()
     await h.login({ clientId: 'client-1', workspaceId: null, webContentsId: null }, 'admin', 'secret')
     setRuntimeActiveProductSpaceAccount('user-1'); setRuntimeActiveProductSpace('space-a')
     return h
   }
-  it('uses the current authenticated personal space and puts no credential in the browser URL', async () => {
+  it('exchanges the fenced scope for a ticket and opens only the static handoff fragment route', async () => {
     const h = await setup()
     adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal' }] })
+    adminClientBehavior.issuePaymentHandoff = async (_accessToken, productSpaceId) => {
+      expect(productSpaceId).toBe('space-a')
+      return { ...handoffTicket }
+    }
     const result = await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })
     expect(result).toMatchObject({ success: true, accountId: 'user-1', productSpaceId: 'space-a' })
-    expect(new URL(result.url).pathname).toBe('/pay/space-a/credits/consumption')
-    expect(new URL(result.url).search).toBe('')
+    const url = new URL(result.url)
+    // POO-112: the browser lands on /pay/handoff with the ticket fragment —
+    // never the payer-gated consumption page, never a query parameter.
+    expect(url.pathname).toBe('/pay/handoff')
+    expect(url.search).toBe('')
+    expect(url.hash).toBe(`#ticket=${handoffTicket.ticket}`)
+  })
+  it('refuses a ticket that does not bind the fenced account and space', async () => {
+    const h = await setup()
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal' }] })
+    adminClientBehavior.issuePaymentHandoff = async () => ({ ...handoffTicket, productSpaceId: 'space-other' })
+    expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
+    adminClientBehavior.issuePaymentHandoff = async () => ({ ...handoffTicket, accountId: 'user-9' })
+    expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
   })
   it('denies current enterprise member even if another listed enterprise is owned', async () => {
     const h = await setup()
@@ -5412,6 +5442,15 @@ describe('Current-space payment browser handoff', () => {
     adminClientBehavior.listProductSpaces = async () => {
       setRuntimeActiveProductSpace('space-b'); setRuntimeActiveProductSpace('space-a')
       return { productSpaces: [{ id: 'space-a', kind: 'personal' }] }
+    }
+    expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false })
+  })
+  it('discards the ticket when the space switches while issuance is in flight', async () => {
+    const h = await setup()
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal' }] })
+    adminClientBehavior.issuePaymentHandoff = async () => {
+      setRuntimeActiveProductSpace('space-b'); setRuntimeActiveProductSpace('space-a')
+      return { ...handoffTicket }
     }
     expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false })
   })

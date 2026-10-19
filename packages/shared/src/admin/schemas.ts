@@ -436,6 +436,21 @@ export const RemoveOrganizationMemberRpcInputSchema = z.object({
   reason: z.string().trim().min(1).max(512).optional(),
 }).strict()
 
+// POO-112 browser payment handoff: strictly the four fields the desktop may
+// know. The ticket is the ONLY credential allowed to travel through the
+// renderer, and only inside a URL fragment built by the server-core layer —
+// never a session token, never a server-authored redirect URL.
+export const PaymentHandoffTicketSchema = z.object({
+  ticket: nonBlankString(64).refine(
+    value => /^[A-Za-z0-9_-]{43}$/.test(value),
+    'Payment handoff ticket must be base64url of 32 bytes',
+  ),
+  expiresAt: z.string().datetime({ offset: true }),
+  accountId: AdminEntityIdSchema,
+  productSpaceId: AdminEntityIdSchema,
+}).strict()
+export type PaymentHandoffTicket = z.infer<typeof PaymentHandoffTicketSchema>
+
 export {
   billingRuntimeRequestResponseSchema as AdminGetAppRequestResponseSchema,
   billingRuntimeAdmissionResponseSchema as AdminAdmitAppRequestResponseSchema,
