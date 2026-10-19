@@ -822,3 +822,30 @@ describe('R4FIX current entitlement in subscription status', () => {
     expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).not.toBe('active')
   })
 })
+
+// Current-period authority replaces recent-order inference; old tests stay unchanged.
+describe('R4FIX-02 subscription consumes current-period authority', () => {
+  for (const state of ['entitled', 'not_entitled', 'unknown'] as const) {
+    it(`uses ${state} even when recent order history points the other way`, async () => {
+      const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
+      const base = membershipFixture()
+      const member = {
+        ...base,
+        currentEntitlement: currentEntitlementFixture({ membershipId: base.membershipId, state, currentPeriodEnd: base.currentPeriodEnd, validUntil: base.currentPeriodEnd }),
+        paymentOrders: Array.from({ length: 5 }, (_, i) => ({ ...base.paymentOrders[0]!, orderId: `future-${i}`, effectivePaymentStatus: state === 'entitled' ? 'cancelled' : 'paid' })),
+      }
+      renderPanel({ membership: member })
+      expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status') === 'active').toBe(state === 'entitled')
+    })
+  }
+  it('expires a free entitlement at validUntil without another receipt', async () => {
+    const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
+    const until = new Date(Date.now() + 180).toISOString()
+    const member = membershipFixture({ billingKind: 'free', currentPeriodEnd: null })
+    renderPanel({ circle: circleFixture({ billingKind: 'free', currentPeriodEnd: null }), membership: {
+      ...member, currentEntitlement: currentEntitlementFixture({ membershipId: member.membershipId, currentPeriodEnd: null, validUntil: until, source: { ...currentEntitlementFixture().source, billingKind: 'free', orderId: null } }),
+    } })
+    expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).toBe('active')
+    await waitFor(() => expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).not.toBe('active'))
+  })
+})
