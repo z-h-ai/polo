@@ -565,6 +565,39 @@ describe('outer route assembly (P70-CIRCLE-DETAIL-01)', () => {
     expect(screen.queryByTestId('my-circles-page')).toBeNull()
   })
 
+  it('P-R2-01: detail → circles → return home clears the outer history', async () => {
+    await renderAssembly()
+    await navigateToDetail()
+    fireEvent.click(screen.getByTestId('circle-detail-back'))
+    await waitFor(() => expect(screen.getByTestId('my-circles-page')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('my-circles-back'))
+    await waitFor(() => expect(screen.getByTestId('home-app-hub')).toBeTruthy())
+    expect(observedRoute).toEqual({ kind: 'home' })
+    expect(probeClientPage!.canGoBack).toBe(false)
+    await act(async () => probeClientPage!.back())
+    expect(observedRoute).toEqual({ kind: 'home' })
+  })
+
+  for (const billingKind of ['free', 'paid'] as const) {
+    it(`P-R2-03: ${billingKind} subscription has one validity fact, in its details`, async () => {
+      const circle = circlesByAccount['account-a']![0]!
+      const membership = membershipsByAccount['account-a']![0]!
+      circle.billingKind = billingKind
+      membership.billingKind = billingKind
+      if (billingKind === 'paid') {
+        circle.currentPeriodEnd = membership.currentPeriodEnd = '2028-10-18T00:00:00.000Z'
+      }
+      await renderAssembly()
+      await navigateToDetail('circle-1', 'subscription')
+      await waitFor(() => expect(screen.getByTestId('circle-subscription-validity-value')).toBeTruthy())
+      expect(screen.queryByTestId('circle-detail-term')).toBeNull()
+      const fact = billingKind === 'free' ? i18n.t('poo70.c6.detail.freeTerm') : '2028-10-18'
+      expect(screen.getByTestId('circle-subscription-validity-value').textContent).toContain(fact)
+      expect(screen.getByTestId('circle-detail-page').textContent!.split(fact)).toHaveLength(2)
+      expect(screen.getByTestId('circle-detail-status')).toBeTruthy()
+    })
+  }
+
   it('switches all three sections through the route field, rendering each panel exactly once', async () => {
     await renderAssembly()
     await navigateToDetail()

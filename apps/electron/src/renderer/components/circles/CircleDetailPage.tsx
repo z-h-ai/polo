@@ -487,7 +487,7 @@ export function CircleDetailPage({
                   >
                     {statusLabel}
                   </span>
-                  {termText !== '' && termText !== statusLabel && (
+                  {section !== 'subscription' && termText !== '' && termText !== statusLabel && (
                     <small className="text-[12px] text-muted-foreground" data-testid="circle-detail-term">
                       {termText}
                     </small>

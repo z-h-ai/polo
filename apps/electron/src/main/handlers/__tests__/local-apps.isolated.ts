@@ -424,6 +424,8 @@ let scopedRegistryOverride: unknown = null
 
 const scopedRegistry = {
   assertAppAuthorized,
+  listAllCatalogScopes: mock(async (): Promise<CatalogLocalAppScope[]> => []),
+  removeLegacyInstallationState: mock(async (_scope: CatalogLocalAppScope) => {}),
   install: scopedInstall,
   cancelInstall: mock(async () => false),
   start: scopedStart,
@@ -790,6 +792,37 @@ describe('local app main-process authorization boundary', () => {
     setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
     setRuntimeOfflineReadOnly(false)
     resetExecutionRegistry()
+  })
+
+  it('P-R2-04: B bootstrap preserves A ProductSpace installs and cleans only identified legacy scopes', async () => {
+    const productScope = { ...scope('artifact-instance-a'), accountId: 'account-a' }
+    const legacyScope = scope('应用.App-ID')
+    const unknownScope = { ...scope('unknown-app'), accountId: 'account-c' }
+    scopedRegistry.listAllCatalogScopes.mockResolvedValueOnce([productScope, legacyScope, unknownScope])
+    scopedRegistry.removeLegacyInstallationState.mockClear()
+    // In production A is fenced after logout; calling normal stop/uninstall
+    // here would reject. The bootstrap cleaner must not call either path.
+    scopedRegistry.stop.mockImplementationOnce(async () => {
+      throw new Error('The Admin session for this local app account is ending')
+    })
+    const { runLegacyLocalAppCleaner } = await import('@polo-ai/server-core/runtime/legacy-state-cleaners')
+    signedInAccountId = 'account-b'
+    const result = await runLegacyLocalAppCleaner()
+    expect(result.ok).toBe(true)
+    expect(scopedRegistry.removeLegacyInstallationState.mock.calls).toEqual([[legacyScope]])
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+    scopedRegistry.stop.mockReset()
+    scopedRegistry.stop.mockImplementation(async item => ({ appId: item.catalogAppId, scope: item, status: 'stopped' as const }))
+  })
+
+  it('P-R2-04: a real legacy cleanup failure remains retryable rather than granting bootstrap success', async () => {
+    scopedRegistry.listAllCatalogScopes.mockResolvedValueOnce([scope()])
+    scopedRegistry.removeLegacyInstallationState.mockRejectedValueOnce(new Error('disk is read-only'))
+    const { runLegacyLocalAppCleaner } = await import('@polo-ai/server-core/runtime/legacy-state-cleaners')
+    const result = await runLegacyLocalAppCleaner()
+    expect(result.ok).toBe(false)
+    expect(result.failedRefs).toEqual([`organization-a:${scope().catalogAppId}`])
   })
 
   it('installs a bundle only after revalidating the exact ProductSpace Catalog tuple', async () => {

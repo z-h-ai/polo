@@ -1155,9 +1155,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   setLegacyLocalAppCleaner(async () => {
     const registry = getScopedLocalAppRuntimeRegistry()
     const failedRefs: string[] = []
-    // Enumerate EVERY persisted scope on this device — not only executions in
-    // the current registry — so stale Organization-era installation/runtime
-    // state cannot survive the direct switch.
+    // The storage tuple is shared by Organization-era and ProductSpace apps.
+    // Enumeration alone cannot classify an installation as legacy. Only an
+    // exact legacy Catalog cache binding may select it for invalidation;
+    // ProductSpace and unclassified installations belong to their accounts.
     let persistedScopes: CatalogLocalAppScope[] = []
     try {
       persistedScopes = await registry.listAllCatalogScopes()
@@ -1166,9 +1167,18 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     for (const scope of persistedScopes) {
       try {
-        await registry.stop(scope)
-        // Invalidate installation/runtime state while preserving user data.
-        await registry.uninstall(scope, { preserveData: true })
+        const cached = getCachedAppCatalog(scope.accountId, scope.organizationId)
+        const legacy = cached?.accountId === scope.accountId
+          && cached.organizationId === scope.organizationId
+          && getAppCatalogApps(cached).some(app => (
+            app.id === scope.catalogAppId
+            && app.deliveryMode === 'local_bundle'
+            && !app.artifactInstanceId
+          ))
+        if (!legacy) continue
+        // A logged-out account remains fenced. This Main-only teardown does
+        // not reauthorize it or use renderer lifecycle RPCs.
+        await registry.removeLegacyInstallationState(scope)
       } catch {
         failedRefs.push(`${scope.organizationId}:${scope.catalogAppId}`)
       }
