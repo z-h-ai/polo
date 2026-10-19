@@ -5591,3 +5591,33 @@ it('a delayed read-only response cannot revoke newer current-space App authority
   expect(authorityRecordCalls).toHaveLength(1)
   expect(isRuntimeProductSpaceRestricted('space-a')).toBe(false)
 })
+
+
+describe('R3FIX native late authentication after explicit logout', () => {
+  for (const method of ['logout', 'authLogout'] as const) {
+    for (const hasSession of [false, true]) {
+      it(`${method} invalidates pending login with old session=${hasSession}`, async () => {
+        const harness = createHarness()
+        const ctx = { clientId: 'r3', workspaceId: null, webContentsId: null }
+        if (hasSession) expect(await harness.login(ctx, 'old', 'secret')).toMatchObject({ success: true })
+        const pending = createDeferred<any>()
+        const response = {
+          accessToken: 'late-access', refreshToken: 'late-refresh', expiresIn: 3600,
+          user: { id: 'late-account', username: 'late', displayName: null, role: 'user', groupIds: [] },
+        }
+        adminClientBehavior.login = async () => pending.promise
+        const late = harness.login(ctx, 'late', 'secret')
+        // Wait until the actual login handler has entered its HTTP dependency.
+        while (!adminClientCalls.some(call => call.method === 'login' && call.args[0] === 'late')) {
+          await new Promise(resolve => setTimeout(resolve, 0))
+        }
+        expect(await harness[method](ctx)).toMatchObject({ success: true })
+        expect(managerState.tokens).toBeNull()
+        pending.resolve(response)
+        expect(await late).toMatchObject({ success: false, errorCode: 'SESSION_CHANGED' })
+        expect(managerState.tokens).toBeNull()
+        expect(adminSessionStarted.mock.calls.some(call => call[0] === 'late-account')).toBe(false)
+      })
+    }
+  }
+})

@@ -2269,3 +2269,25 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
     view.unmount()
   })
 })
+
+
+describe('R3FIX initial Catalog failure classification', () => {
+  for (const thrown of [false, true]) {
+    it(`uncached 503 is a load error, supports explicit retry, and never starts an App (thrown=${thrown})`, async () => {
+      syncCatalog = mock(async () => {
+        if (thrown) throw new Error('service unavailable')
+        return { success: false as const, errorCode: 'SERVER_ERROR', message: 'unavailable', status: 503 }
+      })
+      const { result } = renderHook(() => useAppCatalog())
+      await waitFor(() => expect(result.current.state.loading).toBe(false))
+      expect(result.current.state.catalog).toBeNull()
+      expect(result.current.state.accessMode).toBeNull()
+      expect(result.current.state.errorCode).not.toBeNull()
+      syncCatalog = mock(async id => syncResult(id, 'recovered'))
+      await act(async () => { await result.current.sync(true) })
+      expect(result.current.state.catalog).not.toBeNull()
+      expect(result.current.state.errorCode).toBeNull()
+      expect(startLocalApp).not.toHaveBeenCalled()
+    })
+  }
+})

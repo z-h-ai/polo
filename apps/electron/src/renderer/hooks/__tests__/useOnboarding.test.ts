@@ -866,3 +866,31 @@ describe('admin login session fencing (hook)', () => {
     expect(firstResult).toEqual({ success: true, accepted: true, expiresIn: 300, resendAfter: 60 })
   })
 })
+
+
+describe('R3FIX explicit password cancellation', () => {
+  afterEach(() => cleanup())
+  it('fences native authentication, blocks resubmit until cancellation settles, and ignores late success', async () => {
+    const pending = makeDeferred<AdminLoginResult>()
+    const cancelled = makeDeferred<{ success: true }>()
+    const adminLogin = mock(() => pending.promise)
+    const adminLogout = mock(() => cancelled.promise)
+    installElectronApi({ adminLogin, adminLogout })
+    const onComplete = mock(() => {})
+    const { result } = renderAdminLoginHooks({ onComplete })
+    await act(async () => { void result.current.handleAdminLogin('a', 'secret') })
+    let cancellation!: Promise<void>
+    act(() => { cancellation = result.current.handleAdminCancelLogin() })
+    expect(adminLogout).toHaveBeenCalledTimes(1)
+    await act(async () => { await result.current.handleAdminLogin('b', 'secret') })
+    expect(adminLogin).toHaveBeenCalledTimes(1)
+    await act(async () => { cancelled.resolve({ success: true }); await cancellation })
+    expect(result.current.state.step).toBe('admin-login')
+    expect(result.current.state.loginStatus).toBe('idle')
+    await act(async () => { pending.resolve({ success: true, user: adminUser('a') }) })
+    expect(onComplete).not.toHaveBeenCalled()
+    expect(result.current.state.loginStatus).toBe('idle')
+    await act(async () => { await result.current.handleAdminLogin('b', 'secret') })
+    expect(adminLogin).toHaveBeenCalledTimes(2)
+  })
+})

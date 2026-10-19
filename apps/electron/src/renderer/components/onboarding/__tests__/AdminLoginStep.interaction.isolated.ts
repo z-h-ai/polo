@@ -317,3 +317,24 @@ describe('AdminLoginStep shared rows', () => {
     expect(screen.getByTestId('admin-login-method-phone').textContent).toBe('Verification code')
   })
 })
+
+
+describe('R3FIX busy password cancellation controls', () => {
+  for (const action of ['button', 'escape']) {
+    it(`offers operational ${action} cancellation while password fields remain locked`, async () => {
+      const onCancel = mock(() => {})
+      renderWithI18n(createElement(AdminLoginStep, {
+        isLoading: true, phoneAuthEnabled: false, onCancel,
+        onClearError: () => {}, onSubmit: () => {},
+        onSendPhoneCode: async () => ({ success: false as const, errorCode: 'disabled' }),
+        onVerifyPhoneCode: async () => false,
+      }))
+      const cancel = screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement
+      expect(cancel.disabled).toBe(false)
+      expect((screen.getByLabelText(PASSWORD_LABEL) as HTMLInputElement).disabled).toBe(true)
+      if (action === 'button') fireEvent.click(cancel)
+      else fireEvent.keyDown(window, { key: 'Escape' })
+      expect(onCancel).toHaveBeenCalledTimes(1)
+    })
+  }
+})

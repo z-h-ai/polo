@@ -765,3 +765,35 @@ describe('MyCirclesPage navigation and toolbar restore (P70-CIRCLE-LIST-03)', ()
     expect(screen.getAllByTestId('circle-row').length).toBe(5)
   })
 })
+
+
+it('R3FIX retains toolbar through route-only unmount with the live relations provider', async () => {
+  const view = render(pageTree({ accountId: 'account-a-fixture' }))
+  await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
+  fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
+  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  view.rerender(pageTree({ accountId: 'account-a-fixture', withPage: false }))
+  expect(screen.queryByTestId('my-circles-page')).toBeNull()
+  view.rerender(pageTree({ accountId: 'account-a-fixture' }))
+  await waitFor(() => expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design'))
+  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+  // A second visit must not have persisted the initial empty render over the saved view.
+  view.rerender(pageTree({ accountId: 'account-a-fixture', withPage: false }))
+  view.rerender(pageTree({ accountId: 'account-a-fixture' }))
+  expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
+})
+
+
+it('R3FIX restores the toolbar on a route remount under production StrictMode', async () => {
+  const { StrictMode } = await import('react')
+  const tree = (withPage: boolean) => createElement(StrictMode, null,
+    pageTree({ accountId: 'account-a-fixture', withPage }))
+  const view = render(tree(true))
+  await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
+  fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
+  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  view.rerender(tree(false))
+  view.rerender(tree(true))
+  expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
+  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+})
