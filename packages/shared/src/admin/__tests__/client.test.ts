@@ -1560,6 +1560,76 @@ describe('AdminClient', () => {
   });
 });
 
+describe('AdminClient POO-112 browser payment handoff', () => {
+  const ticketBase = {
+    ticket: 'A'.repeat(43),
+    expiresAt: '2026-10-19T12:01:00.000Z',
+    accountId: 'account-a',
+    productSpaceId: 'space-a',
+  };
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    fetchCalls = [];
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('issues a handoff with the Bearer, the exact space, and a manual redirect policy', async () => {
+    mockJsonFetch(ticketBase);
+    const client = new AdminClient('https://admin.example.com');
+    const ticket = await client.issuePaymentHandoff('access-token', 'space-a');
+    expect(ticket).toEqual(ticketBase);
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/payment-handoff/issue');
+    expect(fetchCalls[0]!.init.method).toBe('POST');
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({ productSpaceId: 'space-a' }));
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization).toBe('Bearer access-token');
+    expect(fetchCalls[0]!.init.redirect).toBe('manual');
+  });
+
+  it('fails closed on a response that carries a URL, token, or any extra field', async () => {
+    const client = new AdminClient('https://admin.example.com');
+    // The old server contract answered with a browser URL; the strict ticket
+    // DTO must reject it instead of opening a page that demands login.
+    mockJsonFetch({ ...ticketBase, url: 'https://admin.example.com/pay/space-a/credits/consumption' });
+    await expect(client.issuePaymentHandoff('access-token', 'space-a'))
+      .rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+    mockJsonFetch({ ...ticketBase, accessToken: 'leaked-session-token' });
+    await expect(client.issuePaymentHandoff('access-token', 'space-a'))
+      .rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+    mockJsonFetch({ ...ticketBase, ticket: 'short' });
+    await expect(client.issuePaymentHandoff('access-token', 'space-a'))
+      .rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+  });
+
+  it('refuses to follow a redirect answer instead of leaking the Bearer onwards', async () => {
+    fetchCalls = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      fetchCalls.push({ url, init: init ?? {} });
+      return new Response(null, { status: 302, headers: { Location: 'https://admin.example.com/login' } });
+    }) as typeof globalThis.fetch;
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.issuePaymentHandoff('access-token', 'space-a')).rejects.toBeInstanceOf(AdminError);
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  it('maps honest handoff denials onto their status codes without retrying', async () => {
+    const client = new AdminClient('https://admin.example.com');
+    mockJsonFetch({ error: 'payer_required' }, 403);
+    await expect(client.issuePaymentHandoff('access-token', 'space-a'))
+      .rejects.toMatchObject({ errorCode: 'FORBIDDEN' });
+    mockJsonFetch({ error: 'rate_limited' }, 429);
+    await expect(client.issuePaymentHandoff('access-token', 'space-a'))
+      .rejects.toMatchObject({ errorCode: 'VALIDATION_ERROR' });
+    // mockJsonFetch resets the call log per answer: exactly one request behind
+    // each denial, so no denial silently became a retry.
+    expect(fetchCalls).toHaveLength(1);
+  });
+});
+
 describe('AdminClient POL-102 App billing (POO-54)', () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch;

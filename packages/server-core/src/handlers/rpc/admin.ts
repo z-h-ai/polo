@@ -2166,7 +2166,15 @@ export function registerAdminHandlers(
       if (!space || space.kind === 'enterprise' && space.role !== 'owner') {
         throw new AdminError('Only the current space payer may open billing', 'FORBIDDEN')
       }
-      return { url: paymentHandoffUrl(requireAdminUrl(), space), accountId, productSpaceId: space.id }
+      // The ticket is minted for the exact fenced scope and re-checked after
+      // issuance, so a space or account switch can never ship a stale ticket
+      // to the browser handoff page.
+      const ticket = await client.issuePaymentHandoff(accessToken, space.id)
+      assertCurrent()
+      if (ticket.accountId !== accountId || ticket.productSpaceId !== space.id) {
+        throw new AdminError('Payment handoff ticket does not match the current scope', 'FORBIDDEN')
+      }
+      return { url: paymentHandoffUrl(requireAdminUrl(), ticket), accountId, productSpaceId: space.id }
     })
   })
 

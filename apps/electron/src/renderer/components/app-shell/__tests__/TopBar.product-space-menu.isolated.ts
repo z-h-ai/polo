@@ -37,7 +37,11 @@ const personal = { id: 'personal', kind: 'personal', name: '我的空间', acces
 const enterprise = { id: 'enterprise', kind: 'enterprise', enterpriseId: 'org-a', name: '合法企业', accessMode: 'active', role: 'member', payer: { kind: 'enterprise', enterpriseId: 'org-a' } } as ProductSpaceSummary
 const restricted = { ...enterprise, id: 'restricted', enterpriseId: 'org-b', name: '受限企业', accessMode: 'read_only', restrictionCode: 'billing_restricted' } as ProductSpaceSummary
 const select = mock(() => {})
-const paymentHandoff = mock(async () => ({ success: true, accountId: 'account-a', productSpaceId: 'personal', url: 'https://admin.example.com/pay/personal/credits/consumption' }))
+// POO-112: the handoff now opens the static /pay/handoff landing route with
+// the single-use ticket in the URL fragment — never the gated consumption
+// page that used to demand a browser login.
+const handoffUrl = 'https://admin.example.com/pay/handoff#ticket=' + 'A'.repeat(43)
+const paymentHandoff = mock(async () => ({ success: true, accountId: 'account-a', productSpaceId: 'personal', url: handoffUrl }))
 const openPaymentUrl = mock(async (_url: string) => {})
 function tree(active: ProductSpaceSummary, productSpaces = [personal, enterprise, restricted]) {
   // All execution reads stay on the real current account/space tuple.
@@ -127,7 +131,27 @@ describe('Account payment entry', () => {
     await user.click(screen.getByTestId('topbar-account'))
     expect(paymentHandoff).not.toHaveBeenCalled()
     await user.click(screen.getByTestId('topbar-payment'))
-    await waitFor(() => expect(openPaymentUrl).toHaveBeenCalledWith('https://admin.example.com/pay/personal/credits/consumption'))
+    await waitFor(() => expect(openPaymentUrl).toHaveBeenCalledWith(handoffUrl))
+  })
+  it('mints at most one handoff while a click is still in flight', async () => {
+    // A second click during the first handoff must not mint a competing
+    // ticket: issuance supersedes the outstanding ticket for the same
+    // session+space, which would break the handoff the user already has.
+    let releaseHandoff!: (value: { success: boolean, accountId: string, productSpaceId: string, url: string }) => void
+    paymentHandoff.mockImplementationOnce(() => new Promise(resolve => { releaseHandoff = resolve }))
+    render(tree(personal))
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('topbar-account'))
+    await user.click(screen.getByTestId('topbar-payment'))
+    // The first click closes the account menu; the impatient second click
+    // re-opens it and fires again while the first handoff is still in flight.
+    await user.click(screen.getByTestId('topbar-account'))
+    await user.click(await screen.findByTestId('topbar-payment'))
+    await waitFor(() => expect(releaseHandoff).toBeDefined())
+    expect(paymentHandoff).toHaveBeenCalledTimes(1)
+    releaseHandoff({ success: true, accountId: 'account-a', productSpaceId: 'personal', url: handoffUrl })
+    await waitFor(() => expect(openPaymentUrl).toHaveBeenCalledWith(handoffUrl))
+    expect(openPaymentUrl).toHaveBeenCalledTimes(1)
   })
   it('hides financial entry from enterprise members even if another enterprise is owned', async () => {
     const owner = { ...enterprise, id: 'other', role: 'owner' } as ProductSpaceSummary
@@ -148,7 +172,7 @@ it('drops a delayed browser handoff when the visible account space changes', asy
   await user.click(screen.getByTestId('topbar-payment'))
   await waitFor(() => expect(resolveHandoff).toBeDefined())
   view.rerender(tree(enterprise))
-  resolveHandoff({ success: true, accountId: 'account-a', productSpaceId: personal.id, url: 'https://admin.example.com/pay/personal/credits/consumption' })
+  resolveHandoff({ success: true, accountId: 'account-a', productSpaceId: personal.id, url: handoffUrl })
   await new Promise(resolve => setTimeout(resolve, 0))
   expect(openPaymentUrl).not.toHaveBeenCalled()
 })

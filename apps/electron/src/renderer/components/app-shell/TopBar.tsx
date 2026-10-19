@@ -117,9 +117,14 @@ export function TopBar() {
   const canOpenPayment = productSpace && !productSpace.pendingSwitch && (
     productSpace.activeProductSpace.kind === 'personal' || productSpace.activeProductSpace.role === 'owner'
   )
+  // One handoff at a time: every click would otherwise mint another ticket,
+  // superseding the one the user is about to redeem. Re-entry is dropped
+  // silently — the first click still owns the outcome.
+  const paymentHandoffInFlight = useRef(false)
   const openPayment = async () => {
     const scope = paymentScope.current
-    if (!scope || scope.pendingSwitch) return
+    if (!scope || scope.pendingSwitch || paymentHandoffInFlight.current) return
+    paymentHandoffInFlight.current = true
     try {
       const result = await window.electronAPI.adminPaymentHandoff()
       const current = paymentScope.current
@@ -130,6 +135,7 @@ export function TopBar() {
       }
       await window.electronAPI.openUrl(result.url)
     } catch { if (paymentScope.current === scope) toast.error(t("topbar.account.paymentError")) }
+    finally { paymentHandoffInFlight.current = false }
   }
 
   const unreadSessions = useMemo(() => (

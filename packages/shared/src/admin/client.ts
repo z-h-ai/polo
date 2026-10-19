@@ -71,6 +71,8 @@ import {
   AdminPhoneAuthResponseSchema,
   AdminRefreshResponseSchema,
   AdminValidateResponseSchema,
+  PaymentHandoffTicketSchema,
+  type PaymentHandoffTicket,
   SendPhoneAuthCodeResponseSchema,
   SetAdminPasswordResponseSchema,
   AcceptOrganizationJoinResponseSchema,
@@ -469,6 +471,28 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, ListOrganizationsResponseSchema);
+  }
+
+  /**
+   * POO-112: exchanges the current business Bearer for a single-use browser
+   * payment handoff ticket bound to this session and one ProductSpace. The
+   * response is parsed against the strict four-field ticket DTO — a server
+   * that answers with a URL, a token, or any extra field fails closed. The
+   * request itself is sent with `redirect: 'manual'`: a handoff endpoint has
+   * no reason to redirect, and following one could leak the Bearer onwards.
+   */
+  async issuePaymentHandoff(accessToken: string, productSpaceId: string): Promise<PaymentHandoffTicket> {
+    const data = await this.request<unknown>('/api/auth/payment-handoff/issue', {
+      method: 'POST',
+      accessToken,
+      body: { productSpaceId },
+      redirect: 'manual',
+    });
+    const parsed = PaymentHandoffTicketSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new AdminError('Admin payment handoff response is invalid', 'SERVER_ERROR');
+    }
+    return parsed.data;
   }
 
   /**
