@@ -14,6 +14,15 @@ export const KB_SEARCH_LIMIT = 20
 /** Per-collection hit cap used by the send-time reference lookup. */
 export const KB_SEARCH_PER_COLLECTION_LIMIT = 3
 export const KB_SNIPPET_CONTEXT_CHARS = 80
+/**
+ * Send-time reference resolution must never hold a message hostage (POO-108
+ * review #7): the whole resolution is raced against this wall clock and the
+ * store scan is additionally byte-budgeted (KB_SEND_MAX_SCAN_BYTES).
+ */
+export const KB_SEND_RESOLVE_TIMEOUT_MS = 1_500
+export const KB_SEND_MAX_SCAN_BYTES = 4 * 1024 * 1024
+/** Same ceiling the SET_SESSION_COLLECTIONS input schema enforces. */
+export const KB_SESSION_COLLECTIONS_MAX = 100
 
 export const KbDocumentStatusSchema = z.enum(['draft', 'in_review', 'published', 'rejected'])
 export type KbDocumentStatus = z.output<typeof KbDocumentStatusSchema>
@@ -54,6 +63,18 @@ export const KbWorkspaceRefSchema = z.object({
   workspaceId: KbWorkspaceIdSchema,
 }).strict()
 export type KbWorkspaceRefInput = z.output<typeof KbWorkspaceRefSchema>
+
+/**
+ * LIST_COLLECTIONS input. `publishedOnly` is the composer's read side: it
+ * returns only collections that can actually back a session scope, so a
+ * selected collection can never silently resolve to zero references
+ * (POO-108 review #16). The management app omits the flag and sees every
+ * collection, including empty ones it uploads into.
+ */
+export const KbListCollectionsInputSchema = KbWorkspaceRefSchema.extend({
+  publishedOnly: z.boolean().optional(),
+}).strict()
+export type KbListCollectionsInput = z.output<typeof KbListCollectionsInputSchema>
 
 export const KbDocumentRefSchema = z.object({
   workspaceId: KbWorkspaceIdSchema,
@@ -109,6 +130,18 @@ export const KbCollectionSchema = z.object({
   canManage: z.boolean(),
 }).strict()
 export type KbCollection = z.output<typeof KbCollectionSchema>
+
+/**
+ * LIST_COLLECTIONS response. `canManage` is the space's authoritative
+ * management capability derived from the trusted enterprise role — never
+ * from whether any collection exists yet, otherwise the first collection of
+ * an empty space could never be created (POO-108 review #6).
+ */
+export const KbCollectionListSchema = z.object({
+  canManage: z.boolean(),
+  collections: z.array(KbCollectionSchema),
+}).strict()
+export type KbCollectionList = z.output<typeof KbCollectionListSchema>
 
 export const KbDocumentSummarySchema = z.object({
   id: z.string(),

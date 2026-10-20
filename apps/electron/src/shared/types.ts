@@ -1371,7 +1371,7 @@ export interface ElectronAPI {
   onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void
 
   // Enterprise Knowledge Base (POO-108)
-  kbListCollections(input: import('@polo-ai/shared/protocol').KbWorkspaceRefInput): Promise<import('@polo-ai/shared/protocol').KbCollection[]>
+  kbListCollections(input: import('@polo-ai/shared/protocol').KbListCollectionsInput): Promise<import('@polo-ai/shared/protocol').KbCollectionList>
   kbCreateCollection(input: import('@polo-ai/shared/protocol').KbCreateCollectionInput): Promise<import('@polo-ai/shared/protocol').KbCollection>
   kbListDocuments(input: import('@polo-ai/shared/protocol').KbListDocumentsInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary[]>
   kbUploadDocument(input: import('@polo-ai/shared/protocol').KbUploadDocumentInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>

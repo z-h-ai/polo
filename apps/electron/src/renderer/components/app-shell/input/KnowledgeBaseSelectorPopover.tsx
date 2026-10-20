@@ -22,15 +22,17 @@ export interface KnowledgeBaseSelectorPopoverProps {
 
 /**
  * The composer's knowledge-base scope picker (POO-108): a multi-select over
- * the enterprise space's PUBLISHED collections. Server-side the kb RPC
- * already filters to published rows for members and refuses unpublished
- * collection ids on save, so this list is a direct projection of the store.
+ * the enterprise space's PUBLISHED collections. The kb RPC is asked for
+ * `publishedOnly` and this list filters again as a client-side backstop — a
+ * collection without published documents can never be offered for selection,
+ * because saving it is refused and sending it would silently resolve to zero
+ * references (review #16).
  */
 export function KnowledgeBaseSelectorPopover({
   open,
   onOpenChange,
   anchorRef,
-  collections,
+  collections: allCollections,
   loading,
   loadFailed,
   selectedIds,
@@ -39,6 +41,10 @@ export function KnowledgeBaseSelectorPopover({
   onClear,
 }: KnowledgeBaseSelectorPopoverProps) {
   const { t } = useTranslation()
+
+  const collections = allCollections?.filter(
+    collection => collection.documentCounts.published > 0,
+  ) ?? null
 
   if (loading) {
     return (

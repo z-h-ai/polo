@@ -327,6 +327,10 @@ export type SessionEvent =
   | { type: 'plan_submitted'; sessionId: string; message: Message }
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
   | { type: 'labels_changed'; sessionId: string; labels: string[] }
+  // POO-108: the authoritative per-session KB scope, broadcast after every
+  // server-side write (explicit save or first-send draft commit) so every
+  // window converges on the persisted value instead of its own draft.
+  | { type: 'kb_collections_changed'; sessionId: string; collectionIds: string[] }
   | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean }
   | { type: 'task_backgrounded'; sessionId: string; toolUseId: string; taskId: string; intent?: string; turnId?: string }
   | { type: 'shell_backgrounded'; sessionId: string; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }
@@ -410,7 +414,6 @@ export type SessionCommand =
   | { type: 'updateWorkingDirectory'; dir: string }
   | { type: 'setSources'; sourceSlugs: string[] }
   | { type: 'setLabels'; labels: string[] }
-  | { type: 'setKbCollections'; collectionIds: string[] }
   | { type: 'showInFinder' }
   | { type: 'copyPath' }
   | { type: 'shareToViewer' }

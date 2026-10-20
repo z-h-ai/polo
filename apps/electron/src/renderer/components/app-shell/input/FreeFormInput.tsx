@@ -173,8 +173,14 @@ export interface FreeFormInputProps {
   // = local draft only (isolated mounts without a session to persist to).
   /** Enterprise KB collections currently scoped to this session */
   enabledKbCollectionIds?: string[]
-  /** Callback when the KB scope changes (persists via the kb RPC) */
-  onKbCollectionsChange?: (collectionIds: string[]) => void
+  /**
+   * Callback when the KB scope changes. May return the save promise: the
+   * composer keeps the optimistic selection only while the server-side save
+   * succeeds, and reverts with an explicit error when it fails (reviews
+   * #11/#16 — a silent failure must never leave the UI claiming a scope the
+   * server does not hold).
+   */
+  onKbCollectionsChange?: (collectionIds: string[]) => void | Promise<void>
   // Skill selection (for @mentions)
   /** Available skills for @mention autocomplete */
   skills?: LoadedSkill[]
@@ -535,23 +541,38 @@ export function FreeFormInput({
   const [kbSelection, setKbSelection] = React.useState<string[]>([])
   const kbButtonRef = React.useRef<HTMLButtonElement>(null)
 
+  // POO-108 review #11: the draft scope is per-session. The effect keys on
+  // the session identity as well as the scope ids, so switching sessions can
+  // never leave session A's selection behind in session B's composer.
   const kbScopeKey = (enabledKbCollectionIds ?? []).join('\n')
   React.useEffect(() => {
     setKbSelection(kbScopeKey.length > 0 ? kbScopeKey.split('\n') : [])
-  }, [kbScopeKey])
+    setKbDropdownOpen(false)
+  }, [sessionId, kbScopeKey])
 
   const loadKbCollections = React.useCallback(async () => {
     if (!workspaceId) return
     setKbLoading(true)
     setKbLoadFailed(false)
     try {
-      setKbCollections(await window.electronAPI.kbListCollections({ workspaceId }))
+      // publishedOnly: the composer offers collections that can actually
+      // back a session scope, so a selection can never silently resolve to
+      // zero references (review #16).
+      const list = await window.electronAPI.kbListCollections({ workspaceId, publishedOnly: true })
+      setKbCollections(list.collections)
     } catch {
       setKbCollections(null)
       setKbLoadFailed(true)
     } finally {
       setKbLoading(false)
     }
+  }, [workspaceId])
+
+  // A workspace switch invalidates the cached collection list.
+  React.useEffect(() => {
+    setKbCollections(null)
+    setKbLoadFailed(false)
+    setKbLoading(false)
   }, [workspaceId])
 
   const handleKbDropdownToggle = React.useCallback(() => {
@@ -562,23 +583,36 @@ export function FreeFormInput({
     })
   }, [kbCollections, kbLoading, loadKbCollections])
 
+  // Optimistic selection with an explicit save contract: a failed persist
+  // reverts the toggle and surfaces the error, instead of leaving a selected
+  // row the server never stored (reviews #11/#16).
+  const persistKbSelection = React.useCallback(async (previous: string[], next: string[]) => {
+    try {
+      await onKbCollectionsChange?.(next)
+    } catch {
+      setKbSelection(previous)
+      toast.error(t('chat.knowledgeBase.saveFailed'))
+    }
+  }, [onKbCollectionsChange, t])
+
   const handleKbToggleCollection = React.useCallback((collectionId: string) => {
     setKbSelection(current => {
+      const previous = current
       const next = current.includes(collectionId)
         ? current.filter(id => id !== collectionId)
         : [...current, collectionId]
-      onKbCollectionsChange?.(next)
+      void persistKbSelection(previous, next)
       return next
     })
-  }, [onKbCollectionsChange])
+  }, [persistKbSelection])
 
   const handleKbClearSelection = React.useCallback(() => {
     setKbSelection(current => {
       if (current.length === 0) return current
-      onKbCollectionsChange?.([])
+      void persistKbSelection(current, [])
       return []
     })
-  }, [onKbCollectionsChange])
+  }, [persistKbSelection])
 
   // Input settings (loaded from config)
   const [autoCapitalisation, setAutoCapitalisation] = React.useState(true)
@@ -1291,10 +1325,14 @@ export function FreeFormInput({
 
     const attachmentSnapshot = attachments
 
-    // POO-108: commit the composer's KB scope with the send. The SEND_MESSAGE
-    // handler filters it against the published store and persists it; an
-    // unchanged scope is a no-op server-side.
-    const kbDraft = onKbCollectionsChange && kbSelection.length > 0
+    // POO-108: commit the composer's KB scope with the send. The selection
+    // is carried EXPLICITLY — including an empty array, which commits "no
+    // collections" in the same operation as the message. Converting `[]` to
+    // an omission would let a failed clear-save fall back to the server's
+    // stale scope and silently attach it to this message (review #12). The
+    // SEND_MESSAGE handler filters against the published store and persists;
+    // an unchanged scope is a no-op server-side.
+    const kbDraft = onKbCollectionsChange
       ? { kbCollectionIds: [...kbSelection] }
       : undefined
 

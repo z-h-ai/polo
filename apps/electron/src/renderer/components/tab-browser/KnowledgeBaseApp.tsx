@@ -56,8 +56,11 @@ function kbErrorText(t: (key: string, options?: Record<string, unknown>) => stri
   if (code === 'kb_manage_required') return t('knowledgeBase.errors.manageRequired')
   if (code === 'kb_content_too_large') return t('knowledgeBase.errors.tooLarge')
   if (code === 'kb_invalid_transition') return t('knowledgeBase.errors.invalidTransition')
+  if (code === 'kb_delete_not_allowed') return t('knowledgeBase.errors.deleteNotAllowed')
   if (code === 'kb_collection_not_found' || code === 'kb_document_not_found') return t('knowledgeBase.errors.notFound')
   if (code === 'kb_unavailable_in_personal') return t('knowledgeBase.errors.personalSpace')
+  if (code === 'kb_space_read_only') return t('knowledgeBase.errors.spaceReadOnly')
+  if (code === 'kb_space_mismatch') return t('knowledgeBase.errors.spaceMismatch')
   if (code === 'OFFLINE_READ_ONLY') return t('knowledgeBase.errors.offline')
   return t('knowledgeBase.errors.generic')
 }
@@ -79,6 +82,10 @@ export function KnowledgeBaseApp() {
   const workspaceId = activeWorkspaceId ?? ''
 
   const [collections, setCollections] = useState<KbCollection[]>([])
+  // POO-108 review #6: the management capability is the trusted space role
+  // returned with the list — never derived from existing rows, so an owner of
+  // an empty space can still create the first collection.
+  const [canManage, setCanManage] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null)
@@ -102,18 +109,18 @@ export function KnowledgeBaseApp() {
     () => collections.find(collection => collection.id === selectedCollectionId) ?? null,
     [collections, selectedCollectionId],
   )
-  const canManage = selectedCollection?.canManage ?? collections.some(collection => collection.canManage)
 
   const refreshCollections = useCallback(async (preferId?: string) => {
     if (!workspaceId) return
     setLoading(true)
     setLoadError(null)
     try {
-      const rows = await window.electronAPI.kbListCollections({ workspaceId })
-      setCollections(rows)
+      const list = await window.electronAPI.kbListCollections({ workspaceId })
+      setCanManage(list.canManage)
+      setCollections(list.collections)
       setSelectedCollectionId(current => {
         const wanted = preferId ?? current
-        return wanted && rows.some(row => row.id === wanted) ? wanted : rows[0]?.id ?? null
+        return wanted && list.collections.some(row => row.id === wanted) ? wanted : list.collections[0]?.id ?? null
       })
     } catch (error) {
       setLoadError(kbErrorText(t, error))
@@ -266,6 +273,9 @@ export function KnowledgeBaseApp() {
           </>
         )
       case 'in_review':
+        // No delete affordance while under review: the store refuses it and
+        // the review trail stays meaningful — reject (or revert) first
+        // (review #14).
         return (
           <>
             <Button
@@ -285,7 +295,6 @@ export function KnowledgeBaseApp() {
             >
               {t('knowledgeBase.actions.reject')}
             </Button>
-            <DeleteButton disabled={busy} label={t('knowledgeBase.actions.delete')} onClick={() => setDeleteTarget(doc)} />
           </>
         )
       case 'rejected':
@@ -475,7 +484,7 @@ export function KnowledgeBaseApp() {
                       </span>
                       {doc.status === 'rejected' && doc.rejectReason && (
                         <p className="m-0 w-full text-[11px] leading-[1.5] text-destructive/80">
-                          {t('knowledgeBase.rejectReason', { reason: doc.rejectReason })}
+                          {t('knowledgeBase.rejectReasonDetail', { reason: doc.rejectReason })}
                         </p>
                       )}
                     </li>

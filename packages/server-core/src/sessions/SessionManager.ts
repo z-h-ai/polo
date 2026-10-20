@@ -7870,6 +7870,9 @@ export class SessionManager implements ISessionManager {
         timestamp: this.monotonic(),
         attachments: storedAttachments,
         badges: options?.badges,
+        // The KB reference snapshot rides the message on FIRST persistence —
+        // steer and queue replays must not lose it (review #10).
+        kbReferences: options?.kbReferences,
       }
       managed.messages.push(userMessage)
     }
@@ -10943,8 +10946,10 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Set the per-session Enterprise Knowledge Base scope (POO-108). The
-   * snapshot is validated by the kb RPC handler before this call; here it is
-   * just durable session state, persisted like labels.
+   * snapshot is validated and audited by the kb RPC handler before this call;
+   * here it is just durable session state, persisted like labels and
+   * broadcast so every window converges on the persisted value instead of
+   * its own draft (review #11).
    */
   async setSessionKbCollections(sessionId: string, collectionIds: string[]): Promise<void> {
     const managed = this.sessions.get(sessionId)
@@ -10955,6 +10960,11 @@ export class SessionManager implements ISessionManager {
       await this.flushSession(managed.id)
       const watcher = this.configWatchers.get(managed.workspace.rootPath)
       watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
+      this.sendEvent({
+        type: 'kb_collections_changed',
+        sessionId: managed.id,
+        collectionIds,
+      }, managed.workspace.id)
     }
   }
 

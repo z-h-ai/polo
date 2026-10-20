@@ -521,11 +521,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const isEnterpriseSpace = productSpace?.activeProductSpace?.kind === 'enterprise'
   const handleKbCollectionsChange = React.useCallback((collectionIds: string[]) => {
     if (!isEnterpriseSpace || !session) return
-    void window.electronAPI.kbSetSessionCollections({
+    // The save promise is handed back to the composer: it keeps the
+    // optimistic selection only on success and reverts with an explicit
+    // error on failure (reviews #11/#16). The authoritative value still
+    // converges through the `kb_collections_changed` session event.
+    return window.electronAPI.kbSetSessionCollections({
       workspaceId: session.workspaceId,
       sessionId: session.id,
       collectionIds,
-    }).catch(() => {})
+    }).then(() => undefined)
   }, [isEnterpriseSpace, session])
 
   // Input is only disabled when explicitly disabled (e.g., agent needs activation)

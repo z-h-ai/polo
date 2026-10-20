@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { join, resolve, sep } from 'path'
 import type {
   KbCollection,
@@ -18,14 +18,86 @@ import {
 /**
  * Enterprise Knowledge Base local store (POO-108).
  *
- * Content lives directly under the workspace: `<workspaceRoot>/.polo-kb/`
- * with `collections/{collectionId}/meta.json`,
+ * Content lives under the workspace, scoped to the TRUSTED enterprise
+ * ProductSpace that owns it: `<workspaceRoot>/.polo-kb/spaces/<spaceHash>/`
+ * with `space.json` (the immutable ProductSpace↔enterprise binding),
+ * `collections/{collectionId}/meta.json`,
  * `collections/{collectionId}/documents/{docId}/meta.json + content.md`,
  * `versions/{docId}/v{n}.md` publish snapshots, `recycle/` and `audit.jsonl`.
  * Every mutating call appends an audit entry; the RPC handler layer owns the
  * permission checks, this layer owns the filesystem truth and the state
- * machine.
+ * machine. A store bound to one enterprise ProductSpace is never readable or
+ * writable through another space's binding — switching the same workspace
+ * between enterprises keeps each space's KB isolated (review #1).
  */
+
+/** The trusted enterprise ProductSpace a KB store belongs to. */
+export interface KbSpaceBinding {
+  productSpaceId: string
+  enterpriseId: string
+}
+
+/**
+ * ProductSpace ids are opaque (any non-blank string up to 512 chars), so the
+ * directory segment is a deterministic hash — collision-free, traversal-safe
+ * and stable across processes. The raw ids stay readable in `space.json`.
+ */
+export function kbSpaceSegment(productSpaceId: string): string {
+  return createHash('sha256').update(productSpaceId).digest('hex').slice(0, 32)
+}
+
+export function kbRootPath(workspaceRoot: string, binding: KbSpaceBinding): string {
+  return join(resolve(workspaceRoot), KB_DIR, 'spaces', kbSpaceSegment(binding.productSpaceId))
+}
+
+interface KbSpaceMarker {
+  productSpaceId: string
+  enterpriseId: string
+  boundAt: string
+}
+
+function markerMatches(marker: KbSpaceMarker, binding: KbSpaceBinding): boolean {
+  return marker.productSpaceId === binding.productSpaceId && marker.enterpriseId === binding.enterpriseId
+}
+
+function readSpaceMarker(root: string, binding: KbSpaceBinding): void {
+  const marker = readJson<KbSpaceMarker>(join(root, 'space.json'))
+  if (!markerMatches(marker, binding)) {
+    throw new KbStoreError(
+      'kb_space_mismatch',
+      'The knowledge base store is bound to a different enterprise ProductSpace',
+    )
+  }
+}
+
+/**
+ * Read-side root: `null` when this space has no store yet (reads as an empty
+ * KB), explicit refusal when the store exists but was bound by a different
+ * enterprise claim on the same ProductSpace.
+ */
+function readSpaceRoot(workspaceRoot: string, binding: KbSpaceBinding): string | null {
+  const root = kbRootPath(workspaceRoot, binding)
+  if (!existsSync(join(root, 'space.json'))) return null
+  readSpaceMarker(root, binding)
+  return root
+}
+
+/** Write-side root: binds the store on first write, refuses a foreign binding. */
+function writeSpaceRoot(workspaceRoot: string, binding: KbSpaceBinding): string {
+  const root = kbRootPath(workspaceRoot, binding)
+  if (existsSync(join(root, 'space.json'))) {
+    readSpaceMarker(root, binding)
+    return root
+  }
+  ensureDir(root)
+  const marker: KbSpaceMarker = {
+    productSpaceId: binding.productSpaceId,
+    enterpriseId: binding.enterpriseId,
+    boundAt: nowIso(),
+  }
+  writeJson(join(root, 'space.json'), marker)
+  return root
+}
 
 export interface KbCollectionRecord {
   id: string
@@ -65,10 +137,6 @@ export class KbStoreError extends Error {
 
 const KB_DIR = '.polo-kb'
 const KB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/
-
-export function kbRootPath(workspaceRoot: string): string {
-  return join(resolve(workspaceRoot), KB_DIR)
-}
 
 function assertKbId(kind: string, id: string): string {
   if (!KB_ID_PATTERN.test(id)) {
@@ -170,10 +238,10 @@ function writeVersionSnapshot(root: string, record: KbDocumentRecord, content: s
 
 export function appendAudit(
   workspaceRoot: string,
+  binding: KbSpaceBinding,
   entry: { actor: string; action: string; target: string; detail?: Record<string, unknown> },
 ): void {
-  const root = kbRootPath(workspaceRoot)
-  ensureDir(root)
+  const root = writeSpaceRoot(workspaceRoot, binding)
   const record: KbAuditEntry = {
     at: nowIso(),
     actor: entry.actor,
@@ -184,8 +252,10 @@ export function appendAudit(
   writeFileSync(join(root, 'audit.jsonl'), `${JSON.stringify(record)}\n`, { flag: 'a' })
 }
 
-export function readAudit(workspaceRoot: string): KbAuditEntry[] {
-  const path = join(kbRootPath(workspaceRoot), 'audit.jsonl')
+export function readAudit(workspaceRoot: string, binding: KbSpaceBinding): KbAuditEntry[] {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return []
+  const path = join(root, 'audit.jsonl')
   if (!existsSync(path)) return []
   return readFileSync(path, 'utf-8')
     .split('\n')
@@ -225,9 +295,11 @@ function toCollection(
 
 export function listCollections(
   workspaceRoot: string,
+  binding: KbSpaceBinding,
   canManage: boolean,
 ): KbCollection[] {
-  const root = kbRootPath(workspaceRoot)
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return []
   const dir = join(root, 'collections')
   if (!existsSync(dir)) return []
   const rows: KbCollection[] = []
@@ -242,10 +314,11 @@ export function listCollections(
 
 export function createCollection(
   workspaceRoot: string,
+  binding: KbSpaceBinding,
   input: { name: string; description: string },
   actor: string,
 ): KbCollection {
-  const root = kbRootPath(workspaceRoot)
+  const root = writeSpaceRoot(workspaceRoot, binding)
   const record: KbCollectionRecord = {
     id: createKbId(),
     name: input.name.trim(),
@@ -256,7 +329,7 @@ export function createCollection(
   const dir = insideRoot(root, join(root, 'collections', record.id))
   ensureDir(dir)
   writeJson(join(dir, 'meta.json'), record)
-  appendAudit(workspaceRoot, {
+  appendAudit(workspaceRoot, binding, {
     actor,
     action: 'collection.create',
     target: record.id,
@@ -265,8 +338,13 @@ export function createCollection(
   return toCollection(root, record, true)
 }
 
-export function listDocuments(workspaceRoot: string, collectionId: string): KbDocumentSummary[] {
-  const root = kbRootPath(workspaceRoot)
+export function listDocuments(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  collectionId: string,
+): KbDocumentSummary[] {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) throw new KbStoreError('kb_collection_not_found')
   readCollectionRecord(root, assertKbId('collectionId', collectionId))
   const dir = insideRoot(root, join(root, 'collections', collectionId, 'documents'))
   if (!existsSync(dir)) return []
@@ -282,11 +360,12 @@ export function listDocuments(workspaceRoot: string, collectionId: string): KbDo
 
 export function uploadDocument(
   workspaceRoot: string,
+  binding: KbSpaceBinding,
   collectionId: string,
   input: { title: string; content: string },
   actor: string,
 ): KbDocumentSummary {
-  const root = kbRootPath(workspaceRoot)
+  const root = writeSpaceRoot(workspaceRoot, binding)
   readCollectionRecord(root, assertKbId('collectionId', collectionId))
   if (Buffer.byteLength(input.content, 'utf-8') > KB_MAX_CONTENT_BYTES) {
     throw new KbStoreError('kb_content_too_large')
@@ -304,7 +383,7 @@ export function uploadDocument(
     rejectReason: null,
   }
   writeDocumentRecord(root, record, input.content)
-  appendAudit(workspaceRoot, {
+  appendAudit(workspaceRoot, binding, {
     actor,
     action: 'document.upload',
     target: record.id,
@@ -313,8 +392,9 @@ export function uploadDocument(
   return toSummary(record)
 }
 
-export function getDocument(workspaceRoot: string, docId: string): KbDocument | null {
-  const root = kbRootPath(workspaceRoot)
+export function getDocument(workspaceRoot: string, binding: KbSpaceBinding, docId: string): KbDocument | null {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) throw new KbStoreError('kb_document_not_found')
   const record = readDocumentRecord(root, assertKbId('docId', docId))
   return { ...toSummary(record), content: readContent(root, record) }
 }
@@ -330,11 +410,13 @@ const TRANSITION_TARGET: Record<KbTransitionAction, KbDocumentStatus> = {
 
 export function transitionDocument(
   workspaceRoot: string,
+  binding: KbSpaceBinding,
   docId: string,
   action: KbTransitionAction,
   opts: { actor: string; reason?: string },
 ): KbDocumentSummary {
-  const root = kbRootPath(workspaceRoot)
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) throw new KbStoreError('kb_document_not_found')
   const record = readDocumentRecord(root, assertKbId('docId', docId))
   const target = TRANSITION_TARGET[action]
   if (!KB_DOCUMENT_TRANSITIONS[record.status]?.includes(target)) {
@@ -357,7 +439,7 @@ export function transitionDocument(
     record.rejectReason = null
   }
   writeDocumentRecord(root, record)
-  appendAudit(workspaceRoot, {
+  appendAudit(workspaceRoot, binding, {
     actor: opts.actor,
     action: `document.${action}`,
     target: record.id,
@@ -370,13 +452,28 @@ export function transitionDocument(
   return toSummary(record)
 }
 
+/**
+ * The agreed deletion contract covers `draft` / `published` / `rejected` only
+ * — a document under review must be rejected (or reverted) first, so the
+ * review trail stays meaningful (review #14).
+ */
+const KB_DELETABLE_STATUSES: ReadonlySet<KbDocumentStatus> = new Set(['draft', 'published', 'rejected'])
+
 export function deleteDocument(
   workspaceRoot: string,
+  binding: KbSpaceBinding,
   docId: string,
   actor: string,
 ): { recycled: true } {
-  const root = kbRootPath(workspaceRoot)
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) throw new KbStoreError('kb_document_not_found')
   const record = readDocumentRecord(root, assertKbId('docId', docId))
+  if (!KB_DELETABLE_STATUSES.has(record.status)) {
+    throw new KbStoreError(
+      'kb_delete_not_allowed',
+      `A ${record.status} document cannot be deleted; reject it first`,
+    )
+  }
   const source = insideRoot(
     root,
     join(root, 'collections', record.collectionId, 'documents', record.id),
@@ -394,7 +491,7 @@ export function deleteDocument(
     status: record.status,
     recycledAt,
   })
-  appendAudit(workspaceRoot, {
+  appendAudit(workspaceRoot, binding, {
     actor,
     action: 'document.delete',
     target: record.id,
@@ -455,15 +552,31 @@ function buildSnippet(content: string, tokens: string[]): string {
 }
 
 /**
+ * Bounds for a search pass (POO-108 review #7): the scan is synchronous, so
+ * the send-time lookup caps how much content it may read and by when it must
+ * stop — a huge KB can never stall the send loop.
+ */
+export interface KbSearchBudget {
+  /** Stop scanning once this many content bytes have been read. */
+  maxScannedBytes?: number
+  /** Wall-clock deadline (Date.now() based), checked between documents. */
+  deadline?: number
+}
+
+/**
  * Keyword search over published documents only. Title hits weigh more than
  * body hits; results sort by score (desc) then title, capped at top 20.
+ * Honors the optional budget by stopping early — partial results stay valid.
  */
 export function searchDocuments(
   workspaceRoot: string,
+  binding: KbSpaceBinding,
   query: string,
   collectionIds?: string[],
+  budget?: KbSearchBudget,
 ): KbSearchHit[] {
-  const root = kbRootPath(workspaceRoot)
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return []
   const tokens = tokenizeKbQuery(query)
   const wanted = collectionIds ? new Set(collectionIds) : null
   const collectionNames = new Map<string, string>()
@@ -471,7 +584,12 @@ export function searchDocuments(
   if (tokens.length === 0) return []
   const collectionsDir = join(root, 'collections')
   if (!existsSync(collectionsDir)) return []
+  let scannedBytes = 0
+  const outOfBudget = (): boolean =>
+    (budget?.deadline !== undefined && Date.now() >= budget.deadline)
+    || (budget?.maxScannedBytes !== undefined && scannedBytes >= budget.maxScannedBytes)
   for (const collectionEntry of readdirSync(collectionsDir, { withFileTypes: true })) {
+    if (outOfBudget()) break
     if (!collectionEntry.isDirectory()) continue
     const collectionMetaPath = insideRoot(root, join(collectionsDir, collectionEntry.name, 'meta.json'))
     if (!existsSync(collectionMetaPath)) continue
@@ -481,17 +599,20 @@ export function searchDocuments(
     const documentsDir = insideRoot(root, join(collectionsDir, collectionEntry.name, 'documents'))
     if (!existsSync(documentsDir)) continue
     for (const docEntry of readdirSync(documentsDir, { withFileTypes: true })) {
+      if (outOfBudget()) break
       if (!docEntry.isDirectory()) continue
       const metaPath = insideRoot(root, join(documentsDir, docEntry.name, 'meta.json'))
       if (!existsSync(metaPath)) continue
       const record = readJson<KbDocumentRecord>(metaPath)
       if (record.status !== 'published') continue
+      const content = readContent(root, record)
+      scannedBytes += Buffer.byteLength(content, 'utf-8')
       const title = record.title.toLowerCase()
-      const content = readContent(root, record).toLowerCase()
+      const lowered = content.toLowerCase()
       let score = 0
       for (const token of tokens) {
         if (title.includes(token)) score += KB_TITLE_WEIGHT
-        score += countOccurrences(content, token) * KB_BODY_WEIGHT
+        score += countOccurrences(lowered, token) * KB_BODY_WEIGHT
       }
       if (score <= 0) continue
       hits.push({
@@ -499,7 +620,7 @@ export function searchDocuments(
         collectionId: record.collectionId,
         collectionName: collection.name,
         title: record.title,
-        snippet: buildSnippet(readContent(root, record), tokens),
+        snippet: buildSnippet(content, tokens),
         score,
       })
     }
@@ -514,8 +635,13 @@ export function searchDocuments(
  * one published document — the read side searches published content only, so
  * an unpublished collection would be an empty promise.
  */
-export function isCollectionPublished(workspaceRoot: string, collectionId: string): boolean {
-  const root = kbRootPath(workspaceRoot)
+export function isCollectionPublished(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  collectionId: string,
+): boolean {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return false
   try {
     readCollectionRecord(root, assertKbId('collectionId', collectionId))
   } catch {

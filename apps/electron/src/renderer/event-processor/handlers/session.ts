@@ -13,6 +13,7 @@ import type {
   TypedErrorEvent,
   SourcesChangedEvent,
   LabelsChangedEvent,
+  KbCollectionsChangedEvent,
   SessionStatusChangedEvent,
   SessionFlaggedEvent,
   SessionUnflaggedEvent,
@@ -558,6 +559,11 @@ export function handleUserMessage(
           ...m,
           isPending: false,
           isQueued: status === 'queued',
+          // POO-108 review #8: the optimistic message was created before the
+          // server resolved the KB references — merge the canonical snapshot
+          // in (keeping the optimistic id) instead of dropping it, so the
+          // chips render immediately without a reload.
+          kbReferences: m.kbReferences ?? message.kbReferences,
         }
       }
       return m
@@ -648,6 +654,31 @@ export function handleLabelsChanged(
       session: {
         ...session,
         labels: event.labels,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle kb_collections_changed - converge the session's KB scope on the
+ * server's authoritative value (POO-108). Every persisted write (explicit
+ * save or first-send draft commit) broadcasts it, so other windows — and the
+ * saving window itself after a race — re-sync instead of keeping a stale
+ * draft selection.
+ */
+export function handleKbCollectionsChanged(
+  state: SessionState,
+  event: KbCollectionsChangedEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  return {
+    state: {
+      session: {
+        ...session,
+        kbCollectionIds: event.collectionIds,
       },
       streaming,
     },

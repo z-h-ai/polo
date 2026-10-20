@@ -496,18 +496,27 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // itself registers through the checked reservation protocol before any
     // bootstrap work, so this path can no longer leave an unchecked record.
 
-    // POO-108: resolve the session's KB scope against this message. The first
-    // send of a new session commits the composer's draft selection; hits are
-    // persisted on the user message as its immutable reference snapshot. Any
-    // KB failure degrades to "no references" — never a failed send.
+    // POO-108: resolve the session's KB scope against this message. The
+    // composer's selection rides `kbCollectionIds` and is committed (or
+    // reconciled) with THIS send; hits are persisted on the user message as
+    // its immutable reference snapshot. Any KB failure degrades to "no
+    // references" — never a failed send. The resolution is bounded
+    // (wall-clock + scan budget) so it cannot stall persist/ACK.
     const kbReferences = await resolveSessionKbReferences(
       deps,
       sessionId,
       message,
       options?.kbCollectionIds,
     )
+    // Post-authorization CAS after the awaited KB resolution — the send must
+    // not dispatch for a scope that moved while references were resolved.
+    assertSessionScopeTokenCurrent(sendScopeToken)
+    // Client-supplied `kbReferences` are ALWAYS dropped (review #13): only
+    // the server-computed snapshot may reach the persisted message, so a
+    // forged title/snippet/docId can never render as a KB citation.
+    const { kbReferences: _clientKbReferences, ...trustedOptions } = options ?? {}
     const sendOptions: SendMessageOptions = {
-      ...options,
+      ...trustedOptions,
       ...(kbReferences && kbReferences.length > 0 ? { kbReferences } : {}),
     }
 
@@ -697,7 +706,6 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     'updateWorkingDirectory',
     'setSources',
     'setLabels',
-    'setKbCollections',
     'setConnection',
     'shareToViewer',
     'updateShare',
@@ -783,8 +791,11 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.setSessionSources(sessionId, command.sourceSlugs)
       case 'setLabels':
         return sessionManager.setSessionLabels(sessionId, command.labels)
-      case 'setKbCollections':
-        return sessionManager.setSessionKbCollections(sessionId, command.collectionIds)
+      // NOTE: there is deliberately no `setKbCollections` command here. The
+      // KB session scope is a validated, audited enterprise domain write — it
+      // is only reachable through the kb RPC (SET_SESSION_COLLECTIONS or the
+      // send-time draft commit), never through the generic session command
+      // surface (review #9).
       case 'showInFinder': {
         const sessionPath = sessionManager.getSessionPath(sessionId)
         if (sessionPath) {
