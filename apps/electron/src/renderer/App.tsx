@@ -2613,7 +2613,11 @@ export default function App() {
     invalidateAccountSession()
     try {
       const result = await window.electronAPI.logout()
-      if (!result.success || !isCurrentLogout()) return
+      if (!isCurrentLogout()) return
+      if (!result.success) {
+        toast.error(t('onboarding.adminLogin.localLogoutFailed'))
+        return
+      }
       invalidateProductSpaceDeepLinkRefresh()
       // Reset all state
       clearProductSpaceAccount(logoutSnapshot.accountId)
@@ -2631,6 +2635,7 @@ export default function App() {
       setAppState('onboarding')
     } catch (error) {
       console.error('Reset failed:', error)
+      if (isCurrentLogout()) toast.error(t('onboarding.adminLogin.localLogoutFailed'))
     } finally {
       setShowResetDialog(false)
     }
@@ -2641,6 +2646,7 @@ export default function App() {
     invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
     resetAccountScopedClientState,
+    t,
   ])
 
   const handleAdminLogout = useCallback(async () => {
@@ -2677,7 +2683,11 @@ export default function App() {
     }
     try {
       const result = await window.electronAPI.adminLogout()
-      if (!result.success || !isCurrentLogout()) return
+      if (!isCurrentLogout()) return
+      if (!result.success) {
+        toast.error(t('onboarding.adminLogin.localLogoutFailed'))
+        return
+      }
       invalidateProductSpaceDeepLinkRefresh()
       clearProductSpaceAccount(logoutSnapshot.accountId)
       resetAccountScopedClientState()
@@ -2692,6 +2702,7 @@ export default function App() {
       setAppState('onboarding')
     } catch (error) {
       console.error('Admin logout failed:', error)
+      if (isCurrentLogout()) toast.error(t('onboarding.adminLogin.localLogoutFailed'))
     }
   }, [
     commitCurrentAdminUser,
@@ -2700,6 +2711,7 @@ export default function App() {
     invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
     resetAccountScopedClientState,
+    t,
   ])
 
   // Handle workspace selection
@@ -2910,6 +2922,7 @@ export default function App() {
       pendingSwitch: productSpace.pendingSwitch,
       onSelectProductSpace: handleSelectProductSpace,
       onRefreshProductSpaces: handleRefreshProductSpaces,
+      onRecoverActiveProductSpace: productSpace.recoverActiveProductSpace,
       onConfirmStopAndSwitch: () => {
         void confirmStopAndSwitch()
       },
@@ -2941,6 +2954,7 @@ export default function App() {
     productSpace.productSpaceContextKey,
     productSpace.productSpaces,
     productSpace.pendingSwitch,
+    productSpace.recoverActiveProductSpace,
     retryFailedStops,
     retryTargetLoad,
   ])

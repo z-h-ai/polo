@@ -315,3 +315,52 @@ Admin 侧需要确认并覆盖：六条未来 cancelled、五条以内未来 can
 无阻塞本轮的契约疑问；第二轮的 Admin DTO 需求已由 v1 交付满足。新的未知版本/状态会拒绝，缺字段的旧响应保持既有行为；currentEntitlement 只约束显示/入口资格，不能代替分发、治理、激活、Catalog/Main 和离线执行门禁。
 
 本轮完成 Client 闭环与受控回归，未执行正式 POO-77/78/79 Acceptance、真实支付/短信或跨仓库部署。不重跑之前已证明为范围外的全仓失败，不把既有全量检查声明为绿色。TASK/授权文件保持 untracked，verify-r4c.log 与一次性脚本/截图不入库，仅当前 baseline 分支提交，不 push、不合并 dev、不改任务卡。
+
+## R5FIX（第四轮：5 项恢复缺陷）
+
+### 来源、范围与完成状态
+
+执行 `TASK-FIX-R5.md`，修复基线为 Client `93811a92f23b630c02ee99105b9c36bcd94f9630`。依据 `.pipeline/poo77-79-r5-acceptance-20261019-083030/RESULT.md` 与其 owned runtime 下三卡 `product-findings.json` 的五项已确认缺陷；历史验收结论未改写。R5FIX-01～05 均已实现并有回归覆盖。
+
+两项已上交的 authority_conflict **不在本轮裁决范围**：legacy/migration unknown 权益的 Catalog/Main 启动资格，以及企业 UI 下账号级 member RPC 的边界。未改 `currentEntitlement` 解析、权益判定、Catalog/resolve-launch 资格规则或成员 RPC 读取规则。第 04 项仅修复已授权空间的可信上下文恢复与执行停止事务。
+
+### R5FIX-01：凭据删除失败传播与显式重试
+
+- **根因**：`CredentialManager.delete()` 是 best-effort API，会吞掉后端写失败并返回 false；`endAdminSession` 忽略删除结果而提交成功。删除抛错后若保留 endingSession，第二次退出又会因无可捕获 session 而假报成功；并发第二次退出也存在相同误判。
+- **改动**：仅 Admin token 的专用删除改为传播写失败，并用后端 discriminative presence inspection 从磁盘确认不存在；不可读/无法解密不再当作不存在。session CAS 内确认凭据消失后才提交，失败返回 `LOCAL_CREDENTIAL_DELETE_FAILED`。若通用 reset 已先删除 token，只有再次确认 absent 才作为幂等成功。失败释放本次 ending 标记并推进 generation，保留 epoch、Catalog 拒绝和 runtime 围栏；重试不删除后来登录账号。无 session 分支也核验实际 presence，拒绝在另一退出尚未完成时声称成功。
+- **消费者**：登录取消错误经现有 onboarding error 状态显示；错误条提供再次退出按钮。App 的退出/reset 路径显示本地化可重试错误，只有成功回执才清除 renderer 身份。七个 locale 同步新增错误文案。
+- **验证**：真实临时 HOME + 临时配置目录内写入加密凭据，目录 0500 后删除拒绝、文件字节不变、身份仍在；恢复 0700 后重试清除。损坏密文拒绝假报删除成功；native handler 覆盖 false 回执、再次退出、并发退出，以及既有晚到认证、账号替换 CAS、epoch 回归；真实 hook/登录组件覆盖错误和重试。早期失败输出在 `.pipeline/r5fix/red.log`、`red-final-boundaries.log`，修复后全部转绿。
+
+### R5FIX-02：缓存首页的离线恢复入口
+
+- **根因**：R3 已把保留缓存的失败正确投影成 offline，但 Home 只在 error/stale 分支提供重试，offline 横条没有恢复动作。
+- **改动**：离线横条提供可见重试，调用现有 `catalog.sync(true)`；同步期间禁用重复点击。不启动、安装或重放 App 操作，不改变缓存授权边界。
+- **验证**：真实 ProductSpace/MemberCatalog/Home 组件链在缓存离线时显式重试，清除横条并恢复在线；`start` 和 `openApp` 调用均为 0。R3 无缓存 error、R4 本地到期与滚动恢复回归继续通过。受控浏览器按离线→服务恢复→点击重试复核，截图 `offline-1440.png`。
+
+### R5FIX-03：个人圈子撤权文案
+
+- **根因**：个人与企业首页共用 `homeApps.errors.unavailable`，其内容硬编码“你的组织”。
+- **改动**：七个 locale 的同一维护源改为中性授权/分发说明，中文为“此 App 的授权已结束或已停止分发。”；继续复用同一 key，不新增手工派生副本。不改撤权、禁用按钮、墓碑保留或恢复算法。
+- **验证**：中文/英文文案回归；原有目录/多来源/禁用入口及 Main `product-space-catalog-authority` 全套通过，包括重复空目录仍保留墓碑。浏览器实际展示个人来源撤权卡片，截图 `withdrawn-1440.png` 已打开检查。
+
+### R5FIX-04：403→200 的 Renderer/Main 上下文恢复
+
+- **根因**：Catalog403 会正确撤销 Main 的 committed fence，但 renderer 保留解释用空间；之后 Catalog200 仅更新数据，不重提交可信空间。空间菜单先读 execution list，遇到缺少 committed context 就失败，renderer 因此仍停留在原企业空间。
+- **改动**：Catalog 记录当前 scope 的撤销标记，成功在线回执必须等待 `onRecoverActiveProductSpace`。恢复重新读取空间列表，复用可信 PREPARE→STOP→COMMIT 后才发布；包括没有缓存的首次403。恢复 promise 按撤销实例共享，晚到回执通过 scope/generation/operation 比较丢弃。失败保持拒绝或进入已有安全错误页，提供 bootstrap 重试；契约不支持仍走 contract-blocked。Home 拒绝横条同样提供显式重试。
+- **停止屏障**：Main 无 origin fence 时，PREPARE、STOP、finalize、COMMIT 对当前可信账号的残留执行执行完整停止与重新核验；其他账号不受影响。有 origin 时维持原空间范围、一次性 token、取消、generation 与最终提交门禁。未增改任何 App/圈子资格规则。
+- **验证**：真实 hook 覆盖撤销后重提交→正常切换、STOP 失败禁止提交并可 bootstrap 恢复；真实 Catalog hook 覆盖等待恢复确认才从 denied 发布 online、无缓存403、失败后再次重试。原生 RPC/registry 覆盖无 fence 时残留执行实际停止、他账号保留、可信上下文可查询，以及全部既有并发/取消/替代执行门禁。浏览器 fixture 状态机复核403清空 Main 模拟上下文、200恢复后 STOP/COMMIT，再成功企业→个人切换。此浏览器部分不是实际 Electron Main/真实 Admin 验收。
+
+### R5FIX-05：圈子 partial 页重试
+
+- **根因**：`MyCirclesPage` 已有 `resource.refresh()`，error/offline/stale 分支可调用；partial 横条仅显示说明。
+- **改动**：partial 横条暴露同一 refresh，刷新期间禁用重复点击；保留成功一侧的真实回执，不合成关系或权益，不自动加入、付款或执行。
+- **验证**：分别覆盖 circles 失败/memberships 成功及反向分支。使用真实 MemberCircleResourceProvider，在同一次挂载里恢复服务→点击重试→partial 消失并恢复五行，无 renderer reload。浏览器检查可见按钮与单次 refresh，截图 `partial-1440.png`；登录错误重试截图 `logout-error-1440.png`。四张图均已实际打开。
+
+### 完整验证与基线限制
+
+- **相关测试：34 个独立进程，873 pass / 0 fail，全部退出 0**。包括 R3/R4/R4C 的 28 个原有进程以及 Admin token 删除、secure-storage write-lock、ProductSpace renderer hook、原生 ProductSpace RPC、Catalog authority 和 execution registry 六组。原 R4 复现入口仍导入维护用例，其 25 个测试重复执行计入上述运行数，未冒充额外唯一场景。
+- 完整测试命令、未经截断的输出和退出码保留在根目录 `verify-r5.log`。复跑：`python3 .pipeline/r5fix/run-tests.py verify-r5.log`。每个测试命令带 `./`，每个进程执行前证明 `os.homedir() === 临时HOME` 且不是 `/Users/wow`；临时凭据目录仅在自身 sandbox 内，权限故障均在 finally 恢复。日志/一次性运行器位于忽略范围，不入库。
+- Electron、shared、server-core 类型检查通过；shared 权威构建方式、Electron main 与 renderer 构建通过。新增翻译调用点 coverage 通过。Renderer 的大 chunk 提示为既有构建提示。
+- 受控 Chromium 5 个恢复场景通过、页面异常 0、自动 App 打开 0，`.pipeline/r5fix/browser-result.json` 明确 fixture 边界。没有把 controlled 浏览器、原生 handler 测试或文件系统故障测试声明为真实支付、真实 Admin 数据库、正式跨卡 Acceptance。
+- **范围外基线问题**：相对 `93811a92`，i18n parity 前后均为五个非中英 locale 缺相同 16 个既有 `productSpaceSkills.*` key；sorted 前后均仅 en/zh-Hans 的相同既有乱序。本轮新 key 在七个 locale 位置正确且齐全；没有补范围外翻译。App/AdminLoginStep 全文件 lint 前后均为 2 个既有 no-shadow 错误，warnings 从 18 降到 17；其余修改的六个 renderer 模块定向 lint 为 0 error / 6 个既有 warning，凭据模块 lint 为 0 error。精确输出及比较在 `.pipeline/r5fix/baseline-comparison.json` 与 baseline/current 日志；不把这些额外全文件门禁报告为绿色。此前 R3 已隔离的全仓失败未重复修复。
+- 红测试先提交（`5d334fbf`、`a19a1083`、`f70b6a6a`）；类型 fixture 的补全没有降低断言。只在当前分支提交；TASK/授权保持 untracked，未 push、未合并 dev、未修改任务卡或旧验收记录。

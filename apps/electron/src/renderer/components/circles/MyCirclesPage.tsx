@@ -427,7 +427,16 @@ export function MyCirclesPage() {
             className="mt-[24px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text"
             data-testid="my-circles-partial-banner"
           >
-            {t('poo70.c3.state.partial')}
+            <span>{t('poo70.c3.state.partial')}</span>
+            <button
+              type="button"
+              data-testid="my-circles-partial-retry"
+              onClick={handleRetry}
+              disabled={resource.state.refreshing}
+              className="ml-[12px] inline-flex min-h-[28px] items-center rounded-[8px] border border-border px-[12px] font-medium text-foreground hover:bg-foreground-5"
+            >
+              {t('poo70.c3.action.retry')}
+            </button>
           </div>
         )}
 

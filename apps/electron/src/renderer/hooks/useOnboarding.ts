@@ -126,6 +126,9 @@ export function resolveInitialStep(initialSetupNeeds: SetupNeeds | undefined, fa
 
 export function mapAdminLoginError(error: unknown): string {
   const errorLike = error as { errorCode?: string; message?: string; status?: number } | undefined
+  if (errorLike?.errorCode === 'LOCAL_CREDENTIAL_DELETE_FAILED') {
+    return i18n.t('onboarding.adminLogin.localLogoutFailed')
+  }
   if (typeof errorLike?.status === 'number' && errorLike.status >= 500) {
     return i18n.t('onboarding.adminLogin.genericError')
   }

@@ -341,6 +341,9 @@ const deleteStoredCredential = jest.fn(async (_credentialId: string) => true)
 let refuseTokenDeletion = false
 
 const mockCredentialManager = {
+  async inspectAdminCredentialPresence() {
+    return { status: managerState.tokens ? 'found' as const : 'absent' as const }
+  },
   async getAdminTokens(): Promise<StoredTokens | null> {
     return managerState.tokens
   },

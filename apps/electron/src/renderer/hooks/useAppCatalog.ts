@@ -487,6 +487,8 @@ export function useAppCatalog() {
     host: null,
   })
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
+  const revokedContextRef = useRef<{ key: string } | null>(null)
+  const contextRecoveryRef = useRef<{ revocation: { key: string }; promise: Promise<boolean> } | null>(null)
   const contextKeyRef = useRef<string | null>(catalogContextKey)
   contextKeyRef.current = catalogContextKey
   const knownCatalogRevisionRef = useRef<string | null>(null)
@@ -898,6 +900,7 @@ export function useAppCatalog() {
           && 'catalog' in catalogResult
           && Boolean(catalogResult.catalog)
         if (hasDeniedSnapshot || isCatalogAccessDenied(failureCode, catalogResult.status)) {
+          revokedContextRef.current = { key: contextKey }
           const deniedContextGeneration = ++contextGenerationRef.current
           const deniedSnapshot = catalogResult.accessMode === 'denied'
             && 'catalog' in catalogResult
@@ -946,6 +949,34 @@ export function useAppCatalog() {
           creatorCircles: [],
         }))
         return
+      }
+      const revocation = revokedContextRef.current
+      if (revocation?.key === contextKey) {
+        // A successful data read is not a committed Main context. Keep the
+        // denied projection until its trusted recovery transaction finishes.
+        let recovered = false
+        if ((catalogResult.accessMode ?? 'online') === 'online' && !catalogResult.notModified) {
+          let recovery = contextRecoveryRef.current
+          if (!recovery || recovery.revocation !== revocation) {
+            recovery = { revocation, promise: Promise.resolve()
+              .then(() => productSpace.onRecoverActiveProductSpace?.() ?? false)
+              .catch(() => false) }
+            contextRecoveryRef.current = recovery
+          }
+          recovered = await recovery.promise
+          if (contextRecoveryRef.current === recovery) contextRecoveryRef.current = null
+        }
+        // Recovery can change the provider version and start a fresh sync.
+        // Clear only this scope's marker; the newer sync shares its promise.
+        if (recovered && revokedContextRef.current === revocation) revokedContextRef.current = null
+        if (syncGeneration !== syncGenerationRef.current
+          || contextGeneration !== contextGenerationRef.current
+          || contextKeyRef.current !== contextKey) return
+        if (!recovered) {
+          setState(current => ({ ...current, loading: false, refreshing: false,
+            errorCode: 'PRODUCT_SPACE_CONTEXT_REQUIRED', accessMode: 'denied' }))
+          return
+        }
       }
       if (catalogResult.notModified && catalogRef.current) {
         setState(current => ({
@@ -1028,6 +1059,7 @@ export function useAppCatalog() {
       ) return
       const errorCode = getHomeAppErrorCode(error) ?? 'request_failed'
       if (isCatalogAccessDenied(errorCode)) {
+        revokedContextRef.current = { key: contextKey }
         const deniedContextGeneration = ++contextGenerationRef.current
         const deniedCatalog = catalogRef.current
           ? markCatalogAccessDenied(catalogRef.current)

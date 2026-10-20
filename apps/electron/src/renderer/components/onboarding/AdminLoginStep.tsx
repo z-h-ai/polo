@@ -100,6 +100,17 @@ export function AdminLoginStep({
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>{errorMessage}</span>
+          {errorMessage === t('onboarding.adminLogin.localLogoutFailed') && onCancel ? (
+            <button
+              type="button"
+              data-testid="admin-logout-retry"
+              disabled={isLoading}
+              onClick={onCancel}
+              className="shrink-0 underline underline-offset-2"
+            >
+              {t('common.retry')}
+            </button>
+          ) : null}
         </motion.div>
       ) : null}
     </AnimatePresence>

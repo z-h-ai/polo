@@ -452,7 +452,18 @@ export class CredentialManager {
 
   /** Delete admin access/refresh tokens. */
   async deleteAdminTokens(): Promise<boolean> {
-    return this.delete({ type: 'admin_token' });
+    // Logout is a durable identity transition. The general best-effort delete
+    // API cannot acknowledge it: storage errors and unverifiable reads must
+    // propagate rather than masquerade as an absent credential.
+    await this.ensureInitialized();
+    const id: CredentialId = { type: 'admin_token' };
+    let deleted = false;
+    for (const backend of this.backends) {
+      deleted = await backend.delete(id) || deleted;
+      const presence = await backend.inspectCredentialPresence?.(id);
+      if (presence?.status !== 'absent') throw new Error('Admin credential deletion could not be verified');
+    }
+    return invocationCredentials.delete(invocationCredentialKey(id)) || deleted;
   }
 
   /** Get workspace MCP OAuth credentials */

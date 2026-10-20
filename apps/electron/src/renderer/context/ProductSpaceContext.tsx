@@ -23,6 +23,8 @@ export interface ProductSpaceContextValue {
   pendingSwitch: PendingSpaceSwitch | null
   onSelectProductSpace: (productSpaceId: string) => void
   onRefreshProductSpaces: () => void
+  /** Recommit a revoked scope before publishing a recovered Catalog. */
+  onRecoverActiveProductSpace?: () => Promise<boolean>
   onConfirmStopAndSwitch: () => void
   onRetryFailedStops: () => void
   onRetryTargetLoad: () => void

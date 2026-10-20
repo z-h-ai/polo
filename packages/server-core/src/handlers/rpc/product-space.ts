@@ -845,10 +845,12 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           // Snapshot the origin executions the stop phase will terminate —
           // nothing is stopped in this phase.
           const planned: ExecutionSummary[] = []
-          if (originProductSpaceId && !offlineRevalidation) {
+          // R5: a revoked fence has no origin id, but owned executions may
+          // survive the denial. Drain the trusted account before recommit.
+          if (!offlineRevalidation) {
             for (const execution of listRegisteredProductSpaceExecutions()) {
               if (execution.scope.accountId !== trustedAccountId) continue
-              if (execution.scope.productSpaceId !== originProductSpaceId) continue
+              if (originProductSpaceId && execution.scope.productSpaceId !== originProductSpaceId) continue
               let active: boolean
               try {
                 active = Boolean(await execution.isActive())
@@ -960,7 +962,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       try {
         for (const execution of listRegisteredProductSpaceExecutions()) {
           if (execution.scope.accountId !== trustedAccountId) continue
-          if (execution.scope.productSpaceId !== originProductSpaceId) continue
+          if (originProductSpaceId && execution.scope.productSpaceId !== originProductSpaceId) continue
           let active: boolean
           try {
             active = Boolean(await execution.isActive())
@@ -1022,7 +1024,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           const revisionBefore = registeredExecutionsScopeRevision(trustedAccountId, originProductSpaceId)
           for (const execution of listRegisteredProductSpaceExecutions()) {
             if (execution.scope.accountId !== trustedAccountId) continue
-            if (execution.scope.productSpaceId !== originProductSpaceId) continue
+            if (originProductSpaceId && execution.scope.productSpaceId !== originProductSpaceId) continue
             let active: boolean
             try {
               active = Boolean(await execution.isActive())
@@ -1181,7 +1183,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         if (!revalidation) {
           for (const execution of listRegisteredProductSpaceExecutions()) {
             if (execution.scope.accountId !== trustedAccountId) continue
-            if (execution.scope.productSpaceId !== originProductSpaceId) continue
+            if (originProductSpaceId && execution.scope.productSpaceId !== originProductSpaceId) continue
             let active: boolean
             try {
               active = Boolean(await execution.isActive())

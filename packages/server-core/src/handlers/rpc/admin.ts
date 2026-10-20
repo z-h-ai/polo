@@ -555,7 +555,17 @@ class AdminSessionCoordinator {
         }
         return { applied: false }
       }
-      const value = await operation(current!)
+      let value: T
+      try {
+        value = await operation(current!)
+      } catch (error) {
+        // The transition failed to delete credentials. Release only this
+        // ending marker so explicit logout can retry; epochs stay advanced
+        // and the denied Catalog/runtime fences are not reopened.
+        this.endingSession = null
+        this.advanceGeneration()
+        throw error
+      }
       this.advanceGeneration()
       this.endingSession = null
       return { applied: true, value }
@@ -1561,31 +1571,46 @@ export function registerAdminHandlers(
     const adminUrl = getAdminUrl()
     const manager = getCredentialManager()
     const session = await sessions.captureForLogout(manager)
-    if (!session) return { success: true }
+    if (!session) {
+      // Another logout may own the ending marker. No session snapshot does
+      // not mean its credentials have disappeared yet.
+      return sessions.runExclusive(async () => (await manager.inspectAdminCredentialPresence()).status !== 'absent'
+        ? { success: false, errorCode: 'LOCAL_CREDENTIAL_DELETE_FAILED',
+            message: 'Local sign-out is not complete. Retry logout.' }
+        : { success: true })
+    }
 
-    const ended = await endAdminSession(
-      manager,
-      deps,
-      sessions,
-      session,
-      async () => {
-        await deleteAdminManagedConnections(manager)
-        setAdminConfigVersion(undefined)
-      },
-      async () => {
-        if (!adminUrl) return
-        try {
-          await createPublicAdminClient(adminUrl)
-            .logout(session.tokens.accessToken)
-        } catch (error) {
-          log?.warn(
-            '[Admin] remote logout failed; clearing local state:',
-            error instanceof Error ? error.message : String(error),
-          )
-        }
-      },
-    )
-    if (!ended) return staleAdminSessionResult()
+    try {
+      const ended = await endAdminSession(
+        manager,
+        deps,
+        sessions,
+        session,
+        async () => {
+          await deleteAdminManagedConnections(manager)
+          setAdminConfigVersion(undefined)
+        },
+        async () => {
+          if (!adminUrl) return
+          try {
+            await createPublicAdminClient(adminUrl)
+              .logout(session.tokens.accessToken)
+          } catch (error) {
+            log?.warn(
+              '[Admin] remote logout failed; clearing local state:',
+              error instanceof Error ? error.message : String(error),
+            )
+          }
+        },
+      )
+      if (!ended) return staleAdminSessionResult()
+
+    } catch (error) {
+      if (error instanceof AdminCredentialDeletionError) {
+        return { success: false, errorCode: error.errorCode, message: error.message }
+      }
+      throw error
+    }
 
     return { success: true }
   })
@@ -3217,6 +3242,9 @@ export function registerAdminHandlers(
       const cleared = await sessions.runExclusive(async () => {
         if (await manager.getAdminTokens()) return false
         await beforeDelete?.(manager)
+        if ((await manager.inspectAdminCredentialPresence()).status !== 'absent') {
+          throw new AdminCredentialDeletionError()
+        }
         return true
       })
       return cleared ? 'no_session' : 'session_changed'
@@ -3388,6 +3416,11 @@ async function persistVerifiedAdminUser(
   return persisted.applied ? persisted.value! : null
 }
 
+class AdminCredentialDeletionError extends Error {
+  readonly errorCode = 'LOCAL_CREDENTIAL_DELETE_FAILED'
+  constructor() { super('Local credentials could not be cleared. Retry logout.') }
+}
+
 async function endAdminSession(
   manager: CredentialManager,
   deps: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'> | undefined,
@@ -3460,7 +3493,17 @@ async function endAdminSession(
           error instanceof Error ? error.message : String(error),
         )
       }
-      await manager.deleteAdminTokens()
+      try {
+        // A common logout may already have removed this token in beforeDelete.
+        // False is idempotent success only when a fresh presence read proves
+        // absence; unreadable storage and retained tokens are failures.
+        await manager.deleteAdminTokens()
+        if ((await manager.inspectAdminCredentialPresence()).status !== 'absent') {
+          throw new Error('Admin credentials remain after deletion')
+        }
+      } catch {
+        throw new AdminCredentialDeletionError()
+      }
       return true
     },
   )
