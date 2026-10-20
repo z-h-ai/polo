@@ -777,21 +777,74 @@ async function commitSendDraftScope(
 }
 
 /**
+ * The OpenViking binding for a SEND scope capture, or `null` when the
+ * deployment runs without OpenViking. Derived from the CAPTURED scope only —
+ * the same space the whole resolution is bound to, never the live fence
+ * state (review N1).
+ */
+function sendOpenVikingTarget(capture: SendScopeCapture): OpenVikingTarget | null {
+  const config = readOpenVikingConfig()
+  if (!config) return null
+  return {
+    config,
+    workspaceRoot: capture.workspaceRoot,
+    binding: capture.binding,
+    space: { id: capture.space.id, enterpriseId: capture.space.enterpriseId, name: capture.space.name },
+    actor: capture.token.accountId,
+  }
+}
+
+/**
  * Phase 2 of the send resolution — strictly READ-ONLY against the captured
  * space binding. It never touches session or audit state, so finishing after
  * the send deadline is harmless: the caller has already moved on with the
  * fallback, and the late hits are simply discarded (review N1).
+ *
+ * Retrieval backend (POO-108 v2 follow-up): when the deployment runs
+ * OpenViking, ONE `find` over the space root ranks the scope's published
+ * content first — a measured few-ms call on a local instance. The find is
+ * raced against the SAME deadline every other phase shares, so the total
+ * send budget never grows (review #7); hits map back onto local published
+ * documents through the `doc=` tag with local title/snippet and OpenViking
+ * scores. A find that fails, times out or was never configured falls back to
+ * the local keyword scan unchanged — per-collection caps and the interleave
+ * merge stay exactly as before. On a race timeout the budget is already
+ * gone, so that fallback degrades to nothing instead of running past the
+ * send: the scan's own deadline budget reads an exhausted clock as "stop".
  */
-function retrieveReferences(
+async function retrieveReferences(
+  deps: HandlerDeps<ISessionManager>,
   capture: SendScopeCapture,
   message: string,
   scopeIds: string[],
   deadline: number,
-): KbSearchHit[] {
+  attempt: { abandoned: boolean },
+): Promise<KbSearchHit[]> {
   if (scopeIds.length === 0) return []
   // The send text is tokenized raw, so it is truncated to the same ceiling
   // the SEARCH RPC schema enforces (review #7).
   const query = message.slice(0, KB_SEARCH_QUERY_MAX_CHARS)
+  const target = sendOpenVikingTarget(capture)
+  if (target && Date.now() < deadline) {
+    try {
+      const remote = await raceSendDeadline<KbSearchHit[] | null>(
+        searchDocumentsViaOpenViking(target, query, scopeIds, { deadline }),
+        deadline,
+        () => null,
+      )
+      if (remote) {
+        deps.platform.logger?.info(`KB_SEND_REFERENCES: source=openviking hits=${remote.length}`)
+        return remote
+      }
+      // The deadline, not the backend, ended the race — mark the attempt
+      // abandoned like every other timed-out phase (review N1) and let the
+      // budgeted fallback below degrade.
+      attempt.abandoned = true
+      deps.platform.logger?.warn('KB_SEND_REFERENCES: openviking find raced past the send deadline, degrading')
+    } catch (error) {
+      deps.platform.logger?.warn(`KB_SEND_REFERENCES: openviking find failed, using the local keyword fallback: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const byCollection = new Map<string, KbSearchHit[]>()
   for (const collectionId of scopeIds) {
     if (Date.now() >= deadline) break
@@ -902,8 +955,10 @@ export async function resolveSessionKbReferences(
       )
       if (committed !== null) scopeIds = committed
     }
-    // Phase 2 — read-only retrieval.
-    const references = retrieveReferences(capture, message, scopeIds, deadline)
+    // Phase 2 — read-only retrieval. Its only awaited step (the OpenViking
+    // find) is raced against the same deadline inside, so this await stays
+    // within the send budget.
+    const references = await retrieveReferences(deps, capture, message, scopeIds, deadline, attempt)
     return references.length > 0 ? references : undefined
   } catch (error) {
     deps.platform.logger?.warn(`KB_SEND_REFERENCES: reference resolution failed: ${error instanceof Error ? error.message : String(error)}`)

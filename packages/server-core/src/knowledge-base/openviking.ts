@@ -242,6 +242,21 @@ function readSyncedUri(target: OpenVikingTarget, docId: string): string | undefi
 }
 
 /**
+ * Optional bounds for a search pass (POO-108 review #7 discipline). The find
+ * itself is bounded by the client's own search timeout and by whatever the
+ * caller races it against; the deadline here additionally bounds the
+ * SYNCHRONOUS mapping of hits back onto local documents.
+ */
+export interface KbOpenVikingSearchOptions {
+  /**
+   * Wall-clock deadline (Date.now() based): a mapping that runs out of budget
+   * keeps the hits already built and drops the rest — partial results stay
+   * valid, and the send path never maps past the budget that bounds it.
+   */
+  deadline?: number
+}
+
+/**
  * OpenViking-backed search over the space: `find` scoped to the space root,
  * hits mapped back onto LOCAL published documents through the `doc=` tag.
  * Documents the local store cannot resolve (unpublished, recycled, filtered
@@ -257,6 +272,7 @@ export async function searchDocumentsViaOpenViking(
   target: OpenVikingTarget,
   query: string,
   collectionIds?: string[],
+  options?: KbOpenVikingSearchOptions,
 ): Promise<KbSearchHit[]> {
   assertTargetConsistent(target)
   const meta = readOpenVikingSpaceMeta(target.workspaceRoot, target.binding)
@@ -269,8 +285,10 @@ export async function searchDocumentsViaOpenViking(
     targetUri: meta.rootUri,
     limit: KB_SEARCH_LIMIT,
   })
+  const deadline = options?.deadline
   const bestByDoc = new Map<string, KbSearchHit>()
   for (const resource of resources) {
+    if (deadline !== undefined && Date.now() >= deadline) break
     const docId = resource.tags.doc
     if (!docId) continue
     const spaceTag = resource.tags.polo_space
@@ -289,7 +307,7 @@ export async function searchDocumentsViaOpenViking(
       collectionId: local.collectionId,
       collectionName: local.collectionName,
       title: local.title,
-      snippet: buildKbSnippetForQuery(local.content, query),
+      snippet: buildKbSnippetForQuery(local.content, query, deadline),
       score: resource.score,
       source: 'openviking',
     })

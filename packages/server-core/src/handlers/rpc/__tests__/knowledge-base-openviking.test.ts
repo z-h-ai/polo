@@ -6,6 +6,7 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { KbCollection, KbDocument, KbDocumentSummary, KbSearchHit } from '@polo-ai/shared/protocol'
 import type { HandlerFn, RpcServer, RequestContext } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../../handler-deps'
+import type { ISessionManager } from '../../session-manager-interface'
 import {
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
@@ -19,7 +20,10 @@ import {
 import {
   registerKnowledgeBaseHandlers,
   resetKbActiveProductSpaceReaderForTests,
+  resetKbSendResolveTimeoutForTests,
+  resolveSessionKbReferences,
   setKbActiveProductSpaceReaderForTests,
+  setKbSendResolveTimeoutForTests,
 } from '../knowledge-base'
 import {
   kbRootPath,
@@ -27,7 +31,10 @@ import {
   readAudit,
   readOpenVikingSpaceMeta,
 } from '../../../knowledge-base/store'
-import { resetOpenVikingTimeoutsForTests } from '../../../knowledge-base/openviking-client'
+import {
+  resetOpenVikingTimeoutsForTests,
+  setOpenVikingTimeoutsForTests,
+} from '../../../knowledge-base/openviking-client'
 
 /**
  * OpenViking integration tests for the KB RPC surface (POO-108 v2): space
@@ -74,6 +81,8 @@ const stub = {
   resources: [] as Array<{ uri: string; score: number; tags: string[] }>,
   failAddWith: null as number | null,
   failDeleteWith: null as number | null,
+  /** artificial stall for `/api/v1/search/find` (the send-path timeout cases). */
+  findDelayMs: 0,
 }
 
 interface RecordedRequest {
@@ -120,6 +129,7 @@ const server = Bun.serve({
       return Response.json({ status: 'ok', result: { root_uri: String(body?.to ?? ''), status: 'success' } })
     }
     if (url.pathname === '/api/v1/search/find') {
+      if (stub.findDelayMs > 0) await new Promise(resolve => setTimeout(resolve, stub.findDelayMs))
       return Response.json({ status: 'ok', result: { resources: stub.resources } })
     }
     return Response.json({ status: 'error', error: `unexpected path ${url.pathname}` }, { status: 404 })
@@ -172,6 +182,7 @@ function createHarness() {
       if (!handler) throw new Error(`missing handler for ${channel}`)
       return handler(ctx, input)
     },
+    sessionManager: sessionManager as unknown as ISessionManager,
   }
 }
 
@@ -186,6 +197,7 @@ beforeEach(() => {
   stub.resources = []
   stub.failAddWith = null
   stub.failDeleteWith = null
+  stub.findDelayMs = 0
   requests.length = 0
   setRuntimeActiveProductSpace(SPACE_ID)
   setRuntimeActiveProductSpaceAccount(ACCOUNT_ID)
@@ -198,6 +210,7 @@ afterEach(() => {
   delete process.env.POLO_OPENVIKING_URL
   delete process.env.POLO_OPENVIKING_API_KEY
   resetOpenVikingTimeoutsForTests()
+  resetKbSendResolveTimeoutForTests()
   resetKbActiveProductSpaceReaderForTests()
   setRuntimeProductSpaceRestricted(SPACE_ID, false)
   setRuntimeActiveProductSpace(null)
@@ -401,6 +414,117 @@ describe('knowledge-base OpenViking search', () => {
     expect(hits).toHaveLength(1)
     expect(hits[0]).toMatchObject({ docId: document.id, title: 'Flights policy' })
     expect(hits[0].source).toBeUndefined()
+  })
+})
+
+describe('knowledge-base send-time OpenViking retrieval', () => {
+  const SESSION = 'session-send'
+  const DOC = { title: 'Travel policy', content: 'Flights are economy only.' }
+
+  function resolveFor(harness: ReturnType<typeof createHarness>, message: string) {
+    return resolveSessionKbReferences(
+      {
+        sessionManager: harness.sessionManager,
+        platform: { logger: { info: () => {}, warn: () => {}, error: () => {} } },
+      } as never,
+      SESSION, message,
+    )
+  }
+
+  /** Seeds a published document and a session scoped to its collection. */
+  async function seedScopedSession(harness: ReturnType<typeof createHarness>) {
+    const { invoke, sessionManager } = harness
+    const { collection, document } = await seedPublishedDocument(invoke, DOC)
+    await sessionManager.setSessionKbCollections(SESSION, [collection.id])
+    requests.length = 0
+    return { collection, document }
+  }
+
+  it('ranks send references with ONE space-root find and maps hits back locally', async () => {
+    const harness = createHarness()
+    const { collection, document } = await seedScopedSession(harness)
+    // The vector backend knows this query while the local keyword scan scores
+    // it zero: a hit here proves the send used OpenViking, not the fallback.
+    stub.resources = [
+      {
+        uri: `${spaceRootUri()}/collections/${collection.id}/${document.id}.md`,
+        score: 0.818,
+        tags: [`polo_space=${SPACE_ID}`, `collection=${collection.id}`, `doc=${document.id}`],
+      },
+    ]
+
+    const references = await resolveFor(harness, 'quantum flux')
+
+    expect(references).toHaveLength(1)
+    expect(references?.[0]).toEqual({
+      docId: document.id,
+      collectionId: collection.id,
+      collectionName: 'Handbook',
+      title: 'Travel policy',
+      snippet: 'Flights are economy only.',
+      score: 0.818,
+      source: 'openviking',
+    })
+    expect(requests).toHaveLength(1)
+    expect(requests[0].path).toBe('/api/v1/search/find')
+    expect(requests[0].body).toEqual({
+      query: 'quantum flux',
+      target_uri: spaceRootUri(),
+      context_type: ['resource'],
+      limit: 20,
+    })
+  })
+
+  it('falls back to the local keyword scan when find times out inside the send budget', async () => {
+    const harness = createHarness()
+    const { collection, document } = await seedScopedSession(harness)
+    // The backend stalls past its own search timeout but well inside the send
+    // budget: the client gives up and the fallback answers with the remaining
+    // budget — per-collection caps and the interleave merge unchanged.
+    stub.findDelayMs = 200
+    setOpenVikingTimeoutsForTests({ searchMs: 25 })
+
+    const started = Date.now()
+    const references = await resolveFor(harness, 'flights')
+
+    expect(references).toHaveLength(1)
+    expect(references?.[0]).toMatchObject({
+      docId: document.id, collectionId: collection.id, title: 'Travel policy',
+    })
+    expect(references?.[0].source).toBeUndefined()
+    expect(requests).toHaveLength(1)
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('never lets a hung find push the send past its wall clock (review #7)', async () => {
+    const harness = createHarness()
+    await seedScopedSession(harness)
+    // The stall outlives the send deadline: the race ends the phase, the
+    // budget is gone, so the fallback scans against the exhausted clock and
+    // resolves to nothing instead of holding the send hostage.
+    stub.findDelayMs = 500
+    setKbSendResolveTimeoutForTests(60)
+
+    const started = Date.now()
+    const references = await resolveFor(harness, 'flights')
+
+    expect(references).toBeUndefined()
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('keeps the pre-v2 local keyword resolution when OpenViking is not configured', async () => {
+    delete process.env.POLO_OPENVIKING_URL
+    const harness = createHarness()
+    const { collection, document } = await seedScopedSession(harness)
+
+    const references = await resolveFor(harness, 'flights')
+
+    expect(references).toHaveLength(1)
+    expect(references?.[0]).toMatchObject({
+      docId: document.id, collectionId: collection.id, title: 'Travel policy', score: 1,
+    })
+    expect(references?.[0].source).toBeUndefined()
+    expect(requests).toEqual([])
   })
 })
 
