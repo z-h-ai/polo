@@ -856,3 +856,19 @@ describe('R5FIX-05 partial receipt recovery', () => {
     })
   }
 })
+
+describe('R5FIX-05 real partial receipt refresh', () => {
+  for (const failed of ['circles', 'memberships'] as const) {
+    it(`recovers ${failed} in the same mounted resource after service restoration`, async () => {
+      if (failed === 'circles') listErrorCode = 'service_unavailable'
+      else membershipsErrorCode = 'service_unavailable'
+      render(pageTree({ accountId: 'account-a-fixture' }))
+      await waitFor(() => expect(screen.getByTestId('my-circles-partial-banner')).toBeTruthy())
+      listErrorCode = null
+      membershipsErrorCode = null
+      fireEvent.click(screen.getByTestId('my-circles-partial-retry'))
+      await waitFor(() => expect(screen.queryByTestId('my-circles-partial-banner')).toBeNull())
+      expect(screen.getAllByTestId('circle-row').length).toBe(5)
+    })
+  }
+})

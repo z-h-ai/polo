@@ -2270,10 +2270,10 @@ describe('R5FIX-04 trusted active context recovery', () => {
     api.productSpaceCommitSwitch = async (token, target) => { stages.push('commit'); return commit(token, target) }
     await act(async () => { expect(await result.current.recoverActiveProductSpace()).toBe(true) })
     expect(stages).toEqual(['stop', 'commit'])
-    expect(declaredActiveSpace).toBe('space-ent')
+    expect(declaredActiveSpace as string | undefined).toBe('space-ent')
     expect(result.current.activeProductSpaceId).toBe('space-ent')
     await act(async () => { await result.current.requestSwitch(personalId) })
-    expect(declaredActiveSpace).toBe(personalId)
+    expect(declaredActiveSpace as string | undefined).toBe(personalId)
     expect(result.current.activeProductSpaceId).toBe(personalId)
   })
 
@@ -2283,11 +2283,11 @@ describe('R5FIX-04 trusted active context recovery', () => {
     declaredActiveSpace = undefined
     switchResult = { success: false, errorCode: 'runtime_stop_failed', executions: [] }
     await act(async () => { expect(await result.current.recoverActiveProductSpace()).toBe(false) })
-    expect(declaredActiveSpace).toBeUndefined()
+    expect(declaredActiveSpace as string | undefined).toBeUndefined()
     expect(result.current.flowState).toBe('error')
     expect(result.current.error?.code).toBe('runtime_stop_failed')
     switchResult = { success: true, executions: [] }
     await act(async () => { expect(await result.current.retryBootstrap()).toBe('ready') })
-    expect(declaredActiveSpace).toBe(personalId)
+    expect(declaredActiveSpace as string | undefined).toBe(personalId)
   })
 })

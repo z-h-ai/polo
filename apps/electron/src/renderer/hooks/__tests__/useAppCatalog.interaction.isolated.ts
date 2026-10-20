@@ -2299,7 +2299,7 @@ describe('R5FIX-04 denied Catalog recovery ordering', () => {
     await waitFor(() => expect(result.current.state.loading).toBe(false))
     const api = window.electronAPI
     const healthy = api.productSpaceGetCatalog
-    api.productSpaceGetCatalog = async () => ({ success: false, errorCode: 'FORBIDDEN', status: 403 })
+    api.productSpaceGetCatalog = async () => ({ success: false, errorCode: 'FORBIDDEN', status: 403, message: 'fixture denial' })
     await act(async () => { await result.current.sync(true) })
     expect(result.current.state.accessMode).toBe('denied')
     let release!: (ok: boolean) => void

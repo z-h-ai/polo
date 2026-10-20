@@ -338,3 +338,16 @@ describe('R3FIX busy password cancellation controls', () => {
     })
   }
 })
+
+it('R5FIX-01 exposes an explicit retry for incomplete local sign-out', async () => {
+  const onCancel = mock(() => {})
+  renderWithI18n(createElement(AdminLoginStep, {
+    errorMessage: i18n.t('onboarding.adminLogin.localLogoutFailed'),
+    isLoading: false, phoneAuthEnabled: false, onCancel,
+    onClearError: () => {}, onSubmit: () => {},
+    onSendPhoneCode: async () => ({ success: false as const, errorCode: 'NETWORK_ERROR' }),
+    onVerifyPhoneCode: async () => false,
+  }))
+  fireEvent.click(screen.getByTestId('admin-logout-retry'))
+  expect(onCancel).toHaveBeenCalledTimes(1)
+})
