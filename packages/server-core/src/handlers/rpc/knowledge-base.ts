@@ -639,7 +639,18 @@ async function commitSendDraftScope(
   // deadline this attempt is abandoned (review N1 — a timeout may not leave
   // background work behind that mutates state), and a scope that moved during
   // any awaited step above fails closed here (review #3).
-  if (attempt.abandoned || !isTrustedSessionScopeTokenCurrent(capture.token)) return null
+  //
+  // The DEADLINE is re-checked absolutely (review N1 residual): the publish
+  // filter above runs SYNCHRONOUSLY, so the abandonment flag cannot flip
+  // inside it — a scan that consumed the whole budget would otherwise reach
+  // this gate with `abandoned` still false and commit the truncated scope
+  // after the deadline. Time is monotonic, so an exhausted budget can never
+  // pass this check: budget gone → no write, no audit, the stored scope wins.
+  if (
+    attempt.abandoned
+    || Date.now() >= deadline
+    || !isTrustedSessionScopeTokenCurrent(capture.token)
+  ) return null
   await writeSessionScopeAudited(deps, {
     workspaceRoot: capture.workspaceRoot,
     binding: capture.binding,

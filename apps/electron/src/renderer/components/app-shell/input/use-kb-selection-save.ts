@@ -17,8 +17,12 @@ import * as React from 'react'
  * change, and the rollback target is the confirmed snapshot: the value the
  * server is known to hold, fed by save successes AND by the server-pushed
  * scope arriving through `serverValue`, ordered by a monotonic confirmation
- * sequence. A rollback can therefore never move a selection across sessions,
- * backwards in time, or away from what the server actually holds.
+ * sequence. A success may only feed that snapshot when the request was still
+ * the latest one AND no server push landed while it was in flight — a
+ * settling request that predates a push must never rewind the snapshot
+ * behind the server (review #11 residual). A rollback can therefore never
+ * move a selection across sessions, backwards in time, or away from what
+ * the server actually holds.
  */
 export function useKbSelectionSave(options: {
   /** The session the composer is currently rendering for. */
@@ -67,10 +71,15 @@ export function useKbSelectionSave(options: {
     generation: number
     value: string[]
   } | null>(null)
+  // Monotonic count of server-pushed snapshots the hook has SEEN. A request
+  // captures the count at its start; its success may only confirm its own
+  // value when no push arrived while it was in flight (review #11 residual).
+  const serverEventVersionRef = React.useRef(0)
   const serverValueKey = JSON.stringify(serverValue)
   const lastServerValueKeyRef = React.useRef<string | null>(null)
   if (sessionId !== undefined && serverValueKey !== lastServerValueKeyRef.current) {
     lastServerValueKeyRef.current = serverValueKey
+    serverEventVersionRef.current += 1
     confirmedRef.current = {
       sessionId,
       generation: generationRef.current,
@@ -84,13 +93,24 @@ export function useKbSelectionSave(options: {
     // actually happened.
     const requestSessionId = activeSessionRef.current
     const requestGeneration = activeGenerationRef.current
+    const requestServerEventVersion = serverEventVersionRef.current
     const requestSeq = ++requestSeqRef.current
     try {
       await save(next)
       // A settled save CONFIRMS its value — but only while it is still the
-      // latest request: a stale success must not drag the confirmed snapshot
-      // behind a scope event that already moved it (review #11).
-      if (requestSessionId !== undefined && requestSeq === requestSeqRef.current) {
+      // latest request (a stale success must not drag the confirmed snapshot
+      // behind a scope event that already moved it), and only while no
+      // server push landed while it was in flight: the render block above
+      // has already recorded that push as the newer confirmation, and
+      // overwriting it with this request's value would rewind the rollback
+      // target behind the server (review #11 residual — R1 saves X, the
+      // server pushes Y, R1 settles, R2 fails → the selection must roll
+      // back to Y, not X).
+      if (
+        requestSessionId !== undefined
+        && requestSeq === requestSeqRef.current
+        && serverEventVersionRef.current === requestServerEventVersion
+      ) {
         confirmedRef.current = {
           sessionId: requestSessionId,
           generation: requestGeneration,

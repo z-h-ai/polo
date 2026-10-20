@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { join, resolve, sep } from 'path'
 import type {
@@ -226,7 +226,24 @@ function readContent(root: string, record: KbDocumentRecord): string {
     join(root, 'collections', record.collectionId, 'documents', record.id, 'content.md'),
   )
   if (!existsSync(path)) return ''
-  return readFileSync(path, 'utf-8')
+  // Bounded at the SYSCALL, not after the fact (review #7): uploads are
+  // capped at KB_MAX_CONTENT_BYTES, so an oversize file can only be an
+  // out-of-band write — only the capped head (+1 byte that merely decides
+  // the file is oversize and is then dropped) is ever pulled off the disk.
+  const handle = openSync(path, 'r')
+  try {
+    const buffer = Buffer.alloc(KB_CONTENT_READ_MAX_BYTES + 1)
+    const read = readSync(handle, buffer, 0, buffer.length, 0)
+    if (read > KB_CONTENT_READ_MAX_BYTES) {
+      console.warn(
+        `[KbStore] document ${record.id} content exceeds ${KB_CONTENT_READ_MAX_BYTES} bytes — reading a truncated head (out-of-band write?)`,
+      )
+      return buffer.toString('utf-8', 0, KB_CONTENT_READ_MAX_BYTES)
+    }
+    return buffer.toString('utf-8', 0, read)
+  } finally {
+    closeSync(handle)
+  }
 }
 
 /** Publish snapshot: `versions/{docId}/v{n}.md` preserves the exact content. */
@@ -274,6 +291,24 @@ export interface KbPublishedCheckBudget {
   deadline?: number
 }
 
+/**
+ * Defensive ceilings for the two walks the deadline budget cannot interrupt
+ * (POO-108 review #7 — KNOWN ITEM, deferred): the metadata walk and the
+ * full-text read below run as a single synchronous stretch, so neither the
+ * send deadline nor the publish-check budget can cancel them mid-flight, and
+ * a runaway or out-of-band-written store directory would otherwise be
+ * scanned unbounded. These are NOT product limits — uploads are already
+ * capped by `KB_MAX_CONTENT_BYTES`; hitting a ceiling means the store on
+ * disk is abnormal. The caller sees the degradation in the log and the
+ * truncated result, never a stall. The real fix — offloading the walks to a
+ * cancellable worker the deadline can terminate — is tracked as follow-up
+ * work (see `.pipeline/sdlc/POO-108/dev-delivery-v1.md`, 已知项与收尾).
+ */
+/** Max document directory entries enumerated for ONE collection. */
+const KB_DOCUMENT_DIR_MAX_ENTRIES = 10_000
+/** Max bytes ever read back from ONE document's `content.md`. */
+const KB_CONTENT_READ_MAX_BYTES = KB_MAX_CONTENT_BYTES
+
 function documentCounts(
   root: string,
   collectionId: string,
@@ -282,7 +317,15 @@ function documentCounts(
   const counts = { draft: 0, in_review: 0, published: 0, rejected: 0 }
   const dir = insideRoot(root, join(root, 'collections', collectionId, 'documents'))
   if (!existsSync(dir)) return counts
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  // Enumeration is bounded (review #7): a collection directory past the
+  // ceiling is counted only up to it and logged, never walked unbounded.
+  const entries = readdirSync(dir, { withFileTypes: true })
+  if (entries.length > KB_DOCUMENT_DIR_MAX_ENTRIES) {
+    console.warn(
+      `[KbStore] collection ${collectionId} holds ${entries.length} document entries — counting only the first ${KB_DOCUMENT_DIR_MAX_ENTRIES}`,
+    )
+  }
+  for (const entry of entries.slice(0, KB_DOCUMENT_DIR_MAX_ENTRIES)) {
     if (budget?.deadline !== undefined && Date.now() >= budget.deadline) break
     if (!entry.isDirectory()) continue
     const metaPath = insideRoot(root, join(dir, entry.name, 'meta.json'))

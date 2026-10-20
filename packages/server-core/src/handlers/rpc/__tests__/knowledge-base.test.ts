@@ -911,6 +911,47 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
       .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
   })
 
+  it('an exhausted publish budget commits nothing — the write gate re-checks the deadline (review N1)', async () => {
+    const harness = createHarness()
+    const { stored, draftCollection } = await seedScopedSession(harness)
+    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
+    // The publish filter runs SYNCHRONOUSLY, so the abandonment timer cannot
+    // fire inside it — the faithful repro of the gap shifts the wall clock
+    // past the deadline during the commit phase's session read: every
+    // deadline check from there on (the filter AND the pre-write gate) sees
+    // an exhausted budget, while the REAL race timer has not fired, so
+    // `abandoned` is still false and only the absolute deadline can stop
+    // the write of the truncated scope.
+    const realNow = Date.now.bind(Date)
+    const manager = harness.sessionManager as unknown as {
+      getSession: (sessionId: string) => Promise<unknown>
+    }
+    const original = manager.getSession.bind(manager)
+    let sessionReads = 0
+    manager.getSession = async sessionId => {
+      const record = await original(sessionId)
+      sessionReads += 1
+      // 1st read: the capture phase (budget intact). 2nd read: the commit
+      // phase — from here on the budget counts as exhausted.
+      if (sessionReads === 2) Date.now = () => realNow() + 60_000
+      return record
+    }
+    setKbSendResolveTimeoutForTests(25_000)
+    try {
+      // Phase 2 sees the same exhausted clock and resolves nothing — the
+      // send degrades, it does not fail.
+      const result = await resolveFor(harness, 'flights', [draftCollection.id])
+      expect(result).toBeUndefined()
+      // The truncated draft was NOT committed: scope unchanged, zero audit.
+      expect(await harness.sessionManager.getSession('session-ro'))
+        .toMatchObject({ kbCollectionIds: [stored.id] })
+      expect(readAudit(workspaceRoot, binding).filter(entry => entry.action === 'session_scope.set'))
+        .toHaveLength(0)
+    } finally {
+      Date.now = realNow
+    }
+  })
+
   it('authorizes the whole resolution against the ENTRY token only (reviews #3/N1)', async () => {
     const harness = createHarness()
     const { stored, draftCollection } = await seedScopedSession(harness)

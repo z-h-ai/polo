@@ -12,6 +12,9 @@
  *  - a scope event that lands while a save is pending wins over it;
  *  - a save success confirms its value for a later rollback;
  *  - a stale success does not drag the snapshot behind a newer event;
+ *  - a SUCCESS that predates a scope event does not rewind the snapshot
+ *    behind it either (review #11 residual: R1 ok after a push, R2 fails
+ *    → roll back to the pushed value, not R1's);
  *  - session A's failure after switching to session B leaves B untouched
  *    (the N2 repro: B would otherwise inherit A's selection);
  *  - an A→B→A round trip does not resurrect the pre-switch request (the
@@ -174,6 +177,22 @@ describe('useKbSelectionSave rollback guards', () => {
     await stale
     await newer
     expect(harness.rollbacks).toEqual([['kb-z']])
+  })
+
+  it('a success does not rewind the snapshot behind a push that landed in flight (review #11)', async () => {
+    const first = harness.persist(['kb-x'])
+    // The server moved on to kb-y while R1 was in flight.
+    harness.pushServerValue(['kb-y'])
+    // R1 settles SUCCESSFULLY — but it predates the push, so confirming its
+    // own value would rewind the snapshot behind the server.
+    harness.settleNextSave('ok')
+    await first
+    // R2 fails: the rollback lands on the server truth kb-y, not R1's kb-x.
+    const second = harness.persist(['kb-z'])
+    harness.settleNextSave('fail')
+    await second
+    expect(harness.rollbacks).toEqual([['kb-y']])
+    expect(harness.failures).toBe(1)
   })
 
   it('never rolls a failed save into a different session (review N2)', async () => {
