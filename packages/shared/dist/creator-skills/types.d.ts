@@ -11,6 +11,21 @@ export interface SkillArchivePolicy {
 }
 export declare const DEFAULT_SKILL_ARCHIVE_POLICY: SkillArchivePolicy;
 export declare const HARD_SKILL_ARCHIVE_POLICY: SkillArchivePolicy;
+/**
+ * Hard ceiling for web_app (Generative UI canvas) bundles, following the
+ * HARD_SKILL_ARCHIVE_POLICY pattern: hardcoded client-side, admin policy can
+ * only tighten. `maxBundleBytes` mirrors GENERATE_APP_MAX_HTML_BYTES in
+ * @polo-ai/session-tools-core (the generation path enforces the same 512KB
+ * cap; that leaf package cannot import this one, so the pair is guarded by
+ * tests on both sides). One self-contained index.html per bundle, hence
+ * maxFileCount 1.
+ */
+export interface WebAppBundlePolicy {
+    version: string;
+    maxBundleBytes: number;
+    maxFileCount: number;
+}
+export declare const HARD_WEBAPP_BUNDLE_POLICY: WebAppBundlePolicy;
 export interface CreatorArtifact {
     id: string;
     organizationId: string;

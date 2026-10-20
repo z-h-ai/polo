@@ -12114,6 +12114,7 @@ __export(creator_skills_exports, {
   EMPTY_SKILL_CONTENT_MESSAGE: () => EMPTY_SKILL_CONTENT_MESSAGE,
   EMPTY_SKILL_CONTENT_SUGGESTION: () => EMPTY_SKILL_CONTENT_SUGGESTION,
   HARD_SKILL_ARCHIVE_POLICY: () => HARD_SKILL_ARCHIVE_POLICY,
+  HARD_WEBAPP_BUNDLE_POLICY: () => HARD_WEBAPP_BUNDLE_POLICY,
   INVALID_YAML_FRONTMATTER_MESSAGE: () => INVALID_YAML_FRONTMATTER_MESSAGE,
   InstalledCreatorSkillSchema: () => InstalledCreatorSkillSchema,
   PortableSkillMetadataSchema: () => PortableSkillMetadataSchema,
@@ -12122,11 +12123,13 @@ __export(creator_skills_exports, {
   SkillValidationIssueSchema: () => SkillValidationIssueSchema,
   SkillVersionMetadataSchema: () => SkillVersionMetadataSchema,
   StableSemverSchema: () => StableSemverSchema,
+  WebAppArtifactPolicySchema: () => WebAppArtifactPolicySchema,
   calculateContentDigest: () => calculateContentDigest,
   cancelCreatorSkillOperation: () => cancelCreatorSkillOperation,
   canonicalManifestJson: () => canonicalManifestJson,
   canonicalSkillIdentity: () => canonicalSkillIdentity,
   canonicalSkillRoot: () => canonicalSkillRoot,
+  clampWebAppArtifactPolicy: () => clampWebAppArtifactPolicy,
   copyCreatorSkillBackupForTesting: () => copyCreatorSkillBackupForTesting,
   creatorSkillBackupTimestamp: () => creatorSkillBackupTimestamp,
   deleteCreatorSkillBackups: () => deleteCreatorSkillBackups,
@@ -12183,6 +12186,11 @@ var HARD_SKILL_ARCHIVE_POLICY = {
   maxFileCount: 1e3,
   maxFileBytes: 25 * 1024 * 1024,
   maxExpandedBytes: 250 * 1024 * 1024
+};
+var HARD_WEBAPP_BUNDLE_POLICY = {
+  version: "hard-1",
+  maxBundleBytes: 512 * 1024,
+  maxFileCount: 1
 };
 
 // ../../node_modules/zod/v4/classic/external.js
@@ -26211,6 +26219,22 @@ var SkillArchivePolicySchema = external_exports.object({
   maxFileBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxFileBytes),
   maxExpandedBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxExpandedBytes)
 });
+var WebAppArtifactPolicySchema = external_exports.object({
+  enabled: external_exports.boolean(),
+  maxBundleBytes: external_exports.number().int().positive().max(HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes),
+  maxFileCount: external_exports.number().int().positive().max(HARD_WEBAPP_BUNDLE_POLICY.maxFileCount)
+});
+function clampWebAppArtifactPolicy(policy) {
+  const parsed = WebAppArtifactPolicySchema.safeParse(policy);
+  if (!parsed.success) {
+    return { enabled: false, maxBundleBytes: 0, maxFileCount: 0 };
+  }
+  return {
+    enabled: parsed.data.enabled,
+    maxBundleBytes: Math.min(parsed.data.maxBundleBytes, HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes),
+    maxFileCount: Math.min(parsed.data.maxFileCount, HARD_WEBAPP_BUNDLE_POLICY.maxFileCount)
+  };
+}
 var SkillValidationIssueSchema = external_exports.object({
   code: external_exports.string().min(1).max(128),
   severity: external_exports.enum(["error", "warning"]),
@@ -29737,6 +29761,7 @@ async function readCanonicalSkillInstallations(workspaceRoot, scope, options2 = 
   EMPTY_SKILL_CONTENT_MESSAGE,
   EMPTY_SKILL_CONTENT_SUGGESTION,
   HARD_SKILL_ARCHIVE_POLICY,
+  HARD_WEBAPP_BUNDLE_POLICY,
   INVALID_YAML_FRONTMATTER_MESSAGE,
   InstalledCreatorSkillSchema,
   PortableSkillMetadataSchema,
@@ -29745,11 +29770,13 @@ async function readCanonicalSkillInstallations(workspaceRoot, scope, options2 = 
   SkillValidationIssueSchema,
   SkillVersionMetadataSchema,
   StableSemverSchema,
+  WebAppArtifactPolicySchema,
   calculateContentDigest,
   cancelCreatorSkillOperation,
   canonicalManifestJson,
   canonicalSkillIdentity,
   canonicalSkillRoot,
+  clampWebAppArtifactPolicy,
   copyCreatorSkillBackupForTesting,
   creatorSkillBackupTimestamp,
   deleteCreatorSkillBackups,

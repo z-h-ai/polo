@@ -7,6 +7,31 @@ export declare const SkillArchivePolicySchema: z.ZodObject<{
     maxFileBytes: z.ZodNumber;
     maxExpandedBytes: z.ZodNumber;
 }, z.core.$strip>;
+/**
+ * Server-issued policy for web_app (Generative UI canvas) artifacts. The max
+ * bounds ARE the client hard caps: a server response that exceeds
+ * HARD_WEBAPP_BUNDLE_POLICY fails validation instead of loosening it, so the
+ * installer can never be talked above the local ceiling.
+ */
+export declare const WebAppArtifactPolicySchema: z.ZodObject<{
+    enabled: z.ZodBoolean;
+    maxBundleBytes: z.ZodNumber;
+    maxFileCount: z.ZodNumber;
+}, z.core.$strip>;
+/**
+ * HARD clamp for the installer side: intersect a server policy with the local
+ * hard caps so every effective limit is ≤ HARD_WEBAPP_BUNDLE_POLICY, and an
+ * `enabled: true` from the server can never bypass a local disable.
+ */
+export declare function clampWebAppArtifactPolicy(policy: {
+    enabled: boolean;
+    maxBundleBytes: number;
+    maxFileCount: number;
+}): {
+    enabled: boolean;
+    maxBundleBytes: number;
+    maxFileCount: number;
+};
 export declare const SkillValidationIssueSchema: z.ZodObject<{
     code: z.ZodString;
     severity: z.ZodEnum<{
