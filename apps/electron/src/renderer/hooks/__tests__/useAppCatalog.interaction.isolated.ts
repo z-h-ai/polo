@@ -2317,3 +2317,23 @@ describe('R5FIX-04 denied Catalog recovery ordering', () => {
     expect(result.current.state.accessMode).toBe('online')
   })
 })
+
+it('R5FIX-04 retries a failed recovery after an initial no-cache denial', async () => {
+  const api = window.electronAPI
+  const healthy = api.productSpaceGetCatalog
+  api.productSpaceGetCatalog = async () => ({ success: false, errorCode: 'FORBIDDEN', status: 403, message: 'fixture denial' })
+  const { result } = renderHook(() => useAppCatalog())
+  await waitFor(() => expect(result.current.state.accessMode).toBe('denied'))
+  expect(result.current.state.catalog).toBeNull()
+  let recoveries = 0
+  productSpaceContextState.onRecoverActiveProductSpace = async () => { recoveries++; return false }
+  api.productSpaceGetCatalog = healthy
+  await act(async () => { await result.current.sync(true) })
+  expect(recoveries).toBe(1)
+  expect(result.current.state.accessMode).toBe('denied')
+  expect(result.current.state.errorCode).toBe('PRODUCT_SPACE_CONTEXT_REQUIRED')
+  productSpaceContextState.onRecoverActiveProductSpace = async () => { recoveries++; return true }
+  await act(async () => { await result.current.sync(true) })
+  expect(recoveries).toBe(2)
+  expect(result.current.state.accessMode).toBe('online')
+})

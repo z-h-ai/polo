@@ -26,3 +26,18 @@ describe('R5FIX-01 durable Admin token deletion', () => {
     expect(await manager.getAdminTokens()).toBeNull()
   })
 })
+
+it('R5FIX-01 never treats an unreadable store as confirmed deletion', async () => {
+  const { writeFileSync } = await import('node:fs')
+  const dir = process.env.POLO_AI_CONFIG_DIR!
+  expect(dir.startsWith(homedir() + '/')).toBe(true)
+  const manager = new CredentialManager()
+  await manager.setAdminTokens({ accessToken: 'fixture-access', refreshToken: 'fixture-refresh',
+    expiresAt: Date.now() + 60000, userId: 'fixture-user', username: 'fixture-user' })
+  const file = join(dir, readdirSync(dir).find(name => name.endsWith('.enc'))!)
+  const original = readFileSync(file)
+  try {
+    writeFileSync(file, 'invalid-encrypted-store')
+    await expect(manager.deleteAdminTokens()).rejects.toThrow()
+  } finally { writeFileSync(file, original) }
+})

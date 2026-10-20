@@ -5642,3 +5642,20 @@ describe('R5FIX-01 logout credential deletion acknowledgement', () => {
     expect(managerState.tokens).toBeNull()
   })
 })
+
+it('R5FIX-01 does not acknowledge a concurrent logout while the owned transition still has tokens', async () => {
+  const { login, logout } = createHarness()
+  const ctx = { clientId: 'r5', workspaceId: null, webContentsId: null }
+  await login(ctx, 'user', 'secret')
+  const remote = createDeferred<void>()
+  const entered = createDeferred<void>()
+  adminClientBehavior.logout = async () => { entered.resolve(); await remote.promise }
+  const first = logout(ctx)
+  await entered.promise
+  try {
+    const concurrent = await logout(ctx)
+    expect(concurrent.success).toBe(false)
+    expect(concurrent.errorCode).toBe('LOCAL_CREDENTIAL_DELETE_FAILED')
+  } finally { remote.resolve(); await first }
+  expect(managerState.tokens).toBeNull()
+})
