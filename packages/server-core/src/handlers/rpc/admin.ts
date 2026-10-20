@@ -870,7 +870,6 @@ export function registerAdminHandlers(
       const manager = getCredentialManager()
       const snapshot = await sessions.capture(manager)
       if (!snapshot) {
-        void adminUrl
         return null
       }
       return snapshot.tokens.userId
@@ -2125,28 +2124,46 @@ export function registerAdminHandlers(
   )
 
   server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATIONS, async () => {
-    return callOrganization(
-      'listOrganizations',
-      async (client, accessToken, userId) => {
-        invalidateCreatorArtifactCache(userId)
-        return await client.listOrganizations(accessToken)
-      },
-      async (result, session) => {
-        const activeOrganizationIds = new Set(result.organizations
-          .filter(organization => (
-            organization.status !== 'suspended'
-            && organization.membership.status === 'active'
-          ))
-          .map(organization => organization.id))
-        const accountId = session.tokens.userId
-        invalidateCreatorArtifactCache(accountId)
-        const scopedOrganizationIds = catalogOrganizationIdsForAccount(accountId)
-        for (const organizationId of scopedOrganizationIds) {
-          if (activeOrganizationIds.has(organizationId)) continue
-          denyCatalogScope(accountId, organizationId)
-        }
-      },
-    )
+    // POL-88: /api/me/organizations is the legacy enterprise-admin console
+    // surface — a Polo client bearer token is always answered 403 FORBIDDEN
+    // by design. The only desktop consumer is the GenUI publish gate
+    // (POO-109), which must degrade to "no publish target" instead of
+    // ending the login session over a boundary denial, so the boundary
+    // answer is mapped to an empty roster here and the publish chain keeps
+    // surfacing precise errors at publish time.
+    const adminUrl = requireAdminUrl()
+    const manager = getCredentialManager()
+    const tokenResult = await ensureValidTokens(adminUrl, manager, sessions, deps)
+    if (!tokenResult.tokens) {
+      if (tokenResult.stale) return staleAdminSessionResult()
+      if (tokenResult.authError) return { success: false, message: tokenResult.authError.message }
+      return { success: false, message: 'Admin session is not logged in' }
+    }
+    const client = createAuthenticatedAdminClient(adminUrl, manager, sessions, {
+      session: tokenResult.session,
+    })
+    try {
+      const response = await client.listOrganizations(tokenResult.tokens.accessToken)
+      const accountId = tokenResult.session.tokens.userId
+      invalidateCreatorArtifactCache(accountId)
+      const scopedOrganizationIds = catalogOrganizationIdsForAccount(accountId)
+      const activeOrganizationIds = new Set(response.organizations
+        .filter(organization => (
+          organization.status !== 'suspended'
+          && organization.membership.status === 'active'
+        ))
+        .map(organization => organization.id))
+      for (const organizationId of scopedOrganizationIds) {
+        if (activeOrganizationIds.has(organizationId)) continue
+        denyCatalogScope(accountId, organizationId)
+      }
+      return { success: true, ...response }
+    } catch (error) {
+      if (error instanceof AdminError && (error.status === 403 || error.errorCode === 'FORBIDDEN')) {
+        return { success: true, organizations: [] }
+      }
+      throw error
+    }
   })
 
   server.handle(RPC_CHANNELS.admin.PAYMENT_HANDOFF, async () => {
