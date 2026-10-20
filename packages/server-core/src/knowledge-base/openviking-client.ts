@@ -39,11 +39,20 @@ export class OpenVikingError extends Error {
   }
 }
 
+/** OpenViking ingestion modes (the real API values — there is no `full`). */
+export type OpenVikingProcessingMode = 'vectors_only' | 'semantic_and_vectors'
+
 export interface OpenVikingConfig {
   /** Base URL without a trailing slash, e.g. `http://127.0.0.1:1933`. */
   baseUrl: string
   /** Optional bearer token (`POLO_OPENVIKING_API_KEY`); the dev instance needs none. */
   apiKey?: string
+  /**
+   * `semantic_and_vectors` additionally asks the server's VLM for abstracts;
+   * it needs a configured VLM on the OpenViking side and makes publish-sync
+   * slower, so the default stays `vectors_only`.
+   */
+  processingMode?: OpenVikingProcessingMode
 }
 
 /**
@@ -58,6 +67,9 @@ export function readOpenVikingConfig(env: Record<string, string | undefined> = p
   return {
     baseUrl: baseUrl.replace(/\/+$/, ''),
     apiKey: env.POLO_OPENVIKING_API_KEY?.trim() || undefined,
+    processingMode: env.POLO_OPENVIKING_PROCESSING_MODE?.trim() === 'semantic_and_vectors'
+      ? 'semantic_and_vectors'
+      : 'vectors_only',
   }
 }
 
@@ -113,7 +125,7 @@ export interface OpenVikingAddResourceInput {
   createParent?: boolean
   /** Block until the resource is processed. */
   wait?: boolean
-  processingMode?: 'vectors_only' | 'full'
+  processingMode?: OpenVikingProcessingMode
   /** MUST be `["k=v"]` strings, not objects (verified against the real instance). */
   tags?: string[]
   reason?: string

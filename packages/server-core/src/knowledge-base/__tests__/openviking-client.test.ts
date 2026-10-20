@@ -82,9 +82,16 @@ describe('openviking client configuration', () => {
     expect(readOpenVikingConfig({})).toBeNull()
     expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: '   ' })).toBeNull()
     expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://127.0.0.1:1933///' }))
-      .toEqual({ baseUrl: 'http://127.0.0.1:1933' })
+      .toEqual({ baseUrl: 'http://127.0.0.1:1933', apiKey: undefined, processingMode: 'vectors_only' })
     expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://ov:1933', POLO_OPENVIKING_API_KEY: ' k ' }))
-      .toEqual({ baseUrl: 'http://ov:1933', apiKey: 'k' })
+      .toEqual({ baseUrl: 'http://ov:1933', apiKey: 'k', processingMode: 'vectors_only' })
+  })
+
+  it('only opts into semantic processing on the exact mode value', () => {
+    expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://ov:1933', POLO_OPENVIKING_PROCESSING_MODE: 'semantic_and_vectors' })?.processingMode)
+      .toBe('semantic_and_vectors')
+    expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://ov:1933', POLO_OPENVIKING_PROCESSING_MODE: 'full' })?.processingMode)
+      .toBe('vectors_only')
   })
 })
 

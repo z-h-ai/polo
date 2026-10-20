@@ -108,7 +108,7 @@ export async function ensureOpenVikingSpace(target: OpenVikingTarget): Promise<s
     to: `${rootUri}/.space.md`,
     createParent: true,
     wait: true,
-    processingMode: 'vectors_only',
+    processingMode: target.config.processingMode ?? 'vectors_only',
     tags: [`polo_space=${target.space.id}`, 'kind=polo_space_manifest'],
     reason: `Polo AI: provision enterprise knowledge space ${target.space.id}`,
   })
@@ -156,7 +156,7 @@ export async function syncPublishedDocumentToOpenViking(
       to: uri,
       createParent: true,
       wait: true,
-      processingMode: 'vectors_only',
+      processingMode: target.config.processingMode ?? 'vectors_only',
       tags: [
         `polo_space=${target.space.id}`,
         `collection=${document.collectionId}`,
