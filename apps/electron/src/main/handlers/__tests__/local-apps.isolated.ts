@@ -10,6 +10,10 @@ import type {
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import * as nativeInstallationContract from '../../../../../../packages/shared/src/admin/native-installations-contract'
 
+import { parseMemberMembershipsResponse } from '@polo-ai/shared/admin/member-circles'
+import { memberMembershipWireFixture, currentEntitlementFixture, CURRENT_CIRCLE_ID } from '../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement'
+const listMemberCircleMemberships = mock(async (_token: string) => ({ memberships: [] as any[] }))
+
 type Handler = (
   context: { clientId: string; signal: AbortSignal },
   ...args: unknown[]
@@ -159,7 +163,9 @@ const resolveProductSpaceLaunch = mock(async (
     payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-a' },
     delivery: {
       kind: 'bundle' as const,
-      downloadUrl: `https://admin.example.com/api/product-spaces/${productSpaceId}/artifacts/${entry.artifactInstanceId}/versions/${entry.version.versionId}/download?launch=issued-nonce-123456`,
+      downloadUrl: (_context as { kind?: string })?.kind === 'personal'
+        ? `https://admin.example.com/api/personal-entitlements/artifacts/${entry.artifactInstanceId}/versions/${entry.version.versionId}/download?launch=issued-nonce-123456&space=${productSpaceId}`
+        : `https://admin.example.com/api/product-spaces/${productSpaceId}/artifacts/${entry.artifactInstanceId}/versions/${entry.version.versionId}/download?launch=issued-nonce-123456`,
       expiresAt: '2099-01-01T00:10:00.000Z',
       checksum: 'b'.repeat(64),
       sizeBytes: 456,
@@ -462,6 +468,7 @@ mock.module('@polo-ai/shared/admin', () => ({
     listProductSpaces = listProductSpaces
     getProductSpaceCatalog = getProductSpaceCatalog
     resolveProductSpaceLaunch = resolveProductSpaceLaunch
+    listMemberCircleMemberships = listMemberCircleMemberships
   },
   analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
   createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
@@ -3387,6 +3394,46 @@ describe('local app main-process authorization boundary', () => {
     }))
     expect(result[prototypeNamedIds.length]).not.toHaveProperty('versionError')
   })
+
+  describe('R5A paid-circle native admission', () => {
+    beforeEach(() => {
+      listProductSpaces.mockImplementation(async () => ({ contractVersion: 1, defaultProductSpaceId: 'organization-a', productSpaces: [{ id: 'organization-a', kind: 'personal', name: 'Personal', accessMode: 'active' }] }) as any)
+    })
+    for (const state of ['unknown', 'not_entitled', 'missing', 'expired'] as const) {
+      for (const channel of ['install', 'start'] as const) {
+        it(`rejects ${state} at ${channel} before installation, capability or spawn`, async () => {
+          const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+          const catalogReply = await defaultProductSpaceCatalog()
+          getProductSpaceCatalog.mockImplementation(async () => ({ ...catalogReply, entries: catalogReply.entries.map(entry => ({ ...entry, sources: [source] })) }) as any)
+          const wire = memberMembershipWireFixture({ ...(state === 'missing' ? { currentEntitlement: undefined }
+            : { currentEntitlement: currentEntitlementFixture(state === 'expired'
+              ? { validUntil: '2000-01-01T00:00:00.000Z' }
+              : { state }) }) })
+          listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [wire] }))
+          const identity = { ...productSpaceAppIdentity(), sources: [source] }
+          const handler = handlers.get(channel === 'install' ? RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE : RPC_CHANNELS.localApps.START)!
+          await expect(handler(context, channel === 'install' ? { app: identity } : { kind: 'product_space_runtime_start', app: identity }))
+            .rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { recovery: 'refresh_membership' } })
+          expect(scopedInstall).not.toHaveBeenCalled()
+          expect(scopedStartExact).not.toHaveBeenCalled()
+          expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+        })
+      }
+    }
+    it('allows an entitled source despite an unknown sibling on the same artifact', async () => {
+      const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+      const sibling = { ...source, circleId: '22222222-2222-4222-8222-222222222223' }
+      const reply = await defaultProductSpaceCatalog()
+      getProductSpaceCatalog.mockImplementation(async () => ({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [sibling, source] })) }) as any)
+      listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [
+        memberMembershipWireFixture(),
+        memberMembershipWireFixture({ id: '11111111-1111-4111-8111-111111111112', circle: { ...memberMembershipWireFixture().circle, id: sibling.circleId }, currentEntitlement: currentEntitlementFixture({ membershipId: '11111111-1111-4111-8111-111111111112', state: 'unknown' }) }),
+      ] }))
+      await handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!(context, { app: { ...productSpaceAppIdentity(), sources: [sibling, source] } })
+      expect(scopedInstall).toHaveBeenCalledTimes(1)
+    })
+  })
+
 })
 
 describe('local app production status projection (R34-3)', () => {
@@ -4576,4 +4623,5 @@ describe('local app production status projection (R34-3)', () => {
     expect(activeRuntimesByKey.size).toBe(0)
     expect(activeRuntimesByExecution.size).toBe(0)
   })
+
 })

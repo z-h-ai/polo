@@ -155,7 +155,10 @@ const adminClientBehavior = {
   },
 }
 
+let nativeAdmissionMemberships: unknown[] = []
+
 class MockAdminClient {
+  async listMemberCircleMemberships(_token: string) { return { memberships: nativeAdmissionMemberships } }
   readonly adminUrl: string
 
   constructor(adminUrl: string) {
@@ -5661,4 +5664,24 @@ it('R5FIX-01 does not acknowledge a concurrent logout while the owned transition
     expect(concurrent.errorCode).toBe('LOCAL_CREDENTIAL_DELETE_FAILED')
   } finally { remote.resolve(); await first }
   expect(managerState.tokens).toBeNull()
+})
+
+describe('R5A trusted direct launch current entitlement', () => {
+  it('rejects an unknown paid source before minting a launch, without revoking the whole space', async () => {
+    const { parseMemberMembershipsResponse } = await import('@polo-ai/shared/admin/member-circles')
+    const { memberMembershipWireFixture, currentEntitlementFixture, CURRENT_CIRCLE_ID } = await import('../../../../shared/src/admin/__tests__/fixtures/current-entitlement')
+    nativeAdmissionMemberships = parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ state: 'unknown' }) })] }).memberships
+    const harness = createHarness()
+    const ctx = { clientId: 'r5a', workspaceId: null, webContentsId: null }
+    await harness.login(ctx, 'user', 'secret')
+    setRuntimeActiveProductSpaceAccount('user-1')
+    setRuntimeActiveProductSpace('space-a', 'personal')
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal', accessMode: 'active' }] })
+    adminClientBehavior.getProductSpaceCatalog = async () => ({ catalogRevision: 'r5a', entries: [{ kind: 'app', catalogEntryId: 'entry-a', sources: [{ kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid' }] }] }) as any
+    adminClientBehavior.resolveProductSpaceLaunch = async () => ({ delivery: { kind: 'web_url', url: 'https://controlled.example', launchToken: 'must-not-mint' } }) as any
+    const result = await harness.productSpaceResolveLaunch(ctx, 'space-a', 'entry-a') as any
+    expect(result).toMatchObject({ success: false, errorCode: 'CIRCLE_ENTITLEMENT_REQUIRED', reason: 'unknown', recovery: 'refresh_membership' })
+    expect(adminClientCalls.some(call => call.method === 'resolveProductSpaceLaunch')).toBe(false)
+    expect(getRuntimeActiveProductSpace()).toBe('space-a')
+  })
 })
