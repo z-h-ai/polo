@@ -2065,6 +2065,32 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
     }
   }
 
+  it('R7 artifact404 only marks that entry unavailable, keeps the space online and refresh recovers it', async () => {
+    const entries = [rawEntry(), rawEntry({ catalogEntryId: 'neighbor', artifactInstanceId: 'neighbor-artifact' })]
+    wireElectronApi({ entries, resolveLaunch: () => ({ success: false, errorCode: 'NOT_FOUND', status: 404, message: 'missing artifact' }) })
+    const { result } = renderHook(() => useAppCatalog(scopeA))
+    await waitFor(() => expect(result.current.state.catalog?.apps).toHaveLength(2))
+    const target = result.current.state.catalog!.apps[0]!
+    await act(async () => { await expect(result.current.resolveLaunch(target)).rejects.toMatchObject({ code: 'NOT_FOUND' }) })
+    expect(result.current.state.accessMode).toBe('online')
+    expect(result.current.state.catalog!.apps.map(app => app.availability)).toEqual(['unavailable', 'available'])
+    await act(async () => { await result.current.sync(true) })
+    expect(result.current.state.catalog!.apps.map(app => app.availability)).toEqual(['available', 'available'])
+  })
+
+  it('R7 a late artifact404 cannot poison a newer same-scope successful catalog', async () => {
+    const delayed = deferred<any>()
+    wireElectronApi({ entries: [rawEntry()], resolveLaunch: () => delayed.promise })
+    const { result } = renderHook(() => useAppCatalog(scopeA))
+    await waitFor(() => expect(result.current.state.catalog?.apps).toHaveLength(1))
+    const target = result.current.state.catalog!.apps[0]!
+    let pending!: Promise<unknown>
+    act(() => { pending = result.current.resolveLaunch(target) })
+    await act(async () => { await result.current.sync(true) })
+    await act(async () => { delayed.resolve({ success: false, errorCode: 'NOT_FOUND', message: 'old missing artifact' }); await expect(pending).rejects.toMatchObject({ code: 'NOT_FOUND' }) })
+    expect(result.current.state.catalog!.apps[0]!.availability).toBe('available')
+  })
+
   it('pin, open and uninstall carry the complete identity through the REAL persistence, resolve-launch and uninstall RPCs (both collision directions)', async () => {
     const react = await import('@testing-library/react')
     const { createElement } = await import('react')

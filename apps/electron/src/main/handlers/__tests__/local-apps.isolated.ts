@@ -110,6 +110,7 @@ const listProductSpaces = mock(async () => ({
     accessMode: 'active' as const,
   }],
 }))
+const defaultListProductSpaces = listProductSpaces.getMockImplementation()!
 const defaultProductSpaceCatalog = async () => ({
   contractVersion: 1,
   productSpaceId: 'organization-a',
@@ -713,7 +714,10 @@ describe('local app main-process authorization boundary', () => {
     context.webContentsId = 1
     getAppReleaseDownload.mockClear()
     listProductSpaces.mockClear()
+    listProductSpaces.mockImplementation(defaultListProductSpaces)
     getProductSpaceCatalog.mockClear()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    listMemberCircleMemberships.mockResolvedValue({ memberships: [] })
     resolveProductSpaceLaunch.mockClear()
     getAppCatalog.mockClear()
     getAppCatalog.mockImplementation(async () => ({
@@ -3499,6 +3503,18 @@ describe('local app main-process authorization boundary', () => {
         expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
       })
     }
+    for (const channel of [RPC_CHANNELS.localApps.START, RPC_CHANNELS.localApps.RESTART, RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL]) {
+      it(`R7 rejects a vanished enterprise artifact whose old cache lost identity at ${channel}`, async () => {
+        listProductSpaces.mockImplementation(defaultListProductSpaces)
+        catalog.apps[0] = { ...catalog.apps[0]!, id: 'artifact-instance-a', ...(channel === RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL ? { deliveryMode: 'remote_url', remoteUrl: 'https://controlled.example/old' } : {}) }
+        seedTrustedBinding('account-a', 'organization-a', [{ catalogEntryId: 'catalog-entry-a', artifactInstanceId: 'artifact-instance-a', versionId: 'version-a', version: '2.3.4', sources: [] }])
+        const reply = await defaultProductSpaceCatalog()
+        getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: [] } as any)
+        await expect(handlers.get(channel)!(context, scope('artifact-instance-a'))).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+        expect(scopedStart).not.toHaveBeenCalled()
+        expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+      })
+    }
     it('starts a single entitled circle App normally', async () => {
       const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
       const reply = await defaultProductSpaceCatalog()
@@ -3548,6 +3564,7 @@ describe('local app production status projection (R34-3)', () => {
     getProductSpaceCatalog.mockClear()
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
     listProductSpaces.mockClear()
+    listProductSpaces.mockImplementation(defaultListProductSpaces)
     scopedStartExact.mockClear()
     scopedStartExact.mockImplementation(defaultStartExact)
     scopedStopExact.mockClear()

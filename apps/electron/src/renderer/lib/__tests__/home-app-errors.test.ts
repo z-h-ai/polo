@@ -12,3 +12,10 @@ for (const language of ['en', 'zh-Hans', 'de', 'es', 'hu', 'ja', 'pl']) {
     expect(t('productSpace.error.circlePersonalRequired')).not.toContain('productSpace.error.')
   })
 }
+
+for (const language of ['en', 'zh-Hans', 'de', 'es', 'hu', 'ja', 'pl']) {
+  it(`R7 artifact404 is item unavailable copy in ${language}`, () => {
+    const t = i18n.getFixedT(language)
+    expect(homeAppOperationErrorText(t, { code: 'NOT_FOUND' }, 'open', 'personal')).toBe(t('homeApps.status.unavailableGeneric'))
+  })
+}

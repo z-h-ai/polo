@@ -495,6 +495,8 @@ mock.module('@polo-ai/shared/admin', () => ({
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
+  clearAllOrganizationContextStorage: () => {},
+  getProductSpaceContextStorage: () => ({}),
   CONFIG_DIR: join(tmpdir(), `polo-native-admin-skill-test-${process.pid}`),
   getWorkspaceByNameOrId: () => null,
   setSetupDeferred: () => {},
@@ -605,7 +607,8 @@ const {
 } = await import('./admin')
 const { registerAuthHandlers } = await import('./auth')
 
-function createHarness() {
+type HarnessRuntime = { server: RpcServer; deps: HandlerDeps; handlers: Map<string, HandlerFn> }
+function createHarness(observe?: (runtime: HarnessRuntime) => void) {
   const handlers = new Map<string, HandlerFn>()
   const server: RpcServer = {
     handle(channel, handler) {
@@ -650,6 +653,7 @@ function createHarness() {
   const adminSessions = registerAdminHandlers(server, deps)
   registerAuthHandlers(server, deps, adminSessions)
 
+  observe?.({ server, deps, handlers })
   return {
     paymentHandoff: requiredHandler(handlers, RPC_CHANNELS.admin.PAYMENT_HANDOFF),
     login: requiredHandler(handlers, RPC_CHANNELS.admin.LOGIN),
@@ -1790,6 +1794,7 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
     signal: new AbortController().signal,
   }
   let resolveLaunch: HandlerFn
+  let testHarness: HarnessRuntime
 
   const activeList = async () => ({
     productSpaces: [{ id: 'space-a', accessMode: 'active' }],
@@ -1806,7 +1811,7 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
     authorityRevokeCalls.length = 0
     failAuthorityRevoke = false
     setRuntimeActiveProductSpace(null)
-    const harness = createHarness()
+    const harness = createHarness(runtime => { testHarness = runtime })
     resolveLaunch = harness.productSpaceResolveLaunch
     await harness.login(context, 'admin', 'admin-password')
   })
@@ -1823,9 +1828,19 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
     expect(getRuntimeActiveProductSpace()).toBe('space-a')
     expect(getRuntimeFenceGeneration()).toBe(generation)
     expect(managerState.tokens).not.toBeNull()
-    // The surviving committed context can move through the trusted fence setter.
-    setRuntimeActiveProductSpace('space-next', 'enterprise')
-    setRuntimeActiveProductSpaceAccount('user-1')
+    // Exercise actual Main execution-list and PREPARE -> STOP -> COMMIT.
+    const { registerProductSpaceHandlers } = await import('./product-space')
+    registerProductSpaceHandlers(testHarness.server, testHarness.deps)
+    const invoke = (channel: string, ...args: unknown[]) => requiredHandler(testHarness.handlers, channel)(context, ...args) as Promise<any>
+    expect(await invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, 'user-1', 'space-a')).toMatchObject({ success: true, executions: [] })
+    adminClientBehavior.listProductSpaces = async () => ({ personalProductSpaceId: 'space-a', productSpaces: [
+      { id: 'space-a', kind: 'personal', name: 'Personal', accessMode: 'active' },
+      { id: 'space-next', kind: 'enterprise', name: 'Next', accessMode: 'active' },
+    ] })
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, 'space-next')
+    expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).toMatchObject({ success: true })
+    expect(await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, 'space-next')).toMatchObject({ success: true })
     expect(getRuntimeActiveProductSpace()).toBe('space-next')
   })
 

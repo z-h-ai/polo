@@ -866,3 +866,7 @@ describe('R7 renewal cap reasons use maintained locale copy', () => {
     })
   }
 })
+
+it('R7 absent paid period remains unverified rather than active on a circle fallback', () => {
+  expect(resolveSubscriptionStatus(null, { status: 'active', billingKind: 'paid', currentPeriodEnd: null })).not.toBe('active')
+})

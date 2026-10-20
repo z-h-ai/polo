@@ -1427,6 +1427,8 @@ describe('R4FIX-02 detail content uses current-period authority', () => {
 
 it('R7 actual clock expiry agrees in list, heading and subscription without a new receipt', async () => {
   await i18n.changeLanguage('zh-Hans')
+  const { __resetMyCirclesViewPreferencesForTests } = await import('../MyCirclesPage')
+  __resetMyCirclesViewPreferencesForTests()
   const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
   const end = new Date(Date.now() + 1000).toISOString()
   const circle = { ...circleFixture({ circleId: 'circle-1', membershipId: 'ms-1', name: '到期测试圈', billingKind: 'paid' }), currentPeriodEnd: end }
