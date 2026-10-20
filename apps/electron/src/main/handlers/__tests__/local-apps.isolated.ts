@@ -3428,7 +3428,7 @@ describe('local app main-process authorization boundary', () => {
       const validUntil = new Date(Date.now() + 500).toISOString()
       listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ validUntil }) })] }))
       const entered = createDeferred<void>(), release = createDeferred<void>()
-      runtimeCoordinator.ensureGateway.mockImplementationOnce(async () => { entered.resolve(); await release.promise })
+      runtimeCoordinator.ensureGateway.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return 'http://127.0.0.1:9876' })
       const start = handlers.get(RPC_CHANNELS.localApps.START)!(context, { kind: 'product_space_runtime_start', app: { ...productSpaceAppIdentity(), sources: [source] } }) as Promise<unknown>
       await entered.promise
       await new Promise(resolve => setTimeout(resolve, 600))
@@ -3442,6 +3442,11 @@ describe('local app main-process authorization boundary', () => {
       const start = handlers.get(RPC_CHANNELS.localApps.START)!
       await expect(start(context, scope())).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
       expect(scopedStart).not.toHaveBeenCalled()
+    })
+    it('does not expose a cached ProductSpace remote URL through the legacy resolver', async () => {
+      catalog.apps[0] = { ...catalog.apps[0]!, artifactInstanceId: 'artifact-instance-a', deliveryMode: 'remote_url', remoteUrl: 'https://controlled.example/private' } as any
+      await expect(handlers.get(RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL)!(context, scope()))
+        .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     })
     it('starts a single entitled circle App normally', async () => {
       const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
