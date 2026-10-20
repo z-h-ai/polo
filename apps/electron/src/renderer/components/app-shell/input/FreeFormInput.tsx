@@ -58,6 +58,7 @@ import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
 import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingDirectorySelector'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { KnowledgeBaseSelectorPopover } from './KnowledgeBaseSelectorPopover'
+import { useKbSelectionSave } from './use-kb-selection-save'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { KbCollection } from '@polo-ai/shared/protocol'
 import type { PermissionMode } from '@polo-ai/shared/agent/modes'
@@ -585,15 +586,22 @@ export function FreeFormInput({
 
   // Optimistic selection with an explicit save contract: a failed persist
   // reverts the toggle and surfaces the error, instead of leaving a selected
-  // row the server never stored (reviews #11/#16).
-  const persistKbSelection = React.useCallback(async (previous: string[], next: string[]) => {
-    try {
-      await onKbCollectionsChange?.(next)
-    } catch {
-      setKbSelection(previous)
+  // row the server never stored (reviews #11/#16). The rollback is guarded by
+  // useKbSelectionSave — only the latest request of the CURRENT session may
+  // move the selection, so a stale failure can never restore session A's
+  // choice into session B (review N2 — this component is reused across
+  // sessions).
+  const persistKbSelection = useKbSelectionSave({
+    sessionId,
+    save: React.useCallback((ids: string[]) => {
+      if (!onKbCollectionsChange) return undefined
+      return onKbCollectionsChange(ids)
+    }, [onKbCollectionsChange]),
+    rollback: setKbSelection,
+    notifyFailure: React.useCallback(() => {
       toast.error(t('chat.knowledgeBase.saveFailed'))
-    }
-  }, [onKbCollectionsChange, t])
+    }, [t]),
+  })
 
   const handleKbToggleCollection = React.useCallback((collectionId: string) => {
     setKbSelection(current => {

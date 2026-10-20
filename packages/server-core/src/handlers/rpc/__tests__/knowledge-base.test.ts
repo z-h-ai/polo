@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { KB_SEND_MAX_SCAN_BYTES, RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { KbCollection, KbCollectionList, KbDocumentSummary } from '@polo-ai/shared/protocol'
 import type { HandlerFn, RpcServer, RequestContext } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../../handler-deps'
@@ -25,7 +25,7 @@ import {
   setKbActiveProductSpaceReaderForTests,
   setKbSendResolveTimeoutForTests,
 } from '../knowledge-base'
-import { kbRootPath, kbSpaceSegment, readAudit } from '../../../knowledge-base/store'
+import { kbRootPath, kbSpaceSegment, readAudit, searchDocuments } from '../../../knowledge-base/store'
 
 const ACCOUNT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const WORKSPACE_ID = 'ws-one'
@@ -279,6 +279,42 @@ describe('knowledge-base scope enforcement', () => {
     // Nothing was written: no store, no audit entry.
     expect(existsSync(spaceDir())).toBe(false)
   })
+
+  it('fails a mutation whose fence is revoked between authorization and the handler body (review #3)', async () => {
+    const { invoke } = createHarness()
+    // The reader runs INSIDE requireKbScope after its internal CAS but
+    // before the handler resumes: revoking here is exactly the window
+    // between "authorized" and "about to write".
+    setKbActiveProductSpaceReaderForTests((_accountId, productSpaceId) => {
+      if (productSpaceId !== SPACE_ID) return null
+      setRuntimeActiveProductSpace(null)
+      return enterpriseSpace('owner') as never
+    })
+    await expect(invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Revoked mid-entry', description: '',
+    })).rejects.toMatchObject({ code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' })
+    expect(existsSync(spaceDir())).toBe(false)
+
+    // The same window may not leave a session-scope write behind either.
+    setRuntimeActiveProductSpace(SPACE_ID)
+    setRuntimeActiveProductSpaceAccount(ACCOUNT_ID)
+    const second = createHarness()
+    second.seedSession('session-1')
+    const seeded = await seedCollection(second.invoke, { title: 'Policy', content: 'Rules.' })
+    if (!seeded.document) throw new Error('seed document missing')
+    await publishDocument(second.invoke, seeded.document)
+    setKbActiveProductSpaceReaderForTests((_accountId, productSpaceId) => {
+      if (productSpaceId !== SPACE_ID) return null
+      setRuntimeActiveProductSpace(null)
+      return enterpriseSpace('owner') as never
+    })
+    await expect(second.invoke(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS, {
+      workspaceId: WORKSPACE_ID, sessionId: 'session-1', collectionIds: [seeded.collection.id],
+    })).rejects.toMatchObject({ code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' })
+    expect(second.savedCollections.get('session-1')?.kbCollectionIds).toEqual([])
+    expect(readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+      .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
+  })
 })
 
 describe('knowledge-base enterprise isolation', () => {
@@ -463,6 +499,42 @@ describe('knowledge-base session scope authorization', () => {
       .filter(entry => entry.action === 'session_scope.set')
     expect(afterClear).toHaveLength(2)
     expect(afterClear[1].detail).toMatchObject({ from: [collection.id], to: [] })
+  })
+
+  it('never leaves a mutated scope without its audit entry, even when the fence moves mid-write (review #15)', async () => {
+    const { invoke, seedSession, savedCollections, sessionManager } = createHarness()
+    seedSession('session-1')
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Policy', content: 'Rules.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    // The setter revokes the fence AFTER the mutation has landed — the exact
+    // window where the previous order (mutate → CAS → audit) recorded zero.
+    const mutableManager = sessionManager as unknown as {
+      setSessionKbCollections: (sessionId: string, ids: string[]) => Promise<void>
+    }
+    const original = mutableManager.setSessionKbCollections.bind(mutableManager)
+    mutableManager.setSessionKbCollections = async (sessionId, ids) => {
+      await original(sessionId, ids)
+      setRuntimeActiveProductSpace(null)
+    }
+
+    const saved = await invoke(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS, {
+      workspaceId: WORKSPACE_ID, sessionId: 'session-1', collectionIds: [collection.id],
+    }) as { ok: boolean; collectionIds: string[] }
+    // The write was authorized at initiation, so it succeeded — and the trail
+    // MUST have been written ahead of it.
+    expect(saved).toMatchObject({ ok: true, collectionIds: [collection.id] })
+    expect(savedCollections.get('session-1')?.kbCollectionIds).toEqual([collection.id])
+    const entries = readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+      .filter(entry => entry.action === 'session_scope.set')
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      actor: ACCOUNT_ID,
+      target: 'session-1',
+      detail: { from: [], to: [collection.id] },
+    })
   })
 })
 
@@ -720,5 +792,174 @@ describe('knowledge-base send-time reference resolution', () => {
       target: 'session-draft',
       detail: { from: [], to: [collection.id], source: 'send_draft_commit' },
     })
+  })
+
+  it('truncates an oversized send text to the search query ceiling (review #7)', async () => {
+    const { invoke, sessionManager } = createHarness()
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    await sessionManager.setSessionKbCollections('session-9', [collection.id])
+
+    // 48k characters — beyond the ceiling the SEARCH schema enforces; the
+    // send path applies the same bound to the raw message.
+    const oversized = 'flights '.repeat(6_000)
+    const references = await resolveSessionKbReferences(
+      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      'session-9', oversized,
+    )
+    expect(references).toHaveLength(1)
+    expect(references?.[0]).toMatchObject({ docId: document.id })
+  })
+})
+
+describe('knowledge-base send-time read-only and timeout discipline', () => {
+  /** Seeds a session with stored scope `[stored]` plus a second published collection. */
+  async function seedScopedSession(harness: ReturnType<typeof createHarness>) {
+    const { invoke, sessionManager } = harness
+    const stored = await seedCollection(invoke, { title: 'Travel policy', content: 'Flights are economy only.' })
+    if (!stored.document) throw new Error('seed document missing')
+    await publishDocument(invoke, stored.document)
+    const draftCollection = await invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Other', description: '',
+    }) as KbCollection
+    const draftDoc = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, collectionId: draftCollection.id,
+      title: 'Other policy', content: 'Nothing about flights.',
+    }) as KbDocumentSummary
+    await publishDocument(invoke, draftDoc)
+    await sessionManager.setSessionKbCollections('session-ro', [stored.collection.id])
+    return { stored: stored.collection, draftCollection }
+  }
+
+  function resolveFor(harness: ReturnType<typeof createHarness>, message: string, draft?: string[]) {
+    return resolveSessionKbReferences(
+      { sessionManager: harness.sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      'session-ro', message, draft,
+    )
+  }
+
+  it('ignores the composer draft while the space is read-only and resolves from the stored scope (review #4)', async () => {
+    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
+    const scenarios: Array<() => void> = [
+      () => setRuntimeOfflineReadOnly(true),
+      () => setRuntimeProductSpaceRestricted(SPACE_ID, true),
+    ]
+    for (const engage of scenarios) {
+      const harness = createHarness()
+      const { stored, draftCollection } = await seedScopedSession(harness)
+      engage()
+      const references = await resolveFor(harness, 'flights', [draftCollection.id])
+      // References still resolve — from the STORED scope, never the draft.
+      expect(references?.map(hit => hit.collectionId)).toEqual([stored.id])
+      // The draft never reached the session scope, and nothing was audited.
+      expect(await harness.sessionManager.getSession('session-ro'))
+        .toMatchObject({ kbCollectionIds: [stored.id] })
+      expect(readAudit(workspaceRoot, binding).filter(entry => entry.action === 'session_scope.set'))
+        .toHaveLength(0)
+      setRuntimeOfflineReadOnly(false)
+      setRuntimeProductSpaceRestricted(SPACE_ID, false)
+    }
+
+    // Same contract for an online `read_only` accessMode space: seed while
+    // active, then flip the space's accessMode.
+    const readOnly = createHarness()
+    const readOnlySeed = await seedScopedSession(readOnly)
+    setKbActiveProductSpaceReaderForTests(
+      (_accountId, productSpaceId) =>
+        (productSpaceId === SPACE_ID ? enterpriseSpace('owner', { accessMode: 'read_only' }) : null) as never,
+    )
+    const stored = readOnlySeed.stored
+    const draftCollection = readOnlySeed.draftCollection
+    const references = await resolveFor(readOnly, 'flights', [draftCollection.id])
+    expect(references?.map(hit => hit.collectionId)).toEqual([stored.id])
+    expect(await readOnly.sessionManager.getSession('session-ro'))
+      .toMatchObject({ kbCollectionIds: [stored.id] })
+    expect(readAudit(workspaceRoot, binding).filter(entry => entry.action === 'session_scope.set'))
+      .toHaveLength(0)
+  })
+
+  it('a send that times out may not commit its draft afterwards (review N1)', async () => {
+    const harness = createHarness()
+    const { stored, draftCollection } = await seedScopedSession(harness)
+    let release: () => void = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    // The trusted-account lookup hangs past the send deadline.
+    setTrustedProductSpaceAccountProvider(async () => {
+      await gate
+      return ACCOUNT_ID
+    })
+    setKbSendResolveTimeoutForTests(25)
+    const result = await resolveFor(harness, 'flights', [draftCollection.id])
+    expect(result).toBeUndefined()
+    // The deadline has fired; now the stale authorization resumes — with the
+    // fence STILL on this space, so only the abandonment guard stops it.
+    release()
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(await harness.sessionManager.getSession('session-ro'))
+      .toMatchObject({ kbCollectionIds: [stored.id] })
+    expect(readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+      .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
+  })
+
+  it('a resolution resuming after a space switch writes neither scope nor audit into the wrong space (review N1)', async () => {
+    const harness = createHarness()
+    const { stored, draftCollection } = await seedScopedSession(harness)
+    let release: () => void = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    setTrustedProductSpaceAccountProvider(async () => {
+      await gate
+      return ACCOUNT_ID
+    })
+    const pending = resolveFor(harness, 'flights?', [draftCollection.id])
+    await new Promise(resolve => setTimeout(resolve, 10))
+    // The account moves to ANOTHER enterprise space while the old
+    // authorization is still pending — inside the wall clock. The reader
+    // answers for BOTH spaces, so the captured-scope token check is the only
+    // thing that can stop the stale continuation.
+    setRuntimeActiveProductSpace('ps-two')
+    setKbActiveProductSpaceReaderForTests(
+      (_accountId, productSpaceId) =>
+        (productSpaceId === 'ps-two'
+          ? enterpriseSpace('owner', { id: 'ps-two', enterpriseId: 'ent-two' })
+          : productSpaceId === SPACE_ID
+            ? enterpriseSpace('owner')
+            : null) as never,
+    )
+    release()
+    const result = await pending
+    expect(result).toBeUndefined()
+    // Session A's scope was never overwritten with another space's draft.
+    expect(await harness.sessionManager.getSession('session-ro'))
+      .toMatchObject({ kbCollectionIds: [stored.id] })
+    // And no audit entry landed in EITHER space's KB.
+    for (const binding of [
+      { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID },
+      { productSpaceId: 'ps-two', enterpriseId: 'ent-two' },
+    ]) {
+      expect(readAudit(workspaceRoot, binding).filter(entry => entry.action === 'session_scope.set'))
+        .toHaveLength(0)
+    }
+  })
+})
+
+describe('knowledge-base search budget', () => {
+  it('stops on an already-passed deadline before scanning anything (review #7)', async () => {
+    const { invoke } = createHarness()
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    const hits = searchDocuments(
+      workspaceRoot,
+      { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID },
+      'flights',
+      [collection.id],
+      { deadline: Date.now() - 1, maxScannedBytes: KB_SEND_MAX_SCAN_BYTES },
+    )
+    expect(hits).toEqual([])
   })
 })

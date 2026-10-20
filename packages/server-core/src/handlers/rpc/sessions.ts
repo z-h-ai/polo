@@ -501,12 +501,15 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // reconciled) with THIS send; hits are persisted on the user message as
     // its immutable reference snapshot. Any KB failure degrades to "no
     // references" — never a failed send. The resolution is bounded
-    // (wall-clock + scan budget) so it cannot stall persist/ACK.
+    // (wall-clock + scan budget) so it cannot stall persist/ACK, and it is
+    // bound to THIS caller's complete workspace so a resolution resuming
+    // after its deadline can never commit for a foreign scope (review N1).
     const kbReferences = await resolveSessionKbReferences(
       deps,
       sessionId,
       message,
       options?.kbCollectionIds,
+      resolveCallerWorkspaceId(ctx),
     )
     // Post-authorization CAS after the awaited KB resolution — the send must
     // not dispatch for a scope that moved while references were resolved.

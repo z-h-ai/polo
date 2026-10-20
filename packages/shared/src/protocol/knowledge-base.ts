@@ -23,6 +23,12 @@ export const KB_SEND_RESOLVE_TIMEOUT_MS = 1_500
 export const KB_SEND_MAX_SCAN_BYTES = 4 * 1024 * 1024
 /** Same ceiling the SET_SESSION_COLLECTIONS input schema enforces. */
 export const KB_SESSION_COLLECTIONS_MAX = 100
+/**
+ * The longest search query the KB accepts (POO-108 review #7). The send-time
+ * lookup tokenizes the raw message, so it truncates the message to this same
+ * ceiling instead of silently accepting an unbounded scan input.
+ */
+export const KB_SEARCH_QUERY_MAX_CHARS = 32_768
 
 export const KbDocumentStatusSchema = z.enum(['draft', 'in_review', 'published', 'rejected'])
 export type KbDocumentStatus = z.output<typeof KbDocumentStatusSchema>
@@ -97,7 +103,7 @@ export type KbRejectDocumentInput = z.output<typeof KbRejectDocumentInputSchema>
 
 export const KbSearchInputSchema = z.object({
   workspaceId: KbWorkspaceIdSchema,
-  query: z.string().max(32_768),
+  query: z.string().max(KB_SEARCH_QUERY_MAX_CHARS),
   collectionIds: z.array(KbCollectionIdSchema).max(100).optional(),
 }).strict()
 export type KbSearchInput = z.output<typeof KbSearchInputSchema>

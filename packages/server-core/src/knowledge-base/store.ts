@@ -559,7 +559,7 @@ function buildSnippet(content: string, tokens: string[]): string {
 export interface KbSearchBudget {
   /** Stop scanning once this many content bytes have been read. */
   maxScannedBytes?: number
-  /** Wall-clock deadline (Date.now() based), checked between documents. */
+  /** Wall-clock deadline (Date.now() based), checked between documents and inside the token loop. */
   deadline?: number
 }
 
@@ -588,46 +588,56 @@ export function searchDocuments(
   const outOfBudget = (): boolean =>
     (budget?.deadline !== undefined && Date.now() >= budget.deadline)
     || (budget?.maxScannedBytes !== undefined && scannedBytes >= budget.maxScannedBytes)
-  for (const collectionEntry of readdirSync(collectionsDir, { withFileTypes: true })) {
-    if (outOfBudget()) break
-    if (!collectionEntry.isDirectory()) continue
-    const collectionMetaPath = insideRoot(root, join(collectionsDir, collectionEntry.name, 'meta.json'))
-    if (!existsSync(collectionMetaPath)) continue
-    if (wanted && !wanted.has(collectionEntry.name)) continue
-    const collection = readJson<KbCollectionRecord>(collectionMetaPath)
-    collectionNames.set(collection.id, collection.name)
-    const documentsDir = insideRoot(root, join(collectionsDir, collectionEntry.name, 'documents'))
-    if (!existsSync(documentsDir)) continue
-    for (const docEntry of readdirSync(documentsDir, { withFileTypes: true })) {
+  /** Partial results stay valid: rank and cap whatever was scored in budget. */
+  const finalize = (): KbSearchHit[] =>
+    hits
+      .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
+      .slice(0, KB_SEARCH_LIMIT)
+  const scan = (): KbSearchHit[] => {
+    for (const collectionEntry of readdirSync(collectionsDir, { withFileTypes: true })) {
       if (outOfBudget()) break
-      if (!docEntry.isDirectory()) continue
-      const metaPath = insideRoot(root, join(documentsDir, docEntry.name, 'meta.json'))
-      if (!existsSync(metaPath)) continue
-      const record = readJson<KbDocumentRecord>(metaPath)
-      if (record.status !== 'published') continue
-      const content = readContent(root, record)
-      scannedBytes += Buffer.byteLength(content, 'utf-8')
-      const title = record.title.toLowerCase()
-      const lowered = content.toLowerCase()
-      let score = 0
-      for (const token of tokens) {
-        if (title.includes(token)) score += KB_TITLE_WEIGHT
-        score += countOccurrences(lowered, token) * KB_BODY_WEIGHT
+      if (!collectionEntry.isDirectory()) continue
+      const collectionMetaPath = insideRoot(root, join(collectionsDir, collectionEntry.name, 'meta.json'))
+      if (!existsSync(collectionMetaPath)) continue
+      if (wanted && !wanted.has(collectionEntry.name)) continue
+      const collection = readJson<KbCollectionRecord>(collectionMetaPath)
+      collectionNames.set(collection.id, collection.name)
+      const documentsDir = insideRoot(root, join(collectionsDir, collectionEntry.name, 'documents'))
+      if (!existsSync(documentsDir)) continue
+      for (const docEntry of readdirSync(documentsDir, { withFileTypes: true })) {
+        if (outOfBudget()) return finalize()
+        if (!docEntry.isDirectory()) continue
+        const metaPath = insideRoot(root, join(documentsDir, docEntry.name, 'meta.json'))
+        if (!existsSync(metaPath)) continue
+        const record = readJson<KbDocumentRecord>(metaPath)
+        if (record.status !== 'published') continue
+        const content = readContent(root, record)
+        scannedBytes += Buffer.byteLength(content, 'utf-8')
+        const title = record.title.toLowerCase()
+        const lowered = content.toLowerCase()
+        let score = 0
+        for (const token of tokens) {
+          // The deadline must cancel INSIDE the token loop, not only between
+          // documents: a message that tokenizes into thousands of tokens over
+          // a large document would otherwise run past its budget (review #7).
+          if (outOfBudget()) return finalize()
+          if (title.includes(token)) score += KB_TITLE_WEIGHT
+          score += countOccurrences(lowered, token) * KB_BODY_WEIGHT
+        }
+        if (score <= 0) continue
+        hits.push({
+          docId: record.id,
+          collectionId: record.collectionId,
+          collectionName: collection.name,
+          title: record.title,
+          snippet: buildSnippet(content, tokens),
+          score,
+        })
       }
-      if (score <= 0) continue
-      hits.push({
-        docId: record.id,
-        collectionId: record.collectionId,
-        collectionName: collection.name,
-        title: record.title,
-        snippet: buildSnippet(content, tokens),
-        score,
-      })
     }
+    return finalize()
   }
-  return hits
-    .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
-    .slice(0, KB_SEARCH_LIMIT)
+  return scan()
 }
 
 /**
