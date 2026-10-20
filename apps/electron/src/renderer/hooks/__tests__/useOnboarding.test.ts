@@ -894,3 +894,22 @@ describe('R3FIX explicit password cancellation', () => {
     expect(adminLogin).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('R5FIX-01 cancellation deletion failure', () => {
+  afterEach(() => cleanup())
+  it('shows a retryable local deletion error and permits an explicit retry', async () => {
+    let fail = true
+    const adminLogout = mock(async () => fail
+      ? { success: false, errorCode: 'LOCAL_CREDENTIAL_DELETE_FAILED' }
+      : { success: true })
+    installElectronApi({ adminLogout })
+    const { result } = renderAdminLoginHooks()
+    await act(async () => { await result.current.handleAdminCancelLogin() })
+    expect(result.current.state.loginStatus).toBe('error')
+    expect(result.current.state.errorMessage).toBe(i18n.t('onboarding.adminLogin.localLogoutFailed'))
+    fail = false
+    await act(async () => { await result.current.handleAdminCancelLogin() })
+    expect(adminLogout).toHaveBeenCalledTimes(2)
+    expect(result.current.state.loginStatus).toBe('idle')
+  })
+})

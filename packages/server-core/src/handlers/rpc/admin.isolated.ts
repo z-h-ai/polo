@@ -338,6 +338,8 @@ const retainedCatalogAppIds = jest.fn(async (
 const listStoredCredentials = jest.fn(async () => ['admin-tokens', 'local-provider'])
 const deleteStoredCredential = jest.fn(async (_credentialId: string) => true)
 
+let refuseTokenDeletion = false
+
 const mockCredentialManager = {
   async getAdminTokens(): Promise<StoredTokens | null> {
     return managerState.tokens
@@ -346,6 +348,7 @@ const mockCredentialManager = {
     managerState.tokens = { ...tokens }
   },
   async deleteAdminTokens(): Promise<boolean> {
+    if (refuseTokenDeletion) return false
     const hadTokens = managerState.tokens !== null
     managerState.tokens = null
     return hadTokens
@@ -5620,4 +5623,22 @@ describe('R3FIX native late authentication after explicit logout', () => {
       })
     }
   }
+})
+
+describe('R5FIX-01 logout credential deletion acknowledgement', () => {
+  it('returns retryable failure while tokens remain and succeeds after recovery', async () => {
+    const { login, logout } = createHarness()
+    const ctx = { clientId: 'r5', workspaceId: null, webContentsId: null }
+    await login(ctx, 'user', 'secret')
+    const original = managerState.tokens
+    refuseTokenDeletion = true
+    try {
+      const failed = await logout(ctx)
+      expect(failed.success).toBe(false)
+      expect(failed.errorCode).toBe('LOCAL_CREDENTIAL_DELETE_FAILED')
+      expect(managerState.tokens).toEqual(original)
+    } finally { refuseTokenDeletion = false }
+    expect(await logout(ctx)).toEqual({ success: true })
+    expect(managerState.tokens).toBeNull()
+  })
 })

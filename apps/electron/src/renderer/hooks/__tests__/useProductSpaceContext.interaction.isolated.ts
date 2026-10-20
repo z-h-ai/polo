@@ -2255,3 +2255,39 @@ describe('useProductSpaceContextState superseded account receipts (P70-BOOT-03)'
     window.removeEventListener('polo:product-space-changed', onSpaceChanged)
   })
 })
+
+describe('R5FIX-04 trusted active context recovery', () => {
+  it('recommits a revoked context through the stop barrier, then allows a normal switch', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    declaredActiveSpace = undefined // Catalog403 revoked Main only.
+    const stages: string[] = []
+    const api = window.electronAPI
+    const stop = api.productSpaceStopSwitchExecutions
+    const commit = api.productSpaceCommitSwitch
+    api.productSpaceStopSwitchExecutions = async token => { stages.push('stop'); return stop(token) }
+    api.productSpaceCommitSwitch = async (token, target) => { stages.push('commit'); return commit(token, target) }
+    await act(async () => { expect(await result.current.recoverActiveProductSpace()).toBe(true) })
+    expect(stages).toEqual(['stop', 'commit'])
+    expect(declaredActiveSpace).toBe('space-ent')
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+    await act(async () => { await result.current.requestSwitch(personalId) })
+    expect(declaredActiveSpace).toBe(personalId)
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+  })
+
+  it('does not publish recovery when the trusted stop fails; exposes bootstrap retry', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    declaredActiveSpace = undefined
+    switchResult = { success: false, errorCode: 'runtime_stop_failed', executions: [] }
+    await act(async () => { expect(await result.current.recoverActiveProductSpace()).toBe(false) })
+    expect(declaredActiveSpace).toBeUndefined()
+    expect(result.current.flowState).toBe('error')
+    expect(result.current.error?.code).toBe('runtime_stop_failed')
+    switchResult = { success: true, executions: [] }
+    await act(async () => { expect(await result.current.retryBootstrap()).toBe('ready') })
+    expect(declaredActiveSpace).toBe(personalId)
+  })
+})

@@ -170,6 +170,7 @@ let uninstallProductSpaceBundle = mock(async (
 
 function productSpaceContext(organizationId: string, accountId = 'account-a') {
   return {
+    onRecoverActiveProductSpace: async () => true,
     accountId,
     activeProductSpaceId: organizationId,
     productSpaceContextKey: createProductSpaceContextKey(
@@ -2290,4 +2291,29 @@ describe('R3FIX initial Catalog failure classification', () => {
       expect(startLocalApp).not.toHaveBeenCalled()
     })
   }
+})
+
+describe('R5FIX-04 denied Catalog recovery ordering', () => {
+  it('holds denied projection until trusted Main recovery acknowledges the stop and commit', async () => {
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => expect(result.current.state.loading).toBe(false))
+    const api = window.electronAPI
+    const healthy = api.productSpaceGetCatalog
+    api.productSpaceGetCatalog = async () => ({ success: false, errorCode: 'FORBIDDEN', status: 403 })
+    await act(async () => { await result.current.sync(true) })
+    expect(result.current.state.accessMode).toBe('denied')
+    let release!: (ok: boolean) => void
+    let recoveries = 0
+    productSpaceContextState.onRecoverActiveProductSpace = () => {
+      recoveries++
+      return new Promise<boolean>(resolve => { release = resolve })
+    }
+    api.productSpaceGetCatalog = healthy
+    let pending!: Promise<void>
+    act(() => { pending = result.current.sync(true) })
+    await waitFor(() => expect(recoveries).toBe(1))
+    expect(result.current.state.accessMode).toBe('denied')
+    await act(async () => { release(true); await pending })
+    expect(result.current.state.accessMode).toBe('online')
+  })
 })

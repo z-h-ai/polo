@@ -840,3 +840,19 @@ it('R4FIX waits for same-scope data before restoring scroll and resets on accoun
     expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(0)
   }
 })
+
+describe('R5FIX-05 partial receipt recovery', () => {
+  for (const failed of ['circles', 'memberships'] as const) {
+    it(`offers explicit refresh when ${failed} alone failed`, async () => {
+      const resource = makeInjectedResource({ phase: 'partial',
+        ...(failed === 'circles' ? { circles: null, circlesError: { code: 'timeout', retryable: true } }
+          : { memberships: null, membershipsError: { code: 'timeout', retryable: true } }) })
+      let refreshes = 0
+      resource.refresh = async () => { refreshes++; return { skipped: true as const, reason: 'no_scope' as const } }
+      const view = renderInjected(resource)
+      fireEvent.click(screen.getByTestId('my-circles-partial-retry'))
+      await waitFor(() => expect(refreshes).toBe(1))
+      view.unmount()
+    })
+  }
+})

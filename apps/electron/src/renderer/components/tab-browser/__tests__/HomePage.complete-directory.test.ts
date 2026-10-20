@@ -774,3 +774,8 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
     })
   })
 })
+
+it('R5FIX-03 uses source-neutral withdrawal explanation in personal and enterprise spaces', () => {
+  expect(i18n.t('homeApps.errors.unavailable', { lng: 'zh-Hans' })).toBe('此 App 的授权已结束或已停止分发。')
+  expect(i18n.t('homeApps.errors.unavailable', { lng: 'en' })).toBe('Authorization for this App has ended or distribution has stopped.')
+})
