@@ -10,7 +10,7 @@ const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(
 import { pushTyped, type RpcServer, type RequestContext } from '@polo-ai/server-core/transport'
 import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
-import { bindClientActiveSession } from './client-active-session'
+import { bindClientActiveSession, unbindClientActiveSession } from './client-active-session'
 import {
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceScope,
@@ -454,7 +454,12 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const scopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
     assertSessionScopeTokenCurrent(scopeToken)
     unregisterProductSpaceExecution(sessionId)
-    return sessionManager.deleteSession(sessionId)
+    const result = await sessionManager.deleteSession(sessionId)
+    // A stale client binding would make every session-scoped read (skills
+    // workbench, canonical skill files) fail with workspace_context_mismatch
+    // until restart, so drop the binding once its session is gone.
+    unbindClientActiveSession(ctx.clientId, sessionId)
+    return result
   })
 
   // Send a message to a session (with optional file attachments).

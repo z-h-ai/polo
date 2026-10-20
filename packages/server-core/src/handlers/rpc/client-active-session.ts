@@ -24,3 +24,8 @@ export function getClientActiveSession(
 export function clearClientActiveSession(clientId: string): void {
   activeSessionsByClient.delete(clientId)
 }
+
+export function unbindClientActiveSession(clientId: string, sessionId: string): void {
+  const active = activeSessionsByClient.get(clientId)
+  if (active?.sessionId === sessionId) activeSessionsByClient.delete(clientId)
+}

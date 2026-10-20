@@ -589,8 +589,11 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!workspace) return []
     await ensureRecovered(workspace.rootPath)
     const activeSessionId = getClientActiveSession(ctx.clientId, workspace.id)
+    // A stale binding (e.g. active session deleted from another code path)
+    // must not take down the whole workbench; the working directory is only a
+    // discovery enhancement (same tolerance as the GET_FILES path below).
     const effectiveWorkingDir = activeSessionId
-      ? await deriveSessionWorkingDirectory(deps, workspace, activeSessionId) : undefined
+      ? await deriveSessionWorkingDirectory(deps, workspace, activeSessionId).catch(() => undefined) : undefined
     const skills = await loadSkillsWithCreatorState(workspace.rootPath, effectiveWorkingDir, unfiltered)
     deps.platform.logger?.info(`SKILLS_GET: Loaded ${skills.length}${unfiltered ? ' unfiltered' : ''} skills from ${workspace.rootPath}`)
     return skills
@@ -614,7 +617,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const workspace = getBoundWorkspace(_ctx, input.data.workspaceId, deps)
     if (!workspace) return []
     const activeSessionId = getClientActiveSession(_ctx.clientId, workspace.id)
-    const workingDirectory = activeSessionId ? await deriveSessionWorkingDirectory(deps,workspace,activeSessionId) : undefined
+    // Same stale-binding tolerance as readWorkspaceSkills above.
+    const workingDirectory = activeSessionId ? await deriveSessionWorkingDirectory(deps,workspace,activeSessionId).catch(() => undefined) : undefined
     const skill = (await loadSkillsWithCreatorState(workspace.rootPath,workingDirectory)).find(row => row.slug === skillSlug)
     if (!skill) return []
     const skillDir = skill.path
