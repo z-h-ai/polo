@@ -29,6 +29,14 @@ export const KB_SESSION_COLLECTIONS_MAX = 100
  * ceiling instead of silently accepting an unbounded scan input.
  */
 export const KB_SEARCH_QUERY_MAX_CHARS = 32_768
+/**
+ * Wall-clock budget for the publish-state validation that guards a session
+ * scope write (POO-108 review #7). The check walks a collection's document
+ * metadata synchronously, so with a huge collection it must give up — reading
+ * as "not proven published" — instead of stalling the SET RPC (and, on the
+ * send path, the message it feeds) past the reference-resolution deadline.
+ */
+export const KB_PUBLISHED_CHECK_TIMEOUT_MS = 1_500
 
 export const KbDocumentStatusSchema = z.enum(['draft', 'in_review', 'published', 'rejected'])
 export type KbDocumentStatus = z.output<typeof KbDocumentStatusSchema>

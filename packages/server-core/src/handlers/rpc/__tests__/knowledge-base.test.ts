@@ -14,6 +14,7 @@ import {
   setRuntimeProductSpaceRestricted,
 } from '../../../runtime/product-space-executions'
 import {
+  captureCompleteTrustedSessionScopeToken,
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
 } from '../trusted-product-space-account'
@@ -25,7 +26,13 @@ import {
   setKbActiveProductSpaceReaderForTests,
   setKbSendResolveTimeoutForTests,
 } from '../knowledge-base'
-import { kbRootPath, kbSpaceSegment, readAudit, searchDocuments } from '../../../knowledge-base/store'
+import {
+  isCollectionPublished,
+  kbRootPath,
+  kbSpaceSegment,
+  readAudit,
+  searchDocuments,
+} from '../../../knowledge-base/store'
 
 const ACCOUNT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const WORKSPACE_ID = 'ws-one'
@@ -904,6 +911,62 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
       .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
   })
 
+  it('authorizes the whole resolution against the ENTRY token only (reviews #3/N1)', async () => {
+    const harness = createHarness()
+    const { stored, draftCollection } = await seedScopedSession(harness)
+    // The SEND entry captured its token BEFORE the resolution started.
+    const entryToken = captureCompleteTrustedSessionScopeToken(WORKSPACE_ID)
+    if (!entryToken) throw new Error('entry token missing')
+    // The revoke-and-recommit lands INSIDE the awaited session read: a FRESH
+    // capture after it would authorize again (same account, same space, same
+    // fence), but the send was admitted under the entry token — the
+    // resolution must hold it to that token and commit nothing. The previous
+    // capture-after-first-await order picked up the re-armed token and wrote
+    // the draft into the scope of a send the entry had already rejected.
+    const manager = harness.sessionManager as unknown as {
+      getSession: (sessionId: string) => Promise<unknown>
+    }
+    const original = manager.getSession.bind(manager)
+    manager.getSession = async sessionId => {
+      const record = await original(sessionId)
+      setSyncTrustedProductSpaceAccountId('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+      setSyncTrustedProductSpaceAccountId(ACCOUNT_ID)
+      return record
+    }
+    const result = await resolveSessionKbReferences(
+      { sessionManager: harness.sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      'session-ro', 'flights?', [draftCollection.id], WORKSPACE_ID, entryToken,
+    )
+    expect(result).toBeUndefined()
+    expect(await harness.sessionManager.getSession('session-ro'))
+      .toMatchObject({ kbCollectionIds: [stored.id] })
+    expect(readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+      .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
+  })
+
+  it('commits an explicit empty draft as a scope clear before resolving (review #12 regression)', async () => {
+    const { invoke, sessionManager } = createHarness()
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    await sessionManager.setSessionKbCollections('session-9', [collection.id])
+
+    // The user cleared the selection and sent: the explicit [] is a clear,
+    // not "no draft". The previous `draft.length > 0` guard skipped the
+    // commit entirely, so the send kept resolving from the scope the user
+    // had just emptied.
+    const references = await resolveSessionKbReferences(
+      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      'session-9', 'flights?', [],
+    )
+    expect(references).toBeUndefined()
+    expect(await sessionManager.getSession('session-9')).toMatchObject({ kbCollectionIds: [] })
+    expect(readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+      .filter(entry => entry.action === 'session_scope.set')).toHaveLength(1)
+  })
+
   it('a resolution resuming after a space switch writes neither scope nor audit into the wrong space (review N1)', async () => {
     const harness = createHarness()
     const { stored, draftCollection } = await seedScopedSession(harness)
@@ -961,5 +1024,67 @@ describe('knowledge-base search budget', () => {
       { deadline: Date.now() - 1, maxScannedBytes: KB_SEND_MAX_SCAN_BYTES },
     )
     expect(hits).toEqual([])
+  })
+
+  it('scores a document whose read lands exactly on the byte cap (review #7 follow-up)', async () => {
+    const { invoke } = createHarness()
+    const { collection } = await seedCollection(invoke)
+    const first = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, collectionId: collection.id,
+      title: 'First', content: 'alpha beta',
+    }) as KbDocumentSummary
+    const second = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, collectionId: collection.id,
+      title: 'Second', content: 'alpha gamma',
+    }) as KbDocumentSummary
+    await publishDocument(invoke, first)
+    await publishDocument(invoke, second)
+    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
+    // 10 + 11 = 21 bytes: the cap lands exactly after the second document is
+    // read. The byte budget stops the NEXT read, but the content already in
+    // hand must still be scored — the previous in-loop check dropped it and
+    // the send resolved zero references despite the only match being read.
+    const hits = searchDocuments(workspaceRoot, binding, 'gamma', [collection.id], {
+      maxScannedBytes:
+        Buffer.byteLength('alpha beta', 'utf-8') + Buffer.byteLength('alpha gamma', 'utf-8'),
+    })
+    expect(hits.map(hit => hit.docId)).toEqual([second.id])
+  })
+
+  it('still refuses to read the document AFTER the byte cap is reached (review #7)', async () => {
+    const { invoke } = createHarness()
+    const { collection } = await seedCollection(invoke)
+    for (const title of ['First', 'Second']) {
+      const doc = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+        workspaceId: WORKSPACE_ID, collectionId: collection.id,
+        title, content: 'alpha alpha',
+      }) as KbDocumentSummary
+      await publishDocument(invoke, doc)
+    }
+    // Two same-sized documents, cap = exactly one document: whichever is read
+    // first is scored, the second is never read — order-independently one hit.
+    const hits = searchDocuments(
+      workspaceRoot,
+      { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID },
+      'alpha',
+      [collection.id],
+      { maxScannedBytes: Buffer.byteLength('alpha alpha', 'utf-8') },
+    )
+    expect(hits).toHaveLength(1)
+  })
+
+  it('fails the publish check closed once its shared budget is exhausted (review #7)', async () => {
+    const { invoke } = createHarness()
+    const seeded = await seedCollection(invoke, { title: 'Policy', content: 'Rules.' })
+    if (!seeded.document) throw new Error('seed document missing')
+    await publishDocument(invoke, seeded.document)
+    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
+    // In budget the collection is proven published...
+    expect(isCollectionPublished(workspaceRoot, binding, seeded.collection.id)).toBe(true)
+    // ...while an exhausted budget degrades to "not proven published" instead
+    // of walking the whole metadata listing past the send deadline.
+    expect(isCollectionPublished(workspaceRoot, binding, seeded.collection.id, {
+      deadline: Date.now() - 1,
+    })).toBe(false)
   })
 })

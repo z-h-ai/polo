@@ -1,5 +1,6 @@
 import { RPC_CHANNELS, type KbCollectionList, type KbDocument, type KbDocumentSummary, type KbSearchHit } from '@polo-ai/shared/protocol'
 import {
+  KB_PUBLISHED_CHECK_TIMEOUT_MS,
   KB_SEND_MAX_SCAN_BYTES,
   KB_SEND_RESOLVE_TIMEOUT_MS,
   KB_SESSION_COLLECTIONS_MAX,
@@ -417,9 +418,15 @@ export function registerKnowledgeBaseHandlers(
     // (review #2).
     assertSessionInCallerScope(deps, input.sessionId, callerWorkspaceId)
     // Every selected collection must belong to this enterprise space and
-    // hold at least one published document.
+    // hold at least one published document. The checks share ONE wall clock
+    // (review #7): the metadata walk is synchronous, so a collection with a
+    // huge document listing fails closed at the budget instead of stalling
+    // the caller.
+    const publishedCheckDeadline = Date.now() + KB_PUBLISHED_CHECK_TIMEOUT_MS
     for (const collectionId of input.collectionIds) {
-      if (!isCollectionPublished(scope.workspace.rootPath, kbSpaceBinding(scope), collectionId)) {
+      if (!isCollectionPublished(scope.workspace.rootPath, kbSpaceBinding(scope), collectionId, {
+        deadline: publishedCheckDeadline,
+      })) {
         throw kbError('kb_collection_not_published', `Collection ${collectionId} is not available for sessions`)
       }
     }
@@ -563,19 +570,18 @@ function isSendScopeWritable(space: SendScopeCapture['space']): boolean {
 async function captureSendScope(
   deps: HandlerDeps<ISessionManager>,
   sessionId: string,
-  callerWorkspaceId: string | null | undefined,
+  token: TrustedSessionScopeToken,
   attempt: { abandoned: boolean },
 ): Promise<SendScopeCapture | null> {
+  // The token arrives ALREADY BOUND by the caller — captured before this
+  // function's first await (reviews #3/N1). It is only re-checked here, in
+  // the same synchronous block the first awaited read starts from.
+  if (attempt.abandoned || !isTrustedSessionScopeTokenCurrent(token)) return null
   const session = await deps.sessionManager.getSession(sessionId)
   if (!session || attempt.abandoned) return null
-  // The token is captured from the CALLER's workspace BEFORE the awaited
-  // trusted-account lookup, so a lookup resuming late (review N1) is
-  // validated against the scope this send was authorized under — not against
-  // whatever the fence says by then. The target session must belong to that
-  // complete capture (account AND space AND workspace), or nothing may be
-  // committed or read for it.
-  const token = captureCompleteTrustedSessionScopeToken(callerWorkspaceId ?? session.workspaceId)
-  if (!token || !trustedScopeMatchesSessionRecord(session, token)) return null
+  // The target session must belong to the BOUND capture (account AND space
+  // AND workspace), or nothing may be committed or read for it.
+  if (!trustedScopeMatchesSessionRecord(session, token)) return null
   const trustedAccountId = await resolveTrustedProductSpaceAccountId()
   // Post-await CAS: the account/space/fence may all have moved while the
   // lookup was pending — a capture that is no longer current authorizes
@@ -602,6 +608,10 @@ async function captureSendScope(
  * writable and owning; returns the effective draft scope ids, or `null` when
  * the draft was not honored (abandoned, read-only, foreign session or
  * nothing to change) and the STORED scope must be used instead.
+ *
+ * The publish-state validation shares the resolution's ONE wall clock
+ * (review #7): a collection with a huge document listing fails the check at
+ * the deadline — the entry degrades, it never stalls the send.
  */
 async function commitSendDraftScope(
   deps: HandlerDeps<ISessionManager>,
@@ -609,6 +619,7 @@ async function commitSendDraftScope(
   sessionId: string,
   draft: string[],
   attempt: { abandoned: boolean },
+  deadline: number,
 ): Promise<string[] | null> {
   // Fresh read: the record may have moved while the scope was captured.
   const session = await deps.sessionManager.getSession(sessionId)
@@ -619,7 +630,9 @@ async function commitSendDraftScope(
   // dropped, never fatal. The previous scope is SNAPSHOT before the save —
   // the session record may be mutated in place, and the audit entry must
   // capture the change, not the post-write value.
-  const scopeIds = draft.filter(id => isCollectionPublished(capture.workspaceRoot, capture.binding, id))
+  const scopeIds = draft.filter(id =>
+    isCollectionPublished(capture.workspaceRoot, capture.binding, id, { deadline })
+  )
   const previousScope = [...(session.kbCollectionIds ?? [])]
   if (JSON.stringify(previousScope) === JSON.stringify(scopeIds)) return scopeIds
   // The LAST synchronous gate before the write is initiated: after the send
@@ -688,10 +701,20 @@ function retrieveReferences(
  * Send-time reference resolution used by the SEND_MESSAGE handler. Split by
  * authority (review N1): phase 1 is the only step that may change state — it
  * commits the composer draft through the full ownership/read-only/pre-write
- * token gates — and phase 2 only reads. Both share ONE wall clock (review
- * #7): an empty scope exits before any await, the awaited reads are raced
- * against the deadline, the store scan is byte- and time-budgeted inside the
- * token loop, and a timed-out attempt is abandoned — it may return nothing,
+ * token gates — and phase 2 only reads.
+ *
+ * ONE token binds the whole resolution (reviews #3/N1): the SEND entry
+ * captures its scope token and hands it in here, so the resolution is
+ * authorized against exactly the authorization the send was admitted with.
+ * The binding happens before the FIRST await and every later gate
+ * revalidates THAT token — the resolution never re-captures, so a
+ * revoke-and-recommit while a phase is pending can never re-authorize this
+ * send after its entry authorization was rejected.
+ *
+ * Both phases share ONE wall clock (review #7): an empty scope exits before
+ * any await, the awaited reads are raced against the deadline, the publish
+ * checks, store scan, scoring and snippet building all honour the same
+ * deadline, and a timed-out attempt is abandoned — it may return nothing,
  * but never mutate session scope or audit afterwards. Any KB failure
  * degrades to "no references" — a KB outage must never block a send.
  */
@@ -701,24 +724,35 @@ export async function resolveSessionKbReferences(
   message: string,
   draftCollectionIds?: string[],
   callerWorkspaceId?: string | null,
+  entryScopeToken?: TrustedSessionScopeToken | null,
 ): Promise<KbSearchHit[] | undefined> {
   try {
     // Fast path: the session index is synchronous. A session without a KB
     // scope (and without a composer draft to commit) resolves to nothing
-    // without touching auth or the store.
-    const draft = draftCollectionIds ? [...new Set(draftCollectionIds)].slice(0, KB_SESSION_COLLECTIONS_MAX) : undefined
+    // without touching auth or the store. A provided draft — INCLUDING an
+    // explicitly empty one — must stay distinguishable from no draft at all:
+    // the empty array is the "user cleared the selection" signal (review #12).
+    const draft = Array.isArray(draftCollectionIds)
+      ? [...new Set(draftCollectionIds)].slice(0, KB_SESSION_COLLECTIONS_MAX)
+      : undefined
     const indexed = deps.sessionManager
       .getSessions()
       .find(candidate => candidate.id === sessionId)
-    if (!indexed && !draft) return undefined
+    // Bind the token BEFORE the first await (reviews #3/N1). The SEND entry's
+    // token wins; a legacy caller without one gets a token captured right
+    // here — still ahead of any await, so no phase can authorize against a
+    // scope newer than the request itself.
+    const token = entryScopeToken
+      ?? captureCompleteTrustedSessionScopeToken(callerWorkspaceId ?? indexed?.workspaceId ?? null)
+    if (!token || !isTrustedSessionScopeTokenCurrent(token)) return undefined
     const storedScope = indexed?.kbCollectionIds ?? []
-    if ((storedScope.length === 0) && (!draft || draft.length === 0)) return undefined
+    if ((storedScope.length === 0) && (draft === undefined || draft.length === 0)) return undefined
 
     const deadline = Date.now() + sendResolveTimeoutMs
     const attempt = { abandoned: false }
     // Phase 0 — capture, read-only: the scope this send is bound to.
     const capture = await raceSendDeadline(
-      captureSendScope(deps, sessionId, callerWorkspaceId, attempt),
+      captureSendScope(deps, sessionId, token, attempt),
       deadline,
       () => {
         attempt.abandoned = true
@@ -726,13 +760,17 @@ export async function resolveSessionKbReferences(
       },
     )
     if (!capture) return undefined
-    // Phase 1 — the only state-changing step. The commit promise never
-    // rejects (a failed write is audited and logged, the send degrades), so
-    // a post-timeout settlement cannot become an unhandled rejection.
+    // Phase 1 — the only state-changing step. It runs whenever the composer
+    // PROVIDED a draft, including an explicit empty one: clearing the
+    // selection must commit the clear, or the send would fall back to the
+    // stored scope the user just emptied (review #12 regression). The commit
+    // promise never rejects (a failed write is audited and logged, the send
+    // degrades), so a post-timeout settlement cannot become an unhandled
+    // rejection.
     let scopeIds = storedScope
-    if (draft && draft.length > 0) {
+    if (draft !== undefined) {
       const committed = await raceSendDeadline(
-        commitSendDraftScope(deps, capture, sessionId, draft, attempt),
+        commitSendDraftScope(deps, capture, sessionId, draft, attempt, deadline),
         deadline,
         () => {
           attempt.abandoned = true

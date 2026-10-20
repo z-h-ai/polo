@@ -585,14 +585,17 @@ export function FreeFormInput({
   }, [kbCollections, kbLoading, loadKbCollections])
 
   // Optimistic selection with an explicit save contract: a failed persist
-  // reverts the toggle and surfaces the error, instead of leaving a selected
-  // row the server never stored (reviews #11/#16). The rollback is guarded by
-  // useKbSelectionSave — only the latest request of the CURRENT session may
-  // move the selection, so a stale failure can never restore session A's
-  // choice into session B (review N2 — this component is reused across
-  // sessions).
+  // reverts the toggle to the last CONFIRMED server snapshot and surfaces the
+  // error, instead of leaving a row the server never stored (reviews
+  // #11/#16). The rollback is guarded by useKbSelectionSave — only the latest
+  // request of the CURRENT session AND session generation may move the
+  // selection, so a stale failure can never restore session A's choice into
+  // session B, nor survive an A→B→A round trip (review N2 — this component is
+  // reused across sessions). `enabledKbCollectionIds` is the server-pushed
+  // scope, i.e. the confirmed truth the rollback lands on.
   const persistKbSelection = useKbSelectionSave({
     sessionId,
+    serverValue: enabledKbCollectionIds ?? [],
     save: React.useCallback((ids: string[]) => {
       if (!onKbCollectionsChange) return undefined
       return onKbCollectionsChange(ids)
@@ -605,11 +608,10 @@ export function FreeFormInput({
 
   const handleKbToggleCollection = React.useCallback((collectionId: string) => {
     setKbSelection(current => {
-      const previous = current
       const next = current.includes(collectionId)
         ? current.filter(id => id !== collectionId)
         : [...current, collectionId]
-      void persistKbSelection(previous, next)
+      void persistKbSelection(next)
       return next
     })
   }, [persistKbSelection])
@@ -617,7 +619,7 @@ export function FreeFormInput({
   const handleKbClearSelection = React.useCallback(() => {
     setKbSelection(current => {
       if (current.length === 0) return current
-      void persistKbSelection(current, [])
+      void persistKbSelection([])
       return []
     })
   }, [persistKbSelection])

@@ -504,12 +504,16 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // (wall-clock + scan budget) so it cannot stall persist/ACK, and it is
     // bound to THIS caller's complete workspace so a resolution resuming
     // after its deadline can never commit for a foreign scope (review N1).
+    // The entry token is handed in (review #3): the resolution authorizes
+    // against exactly the token this send was admitted with, never a fresh
+    // capture that a revoke-and-recommit could have re-armed.
     const kbReferences = await resolveSessionKbReferences(
       deps,
       sessionId,
       message,
       options?.kbCollectionIds,
       resolveCallerWorkspaceId(ctx),
+      sendScopeToken,
     )
     // Post-authorization CAS after the awaited KB resolution — the send must
     // not dispatch for a scope that moved while references were resolved.

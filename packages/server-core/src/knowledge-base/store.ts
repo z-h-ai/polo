@@ -263,11 +263,27 @@ export function readAudit(workspaceRoot: string, binding: KbSpaceBinding): KbAud
     .map(line => JSON.parse(line) as KbAuditEntry)
 }
 
-function documentCounts(root: string, collectionId: string): KbCollection['documentCounts'] {
+/**
+ * Wall-clock budget for the synchronous metadata walks that guard a scope
+ * write (POO-108 review #7): a collection holding tens of thousands of
+ * documents must not stall the caller — the walk gives up at the deadline and
+ * the caller fails closed ("not proven published").
+ */
+export interface KbPublishedCheckBudget {
+  /** Wall-clock deadline (Date.now() based); an exhausted budget fails closed. */
+  deadline?: number
+}
+
+function documentCounts(
+  root: string,
+  collectionId: string,
+  budget?: KbPublishedCheckBudget,
+): KbCollection['documentCounts'] {
   const counts = { draft: 0, in_review: 0, published: 0, rejected: 0 }
   const dir = insideRoot(root, join(root, 'collections', collectionId, 'documents'))
   if (!existsSync(dir)) return counts
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (budget?.deadline !== undefined && Date.now() >= budget.deadline) break
     if (!entry.isDirectory()) continue
     const metaPath = insideRoot(root, join(dir, entry.name, 'meta.json'))
     if (!existsSync(metaPath)) continue
@@ -531,12 +547,20 @@ function countOccurrences(haystack: string, needle: string): number {
   return count
 }
 
-function buildSnippet(content: string, tokens: string[]): string {
-  const lower = content.toLowerCase()
+/**
+ * Builds the hit snippet from the ALREADY lowered content (the scoring pass
+ * computed it; re-lowering a max-size document would double the cost). The
+ * optional deadline is the search's own: a token sweep that runs out of
+ * budget stops early and falls back to the nearest hit found so far, or to
+ * the head of the content — a snippet is never worth running past the budget
+ * that bounds the send it feeds (review #7).
+ */
+function buildSnippet(content: string, lowered: string, tokens: string[], deadline?: number): string {
   let hitIndex = -1
   let hitLength = 0
   for (const token of tokens) {
-    const index = lower.indexOf(token)
+    if (deadline !== undefined && Date.now() >= deadline) break
+    const index = lowered.indexOf(token)
     if (index !== -1 && (hitIndex === -1 || index < hitIndex)) {
       hitIndex = index
       hitLength = token.length
@@ -557,9 +581,9 @@ function buildSnippet(content: string, tokens: string[]): string {
  * stop — a huge KB can never stall the send loop.
  */
 export interface KbSearchBudget {
-  /** Stop scanning once this many content bytes have been read. */
+  /** Stop READING further documents once this many content bytes have been read. */
   maxScannedBytes?: number
-  /** Wall-clock deadline (Date.now() based), checked between documents and inside the token loop. */
+  /** Wall-clock deadline (Date.now() based), checked between documents, inside the token loop and while building snippets. */
   deadline?: number
 }
 
@@ -585,9 +609,15 @@ export function searchDocuments(
   const collectionsDir = join(root, 'collections')
   if (!existsSync(collectionsDir)) return []
   let scannedBytes = 0
-  const outOfBudget = (): boolean =>
-    (budget?.deadline !== undefined && Date.now() >= budget.deadline)
-    || (budget?.maxScannedBytes !== undefined && scannedBytes >= budget.maxScannedBytes)
+  // The two budget dimensions cancel at different granularities (review #7):
+  // the DEADLINE may stop anywhere — between documents and inside a token
+  // loop — while the BYTE budget only decides whether the NEXT document may
+  // be read at all. Byte-checking inside the scoring loop instead would drop
+  // a document that was already read: two 2MiB documents against a 4MiB cap
+  // would leave the second one unscored even though its content was in hand.
+  const pastDeadline = (): boolean => budget?.deadline !== undefined && Date.now() >= budget.deadline
+  const pastByteBudget = (): boolean =>
+    budget?.maxScannedBytes !== undefined && scannedBytes >= budget.maxScannedBytes
   /** Partial results stay valid: rank and cap whatever was scored in budget. */
   const finalize = (): KbSearchHit[] =>
     hits
@@ -595,7 +625,7 @@ export function searchDocuments(
       .slice(0, KB_SEARCH_LIMIT)
   const scan = (): KbSearchHit[] => {
     for (const collectionEntry of readdirSync(collectionsDir, { withFileTypes: true })) {
-      if (outOfBudget()) break
+      if (pastDeadline()) break
       if (!collectionEntry.isDirectory()) continue
       const collectionMetaPath = insideRoot(root, join(collectionsDir, collectionEntry.name, 'meta.json'))
       if (!existsSync(collectionMetaPath)) continue
@@ -605,7 +635,7 @@ export function searchDocuments(
       const documentsDir = insideRoot(root, join(collectionsDir, collectionEntry.name, 'documents'))
       if (!existsSync(documentsDir)) continue
       for (const docEntry of readdirSync(documentsDir, { withFileTypes: true })) {
-        if (outOfBudget()) return finalize()
+        if (pastDeadline() || pastByteBudget()) return finalize()
         if (!docEntry.isDirectory()) continue
         const metaPath = insideRoot(root, join(documentsDir, docEntry.name, 'meta.json'))
         if (!existsSync(metaPath)) continue
@@ -620,7 +650,7 @@ export function searchDocuments(
           // The deadline must cancel INSIDE the token loop, not only between
           // documents: a message that tokenizes into thousands of tokens over
           // a large document would otherwise run past its budget (review #7).
-          if (outOfBudget()) return finalize()
+          if (pastDeadline()) return finalize()
           if (title.includes(token)) score += KB_TITLE_WEIGHT
           score += countOccurrences(lowered, token) * KB_BODY_WEIGHT
         }
@@ -630,7 +660,7 @@ export function searchDocuments(
           collectionId: record.collectionId,
           collectionName: collection.name,
           title: record.title,
-          snippet: buildSnippet(content, tokens),
+          snippet: buildSnippet(content, lowered, tokens, budget?.deadline),
           score,
         })
       }
@@ -644,18 +674,25 @@ export function searchDocuments(
  * A collection is selectable for a session scope only when it holds at least
  * one published document — the read side searches published content only, so
  * an unpublished collection would be an empty promise.
+ *
+ * The optional budget shares ONE wall clock with the rest of the surrounding
+ * operation (the send resolution's deadline, or the SET RPC's validation
+ * budget): an exhausted budget stops the metadata walk and reads as "not
+ * published" — degraded availability, never an unbounded stall (review #7).
  */
 export function isCollectionPublished(
   workspaceRoot: string,
   binding: KbSpaceBinding,
   collectionId: string,
+  budget?: KbPublishedCheckBudget,
 ): boolean {
   const root = readSpaceRoot(workspaceRoot, binding)
   if (!root) return false
+  if (budget?.deadline !== undefined && Date.now() >= budget.deadline) return false
   try {
     readCollectionRecord(root, assertKbId('collectionId', collectionId))
   } catch {
     return false
   }
-  return documentCounts(root, collectionId).published > 0
+  return documentCounts(root, collectionId, budget).published > 0
 }
