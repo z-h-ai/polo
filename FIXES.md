@@ -364,3 +364,45 @@ Admin 侧需要确认并覆盖：六条未来 cancelled、五条以内未来 can
 - 受控 Chromium 5 个恢复场景通过、页面异常 0、自动 App 打开 0，`.pipeline/r5fix/browser-result.json` 明确 fixture 边界。没有把 controlled 浏览器、原生 handler 测试或文件系统故障测试声明为真实支付、真实 Admin 数据库、正式跨卡 Acceptance。
 - **范围外基线问题**：相对 `93811a92`，i18n parity 前后均为五个非中英 locale 缺相同 16 个既有 `productSpaceSkills.*` key；sorted 前后均仅 en/zh-Hans 的相同既有乱序。本轮新 key 在七个 locale 位置正确且齐全；没有补范围外翻译。App/AdminLoginStep 全文件 lint 前后均为 2 个既有 no-shadow 错误，warnings 从 18 降到 17；其余修改的六个 renderer 模块定向 lint 为 0 error / 6 个既有 warning，凭据模块 lint 为 0 error。精确输出及比较在 `.pipeline/r5fix/baseline-comparison.json` 与 baseline/current 日志；不把这些额外全文件门禁报告为绿色。此前 R3 已隔离的全仓失败未重复修复。
 - 红测试先提交（`5d334fbf`、`a19a1083`、`f70b6a6a`）；类型 fixture 的补全没有降低断言。只在当前分支提交；TASK/授权保持 untracked，未 push、未合并 dev、未修改任务卡或旧验收记录。
+
+## R5FIX-A1A2(Client)
+
+### 裁决、权威来源与范围
+
+本轮执行 `TASK-FIX-R5A.md`，基线 `9198d0b6b64e8422993095d254e8b638c0822530`。用户于 2026-10-20 将两项 authority_conflict 均裁决为方案 A：产品未上线、没有需要兼容的 paid legacy 存量；Main 仅接受 entitled paid 来源；企业空间隔离成员 RPC。此前 R5 的“禁止改变资格规则”是该轮历史边界，本轮按新裁决实施。
+
+Admin 同步交付的只读参考为 `fix/poo79-admin-session-20261019@eb8be26b06fb4adf343454d0e5d922c47cbf56a5`：
+
+- `shared-contract.md` **v1.3 / rules revised 2026-10-20**，SHA-256 `5ad9fb22b27b73cd0e06cf3716c2396d8d81a99493cac3ae624d830006db6bbb`。契约规则修订，currentEntitlement 对象仍为 version 1。
+- `src/lib/creator-circles/current-entitlement.ts` SHA-256 `8a1b2b706b6a7d5e3efdae83e397970dba51fd77aad97d75438a993032d644e8`。期间先观察到 Admin WIP，交付前已核对该提交中的同一来源与哈希；未修改 Admin。精确读取绑定和只读快照在 `.pipeline/r5afix/admin-contract-binding.json`。
+
+### A1：Main paid 来源执行准入
+
+**根因**：安装、START 和 direct resolve-launch 重新读取 Catalog/resolve，却没有独立消费成员 currentEntitlement。旧 Admin 规则下，paid unknown 可出现在 available Catalog，导致展示为“待恢复”而 Main 仍启动。旧 scope-only 生命周期和缓存远程 URL 入口也不能作为 ProductSpace artifact 的旁路。
+
+**改动**：
+
+- 新增 shared 权威判定 `admin/member-circle-admission.ts`。将 renderer 已有的 v1 绑定、active 状态、period end 与 validUntil 判定下移复用，展示分支语义不变。Main 的 paid 来源必须提供 v1 entitled，缺失/unknown/not_entitled 一律拒绝；不从最近 paymentOrders、未来期限或 legacy/migration 状态推导放行。免费来源保留契约既有语义。
+- Main 使用自身认证 AdminClient 读取成员投影，只匹配本次新鲜 Catalog entry 的 circle 来源。逐来源形成并集，例如同作品 A 来源 unknown、B 来源 entitled，可由 B 放行；其他作品的 entitled 圈子不能授权本作品。
+- `installProductSpaceBundle`、完整 identity 的 `localApps.start`/restart、trusted direct resolve-launch 共用此边界。拒绝发生在安装/能力签发/进程启动之前；安装下载和运行时的异步边界继续检查本地期限。START 在 gateway 等待、spawn 签名、health 返回及运行状态发布前重新核验，失败复用既有精确 generation 回滚。
+- 已带 artifactInstanceId 的 ProductSpace App 禁止进入旧 scope-only START 或缓存 URL resolver，必须走新鲜准入；不改变普通旧命名空间管理/清理接口。
+- 新错误码 `CIRCLE_ENTITLEMENT_REQUIRED` 带 `reason`（unknown/not_entitled/expired）与 `recovery=refresh_membership`。错误文案提供刷新成员关系、续订/恢复后重试的指引；Main 早期进程也通过已有 locale registry 得到完整文本，renderer 经既有 Home error formatter 展示，七 locale 均有维护源。单作品资格拒绝不撤销整个 ProductSpace。
+
+**验证**：真实 Main handler 回归覆盖 unknown/not_entitled/缺投影/过期的 install 与 START，均无安装/能力/进程副作用；entitled 正常安装/启动、多来源保留、旧 URL/请求形状拒绝；gateway 等待期间实际跨过 validUntil 后拒绝且零 spawn。原生 direct-open 在未知来源时不发 resolve 请求、不回传 launch token，并保留空间。共享判定覆盖 0/1/4/6 次未来取消、paid-looking 历史不能掩盖拒绝、全退/争议拒绝与部分纠正 retained 权益、错误来源匹配、时间上界，以及真实 loopback HTTP → AdminClient/parser → 准入的 unknown→entitled 恢复。
+
+### A2：成员 RPC 的 committed 个人空间边界
+
+**根因**：原 RPC 由可信账号派生主体，并在回执前核对账号/围栏 generation，但没有校验当前 committed ProductSpace 的 kind，因此企业 UI 隐藏入口后仍可直接调用本人个人关系通道。
+
+**改动**：Main 从已验证列表的 COMMIT/离线可信恢复一并提交空间 kind，revoke 清除；没有 renderer 可设置 kind 的通道。九个 `memberCircles.*` 入口（包括静态 G2/G3 能力状态）都要求当前账号绑定的 committed 个人空间。企业返回 `personal_space_required` + `switch_to_personal_space`，缺失/无法验证绑定返回 `product_space_context_required`，不调用成员服务、不含列表或详情数据。保留原账号及 generation 围栏，并显式捕获 transition epoch 和空间 ID；即使账号切换事务随后 abort，旧调用仍失效。企业 UI 行为不变。
+
+**验证**：九通道逐项检查企业拒绝、零 provider 调用、无数据字段；个人正常读取与既有 token CAS/账号替换/空间离开回归通过；缺少 context、他账号绑定拒绝；abort 后旧异步回执为 session_changed；真实 PREPARE→STOP→COMMIT 从可信列表提交 personal kind，renderer 伪造额外 kind 参数无效，revoke 后清空。
+
+### 完整验证、基线与交付
+
+- **受影响回归 40 个独立进程，1047 pass / 0 fail，全部退出 0**。保留 R5 的 34 个进程，加入 Main 生命周期、严格权益、七 locale 错误消费、ProductSpace 契约、trusted launch bridge 和 handoff 六组；R4 原复现别名的 25 个重复执行仍计入运行数，不宣称为额外唯一场景。R4 到期、currentEntitlement 六类取消复现及 R5 五项均继续通过。
+- 完整输出、命令、退出码为根目录 `verify-r5a.log`（忽略、不入库）；复跑 `python3 .pipeline/r5afix/run-tests.py verify-r5a.log`。每个 Bun 文件路径以 `./` 开始，各 isolated 文件单独进程；每个进程先证明临时 HOME/homedir 与配置目录隔离。HTTP fixture 自身 finally 关闭服务。
+- Electron/shared/server-core 类型检查、shared 权威构建、Electron Main/Renderer 构建均通过；修改的 Main 文件、renderer 两个 adapter、shared 准入模块定向 lint 为 0 error / 0 warning；i18n 调用覆盖检查通过。Renderer 大 chunk 提示为既有构建提示。
+- **额外范围外基线探针**：`admin-local-app-session-ending.isolated.ts` 原始版本在本轮与独立 `9198d0b6` 源码快照中均因 mock 缺少 NativeInstallationReportSchema 无法加载。临时补齐其契约/config/SDK/presence 夹具后，前后均为相同 17 pass / 7 fail，失败名逐项一致。未修改这些既有业务断言，也未保留探针夹具改动或纳入上述绿色 40 组；原始文件保持不变。基线命令/输出与差异在 `.pipeline/r5afix/baseline-integration-*.log`、`integration-fixture.log`、`baseline-integration-comparison.json`；独立临时源码快照已清理。没有把全仓测试或该额外套件报告为绿色。
+- 此交付是 Client 实现与隔离回归，不替代真实支付/生产数据或正式 Acceptance。R6 在独立副本以旧 HEAD 运行，本轮未读取/修改 `.pipeline/poo77-79-r6-*` run_root、未操作其进程/资源；没有用它的结果为新提交背书。
+- 红测试提交 `97a7b50c`、`6b68392b`、`05194a97`；测试类型/fixture 补全不降低断言。只提交当前主 worktree 分支，不 push、不合并 dev；TASK/授权文件保持 untracked，运行器、契约读取快照和探针均保留在自有忽略目录。

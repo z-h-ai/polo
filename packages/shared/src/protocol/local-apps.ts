@@ -369,6 +369,7 @@ export interface LocalAppUninstallOptions {
 }
 
 export type LocalAppErrorCode =
+  | 'CIRCLE_ENTITLEMENT_REQUIRED'
   | 'REMOTE_FORBIDDEN'
   | 'INVALID_REQUEST'
   | 'INVALID_MANIFEST'

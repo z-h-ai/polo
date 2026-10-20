@@ -1,3 +1,4 @@
+import { requireMemberCircleAppAdmission, MemberCircleAdmissionError } from '@polo-ai/shared/admin/member-circle-admission'
 import { getAppSdkBridge } from '../app-sdk-service'
 import {
   AdminClient,
@@ -1143,6 +1144,21 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.GET_LOGS,
 ] as const
 
+async function requireCircleAppAdmission(...args: Parameters<typeof requireMemberCircleAppAdmission>): Promise<() => void> {
+  try {
+    const guard = await requireMemberCircleAppAdmission(...args)
+    return () => {
+      try { guard() } catch (error) {
+        if (error instanceof MemberCircleAdmissionError) throw new LocalAppRuntimeError(error.code, error.message, error.details)
+        throw error
+      }
+    }
+  } catch (error) {
+    if (error instanceof MemberCircleAdmissionError) throw new LocalAppRuntimeError(error.code, error.message, error.details)
+    throw error
+  }
+}
+
 export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManager?: HandlerDeps['windowManager'] }): void {
   void recoverNativeAppInstallationEvidence(getScopedLocalAppRuntimeRegistry()).catch(() => {})
   void server
@@ -1273,6 +1289,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'This ProductSpace App is not available for installation',
         )
       }
+      const assertEntitlement = await requireCircleAppAdmission(loaded.client, loaded.accessToken, entry)
+      assertDownloadCurrent()
       const launch = await loaded.client.resolveProductSpaceLaunch(
         loaded.accessToken,
         loaded.context,
@@ -1280,6 +1298,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         entry.catalogEntryId,
         { platform: hostPlatform(), arch: hostArchitecture() },
       )
+      assertEntitlement()
       await assertProductSpaceAccountCurrent(app)
       assertProductSpaceLaunchIdentity(launch, app)
       if (launch.delivery.kind !== 'bundle') {
@@ -1295,7 +1314,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       const downloadTransport = createProductSpaceDownloadTransport({
         app, kind: loaded.context.kind, adminUrl: adminUrl!, downloadUrl: launch.delivery.downloadUrl,
         expectedManifestAppId,
-        assertCurrent: assertDownloadCurrent,
+        assertCurrent: () => { assertDownloadCurrent(); assertEntitlement() },
         readCredentials: () => getCredentialManager().getAdminTokens(),
       })
       // Installation reporting is additional evidence. An unavailable older
@@ -1818,7 +1837,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
 
   const startCatalogApp = (ctx: { webContentsId?: number | null }, scope: CatalogLocalAppScope) => {
     return (async () => {
-      const { accessMode } = await requireAuthorizedCatalogApp(scope)
+      const { app, accessMode } = await requireAuthorizedCatalogApp(scope)
+      if (app.artifactInstanceId) {
+        throw new LocalAppRuntimeError('INVALID_REQUEST', 'ProductSpace Apps require a full runtime identity request')
+      }
       const registry = getScopedLocalAppRuntimeRegistry()
       if (accessMode === 'offline' && !await registry.isInstalledAndReady(scope)) {
         throw new LocalAppRuntimeError(
@@ -1841,7 +1863,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
    */
   const fetchAuthoritativeProductSpaceApp = async (
     identity: ProductSpaceAppRuntimeIdentity,
-  ): Promise<ProductSpaceAppIdentity> => {
+  ): Promise<{ app: ProductSpaceAppIdentity; assertEntitlement: () => void }> => {
     assertProductSpaceAppOperationCurrent({
       ...identity,
       catalogEntryId: '' as ProductSpaceAppIdentity['catalogEntryId'],
@@ -1898,6 +1920,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         'This ProductSpace App is not available to launch',
       )
     }
+    const assertEntitlement = await requireCircleAppAdmission(client, tokens.accessToken, entry)
+    await assertProductSpaceAccountCurrent({ ...identity, catalogEntryId: entry.catalogEntryId, catalogRevision: catalog.catalogRevision, sources: entry.sources, availability: entry.availability })
     let launch: Awaited<ReturnType<AdminClient['resolveProductSpaceLaunch']>>
     try {
       launch = await client.resolveProductSpaceLaunch(
@@ -1935,7 +1959,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     await assertProductSpaceAccountCurrent(app)
     assertProductSpaceLaunchIdentity(launch, app)
-    return app
+    assertEntitlement()
+    return { app, assertEntitlement }
   }
 
   /**
@@ -1976,7 +2001,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     // Fresh-Catalog re-verification BEFORE the switch mutex (network I/O
     // never runs under the lock); the mutex fence re-checks afterwards.
-    const app = await fetchAuthoritativeProductSpaceApp(runtimeIdentity)
+    const { app, assertEntitlement } = await fetchAuthoritativeProductSpaceApp(runtimeIdentity)
     if (
       !options.trustDerivedIdentityOnly
       && (
@@ -1992,6 +2017,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       )
     }
     const scope = productSpaceBundleScope(app)
+    assertEntitlement()
     const registry = getScopedLocalAppRuntimeRegistry()
     const coordinator = getLocalAppRuntimeCoordinator()
     const identityKey = createProductSpaceAppRuntimeIdentityKey(runtimeIdentity)
@@ -2062,6 +2088,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       start = await startAndRegisterLocalApp(
       scope,
       async () => {
+        assertEntitlement()
         // INSIDE the switch mutex — cross-Workspace single-instance
         // replacement CAS: the prior generation of the same runtime identity
         // is looked up, fully torn down (capability/Run/execution/projection)
@@ -2094,11 +2121,14 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           }
         }
         // Gateway-first: a listen failure fails closed before any spawn.
+        assertEntitlement()
         await coordinator.ensureGateway()
+        assertEntitlement()
         const result = await registry.startExact(scope, app.version, {
           runtimeKey: identityKey,
           versionId: app.versionId,
           processEnvironment: ({ runtimeKind, runtimeGeneration, scopeGeneration }) => {
+            assertEntitlement()
             const signing = coordinator.signCapability({
               identity: runtimeIdentity,
               workspaceId,
@@ -2125,6 +2155,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             return { env: signing.environment, sensitiveValues: signing.sensitiveValues }
           },
         })
+        startedRuntimeGeneration = result.runtimeGeneration
+        assertEntitlement()
         if (result.runtimeKind === 'static') {
           // Static browser capability remains Main-only; no token/env enters the page.
           startedRuntimeGeneration = result.runtimeGeneration
@@ -2147,6 +2179,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             throw error
           }
         }
+        assertEntitlement()
         getAppRuntimeCenter().publish({
           identityKey,
           identity: runtimeIdentity,
@@ -2581,6 +2614,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // scopes are all rejected before any authorization entry is read.
       const scope = requireRendererCatalogScope(rawScope)
       const { app } = await requireAuthorizedCatalogEntry(scope)
+      if (app.artifactInstanceId) {
+        throw new LocalAppRuntimeError('INVALID_REQUEST', 'ProductSpace Apps require fresh resolve-launch admission')
+      }
       if (app.deliveryMode !== 'remote_url' || !app.remoteUrl) {
         throw new LocalAppRuntimeError(
           'INVALID_REQUEST',

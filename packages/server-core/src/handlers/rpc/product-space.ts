@@ -1234,7 +1234,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         // (re)binds the fence to the committing trusted account.
         setRuntimeOfflineReadOnly(false)
         setRuntimeActiveProductSpaceAccount(trustedAccountId)
-        setRuntimeActiveProductSpace(targetProductSpaceId)
+        setRuntimeActiveProductSpace(targetProductSpaceId, target.kind)
         // Linearization record: a cancellation that is only processed after
         // this point must learn that the commit won, with the authoritative
         // target, instead of receiving a no-op success. The record is bound
@@ -1394,7 +1394,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       // The restored read-only view belongs to the trusted account that owns
       // the verified snapshot — never to a replaced account.
       setRuntimeActiveProductSpaceAccount(trustedAccountId)
-      setRuntimeActiveProductSpace(activeId)
+      setRuntimeActiveProductSpace(activeId, list.data.productSpaces.find(space => space.id === activeId)!.kind)
       return {
         success: true as const,
         snapshot: {

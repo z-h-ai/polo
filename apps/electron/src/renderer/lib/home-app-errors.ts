@@ -25,6 +25,7 @@ export function homeAppOperationErrorText(
   spaceKind: HomeAppSpaceKind = null,
 ): string {
   const code = getHomeAppErrorCode(error)
+  if (code === 'CIRCLE_ENTITLEMENT_REQUIRED') return t('homeApps.errors.circleEntitlementRequired')
   if (
     code === 'NOT_AUTHORIZED'
     || code === 'REMOTE_FORBIDDEN'

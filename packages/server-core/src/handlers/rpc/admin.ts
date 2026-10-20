@@ -1,3 +1,4 @@
+import { requireMemberCircleAppAdmission, MemberCircleAdmissionError } from '@polo-ai/shared/admin/member-circle-admission'
 import { paymentHandoffUrl } from './payment-handoff'
 import {
   AdminClient,
@@ -2780,6 +2781,9 @@ export function registerAdminHandlers(
             throw new AdminError('Fresh ProductSpace Catalog is required for launch', 'SERVER_ERROR')
           }
           requireCurrentLaunchScope()
+          const assertEntitlement = await requireMemberCircleAppAdmission(client, accessToken,
+            catalog.entries.find(entry => entry.catalogEntryId === catalogEntryId.data))
+          requireCurrentLaunchScope()
           const launch = await tagRemoteAuthority(client.resolveProductSpaceLaunch(
             accessToken,
             context,
@@ -2788,6 +2792,7 @@ export function registerAdminHandlers(
             { platform, arch },
           ))
           requireCurrentLaunchScope()
+          assertEntitlement()
           return { launch }
         },
         {
@@ -4097,7 +4102,12 @@ function toAdminRpcError(error: unknown): {
   message: string
   status?: number
   retryAfter?: number
+  reason?: string
+  recovery?: string
 } {
+  if (error instanceof MemberCircleAdmissionError) {
+    return { errorCode: error.code, message: error.message, ...error.details }
+  }
   if (error instanceof AdminError) {
     return {
       errorCode: error.errorCode,

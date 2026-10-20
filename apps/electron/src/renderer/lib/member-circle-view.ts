@@ -16,6 +16,7 @@
  * - A renewal handoff whose `resolvedPurchaseUrl` failed closed is surfaced
  *   with its explicit reason; the raw purchase URL is never opened directly.
  */
+import { isCurrentMembershipAuthorityEntitled } from '@polo-ai/shared/admin/member-circle-admission'
 import type {
   MemberCircleCorrection,
   MemberCirclePaymentOrderSummary,
@@ -132,26 +133,7 @@ export function isMembershipCurrentlyPaidEntitled(
   if (membership.status !== 'active') return false
   const authority = membership.currentEntitlement
   if (authority !== undefined) {
-    // Presence selects the v1 contract. Never fall back from unknown, denied
-    // or malformed authority to a paid-looking history row.
-    if (!authority || authority.version !== 1 || authority.state !== 'entitled'
-      || authority.membershipId !== membership.membershipId
-      || authority.source?.billingKind !== membership.billingKind
-      || !Number.isFinite(Date.parse(authority.computedAt))) return false
-    const periodMatches = authority.currentPeriodEnd === null
-      ? membership.currentPeriodEnd === null
-      : membership.currentPeriodEnd !== null
-        && Date.parse(authority.currentPeriodEnd) === Date.parse(membership.currentPeriodEnd)
-    if (!periodMatches) return false
-    if (authority.validUntil !== null) {
-      const until = Date.parse(authority.validUntil)
-      if (!Number.isFinite(until) || until <= now) return false
-    }
-    if (membership.billingKind === 'paid') {
-      const periodEnd = Date.parse(membership.currentPeriodEnd ?? '')
-      if (!Number.isFinite(periodEnd) || periodEnd <= now) return false
-    }
-    return true
+    return isCurrentMembershipAuthorityEntitled(membership, now)
   }
   // Compatibility for a response that omitted currentEntitlement entirely.
   if (membership.billingKind === 'free') return true
