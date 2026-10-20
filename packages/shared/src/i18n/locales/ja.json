@@ -912,7 +912,7 @@
   "onboarding.adminKicked.ariaLabel": "管理者セッションが終了しました",
   "onboarding.adminKicked.description": "アカウントのセッションは無効になりました。安全のため、Polo AIを続けて使用するには再度ログインしてください。",
   "onboarding.adminKicked.relogin": "再ログイン",
-  "onboarding.adminKicked.title": "別のデバイスでログイン済み",
+  "onboarding.adminKicked.title": "ログイン状態が無効になりました",
   "onboarding.adminLogin.accountDisabled": "このアカウントは無効化されています。管理者にお問い合わせください。",
   "onboarding.adminLogin.agreement": "利用規約とプライバシーポリシーに同意する",
   "onboarding.adminLogin.ariaLabel": "管理者ログイン",

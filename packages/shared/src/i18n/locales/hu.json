@@ -912,7 +912,7 @@
   "onboarding.adminKicked.ariaLabel": "Admin munkamenet véget ért",
   "onboarding.adminKicked.description": "A fiók munkamenete már nem érvényes. A fiók védelme érdekében jelentkezz be újra a Polo AI használatához.",
   "onboarding.adminKicked.relogin": "Újra bejelentkezés",
-  "onboarding.adminKicked.title": "Bejelentkezés másik eszközön",
+  "onboarding.adminKicked.title": "A munkamenet véget ért",
   "onboarding.adminLogin.accountDisabled": "Ez a fiók le van tiltva. Fordulj a rendszergazdához.",
   "onboarding.adminLogin.agreement": "Elfogadom a Felhasználási feltételeket és az Adatvédelmi irányelveket",
   "onboarding.adminLogin.ariaLabel": "Admin bejelentkezés",

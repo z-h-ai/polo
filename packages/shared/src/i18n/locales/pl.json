@@ -912,7 +912,7 @@
   "onboarding.adminKicked.ariaLabel": "Sesja administratora zakończona",
   "onboarding.adminKicked.description": "Sesja Twojego konta nie jest już ważna. Dla bezpieczeństwa zaloguj się ponownie, aby dalej korzystać z Polo AI.",
   "onboarding.adminKicked.relogin": "Zaloguj ponownie",
-  "onboarding.adminKicked.title": "Zalogowano na innym urządzeniu",
+  "onboarding.adminKicked.title": "Twoja sesja wygasła",
   "onboarding.adminLogin.accountDisabled": "To konto zostało wyłączone. Skontaktuj się z administratorem.",
   "onboarding.adminLogin.agreement": "Zaakceptuj Warunki korzystania i Politykę prywatności",
   "onboarding.adminLogin.ariaLabel": "Logowanie administratora",

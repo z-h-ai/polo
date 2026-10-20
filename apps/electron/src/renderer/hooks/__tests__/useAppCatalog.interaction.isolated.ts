@@ -2068,7 +2068,7 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
   it('R7 artifact404 only marks that entry unavailable, keeps the space online and refresh recovers it', async () => {
     const entries = [rawEntry(), rawEntry({ catalogEntryId: 'neighbor', artifactInstanceId: 'neighbor-artifact' })]
     wireElectronApi({ entries, resolveLaunch: () => ({ success: false, errorCode: 'NOT_FOUND', status: 404, message: 'missing artifact' }) })
-    const { result } = renderHook(() => useAppCatalog(scopeA))
+    const { result } = renderHook(() => useAppCatalog())
     await waitFor(() => expect(result.current.state.catalog?.apps).toHaveLength(2))
     const target = result.current.state.catalog!.apps[0]!
     await act(async () => { await expect(result.current.resolveLaunch(target)).rejects.toMatchObject({ code: 'NOT_FOUND' }) })
@@ -2081,7 +2081,7 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
   it('R7 a late artifact404 cannot poison a newer same-scope successful catalog', async () => {
     const delayed = deferred<any>()
     wireElectronApi({ entries: [rawEntry()], resolveLaunch: () => delayed.promise })
-    const { result } = renderHook(() => useAppCatalog(scopeA))
+    const { result } = renderHook(() => useAppCatalog())
     await waitFor(() => expect(result.current.state.catalog?.apps).toHaveLength(1))
     const target = result.current.state.catalog!.apps[0]!
     let pending!: Promise<unknown>

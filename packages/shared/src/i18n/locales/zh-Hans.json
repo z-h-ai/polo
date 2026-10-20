@@ -912,7 +912,7 @@
   "onboarding.adminKicked.ariaLabel": "Admin 会话已结束",
   "onboarding.adminKicked.description": "当前账号的登录状态已失效。为了保护账号安全，请重新登录后继续使用 Polo AI。",
   "onboarding.adminKicked.relogin": "重新登录",
-  "onboarding.adminKicked.title": "已在其他设备登录",
+  "onboarding.adminKicked.title": "登录状态已失效",
   "onboarding.adminLogin.accountDisabled": "账号已被禁用，请联系管理员",
   "onboarding.adminLogin.agreement": "同意协议与隐私政策",
   "onboarding.adminLogin.ariaLabel": "Admin 登录",

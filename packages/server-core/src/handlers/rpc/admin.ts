@@ -2738,11 +2738,14 @@ export function registerAdminHandlers(
 
           // Wraps REAL server calls: a thrown AdminError from them is a
           // remote authority verdict.
-          const tagRemoteAuthority = async <S>(call: Promise<S>): Promise<S> => {
+          const tagRemoteAuthority = async <S>(call: Promise<S>, entryScoped = false): Promise<S> => {
             try {
               return await call
             } catch (error) {
               if (error instanceof AdminError && denialOriginOf(error) === null) {
+                // A missing artifact does not revoke membership of its containing space.
+                // Genuine 403 permission denials retain the existing space revocation.
+                if (entryScoped && error.status !== 403 && (error.status === 404 || error.errorCode === 'NOT_FOUND')) throw error
                 throw new ProductSpaceDenialError(
                   error.message,
                   error.errorCode,
@@ -2790,7 +2793,7 @@ export function registerAdminHandlers(
             catalog,
             catalogEntryId.data,
             { platform, arch },
-          ))
+          ), true)
           requireCurrentLaunchScope()
           assertEntitlement()
           return { launch }

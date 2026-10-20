@@ -8,7 +8,7 @@ import type { MemberCircleScopeKey } from '@/hooks/useMemberCircles'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import {
   memberCircleCreatorNameField,
-  isMembershipCurrentlyPaidEntitled,
+  memberCircleAccessState,
 } from '@/lib/member-circle-view'
 import {
   MemberCircleRow,
@@ -126,18 +126,15 @@ export function normalizeMemberCircleRow(
   const membership = memberships.find(
     candidate => candidate.circle.circleId === circleId,
   ) ?? null
-  const status = membership?.status ?? circle.status
   const billingKind = membership?.billingKind ?? circle.billingKind
   const currentPeriodEnd = membership?.currentPeriodEnd ?? circle.currentPeriodEnd
-  const currentEntitlement = membership
-    ? isMembershipCurrentlyPaidEntitled(membership, now)
-    : null
-  const restricted = status !== 'active' || currentEntitlement === false
+  const accessState = memberCircleAccessState(membership, circle, now)
+  const restricted = accessState !== 'valid'
   const entitlementState: MemberCircleEntitlementState = restricted ? 'restore' : 'valid'
 
   let termText: string
   if (restricted) {
-    termText = translate('poo70.c3.entitlement.restore')
+    termText = translate(accessState === 'expired' ? 'poo70.c6.status.expired' : 'poo70.c3.entitlement.restore')
   } else if (billingKind === 'free') {
     termText = translate('poo70.c3.entitlement.free')
   } else {

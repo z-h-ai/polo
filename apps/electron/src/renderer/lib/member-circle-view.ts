@@ -16,7 +16,7 @@
  * - A renewal handoff whose `resolvedPurchaseUrl` failed closed is surfaced
  *   with its explicit reason; the raw purchase URL is never opened directly.
  */
-import { isCurrentMembershipAuthorityEntitled } from '@polo-ai/shared/admin/member-circle-admission'
+import { isCurrentMembershipAuthorityEntitled, isCurrentMembershipAuthorityExpired } from '@polo-ai/shared/admin/member-circle-admission'
 import type {
   MemberCircleCorrection,
   MemberCirclePaymentOrderSummary,
@@ -177,6 +177,25 @@ export function isMembershipCurrentlyPaidEntitled(
   }
   if (!hasCurrentSource && hasUnknownProjection) return true
   return hasCurrentSource
+}
+
+/** Shared display state; never grants execution. Natural expiry has its own
+ * wording while unknown authority, withdrawal and early departure keep recovery.
+ */
+export function memberCircleAccessState(
+  membership: MemberMembership | null,
+  circle: Pick<MemberCircleSnapshot, 'status'> & Partial<Pick<MemberCircleSnapshot, 'billingKind' | 'currentPeriodEnd'>>,
+  now = Date.now(),
+): 'valid' | 'expired' | 'restore' {
+  const status = membership?.status ?? circle.status
+  const periodEnd = membership?.currentPeriodEnd ?? circle.currentPeriodEnd ?? null
+  const billingKind = membership?.billingKind ?? circle.billingKind
+  const expired = isCurrentMembershipAuthorityExpired({ billingKind: billingKind ?? 'free', currentPeriodEnd: periodEnd, currentEntitlement: membership?.currentEntitlement }, now)
+  if (status === 'suspended') return 'restore'
+  if (status === 'expired') return isMembershipEndedBeforePeriodEnd({ status, currentPeriodEnd: periodEnd }, now) ? 'restore' : 'expired'
+  if (expired) return 'expired'
+  if (!membership && billingKind === 'paid' && !Number.isFinite(Date.parse(periodEnd ?? ''))) return 'restore'
+  return membership && !isMembershipCurrentlyPaidEntitled(membership, now) ? 'restore' : 'valid'
 }
 
 /**

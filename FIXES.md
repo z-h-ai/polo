@@ -406,3 +406,71 @@ Admin 同步交付的只读参考为 `fix/poo79-admin-session-20261019@eb8be26b0
 - **额外范围外基线探针**：`admin-local-app-session-ending.isolated.ts` 原始版本在本轮与独立 `9198d0b6` 源码快照中均因 mock 缺少 NativeInstallationReportSchema 无法加载。临时补齐其契约/config/SDK/presence 夹具后，前后均为相同 17 pass / 7 fail，失败名逐项一致。未修改这些既有业务断言，也未保留探针夹具改动或纳入上述绿色 40 组；原始文件保持不变。基线命令/输出与差异在 `.pipeline/r5afix/baseline-integration-*.log`、`integration-fixture.log`、`baseline-integration-comparison.json`；独立临时源码快照已清理。没有把全仓测试或该额外套件报告为绿色。
 - 此交付是 Client 实现与隔离回归，不替代真实支付/生产数据或正式 Acceptance。R6 在独立副本以旧 HEAD 运行，本轮未读取/修改 `.pipeline/poo77-79-r6-*` run_root、未操作其进程/资源；没有用它的结果为新提交背书。
 - 红测试提交 `97a7b50c`、`6b68392b`、`05194a97`；测试类型/fixture 补全不降低断言。只提交当前主 worktree 分支，不 push、不合并 dev；TASK/授权文件保持 untracked，运行器、契约读取快照和探针均保留在自有忽略目录。
+
+## R7FIX — R7 终验七项 Client 修复（2026-10-20）
+
+**范围与来源**：执行 `TASK-FIX-R7.md` 的七项，不扩大到 R7 报告中的 Admin 首登事务、验收工具或外部环境问题。基线 Client `6f851292`；读取 R7 `RESULT.md` 及 POO-77/78 原始 findings，不改封存验收材料。paid 规则以用户已裁决 A1 和 Admin `shared-contract.md` **v1.3 / 对象 version 1** 为准；本轮只读核对到 Admin `7905aa2f`，契约及 current-entitlement 实现与 R5A 相同，hash 与 auth 原因边界见 `.pipeline/r7fix/admin-contract-binding.json`。
+
+### R7FIX-01 — paid 凭证绑定
+
+**根因**：共享准入已校验 membership、billing kind、当前期与时间上界，但未限制 paid entitled 的两个 nullable 来源引用，独立缺少 orderId/evidence 仍可执行。
+
+**修复**：`member-circle-admission.ts` 要求 paid 同时有非空 `source.orderId` 和 `source.authorityEvidenceId`，缺任一按 `unknown` 拒绝并携带 `refresh_membership`；不修改 v1 DTO 的 nullable 字段、不根据最近订单补权。free 的 null 来源语义及多来源任一合法授权保持。
+
+**验证**：共享 parser→admission、Main install/START 独立 null 两字段均拒绝；零安装、resolve/download、gateway、capability、spawn；free null 来源通过。该受控 wire 回归不证明生产 Admin 曾发出坏 DTO。
+
+### R7FIX-02 — 旧缓存 URL / START / restart
+
+**根因**：真实缓存的 `CatalogAppSchema` 会剥掉 ProductSpace artifact/entry/version/source 信息，先前直接注入内存的标识保护测试未覆盖磁盘边界；旧 restart 还缺少新鲜准入检查。
+
+**修复**：权威 schema 保留现有类型声明中的 ProductSpace 身份、来源和 raw availability，磁盘缓存往返不丢消费者所需字段。三个旧入口共用 fresh list/catalog、共享 paid admission 与 server resolve 校验，先拒绝再发生执行副作用；已剥标识的缓存通过 fresh entry 或可信历史身份识别，个人空间中缺失作品、企业中已消失的已知 artifact 都不能退回旧执行路径。通过准入的 ProductSpace 作品仍要求完整 runtime identity，不用 bare scope 绕过版本与 capability 绑定。旧组织 restart 也补 fresh Catalog 校验。
+
+**验证**：三入口 × expired / not_entitled / 409 的拒绝矩阵，零进程/下载/gateway/capability；三入口已有剥标识缓存、企业消失作品均拒绝；缓存真实落盘回读保留全身份。完整身份 entitled 正常安装/启动和旧组织生命周期继续通过。`.pipeline/r7fix/green-vanished.log`、最终 Main 测试明确 **supersedes** R7 旧缓存 START/restart 辅助诊断，历史原始证据不回写，独立正式复核仍由下一轮验收执行。
+
+### R7FIX-03 — 作品 404 不撤销空间
+
+**根因**：resolve-launch 将所有远端 Catalog 类拒绝都标记为空间 authority 拒绝，作品 NOT_FOUND 被提升为整空间撤权。
+
+**修复**：仅 resolve 的作品级 404/NOT_FOUND 不携带空间撤权来源，list/catalog 和真实 403 的原空间撤权语义保留。Renderer 只把被拒绝的确切作品版本投影为 unavailable，空间仍 online，相邻作品不变；主动刷新可恢复。同步 generation 防止晚到 404 污染更新目录。七 locale 复用已有“当前不可用”文案。
+
+**验证**：404 后 Main fence/generation、登录态不变，真实 execution-list 成功，再经真实 PREPARE→STOP→COMMIT 成功切换；403 仍同步撤空间，401 仍结束会话。Renderer 目标不可用/邻居可用、刷新恢复、晚到 404 不覆盖新目录及七 locale 文案均通过。
+
+### R7FIX-04 — 离线 verifiedAt
+
+**根因**：离线 snapshot 恢复复用在线 selection 发布函数，该函数无条件按 Date.now 写新的 verifiedContext。
+
+**修复**：离线分支只发布 Main 已恢复的选择，跳过权威时间持久化；在线成功核验后的发布仍写新时间。
+
+**验证**：NETWORK_ERROR 冷恢复保持原 verifiedAt `1792503892201`，恢复后同一账号/空间可见；后续成功在线 refresh 才推进 verifiedAt。原离线围栏、失败与重试回归保留。
+
+### R7FIX-05 — 会话失效原因文案
+
+**根因**：Admin 当前 auth 实现对 revoked 和自然 lifetime-invalid 都返回 token_revoked，现有契约没有可证明“其他设备替换/管理员撤销”的原因字段；Client 却把共享恢复页标题写死为其他设备登录。
+
+**修复**：七 locale 的既有 `onboarding.adminKicked.title` 改为中性登录状态失效，不从通用 TOKEN_REVOKED 猜具体原因；恢复按钮与失效围栏保持。
+
+**验证**：真实组件逐一切换七 locale，显示中性标题并可点击重新登录。契约读取范围和 auth 源码 hash 已记录，未添加未经上游确认的原因枚举。
+
+### R7FIX-06 — 同屏到期投影
+
+**根因**：时间唤醒已经存在，但列表/页头把一切非有效状态统一投成 restore，订阅面板另行判断 expired，墙钟跨期后形成不同文案。
+
+**修复**：共享 `isCurrentMembershipAuthorityExpired` 同时服务 Main 时间界限与 Renderer，`memberCircleAccessState` 统一自然到期、待恢复及有效的显示投影；列表、页头、订阅面板消费同一规则。保留 `useMemberCircleClock` 的墙钟唤醒与 R4 上界，不改资格来源、不放宽缺失 paid 期间；主动退出、暂停、unknown 仍使用适当恢复表达。
+
+**验证**：实际墙钟跨过 v1 当前期，无新 receipt，真实路由组件的页头和订阅面板同时显示“已到期”，返回列表也为“已到期”，原 stored status 仍 active；原 R4 到期、free validUntil、取消订单及 unknown/refund 矩阵继续通过。受控浏览器逐张打开同屏/列表截图确认。
+
+### R7FIX-07 — 续费枚举文案
+
+**根因**：capReason 字符串被直接插入用户提示。
+
+**修复**：月/年上限分别映射既有 `poo70.c6.cap.ruleMonth` / `ruleYear`，七 locale 单一维护源，无新文案副本；未知原因用通用上限说明，内部枚举不外露。已选原因不再重复显示同一条通用规则。
+
+**验证**：两种真实上限枚举 × 七 locale 的真实组件断言，保留不建单、不启动浏览器和查看原单；受控浏览器年付上限截图确认无内部枚举、无重复年度规则。
+
+### 验证与交付边界
+
+- **42 个独立测试进程，1100 pass / 0 fail**，覆盖上述七项及原 R3/R4/R5/R5A 相关套件。包含原 R4 复现别名的 25 次重复执行，不把运行总数当成唯一场景数。最终完整命令/stdout/stderr/退出码保留 `verify-r7.log`，最终提交 SHA 与文件 hash 写 `.pipeline/r7fix/verification-binding.json`；复跑：`python3 .pipeline/r7fix/verify.py verify-r7.log`。
+- 每个 Bun 文件使用 `./` 路径并单独进程；每进程先证明临时 HOME/homedir 及配置隔离。红测与复现记录在 `.pipeline/r7fix/red*.log`；先行测试提交 `e00597ce`、`884b9045`。新鲜检查暴露旧 fixture 跨用例残留，本轮仅补 mock 重置、真实 RPC 参数/宿主导出和测试类型修正，未降低业务断言；旧 raw enum 展示断言按本轮明确要求替换为“不外露”。
+- Electron/shared/server-core 类型检查、shared 权威构建、Main/Renderer 构建通过；Main/Renderer/shared 定向 lint 0 error，i18n coverage 通过。`useProductSpaceContext` 的两个 hook dependency warning 在 `6f851292` 同文件 stdin lint 中逐项复现，记录于 `baseline-hook-lint.log`，未扩展修复。Renderer chunk 大小为既有构建提示。
+- 受控浏览器四类检查通过、page errors 为空，打开到期同屏、列表、续费及 800px 登录截图；它不替代真实 Admin/Main/支付或正式 Acceptance。自有 preview PID 33647 已停止并核对无监听，浏览器 finally 关闭；用户 R7 报告服务未操作。
+- 已知范围外全仓/额外套件基线仍以此前记录为准（包括 admin-local-app-session-ending mock 加载问题、既有 i18n parity/sort、其他 App/AdminLogin lint），本轮未重写或声称全仓绿色。只提交本分支本轮源码、测试及本段，不 push、不合并 dev；TASK/授权文件保持 untracked，调试与证据均在自有忽略目录。最终提交完成并验证后不再追加提交，等待下一轮验收锁定 HEAD。

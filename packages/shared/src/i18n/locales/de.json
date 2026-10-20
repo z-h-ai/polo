@@ -912,7 +912,7 @@
   "onboarding.adminKicked.ariaLabel": "Admin-Sitzung beendet",
   "onboarding.adminKicked.description": "Deine Kontositzung ist nicht mehr gültig. Melde dich erneut an, um Polo AI sicher weiterzuverwenden.",
   "onboarding.adminKicked.relogin": "Erneut anmelden",
-  "onboarding.adminKicked.title": "Auf einem anderen Gerät angemeldet",
+  "onboarding.adminKicked.title": "Deine Sitzung ist abgelaufen",
   "onboarding.adminLogin.accountDisabled": "Dieses Konto wurde deaktiviert. Bitte kontaktiere deinen Administrator.",
   "onboarding.adminLogin.agreement": "Nutzungsbedingungen und Datenschutzrichtlinie zustimmen",
   "onboarding.adminLogin.ariaLabel": "Admin-Anmeldung",

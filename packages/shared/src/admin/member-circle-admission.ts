@@ -5,10 +5,26 @@ import { i18n, translateRegistryMessage } from '../i18n/index.ts'
 type CurrentMembership = Pick<MemberMembership,
   'membershipId' | 'status' | 'billingKind' | 'currentPeriodEnd' | 'currentEntitlement'>
 
+/** Local deadlines only restrict authority, including after an awaited operation. */
+export function isCurrentMembershipAuthorityExpired(membership: Pick<CurrentMembership, 'billingKind' | 'currentPeriodEnd' | 'currentEntitlement'>, now = Date.now()): boolean {
+  const authority = membership.currentEntitlement
+  return (membership.billingKind === 'paid' && Date.parse(membership.currentPeriodEnd ?? '') <= now)
+    || (authority?.state === 'entitled' && authority.validUntil !== null && Date.parse(authority.validUntil) <= now)
+}
+
+function hasPaidSourceBinding(membership: CurrentMembership): boolean {
+  return membership.billingKind !== 'paid' || (
+    typeof membership.currentEntitlement?.source.orderId === 'string'
+    && membership.currentEntitlement.source.orderId.trim().length > 0
+    && typeof membership.currentEntitlement.source.authorityEvidenceId === 'string'
+    && membership.currentEntitlement.source.authorityEvidenceId.trim().length > 0
+  )
+}
+
 /** Bound v1 authority only. Recent payment history never grants execution. */
 export function isCurrentMembershipAuthorityEntitled(membership: CurrentMembership, now = Date.now()): boolean {
   const authority = membership.currentEntitlement
-  if (membership.status !== 'active' || !authority || authority.version !== 1
+  if (!hasPaidSourceBinding(membership) || membership.status !== 'active' || !authority || authority.version !== 1
     || authority.state !== 'entitled' || authority.membershipId !== membership.membershipId
     || authority.source?.billingKind !== membership.billingKind
     || !Number.isFinite(Date.parse(authority.computedAt))) return false
@@ -19,13 +35,13 @@ export function isCurrentMembershipAuthorityEntitled(membership: CurrentMembersh
   if (!periodMatches) return false
   if (authority.validUntil !== null) {
     const until = Date.parse(authority.validUntil)
-    if (!Number.isFinite(until) || until <= now) return false
+    if (!Number.isFinite(until)) return false
   }
   if (membership.billingKind === 'paid') {
     const periodEnd = Date.parse(membership.currentPeriodEnd ?? '')
-    if (!Number.isFinite(periodEnd) || periodEnd <= now) return false
+    if (!Number.isFinite(periodEnd)) return false
   }
-  return true
+  return !isCurrentMembershipAuthorityExpired(membership, now)
 }
 
 export class MemberCircleAdmissionError extends Error {
@@ -69,10 +85,8 @@ export async function requireMemberCircleAppAdmission(
         || isCurrentMembershipAuthorityEntitled(membership, now)
     ))) return
     const unknown = candidates.length === 0 || candidates.some(membership =>
-      !membership.currentEntitlement || membership.currentEntitlement.state === 'unknown')
-    const expired = candidates.some(membership => membership.currentEntitlement?.state === 'entitled'
-      && ((membership.currentPeriodEnd !== null && Date.parse(membership.currentPeriodEnd) <= now)
-        || (membership.currentEntitlement.validUntil !== null && Date.parse(membership.currentEntitlement.validUntil) <= now)))
+      !membership.currentEntitlement || membership.currentEntitlement.state === 'unknown' || !hasPaidSourceBinding(membership))
+    const expired = candidates.some(membership => membership.currentEntitlement?.state === 'entitled' && isCurrentMembershipAuthorityExpired(membership, now))
     throw new MemberCircleAdmissionError(unknown ? 'unknown' : expired ? 'expired' : 'not_entitled')
   }
   assertCurrent()

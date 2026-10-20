@@ -912,7 +912,7 @@
   "onboarding.adminKicked.ariaLabel": "Admin session ended",
   "onboarding.adminKicked.description": "Your account session is no longer valid. To keep your account secure, please sign in again to continue using Polo AI.",
   "onboarding.adminKicked.relogin": "Sign in again",
-  "onboarding.adminKicked.title": "Signed in on another device",
+  "onboarding.adminKicked.title": "Your session has ended",
   "onboarding.adminLogin.accountDisabled": "This account has been disabled. Please contact your administrator.",
   "onboarding.adminLogin.agreement": "Agree to the Terms of Service and Privacy Policy",
   "onboarding.adminLogin.ariaLabel": "Admin login",

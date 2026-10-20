@@ -18,7 +18,7 @@ import {
   type HomeAppDirectory,
 } from '@/lib/home-app-directory'
 import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
-import { isMembershipCurrentlyPaidEntitled, isMembershipEndedBeforePeriodEnd, selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
+import { memberCircleAccessState, isMembershipEndedBeforePeriodEnd, selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
 import { CircleContentPanel } from './CircleContentPanel'
 import { CircleSubscriptionPanel } from './CircleSubscriptionPanel'
 import { CircleSupportPanel, type CircleSupportTarget } from './CircleSupportPanel'
@@ -116,6 +116,7 @@ export interface CircleDetailHeadingState {
   status: MemberMembership['status'] | MemberCircleSnapshot['status']
   /** True when the entitlement is restricted (lifecycle or G5 projection). */
   restricted: boolean
+  accessState: 'valid' | 'expired' | 'restore'
   appsCount: number
   skillsCount: number
 }
@@ -131,12 +132,11 @@ export function deriveCircleDetailHeadingState(
   now: number = Date.now(),
 ): CircleDetailHeadingState {
   const status = membership?.status ?? circle.status
-  const currentEntitlement = membership
-    ? isMembershipCurrentlyPaidEntitled(membership, now)
-    : null
+  const accessState = memberCircleAccessState(membership, circle, now)
   return {
     status,
-    restricted: status !== 'active' || currentEntitlement === false,
+    restricted: accessState !== 'valid',
+    accessState,
     appsCount: circle.entitlements.filter(e => e.artifact.type === 'web_app').length,
     skillsCount: circle.entitlements.filter(e => e.artifact.type === 'skill').length,
   }
@@ -418,7 +418,7 @@ export function CircleDetailPage({
       // word (other restricted states keep the restore term).
       return isMembershipEndedBeforePeriodEnd({ status: effectiveStatus, currentPeriodEnd })
         ? t('poo70.c9.heading.endedNote')
-        : t('poo70.c3.entitlement.restore')
+        : t(heading.accessState === 'expired' ? 'poo70.c6.status.expired' : 'poo70.c3.entitlement.restore')
     }
     if (billingKind === 'free') return t('poo70.c3.entitlement.free')
     const parsed = currentPeriodEnd ? Date.parse(currentPeriodEnd) : Number.NaN
@@ -483,7 +483,7 @@ export function CircleDetailPage({
               // adjacent term is suppressed when it would repeat the badge
               // word (the post-leave page showed 待恢复 twice side by side).
               const statusLabel = heading.restricted
-                ? t('poo70.c3.entitlement.restore')
+                ? t(heading.accessState === 'expired' ? 'poo70.c6.status.expired' : 'poo70.c3.entitlement.restore')
                 : t('poo70.c3.filter.valid')
               return (
                 <div

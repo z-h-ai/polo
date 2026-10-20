@@ -247,11 +247,12 @@ export function useProductSpaceContextState() {
     list: ProductSpaceSummary[],
     personalId: string,
     productSpaceId: string,
+    onlineVerified = true,
   ) => {
     // The Main fence already moved (trusted transaction committed); now the
     // renderer projection is published as one step.
     setStoredActiveProductSpaceId(accountId, productSpaceId)
-    persistVerifiedContext(accountId, list, personalId, productSpaceId)
+    if (onlineVerified) persistVerifiedContext(accountId, list, personalId, productSpaceId)
     activeProductSpaceIdRef.current = productSpaceId
     setActiveProductSpaceId(productSpaceId)
     setContextVersion(version => version + 1)
@@ -689,6 +690,7 @@ export function useProductSpaceContextState() {
           restored.snapshot.productSpaces,
           restored.snapshot.personalProductSpaceId,
           restored.snapshot.activeProductSpaceId,
+          false, // A cached read is not a new authority verification.
         )
         return 'ready'
       }

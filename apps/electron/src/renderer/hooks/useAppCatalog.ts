@@ -1519,12 +1519,36 @@ export function useAppCatalog() {
     }
     const snapshot = currentSnapshotForApp(app)
     requireCurrent(snapshot)
+    const launchSyncGeneration = syncGenerationRef.current
     const result = await window.electronAPI.productSpaceResolveLaunch(
       snapshot.catalog.organizationId,
       app.catalogEntryId,
     )
     requireCurrent(snapshot)
     if (!result.success) {
+      if (result.errorCode === 'NOT_FOUND' && syncGenerationRef.current === launchSyncGeneration) {
+        // Entry-level refusal leaves the ProductSpace online. Publish only a
+        // local unavailable projection for this exact version; a fresh Catalog
+        // can restore it. A late denial cannot overwrite a newer sync.
+        const currentCatalog = catalogRef.current
+        if (currentCatalog) {
+          const unavailableCatalog: AppCatalogCacheEntry = {
+            ...currentCatalog,
+            apps: currentCatalog.apps.map(candidate => (
+              candidate.catalogEntryId === app.catalogEntryId
+              && candidate.artifactInstanceId === app.artifactInstanceId
+              && candidate.catalogVersion?.versionId === app.catalogVersion?.versionId
+              && candidate.catalogVersion?.version === app.catalogVersion?.version
+                ? { ...candidate, availability: 'unavailable' }
+                : candidate
+            )),
+          }
+          catalogRef.current = unavailableCatalog
+          setState(current => isCurrentSnapshot(snapshot) && current.catalog === currentCatalog
+            ? { ...current, catalog: unavailableCatalog }
+            : current)
+        }
+      }
       const error = new Error(result.message)
       Object.assign(error, { code: result.errorCode, errorCode: result.errorCode })
       throw error
@@ -1551,7 +1575,7 @@ export function useAppCatalog() {
       throw new Error(i18n.t('homeApps.errors.staleContext'))
     }
     return launch
-  }, [currentSnapshotForApp, requireCurrent, state.accessMode])
+  }, [currentSnapshotForApp, isCurrentSnapshot, requireCurrent, state.accessMode])
 
   const installProductSpaceBundle = useCallback((app: CatalogApp) => {
     const snapshot = currentSnapshotForApp(app)

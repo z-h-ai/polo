@@ -14,7 +14,7 @@ import {
 } from '@/hooks/useMemberCircles'
 import { formatSubscriptionPrice } from '@/lib/format-subscription-price'
 import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
-import { isMembershipCurrentlyPaidEntitled, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
+import { memberCircleAccessState, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import {
   selectCirclePurchaseHandoff,
 } from '@/lib/circle-purchase-url'
@@ -103,11 +103,7 @@ export function resolveSubscriptionStatus(
 ): MemberMembership['status'] | MemberCircleSnapshot['status'] {
   const status = membership?.status ?? circle.status
   if (status !== 'active') return status
-  if (membership) return isMembershipCurrentlyPaidEntitled(membership, now) ? status : 'expired'
-  if (circle.billingKind === 'paid') {
-    const periodEnd = Date.parse(circle.currentPeriodEnd ?? '')
-    if (!Number.isFinite(periodEnd) || periodEnd <= now) return 'expired'
-  }
+  if (memberCircleAccessState(membership, circle, now) !== 'valid') return 'expired'
   return status
 }
 
@@ -352,9 +348,10 @@ export function CircleSubscriptionPanel({
     currentPeriodEnd: currentPeriodEnd ?? null,
   }, now)
 
-  const statusLabel = status === 'active'
+  const accessState = memberCircleAccessState(membership, circle, now)
+  const statusLabel = accessState === 'valid'
     ? t('poo70.c6.status.active')
-    : status === 'expired' && !endedBeforePeriodEnd
+    : accessState === 'expired'
       ? t('poo70.c6.status.expired')
       : t('poo70.c3.entitlement.restore')
 
@@ -565,12 +562,16 @@ export function CircleSubscriptionPanel({
           <p className="m-0 font-medium text-foreground">{t('poo70.c6.cap.title')}</p>
           <p className="m-0 mt-[4px] text-muted-foreground">{t('poo70.c6.cap.body')}</p>
           <ul className="m-0 mt-[8px] list-none p-0 text-muted-foreground">
-            <li>{t('poo70.c6.cap.ruleMonth')}</li>
-            <li className="mt-[2px]">{t('poo70.c6.cap.ruleYear')}</li>
+            {readyPreview?.preview.capReason !== 'month_prepaid_cap_12_calendar_months' && <li>{t('poo70.c6.cap.ruleMonth')}</li>}
+            {readyPreview?.preview.capReason !== 'year_prepaid_next_period_only' && <li className="mt-[2px]">{t('poo70.c6.cap.ruleYear')}</li>}
           </ul>
           {readyPreview?.preview.capReason && (
             <p className="m-0 mt-[8px] text-muted-foreground" data-testid="circle-subscription-cap-reason">
-              {t('poo70.c6.cap.serverReason', { reason: readyPreview.preview.capReason })}
+              {t(readyPreview.preview.capReason === 'month_prepaid_cap_12_calendar_months'
+                ? 'poo70.c6.cap.ruleMonth'
+                : readyPreview.preview.capReason === 'year_prepaid_next_period_only'
+                  ? 'poo70.c6.cap.ruleYear'
+                  : 'poo70.c6.cap.body')}
             </p>
           )}
           {latestOrderSummary && (

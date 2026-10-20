@@ -912,7 +912,7 @@
   "onboarding.adminKicked.ariaLabel": "Sesión de administrador finalizada",
   "onboarding.adminKicked.description": "La sesión de tu cuenta ya no es válida. Para proteger tu cuenta, inicia sesión de nuevo para seguir usando Polo AI.",
   "onboarding.adminKicked.relogin": "Iniciar sesión de nuevo",
-  "onboarding.adminKicked.title": "Sesión iniciada en otro dispositivo",
+  "onboarding.adminKicked.title": "Tu sesión ha finalizado",
   "onboarding.adminLogin.accountDisabled": "Esta cuenta está desactivada. Contacta con tu administrador.",
   "onboarding.adminLogin.agreement": "Aceptar los Términos del servicio y la Política de privacidad",
   "onboarding.adminLogin.ariaLabel": "Inicio de sesión de administrador",
