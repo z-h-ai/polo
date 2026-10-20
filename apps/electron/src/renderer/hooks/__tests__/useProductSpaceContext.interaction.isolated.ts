@@ -2291,3 +2291,18 @@ describe('R5FIX-04 trusted active context recovery', () => {
     expect(declaredActiveSpace as string | undefined).toBe(personalId)
   })
 })
+
+
+it('R7 offline cold recovery preserves verifiedAt until successful online verification', async () => {
+  const verifiedAt = 1792503892201
+  productSpaceContextStorage = { verifiedContext: { list: { contractVersion: 1, personalProductSpaceId: personalId, productSpaces: [personalSpace] }, activeProductSpaceId: personalId, verifiedAt }, legacyCleanup: { completedAt: verifiedAt, results: { all: true } } } as unknown as ProductSpaceContextStorage
+  listResult = { success: false, errorCode: 'NETWORK_ERROR', message: 'offline' }
+  restoreViewResult = { success: true, snapshot: { contractVersion: 1, personalProductSpaceId: personalId, productSpaces: [personalSpace], activeProductSpaceId: personalId } }
+  const { result } = renderHook(useHarness)
+  expect(await boot(result)).toBe('ready')
+  expect(productSpaceContextStorage?.verifiedContext?.verifiedAt).toBe(verifiedAt)
+  expect(result.current.activeProductSpaceId).toBe(personalId)
+  listResult = { success: true, productSpaces: [personalSpace], personalProductSpaceId: personalId }
+  await act(async () => { await result.current.refreshProductSpaces() })
+  expect(productSpaceContextStorage?.verifiedContext?.verifiedAt).toBeGreaterThan(verifiedAt)
+})

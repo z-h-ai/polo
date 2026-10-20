@@ -64,3 +64,18 @@ describe('strict Main paid-source authority', () => {
     } finally { await server.stop(true) }
   })
 })
+
+
+describe('R7 paid lineage binding', () => {
+  for (const field of ['orderId', 'authorityEvidenceId'] as const) {
+    it(`rejects entitled paid with independently null ${field} as unknown`, async () => {
+      const member = membership({ currentEntitlement: currentEntitlementFixture({ source: { ...currentEntitlementFixture().source, [field]: null } }) })
+      expect(isCurrentMembershipAuthorityEntitled(member)).toBe(false)
+      await expect(requireMemberCircleAppAdmission(clientFor([member]), 'fixture', entry)).rejects.toMatchObject({ details: { reason: 'unknown', recovery: 'refresh_membership' } })
+    })
+  }
+  it('keeps free null order/evidence semantics', async () => {
+    const member = membership({ billingKind: 'free', currentPeriodEnd: null, currentEntitlement: currentEntitlementFixture({ currentPeriodEnd: null, validUntil: null, source: { ...currentEntitlementFixture().source, billingKind: 'free', orderId: null, authorityEvidenceId: null } }) })
+    expect(isCurrentMembershipAuthorityEntitled(member)).toBe(true)
+  })
+})

@@ -1423,3 +1423,24 @@ describe('R4FIX-02 detail content uses current-period authority', () => {
     })
   }
 })
+
+
+it('R7 actual clock expiry agrees in list, heading and subscription without a new receipt', async () => {
+  await i18n.changeLanguage('zh-Hans')
+  const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
+  const end = new Date(Date.now() + 1000).toISOString()
+  const circle = { ...circleFixture({ circleId: 'circle-1', membershipId: 'ms-1', name: '到期测试圈', billingKind: 'paid' }), currentPeriodEnd: end }
+  const member = { ...membershipFixture({ circleId: 'circle-1', membershipId: 'ms-1', billingKind: 'paid' }), currentPeriodEnd: end, currentEntitlement: currentEntitlementFixture({ membershipId: 'ms-1', currentPeriodEnd: end, validUntil: end }) }
+  circlesByAccount['account-a'] = [circle]
+  membershipsByAccount['account-a'] = [member]
+  await renderAssembly()
+  await act(async () => { probeClientPage!.navigate({ kind: 'circle-detail', circleId: 'circle-1', section: 'subscription' }) })
+  await screen.findByTestId('circle-subscription-status')
+  expect(screen.getByTestId('circle-detail-status').textContent).toBe('有效')
+  await waitFor(() => expect(screen.getByTestId('circle-subscription-status').textContent).toBe('已到期'), { timeout: 2500 })
+  expect(screen.getByTestId('circle-detail-status').textContent).toBe('已到期')
+  await act(async () => { probeClientPage!.navigate({ kind: 'circles' }) })
+  await screen.findByTestId('my-circles-page')
+  expect(screen.getByTestId('circle-row-term').textContent).toBe('已到期')
+  expect(member.status).toBe('active')
+})

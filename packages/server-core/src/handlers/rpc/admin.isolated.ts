@@ -1811,6 +1811,24 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
     await harness.login(context, 'admin', 'admin-password')
   })
 
+  it('R7 artifact 404 preserves the fence, execution-list and a subsequent space switch', async () => {
+    adminClientBehavior.listProductSpaces = activeList
+    adminClientBehavior.getProductSpaceCatalog = freshCatalog
+    adminClientBehavior.resolveProductSpaceLaunch = async () => { throw new TestAdminError('artifact missing', 'NOT_FOUND', { status: 404 }) }
+    setRuntimeActiveProductSpace('space-a', 'personal')
+    setRuntimeActiveProductSpaceAccount('user-1')
+    const generation = getRuntimeFenceGeneration()
+    expect(await resolveLaunch(context, 'space-a', 'entry-1')).toMatchObject({ success: false, errorCode: 'NOT_FOUND' })
+    expect(authorityRevokeCalls).toEqual([])
+    expect(getRuntimeActiveProductSpace()).toBe('space-a')
+    expect(getRuntimeFenceGeneration()).toBe(generation)
+    expect(managerState.tokens).not.toBeNull()
+    // The surviving committed context can move through the trusted fence setter.
+    setRuntimeActiveProductSpace('space-next', 'enterprise')
+    setRuntimeActiveProductSpaceAccount('user-1')
+    expect(getRuntimeActiveProductSpace()).toBe('space-next')
+  })
+
   it('a REMOTE membership 403 keeps the session and synchronously revokes the scope authority and fence', async () => {
     adminClientBehavior.listProductSpaces = activeList
     adminClientBehavior.getProductSpaceCatalog = freshCatalog

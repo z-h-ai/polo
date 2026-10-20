@@ -3448,6 +3448,57 @@ describe('local app main-process authorization boundary', () => {
       await expect(handlers.get(RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL)!(context, scope()))
         .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     })
+    for (const field of ['orderId', 'authorityEvidenceId'] as const) {
+      for (const channel of ['install', 'start'] as const) {
+        it(`R7 denies missing paid ${field} at ${channel} with zero side effects`, async () => {
+          const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+          const reply = await defaultProductSpaceCatalog()
+          getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) } as any)
+          listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ source: { ...currentEntitlementFixture().source, [field]: null } }) })] }))
+          const app = { ...productSpaceAppIdentity(), sources: [source] }
+          await expect(handlers.get(channel === 'install' ? RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE : RPC_CHANNELS.localApps.START)!(context, channel === 'install' ? { app } : { kind: 'product_space_runtime_start', app }))
+            .rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: 'unknown', recovery: 'refresh_membership' } })
+          expect(scopedInstall).not.toHaveBeenCalled()
+          expect(scopedStartExact).not.toHaveBeenCalled()
+          expect(resolveProductSpaceLaunch).not.toHaveBeenCalled()
+          expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+        })
+      }
+    }
+    for (const channel of [RPC_CHANNELS.localApps.START, RPC_CHANNELS.localApps.RESTART, RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL]) {
+      for (const state of ['expired', 'not_entitled', 'conflict'] as const) {
+        it(`R7 supersedes old-cache diagnostic: ${channel} rejects ${state} before effects`, async () => {
+          // Real disk parsing used to erase this marker; the cache roundtrip test covers that boundary.
+          catalog.apps[0] = { ...catalog.apps[0]!, artifactInstanceId: 'artifact-instance-a', catalogEntryId: 'catalog-entry-a', catalogVersion: { versionId: 'version-a', version: '2.3.4' }, ...(channel === RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL ? { deliveryMode: 'remote_url', remoteUrl: 'https://controlled.example/old' } : {}) }
+          const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+          const reply = await defaultProductSpaceCatalog()
+          getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) } as any)
+          listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture(state === 'expired' ? { validUntil: '2000-01-01T00:00:00.000Z' } : state === 'not_entitled' ? { state } : {}) })] }))
+          const resolveBefore = resolveProductSpaceLaunch.getMockImplementation()!
+          if (state === 'conflict') resolveProductSpaceLaunch.mockImplementation(async () => { throw Object.assign(new Error('current launch conflict'), { code: 'CONFLICT', status: 409 }) })
+          try {
+            await expect(handlers.get(channel)!(context, scope())).rejects.toMatchObject(state === 'conflict' ? { status: 409 } : { code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: state } })
+          } finally { resolveProductSpaceLaunch.mockImplementation(resolveBefore) }
+          expect(scopedStart).not.toHaveBeenCalled()
+          expect(scopedStartExact).not.toHaveBeenCalled()
+          expect(scopedInstall).not.toHaveBeenCalled()
+          expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+          expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+        })
+      }
+    }
+    for (const channel of [RPC_CHANNELS.localApps.START, RPC_CHANNELS.localApps.RESTART, RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL]) {
+      it(`R7 rejects an already stripped personal cache at ${channel}`, async () => {
+        catalog.apps[0] = { ...catalog.apps[0]!, id: 'artifact-instance-a', ...(channel === RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL ? { deliveryMode: 'remote_url', remoteUrl: 'https://controlled.example/old' } : {}) }
+        const reply = await defaultProductSpaceCatalog()
+        const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+        getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) } as any)
+        listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ state: 'not_entitled' }) })] }))
+        await expect(handlers.get(channel)!(context, scope('artifact-instance-a'))).rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED' })
+        expect(scopedStart).not.toHaveBeenCalled()
+        expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+      })
+    }
     it('starts a single entitled circle App normally', async () => {
       const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
       const reply = await defaultProductSpaceCatalog()

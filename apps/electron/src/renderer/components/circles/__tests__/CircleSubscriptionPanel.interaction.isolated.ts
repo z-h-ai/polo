@@ -569,7 +569,7 @@ describe('P70-SUBSCRIPTION-02: preview-then-open, fail closed, no payment surfac
     expect(screen.getByTestId('circle-subscription-cap').textContent)
       .toContain('本次没有创建新订单或支付码')
     expect(screen.getByTestId('circle-subscription-cap-reason').textContent)
-      .toContain('next_period_already_purchased')
+      .not.toContain('next_period_already_purchased')
     // 限额不建单仍可查原单.
     fireEvent.click(screen.getByTestId('circle-subscription-view-order'))
     await screen.findByTestId('circle-subscription-order')
@@ -848,4 +848,21 @@ describe('R4FIX-02 subscription consumes current-period authority', () => {
     expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).toBe('active')
     await waitFor(() => expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).not.toBe('active'))
   })
+})
+
+
+describe('R7 renewal cap reasons use maintained locale copy', () => {
+  for (const [reason, key] of [['year_prepaid_next_period_only', 'poo70.c6.cap.ruleYear'], ['month_prepaid_cap_12_calendar_months', 'poo70.c6.cap.ruleMonth']] as const) {
+    it(`renders ${reason} as user copy in all seven locales`, async () => {
+      const { SUPPORTED_LANGUAGE_CODES } = await import('@polo-ai/shared/i18n')
+      previewResponse = successPreviewPayload({ canRenew: false, capReason: reason })
+      renderPanel()
+      await screen.findByTestId('circle-subscription-cap-reason')
+      for (const language of SUPPORTED_LANGUAGE_CODES) {
+        await act(async () => { await i18n.changeLanguage(language) })
+        expect(screen.getByTestId('circle-subscription-cap-reason').textContent).toBe(i18n.t(key))
+        expect(screen.getByTestId('circle-subscription-cap').textContent).not.toContain(reason)
+      }
+    })
+  }
 })
