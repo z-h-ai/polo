@@ -5,6 +5,7 @@ import { registerCliManagedHandlers } from '../../runtime/cli-managed-broker'
 import { registerAdminHandlers } from './admin'
 import { registerAuthHandlers } from './auth'
 import { registerAutomationsHandlers } from './automations'
+import { registerKnowledgeBaseHandlers } from './knowledge-base'
 import { registerFilesHandlers } from './files'
 import { registerLabelsHandlers } from './labels'
 import { registerLlmConnectionsHandlers } from './llm-connections'
@@ -42,6 +43,7 @@ export function registerCoreRpcHandlers(
   registerFilesHandlers(server, deps)
   registerLabelsHandlers(server, deps)
   registerLlmConnectionsHandlers(server, deps)
+  registerKnowledgeBaseHandlers(server, deps)
   registerMemberCircleHandlers(server, deps)
   registerOAuthHandlers(server, deps)
   registerOnboardingHandlers(server, deps)

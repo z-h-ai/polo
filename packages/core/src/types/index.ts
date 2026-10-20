@@ -30,6 +30,7 @@ export type {
   MessageAttachment,
   StoredAttachment,
   ContentBadge,
+  KbReference,
   AnnotationAuthor,
   AnnotationBody,
   AnnotationIntent,

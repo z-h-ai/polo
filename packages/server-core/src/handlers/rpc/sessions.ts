@@ -11,6 +11,7 @@ import { pushTyped, type RpcServer, type RequestContext } from '@polo-ai/server-
 import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession, unbindClientActiveSession } from './client-active-session'
+import { resolveSessionKbReferences } from './knowledge-base'
 import {
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceScope,
@@ -495,6 +496,21 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // itself registers through the checked reservation protocol before any
     // bootstrap work, so this path can no longer leave an unchecked record.
 
+    // POO-108: resolve the session's KB scope against this message. The first
+    // send of a new session commits the composer's draft selection; hits are
+    // persisted on the user message as its immutable reference snapshot. Any
+    // KB failure degrades to "no references" — never a failed send.
+    const kbReferences = await resolveSessionKbReferences(
+      deps,
+      sessionId,
+      message,
+      options?.kbCollectionIds,
+    )
+    const sendOptions: SendMessageOptions = {
+      ...options,
+      ...(kbReferences && kbReferences.length > 0 ? { kbReferences } : {}),
+    }
+
     return await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {
       let acked = false
       const onAck = (messageId: string) => {
@@ -505,7 +521,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       }
 
       sessionManager
-        .sendMessage(sessionId, message, attachments, storedAttachments, options, undefined, undefined, onAck, { callerClientId })
+        .sendMessage(sessionId, message, attachments, storedAttachments, sendOptions, undefined, undefined, onAck, { callerClientId })
         .then(async () => {
           if (acked) return
           // SILENT DELETE CONVERGENCE: sendMessage returns without an ack
@@ -681,6 +697,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     'updateWorkingDirectory',
     'setSources',
     'setLabels',
+    'setKbCollections',
     'setConnection',
     'shareToViewer',
     'updateShare',
@@ -766,6 +783,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.setSessionSources(sessionId, command.sourceSlugs)
       case 'setLabels':
         return sessionManager.setSessionLabels(sessionId, command.labels)
+      case 'setKbCollections':
+        return sessionManager.setSessionKbCollections(sessionId, command.collectionIds)
       case 'showInFinder': {
         const sessionPath = sessionManager.getSessionPath(sessionId)
         if (sessionPath) {

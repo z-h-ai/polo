@@ -354,6 +354,21 @@ export const CHANNEL_MAP = {
   creatorSkillIgnoreVersion: invoke(RPC_CHANNELS.creatorSkills.IGNORE_VERSION),
   onCreatorSkillProgress: listener(RPC_CHANNELS.creatorSkills.PROGRESS),
 
+  // Enterprise Knowledge Base (POO-108)
+  kbListCollections: invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS),
+  kbCreateCollection: invoke(RPC_CHANNELS.kb.CREATE_COLLECTION),
+  kbListDocuments: invoke(RPC_CHANNELS.kb.LIST_DOCUMENTS),
+  kbUploadDocument: invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT),
+  kbSubmitForReview: invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW),
+  kbPublishDocument: invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT),
+  kbRejectDocument: invoke(RPC_CHANNELS.kb.REJECT_DOCUMENT),
+  kbRevertToDraft: invoke(RPC_CHANNELS.kb.REVERT_TO_DRAFT),
+  kbDeleteDocument: invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT),
+  kbGetDocument: invoke(RPC_CHANNELS.kb.GET_DOCUMENT),
+  kbSearch: invoke(RPC_CHANNELS.kb.SEARCH),
+  kbSetSessionCollections: invoke(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS),
+  kbGetSessionCollections: invoke(RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS),
+
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
   reorderStatuses: invoke(RPC_CHANNELS.statuses.REORDER),

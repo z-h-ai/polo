@@ -4,6 +4,7 @@ import { useMemberCatalog } from '@/context/MemberCatalogContext'
 import { MemberCircleResourceProvider } from '@/context/MemberCircleResourceContext'
 import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { WebAppView } from './WebAppView'
+import { KnowledgeBaseApp } from './KnowledgeBaseApp'
 import { useTabShell } from '@/context/TabShellContext'
 import type { TabInstance } from '../../../shared/tab-browser-types'
 
@@ -62,6 +63,11 @@ export function TabContent({ renderPolo, onReauthenticateRequest }: TabContentPr
       </div>
 
       {activeType === 'home' && <ClientHomeSurface onReauthenticateRequest={onReauthenticateRequest} />}
+
+      {/* POO-108: the enterprise knowledge base app tab. Mounted only while
+      active — the surface re-reads its scope on mount, and the tab strip is
+      the only persistent state it needs. */}
+      {activeType === 'knowledge-base' && <KnowledgeBaseApp />}
 
       {[...openTabs, ...backgroundTabs]
         .filter((tab) => tab.type === 'webapp')

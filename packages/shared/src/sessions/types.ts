@@ -58,6 +58,8 @@ export const SESSION_PERSISTENT_FIELDS = [
   'lastReadMessageId', 'hasUnread',
   // Config
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
+  // Enterprise Knowledge Base session scope (POO-108)
+  'kbCollectionIds',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
   // System prompt preset ('mini' edit-popover sessions must survive restarts
@@ -165,6 +167,12 @@ export interface SessionConfig {
   hasUnread?: boolean;
   /** Per-session source selection (source slugs) */
   enabledSourceSlugs?: string[];
+  /**
+   * Per-session Enterprise Knowledge Base scope (POO-108): the collection
+   * IDs the assistant reads from for this session. Empty/undefined means
+   * the session does not use the knowledge base.
+   */
+  kbCollectionIds?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
   /** SDK cwd for session storage - set once at creation, never changes. Ensures SDK can find session transcripts regardless of workingDirectory changes. */
@@ -310,6 +318,8 @@ export interface SessionHeader {
   hasUnread?: boolean;
   /** Per-session source selection (source slugs) */
   enabledSourceSlugs?: string[];
+  /** Per-session Enterprise Knowledge Base scope (POO-108, collection IDs) */
+  kbCollectionIds?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
   /** SDK cwd for session storage - set once at creation, never changes */

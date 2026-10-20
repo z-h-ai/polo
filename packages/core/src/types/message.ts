@@ -3,6 +3,21 @@
  */
 
 /**
+ * Immutable per-message Enterprise Knowledge Base reference snapshot (POO-108).
+ * Persisted with the user message when the session had a KB scope at send
+ * time; rendered as reference chips. Clearing the session selection never
+ * mutates an already-persisted snapshot.
+ */
+export interface KbReference {
+  docId: string;
+  collectionId: string;
+  collectionName: string;
+  title: string;
+  snippet: string;
+  score: number;
+}
+
+/**
  * Message roles for display (runtime)
  */
 export type MessageRole =
@@ -275,6 +290,8 @@ export interface Message {
   attachments?: StoredAttachment[];
   // Content badges for inline display (sources, skills)
   badges?: ContentBadge[];
+  /** Knowledge Base reference snapshot attached at send time (POO-108) */
+  kbReferences?: KbReference[];
   /** Annotation payloads for this message */
   annotations?: AnnotationV1[];
   isError?: boolean;
@@ -383,6 +400,8 @@ export interface StoredMessage {
   attachments?: StoredAttachment[];
   /** Content badges for inline display (sources, skills) */
   badges?: ContentBadge[];
+  /** Knowledge Base reference snapshot attached at send time (POO-108) */
+  kbReferences?: KbReference[];
   /** Annotations persisted at message level */
   annotations?: AnnotationV1[];
   // Turn grouping - critical for TurnCard rendering after reload

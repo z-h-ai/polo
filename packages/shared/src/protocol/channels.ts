@@ -411,6 +411,23 @@ export const RPC_CHANNELS = {
     LIST_MANAGED: 'skills:listManaged',
     SET_MANAGED_ENABLEMENT: 'skills:setManagedEnablement',
   },
+  // Enterprise Knowledge Base (POO-108): local workspace-scoped file store,
+  // every channel is LOCAL_ONLY (see routing.ts).
+  kb: {
+    LIST_COLLECTIONS: 'kb:listCollections',
+    CREATE_COLLECTION: 'kb:createCollection',
+    LIST_DOCUMENTS: 'kb:listDocuments',
+    UPLOAD_DOCUMENT: 'kb:uploadDocument',
+    SUBMIT_FOR_REVIEW: 'kb:submitForReview',
+    PUBLISH_DOCUMENT: 'kb:publishDocument',
+    REJECT_DOCUMENT: 'kb:rejectDocument',
+    REVERT_TO_DRAFT: 'kb:revertToDraft',
+    DELETE_DOCUMENT: 'kb:deleteDocument',
+    GET_DOCUMENT: 'kb:getDocument',
+    SEARCH: 'kb:search',
+    SET_SESSION_COLLECTIONS: 'kb:setSessionCollections',
+    GET_SESSION_COLLECTIONS: 'kb:getSessionCollections',
+  },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',
     INSTALL: 'creatorSkills:install',

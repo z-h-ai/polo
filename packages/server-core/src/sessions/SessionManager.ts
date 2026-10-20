@@ -937,6 +937,8 @@ interface ManagedSession {
   hasUnread?: boolean
   // Per-session source selection (slugs of enabled sources)
   enabledSourceSlugs?: string[]
+  // Per-session Enterprise Knowledge Base scope (POO-108, collection IDs)
+  kbCollectionIds?: string[]
   // Labels applied to this session (additive tags, many-per-session)
   labels?: string[]
   // Working directory for this session (used by agent for bash commands)
@@ -2983,6 +2985,7 @@ export class SessionManager implements ISessionManager {
       // loadSessionsFromDisk). Populate from disk only if not already set in
       // memory — a caller may have mutated them via setSessionSources etc.
       if (managed.enabledSourceSlugs === undefined) managed.enabledSourceSlugs = stored.enabledSourceSlugs
+      if (managed.kbCollectionIds === undefined) managed.kbCollectionIds = stored.kbCollectionIds
       if (managed.lastReadMessageId === undefined) managed.lastReadMessageId = stored.lastReadMessageId
       if (managed.hasUnread === undefined) managed.hasUnread = stored.hasUnread
       if (managed.sharedUrl === undefined) managed.sharedUrl = stored.sharedUrl
@@ -3475,6 +3478,7 @@ export class SessionManager implements ISessionManager {
       managed.lastReadMessageId = storedSession.lastReadMessageId
       managed.hasUnread = storedSession.hasUnread  // Explicit unread flag for NEW badge state machine
       managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
+      managed.kbCollectionIds = storedSession.kbCollectionIds
       managed.sharedUrl = storedSession.sharedUrl
       managed.sharedId = storedSession.sharedId
       managed.sharedWriteToken = storedSession.sharedWriteToken
@@ -8166,6 +8170,16 @@ export class SessionManager implements ISessionManager {
             timestamp: this.monotonic(),
             attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
             badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
+            // KB reference snapshot resolved by the SEND_MESSAGE handler from
+            // the session's KB scope (POO-108); immutable once persisted.
+            // TODO(POO-108): inject the same kbReferences into the agent
+            // turn's system/context prompt once the agent context assembly
+            // gains a suitable hook point. The persisted message snapshot is
+            // the single source of truth — the injection should read from it
+            // (or from options.kbReferences) rather than re-querying the KB,
+            // so mid-stream queue replays (which bypass the SEND_MESSAGE
+            // handler) stay consistent with what the user saw.
+            kbReferences: options?.kbReferences,
           }
           managed.messages.push(userMessage)
 
@@ -10922,6 +10936,23 @@ export class SessionManager implements ISessionManager {
       // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
       // directories created after the watcher started.
       // https://github.com/oven-sh/bun/issues/15939
+      const watcher = this.configWatchers.get(managed.workspace.rootPath)
+      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
+    }
+  }
+
+  /**
+   * Set the per-session Enterprise Knowledge Base scope (POO-108). The
+   * snapshot is validated by the kb RPC handler before this call; here it is
+   * just durable session state, persisted like labels.
+   */
+  async setSessionKbCollections(sessionId: string, collectionIds: string[]): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (managed) {
+      managed.kbCollectionIds = collectionIds
+      this.setMetadataWriteGuard(managed)
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
       const watcher = this.configWatchers.get(managed.workspace.rootPath)
       watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
     }

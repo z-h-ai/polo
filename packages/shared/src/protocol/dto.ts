@@ -10,6 +10,7 @@ import type {
   Message,
   TypedError,
   ContentBadge,
+  KbReference,
   ToolDisplayMeta,
   AnnotationV1,
   PermissionRequest as BasePermissionRequest,
@@ -79,6 +80,8 @@ export interface Session {
    */
   hasUnread?: boolean
   enabledSourceSlugs?: string[]
+  /** Per-session Enterprise Knowledge Base scope (POO-108, collection IDs) */
+  kbCollectionIds?: string[]
   workingDirectory?: string
   sessionFolderPath?: string
   sharedUrl?: string
@@ -374,6 +377,18 @@ export interface SendMessageOptions {
    * (fail closed).
    */
   invocationSource?: InvocationSource
+  /**
+   * Knowledge Base scope carried by the FIRST send of a new session
+   * (POO-108): the composer's pre-session draft is committed to the session
+   * snapshot before the KB references are resolved. Omitted turns keep the
+   * session's stored scope.
+   */
+  kbCollectionIds?: string[]
+  /**
+   * Resolved KB references for this turn (computed by the SEND_MESSAGE
+   * handler from the session's KB scope) and persisted on the user message.
+   */
+  kbReferences?: KbReference[]
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +410,7 @@ export type SessionCommand =
   | { type: 'updateWorkingDirectory'; dir: string }
   | { type: 'setSources'; sourceSlugs: string[] }
   | { type: 'setLabels'; labels: string[] }
+  | { type: 'setKbCollections'; collectionIds: string[] }
   | { type: 'showInFinder' }
   | { type: 'copyPath' }
   | { type: 'shareToViewer' }

@@ -786,9 +786,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           <ChatDisplay
             ref={chatDisplayRef}
             session={session}
-            onSendMessage={(message, attachments, skillSlugs) => {
+            onSendMessage={(message, attachments, skillSlugs, kbCollectionIds) => {
               if (session) {
-                onSendMessage(session.id, message, attachments, skillSlugs)
+                onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds)
               }
             }}
             onOpenFile={handleOpenFile}

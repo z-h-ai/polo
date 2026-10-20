@@ -231,6 +231,49 @@ describe('ProductSpace v1 network contract', () => {
     ]), enterprise).entries).toHaveLength(2)
   })
 
+  test('admits the enterprise knowledge built-in app in enterprise spaces only (POO-108)', () => {
+    const knowledgeEntry = {
+      catalogEntryId: 'knowledge', name: 'Enterprise knowledge', description: 'Built in',
+      availability: 'available', kind: 'built_in_app' as const, builtInAppId: 'enterprise_knowledge' as const,
+    }
+    // The schema accepts the new built-in app id...
+    expect(ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1',
+      entries: [assistantEntry(), knowledgeEntry],
+    }).success).toBe(true)
+    // ...but at most one knowledge entry per catalog.
+    expect(ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1',
+      entries: [assistantEntry(), knowledgeEntry, { ...knowledgeEntry, catalogEntryId: 'knowledge-2' }],
+    }).success).toBe(false)
+
+    const personal = ProductSpaceRefSchema.parse({ id: 'product-space-a', kind: 'personal' })
+    const enterprise = ProductSpaceRefSchema.parse({
+      id: 'product-space-a', kind: 'enterprise', enterpriseId: 'enterprise-a', role: 'member',
+    })
+    const response = (entries: unknown[]) => ({
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1',
+      entries: [assistantEntry(), ...entries],
+    })
+    // A personal catalog that lists the knowledge base is a scope violation —
+    // the entry must fail validation, never degrade to a missing row.
+    expect(() => parseProductSpaceCatalogResponseForProductSpace(response([knowledgeEntry]), personal)).toThrow('did not match')
+    expect(parseProductSpaceCatalogResponseForProductSpace(response([knowledgeEntry]), enterprise).entries).toHaveLength(2)
+
+    // Launch subjects accept the knowledge base with built_in delivery only.
+    const launch = {
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogEntryId: 'knowledge',
+      resolvedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:05:00.000Z',
+      subject: { kind: 'built_in_app', builtInAppId: 'enterprise_knowledge' },
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
+      delivery: { kind: 'built_in' },
+    }
+    expect(ResolveLaunchResponseSchema.safeParse(launch).success).toBe(true)
+    expect(ResolveLaunchResponseSchema.safeParse({
+      ...launch, delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+    }).success).toBe(false)
+  })
+
   test('rejects duplicate artifact instances instead of splitting creator-circle grants', () => {
     expect(ProductSpaceCatalogResponseSchema.safeParse({
       contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1',

@@ -87,12 +87,22 @@ function restoreTabs(rawTabs: TabInstance[], apps: AppDefinition[]): TabInstance
   const appIds = new Set(apps.map((app) => app.id))
   const restored = rawTabs.filter((tab) => {
     if (tab.id === POLO_TAB_ID || tab.type === 'polo') return true
+    // POO-108: the knowledge base is a built-in surface, not an installed
+    // webapp — an open tab survives restore. It is never re-created here:
+    // the surface is enterprise-only and opens from the Home card.
+    if (tab.type === 'knowledge-base') return true
     if (tab.type !== 'webapp') return false
     return appIds.has(tab.appId)
   })
 
-  const hasPolo = restored.some((tab) => tab.id === POLO_TAB_ID || tab.type === 'polo')
-  return hasPolo ? restored : [POLO_TAB, ...restored]
+  // Collapse duplicated knowledge-base tabs onto the canonical instance.
+  const deduped = restored.filter((tab, index) => (
+    tab.type !== 'knowledge-base'
+    || index === restored.findIndex(candidate => candidate.type === 'knowledge-base')
+  ))
+
+  const hasPolo = deduped.some((tab) => tab.id === POLO_TAB_ID || tab.type === 'polo')
+  return hasPolo ? deduped : [POLO_TAB, ...deduped]
 }
 
 export function TabShellProvider({ workspaceId, productSpaceScope, children }: TabShellProviderProps) {
