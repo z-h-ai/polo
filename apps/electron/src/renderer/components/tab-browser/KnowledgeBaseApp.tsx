@@ -476,6 +476,9 @@ export function KnowledgeBaseApp() {
                       >
                         {statusLabel(doc.status)}
                       </span>
+                      {doc.status === 'published' && (
+                        <SyncBadge doc={doc} />
+                      )}
                       <span className="shrink-0 text-[11px] text-foreground-40">
                         {t('knowledgeBase.versionShort', { version: doc.version })}
                       </span>
@@ -731,5 +734,31 @@ function DeleteButton({ disabled, label, onClick }: { disabled: boolean; label: 
     >
       <Icons.Trash2 className="size-[13px]" aria-hidden="true" />
     </Button>
+  )
+}
+
+/**
+ * OpenViking publish-sync outcome, shown next to the「已发布」badge (POO-108
+ * v2). Only a document the server recorded a sync outcome for renders it —
+ * a deployment without OpenViking keeps the row exactly as before.
+ */
+function SyncBadge({ doc }: { doc: KbDocumentSummary }) {
+  const { t } = useTranslation()
+  const state = doc.openViking
+  if (!state) return null
+  const synced = 'uri' in state
+  return (
+    <span
+      className={`inline-flex min-h-[20px] shrink-0 items-center gap-[4px] rounded-full px-[8px] text-[10px] font-semibold ${
+        synced ? 'bg-success/11 text-success' : 'bg-destructive/10 text-destructive'
+      }`}
+      data-testid={`kb-document-sync-${doc.id}`}
+      title={synced ? state.uri : state.error}
+    >
+      {synced
+        ? <Icons.CloudUpload className="size-[11px]" aria-hidden="true" />
+        : <Icons.CloudOff className="size-[11px]" aria-hidden="true" />}
+      {synced ? t('knowledgeBase.sync.synced') : t('knowledgeBase.sync.failed')}
+    </span>
   )
 }

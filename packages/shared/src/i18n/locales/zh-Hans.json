@@ -940,6 +940,8 @@
   "knowledgeBase.status.in_review": "审核中",
   "knowledgeBase.status.published": "已发布",
   "knowledgeBase.status.rejected": "已驳回",
+  "knowledgeBase.sync.failed": "同步失败",
+  "knowledgeBase.sync.synced": "已同步",
   "knowledgeBase.title": "知识库",
   "knowledgeBase.toast.collectionCreated": "集合已创建",
   "knowledgeBase.toast.deleted": "文档已删除",

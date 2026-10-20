@@ -940,6 +940,8 @@
   "knowledgeBase.status.in_review": "レビュー中",
   "knowledgeBase.status.published": "公開済み",
   "knowledgeBase.status.rejected": "差し戻し済み",
+  "knowledgeBase.sync.failed": "同期失敗",
+  "knowledgeBase.sync.synced": "同期済み",
   "knowledgeBase.title": "ナレッジベース",
   "knowledgeBase.toast.collectionCreated": "コレクションを作成しました",
   "knowledgeBase.toast.deleted": "ドキュメントを削除しました",

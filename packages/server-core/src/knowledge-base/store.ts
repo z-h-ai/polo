@@ -107,6 +107,15 @@ export interface KbCollectionRecord {
   updatedAt: string
 }
 
+/**
+ * Outcome of the OpenViking publish sync recorded on ONE document (POO-108
+ * v2): either the remote URI it was published under, or why the sync failed.
+ * The local publish itself is never rolled back by the failure branch.
+ */
+export type KbDocumentOpenVikingState =
+  | { uri: string; syncedAt: string }
+  | { error: string; failedAt: string }
+
 export interface KbDocumentRecord {
   id: string
   collectionId: string
@@ -117,6 +126,19 @@ export interface KbDocumentRecord {
   updatedAt: string
   publishedAt: string | null
   rejectReason: string | null
+  openViking?: KbDocumentOpenVikingState
+}
+
+/**
+ * Space-level OpenViking provisioning marker (POO-108 v2): the remote root the
+ * whole ProductSpace publishes under. Written once by the first provisioning
+ * call and reused (idempotently) by every later sync.
+ */
+export interface KbOpenVikingSpaceMeta {
+  rootUri: string
+  productSpaceId: string
+  enterpriseId: string
+  provisionedAt: string
 }
 
 export interface KbAuditEntry {
@@ -181,17 +203,22 @@ function readCollectionRecord(root: string, collectionId: string): KbCollectionR
   return readJson<KbCollectionRecord>(path)
 }
 
-function readDocumentRecord(root: string, docId: string): KbDocumentRecord {
-  const path = join(root, 'collections')
-  const entries = existsSync(path) ? readdirSync(path, { withFileTypes: true }) : []
+/** Locates a document's directory across the space's collections; throws `kb_document_not_found`. */
+function findDocumentDir(root: string, docId: string): string {
+  const collectionsDir = join(root, 'collections')
+  const entries = existsSync(collectionsDir) ? readdirSync(collectionsDir, { withFileTypes: true }) : []
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
-    const docPath = insideRoot(root, join(path, entry.name, 'documents', docId, 'meta.json'))
-    if (existsSync(docPath)) {
-      return readJson<KbDocumentRecord>(docPath)
+    const docDir = insideRoot(root, join(collectionsDir, entry.name, 'documents', docId))
+    if (existsSync(join(docDir, 'meta.json'))) {
+      return docDir
     }
   }
   throw new KbStoreError('kb_document_not_found')
+}
+
+function readDocumentRecord(root: string, docId: string): KbDocumentRecord {
+  return readJson<KbDocumentRecord>(join(findDocumentDir(root, assertKbId('docId', docId)), 'meta.json'))
 }
 
 function writeDocumentRecord(root: string, record: KbDocumentRecord, content?: string): void {
@@ -217,6 +244,9 @@ function toSummary(record: KbDocumentRecord): KbDocumentSummary {
     updatedAt: record.updatedAt,
     publishedAt: record.publishedAt,
     rejectReason: record.rejectReason,
+    // Omitted entirely when OpenViking is not in play — the wire shape of a
+    // non-synced store stays byte-identical to the pre-v2 one.
+    ...(record.openViking ? { openViking: record.openViking } : {}),
   }
 }
 
@@ -278,6 +308,141 @@ export function readAudit(workspaceRoot: string, binding: KbSpaceBinding): KbAud
     .split('\n')
     .filter(line => line.trim().length > 0)
     .map(line => JSON.parse(line) as KbAuditEntry)
+}
+
+/**
+ * OpenViking provisioning marker for the space (`openviking.json`), POO-108
+ * v2. `null` means the space was never provisioned. The store only owns the
+ * marker's persistence — the remote calls around it live in
+ * `openviking.ts`. A marker naming a different binding is refused like any
+ * other cross-binding read (fail closed).
+ */
+export function readOpenVikingSpaceMeta(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+): KbOpenVikingSpaceMeta | null {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return null
+  const path = join(root, 'openviking.json')
+  if (!existsSync(path)) return null
+  const meta = readJson<KbOpenVikingSpaceMeta>(path)
+  if (meta.productSpaceId !== binding.productSpaceId || meta.enterpriseId !== binding.enterpriseId) {
+    throw new KbStoreError(
+      'kb_space_mismatch',
+      'The OpenViking space marker is bound to a different enterprise ProductSpace',
+    )
+  }
+  return meta
+}
+
+export function writeOpenVikingSpaceMeta(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  meta: KbOpenVikingSpaceMeta,
+): void {
+  const root = writeSpaceRoot(workspaceRoot, binding)
+  writeJson(join(root, 'openviking.json'), meta)
+}
+
+/** The OpenViking sync state recorded on ONE document, if any. */
+export function readDocumentOpenVikingState(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  docId: string,
+): KbDocumentOpenVikingState | null {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return null
+  return readDocumentRecord(root, docId).openViking ?? null
+}
+
+/** Records a sync outcome on the document meta and returns the refreshed summary. */
+export function recordDocumentOpenVikingState(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  docId: string,
+  state: KbDocumentOpenVikingState,
+): KbDocumentSummary {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) throw new KbStoreError('kb_document_not_found')
+  const docDir = findDocumentDir(root, assertKbId('docId', docId))
+  const record = readJson<KbDocumentRecord>(join(docDir, 'meta.json'))
+  record.openViking = state
+  writeJson(join(docDir, 'meta.json'), record)
+  return toSummary(record)
+}
+
+/** Drops the sync state (after a successful remote removal on revert). */
+export function clearDocumentOpenVikingState(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  docId: string,
+): void {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return
+  const docDir = findDocumentDir(root, assertKbId('docId', docId))
+  const record = readJson<KbDocumentRecord>(join(docDir, 'meta.json'))
+  if (!record.openViking) return
+  delete record.openViking
+  writeJson(join(docDir, 'meta.json'), record)
+}
+
+/** Re-reads ONE document's summary (used to report the post-sync state). */
+export function readDocumentSummary(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  docId: string,
+): KbDocumentSummary {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) throw new KbStoreError('kb_document_not_found')
+  return toSummary(readDocumentRecord(root, assertKbId('docId', docId)))
+}
+
+/** The local document facts an OpenViking search hit is mapped back onto. */
+export interface KbLookupDocument {
+  docId: string
+  collectionId: string
+  collectionName: string
+  title: string
+  content: string
+}
+
+/**
+ * Resolves a remote hit's `doc=` tag to the LOCAL published document it
+ * belongs to, enforcing the same visibility rules the local search does:
+ * published only, and inside the requested collection filter. Unpublished,
+ * foreign-collection or missing documents read as `null` — a stale remote
+ * copy never leaks into results (POO-108 v2).
+ */
+export function lookupPublishedDocument(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  docId: string,
+  collectionIds?: string[],
+): KbLookupDocument | null {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return null
+  let record: KbDocumentRecord
+  try {
+    record = readDocumentRecord(root, docId)
+  } catch (error) {
+    if (error instanceof KbStoreError && error.code === 'kb_document_not_found') return null
+    throw error
+  }
+  if (record.status !== 'published') return null
+  if (collectionIds && !collectionIds.includes(record.collectionId)) return null
+  let collectionName = record.collectionId
+  try {
+    collectionName = readCollectionRecord(root, record.collectionId).name
+  } catch {
+    // A collection deleted out-of-band still leaves the document readable.
+  }
+  return {
+    docId: record.id,
+    collectionId: record.collectionId,
+    collectionName,
+    title: record.title,
+    content: readContent(root, record),
+  }
 }
 
 /**
@@ -616,6 +781,15 @@ function buildSnippet(content: string, lowered: string, tokens: string[], deadli
   const end = Math.min(content.length, hitIndex + hitLength + KB_SNIPPET_CONTEXT_CHARS)
   const body = content.slice(start, end).trim()
   return `${start > 0 ? '…' : ''}${body}${end < content.length ? '…' : ''}`
+}
+
+/**
+ * Snippet for a search hit built from the LOCAL content, whatever ranked it
+ * (POO-108 v2: OpenViking hits keep the local snippet contract so the
+ * renderer cannot tell the backends apart beyond the `source` field).
+ */
+export function buildKbSnippetForQuery(content: string, query: string, deadline?: number): string {
+  return buildSnippet(content, content.toLowerCase(), tokenizeKbQuery(query), deadline)
 }
 
 /**

@@ -39,6 +39,7 @@ import {
 } from '../../runtime/product-space-executions'
 import {
   appendAudit,
+  clearDocumentOpenVikingState,
   createCollection,
   deleteDocument,
   getDocument,
@@ -46,11 +47,21 @@ import {
   KbStoreError,
   listCollections,
   listDocuments,
+  readDocumentOpenVikingState,
+  readDocumentSummary,
   searchDocuments,
   transitionDocument,
   uploadDocument,
   type KbSpaceBinding,
 } from '../../knowledge-base/store'
+import {
+  ensureOpenVikingSpace,
+  removeDocumentFromOpenViking,
+  searchDocumentsViaOpenViking,
+  syncPublishedDocumentToOpenViking,
+  type OpenVikingTarget,
+} from '../../knowledge-base/openviking'
+import { readOpenVikingConfig } from '../../knowledge-base/openviking-client'
 
 /**
  * Enterprise Knowledge Base RPC handlers (POO-108).
@@ -125,6 +136,53 @@ interface KbScope {
 
 function kbSpaceBinding(scope: KbScope): KbSpaceBinding {
   return { productSpaceId: scope.space.id, enterpriseId: scope.space.enterpriseId }
+}
+
+/**
+ * The OpenViking binding for this scope, or `null` when the deployment runs
+ * without OpenViking (`POLO_OPENVIKING_URL` unset) — every integration step
+ * below short-circuits on `null`, keeping the unconfigured behavior
+ * byte-identical to the pre-v2 surface.
+ */
+function openVikingTarget(scope: KbScope): OpenVikingTarget | null {
+  const config = readOpenVikingConfig()
+  if (!config) return null
+  return {
+    config,
+    workspaceRoot: scope.workspace.rootPath,
+    binding: kbSpaceBinding(scope),
+    space: { id: scope.space.id, enterpriseId: scope.space.enterpriseId, name: scope.space.name },
+    actor: scope.accountId,
+  }
+}
+
+/** The remote URI a published document was synced under, when one was recorded. */
+function openVikingSyncedUri(scope: KbScope, docId: string): string | undefined {
+  const state = readDocumentOpenVikingState(scope.workspace.rootPath, kbSpaceBinding(scope), docId)
+  return state && 'uri' in state ? state.uri : undefined
+}
+
+/**
+ * Provisioning at collection-creation time (brief v2 改动点 2): the first
+ * collection of a space brings the remote root up with it. Best-effort — the
+ * local collection exists either way, and a failed provisioning is audited
+ * and retried by the next collection creation or publish sync.
+ */
+async function provisionOpenVikingSpaceForScope(scope: KbScope, deps: HandlerDeps): Promise<void> {
+  const target = openVikingTarget(scope)
+  if (!target) return
+  try {
+    await ensureOpenVikingSpace(target)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    appendAudit(scope.workspace.rootPath, kbSpaceBinding(scope), {
+      actor: scope.accountId,
+      action: 'openviking.space_provision_failed',
+      target: scope.space.id,
+      detail: { error: message },
+    })
+    deps.platform.logger?.warn(`KB_OPENVIKING: space provisioning failed: ${message}`)
+  }
 }
 
 /**
@@ -293,6 +351,10 @@ export function registerKnowledgeBaseHandlers(
       { name: input.name, description: input.description },
       scope.accountId,
     )
+    // Bring the OpenViking space up with the first local collection (POO-108
+    // v2 改动点 2). Awaited so the caller's publish sync can rely on the root;
+    // best-effort, so an OpenViking outage cannot fail the local creation.
+    await provisionOpenVikingSpaceForScope(scope, deps)
     deps.platform.logger?.info(`KB_CREATE_COLLECTION: ${collection.id} in ${scope.workspace.id}`)
     return collection
   })
@@ -342,9 +404,15 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    return transitionDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, 'publish', {
+    const published = transitionDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, 'publish', {
       actor: scope.accountId,
     })
+    // Publish sync (POO-108 v2 改动点 3): after the local publish committed,
+    // push the content into the OpenViking space. The sync result lands on
+    // the document meta; a failed sync never rolls the local publish back.
+    const target = openVikingTarget(scope)
+    if (!target) return published
+    return syncPublishedDocumentToOpenViking(target, input.docId)
   })
 
   server.handle(RPC_CHANNELS.kb.REJECT_DOCUMENT, async (ctx, rawInput: unknown) => {
@@ -365,9 +433,23 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    return transitionDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, 'revert', {
+    const reverted = transitionDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, 'revert', {
       actor: scope.accountId,
     })
+    // A reverted document must stop surfacing remotely too (POO-108 v2 改动点
+    // 3): drop its copy from the OpenViking space, best-effort, and clear the
+    // stale sync marker when the removal went through. Today only a rejected
+    // document reaches draft (published is terminal) and none of those carry
+    // a remote copy, so this is the brief-mandated guard for the moment the
+    // state machine grows a published→draft edge.
+    const target = openVikingTarget(scope)
+    if (!target) return reverted
+    const removed = await removeDocumentFromOpenViking(target, input.docId)
+    if (removed) {
+      clearDocumentOpenVikingState(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId)
+      return readDocumentSummary(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId)
+    }
+    return reverted
   })
 
   server.handle(RPC_CHANNELS.kb.DELETE_DOCUMENT, async (ctx, rawInput: unknown) => {
@@ -376,7 +458,15 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    return deleteDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, scope.accountId)
+    // The remote URI must be read BEFORE the local delete: deleting moves the
+    // document into recycle/, where the store no longer resolves its meta.
+    const target = openVikingTarget(scope)
+    const remoteUri = target ? openVikingSyncedUri(scope, input.docId) : undefined
+    const result = deleteDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, scope.accountId)
+    // Best-effort remote cleanup (POO-108 v2 改动点 3): the outcome is audited,
+    // a failure never fails the local deletion.
+    if (target) await removeDocumentFromOpenViking(target, input.docId, remoteUri)
+    return result
   })
 
   server.handle(RPC_CHANNELS.kb.GET_DOCUMENT, async (ctx, rawInput: unknown) => {
@@ -394,6 +484,28 @@ export function registerKnowledgeBaseHandlers(
     const input = parseOrThrow(KbSearchInputSchema, rawInput)
     const scope = await requireKbScope(ctx, input.workspaceId, deps)
     assertKbScopeCurrent(scope)
+    // OpenViking is the retrieval backend when it is configured (POO-108 v2
+    // 改动点 4); the local keyword scan stays the fallback for an unconfigured,
+    // failed or timed-out backend. The two are never mixed.
+    const target = openVikingTarget(scope)
+    let openVikingHits: KbSearchHit[] | null = null
+    if (target) {
+      try {
+        openVikingHits = await searchDocumentsViaOpenViking(target, input.query, input.collectionIds)
+      } catch (error) {
+        deps.platform.logger?.warn(`KB_SEARCH: openviking backend failed, using the local keyword fallback: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      // Post-await CAS before ANY disclosure (review #3 discipline): the
+      // fallback below reads the same space-bound store, so a fence revoked
+      // while the remote call was in flight must fail the request rather than
+      // silently answer from either backend.
+      assertKbScopeCurrent(scope)
+      if (openVikingHits) {
+        deps.platform.logger?.info(`KB_SEARCH: source=openviking hits=${openVikingHits.length}`)
+        return openVikingHits
+      }
+      deps.platform.logger?.info('KB_SEARCH: source=local-fallback')
+    }
     const hits: KbSearchHit[] = searchDocuments(
       scope.workspace.rootPath,
       kbSpaceBinding(scope),

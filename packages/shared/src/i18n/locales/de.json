@@ -940,6 +940,8 @@
   "knowledgeBase.status.in_review": "In Prüfung",
   "knowledgeBase.status.published": "Veröffentlicht",
   "knowledgeBase.status.rejected": "Abgelehnt",
+  "knowledgeBase.sync.failed": "Sync fehlgeschlagen",
+  "knowledgeBase.sync.synced": "Synchronisiert",
   "knowledgeBase.title": "Wissensbasis",
   "knowledgeBase.toast.collectionCreated": "Sammlung erstellt",
   "knowledgeBase.toast.deleted": "Dokument gelöscht",

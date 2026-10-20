@@ -940,6 +940,8 @@
   "knowledgeBase.status.in_review": "Ellenőrzés alatt",
   "knowledgeBase.status.published": "Közzétéve",
   "knowledgeBase.status.rejected": "Elutasítva",
+  "knowledgeBase.sync.failed": "Szinkronizálási hiba",
+  "knowledgeBase.sync.synced": "Szinkronizálva",
   "knowledgeBase.title": "Tudásbázis",
   "knowledgeBase.toast.collectionCreated": "Gyűjtemény létrehozva",
   "knowledgeBase.toast.deleted": "Dokumentum törölve",

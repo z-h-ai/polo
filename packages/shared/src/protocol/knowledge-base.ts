@@ -157,6 +157,19 @@ export const KbCollectionListSchema = z.object({
 }).strict()
 export type KbCollectionList = z.output<typeof KbCollectionListSchema>
 
+/**
+ * OpenViking publish-sync outcome carried on a document summary (POO-108
+ * v2), in exactly the brief's shape: `{"uri", "syncedAt"}` on success or
+ * `{"error", "failedAt"}` on failure — the local publish is never rolled
+ * back by that failure. Absent for a plain local store, so existing clients
+ * see no change.
+ */
+export const KbDocumentOpenVikingStateSchema = z.union([
+  z.object({ uri: z.string().min(1), syncedAt: z.string().min(1) }).strict(),
+  z.object({ error: z.string().min(1), failedAt: z.string().min(1) }).strict(),
+])
+export type KbDocumentOpenVikingState = z.output<typeof KbDocumentOpenVikingStateSchema>
+
 export const KbDocumentSummarySchema = z.object({
   id: z.string(),
   collectionId: z.string(),
@@ -167,6 +180,7 @@ export const KbDocumentSummarySchema = z.object({
   updatedAt: z.string(),
   publishedAt: z.string().nullable(),
   rejectReason: z.string().nullable(),
+  openViking: KbDocumentOpenVikingStateSchema.optional(),
 }).strict()
 export type KbDocumentSummary = z.output<typeof KbDocumentSummarySchema>
 
@@ -175,6 +189,11 @@ export const KbDocumentSchema = KbDocumentSummarySchema.extend({
 }).strict()
 export type KbDocument = z.output<typeof KbDocumentSchema>
 
+/**
+ * Where a search hit's score came from (POO-108 v2). `'openviking'` marks a
+ * hit ranked by the OpenViking retrieval backend; the local keyword fallback
+ * leaves the field unset so pre-v2 results keep their exact shape.
+ */
 export const KbSearchHitSchema = z.object({
   docId: z.string(),
   collectionId: z.string(),
@@ -182,6 +201,7 @@ export const KbSearchHitSchema = z.object({
   title: z.string(),
   snippet: z.string(),
   score: z.number(),
+  source: z.enum(['openviking', 'local-fallback']).optional(),
 }).strict()
 export type KbSearchHit = z.output<typeof KbSearchHitSchema>
 
