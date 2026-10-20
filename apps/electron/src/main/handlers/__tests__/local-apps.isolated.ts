@@ -3420,6 +3420,37 @@ describe('local app main-process authorization boundary', () => {
         })
       }
     }
+
+    it('does not spawn when the captured entitlement expires while gateway initialization is pending', async () => {
+      const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+      const reply = await defaultProductSpaceCatalog()
+      getProductSpaceCatalog.mockImplementation(async () => ({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) }) as any)
+      const validUntil = new Date(Date.now() + 500).toISOString()
+      listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ validUntil }) })] }))
+      const entered = createDeferred<void>(), release = createDeferred<void>()
+      runtimeCoordinator.ensureGateway.mockImplementationOnce(async () => { entered.resolve(); await release.promise })
+      const start = handlers.get(RPC_CHANNELS.localApps.START)!(context, { kind: 'product_space_runtime_start', app: { ...productSpaceAppIdentity(), sources: [source] } }) as Promise<unknown>
+      await entered.promise
+      await new Promise(resolve => setTimeout(resolve, 600))
+      release.resolve()
+      await expect(start).rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: 'expired' } })
+      expect(scopedStartExact).not.toHaveBeenCalled()
+      expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+    })
+    it('rejects a scope-only legacy request for a ProductSpace artifact', async () => {
+      catalog.apps[0] = { ...catalog.apps[0]!, artifactInstanceId: 'artifact-instance-a' } as any
+      const start = handlers.get(RPC_CHANNELS.localApps.START)!
+      await expect(start(context, scope())).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+      expect(scopedStart).not.toHaveBeenCalled()
+    })
+    it('starts a single entitled circle App normally', async () => {
+      const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+      const reply = await defaultProductSpaceCatalog()
+      getProductSpaceCatalog.mockImplementation(async () => ({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) }) as any)
+      listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture()] }))
+      await handlers.get(RPC_CHANNELS.localApps.START)!(context, { kind: 'product_space_runtime_start', app: { ...productSpaceAppIdentity(), sources: [source] } })
+      expect(scopedStartExact).toHaveBeenCalledTimes(1)
+    })
     it('allows an entitled source despite an unknown sibling on the same artifact', async () => {
       const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
       const sibling = { ...source, circleId: '22222222-2222-4222-8222-222222222223' }

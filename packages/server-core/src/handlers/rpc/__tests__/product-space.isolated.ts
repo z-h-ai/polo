@@ -10,6 +10,7 @@ import {
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
+  getRuntimeActiveProductSpaceKind,
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
@@ -2113,4 +2114,15 @@ describe('R5FIX-04 recovery after Catalog revokes the committed fence', () => {
     expect(runtimeActiveSpace()).toBe(spaceA)
     expect((await invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, trustedAccountId, spaceA)).success).toBe(true)
   })
+})
+
+it('R5A commits the kind from the trusted list, and a revoke clears it', async () => {
+  const { invoke } = createHarness()
+  const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, personalId, { kind: 'enterprise' })
+  expect(prepared.success).toBe(true)
+  expect((await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).success).toBe(true)
+  expect((await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, personalId)).success).toBe(true)
+  expect(getRuntimeActiveProductSpaceKind()).toBe('personal')
+  await invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT)
+  expect(getRuntimeActiveProductSpaceKind()).toBeNull()
 })

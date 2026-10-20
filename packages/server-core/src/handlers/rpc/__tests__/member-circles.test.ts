@@ -658,3 +658,21 @@ describe('R5A member RPC committed-scope isolation', () => {
     expect(harness.client.calls).toEqual([])
   })
 })
+
+it('R5A an aborted account transition still invalidates an older in-flight personal request', async () => {
+  const harness = createHarness()
+  setSyncTrustedProductSpaceAccountId(ACCOUNT_ID)
+  setRuntimeActiveProductSpaceAccount(ACCOUNT_ID)
+  setRuntimeActiveProductSpace('personal-fixture', 'personal')
+  let release!: (value: unknown) => void
+  let entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  harness.client.listMemberCirclesGate = () => { entered(); return new Promise(resolve => { release = resolve }) }
+  const request = harness.invoke(RPC_CHANNELS.memberCircles.LIST)
+  await started
+  const epoch = beginAccountTransition()
+  settleAccountTransition(epoch, 'abort')
+  release(validCirclesList())
+  expect(await request).toMatchObject({ success: false, errorCode: 'session_changed' })
+  setRuntimeActiveProductSpace(null)
+})
