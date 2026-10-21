@@ -194,6 +194,26 @@ async function requireKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
 }
 
 /**
+ * The store binding for a MEMBER read: the cached credential ONLY — reads
+ * never provision (brief D2) — resolved to `null` when this device holds no
+ * binding for the space. A clean credential MISS is the ONLY degraded answer:
+ * an unconfigured deployment, a failed credential-store read (the tenant read
+ * throws) or an enterprise mismatch all stay real errors, and so does every
+ * remote listing failure AFTER a binding was found (F1 acceptance round,
+ * 2026-10-21 — "no binding" and "bound but the call failed" must stay
+ * distinguishable).
+ */
+async function readCachedKbSpaceOrNull(scope: KbScope): Promise<KbOpenVikingSpace | null> {
+  const config = readOpenVikingConfig()
+  if (!config) {
+    throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
+  }
+  const credential = await readKbTenantCredential(scope.space.id, scope.space.enterpriseId)
+  if (!credential) return null
+  return kbSpaceFrom(scope, config, credential)
+}
+
+/**
  * The store binding for a WRITE: provision/recover the tenant binding first
  * (idempotent, lease-serialized — brief D2). This is the ONLY path that may
  * provision, and every content mutation goes through it, so a binding that
@@ -461,7 +481,26 @@ export function registerKnowledgeBaseHandlers(
     // button is gated on this list's `canManage`); a member's list is a pure
     // read of the cached binding. An unconfigured deployment still refuses
     // both with the neutral availability error (brief D2/D7).
-    const space = scope.canManage ? await ensureKbSpace(scope) : await requireKbSpace(scope)
+    let space: KbOpenVikingSpace
+    if (scope.canManage) {
+      space = await ensureKbSpace(scope)
+    } else {
+      // F1 (acceptance round, 2026-10-21): a member opening the surface on a
+      // space that was never provisioned ON THIS DEVICE reads the EMPTY list
+      // — informationally exactly what the member saw before any manager
+      // provisioned — instead of the neutral failure the UI renders as "the
+      // knowledge base operation failed". Still cache-only (brief D2): the
+      // miss never provisions and never discloses another space's data, and
+      // only the clean binding MISS degrades — a real unavailability (failed
+      // credential-store read, enterprise mismatch, remote listing failure)
+      // keeps its error.
+      const cached = await readCachedKbSpaceOrNull(scope)
+      if (!cached) {
+        assertKbScopeCurrent(scope)
+        return { canManage: false, collections: [] }
+      }
+      space = cached
+    }
     const rows = await listCollections(space, scope.canManage)
     // Post-await CAS: the disclosure is refused for a scope that moved while
     // the remote listing was in flight (review #3, async-store discipline).

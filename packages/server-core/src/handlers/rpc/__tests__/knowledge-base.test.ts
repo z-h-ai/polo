@@ -548,14 +548,50 @@ describe('knowledge-base availability semantics', () => {
     expect(populated.collections).toHaveLength(1)
   })
 
-  it('a member LIST reads the binding without ever provisioning (brief D2, review fix round B1)', async () => {
-    // Members hold read-only access: their listing is a cache-only read. With
-    // no binding yet, it degrades to the neutral availability failure and
-    // leaves the remote plane untouched — provisioning stays a managing act.
+  it('a member LIST on a never-provisioned space reads the empty list without provisioning (F1)', async () => {
+    // F1 acceptance round: a member's first visit to a space that was never
+    // provisioned ON THIS DEVICE renders the empty member view — the same
+    // information the member had before any provisioning — instead of the
+    // neutral failure. Still cache-only (brief D2): the miss never touches
+    // the remote plane, so provisioning stays a managing act.
     const { invoke } = createHarness({ role: 'member' })
-    await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
-      .rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+    const list = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
+    expect(list.canManage).toBe(false)
+    expect(list.collections).toEqual([])
     expect(ov.requests).toEqual([])
+    expect(ov.hasAccount(ovAccountId(SPACE_ID))).toBe(false)
+  })
+
+  it('a member LIST with a binding still fails on a remote 5xx (F1: miss vs failure stay distinct)', async () => {
+    // The binding exists on this device (a manager provisioned earlier), so
+    // the read is a real remote call — its failure stays the neutral
+    // availability error, NOT the empty list the missing binding degrades to.
+    const provisioning = createHarness()
+    await provisioning.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID })
+    expect(ov.hasAccount(ovAccountId(SPACE_ID))).toBe(true)
+
+    const member = createHarness({ role: 'member' })
+    ov.armFault({ pathPrefix: '/api/v1/fs/ls', status: 500, code: 'INTERNAL', message: 'boom', times: 1 })
+    await expect(member.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
+      .rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+  })
+
+  it('a member LIST still refuses when the credential store read fails (F1: not a clean miss)', async () => {
+    const { invoke } = createHarness({ role: 'member' })
+    // A broken credential store is an availability failure, not "never
+    // provisioned" — the empty-list degradation must not swallow it.
+    credentialManagerOverride = {
+      get: async () => { throw new Error('credential store unavailable') },
+      set: async () => {},
+      delete: async () => false,
+      withExclusiveLease: async (_scope: string, operation: () => Promise<unknown>) => operation(),
+    } as unknown as FakeCredentialManager
+    try {
+      await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
+        .rejects.toMatchObject({ code: 'kb_service_unavailable' })
+    } finally {
+      credentialManagerOverride = null
+    }
   })
 
   it('maps a storage outage to the neutral availability error without vendor names (brief D7)', async () => {
