@@ -173,6 +173,13 @@ function encodeCredential(credential: KbTenantCredential): string {
 function decodeCredential(value: string): KbTenantCredential | null {
   try {
     const parsed = JSON.parse(value) as Partial<KbTenantCredential>
+    // Brief v5: the admin-managed library credential is persisted under the
+    // SAME credential id (marked `source: 'admin'` — see admin-credential.ts).
+    // The OSS tenant path must never adopt it: its key belongs to a cloud
+    // library this instance knows nothing about. Reading `null` here reads as
+    // "never provisioned", which is exactly what the OSS path must do while
+    // the admin mode holds the space.
+    if ((parsed as { source?: unknown }).source === 'admin') return null
     if (
       typeof parsed.accountId !== 'string' || typeof parsed.userId !== 'string'
       || typeof parsed.apiKey !== 'string' || typeof parsed.enterpriseId !== 'string'

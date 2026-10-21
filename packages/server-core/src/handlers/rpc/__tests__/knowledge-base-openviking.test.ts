@@ -49,6 +49,12 @@ import {
   setOpenVikingTimeoutsForTests,
 } from '../../../knowledge-base/openviking-client'
 import { asciiSlug, kbTenantAccountId, kbTenantAuth, kbTenantSpaceHash, readKbTenantCredential } from '../../../knowledge-base/tenant'
+import {
+  readAdminKbCredential,
+  resetAdminKbCredentialCacheForTests,
+  setAdminKbCredentialAdminUrlForTests,
+  setAdminKbCredentialTtlForTests,
+} from '../../../knowledge-base/admin-credential'
 import { FakeOpenVikingServer } from '../../../knowledge-base/__tests__/fake-openviking-server'
 
 /**
@@ -76,6 +82,15 @@ const ROOT_KEY = 'ok-root-key-kb-ov-tests'
 class FakeCredentialManager {
   private readonly entries = new Map<string, string>()
 
+  /** The trusted Admin session the admin-credential module authenticates with. */
+  adminTokens: {
+    accessToken: string
+    refreshToken: string
+    expiresAt: number
+    userId: string
+    username: string
+  } | null = null
+
   async get(id: { type: string; name: string }): Promise<{ value: string } | null> {
     const value = this.entries.get(`${id.type}:${id.name}`)
     return value === undefined ? null : { value }
@@ -87,6 +102,10 @@ class FakeCredentialManager {
 
   async delete(id: { type: string; name: string }): Promise<boolean> {
     return this.entries.delete(`${id.type}:${id.name}`)
+  }
+
+  async getAdminTokens(): Promise<typeof this.adminTokens> {
+    return this.adminTokens
   }
 
   async withExclusiveLease<T>(_scope: string, operation: () => Promise<T>): Promise<T> {
@@ -1602,6 +1621,252 @@ describe('cloud-managed library mode (brief v4 D-A)', () => {
       .filter(uri => uri !== 'viking://resources/' && uri !== expectedSpaceRootDir())
     expect(created).toEqual([])
     expect(ov.requests.filter(request => request.path.startsWith('/api/v1/admin/'))).toEqual([])
+  })
+})
+
+describe('admin-managed per-space library (brief v5 §B)', () => {
+  /** The fake account standing in for ONE space's dedicated cloud library. */
+  const ADMIN_LIBRARY_ACCOUNT = 'polo-admin-library'
+  /** The fake account standing in for the env-configured managed library. */
+  const ENV_LIBRARY_ACCOUNT = 'polo-env-library'
+  /** The fake polo-admin origin — unroutable, so nothing leaks off-process. */
+  const ADMIN_ORIGIN = 'http://polo-admin.fixture'
+  const ADMIN_ACCESS_TOKEN = 'admin-access-token-fixture'
+
+  const realFetch = globalThis.fetch.bind(globalThis)
+
+  interface AdminStub {
+    requests: Array<{ path: string; authorization: string | null }>
+  }
+
+  let adminStub: AdminStub | null = null
+
+  /**
+   * Answers `/api/kb/credential` the way polo-admin does (flat JSON; 404 for
+   * a space without a library) while passing EVERY other request — the whole
+   * OpenViking data plane — through to the real fake server.
+   */
+  function installFakeAdminEndpoint(
+    respond: (url: URL, authorization: string | null) => Response,
+  ): AdminStub {
+    const stub: AdminStub = { requests: [] }
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+      if (url.origin === ADMIN_ORIGIN) {
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        const authorization = headers.Authorization ?? headers.authorization ?? null
+        stub.requests.push({ path: `${url.pathname}${url.search}`, authorization })
+        return respond(url, authorization)
+      }
+      return realFetch(input, init)
+    }) as typeof fetch
+    adminStub = stub
+    return stub
+  }
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  }
+
+  /** The admin answer for the fixture space's dedicated library. */
+  function adminCredentialPayload(): Record<string, string> {
+    return {
+      baseUrl: ov.baseUrl,
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+    }
+  }
+
+  beforeEach(() => {
+    resetAdminKbCredentialCacheForTests()
+    setAdminKbCredentialAdminUrlForTests(ADMIN_ORIGIN)
+    currentCredentials.adminTokens = {
+      accessToken: ADMIN_ACCESS_TOKEN,
+      refreshToken: 'refresh-fixture',
+      expiresAt: Date.now() + 60_000,
+      userId: ACCOUNT_ID,
+      username: 'member-one',
+    }
+  })
+
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    adminStub = null
+    resetAdminKbCredentialCacheForTests()
+  })
+
+  it('serves the admin credential ahead of both env modes and roots data at the library root', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    installFakeAdminEndpoint(() => jsonResponse(200, adminCredentialPayload()))
+    // BOTH env modes are configured on purpose: the admin answer outranks the
+    // managed key AND the root key. The managed key is a dud — had the env
+    // mode won, every data-plane call would have been refused.
+    process.env.POLO_OPENVIKING_API_KEY = 'not-a-real-library-key'
+    const harness = useDevice()
+
+    const collection = await createCollection(harness, 'Handbook')
+    const document = await publishInto(harness, collection, {
+      title: 'Flights', content: 'Flights are economy only.',
+    })
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'flights',
+    }) as KbSearchHit[]
+    expect(hits.map(hit => hit.title)).toContain('Flights')
+
+    // The admin-issued key rode EVERY data-plane request; the root-key
+    // provisioning plane was never entered (the admin mode has no tenant to
+    // provision) and the dud env key never appeared.
+    const dataPlane = ov.requests.filter(request => !request.path.startsWith('/api/v1/admin/'))
+    expect(dataPlane.length).toBeGreaterThan(0)
+    const adminKey = ov.userKey(ADMIN_LIBRARY_ACCOUNT)
+    expect(dataPlane.every(request => request.authorization === `Bearer ${adminKey}`)).toBe(true)
+    expect(ov.requests.filter(request => request.path.startsWith('/api/v1/admin/'))).toEqual([])
+    expect(ov.hasAccount(ACCOUNT_DERIVED)).toBe(false)
+
+    // A DEDICATED library roots its space data at the library root — the OSS
+    // shape — never under the derived per-space directory of the shared
+    // managed mode.
+    const tree = ov.tree(ADMIN_LIBRARY_ACCOUNT)
+    expect(tree.get(kbCollectionUri('Handbook', collection.id))).toBeDefined()
+    expect(tree.get(kbDocumentUri(kbCollectionUri('Handbook', collection.id), 'Flights', document.id))).toBeDefined()
+  }, 15_000)
+
+  it('serves repeated calls from the cache with zero further admin requests', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    const stub = installFakeAdminEndpoint(() => jsonResponse(200, adminCredentialPayload()))
+    const harness = useDevice()
+
+    await createCollection(harness, 'Handbook')
+    expect(stub.requests).toHaveLength(1)
+    expect(stub.requests[0]?.path).toBe(`/api/kb/credential?productSpaceId=${SPACE_ID}`)
+    expect(stub.requests[0]?.authorization).toBe(`Bearer ${ADMIN_ACCESS_TOKEN}`)
+
+    await createCollection(harness, 'Policies')
+    await harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID })
+    // Three RPCs, ONE admin request — the TTL cache, never a per-RPC fetch.
+    expect(stub.requests).toHaveLength(1)
+  })
+
+  it('degrades to the env managed mode on a 404 and remembers the miss', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    ov.createAccount(ENV_LIBRARY_ACCOUNT, 'polo-service')
+    installFakeAdminEndpoint(() => jsonResponse(404, { error: 'not_found' }))
+    process.env.POLO_OPENVIKING_API_KEY = ov.userKey(ENV_LIBRARY_ACCOUNT)
+    const harness = useDevice()
+
+    const collection = await createCollection(harness, 'Handbook')
+    // The env managed key rode the requests and the space nested under its
+    // derived directory — the untouched v4 D-A behavior.
+    const envKey = ov.userKey(ENV_LIBRARY_ACCOUNT)
+    const dataPlane = ov.requests.filter(request => !request.path.startsWith('/api/v1/admin/'))
+    expect(dataPlane.length).toBeGreaterThan(0)
+    expect(dataPlane.every(request => request.authorization === `Bearer ${envKey}`)).toBe(true)
+    expect(ov.tree(ENV_LIBRARY_ACCOUNT).get(kbCollectionUri('Handbook', collection.id, kbSpaceRootUri({
+      config: { baseUrl: ov.baseUrl, managedApiKey: envKey, processingMode: 'vectors_only' },
+      binding,
+      spaceName: 'Example enterprise',
+    })))).toBeDefined()
+
+    // The 404 is a remembered MISS: the second RPC does not ask again.
+    expect(adminStub?.requests).toHaveLength(1)
+    await createCollection(harness, 'Policies')
+    expect(adminStub?.requests).toHaveLength(1)
+  })
+
+  it('serves the stale credential past its TTL while the background refresh fails', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    let healthy = true
+    const stub = installFakeAdminEndpoint(() => jsonResponse(healthy ? 200 : 500, healthy
+      ? adminCredentialPayload()
+      : { error: 'admin_unavailable' }))
+    setAdminKbCredentialTtlForTests(30)
+    const first = await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
+    expect(first?.apiKey).toBe(ov.userKey(ADMIN_LIBRARY_ACCOUNT))
+    expect(stub.requests).toHaveLength(1)
+
+    // The admin goes down and the TTL passes: the last good answer keeps
+    // serving — a refresh that cannot complete never blocks the read.
+    healthy = false
+    await Bun.sleep(60)
+    const stale = await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
+    expect(stale).toEqual(first)
+
+    // Exactly ONE background refresh ran for it (cadence-gated), failed, and
+    // left the answer in place; the next read re-serves it with no new request.
+    await Bun.sleep(30)
+    expect(stub.requests).toHaveLength(2)
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual(first)
+    expect(stub.requests).toHaveLength(2)
+  })
+
+  it('serves the persisted credential after a restart and refreshes in the background', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    let healthy = true
+    const stub = installFakeAdminEndpoint(() => jsonResponse(healthy ? 200 : 500, healthy
+      ? adminCredentialPayload()
+      : { error: 'admin_unavailable' }))
+    const first = await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
+
+    // The process restarted: the in-memory cache is gone, the encrypted store
+    // is not. The admin is DOWN now — the persisted answer still warms the
+    // first call, and the failed background refresh does not evict it.
+    resetAdminKbCredentialCacheForTests()
+    setAdminKbCredentialAdminUrlForTests(ADMIN_ORIGIN)
+    healthy = false
+    const warmed = await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
+    expect(warmed).toEqual(first)
+    await Bun.sleep(30)
+    expect(stub.requests).toHaveLength(2)
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual(first)
+  })
+
+  it('resolves a space with NO env config at all — the admin credential is enough', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    installFakeAdminEndpoint(() => jsonResponse(200, adminCredentialPayload()))
+    delete process.env.POLO_OPENVIKING_URL
+    delete process.env.POLO_OPENVIKING_ROOT_API_KEY
+    const harness = useDevice()
+
+    const collection = await createCollection(harness, 'Handbook')
+    await publishInto(harness, collection, { title: 'Flights', content: 'Flights are economy only.' })
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'flights',
+    }) as KbSearchHit[]
+    expect(hits.map(hit => hit.title)).toContain('Flights')
+    expect(ov.tree(ADMIN_LIBRARY_ACCOUNT).get(kbCollectionUri('Handbook', collection.id))).toBeDefined()
+  }, 15_000)
+
+  it('never serves a cached credential to a different enterprise claim', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    const stub = installFakeAdminEndpoint(() => jsonResponse(200, adminCredentialPayload()))
+    await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
+    expect(stub.requests).toHaveLength(1)
+
+    // The same space id claimed by ANOTHER enterprise must not ride the cache:
+    // the entry is dropped and the admin is asked again.
+    const foreign = await readAdminKbCredential(SPACE_ID, 'ent-two')
+    expect(foreign).toEqual({
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+      baseUrl: ov.baseUrl,
+    })
+    expect(stub.requests).toHaveLength(2)
+  })
+
+  it('keeps the OSS tenant path from adopting the admin payload under the shared credential id', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    installFakeAdminEndpoint(() => jsonResponse(200, adminCredentialPayload()))
+    await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
+    // Both modes share `kb_openviking_tenant::{productSpaceId}`; the admin
+    // marker (`source: 'admin'`) is what keeps the OSS tenant read from ever
+    // adopting a cloud library key as a local tenant key.
+    expect(await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID)).toBeNull()
+    // ...and the admin read still answers from its own marker.
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual({
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+      baseUrl: ov.baseUrl,
+    })
   })
 })
 

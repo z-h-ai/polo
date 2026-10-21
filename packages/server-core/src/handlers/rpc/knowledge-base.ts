@@ -61,6 +61,12 @@ import {
 } from '../../knowledge-base/store'
 import { ensureKbTenant, kbTenantAuth, readKbTenantCredential, type KbTenantCredential } from '../../knowledge-base/tenant'
 import {
+  adminKbAuth,
+  adminKbSpaceConfig,
+  readAdminKbCredential,
+  type AdminKbLibraryCredential,
+} from '../../knowledge-base/admin-credential'
+import {
   isManagedOpenViking,
   managedOpenVikingAuth,
   readOpenVikingConfig,
@@ -91,6 +97,13 @@ import {
  * credential exclusively (`requireKbSpace`/`readSendKbSpace`) — a space that
  * was never provisioned on this device reads as unavailable/no references,
  * and a read can never trigger a remote write.
+ *
+ * Credential priority (brief v5 §B): every entry resolves the admin-managed
+ * per-space library credential FIRST (`admin-credential.ts`, TTL-cached,
+ * never throwing), then the env modes — `POLO_OPENVIKING_API_KEY` (one shared
+ * cloud library) and `POLO_OPENVIKING_ROOT_API_KEY` (OSS multi-tenant) —
+ * exactly as before. An admin answer replaces the env baseUrl and needs no
+ * env config at all; an admin miss changes nothing.
  *
  * Async-store CAS discipline (brief §3 item 5): every store call is awaited,
  * so the authorization check and the change it authorizes are no longer in
@@ -178,11 +191,36 @@ function kbSpaceFrom(scope: KbScope, config: OpenVikingConfig, credential: KbTen
 }
 
 /**
+ * The admin-managed per-space library binding (brief v5 §B) — the HIGHEST
+ * credential priority, consulted by every entry below before any env mode:
+ * the admin service provisions each enterprise space's dedicated library and
+ * hands out its data-plane credential on demand. `null` = the admin answered
+ * nothing usable (unconfigured, signed out, no such library, still
+ * provisioning, unreachable) and the caller falls through to the env modes
+ * unchanged — the read paths only ever see a `null`, never a throw.
+ *
+ * The resolved config carries the ADMIN baseUrl and neither env key, and
+ * keeps `managedApiKey` unset: a dedicated library's space root is the
+ * library root itself (`viking://resources/`, the OSS shape), not the derived
+ * per-space directory the shared-library managed mode nests under.
+ */
+async function adminKbSpace(scope: KbScope): Promise<KbOpenVikingSpace | null> {
+  const credential = await readAdminKbCredential(scope.space.id, scope.space.enterpriseId)
+  if (!credential) return null
+  return kbSpaceFromAuth(scope, adminKbSpaceConfig(credential), adminKbAuth(credential))
+}
+
+/**
  * The store binding for a READ: the deployment must be configured and the
  * space's tenant credential must already be cached on this device. A miss is
  * the neutral availability failure — reads NEVER provision (brief D2), so a
  * space provisioned on another device stays unavailable here until a
  * management RPC recovers the binding.
+ *
+ * Admin-managed mode (brief v5 §B): the per-space library credential is the
+ * highest priority and needs NO env config — a space the admin answers for
+ * resolves even with `POLO_OPENVIKING_URL` unset, and only a clean admin miss
+ * falls through to the env modes below.
  *
  * Managed-library mode (brief v4 D-A): there IS no per-device binding — the
  * config's managed key IS the data-plane credential, so the space resolves
@@ -198,6 +236,8 @@ function kbSpaceFrom(scope: KbScope, config: OpenVikingConfig, credential: KbTen
  * binding exclusively and refuses with the neutral error.
  */
 async function requireKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
+  const admin = await adminKbSpace(scope)
+  if (admin) return admin
   const config = readOpenVikingConfig()
   if (!config) {
     throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
@@ -225,8 +265,12 @@ async function requireKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
  * Managed-library mode (brief v4 D-A): the binding always resolves — the
  * config's managed key IS the credential — and a space whose directory was
  * never created yet reads as empty through the store's not-found walk rule.
+ * Admin-managed mode (brief v5 §B) resolves the same way, from the admin's
+ * per-space credential, before any env mode is consulted.
  */
 async function readCachedKbSpaceOrNull(scope: KbScope): Promise<KbOpenVikingSpace | null> {
+  const admin = await adminKbSpace(scope)
+  if (admin) return admin
   const config = readOpenVikingConfig()
   if (!config) {
     throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
@@ -248,9 +292,14 @@ async function readCachedKbSpaceOrNull(scope: KbScope): Promise<KbOpenVikingSpac
  *
  * Managed-library mode (brief v4 D-A): no provisioning exists — the space
  * resolves directly from the config, and the space-root directory is created
- * by the store on first content write (`ensureKbSpaceRoot`).
+ * by the store on first content write (`ensureKbSpaceRoot`). Admin-managed
+ * mode (brief v5 §B) resolves the same way from the admin's per-space
+ * credential — the library itself was provisioned by the admin service, so
+ * the client-side provisioning plane never runs.
  */
 async function ensureKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
+  const admin = await adminKbSpace(scope)
+  if (admin) return admin
   const config = readOpenVikingConfig()
   if (!config) {
     throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
@@ -281,10 +330,27 @@ async function ensureKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
  * never provisions, brief D2), and every failure degrades to `null` — a KB
  * outage or a missing binding yields "no references", never a failed send
  * (brief D7). Managed-library mode (brief v4 D-A) resolves straight from the
- * config — nothing device-local to miss.
+ * config — nothing device-local to miss. Admin-managed mode (brief v5 §B)
+ * resolves first, from the admin's per-space credential (itself TTL-cached,
+ * so a send pays no admin request); its `null` degrades identically.
  */
 async function readSendKbSpace(capture: SendScopeCapture): Promise<KbOpenVikingSpace | null> {
   const config = readOpenVikingConfig()
+  const adminCredential: AdminKbLibraryCredential | null = await readAdminKbCredential(
+    capture.binding.productSpaceId,
+    capture.binding.enterpriseId,
+  )
+  if (adminCredential) {
+    return {
+      config: adminKbSpaceConfig(adminCredential),
+      auth: adminKbAuth(adminCredential),
+      binding: capture.binding,
+      workspaceRoot: capture.workspaceRoot,
+      spaceName: capture.space.name,
+      actor: capture.token.accountId,
+      scopeToken: capture.token,
+    }
+  }
   if (!config) return null
   if (isManagedOpenViking(config)) {
     return {
