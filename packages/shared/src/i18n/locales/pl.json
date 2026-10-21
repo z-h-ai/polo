@@ -922,6 +922,7 @@
   "knowledgeBase.documentsTitle": "Dokumenty",
   "knowledgeBase.emptyHint": "Utwórz kolekcję, aby zacząć publikować dokumenty.",
   "knowledgeBase.emptyTitle": "Nie ma jeszcze kolekcji",
+  "knowledgeBase.errors.conflict": "Ten dokument został właśnie zmieniony przez inną osobę. Odśwież i spróbuj ponownie.",
   "knowledgeBase.errors.deleteNotAllowed": "Dokumentów w trakcie sprawdzania nie można usuwać. Najpierw je odrzuć.",
   "knowledgeBase.errors.generic": "Operacja w bazie wiedzy nie powiodła się. Spróbuj ponownie.",
   "knowledgeBase.errors.invalidTransition": "Ta zmiana stanu nie jest dozwolona.",

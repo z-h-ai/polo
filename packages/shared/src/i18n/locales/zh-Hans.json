@@ -920,6 +920,7 @@
   "knowledgeBase.documentsTitle": "文档",
   "knowledgeBase.emptyHint": "创建一个集合，开始发布文档。",
   "knowledgeBase.emptyTitle": "暂无集合",
+  "knowledgeBase.errors.conflict": "该文档刚被他人修改，请刷新后重试。",
   "knowledgeBase.errors.deleteNotAllowed": "审核中的文档不能删除，请先驳回。",
   "knowledgeBase.errors.generic": "知识库操作失败，请重试。",
   "knowledgeBase.errors.invalidTransition": "不允许该状态变更。",

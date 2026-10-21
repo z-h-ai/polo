@@ -920,6 +920,7 @@
   "knowledgeBase.documentsTitle": "ドキュメント",
   "knowledgeBase.emptyHint": "コレクションを作成して、ドキュメントの公開を始めましょう。",
   "knowledgeBase.emptyTitle": "コレクションはまだありません",
+  "knowledgeBase.errors.conflict": "このドキュメントは他のユーザーによって変更されました。更新してからもう一度お試しください。",
   "knowledgeBase.errors.deleteNotAllowed": "審査中のドキュメントは削除できません。先に却下してください。",
   "knowledgeBase.errors.generic": "ナレッジベースの操作に失敗しました。もう一度お試しください。",
   "knowledgeBase.errors.invalidTransition": "このステータス変更は許可されていません。",

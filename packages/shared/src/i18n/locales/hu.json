@@ -920,6 +920,7 @@
   "knowledgeBase.documentsTitle": "Dokumentumok",
   "knowledgeBase.emptyHint": "Hozzon létre egy gyűjteményt a dokumentumok közzétételének megkezdéséhez.",
   "knowledgeBase.emptyTitle": "Még nincsenek gyűjtemények",
+  "knowledgeBase.errors.conflict": "Ezt a dokumentumot éppen most módosította valaki más. Frissítse, és próbálja újra.",
   "knowledgeBase.errors.deleteNotAllowed": "Elbírálás alatt álló dokumentum nem törölhető. Először utasítsa el.",
   "knowledgeBase.errors.generic": "A tudásbázis-művelet nem sikerült. Kérjük, próbálja újra.",
   "knowledgeBase.errors.invalidTransition": "Ez az állapotváltás nem engedélyezett.",

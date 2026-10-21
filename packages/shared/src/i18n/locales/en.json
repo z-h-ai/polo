@@ -920,6 +920,7 @@
   "knowledgeBase.documentsTitle": "Documents",
   "knowledgeBase.emptyHint": "Create a collection to start publishing documents.",
   "knowledgeBase.emptyTitle": "No collections yet",
+  "knowledgeBase.errors.conflict": "This document was just changed by someone else. Refresh and try again.",
   "knowledgeBase.errors.deleteNotAllowed": "Documents under review cannot be deleted. Reject them first.",
   "knowledgeBase.errors.generic": "The knowledge base operation failed. Please retry.",
   "knowledgeBase.errors.invalidTransition": "This status change is not allowed.",

@@ -59,6 +59,9 @@ function kbErrorText(t: (key: string, options?: Record<string, unknown>) => stri
   if (code === 'kb_invalid_transition') return t('knowledgeBase.errors.invalidTransition')
   if (code === 'kb_delete_not_allowed') return t('knowledgeBase.errors.deleteNotAllowed')
   if (code === 'kb_collection_not_found' || code === 'kb_document_not_found') return t('knowledgeBase.errors.notFound')
+  // A concurrent writer landed inside the re-read/verify window (store B6):
+  // the state on the server is newer than this client's view of it.
+  if (code === 'kb_conflict') return t('knowledgeBase.errors.conflict')
   if (code === 'kb_unavailable_in_personal') return t('knowledgeBase.errors.personalSpace')
   if (code === 'kb_space_read_only') return t('knowledgeBase.errors.spaceReadOnly')
   if (code === 'kb_space_mismatch') return t('knowledgeBase.errors.spaceMismatch')

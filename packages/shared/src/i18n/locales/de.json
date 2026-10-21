@@ -920,6 +920,7 @@
   "knowledgeBase.documentsTitle": "Dokumente",
   "knowledgeBase.emptyHint": "Erstellen Sie eine Sammlung, um Dokumente zu veröffentlichen.",
   "knowledgeBase.emptyTitle": "Noch keine Sammlungen",
+  "knowledgeBase.errors.conflict": "Dieses Dokument wurde gerade von jemand anderem geändert. Aktualisieren und versuchen Sie es erneut.",
   "knowledgeBase.errors.deleteNotAllowed": "Dokumente in Prüfung können nicht gelöscht werden. Lehnen Sie sie zuerst ab.",
   "knowledgeBase.errors.generic": "Der Vorgang in der Wissensbasis ist fehlgeschlagen. Bitte erneut versuchen.",
   "knowledgeBase.errors.invalidTransition": "Diese Statusänderung ist nicht erlaubt.",
