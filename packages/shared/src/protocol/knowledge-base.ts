@@ -3,10 +3,11 @@ import { z } from 'zod'
 /**
  * Enterprise Knowledge Base (POO-108) wire contracts.
  *
- * The KB is a local, workspace-scoped service domain: content lives under the
- * workspace's `.polo-kb/` directory and every RPC is LOCAL_ONLY. These schemas
- * define both the RPC payloads and the persisted `kbReferences` snapshot that
- * travels on user messages.
+ * The KB is a workspace-scoped service domain (POO-108 v3.1): content lives in
+ * the enterprise's remote storage tenant and every RPC is LOCAL_ONLY — the
+ * wire never names the storage vendor. These schemas define both the RPC
+ * payloads and the persisted `kbReferences` snapshot that travels on user
+ * messages.
  */
 
 export const KB_MAX_CONTENT_BYTES = 2 * 1024 * 1024
@@ -16,11 +17,11 @@ export const KB_SEARCH_PER_COLLECTION_LIMIT = 3
 export const KB_SNIPPET_CONTEXT_CHARS = 80
 /**
  * Send-time reference resolution must never hold a message hostage (POO-108
- * review #7): the whole resolution is raced against this wall clock and the
- * store scan is additionally byte-budgeted (KB_SEND_MAX_SCAN_BYTES).
+ * review #7): the whole resolution is raced against this wall clock — the
+ * single remote find, the tenant walk it needs and the snippet building all
+ * honour the same deadline.
  */
 export const KB_SEND_RESOLVE_TIMEOUT_MS = 1_500
-export const KB_SEND_MAX_SCAN_BYTES = 4 * 1024 * 1024
 /** Same ceiling the SET_SESSION_COLLECTIONS input schema enforces. */
 export const KB_SESSION_COLLECTIONS_MAX = 100
 /**
@@ -157,19 +158,6 @@ export const KbCollectionListSchema = z.object({
 }).strict()
 export type KbCollectionList = z.output<typeof KbCollectionListSchema>
 
-/**
- * OpenViking publish-sync outcome carried on a document summary (POO-108
- * v2), in exactly the brief's shape: `{"uri", "syncedAt"}` on success or
- * `{"error", "failedAt"}` on failure — the local publish is never rolled
- * back by that failure. Absent for a plain local store, so existing clients
- * see no change.
- */
-export const KbDocumentOpenVikingStateSchema = z.union([
-  z.object({ uri: z.string().min(1), syncedAt: z.string().min(1) }).strict(),
-  z.object({ error: z.string().min(1), failedAt: z.string().min(1) }).strict(),
-])
-export type KbDocumentOpenVikingState = z.output<typeof KbDocumentOpenVikingStateSchema>
-
 export const KbDocumentSummarySchema = z.object({
   id: z.string(),
   collectionId: z.string(),
@@ -180,7 +168,6 @@ export const KbDocumentSummarySchema = z.object({
   updatedAt: z.string(),
   publishedAt: z.string().nullable(),
   rejectReason: z.string().nullable(),
-  openViking: KbDocumentOpenVikingStateSchema.optional(),
 }).strict()
 export type KbDocumentSummary = z.output<typeof KbDocumentSummarySchema>
 
@@ -190,9 +177,9 @@ export const KbDocumentSchema = KbDocumentSummarySchema.extend({
 export type KbDocument = z.output<typeof KbDocumentSchema>
 
 /**
- * Where a search hit's score came from (POO-108 v2). `'openviking'` marks a
- * hit ranked by the OpenViking retrieval backend; the local keyword fallback
- * leaves the field unset so pre-v2 results keep their exact shape.
+ * One ranked search hit. The storage backend is invisible on the wire (POO-108
+ * v3.1): every hit carries the same shape regardless of where its score came
+ * from, so the renderer cannot tell backends apart.
  */
 export const KbSearchHitSchema = z.object({
   docId: z.string(),
@@ -201,7 +188,6 @@ export const KbSearchHitSchema = z.object({
   title: z.string(),
   snippet: z.string(),
   score: z.number(),
-  source: z.enum(['openviking', 'local-fallback']).optional(),
 }).strict()
 export type KbSearchHit = z.output<typeof KbSearchHitSchema>
 

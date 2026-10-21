@@ -1,6 +1,6 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
-import { join, resolve, sep } from 'path'
+import { mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { join, resolve } from 'path'
 import type {
   KbCollection,
   KbDocument,
@@ -14,21 +14,57 @@ import {
   KB_SEARCH_LIMIT,
   KB_SNIPPET_CONTEXT_CHARS,
 } from '@polo-ai/shared/protocol'
+import {
+  isOpenVikingAlreadyExists,
+  openVikingAttrs,
+  openVikingFind,
+  openVikingGlob,
+  openVikingLs,
+  openVikingMkdir,
+  openVikingMv,
+  openVikingReadContent,
+  openVikingSetTags,
+  openVikingWriteContent,
+  type OpenVikingConfig,
+  type OpenVikingFindResource,
+  type OpenVikingNode,
+  type OpenVikingTenantAuth,
+} from './openviking-client'
+import { isTrustedSessionScopeTokenCurrent, type TrustedSessionScopeToken } from '../handlers/rpc/trusted-product-space-account'
+import { KB_SERVICE_UNAVAILABLE_MESSAGE, KbStoreError } from './errors'
 
 /**
- * Enterprise Knowledge Base local store (POO-108).
+ * Enterprise Knowledge Base store (POO-108 v3.1) — the OpenViking backend.
  *
- * Content lives under the workspace, scoped to the TRUSTED enterprise
- * ProductSpace that owns it: `<workspaceRoot>/.polo-kb/spaces/<spaceHash>/`
- * with `space.json` (the immutable ProductSpace↔enterprise binding),
- * `collections/{collectionId}/meta.json`,
- * `collections/{collectionId}/documents/{docId}/meta.json + content.md`,
- * `versions/{docId}/v{n}.md` publish snapshots, `recycle/` and `audit.jsonl`.
- * Every mutating call appends an audit entry; the RPC handler layer owns the
- * permission checks, this layer owns the filesystem truth and the state
- * machine. A store bound to one enterprise ProductSpace is never readable or
- * writable through another space's binding — switching the same workspace
- * between enterprises keeps each space's KB isolated (review #1).
+ * The remote tenant IS the authoritative storage (brief R1): one OpenViking
+ * account per enterprise ProductSpace, created by `tenant.ts`. Polo keeps no
+ * local content or metadata copy — collections are top-level directories in
+ * the account's resource root, documents are `.md` files under them, and the
+ * ENTIRE lifecycle state (status, titles, timestamps) travels in retrieval
+ * tags. Everything this module does is an API call; the only local artifact
+ * is the audit trail (`.polo-kb/audit/`, a device-local operation log — the
+ * enterprise-authoritative audit is follow-up card #3, brief D8).
+ *
+ * URI scheme (brief D3/D4): deterministic URIs make every write retry-safe —
+ *
+ *   collection   viking://resources/<pathSegment(name)>-<collectionId>
+ *   document     <collectionUri>/<pathSegment(title)>-<docId>.md
+ *   recycle      viking://resources/.recycle/<original file name>
+ *   transition   viking://resources/.audit/transitions/<uuid>.md
+ *
+ * The FULL id suffix keeps URIs collision-free even for identical names; the
+ * readable prefix survives in the Studio tree. Lossless names/titles travel
+ * in url-encoded tags (`name=`, `title=`) because pathSegment folds
+ * characters for URI safety.
+ *
+ * CAS discipline (brief §3 item 5): every REMOTE WRITE revalidates the
+ * await-spanning scope token right before it is issued, so a fence revoked
+ * while earlier awaits were pending can never authorize a write it never
+ * saw. Cross-device concurrent transitions are bounded by design (brief D4):
+ * re-read immediately before the write, verify after — conflicts that land
+ * inside that window surface as `kb_conflict`, and everything wider is an
+ * accepted, audited last-writer-wins boundary (no conditional-write primitive
+ * exists on the storage service; the admin-side serializer is follow-up #6).
  */
 
 /** The trusted enterprise ProductSpace a KB store belongs to. */
@@ -38,141 +74,60 @@ export interface KbSpaceBinding {
 }
 
 /**
- * ProductSpace ids are opaque (any non-blank string up to 512 chars), so the
- * directory segment is a deterministic hash — collision-free, traversal-safe
- * and stable across processes. The raw ids stay readable in `space.json`.
+ * Everything a store call needs: the remote binding (config + tenant key),
+ * the space facts audit entries are written against, and the await-spanning
+ * scope token every remote write revalidates. `auth`/`config` are supplied by
+ * the handler layer — reads receive the CACHED tenant credential only, so a
+ * space that was never provisioned has no store at all (no background
+ * provisioning on read/send paths, brief D2).
+ */
+export interface KbOpenVikingSpace {
+  config: OpenVikingConfig
+  auth: OpenVikingTenantAuth
+  binding: KbSpaceBinding
+  /** The workspace root the LOCAL audit trail is written under. */
+  workspaceRoot: string
+  spaceName: string
+  actor: string
+  /** Captured at the RPC entry; revalidated before every remote write. */
+  scopeToken?: TrustedSessionScopeToken
+}
+
+export {
+  KbStoreError,
+  KB_SERVICE_UNAVAILABLE_MESSAGE,
+} from './errors'
+
+/**
+ * ProductSpace ids are opaque, so the audit file is a deterministic hash —
+ * collision-free, traversal-safe and stable across processes. The remote
+ * account id carries the readable slug instead (`tenant.ts`).
  */
 export function kbSpaceSegment(productSpaceId: string): string {
+  // Collision-free sha256 — the audit file for one space must never be
+  // created for a different one, even for adversarially similar ids. A
+  // device-local layout detail ONLY: the remote tenant's hash suffix is
+  // derived independently in `tenant.ts` and the two must never be
+  // cross-interpreted.
   return createHash('sha256').update(productSpaceId).digest('hex').slice(0, 32)
 }
 
-export function kbRootPath(workspaceRoot: string, binding: KbSpaceBinding): string {
-  return join(resolve(workspaceRoot), KB_DIR, 'spaces', kbSpaceSegment(binding.productSpaceId))
-}
-
-interface KbSpaceMarker {
-  productSpaceId: string
-  enterpriseId: string
-  boundAt: string
-}
-
-function markerMatches(marker: KbSpaceMarker, binding: KbSpaceBinding): boolean {
-  return marker.productSpaceId === binding.productSpaceId && marker.enterpriseId === binding.enterpriseId
-}
-
-function readSpaceMarker(root: string, binding: KbSpaceBinding): void {
-  const marker = readJson<KbSpaceMarker>(join(root, 'space.json'))
-  if (!markerMatches(marker, binding)) {
-    throw new KbStoreError(
-      'kb_space_mismatch',
-      'The knowledge base store is bound to a different enterprise ProductSpace',
-    )
-  }
-}
-
-/**
- * Read-side root: `null` when this space has no store yet (reads as an empty
- * KB), explicit refusal when the store exists but was bound by a different
- * enterprise claim on the same ProductSpace.
- */
-function readSpaceRoot(workspaceRoot: string, binding: KbSpaceBinding): string | null {
-  const root = kbRootPath(workspaceRoot, binding)
-  if (!existsSync(join(root, 'space.json'))) return null
-  readSpaceMarker(root, binding)
-  return root
-}
-
-/** Write-side root: binds the store on first write, refuses a foreign binding. */
-function writeSpaceRoot(workspaceRoot: string, binding: KbSpaceBinding): string {
-  const root = kbRootPath(workspaceRoot, binding)
-  if (existsSync(join(root, 'space.json'))) {
-    readSpaceMarker(root, binding)
-    return root
-  }
-  ensureDir(root)
-  const marker: KbSpaceMarker = {
-    productSpaceId: binding.productSpaceId,
-    enterpriseId: binding.enterpriseId,
-    boundAt: nowIso(),
-  }
-  writeJson(join(root, 'space.json'), marker)
-  return root
-}
-
-export interface KbCollectionRecord {
-  id: string
-  name: string
-  description: string
-  createdAt: string
-  updatedAt: string
-}
-
-/**
- * Outcome of the OpenViking publish sync recorded on ONE document (POO-108
- * v2): either the remote URI it was published under, or why the sync failed.
- * The local publish itself is never rolled back by the failure branch.
- */
-export type KbDocumentOpenVikingState =
-  | { uri: string; syncedAt: string }
-  | { error: string; failedAt: string }
-
-export interface KbDocumentRecord {
-  id: string
-  collectionId: string
-  title: string
-  status: KbDocumentStatus
-  version: number
-  createdAt: string
-  updatedAt: string
-  publishedAt: string | null
-  rejectReason: string | null
-  openViking?: KbDocumentOpenVikingState
-}
-
-/**
- * Space-level OpenViking provisioning marker (POO-108 v2): the remote root the
- * whole ProductSpace publishes under. Written once by the first provisioning
- * call and reused (idempotently) by every later sync.
- */
-export interface KbOpenVikingSpaceMeta {
-  rootUri: string
-  productSpaceId: string
-  enterpriseId: string
-  provisionedAt: string
-}
-
-export interface KbAuditEntry {
-  at: string
-  actor: string
-  action: string
-  target: string
-  detail: Record<string, unknown>
-}
-
-/** Thrown for KB business failures; `code` is the stable RPC error contract. */
-export class KbStoreError extends Error {
-  constructor(readonly code: string, message?: string) {
-    super(message ?? code)
-    this.name = 'KbStoreError'
-  }
-}
-
 const KB_DIR = '.polo-kb'
+const KB_AUDIT_DIR = 'audit'
 const KB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/
+
+/** The account-relative root every collection lives under. */
+export const KB_SPACE_ROOT_URI = 'viking://resources/'
+/** Soft-delete target: a hidden dot directory, out of every listing (§1.7). */
+const KB_RECYCLE_DIR_URI = `${KB_SPACE_ROOT_URI}.recycle`
+/** Best-effort transition log: hidden, one UUID file per transition (D4). */
+const KB_TRANSITIONS_DIR_URI = `${KB_SPACE_ROOT_URI}.audit/transitions`
 
 function assertKbId(kind: string, id: string): string {
   if (!KB_ID_PATTERN.test(id)) {
     throw new KbStoreError('kb_not_found', `${kind} is invalid`)
   }
   return id
-}
-
-function insideRoot(root: string, path: string): string {
-  const canonical = resolve(path)
-  if (canonical !== root && !canonical.startsWith(`${root}${sep}`)) {
-    throw new KbStoreError('kb_not_found', 'Resolved path escaped the knowledge base root')
-  }
-  return canonical
 }
 
 function createKbId(): string {
@@ -183,112 +138,190 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-function ensureDir(path: string): void {
-  mkdirSync(path, { recursive: true })
+// ---------------------------------------------------------------------------
+// URI construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Single-segment safety for readable URI parts: the service rejects `.`, `..`,
+ * `:` and `+` inside a segment, so human names fold down to a stable subset.
+ * Uniqueness NEVER relies on this text — the full id is appended by the
+ * caller — so folding is free to be lossy (brief D3).
+ */
+export function kbPathSegment(name: string): string {
+  const cleaned = name
+    .replace(/[\u0000-\u001f/\\:*?#%<>|"+:^]/g, ' ')
+    .replace(/^[.\s]+|[.\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60)
+    .trim()
+  return cleaned || 'untitled'
 }
 
-function readJson<T>(path: string): T {
-  return JSON.parse(readFileSync(path, 'utf-8')) as T
+export function kbCollectionUri(collectionName: string, collectionId: string): string {
+  return `${KB_SPACE_ROOT_URI}${kbPathSegment(collectionName)}-${collectionId}`
 }
 
-function writeJson(path: string, value: unknown): void {
-  writeFileSync(path, JSON.stringify(value, null, 2), 'utf-8')
+export function kbDocumentUri(collectionUri: string, title: string, docId: string): string {
+  return `${collectionUri}/${kbPathSegment(title)}-${docId}.md`
 }
 
-function readCollectionRecord(root: string, collectionId: string): KbCollectionRecord {
-  const path = insideRoot(root, join(root, 'collections', collectionId, 'meta.json'))
-  if (!existsSync(path)) {
-    throw new KbStoreError('kb_collection_not_found')
-  }
-  return readJson<KbCollectionRecord>(path)
+/** True for URIs inside the hidden recycle/transition subtrees. */
+function isHiddenKbUri(uri: string): boolean {
+  return uri.startsWith(`${KB_RECYCLE_DIR_URI}/`) || uri.startsWith(`${KB_TRANSITIONS_DIR_URI}/`)
 }
 
-/** Locates a document's directory across the space's collections; throws `kb_document_not_found`. */
-function findDocumentDir(root: string, docId: string): string {
-  const collectionsDir = join(root, 'collections')
-  const entries = existsSync(collectionsDir) ? readdirSync(collectionsDir, { withFileTypes: true }) : []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const docDir = insideRoot(root, join(collectionsDir, entry.name, 'documents', docId))
-    if (existsSync(join(docDir, 'meta.json'))) {
-      return docDir
-    }
-  }
-  throw new KbStoreError('kb_document_not_found')
+/** The `.recycle/` file name a document moves under (keeps its unique suffix). */
+function recycleTargetUri(documentUri: string): string {
+  const fileName = documentUri.slice(documentUri.lastIndexOf('/') + 1)
+  return `${KB_RECYCLE_DIR_URI}/${fileName}`
 }
 
-function readDocumentRecord(root: string, docId: string): KbDocumentRecord {
-  return readJson<KbDocumentRecord>(join(findDocumentDir(root, assertKbId('docId', docId)), 'meta.json'))
+// ---------------------------------------------------------------------------
+// Tag encoding — the summary fields' ONLY source of truth (brief D4)
+// ---------------------------------------------------------------------------
+
+function tagValue(value: string): string {
+  return encodeURIComponent(value)
 }
 
-function writeDocumentRecord(root: string, record: KbDocumentRecord, content?: string): void {
-  const docDir = insideRoot(
-    root,
-    join(root, 'collections', record.collectionId, 'documents', record.id),
-  )
-  ensureDir(docDir)
-  writeJson(join(docDir, 'meta.json'), record)
-  if (content !== undefined) {
-    writeFileSync(join(docDir, 'content.md'), content, 'utf-8')
-  }
-}
-
-function toSummary(record: KbDocumentRecord): KbDocumentSummary {
-  return {
-    id: record.id,
-    collectionId: record.collectionId,
-    title: record.title,
-    status: record.status,
-    version: record.version,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-    publishedAt: record.publishedAt,
-    rejectReason: record.rejectReason,
-    // Omitted entirely when OpenViking is not in play — the wire shape of a
-    // non-synced store stays byte-identical to the pre-v2 one.
-    ...(record.openViking ? { openViking: record.openViking } : {}),
-  }
-}
-
-function readContent(root: string, record: KbDocumentRecord): string {
-  const path = insideRoot(
-    root,
-    join(root, 'collections', record.collectionId, 'documents', record.id, 'content.md'),
-  )
-  if (!existsSync(path)) return ''
-  // Bounded at the SYSCALL, not after the fact (review #7): uploads are
-  // capped at KB_MAX_CONTENT_BYTES, so an oversize file can only be an
-  // out-of-band write — only the capped head (+1 byte that merely decides
-  // the file is oversize and is then dropped) is ever pulled off the disk.
-  const handle = openSync(path, 'r')
+function readTagValue(value: string | undefined): string | null {
+  if (value === undefined) return null
   try {
-    const buffer = Buffer.alloc(KB_CONTENT_READ_MAX_BYTES + 1)
-    const read = readSync(handle, buffer, 0, buffer.length, 0)
-    if (read > KB_CONTENT_READ_MAX_BYTES) {
-      console.warn(
-        `[KbStore] document ${record.id} content exceeds ${KB_CONTENT_READ_MAX_BYTES} bytes — reading a truncated head (out-of-band write?)`,
-      )
-      return buffer.toString('utf-8', 0, KB_CONTENT_READ_MAX_BYTES)
-    }
-    return buffer.toString('utf-8', 0, read)
-  } finally {
-    closeSync(handle)
+    return decodeURIComponent(value)
+  } catch {
+    return value
   }
 }
 
-/** Publish snapshot: `versions/{docId}/v{n}.md` preserves the exact content. */
-function writeVersionSnapshot(root: string, record: KbDocumentRecord, content: string): void {
-  const versionsDir = insideRoot(root, join(root, 'versions', record.id))
-  ensureDir(versionsDir)
-  writeFileSync(join(versionsDir, `v${record.version}.md`), content, 'utf-8')
+/** Builds one `k=v` tag, url-encoding the value (lossless round-trip). */
+function tag(key: string, value: string): string {
+  return `${key}=${tagValue(value)}`
 }
 
+const KB_DOCUMENT_STATUSES: ReadonlySet<string> = new Set(['draft', 'in_review', 'published', 'rejected'])
+
+/**
+ * The full tag set of ONE document, parsed STRICTLY (brief D5): repeated keys
+ * or a missing required field reject the node outright — a corrupted or
+ * out-of-band node must never be disclosed as a document.
+ */
+interface KbDocumentTags {
+  docId: string
+  collectionId: string
+  status: KbDocumentStatus
+  title: string
+  version: number
+  createdAt: string
+  updatedAt: string
+  publishedAt: string | null
+  rejectReason: string | null
+}
+
+interface RawTags {
+  tags: Record<string, string>
+  duplicateKeys: string[]
+}
+
+function rawTagsOf(node: OpenVikingNode | OpenVikingFindResource): RawTags {
+  return {
+    tags: node.tags,
+    duplicateKeys: node.duplicateTagKeys ?? [],
+  }
+}
+
+function parseDocumentTags(raw: RawTags): KbDocumentTags | null {
+  if (raw.duplicateKeys.length > 0) return null
+  const { tags } = raw
+  const docId = tags.doc
+  const collectionId = tags.collection
+  const status = tags.status
+  const title = readTagValue(tags.title)
+  const createdAt = readTagValue(tags.created)
+  const updatedAt = readTagValue(tags.updated)
+  if (!docId || !collectionId || !status || !title || !createdAt || !updatedAt) return null
+  if (!KB_DOCUMENT_STATUSES.has(status)) return null
+  const version = tags.v !== undefined ? Number(tags.v) : 1
+  return {
+    docId,
+    collectionId,
+    status: status as KbDocumentStatus,
+    title,
+    version: Number.isInteger(version) && version >= 1 ? version : 1,
+    createdAt,
+    updatedAt,
+    publishedAt: readTagValue(tags.published),
+    rejectReason: readTagValue(tags.reject),
+  }
+}
+
+function parseDocumentStatus(raw: RawTags): KbDocumentStatus | null {
+  if (raw.duplicateKeys.length > 0) return null
+  const status = raw.tags.status
+  if (!status || !KB_DOCUMENT_STATUSES.has(status)) return null
+  return status as KbDocumentStatus
+}
+
+/** The tag set uploaded/published with a document — the FULL set, every time. */
+function documentTags(record: {
+  docId: string
+  collectionId: string
+  title: string
+  status: KbDocumentStatus
+  version: number
+  createdAt: string
+  updatedAt: string
+  publishedAt: string | null
+  rejectReason: string | null
+}): string[] {
+  return [
+    tag('doc', record.docId),
+    tag('collection', record.collectionId),
+    tag('status', record.status),
+    tag('title', record.title),
+    `v=${record.version}`,
+    tag('created', record.createdAt),
+    tag('updated', record.updatedAt),
+    ...(record.publishedAt ? [tag('published', record.publishedAt)] : []),
+    ...(record.rejectReason !== null ? [tag('reject', record.rejectReason)] : []),
+  ]
+}
+
+/** Collection directory tags: id, lossless name, optional lossless description. */
+function collectionTags(input: { collectionId: string; name: string; description: string; createdAt: string }): string[] {
+  return [
+    tag('collection', input.collectionId),
+    tag('name', input.name),
+    // Descriptions beyond the verified tag budget (2048 CJK chars, §1.4)
+    // truncate rather than fail the creation.
+    ...(input.description ? [tag('description', input.description.slice(0, 2_048))] : []),
+    tag('created', input.createdAt),
+  ]
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail (local, device-operation log — brief D8)
+// ---------------------------------------------------------------------------
+
+export interface KbAuditEntry {
+  at: string
+  actor: string
+  action: string
+  target: string
+  detail: Record<string, unknown>
+}
+
+function auditPath(workspaceRoot: string, binding: KbSpaceBinding): string {
+  return join(resolve(workspaceRoot), KB_DIR, KB_AUDIT_DIR, `${kbSpaceSegment(binding.productSpaceId)}.jsonl`)
+}
+
+/** Appends ONE audit entry; failures are logged, never fatal to the caller. */
 export function appendAudit(
   workspaceRoot: string,
   binding: KbSpaceBinding,
   entry: { actor: string; action: string; target: string; detail?: Record<string, unknown> },
 ): void {
-  const root = writeSpaceRoot(workspaceRoot, binding)
   const record: KbAuditEntry = {
     at: nowIso(),
     actor: entry.actor,
@@ -296,346 +329,439 @@ export function appendAudit(
     target: entry.target,
     detail: entry.detail ?? {},
   }
-  writeFileSync(join(root, 'audit.jsonl'), `${JSON.stringify(record)}\n`, { flag: 'a' })
+  try {
+    const path = auditPath(workspaceRoot, binding)
+    mkdirSync(join(path, '..'), { recursive: true })
+    writeFileSync(path, `${JSON.stringify(record)}\n`, { flag: 'a' })
+  } catch (error) {
+    console.warn(`[KbStore] audit append failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 export function readAudit(workspaceRoot: string, binding: KbSpaceBinding): KbAuditEntry[] {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return []
-  const path = join(root, 'audit.jsonl')
-  if (!existsSync(path)) return []
-  return readFileSync(path, 'utf-8')
-    .split('\n')
-    .filter(line => line.trim().length > 0)
-    .map(line => JSON.parse(line) as KbAuditEntry)
+  const path = auditPath(workspaceRoot, binding)
+  try {
+    return readFileSync(path, 'utf-8')
+      .split('\n')
+      .filter(line => line.trim().length > 0)
+      .map(line => JSON.parse(line) as KbAuditEntry)
+  } catch {
+    return []
+  }
 }
 
-/**
- * OpenViking provisioning marker for the space (`openviking.json`), POO-108
- * v2. `null` means the space was never provisioned. The store only owns the
- * marker's persistence — the remote calls around it live in
- * `openviking.ts`. A marker naming a different binding is refused like any
- * other cross-binding read (fail closed).
- */
-export function readOpenVikingSpaceMeta(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-): KbOpenVikingSpaceMeta | null {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return null
-  const path = join(root, 'openviking.json')
-  if (!existsSync(path)) return null
-  const meta = readJson<KbOpenVikingSpaceMeta>(path)
-  if (meta.productSpaceId !== binding.productSpaceId || meta.enterpriseId !== binding.enterpriseId) {
+/** The audit callback tenant provisioning writes through. */
+export function kbAuditFor(space: Pick<KbOpenVikingSpace, 'workspaceRoot' | 'binding' | 'actor'>) {
+  return (action: string, target: string, detail?: Record<string, unknown>): void => {
+    appendAudit(space.workspaceRoot, space.binding, { actor: space.actor, action, target, detail })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Remote primitives — every WRITE revalidates the scope token first (§3.5)
+// ---------------------------------------------------------------------------
+
+function assertScopeTokenCurrent(space: KbOpenVikingSpace): void {
+  if (space.scopeToken && !isTrustedSessionScopeTokenCurrent(space.scopeToken)) {
     throw new KbStoreError(
-      'kb_space_mismatch',
-      'The OpenViking space marker is bound to a different enterprise ProductSpace',
+      'PRODUCT_SPACE_CONTEXT_REQUIRED',
+      'The trusted scope changed during the operation',
     )
   }
-  return meta
-}
-
-export function writeOpenVikingSpaceMeta(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  meta: KbOpenVikingSpaceMeta,
-): void {
-  const root = writeSpaceRoot(workspaceRoot, binding)
-  writeJson(join(root, 'openviking.json'), meta)
-}
-
-/** The OpenViking sync state recorded on ONE document, if any. */
-export function readDocumentOpenVikingState(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  docId: string,
-): KbDocumentOpenVikingState | null {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return null
-  return readDocumentRecord(root, docId).openViking ?? null
-}
-
-/** Records a sync outcome on the document meta and returns the refreshed summary. */
-export function recordDocumentOpenVikingState(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  docId: string,
-  state: KbDocumentOpenVikingState,
-): KbDocumentSummary {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) throw new KbStoreError('kb_document_not_found')
-  const docDir = findDocumentDir(root, assertKbId('docId', docId))
-  const record = readJson<KbDocumentRecord>(join(docDir, 'meta.json'))
-  record.openViking = state
-  writeJson(join(docDir, 'meta.json'), record)
-  return toSummary(record)
-}
-
-/** Drops the sync state (after a successful remote removal on revert). */
-export function clearDocumentOpenVikingState(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  docId: string,
-): void {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return
-  const docDir = findDocumentDir(root, assertKbId('docId', docId))
-  const record = readJson<KbDocumentRecord>(join(docDir, 'meta.json'))
-  if (!record.openViking) return
-  delete record.openViking
-  writeJson(join(docDir, 'meta.json'), record)
-}
-
-/** Re-reads ONE document's summary (used to report the post-sync state). */
-export function readDocumentSummary(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  docId: string,
-): KbDocumentSummary {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) throw new KbStoreError('kb_document_not_found')
-  return toSummary(readDocumentRecord(root, assertKbId('docId', docId)))
-}
-
-/** The collection display name for remote readable paths; falls back to the id. */
-export function readCollectionName(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  collectionId: string,
-): string {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return collectionId
-  try {
-    return readCollectionRecord(root, collectionId).name
-  } catch {
-    return collectionId
-  }
-}
-
-/** The local document facts an OpenViking search hit is mapped back onto. */
-export interface KbLookupDocument {
-  docId: string
-  collectionId: string
-  collectionName: string
-  title: string
-  content: string
 }
 
 /**
- * Resolves a remote hit's `doc=` tag to the LOCAL published document it
- * belongs to, enforcing the same visibility rules the local search does:
- * published only, and inside the requested collection filter. Unpublished,
- * foreign-collection or missing documents read as `null` — a stale remote
- * copy never leaks into results (POO-108 v2).
+ * Wraps a remote call: vendor failures become the neutral availability error
+ * with the RAW cause in `detail` (server-side logs only, brief D7).
  */
-export function lookupPublishedDocument(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  docId: string,
-  collectionIds?: string[],
-): KbLookupDocument | null {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return null
-  let record: KbDocumentRecord
+function toKbError(operation: string, error: unknown): KbStoreError {
+  if (error instanceof KbStoreError) return error
+  return new KbStoreError(
+    'kb_service_unavailable',
+    KB_SERVICE_UNAVAILABLE_MESSAGE,
+    `${operation} failed: ${error instanceof Error ? error.message : String(error)}`,
+  )
+}
+
+async function remoteMkdir(space: KbOpenVikingSpace, uri: string, description?: string): Promise<void> {
+  assertScopeTokenCurrent(space)
   try {
-    record = readDocumentRecord(root, docId)
+    await openVikingMkdir(space.config, space.auth, { uri, description })
   } catch (error) {
-    if (error instanceof KbStoreError && error.code === 'kb_document_not_found') return null
-    throw error
-  }
-  if (record.status !== 'published') return null
-  if (collectionIds && !collectionIds.includes(record.collectionId)) return null
-  let collectionName = record.collectionId
-  try {
-    collectionName = readCollectionRecord(root, record.collectionId).name
-  } catch {
-    // A collection deleted out-of-band still leaves the document readable.
-  }
-  return {
-    docId: record.id,
-    collectionId: record.collectionId,
-    collectionName,
-    title: record.title,
-    content: readContent(root, record),
+    // Idempotent on retry: an existing directory is as good as a new one —
+    // the tags write below completes the state either way.
+    if (isOpenVikingAlreadyExists(error)) return
+    throw toKbError(`mkdir ${uri}`, error)
   }
 }
 
-/**
- * Wall-clock budget for the synchronous metadata walks that guard a scope
- * write (POO-108 review #7): a collection holding tens of thousands of
- * documents must not stall the caller — the walk gives up at the deadline and
- * the caller fails closed ("not proven published").
- */
-export interface KbPublishedCheckBudget {
+async function remoteWriteContent(
+  space: KbOpenVikingSpace,
+  uri: string,
+  content: string,
+  tags?: string[],
+): Promise<void> {
+  assertScopeTokenCurrent(space)
+  try {
+    await openVikingWriteContent(space.config, space.auth, { uri, content, tags })
+  } catch (error) {
+    throw toKbError(`write ${uri}`, error)
+  }
+}
+
+async function remoteSetTags(space: KbOpenVikingSpace, uri: string, tags: string[]): Promise<void> {
+  assertScopeTokenCurrent(space)
+  try {
+    await openVikingSetTags(space.config, space.auth, { uri, tags, mode: 'replace' })
+  } catch (error) {
+    throw toKbError(`set_tags ${uri}`, error)
+  }
+}
+
+async function remoteMv(space: KbOpenVikingSpace, fromUri: string, toUri: string): Promise<void> {
+  assertScopeTokenCurrent(space)
+  try {
+    await openVikingMv(space.config, space.auth, { fromUri, toUri })
+  } catch (error) {
+    throw toKbError(`mv ${fromUri}`, error)
+  }
+}
+
+/** Reads ONE node's attrs; a missing node reads as `null`. */
+async function remoteAttrs(space: KbOpenVikingSpace, uri: string): Promise<OpenVikingNode | null> {
+  try {
+    return await openVikingAttrs(space.config, space.auth, uri)
+  } catch (error) {
+    throw toKbError(`attrs ${uri}`, error)
+  }
+}
+
+/** Reads ONE document body; `null` when the body is absent. */
+async function remoteReadContent(space: KbOpenVikingSpace, uri: string): Promise<string | null> {
+  try {
+    return await openVikingReadContent(space.config, space.auth, uri)
+  } catch (error) {
+    throw toKbError(`read ${uri}`, error)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tree walk — the ONE listing the collection views are built from (brief D3)
+// ---------------------------------------------------------------------------
+
+/** Wall-clock budget shared by the walk and everything built from it. */
+export interface KbStoreBudget {
   /** Wall-clock deadline (Date.now() based); an exhausted budget fails closed. */
   deadline?: number
 }
 
-/**
- * Defensive ceilings for the two walks the deadline budget cannot interrupt
- * (POO-108 review #7 — KNOWN ITEM, deferred): the metadata walk and the
- * full-text read below run as a single synchronous stretch, so neither the
- * send deadline nor the publish-check budget can cancel them mid-flight, and
- * a runaway or out-of-band-written store directory would otherwise be
- * scanned unbounded. These are NOT product limits — uploads are already
- * capped by `KB_MAX_CONTENT_BYTES`; hitting a ceiling means the store on
- * disk is abnormal. The caller sees the degradation in the log and the
- * truncated result, never a stall. The real fix — offloading the walks to a
- * cancellable worker the deadline can terminate — is tracked as follow-up
- * work (see `.pipeline/sdlc/POO-108/dev-delivery-v1.md`, 已知项与收尾).
- */
-/** Max document directory entries enumerated for ONE collection. */
-const KB_DOCUMENT_DIR_MAX_ENTRIES = 10_000
-/** Max bytes ever read back from ONE document's `content.md`. */
-const KB_CONTENT_READ_MAX_BYTES = KB_MAX_CONTENT_BYTES
+const KB_LS_PAGE_NODES = 2_000
+/** Ten full pages ≈ 20k nodes: past this the tenant is abnormal, not large. */
+const KB_LS_MAX_PAGES = 10
 
-function documentCounts(
-  root: string,
-  collectionId: string,
-  budget?: KbPublishedCheckBudget,
-): KbCollection['documentCounts'] {
-  const counts = { draft: 0, in_review: 0, published: 0, rejected: 0 }
-  const dir = insideRoot(root, join(root, 'collections', collectionId, 'documents'))
-  if (!existsSync(dir)) return counts
-  // Enumeration is bounded (review #7): a collection directory past the
-  // ceiling is counted only up to it and logged, never walked unbounded.
-  const entries = readdirSync(dir, { withFileTypes: true })
-  if (entries.length > KB_DOCUMENT_DIR_MAX_ENTRIES) {
-    console.warn(
-      `[KbStore] collection ${collectionId} holds ${entries.length} document entries — counting only the first ${KB_DOCUMENT_DIR_MAX_ENTRIES}`,
-    )
-  }
-  for (const entry of entries.slice(0, KB_DOCUMENT_DIR_MAX_ENTRIES)) {
+/**
+ * One recursive, tag-annotated walk over the whole tenant (brief D3). The
+ * server hides dotfile CONTENT but lists dot DIRECTORIES (§1.7), so the
+ * recycle/transition subtrees are filtered here by prefix. Pages honor the
+ * shared deadline; partial results stay valid — callers fail closed.
+ */
+async function walkKbTree(space: KbOpenVikingSpace, budget?: KbStoreBudget): Promise<OpenVikingNode[]> {
+  const nodes: OpenVikingNode[] = []
+  let offset = 0
+  for (let page = 0; page < KB_LS_MAX_PAGES; page += 1) {
     if (budget?.deadline !== undefined && Date.now() >= budget.deadline) break
-    if (!entry.isDirectory()) continue
-    const metaPath = insideRoot(root, join(dir, entry.name, 'meta.json'))
-    if (!existsSync(metaPath)) continue
-    const record = readJson<KbDocumentRecord>(metaPath)
-    if (record.status in counts) counts[record.status] += 1
+    let result
+    try {
+      result = await openVikingLs(space.config, space.auth, {
+        uri: KB_SPACE_ROOT_URI,
+        recursive: true,
+        nodeLimit: KB_LS_PAGE_NODES,
+        offset,
+      })
+    } catch (error) {
+      throw toKbError('ls', error)
+    }
+    for (const entry of result.entries) {
+      if (!isHiddenKbUri(entry.uri)) nodes.push(entry)
+    }
+    if (!result.hasMore) return nodes
+    offset += result.entries.length
   }
-  return counts
+  console.warn(
+    `[KbStore] the knowledge base listing exceeded ${KB_LS_MAX_PAGES * KB_LS_PAGE_NODES} nodes — counting the first pages only`,
+  )
+  return nodes
 }
 
-function toCollection(
-  root: string,
-  record: KbCollectionRecord,
-  canManage: boolean,
-): KbCollection {
+interface KbCollectionIndexEntry {
+  uri: string
+  name: string
+  description: string
+  createdAt: string
+  updatedAt: string
+  documentCounts: KbCollection['documentCounts']
+}
+
+interface KbDocumentIndexEntry {
+  uri: string
+  parsed: KbDocumentTags
+}
+
+/** The tenant index one walk produces: collections with counts, documents by id. */
+export interface KbIndex {
+  collections: Map<string, KbCollectionIndexEntry>
+  documents: Map<string, KbDocumentIndexEntry>
+}
+
+function emptyCounts(): KbCollection['documentCounts'] {
+  return { draft: 0, in_review: 0, published: 0, rejected: 0 }
+}
+
+function buildKbIndex(nodes: OpenVikingNode[]): KbIndex {
+  const collections = new Map<string, KbCollectionIndexEntry>()
+  const documents = new Map<string, KbDocumentIndexEntry>()
+  for (const node of nodes) {
+    const raw = rawTagsOf(node)
+    const collectionId = raw.tags.collection
+    if (!collectionId || raw.duplicateKeys.includes('collection')) continue
+    const entry = collections.get(collectionId) ?? {
+      uri: '',
+      name: collectionId,
+      description: '',
+      createdAt: '',
+      updatedAt: '',
+      documentCounts: emptyCounts(),
+    }
+    collections.set(collectionId, entry)
+    if (raw.tags.doc === undefined) {
+      // The collection directory itself: name/description/timestamps live here.
+      const name = readTagValue(raw.tags.name)
+      if (name) entry.name = name
+      const description = readTagValue(raw.tags.description)
+      if (description) entry.description = description
+      const createdAt = readTagValue(raw.tags.created)
+      if (createdAt) entry.createdAt = createdAt
+      if (node.mtime) entry.updatedAt = node.mtime
+      if (!entry.uri && node.uri.startsWith(KB_SPACE_ROOT_URI)) entry.uri = node.uri
+      continue
+    }
+    // A document: strict parsing — unknown shapes never reach the views.
+    // Soft-deleted copies (status=deleted, brief D4) fail the strict parse
+    // (an unknown status), so they drop out of counts AND listings here.
+    const parsed = parseDocumentTags(raw)
+    if (!parsed) continue
+    entry.documentCounts[parsed.status] = (entry.documentCounts[parsed.status] ?? 0) + 1
+    const existing = documents.get(parsed.docId)
+    if (!existing) documents.set(parsed.docId, { uri: node.uri, parsed })
+  }
+  return { collections, documents }
+}
+
+function toCollection(entry: KbCollectionIndexEntry, collectionId: string, canManage: boolean): KbCollection {
   return {
-    id: record.id,
-    name: record.name,
-    description: record.description,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-    documentCounts: documentCounts(root, record.id),
+    id: collectionId,
+    name: entry.name,
+    description: entry.description,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    documentCounts: entry.documentCounts,
     canManage,
   }
 }
 
-export function listCollections(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
+export async function listCollections(
+  space: KbOpenVikingSpace,
   canManage: boolean,
-): KbCollection[] {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return []
-  const dir = join(root, 'collections')
-  if (!existsSync(dir)) return []
-  const rows: KbCollection[] = []
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const metaPath = insideRoot(root, join(dir, entry.name, 'meta.json'))
-    if (!existsSync(metaPath)) continue
-    rows.push(toCollection(root, readJson<KbCollectionRecord>(metaPath), canManage))
-  }
-  return rows.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+): Promise<KbCollection[]> {
+  const index = await loadKbIndex(space)
+  return [...index.collections.entries()]
+    .map(([collectionId, entry]) => toCollection(entry, collectionId, canManage))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
 }
 
-export function createCollection(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  input: { name: string; description: string },
-  actor: string,
-): KbCollection {
-  const root = writeSpaceRoot(workspaceRoot, binding)
-  const record: KbCollectionRecord = {
-    id: createKbId(),
-    name: input.name.trim(),
-    description: input.description,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-  }
-  const dir = insideRoot(root, join(root, 'collections', record.id))
-  ensureDir(dir)
-  writeJson(join(dir, 'meta.json'), record)
-  appendAudit(workspaceRoot, binding, {
-    actor,
-    action: 'collection.create',
-    target: record.id,
-    detail: { name: record.name },
-  })
-  return toCollection(root, record, true)
+/**
+ * ONE walk, ONE index — the shared input for every listing/published check
+ * (the send path's for-await loop reuses a single load instead of walking per
+ * collection).
+ */
+export async function loadKbIndex(space: KbOpenVikingSpace, budget?: KbStoreBudget): Promise<KbIndex> {
+  return buildKbIndex(await walkKbTree(space, budget))
 }
 
-export function listDocuments(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
+export async function listDocuments(
+  space: KbOpenVikingSpace,
   collectionId: string,
-): KbDocumentSummary[] {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) throw new KbStoreError('kb_collection_not_found')
-  readCollectionRecord(root, assertKbId('collectionId', collectionId))
-  const dir = insideRoot(root, join(root, 'collections', collectionId, 'documents'))
-  if (!existsSync(dir)) return []
+): Promise<KbDocumentSummary[]> {
+  assertKbId('collectionId', collectionId)
+  const index = await loadKbIndex(space)
+  if (!index.collections.has(collectionId)) {
+    throw new KbStoreError('kb_collection_not_found')
+  }
   const rows: KbDocumentSummary[] = []
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const metaPath = insideRoot(root, join(dir, entry.name, 'meta.json'))
-    if (!existsSync(metaPath)) continue
-    rows.push(toSummary(readJson<KbDocumentRecord>(metaPath)))
+  for (const entry of index.documents.values()) {
+    if (entry.parsed.collectionId !== collectionId) continue
+    rows.push(toSummary(entry))
   }
   return rows.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
 }
 
-export function uploadDocument(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
+function toSummary(entry: KbDocumentIndexEntry): KbDocumentSummary {
+  const parsed = entry.parsed
+  return {
+    id: parsed.docId,
+    collectionId: parsed.collectionId,
+    title: parsed.title,
+    status: parsed.status,
+    version: parsed.version,
+    createdAt: parsed.createdAt,
+    updatedAt: parsed.updatedAt,
+    publishedAt: parsed.publishedAt,
+    rejectReason: parsed.rejectReason,
+  }
+}
+
+/**
+ * A collection is selectable for a session scope only when it holds at least
+ * one published document (D6). The walk honors the shared budget: an
+ * exhausted budget reads as "not proven published" — degraded availability,
+ * never an unbounded stall.
+ */
+export async function isCollectionPublished(
+  space: KbOpenVikingSpace,
+  collectionId: string,
+  budget?: KbStoreBudget,
+): Promise<boolean> {
+  if (budget?.deadline !== undefined && Date.now() >= budget.deadline) return false
+  const index = await loadKbIndex(space, budget)
+  return indexCollectionPublished(index, collectionId)
+}
+
+/** The synchronous check against an ALREADY-loaded index (send path, N collections). */
+export function indexCollectionPublished(index: KbIndex, collectionId: string): boolean {
+  return (index.collections.get(collectionId)?.documentCounts.published ?? 0) > 0
+}
+
+export async function createCollection(
+  space: KbOpenVikingSpace,
+  input: { name: string; description: string },
+): Promise<KbCollection> {
+  const record = {
+    collectionId: createKbId(),
+    name: input.name.trim(),
+    description: input.description,
+    createdAt: nowIso(),
+  }
+  const uri = kbCollectionUri(record.name, record.collectionId)
+  await remoteMkdir(space, uri, record.description)
+  await remoteSetTags(space, uri, collectionTags(record))
+  appendAudit(space.workspaceRoot, space.binding, {
+    actor: space.actor,
+    action: 'collection.create',
+    target: record.collectionId,
+    detail: { name: record.name },
+  })
+  return {
+    id: record.collectionId,
+    name: record.name,
+    description: record.description,
+    createdAt: record.createdAt,
+    updatedAt: record.createdAt,
+    documentCounts: emptyCounts(),
+    canManage: true,
+  }
+}
+
+export async function uploadDocument(
+  space: KbOpenVikingSpace,
   collectionId: string,
   input: { title: string; content: string },
-  actor: string,
-): KbDocumentSummary {
-  const root = writeSpaceRoot(workspaceRoot, binding)
-  readCollectionRecord(root, assertKbId('collectionId', collectionId))
+): Promise<KbDocumentSummary> {
+  assertKbId('collectionId', collectionId)
   if (Buffer.byteLength(input.content, 'utf-8') > KB_MAX_CONTENT_BYTES) {
     throw new KbStoreError('kb_content_too_large')
   }
+  // The collection's URI comes from the listing — a collection id that does
+  // not resolve in THIS tenant is a not-found, never a write into nowhere.
+  const index = await loadKbIndex(space)
+  const collection = index.collections.get(collectionId)
+  if (!collection?.uri) {
+    throw new KbStoreError('kb_collection_not_found')
+  }
   const timestamp = nowIso()
-  const record: KbDocumentRecord = {
-    id: createKbId(),
+  const record = {
+    docId: createKbId(),
     collectionId,
     title: input.title.trim(),
-    status: 'draft',
+    status: 'draft' as const,
     version: 1,
     createdAt: timestamp,
     updatedAt: timestamp,
     publishedAt: null,
     rejectReason: null,
   }
-  writeDocumentRecord(root, record, input.content)
-  appendAudit(workspaceRoot, binding, {
-    actor,
+  // The deterministic URI makes the write replace-idempotent: a timed-out
+  // upload retried under the same id rewrites the same node (brief D4).
+  const uri = kbDocumentUri(collection.uri, record.title, record.docId)
+  await remoteWriteContent(space, uri, input.content, documentTags(record))
+  appendAudit(space.workspaceRoot, space.binding, {
+    actor: space.actor,
     action: 'document.upload',
-    target: record.id,
+    target: record.docId,
     detail: { collectionId, title: record.title, bytes: Buffer.byteLength(input.content, 'utf-8') },
   })
-  return toSummary(record)
+  return {
+    id: record.docId,
+    collectionId,
+    title: record.title,
+    status: record.status,
+    version: record.version,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    publishedAt: record.publishedAt,
+    rejectReason: record.rejectReason,
+  }
 }
 
-export function getDocument(workspaceRoot: string, binding: KbSpaceBinding, docId: string): KbDocument | null {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) throw new KbStoreError('kb_document_not_found')
-  const record = readDocumentRecord(root, assertKbId('docId', docId))
-  return { ...toSummary(record), content: readContent(root, record) }
+/** Resolves ONE document's live URI by its unique id suffix (brief D4). */
+async function locateDocument(space: KbOpenVikingSpace, docId: string): Promise<string> {
+  assertKbId('docId', docId)
+  let matches: string[]
+  try {
+    matches = await openVikingGlob(space.config, space.auth, {
+      pattern: `**/*-${docId}.md`,
+      uri: KB_SPACE_ROOT_URI,
+    })
+  } catch (error) {
+    throw toKbError(`glob ${docId}`, error)
+  }
+  // Recycled/transition copies never resolve: the live document is the one
+  // outside the hidden subtrees.
+  const live = matches.filter(uri => !isHiddenKbUri(uri))
+  if (live.length === 0) {
+    throw new KbStoreError('kb_document_not_found')
+  }
+  return live.sort()[0]
+}
+
+export async function getDocument(space: KbOpenVikingSpace, docId: string): Promise<KbDocument | null> {
+  const uri = await locateDocument(space, docId)
+  // Two O(1) reads (brief D4): the body and the tags.
+  const [content, node] = await Promise.all([
+    remoteReadContent(space, uri),
+    remoteAttrs(space, uri),
+  ])
+  if (!node) {
+    // Glob saw it, attrs does not: a concurrently recycled document.
+    throw new KbStoreError('kb_document_not_found')
+  }
+  const parsed = parseDocumentTags(rawTagsOf(node))
+  if (!parsed || parsed.docId !== docId) {
+    throw new KbStoreError('kb_document_not_found')
+  }
+  return {
+    ...toSummary({ uri, parsed }),
+    content: content ?? '',
+  }
 }
 
 export type KbTransitionAction = 'submit' | 'publish' | 'reject' | 'revert'
@@ -647,101 +773,189 @@ const TRANSITION_TARGET: Record<KbTransitionAction, KbDocumentStatus> = {
   revert: 'draft',
 }
 
-export function transitionDocument(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  docId: string,
-  action: KbTransitionAction,
-  opts: { actor: string; reason?: string },
-): KbDocumentSummary {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) throw new KbStoreError('kb_document_not_found')
-  const record = readDocumentRecord(root, assertKbId('docId', docId))
-  const target = TRANSITION_TARGET[action]
-  if (!KB_DOCUMENT_TRANSITIONS[record.status]?.includes(target)) {
-    throw new KbStoreError(
-      'kb_invalid_transition',
-      `Cannot move a ${record.status} document to ${target}`,
-    )
-  }
-  const content = readContent(root, record)
-  const previousStatus = record.status
-  record.status = target
-  record.updatedAt = nowIso()
-  if (target === 'published') {
-    record.publishedAt = record.updatedAt
-    record.rejectReason = null
-    writeVersionSnapshot(root, record, content)
-  } else if (target === 'rejected') {
-    record.rejectReason = opts.reason ?? ''
-  } else if (target === 'draft') {
-    record.rejectReason = null
-  }
-  writeDocumentRecord(root, record)
-  appendAudit(workspaceRoot, binding, {
-    actor: opts.actor,
-    action: `document.${action}`,
-    target: record.id,
-    detail: {
-      from: previousStatus,
-      status: record.status,
-      ...(opts.reason ? { reason: opts.reason } : {}),
-    },
-  })
-  return toSummary(record)
-}
-
 /**
- * The agreed deletion contract covers `draft` / `published` / `rejected` only
- * — a document under review must be rejected (or reverted) first, so the
- * review trail stays meaningful (review #14).
+ * The deletion contract covers `draft` / `published` / `rejected` only — a
+ * document under review must be rejected (or reverted) first, so the review
+ * trail stays meaningful (v2 review #14, unchanged).
  */
 const KB_DELETABLE_STATUSES: ReadonlySet<KbDocumentStatus> = new Set(['draft', 'published', 'rejected'])
 
-export function deleteDocument(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  docId: string,
-  actor: string,
-): { recycled: true } {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) throw new KbStoreError('kb_document_not_found')
-  const record = readDocumentRecord(root, assertKbId('docId', docId))
-  if (!KB_DELETABLE_STATUSES.has(record.status)) {
-    throw new KbStoreError(
-      'kb_delete_not_allowed',
-      `A ${record.status} document cannot be deleted; reject it first`,
-    )
-  }
-  const source = insideRoot(
-    root,
-    join(root, 'collections', record.collectionId, 'documents', record.id),
-  )
-  const recycleDir = insideRoot(root, join(root, 'recycle'))
-  ensureDir(recycleDir)
-  const destination = insideRoot(root, join(recycleDir, record.id))
-  if (existsSync(destination)) {
-    rmSync(destination, { recursive: true, force: true })
-  }
-  renameSync(source, destination)
-  const recycledAt = nowIso()
-  writeJson(join(destination, 'meta.json'), {
-    ...record,
-    status: record.status,
-    recycledAt,
+/**
+ * Per-document in-process mutex (brief D4): transitions read-modify-write the
+ * tag set, so two concurrent transitions on ONE document serialize here.
+ * Cross-device races stay bounded by the re-read/verify window below.
+ */
+const documentLocks = new Map<string, Promise<unknown>>()
+
+function withDocumentLock<T>(docId: string, operation: () => Promise<T>): Promise<T> {
+  const previous = documentLocks.get(docId) ?? Promise.resolve()
+  const result = previous.then(operation, operation)
+  const tail = result.then(() => undefined, () => undefined)
+  documentLocks.set(docId, tail)
+  void tail.then(() => {
+    if (documentLocks.get(docId) === tail) documentLocks.delete(docId)
   })
-  appendAudit(workspaceRoot, binding, {
-    actor,
-    action: 'document.delete',
-    target: record.id,
-    detail: { collectionId: record.collectionId, recycledAt, previousStatus: record.status },
-  })
-  return { recycled: true }
+  return result
 }
 
 /**
- * Naive tokenization for the local keyword search: whitespace-separated runs
- * stay whole, CJK runs split into single characters.
+ * The best-effort shared transition log (brief D4 ii): ONE uuid file per
+ * transition in the hidden `.audit/transitions/` tree. Independent files —
+ * never an append to a shared one, which would lose concurrent entries —
+ * and never fatal: this is a diagnostic trail, not a gate.
+ */
+async function writeTransitionLog(
+  space: KbOpenVikingSpace,
+  entry: {
+    docId: string
+    uri: string
+    from: KbDocumentStatus
+    to: KbDocumentStatus
+    actor: string
+    at: string
+  },
+): Promise<void> {
+  try {
+    const uri = `${KB_TRANSITIONS_DIR_URI}/${randomUUID()}.md`
+    await openVikingWriteContent(space.config, space.auth, {
+      uri,
+      content: JSON.stringify(entry),
+      tags: [`doc=${entry.docId}`, `kind=transition`],
+    })
+  } catch (error) {
+    console.warn(
+      `[KbStore] transition log for ${entry.docId} failed (best-effort): ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+export async function transitionDocument(
+  space: KbOpenVikingSpace,
+  docId: string,
+  action: KbTransitionAction,
+  opts: { reason?: string } = {},
+): Promise<KbDocumentSummary> {
+  return withDocumentLock(docId, async () => {
+    const uri = await locateDocument(space, docId)
+    const target = TRANSITION_TARGET[action]
+
+    // Gate 1: the current state must allow the transition at all.
+    const node = await remoteAttrs(space, uri)
+    if (!node) throw new KbStoreError('kb_document_not_found')
+    const current = parseDocumentTags(rawTagsOf(node))
+    if (!current || current.docId !== docId) throw new KbStoreError('kb_document_not_found')
+    if (!KB_DOCUMENT_TRANSITIONS[current.status]?.includes(target)) {
+      throw new KbStoreError(
+        'kb_invalid_transition',
+        `Cannot move a ${current.status} document to ${target}`,
+      )
+    }
+
+    // Gate 2 — the tight re-read (brief D4): state checked again IMMEDIATELY
+    // before the write, shrinking the local-race window to one round trip.
+    // A concurrent transition detected here is a conflict, not a surprise.
+    const fresh = await remoteAttrs(space, uri)
+    if (!fresh) throw new KbStoreError('kb_document_not_found')
+    const freshParsed = parseDocumentTags(rawTagsOf(fresh))
+    if (!freshParsed || freshParsed.docId !== docId) throw new KbStoreError('kb_document_not_found')
+    if (freshParsed.status !== current.status) {
+      throw new KbStoreError(
+        'kb_conflict',
+        'The document was changed concurrently',
+        { from: current.status, actual: freshParsed.status },
+      )
+    }
+
+    const updatedAt = nowIso()
+    const next: KbDocumentTags = {
+      ...current,
+      status: target,
+      updatedAt,
+      ...(target === 'published' ? { publishedAt: updatedAt, rejectReason: null } : {}),
+      ...(target === 'rejected' ? { rejectReason: opts.reason ?? '' } : {}),
+      ...(target === 'draft' ? { publishedAt: null, rejectReason: null } : {}),
+    }
+    await remoteSetTags(space, uri, documentTags(next))
+
+    // Read-back verification: the state machine only commits when the remote
+    // tags say what we just wrote. A mismatch is a hard conflict (the write
+    // itself was unconditional — some other writer has overlapped, brief D4).
+    const after = await remoteAttrs(space, uri)
+    const afterParsed = after ? parseDocumentTags(rawTagsOf(after)) : null
+    if (!afterParsed || afterParsed.status !== target) {
+      throw new KbStoreError(
+        'kb_conflict',
+        'The document changed while the transition was applied',
+        { expected: target, actual: afterParsed?.status ?? null },
+      )
+    }
+    void writeTransitionLog(space, {
+      docId,
+      uri,
+      from: current.status,
+      to: target,
+      actor: space.actor,
+      at: updatedAt,
+    })
+    appendAudit(space.workspaceRoot, space.binding, {
+      actor: space.actor,
+      action: `document.${action}`,
+      target: docId,
+      detail: {
+        from: current.status,
+        status: target,
+        ...(opts.reason ? { reason: opts.reason } : {}),
+      },
+    })
+    return toSummary({ uri, parsed: next })
+  })
+}
+
+export async function deleteDocument(
+  space: KbOpenVikingSpace,
+  docId: string,
+): Promise<{ recycled: true }> {
+  return withDocumentLock(docId, async () => {
+    const uri = await locateDocument(space, docId)
+    const node = await remoteAttrs(space, uri)
+    if (!node) throw new KbStoreError('kb_document_not_found')
+    const current = parseDocumentTags(rawTagsOf(node))
+    if (!current || current.docId !== docId) throw new KbStoreError('kb_document_not_found')
+    if (!KB_DELETABLE_STATUSES.has(current.status)) {
+      throw new KbStoreError(
+        'kb_delete_not_allowed',
+        `A ${current.status} document cannot be deleted; reject it first`,
+      )
+    }
+    // Soft delete (brief D4): status leaves the retrieval face FIRST (the
+    // recycle target is a hidden dot path, so the move then removes it from
+    // every listing too). No permanent deletion exists — same as v2.
+    const recycledAt = nowIso()
+    await remoteSetTags(space, uri, documentTags({
+      ...current,
+      status: 'deleted',
+      updatedAt: recycledAt,
+    }))
+    await remoteMkdir(space, KB_RECYCLE_DIR_URI)
+    await remoteMv(space, uri, recycleTargetUri(uri))
+    appendAudit(space.workspaceRoot, space.binding, {
+      actor: space.actor,
+      action: 'document.delete',
+      target: docId,
+      detail: { collectionId: current.collectionId, recycledAt, previousStatus: current.status },
+    })
+    return { recycled: true as const }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval (brief D5) — ONE find, server-scoped, snippets inline
+// ---------------------------------------------------------------------------
+
+/**
+ * Naive tokenization for the query guard: whitespace-separated runs stay
+ * whole, CJK runs split into single characters. A query with no tokens
+ * (whitespace only) is answered with no results, never with a remote call.
  */
 export function tokenizeKbQuery(query: string): string[] {
   const tokens = new Set<string>()
@@ -776,7 +990,7 @@ function countOccurrences(haystack: string, needle: string): number {
  * optional deadline is the search's own: a token sweep that runs out of
  * budget stops early and falls back to the nearest hit found so far, or to
  * the head of the content — a snippet is never worth running past the budget
- * that bounds the send it feeds (review #7).
+ * that bounds the send it feeds.
  */
 function buildSnippet(content: string, lowered: string, tokens: string[], deadline?: number): string {
   let hitIndex = -1
@@ -798,133 +1012,89 @@ function buildSnippet(content: string, lowered: string, tokens: string[], deadli
   return `${start > 0 ? '…' : ''}${body}${end < content.length ? '…' : ''}`
 }
 
-/**
- * Snippet for a search hit built from the LOCAL content, whatever ranked it
- * (POO-108 v2: OpenViking hits keep the local snippet contract so the
- * renderer cannot tell the backends apart beyond the `source` field).
- */
+/** Snippet built from the content ONE find inlined (brief D5). */
 export function buildKbSnippetForQuery(content: string, query: string, deadline?: number): string {
   return buildSnippet(content, content.toLowerCase(), tokenizeKbQuery(query), deadline)
 }
 
-/**
- * Bounds for a search pass (POO-108 review #7): the scan is synchronous, so
- * the send-time lookup caps how much content it may read and by when it must
- * stop — a huge KB can never stall the send loop.
- */
-export interface KbSearchBudget {
-  /** Stop READING further documents once this many content bytes have been read. */
-  maxScannedBytes?: number
-  /** Wall-clock deadline (Date.now() based), checked between documents, inside the token loop and while building snippets. */
-  deadline?: number
+/** Resolves the requested collection ids to their LIVE remote URIs. */
+function resolveCollectionUris(index: KbIndex, collectionIds: string[] | undefined): string[] {
+  if (!collectionIds || collectionIds.length === 0) return [KB_SPACE_ROOT_URI]
+  const uris: string[] = []
+  for (const collectionId of collectionIds) {
+    const entry = index.collections.get(collectionId)
+    if (entry?.uri) uris.push(entry.uri)
+  }
+  return uris
 }
 
 /**
- * Keyword search over published documents only. Title hits weigh more than
- * body hits; results sort by score (desc) then title, capped at top 20.
- * Honors the optional budget by stopping early — partial results stay valid.
+ * Retrieval over published documents only (brief D5): ONE `find` with the
+ * server-side collection scoping (`target_uri` array), the server-side
+ * status filter (`status=published`) and inlined hit content — snippets come
+ * from the SAME response, never one extra read per hit. Hits are disclosed
+ * only after their tags parse STRICTLY and re-confirm collection membership
+ * and the published status; anything else (stale index, out-of-band node,
+ * corrupted tags) drops silently.
+ *
+ * Scores stay the backend's (not confined to [0,1]); results sort by score
+ * (desc) then title, capped at the KB search limit. An exhausted budget
+ * keeps the hits already mapped — partial results stay valid.
  */
-export function searchDocuments(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
+export async function searchDocuments(
+  space: KbOpenVikingSpace,
   query: string,
   collectionIds?: string[],
-  budget?: KbSearchBudget,
-): KbSearchHit[] {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return []
+  budget?: KbStoreBudget,
+): Promise<KbSearchHit[]> {
   const tokens = tokenizeKbQuery(query)
-  const wanted = collectionIds ? new Set(collectionIds) : null
-  const collectionNames = new Map<string, string>()
-  const hits: KbSearchHit[] = []
   if (tokens.length === 0) return []
-  const collectionsDir = join(root, 'collections')
-  if (!existsSync(collectionsDir)) return []
-  let scannedBytes = 0
-  // The two budget dimensions cancel at different granularities (review #7):
-  // the DEADLINE may stop anywhere — between documents and inside a token
-  // loop — while the BYTE budget only decides whether the NEXT document may
-  // be read at all. Byte-checking inside the scoring loop instead would drop
-  // a document that was already read: two 2MiB documents against a 4MiB cap
-  // would leave the second one unscored even though its content was in hand.
-  const pastDeadline = (): boolean => budget?.deadline !== undefined && Date.now() >= budget.deadline
-  const pastByteBudget = (): boolean =>
-    budget?.maxScannedBytes !== undefined && scannedBytes >= budget.maxScannedBytes
-  /** Partial results stay valid: rank and cap whatever was scored in budget. */
-  const finalize = (): KbSearchHit[] =>
-    hits
-      .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
-      .slice(0, KB_SEARCH_LIMIT)
-  const scan = (): KbSearchHit[] => {
-    for (const collectionEntry of readdirSync(collectionsDir, { withFileTypes: true })) {
-      if (pastDeadline()) break
-      if (!collectionEntry.isDirectory()) continue
-      const collectionMetaPath = insideRoot(root, join(collectionsDir, collectionEntry.name, 'meta.json'))
-      if (!existsSync(collectionMetaPath)) continue
-      if (wanted && !wanted.has(collectionEntry.name)) continue
-      const collection = readJson<KbCollectionRecord>(collectionMetaPath)
-      collectionNames.set(collection.id, collection.name)
-      const documentsDir = insideRoot(root, join(collectionsDir, collectionEntry.name, 'documents'))
-      if (!existsSync(documentsDir)) continue
-      for (const docEntry of readdirSync(documentsDir, { withFileTypes: true })) {
-        if (pastDeadline() || pastByteBudget()) return finalize()
-        if (!docEntry.isDirectory()) continue
-        const metaPath = insideRoot(root, join(documentsDir, docEntry.name, 'meta.json'))
-        if (!existsSync(metaPath)) continue
-        const record = readJson<KbDocumentRecord>(metaPath)
-        if (record.status !== 'published') continue
-        const content = readContent(root, record)
-        scannedBytes += Buffer.byteLength(content, 'utf-8')
-        const title = record.title.toLowerCase()
-        const lowered = content.toLowerCase()
-        let score = 0
-        for (const token of tokens) {
-          // The deadline must cancel INSIDE the token loop, not only between
-          // documents: a message that tokenizes into thousands of tokens over
-          // a large document would otherwise run past its budget (review #7).
-          if (pastDeadline()) return finalize()
-          if (title.includes(token)) score += KB_TITLE_WEIGHT
-          score += countOccurrences(lowered, token) * KB_BODY_WEIGHT
-        }
-        if (score <= 0) continue
-        hits.push({
-          docId: record.id,
-          collectionId: record.collectionId,
-          collectionName: collection.name,
-          title: record.title,
-          snippet: buildSnippet(content, lowered, tokens, budget?.deadline),
-          score,
-        })
-      }
-    }
-    return finalize()
-  }
-  return scan()
-}
-
-/**
- * A collection is selectable for a session scope only when it holds at least
- * one published document — the read side searches published content only, so
- * an unpublished collection would be an empty promise.
- *
- * The optional budget shares ONE wall clock with the rest of the surrounding
- * operation (the send resolution's deadline, or the SET RPC's validation
- * budget): an exhausted budget stops the metadata walk and reads as "not
- * published" — degraded availability, never an unbounded stall (review #7).
- */
-export function isCollectionPublished(
-  workspaceRoot: string,
-  binding: KbSpaceBinding,
-  collectionId: string,
-  budget?: KbPublishedCheckBudget,
-): boolean {
-  const root = readSpaceRoot(workspaceRoot, binding)
-  if (!root) return false
-  if (budget?.deadline !== undefined && Date.now() >= budget.deadline) return false
+  if (budget?.deadline !== undefined && Date.now() >= budget.deadline) return []
+  // ONE index load serves BOTH the collection-URI resolution and the hit
+  // mapping — never a second walk of the same tenant.
+  const index = await loadKbIndex(space, budget)
+  const targetUris = resolveCollectionUris(index, collectionIds)
+  if (targetUris.length === 0) return []
+  const wanted = collectionIds ? new Set(collectionIds) : null
+  let resources: OpenVikingFindResource[]
   try {
-    readCollectionRecord(root, assertKbId('collectionId', collectionId))
-  } catch {
-    return false
+    resources = await openVikingFind(space.config, space.auth, {
+      query,
+      targetUri: targetUris,
+      tags: ['status=published'],
+      limit: KB_SEARCH_LIMIT,
+      readContent: true,
+    })
+  } catch (error) {
+    throw toKbError('find', error)
   }
-  return documentCounts(root, collectionId, budget).published > 0
+  const collectionNames = new Map<string, string>()
+  for (const [collectionId, entry] of index.collections) {
+    collectionNames.set(collectionId, entry.name)
+  }
+  const bestByDoc = new Map<string, KbSearchHit>()
+  for (const resource of resources) {
+    if (budget?.deadline !== undefined && Date.now() >= budget.deadline) break
+    // Strict disclosure gate (brief D5): duplicated keys, missing fields or
+    // an unknown status reject the hit outright.
+    const parsed = parseDocumentTags(rawTagsOf(resource))
+    if (!parsed) continue
+    if (parsed.status !== 'published') continue
+    if (wanted && !wanted.has(parsed.collectionId)) continue
+    const collectionName = collectionNames.get(parsed.collectionId) ?? parsed.collectionId
+    const previous = bestByDoc.get(parsed.docId)
+    if (previous && previous.score >= resource.score) continue
+    const content = resource.content ?? ''
+    bestByDoc.set(parsed.docId, {
+      docId: parsed.docId,
+      collectionId: parsed.collectionId,
+      collectionName,
+      title: parsed.title,
+      snippet: buildKbSnippetForQuery(content, query, budget?.deadline),
+      score: resource.score,
+    })
+  }
+  return [...bestByDoc.values()]
+    .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
+    .slice(0, KB_SEARCH_LIMIT)
 }

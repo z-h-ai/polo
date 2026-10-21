@@ -1,11 +1,10 @@
 import { RPC_CHANNELS, type KbCollectionList, type KbDocument, type KbDocumentSummary, type KbSearchHit } from '@polo-ai/shared/protocol'
 import {
   KB_PUBLISHED_CHECK_TIMEOUT_MS,
-  KB_SEND_MAX_SCAN_BYTES,
-  KB_SEND_RESOLVE_TIMEOUT_MS,
-  KB_SESSION_COLLECTIONS_MAX,
   KB_SEARCH_PER_COLLECTION_LIMIT,
   KB_SEARCH_QUERY_MAX_CHARS,
+  KB_SEND_RESOLVE_TIMEOUT_MS,
+  KB_SESSION_COLLECTIONS_MAX,
   KbCreateCollectionInputSchema,
   KbDocumentRefSchema,
   KbGetSessionCollectionsInputSchema,
@@ -39,48 +38,58 @@ import {
 } from '../../runtime/product-space-executions'
 import {
   appendAudit,
-  clearDocumentOpenVikingState,
   createCollection,
   deleteDocument,
   getDocument,
-  isCollectionPublished,
+  indexCollectionPublished,
+  kbAuditFor,
+  loadKbIndex,
   KbStoreError,
+  KB_SERVICE_UNAVAILABLE_MESSAGE,
   listCollections,
   listDocuments,
-  readDocumentOpenVikingState,
-  readDocumentSummary,
   searchDocuments,
   transitionDocument,
   uploadDocument,
+  type KbIndex,
+  type KbOpenVikingSpace,
   type KbSpaceBinding,
+  type KbStoreBudget,
 } from '../../knowledge-base/store'
-import {
-  ensureOpenVikingSpace,
-  removeDocumentFromOpenViking,
-  searchDocumentsViaOpenViking,
-  syncPublishedDocumentToOpenViking,
-  type OpenVikingTarget,
-} from '../../knowledge-base/openviking'
-import { readOpenVikingConfig } from '../../knowledge-base/openviking-client'
+import { ensureKbTenant, kbTenantAuth, readKbTenantCredential, type KbTenantCredential } from '../../knowledge-base/tenant'
+import { readOpenVikingConfig, type OpenVikingConfig } from '../../knowledge-base/openviking-client'
 
 /**
- * Enterprise Knowledge Base RPC handlers (POO-108).
+ * Enterprise Knowledge Base RPC handlers (POO-108 v3.1).
  *
- * Every entry derives its scope from the trusted Admin session + committed
- * ProductSpace fence (same discipline as the Skills surface) and refuses any
- * non-enterprise space with an explicit `kb_unavailable_in_personal` error —
- * a personal-space caller must never see an empty list that looks like
- * "no collections yet". Mutations additionally require the enterprise
- * owner/manager role, a writable space (online, `accessMode: 'active'`, no
- * runtime restriction) and append to the workspace's KB audit trail.
+ * The remote storage tenant IS the knowledge base (brief R1): every handler
+ * below resolves the space's tenant binding and turns the RPC into store
+ * calls — there is no local copy and no sync step anymore. The storage
+ * service stays invisible: failures surface as the neutral
+ * `kb_service_unavailable` code and its message never names a vendor, a URI
+ * or a raw response (brief D7 — the details live in server logs and the
+ * audit trail only).
  *
- * Store isolation: every store call is bound to the trusted
- * `{productSpaceId, enterpriseId}` pair, so a workspace reused across
- * enterprises keeps one KB per space and no entry can read or write another
- * space's content (review #1). Session-scoped reads/writes additionally run
- * the complete session-scope comparator (account AND committed space AND
- * caller Workspace) and revalidate an await-spanning token after every await
- * and immediately before disclosure or mutation (reviews #2/#3).
+ * Scope discipline (unchanged from v2): every entry derives its scope from
+ * the trusted Admin session + committed ProductSpace fence (same discipline
+ * as the Skills surface) and refuses any non-enterprise space with an
+ * explicit `kb_unavailable_in_personal` error — a personal-space caller must
+ * never see an empty list that looks like "no collections yet". Mutations
+ * additionally require the enterprise owner/manager role and a writable
+ * space (online, `accessMode: 'active'`, no runtime restriction).
+ *
+ * Provisioning boundary (brief D2): ONLY management RPCs bring the tenant up
+ * (`ensureKbSpace`, idempotent). Reads and the send path use the CACHED
+ * credential exclusively (`requireKbSpace`/`readSendKbSpace`) — a space that
+ * was never provisioned on this device reads as unavailable/no references,
+ * and a read can never trigger a remote write.
+ *
+ * Async-store CAS discipline (brief §3 item 5): every store call is awaited,
+ * so the authorization check and the change it authorizes are no longer in
+ * the same synchronous block. The gap is closed at both ends — the store
+ * revalidates the captured scope token right before each REMOTE WRITE it
+ * issues, and each handler re-runs `assertKbScopeCurrent(scope)` after its
+ * last await and before it discloses or returns.
  */
 
 /** Stable business-RPC error for an uncommitted (null) runtime fence. */
@@ -138,50 +147,105 @@ function kbSpaceBinding(scope: KbScope): KbSpaceBinding {
   return { productSpaceId: scope.space.id, enterpriseId: scope.space.enterpriseId }
 }
 
-/**
- * The OpenViking binding for this scope, or `null` when the deployment runs
- * without OpenViking (`POLO_OPENVIKING_URL` unset) — every integration step
- * below short-circuits on `null`, keeping the unconfigured behavior
- * byte-identical to the pre-v2 surface.
- */
-function openVikingTarget(scope: KbScope): OpenVikingTarget | null {
-  const config = readOpenVikingConfig()
-  if (!config) return null
+function kbSpaceFrom(scope: KbScope, config: OpenVikingConfig, credential: KbTenantCredential): KbOpenVikingSpace {
   return {
     config,
-    workspaceRoot: scope.workspace.rootPath,
+    auth: kbTenantAuth(credential),
     binding: kbSpaceBinding(scope),
-    space: { id: scope.space.id, enterpriseId: scope.space.enterpriseId, name: scope.space.name },
+    workspaceRoot: scope.workspace.rootPath,
+    spaceName: scope.space.name,
     actor: scope.accountId,
+    scopeToken: scope.token,
   }
 }
 
-/** The remote URI a published document was synced under, when one was recorded. */
-function openVikingSyncedUri(scope: KbScope, docId: string): string | undefined {
-  const state = readDocumentOpenVikingState(scope.workspace.rootPath, kbSpaceBinding(scope), docId)
-  return state && 'uri' in state ? state.uri : undefined
+/**
+ * The store binding for a READ: the deployment must be configured and the
+ * space's tenant credential must already be cached on this device. A miss is
+ * the neutral availability failure — reads NEVER provision (brief D2), so a
+ * space provisioned on another device stays unavailable here until a
+ * management RPC recovers the binding.
+ */
+async function requireKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
+  const config = readOpenVikingConfig()
+  if (!config) {
+    throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
+  }
+  const credential = await readKbTenantCredential(scope.space.id, scope.space.enterpriseId)
+  if (!credential) {
+    throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
+  }
+  return kbSpaceFrom(scope, config, credential)
 }
 
 /**
- * Provisioning at collection-creation time (brief v2 改动点 2): the first
- * collection of a space brings the remote root up with it. Best-effort — the
- * local collection exists either way, and a failed provisioning is audited
- * and retried by the next collection creation or publish sync.
+ * The store binding for a WRITE: provision/recover the tenant binding first
+ * (idempotent, lease-serialized — brief D2). This is the ONLY path that may
+ * provision, and every content mutation goes through it, so a binding that
+ * vanished (fresh device, cleared credential store) is recovered by the first
+ * management RPC instead of failing the surface forever.
  */
-async function provisionOpenVikingSpaceForScope(scope: KbScope, deps: HandlerDeps): Promise<void> {
-  const target = openVikingTarget(scope)
-  if (!target) return
-  try {
-    await ensureOpenVikingSpace(target)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    appendAudit(scope.workspace.rootPath, kbSpaceBinding(scope), {
+async function ensureKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
+  const config = readOpenVikingConfig()
+  if (!config) {
+    throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
+  }
+  const credential = await ensureKbTenant({
+    config,
+    identity: {
+      productSpaceId: scope.space.id,
+      enterpriseId: scope.space.enterpriseId,
+      spaceName: scope.space.name,
+    },
+    actor: scope.accountId,
+    audit: kbAuditFor({
+      workspaceRoot: scope.workspace.rootPath,
+      binding: kbSpaceBinding(scope),
       actor: scope.accountId,
-      action: 'openviking.space_provision_failed',
-      target: scope.space.id,
-      detail: { error: message },
-    })
-    deps.platform.logger?.warn(`KB_OPENVIKING: space provisioning failed: ${message}`)
+    }),
+    scopeToken: scope.token,
+  })
+  return kbSpaceFrom(scope, config, credential)
+}
+
+/**
+ * The store binding for ONE send phase: cached credential ONLY (the send path
+ * never provisions, brief D2), and every failure degrades to `null` — a KB
+ * outage or a missing binding yields "no references", never a failed send
+ * (brief D7).
+ */
+async function readSendKbSpace(capture: SendScopeCapture): Promise<KbOpenVikingSpace | null> {
+  const config = readOpenVikingConfig()
+  if (!config) return null
+  let credential: KbTenantCredential | null
+  try {
+    credential = await readKbTenantCredential(
+      capture.binding.productSpaceId,
+      capture.binding.enterpriseId,
+    )
+  } catch {
+    return null
+  }
+  if (!credential) return null
+  return {
+    config,
+    auth: kbTenantAuth(credential),
+    binding: capture.binding,
+    workspaceRoot: capture.workspaceRoot,
+    spaceName: capture.space.name,
+    actor: capture.token.accountId,
+    scopeToken: capture.token,
+  }
+}
+
+/** Logs a store failure's RAW cause — server log only, never the wire (D7). */
+function logKbStoreDetail(
+  deps: HandlerDeps<ISessionManager>,
+  operation: string,
+  error: unknown,
+): void {
+  if (error instanceof KbStoreError && error.detail !== undefined) {
+    deps.platform.logger?.warn(`KB_${operation}: ${error.code}: ${String(error.detail)}`)
   }
 }
 
@@ -247,12 +311,11 @@ function assertKbScopeTokenCurrent(token: TrustedSessionScopeToken): void {
  * fence revoke during any awaited step must fail the boundary before it
  * discloses data or commits a mutation (review #3).
  *
- * `await requireKbScope(...)` always costs at least one microtask between the
- * helper's internal CAS and the handler body, so a fence revoked in exactly
- * that window still authorized. Every handler therefore calls this as its
- * FIRST statement after the entry await — the check lands in the same
- * synchronous block as the disclosure or mutation that follows, and no await
- * may slip between them.
+ * With the async store every handler awaits remote calls AFTER
+ * `requireKbScope`, so this runs a SECOND time — after the last store await,
+ * in the same synchronous block as the disclosure/return it guards. The store
+ * additionally revalidates the token before each remote WRITE it initiates
+ * (brief §3 item 5), covering the window between this check and the write.
  */
 function assertKbScopeCurrent(scope: KbScope): void {
   assertKbScopeTokenCurrent(scope.token)
@@ -311,9 +374,9 @@ function parseOrThrow<T>(schema: { safeParse(input: unknown): { success: boolean
 }
 
 /** A missing document reads as "no document", not as an RPC failure. */
-function getDocumentOrNull(workspaceRoot: string, binding: KbSpaceBinding, docId: string): KbDocument | null {
+async function getDocumentOrNull(space: KbOpenVikingSpace, docId: string): Promise<KbDocument | null> {
   try {
-    return getDocument(workspaceRoot, binding, docId)
+    return await getDocument(space, docId)
   } catch (error) {
     if (error instanceof KbStoreError && error.code === 'kb_document_not_found') return null
     throw error
@@ -331,7 +394,11 @@ export function registerKnowledgeBaseHandlers(
     const input = parseOrThrow(KbListCollectionsInputSchema, rawInput)
     const scope = await requireKbScope(ctx, input.workspaceId, deps)
     assertKbScopeCurrent(scope)
-    const rows = listCollections(scope.workspace.rootPath, kbSpaceBinding(scope), scope.canManage)
+    const space = await requireKbSpace(scope)
+    const rows = await listCollections(space, scope.canManage)
+    // Post-await CAS: the disclosure is refused for a scope that moved while
+    // the remote listing was in flight (review #3, async-store discipline).
+    assertKbScopeCurrent(scope)
     const collections = input.publishedOnly
       ? rows.filter(row => row.documentCounts.published > 0)
       : rows
@@ -345,16 +412,13 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    const collection = createCollection(
-      scope.workspace.rootPath,
-      kbSpaceBinding(scope),
-      { name: input.name, description: input.description },
-      scope.accountId,
-    )
-    // Bring the OpenViking space up with the first local collection (POO-108
-    // v2 改动点 2). Awaited so the caller's publish sync can rely on the root;
-    // best-effort, so an OpenViking outage cannot fail the local creation.
-    await provisionOpenVikingSpaceForScope(scope, deps)
+    // The collection is created INSIDE the tenant, so the tenant binding is
+    // provisioned/recovered first — the only lazy-provisioning trigger of the
+    // whole surface (brief D2). Its failure is the neutral availability
+    // error; the raw cause is already in the tenant audit trail.
+    const space = await ensureKbSpace(scope)
+    const collection = await createCollection(space, { name: input.name, description: input.description })
+    assertKbScopeCurrent(scope)
     deps.platform.logger?.info(`KB_CREATE_COLLECTION: ${collection.id} in ${scope.workspace.id}`)
     return collection
   })
@@ -363,11 +427,9 @@ export function registerKnowledgeBaseHandlers(
     const input = parseOrThrow(KbListDocumentsInputSchema, rawInput)
     const scope = await requireKbScope(ctx, input.workspaceId, deps)
     assertKbScopeCurrent(scope)
-    const rows: KbDocumentSummary[] = listDocuments(
-      scope.workspace.rootPath,
-      kbSpaceBinding(scope),
-      input.collectionId,
-    )
+    const space = await requireKbSpace(scope)
+    const rows: KbDocumentSummary[] = await listDocuments(space, input.collectionId)
+    assertKbScopeCurrent(scope)
     // Members see published rows only; managers run the review flow and see all.
     return scope.canManage ? rows : rows.filter(row => row.status === 'published')
   })
@@ -378,13 +440,13 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    return uploadDocument(
-      scope.workspace.rootPath,
-      kbSpaceBinding(scope),
-      input.collectionId,
-      { title: input.title, content: input.content },
-      scope.accountId,
-    )
+    const space = await ensureKbSpace(scope)
+    const document = await uploadDocument(space, input.collectionId, {
+      title: input.title,
+      content: input.content,
+    })
+    assertKbScopeCurrent(scope)
+    return document
   })
 
   server.handle(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, async (ctx, rawInput: unknown) => {
@@ -393,9 +455,10 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    return transitionDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, 'submit', {
-      actor: scope.accountId,
-    })
+    const space = await ensureKbSpace(scope)
+    const summary = await transitionDocument(space, input.docId, 'submit')
+    assertKbScopeCurrent(scope)
+    return summary
   })
 
   server.handle(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, async (ctx, rawInput: unknown) => {
@@ -404,15 +467,12 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    const published = transitionDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, 'publish', {
-      actor: scope.accountId,
-    })
-    // Publish sync (POO-108 v2 改动点 3): after the local publish committed,
-    // push the content into the OpenViking space. The sync result lands on
-    // the document meta; a failed sync never rolls the local publish back.
-    const target = openVikingTarget(scope)
-    if (!target) return published
-    return syncPublishedDocumentToOpenViking(target, input.docId)
+    // v3.1: the status tag IS the publication — the document already lives in
+    // the tenant, so publishing is one transition with no sync step after it.
+    const space = await ensureKbSpace(scope)
+    const summary = await transitionDocument(space, input.docId, 'publish')
+    assertKbScopeCurrent(scope)
+    return summary
   })
 
   server.handle(RPC_CHANNELS.kb.REJECT_DOCUMENT, async (ctx, rawInput: unknown) => {
@@ -421,10 +481,10 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    return transitionDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, 'reject', {
-      actor: scope.accountId,
-      reason: input.reason,
-    })
+    const space = await ensureKbSpace(scope)
+    const summary = await transitionDocument(space, input.docId, 'reject', { reason: input.reason })
+    assertKbScopeCurrent(scope)
+    return summary
   })
 
   server.handle(RPC_CHANNELS.kb.REVERT_TO_DRAFT, async (ctx, rawInput: unknown) => {
@@ -433,23 +493,10 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    const reverted = transitionDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, 'revert', {
-      actor: scope.accountId,
-    })
-    // A reverted document must stop surfacing remotely too (POO-108 v2 改动点
-    // 3): drop its copy from the OpenViking space, best-effort, and clear the
-    // stale sync marker when the removal went through. Today only a rejected
-    // document reaches draft (published is terminal) and none of those carry
-    // a remote copy, so this is the brief-mandated guard for the moment the
-    // state machine grows a published→draft edge.
-    const target = openVikingTarget(scope)
-    if (!target) return reverted
-    const removed = await removeDocumentFromOpenViking(target, input.docId)
-    if (removed) {
-      clearDocumentOpenVikingState(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId)
-      return readDocumentSummary(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId)
-    }
-    return reverted
+    const space = await ensureKbSpace(scope)
+    const summary = await transitionDocument(space, input.docId, 'revert')
+    assertKbScopeCurrent(scope)
+    return summary
   })
 
   server.handle(RPC_CHANNELS.kb.DELETE_DOCUMENT, async (ctx, rawInput: unknown) => {
@@ -458,14 +505,11 @@ export function registerKnowledgeBaseHandlers(
     assertKbScopeCurrent(scope)
     assertCanManage(scope)
     assertKbWritable(scope)
-    // The remote URI must be read BEFORE the local delete: deleting moves the
-    // document into recycle/, where the store no longer resolves its meta.
-    const target = openVikingTarget(scope)
-    const remoteUri = target ? openVikingSyncedUri(scope, input.docId) : undefined
-    const result = deleteDocument(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId, scope.accountId)
-    // Best-effort remote cleanup (POO-108 v2 改动点 3): the outcome is audited,
-    // a failure never fails the local deletion.
-    if (target) await removeDocumentFromOpenViking(target, input.docId, remoteUri)
+    const space = await ensureKbSpace(scope)
+    // Soft delete (brief D4): status=deleted, then a move into the hidden
+    // recycle directory — the recycle-bin contract is unchanged.
+    const result = await deleteDocument(space, input.docId)
+    assertKbScopeCurrent(scope)
     return result
   })
 
@@ -473,7 +517,9 @@ export function registerKnowledgeBaseHandlers(
     const input = parseOrThrow(KbDocumentRefSchema, rawInput)
     const scope = await requireKbScope(ctx, input.workspaceId, deps)
     assertKbScopeCurrent(scope)
-    const doc: KbDocument | null = getDocumentOrNull(scope.workspace.rootPath, kbSpaceBinding(scope), input.docId)
+    const space = await requireKbSpace(scope)
+    const doc: KbDocument | null = await getDocumentOrNull(space, input.docId)
+    assertKbScopeCurrent(scope)
     if (!doc) return null
     // Members may only open published documents; managers preview anything.
     if (!scope.canManage && doc.status !== 'published') return null
@@ -484,37 +530,13 @@ export function registerKnowledgeBaseHandlers(
     const input = parseOrThrow(KbSearchInputSchema, rawInput)
     const scope = await requireKbScope(ctx, input.workspaceId, deps)
     assertKbScopeCurrent(scope)
-    // OpenViking is the retrieval backend when it is configured (POO-108 v2
-    // 改动点 4); the local keyword scan stays the fallback for an unconfigured,
-    // failed or timed-out backend. The two are never mixed.
-    const target = openVikingTarget(scope)
-    let openVikingHits: KbSearchHit[] | null = null
-    if (target) {
-      try {
-        openVikingHits = await searchDocumentsViaOpenViking(target, input.query, input.collectionIds)
-      } catch (error) {
-        deps.platform.logger?.warn(`KB_SEARCH: openviking backend failed, using the local keyword fallback: ${error instanceof Error ? error.message : String(error)}`)
-      }
-      // Post-await CAS before ANY disclosure (review #3 discipline): the
-      // fallback below reads the same space-bound store, so a fence revoked
-      // while the remote call was in flight must fail the request rather than
-      // silently answer from either backend.
-      assertKbScopeCurrent(scope)
-      if (openVikingHits) {
-        deps.platform.logger?.info(`KB_SEARCH: source=openviking hits=${openVikingHits.length}`)
-        return openVikingHits
-      }
-      deps.platform.logger?.info('KB_SEARCH: source=local-fallback')
-    }
-    const hits: KbSearchHit[] = searchDocuments(
-      scope.workspace.rootPath,
-      kbSpaceBinding(scope),
-      input.query,
-      input.collectionIds,
-    )
-    // Defense in depth: the store only indexes published rows of its OWN
-    // space, the scope filter here keeps a forged collectionIds list from
-    // changing that.
+    // ONE find, server-scoped (brief D5): the storage service filters by the
+    // requested collections and the published status in the same call, and
+    // the hits arrive with their content inlined — there is no local keyword
+    // fallback anymore (brief R3).
+    const space = await requireKbSpace(scope)
+    const hits: KbSearchHit[] = await searchDocuments(space, input.query, input.collectionIds)
+    assertKbScopeCurrent(scope)
     return hits
   })
 
@@ -530,15 +552,19 @@ export function registerKnowledgeBaseHandlers(
     // (review #2).
     assertSessionInCallerScope(deps, input.sessionId, callerWorkspaceId)
     // Every selected collection must belong to this enterprise space and
-    // hold at least one published document. The checks share ONE wall clock
-    // (review #7): the metadata walk is synchronous, so a collection with a
-    // huge document listing fails closed at the budget instead of stalling
-    // the caller.
+    // hold at least one published document. The check is a READ: the cached
+    // binding only, never provisioning (brief D2).
+    const space = await requireKbSpace(scope)
+    // ONE shared wall clock (review #7) and ONE tenant walk serve every
+    // collection: the index is loaded once, then each entry is checked
+    // against it in an EXPLICIT loop (brief §3 item 2 — a `filter(async…)`
+    // would see every Promise as truthy and pass unpublished collections).
+    // Nothing inside the loop is awaited, so the trap cannot arise, and the
+    // walk honors the same deadline a per-collection walk would have.
     const publishedCheckDeadline = Date.now() + KB_PUBLISHED_CHECK_TIMEOUT_MS
+    const index = await loadKbIndex(space, { deadline: publishedCheckDeadline })
     for (const collectionId of input.collectionIds) {
-      if (!isCollectionPublished(scope.workspace.rootPath, kbSpaceBinding(scope), collectionId, {
-        deadline: publishedCheckDeadline,
-      })) {
+      if (Date.now() >= publishedCheckDeadline || !indexCollectionPublished(index, collectionId)) {
         throw kbError('kb_collection_not_published', `Collection ${collectionId} is not available for sessions`)
       }
     }
@@ -553,7 +579,8 @@ export function registerKnowledgeBaseHandlers(
     }
     // Final CAS in the same synchronous block as the audit and the write it
     // authorizes (reviews #3/#15): a fence revoked after the entry await —
-    // or during any step above — fails here, before anything is recorded.
+    // or during the remote steps above — fails here, before anything is
+    // recorded.
     assertKbScopeCurrent(scope)
     // Audit BEFORE the awaited mutation (review #15): the previous order
     // (mutate → CAS → audit) left a mutated scope with an empty trail when
@@ -718,12 +745,16 @@ async function captureSendScope(
  * Phase 1 of the send resolution — its ONLY state-changing step. Honors the
  * composer draft for THIS message when the captured scope proves current,
  * writable and owning; returns the effective draft scope ids, or `null` when
- * the draft was not honored (abandoned, read-only, foreign session or
- * nothing to change) and the STORED scope must be used instead.
+ * the draft was not honored (abandoned, read-only, foreign session, nothing
+ * to change, or a knowledge base that cannot prove publication) and the
+ * STORED scope must be used instead.
  *
  * The publish-state validation shares the resolution's ONE wall clock
- * (review #7): a collection with a huge document listing fails the check at
- * the deadline — the entry degrades, it never stalls the send.
+ * (review #7): the tenant index is loaded once under the deadline, then each
+ * draft entry is checked against it in an EXPLICIT loop (brief §3 item 3 —
+ * a `filter(async…)` would pass everything, Promise being truthy). The
+ * deadline is re-checked inside the loop, so an exhausted budget commits
+ * nothing: the stored scope wins.
  */
 async function commitSendDraftScope(
   deps: HandlerDeps<ISessionManager>,
@@ -742,22 +773,36 @@ async function commitSendDraftScope(
   // dropped, never fatal. The previous scope is SNAPSHOT before the save —
   // the session record may be mutated in place, and the audit entry must
   // capture the change, not the post-write value.
-  const scopeIds = draft.filter(id =>
-    isCollectionPublished(capture.workspaceRoot, capture.binding, id, { deadline })
-  )
-  const previousScope = [...(session.kbCollectionIds ?? [])]
-  if (JSON.stringify(previousScope) === JSON.stringify(scopeIds)) return scopeIds
+  const scopeIds: string[] = []
+  if (draft.length > 0) {
+    // Cached binding only — the send path NEVER provisions (brief D2). A
+    // missing binding or an unavailable service means the draft cannot be
+    // PROVEN published, so it is not honored: `null` keeps the stored scope
+    // and the retrieval phase degrades to no references.
+    const space = await readSendKbSpace(capture)
+    if (!space) return null
+    let index: KbIndex
+    try {
+      index = await loadKbIndex(space, { deadline })
+    } catch (error) {
+      logKbStoreDetail(deps, 'SEND_DRAFT_COMMIT', error)
+      return null
+    }
+    for (const collectionId of draft) {
+      if (Date.now() >= deadline) break
+      if (indexCollectionPublished(index, collectionId)) scopeIds.push(collectionId)
+    }
+  }
+  if (JSON.stringify(session.kbCollectionIds ?? []) === JSON.stringify(scopeIds)) return scopeIds
   // The LAST synchronous gate before the write is initiated: after the send
   // deadline this attempt is abandoned (review N1 — a timeout may not leave
   // background work behind that mutates state), and a scope that moved during
   // any awaited step above fails closed here (review #3).
   //
   // The DEADLINE is re-checked absolutely (review N1 residual): the publish
-  // filter above runs SYNCHRONOUSLY, so the abandonment flag cannot flip
-  // inside it — a scan that consumed the whole budget would otherwise reach
-  // this gate with `abandoned` still false and commit the truncated scope
-  // after the deadline. Time is monotonic, so an exhausted budget can never
-  // pass this check: budget gone → no write, no audit, the stored scope wins.
+  // loop above can only STOP at the deadline — an exhausted budget lands
+  // here with a truncated `scopeIds` and must not commit it. Time is
+  // monotonic, so budget gone → no write, no audit, the stored scope wins.
   if (
     attempt.abandoned
     || Date.now() >= deadline
@@ -769,7 +814,7 @@ async function commitSendDraftScope(
     actor: capture.token.accountId,
     workspaceId: capture.token.workspaceId,
     sessionId,
-    from: previousScope,
+    from: [...(session.kbCollectionIds ?? [])],
     to: scopeIds,
     detail: { source: 'send_draft_commit' },
   })
@@ -777,21 +822,34 @@ async function commitSendDraftScope(
 }
 
 /**
- * The OpenViking binding for a SEND scope capture, or `null` when the
- * deployment runs without OpenViking. Derived from the CAPTURED scope only —
- * the same space the whole resolution is bound to, never the live fence
- * state (review N1).
+ * Interleaves one find's ranked hits per collection (brief D5): the per-
+ * collection cap stops a single dominant collection from filling the list,
+ * and the round-robin merge walks the session's selection order so each
+ * collection's own ranking is preserved.
  */
-function sendOpenVikingTarget(capture: SendScopeCapture): OpenVikingTarget | null {
-  const config = readOpenVikingConfig()
-  if (!config) return null
-  return {
-    config,
-    workspaceRoot: capture.workspaceRoot,
-    binding: capture.binding,
-    space: { id: capture.space.id, enterpriseId: capture.space.enterpriseId, name: capture.space.name },
-    actor: capture.token.accountId,
+function interleaveSendReferences(hits: KbSearchHit[], scopeIds: string[]): KbSearchHit[] {
+  const byCollection = new Map<string, KbSearchHit[]>()
+  for (const hit of hits) {
+    const list = byCollection.get(hit.collectionId)
+    if (list) {
+      if (list.length < KB_SEARCH_PER_COLLECTION_LIMIT) list.push(hit)
+    } else {
+      byCollection.set(hit.collectionId, [hit])
+    }
   }
+  const merged: KbSearchHit[] = []
+  for (let index = 0; ; index += 1) {
+    let added = false
+    for (const collectionId of scopeIds) {
+      const hit = byCollection.get(collectionId)?.[index]
+      if (hit) {
+        merged.push(hit)
+        added = true
+      }
+    }
+    if (!added) break
+  }
+  return merged
 }
 
 /**
@@ -800,17 +858,12 @@ function sendOpenVikingTarget(capture: SendScopeCapture): OpenVikingTarget | nul
  * the send deadline is harmless: the caller has already moved on with the
  * fallback, and the late hits are simply discarded (review N1).
  *
- * Retrieval backend (POO-108 v2 follow-up): when the deployment runs
- * OpenViking, ONE `find` over the space root ranks the scope's published
- * content first — a measured few-ms call on a local instance. The find is
- * raced against the SAME deadline every other phase shares, so the total
- * send budget never grows (review #7); hits map back onto local published
- * documents through the `doc=` tag with local title/snippet and OpenViking
- * scores. A find that fails, times out or was never configured falls back to
- * the local keyword scan unchanged — per-collection caps and the interleave
- * merge stay exactly as before. On a race timeout the budget is already
- * gone, so that fallback degrades to nothing instead of running past the
- * send: the scan's own deadline budget reads an exhausted clock as "stop".
+ * Retrieval is ONE bounded find (brief §3 item 4): the cached tenant binding
+ * must exist, the storage service scopes by the session's collections and the
+ * published status in the same call, and hits arrive with content inlined —
+ * there is no local keyword scan to fall back to (brief R3). No binding,
+ * a failure or a timeout all degrade to ZERO references: a send is never
+ * blocked, and no provisioning is ever triggered from here (brief D2/D7).
  */
 async function retrieveReferences(
   deps: HandlerDeps<ISessionManager>,
@@ -824,53 +877,39 @@ async function retrieveReferences(
   // The send text is tokenized raw, so it is truncated to the same ceiling
   // the SEARCH RPC schema enforces (review #7).
   const query = message.slice(0, KB_SEARCH_QUERY_MAX_CHARS)
-  const target = sendOpenVikingTarget(capture)
-  if (target && Date.now() < deadline) {
-    try {
-      const remote = await raceSendDeadline<KbSearchHit[] | null>(
-        searchDocumentsViaOpenViking(target, query, scopeIds, { deadline }),
-        deadline,
-        () => null,
-      )
-      if (remote) {
-        deps.platform.logger?.info(`KB_SEND_REFERENCES: source=openviking hits=${remote.length}`)
-        return remote
-      }
+  const space = await readSendKbSpace(capture)
+  if (!space) {
+    deps.platform.logger?.info('KB_SEND_REFERENCES: no knowledge base binding, no references')
+    return []
+  }
+  if (Date.now() >= deadline) {
+    attempt.abandoned = true
+    return []
+  }
+  let hits: KbSearchHit[]
+  try {
+    let timedOut = false
+    hits = await raceSendDeadline<KbSearchHit[]>(
+      searchDocuments(space, query, scopeIds, { deadline } satisfies KbStoreBudget),
+      deadline,
+      () => {
+        timedOut = true
+        return []
+      },
+    )
+    if (timedOut) {
       // The deadline, not the backend, ended the race — mark the attempt
-      // abandoned like every other timed-out phase (review N1) and let the
-      // budgeted fallback below degrade.
+      // abandoned like every other timed-out phase (review N1).
       attempt.abandoned = true
-      deps.platform.logger?.warn('KB_SEND_REFERENCES: openviking find raced past the send deadline, degrading')
-    } catch (error) {
-      deps.platform.logger?.warn(`KB_SEND_REFERENCES: openviking find failed, using the local keyword fallback: ${error instanceof Error ? error.message : String(error)}`)
+      deps.platform.logger?.warn('KB_SEND_REFERENCES: knowledge base lookup raced past the send deadline, no references')
+      return []
     }
+  } catch (error) {
+    logKbStoreDetail(deps, 'SEND_REFERENCES', error)
+    deps.platform.logger?.warn('KB_SEND_REFERENCES: knowledge base lookup failed, no references')
+    return []
   }
-  const byCollection = new Map<string, KbSearchHit[]>()
-  for (const collectionId of scopeIds) {
-    if (Date.now() >= deadline) break
-    const hits = searchDocuments(
-      capture.workspaceRoot,
-      capture.binding,
-      query,
-      [collectionId],
-      { deadline, maxScannedBytes: KB_SEND_MAX_SCAN_BYTES },
-    ).slice(0, KB_SEARCH_PER_COLLECTION_LIMIT)
-    byCollection.set(collectionId, hits)
-  }
-  // Interleave so no single collection dominates the reference list.
-  const merged: KbSearchHit[] = []
-  for (let index = 0; ; index += 1) {
-    let added = false
-    for (const hits of byCollection.values()) {
-      const hit = hits[index]
-      if (hit) {
-        merged.push(hit)
-        added = true
-      }
-    }
-    if (!added) break
-  }
-  return merged
+  return interleaveSendReferences(hits, scopeIds)
 }
 
 /**
@@ -889,10 +928,10 @@ async function retrieveReferences(
  *
  * Both phases share ONE wall clock (review #7): an empty scope exits before
  * any await, the awaited reads are raced against the deadline, the publish
- * checks, store scan, scoring and snippet building all honour the same
- * deadline, and a timed-out attempt is abandoned — it may return nothing,
- * but never mutate session scope or audit afterwards. Any KB failure
- * degrades to "no references" — a KB outage must never block a send.
+ * checks, the tenant walk and the find all honour the same deadline, and a
+ * timed-out attempt is abandoned — it may return nothing, but never mutates
+ * session scope or audit afterwards. Any KB failure degrades to "no
+ * references" — a KB outage must never block a send (brief D7).
  */
 export async function resolveSessionKbReferences(
   deps: HandlerDeps<ISessionManager>,
@@ -955,9 +994,9 @@ export async function resolveSessionKbReferences(
       )
       if (committed !== null) scopeIds = committed
     }
-    // Phase 2 — read-only retrieval. Its only awaited step (the OpenViking
-    // find) is raced against the same deadline inside, so this await stays
-    // within the send budget.
+    // Phase 2 — read-only retrieval. Its awaited steps (the binding read and
+    // the single find) are raced against the same deadline inside, so this
+    // await stays within the send budget.
     const references = await retrieveReferences(deps, capture, message, scopeIds, deadline, attempt)
     return references.length > 0 ? references : undefined
   } catch (error) {

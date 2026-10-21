@@ -1,25 +1,33 @@
 /**
- * Minimal OpenViking Context HTTP client (POO-108 v2).
+ * OpenViking Context HTTP client (POO-108 v3.1) — every endpoint the KB uses.
  *
- * Covers exactly the four endpoints the integration needs, with the
- * request/response shapes verified against a real local OpenViking instance
- * (v0.5.1.1, `auth_mode=dev`) — see `.pipeline/sdlc/POO-108/dev-brief-v2-openviking.md`:
+ * Request/response shapes follow the real instance (v0.5.1.1, `auth_mode=api_key`)
+ * as recorded in `.pipeline/sdlc/POO-108/dev-brief-v3-openviking-native.md` §1
+ * and its `GET /openapi.json`:
  *
- * 1. `POST /api/v1/resources/temp_upload` (multipart field `file`) → `result.temp_file_id`
- * 2. `POST /api/v1/resources` (`temp_file_id`, `to`, `create_parent`, `wait`,
- *    `processing_mode`, `tags` as `k=v` STRINGS, `reason`) → `result.root_uri`
- * 3. `POST /api/v1/search/find` (`query`, `target_uri`, `context_type`, `limit`)
- *    → `result.resources[]` with `uri` / `score` / `tags` / `abstract`
- * 4. `DELETE /api/v1/fs?uri=<uri>&recursive=<bool>`
+ * - Provisioning plane (ROOT key only — the root key is REFUSED on the data
+ *   plane with HTTP 403 `PERMISSION_DENIED`): `POST/GET /api/v1/admin/accounts`
+ *   and `GET /api/v1/admin/accounts/{id}/users?include_credentials=true`.
+ *   Creating an account mints its first admin user and returns the user key
+ *   exactly once; re-creating the same account fails with `ALREADY_EXISTS`
+ *   (the idempotent re-use hook), and an existing user's key can be read back
+ *   through the users list WITHOUT re-signing it (the credential-recovery path).
+ * - Data plane (the tenant's per-account user key): `fs/mkdir`, `fs/mv`,
+ *   `fs/rm` (DELETE /fs), `fs/attrs`, `fs/attrs/set_tags`, `fs/ls`,
+ *   `content/write`, `content/read`, `search/find`, `search/glob`.
  *
- * The client is deliberately dumb: plain `fetch`, bounded timeouts (uploads and
- * syncs 120s, search 8s) and structured `OpenVikingError` failures. Every
- * failure mode degrades upstream — a missing or broken OpenViking must never
- * fail a local knowledge-base management operation.
+ * The client is deliberately dumb: plain `fetch`, bounded timeouts (provision
+ * 30s, writes 120s, reads/attrs/ls/glob 15s, find 8s — brief D10) and
+ * structured `OpenVikingError` failures. Error MESSAGES may carry the raw
+ * server detail: they are logged server-side only and are mapped to neutral
+ * user-facing text at the RPC boundary (brief D7 — the enterprise user must
+ * never learn a storage vendor exists).
  */
 
-export const OPENVIKING_SYNC_TIMEOUT_MS = 120_000
-export const OPENVIKING_SEARCH_TIMEOUT_MS = 8_000
+export const OPENVIKING_PROVISION_TIMEOUT_MS = 30_000
+export const OPENVIKING_WRITE_TIMEOUT_MS = 120_000
+export const OPENVIKING_READ_TIMEOUT_MS = 15_000
+export const OPENVIKING_FIND_TIMEOUT_MS = 8_000
 
 export type OpenVikingErrorCode =
   | 'openviking_timeout'
@@ -27,16 +35,35 @@ export type OpenVikingErrorCode =
   | 'openviking_http_error'
   | 'openviking_invalid_response'
 
-/** Thrown for every OpenViking failure; `code` is stable, `status` is the HTTP status when one was received. */
+/**
+ * Thrown for every OpenViking failure. `code` is the stable transport-level
+ * classification, `status` the HTTP status when one was received, `serverCode`
+ * the server's own error code (e.g. `ALREADY_EXISTS`) and `detail` the raw
+ * failure body. The message/detail carry vendor specifics — for server-side
+ * logs and the audit trail only.
+ */
 export class OpenVikingError extends Error {
   constructor(
     readonly code: OpenVikingErrorCode,
     message: string,
     readonly status?: number,
+    readonly serverCode?: string,
+    readonly detail?: unknown,
   ) {
     super(message)
     this.name = 'OpenVikingError'
   }
+}
+
+/** True when the server answered an idempotent-create with "already there". */
+export function isOpenVikingAlreadyExists(error: unknown): boolean {
+  return error instanceof OpenVikingError && error.serverCode === 'ALREADY_EXISTS'
+}
+
+/** True when the server refused the credential (missing, wrong or forbidden). */
+export function isOpenVikingAuthError(error: unknown): boolean {
+  return error instanceof OpenVikingError
+  && (error.status === 401 || error.status === 403)
 }
 
 /** OpenViking ingestion modes (the real API values — there is no `full`). */
@@ -45,28 +72,32 @@ export type OpenVikingProcessingMode = 'vectors_only' | 'semantic_and_vectors'
 export interface OpenVikingConfig {
   /** Base URL without a trailing slash, e.g. `http://127.0.0.1:1933`. */
   baseUrl: string
-  /** Optional bearer token (`POLO_OPENVIKING_API_KEY`); the dev instance needs none. */
-  apiKey?: string
+  /**
+   * The ROOT key (`POLO_OPENVIKING_ROOT_API_KEY`) — provisioning plane only.
+   * Data-plane calls use the per-tenant user key handed in per call, so a
+   * deployment that never provisions still never needs the root key.
+   */
+  rootApiKey?: string
   /**
    * `semantic_and_vectors` additionally asks the server's VLM for abstracts;
-   * it needs a configured VLM on the OpenViking side and makes publish-sync
+   * it needs a configured VLM on the OpenViking side and makes ingestion
    * slower, so the default stays `vectors_only`.
    */
-  processingMode?: OpenVikingProcessingMode
+  processingMode: OpenVikingProcessingMode
 }
 
 /**
  * OpenViking is opt-in through the environment and read at CALL time (never
  * module load), so a server started without it stays exactly as before and a
  * test can flip the flag per case. Unset `POLO_OPENVIKING_URL` disables every
- * OpenViking behavior.
+ * OpenViking behavior — the KB then reports `kb_service_unavailable` (brief D7).
  */
 export function readOpenVikingConfig(env: Record<string, string | undefined> = process.env): OpenVikingConfig | null {
   const baseUrl = env.POLO_OPENVIKING_URL?.trim()
   if (!baseUrl) return null
   return {
     baseUrl: baseUrl.replace(/\/+$/, ''),
-    apiKey: env.POLO_OPENVIKING_API_KEY?.trim() || undefined,
+    rootApiKey: env.POLO_OPENVIKING_ROOT_API_KEY?.trim() || undefined,
     processingMode: env.POLO_OPENVIKING_PROCESSING_MODE?.trim() === 'semantic_and_vectors'
       ? 'semantic_and_vectors'
       : 'vectors_only',
@@ -78,15 +109,21 @@ export function isOpenVikingConfigured(env: Record<string, string | undefined> =
 }
 
 interface OpenVikingTimeouts {
-  /** temp_upload / add_resource / fs DELETE — the publish-sync path. */
-  syncMs: number
-  /** search/find. */
-  searchMs: number
+  /** admin account/user provisioning — the root-key plane. */
+  provisionMs: number
+  /** content/write, set_tags, mkdir, mv, rm — the mutation plane. */
+  writeMs: number
+  /** content/read, fs/attrs, fs/ls, search/glob. */
+  readMs: number
+  /** search/find — bounded hard because the send path awaits it. */
+  findMs: number
 }
 
 let timeouts: OpenVikingTimeouts = {
-  syncMs: OPENVIKING_SYNC_TIMEOUT_MS,
-  searchMs: OPENVIKING_SEARCH_TIMEOUT_MS,
+  provisionMs: OPENVIKING_PROVISION_TIMEOUT_MS,
+  writeMs: OPENVIKING_WRITE_TIMEOUT_MS,
+  readMs: OPENVIKING_READ_TIMEOUT_MS,
+  findMs: OPENVIKING_FIND_TIMEOUT_MS,
 }
 
 /** Test seam: shrink the wall clocks so a timeout can be observed quickly. */
@@ -95,10 +132,19 @@ export function setOpenVikingTimeoutsForTests(overrides: Partial<OpenVikingTimeo
 }
 
 export function resetOpenVikingTimeoutsForTests(): void {
-  timeouts = { syncMs: OPENVIKING_SYNC_TIMEOUT_MS, searchMs: OPENVIKING_SEARCH_TIMEOUT_MS }
+  timeouts = {
+    provisionMs: OPENVIKING_PROVISION_TIMEOUT_MS,
+    writeMs: OPENVIKING_WRITE_TIMEOUT_MS,
+    readMs: OPENVIKING_READ_TIMEOUT_MS,
+    findMs: OPENVIKING_FIND_TIMEOUT_MS,
+  }
 }
 
-/** `{"status":"ok","result":…}` — anything else is a protocol failure. */
+/**
+ * `{"status":"ok","result":…}` on success, `{"status":"error","error":{"code",
+ * "message","details"}}` on failure — the shape verified against the real
+ * instance (the error body arrives with the matching HTTP status).
+ */
 interface OpenVikingEnvelope<T> {
   status?: unknown
   result?: T
@@ -106,73 +152,48 @@ interface OpenVikingEnvelope<T> {
   error?: unknown
 }
 
-export interface OpenVikingTempFile {
-  tempFileId: string
-}
-
-export interface OpenVikingTempUploadInput {
-  /** Object name reported to OpenViking, e.g. `.space.md` or `kb-<id>.md`. */
-  filename: string
-  content: string
-  contentType?: string
-}
-
-export interface OpenVikingAddResourceInput {
-  tempFileId: string
-  /** Destination URI, e.g. `viking://resources/entspace-<hash>/.space.md`. */
-  to: string
-  /** `true` creates every missing parent directory — this IS the space/collection creation. */
-  createParent?: boolean
-  /** Block until the resource is processed. */
-  wait?: boolean
-  processingMode?: OpenVikingProcessingMode
-  /** MUST be `["k=v"]` strings, not objects (verified against the real instance). */
-  tags?: string[]
-  reason?: string
-}
-
-export interface OpenVikingAddResourceResult {
-  rootUri: string | null
-  status: string | null
-}
-
-export interface OpenVikingSearchResource {
-  uri: string
-  score: number
-  tags: Record<string, string>
-  abstract: string | null
-}
-
-export interface OpenVikingFindInput {
-  query: string
-  /** Scope the search to a space (or any subtree), e.g. the space root. */
-  targetUri: string
-  limit: number
-  /** Defaults to `['resource']`, the verified shape. */
-  contextTypes?: string[]
+/** The structured error body the real instance returns. */
+interface OpenVikingErrorBody {
+  code?: unknown
+  message?: unknown
+  details?: unknown
 }
 
 interface RequestOptions {
-  method: 'POST' | 'DELETE'
+  method: 'POST' | 'GET' | 'DELETE'
   path: string
   json?: unknown
-  form?: FormData
+  query?: URLSearchParams
+  /** The credential presented as the bearer token (root key or tenant key). */
+  apiKey?: string
   timeoutMs: number
 }
 
-function describePayloadError(payload: OpenVikingEnvelope<unknown>): string {
-  const detail = payload.error ?? payload.message
-  if (typeof detail === 'string' && detail.trim()) return detail.trim()
-  if (detail && typeof detail === 'object') {
-    const message = (detail as { message?: unknown }).message
-    if (typeof message === 'string' && message.trim()) return message.trim()
+function describePayloadError(payload: OpenVikingEnvelope<unknown>): { message: string; serverCode?: string; detail: unknown } {
+  const structured = payload.error
+  if (structured && typeof structured === 'object') {
+    const body = structured as OpenVikingErrorBody
+    const code = typeof body.code === 'string' && body.code.trim() ? body.code.trim() : undefined
+    const message = typeof body.message === 'string' && body.message.trim() ? body.message.trim() : undefined
+    if (code || message) {
+      return {
+        message: [code, message].filter(Boolean).join(': '),
+        serverCode: code,
+        detail: body.details ?? structured,
+      }
+    }
   }
-  return JSON.stringify(payload).slice(0, 200)
+  if (typeof structured === 'string' && structured.trim()) {
+    return { message: structured.trim(), detail: structured }
+  }
+  const legacy = payload.message
+  if (typeof legacy === 'string' && legacy.trim()) return { message: legacy.trim(), detail: payload }
+  return { message: JSON.stringify(payload).slice(0, 400), detail: payload }
 }
 
 function describeBodySnippet(body: string): string {
   const snippet = body.trim().replace(/\s+/g, ' ')
-  return snippet ? `: ${snippet.slice(0, 200)}` : ''
+  return snippet ? `: ${snippet.slice(0, 400)}` : ''
 }
 
 async function openVikingRequest<T>(config: OpenVikingConfig, options: RequestOptions): Promise<T> {
@@ -181,43 +202,32 @@ async function openVikingRequest<T>(config: OpenVikingConfig, options: RequestOp
   // body must hit the same timeout as a stalled handshake.
   const timer = setTimeout(() => controller.abort(), options.timeoutMs)
   const headers: Record<string, string> = { accept: 'application/json' }
-  if (config.apiKey) headers.authorization = `Bearer ${config.apiKey}`
+  if (options.apiKey) headers.authorization = `Bearer ${options.apiKey}`
   if (options.json !== undefined) headers['content-type'] = 'application/json'
-  let body: string | FormData | undefined
-  if (options.form) {
-    body = options.form
-  } else if (options.json !== undefined) {
-    body = JSON.stringify(options.json)
-  }
+  const query = options.query?.toString()
+  const pathWithQuery = query ? `${options.path}?${query}` : options.path
 
   let text: string
+  let status = 0
   try {
-    const response = await fetch(`${config.baseUrl}${options.path}`, {
+    const response = await fetch(`${config.baseUrl}${pathWithQuery}`, {
       method: options.method,
       headers,
-      body,
+      body: options.json !== undefined ? JSON.stringify(options.json) : undefined,
       signal: controller.signal,
     })
-    if (!response.ok) {
-      const snippet = describeBodySnippet(await response.text().catch(() => ''))
-      throw new OpenVikingError(
-        'openviking_http_error',
-        `OpenViking ${options.method} ${options.path} failed with HTTP ${response.status}${snippet}`,
-        response.status,
-      )
-    }
+    status = response.status
     text = await response.text()
   } catch (error) {
-    if (error instanceof OpenVikingError) throw error
     if (controller.signal.aborted) {
       throw new OpenVikingError(
         'openviking_timeout',
-        `OpenViking ${options.method} ${options.path} timed out after ${options.timeoutMs}ms`,
+        `OpenViking ${options.method} ${pathWithQuery} timed out after ${options.timeoutMs}ms`,
       )
     }
     throw new OpenVikingError(
       'openviking_network_error',
-      `OpenViking ${options.method} ${options.path} failed: ${error instanceof Error ? error.message : String(error)}`,
+      `OpenViking ${options.method} ${pathWithQuery} failed: ${error instanceof Error ? error.message : String(error)}`,
     )
   } finally {
     clearTimeout(timer)
@@ -227,124 +237,545 @@ async function openVikingRequest<T>(config: OpenVikingConfig, options: RequestOp
   try {
     payload = JSON.parse(text) as OpenVikingEnvelope<T>
   } catch {
+    // A non-JSON body on a non-2xx status is a transport failure first —
+    // a gateway HTML error page must not read as a protocol violation.
+    if (status < 200 || status >= 300) {
+      throw new OpenVikingError(
+        'openviking_http_error',
+        `OpenViking ${options.method} ${pathWithQuery} failed with HTTP ${status}${describeBodySnippet(text)}`,
+        status,
+      )
+    }
     throw new OpenVikingError(
       'openviking_invalid_response',
-      `OpenViking ${options.method} ${options.path} returned non-JSON body: ${describeBodySnippet(text)}`,
+      `OpenViking ${options.method} ${pathWithQuery} returned non-JSON body: ${describeBodySnippet(text)}`,
+    )
+  }
+
+  if (status < 200 || status >= 300) {
+    const described = describePayloadError(payload ?? {})
+    throw new OpenVikingError(
+      'openviking_http_error',
+      `OpenViking ${options.method} ${pathWithQuery} failed with HTTP ${status}: ${described.message}`,
+      status,
+      described.serverCode,
+      described.detail,
     )
   }
   if (!payload || payload.status !== 'ok') {
+    const described = describePayloadError(payload ?? {})
     throw new OpenVikingError(
       'openviking_invalid_response',
-      `OpenViking ${options.method} ${options.path} returned status=${String(payload?.status ?? 'none')}: ${describePayloadError(payload ?? {})}`,
+      `OpenViking ${options.method} ${pathWithQuery} returned status=${String(payload?.status ?? 'none')}: ${described.message}`,
+      status,
+      described.serverCode,
+      described.detail,
     )
   }
   return payload.result as T
 }
 
-/** `POST /api/v1/resources/temp_upload` — the local instance refuses host paths, so content always enters through here. */
-export async function openVikingTempUpload(
-  config: OpenVikingConfig,
-  input: OpenVikingTempUploadInput,
-): Promise<OpenVikingTempFile> {
-  const form = new FormData()
-  form.append('file', new Blob([input.content], { type: input.contentType ?? 'text/markdown' }), input.filename)
-  const result = await openVikingRequest<{ temp_file_id?: unknown }>(config, {
-    method: 'POST',
-    path: '/api/v1/resources/temp_upload',
-    form,
-    timeoutMs: timeouts.syncMs,
-  })
-  if (typeof result?.temp_file_id !== 'string' || result.temp_file_id.length === 0) {
-    throw new OpenVikingError('openviking_invalid_response', 'OpenViking temp_upload returned no temp_file_id')
-  }
-  return { tempFileId: result.temp_file_id }
+/**
+ * Normalizes both tag shapes OpenViking may return: `["k=v"]` strings (the
+ * verified wire shape) or a plain object. Duplicate keys surface in
+ * `duplicateTagKeys` instead of silently collapsing — every tag Polo writes
+ * is single-valued by construction, so a duplicated key is an out-of-band
+ * write and the store's STRICT parsers reject such nodes outright (brief D5).
+ */
+export function normalizeOpenVikingTags(tags: unknown): Record<string, string> {
+  return splitOpenVikingTags(tags).tags
 }
 
-export async function openVikingAddResource(
-  config: OpenVikingConfig,
-  input: OpenVikingAddResourceInput,
-): Promise<OpenVikingAddResourceResult> {
-  const result = await openVikingRequest<{ root_uri?: unknown; status?: unknown }>(config, {
-    method: 'POST',
-    path: '/api/v1/resources',
-    json: {
-      temp_file_id: input.tempFileId,
-      to: input.to,
-      ...(input.createParent !== undefined ? { create_parent: input.createParent } : {}),
-      ...(input.wait !== undefined ? { wait: input.wait } : {}),
-      ...(input.processingMode !== undefined ? { processing_mode: input.processingMode } : {}),
-      ...(input.tags ? { tags: input.tags } : {}),
-      ...(input.reason ? { reason: input.reason } : {}),
-    },
-    timeoutMs: timeouts.syncMs,
-  })
-  return {
-    rootUri: typeof result?.root_uri === 'string' ? result.root_uri : null,
-    status: typeof result?.status === 'string' ? result.status : null,
-  }
-}
-
-/** Normalizes both tag shapes OpenViking may return: `["k=v"]` strings or a plain object. */
-function normalizeTags(tags: unknown): Record<string, string> {
+/** The normalized tag object PLUS the keys that arrived more than once. */
+function splitOpenVikingTags(tags: unknown): { tags: Record<string, string>; duplicateKeys: string[] } {
+  const parsed: Record<string, string> = {}
+  const duplicates = new Set<string>()
   if (Array.isArray(tags)) {
-    const parsed: Record<string, string> = {}
     for (const entry of tags) {
       if (typeof entry !== 'string') continue
       const separator = entry.indexOf('=')
       if (separator <= 0) continue
-      parsed[entry.slice(0, separator)] = entry.slice(separator + 1)
+      const key = entry.slice(0, separator)
+      if (key in parsed) duplicates.add(key)
+      parsed[key] = entry.slice(separator + 1)
     }
-    return parsed
-  }
-  if (tags && typeof tags === 'object') {
-    const parsed: Record<string, string> = {}
+  } else if (tags && typeof tags === 'object') {
     for (const [key, value] of Object.entries(tags as Record<string, unknown>)) {
       if (typeof value === 'string') parsed[key] = value
     }
-    return parsed
   }
-  return {}
+  return { tags: parsed, duplicateKeys: [...duplicates] }
 }
 
-export async function openVikingFind(config: OpenVikingConfig, input: OpenVikingFindInput): Promise<OpenVikingSearchResource[]> {
-  const result = await openVikingRequest<{ resources?: unknown }>(config, {
+// ---------------------------------------------------------------------------
+// Provisioning plane — ROOT key only (403 on the data plane, verified).
+// ---------------------------------------------------------------------------
+
+export interface OpenVikingAccount {
+  accountId: string
+  createdAt: string | null
+  status: string | null
+  userCount: number | null
+}
+
+/** `POST /api/v1/admin/accounts` — creates the account AND its first admin user. */
+export async function openVikingCreateAccount(
+  config: OpenVikingConfig,
+  input: { accountId: string; adminUserId: string },
+): Promise<{ accountId: string; adminUserId: string; userKey: string }> {
+  const result = await openVikingRequest<Record<string, unknown>>(config, {
+    method: 'POST',
+    path: '/api/v1/admin/accounts',
+    json: { account_id: input.accountId, admin_user_id: input.adminUserId },
+    apiKey: config.rootApiKey,
+    timeoutMs: timeouts.provisionMs,
+  })
+  const userKey = result?.user_key ?? result?.apiKey
+  if (typeof input.accountId !== 'string' || typeof userKey !== 'string' || userKey.length === 0) {
+    throw new OpenVikingError(
+      'openviking_invalid_response',
+      'OpenViking account creation returned no usable user key',
+    )
+  }
+  const adminUserId = typeof result?.admin_user_id === 'string' ? result.admin_user_id : input.adminUserId
+  return { accountId: input.accountId, adminUserId, userKey }
+}
+
+/** `GET /api/v1/admin/accounts` — the account list (verified list shape). */
+export async function openVikingListAccounts(config: OpenVikingConfig): Promise<OpenVikingAccount[]> {
+  const result = await openVikingRequest<unknown>(config, {
+    method: 'GET',
+    path: '/api/v1/admin/accounts',
+    apiKey: config.rootApiKey,
+    timeoutMs: timeouts.provisionMs,
+  })
+  if (!Array.isArray(result)) {
+    throw new OpenVikingError('openviking_invalid_response', 'OpenViking account list returned no array')
+  }
+  const accounts: OpenVikingAccount[] = []
+  for (const entry of result) {
+    const candidate = entry as { account_id?: unknown; created_at?: unknown; status?: unknown; user_count?: unknown }
+    if (typeof candidate?.account_id !== 'string' || candidate.account_id.length === 0) continue
+    accounts.push({
+      accountId: candidate.account_id,
+      createdAt: typeof candidate.created_at === 'string' ? candidate.created_at : null,
+      status: typeof candidate.status === 'string' ? candidate.status : null,
+      userCount: typeof candidate.user_count === 'number' ? candidate.user_count : null,
+    })
+  }
+  return accounts
+}
+
+export interface OpenVikingUser {
+  userId: string
+  username: string | null
+  role: string | null
+  /** The user key, present only when `include_credentials=true` was honored. */
+  userKey: string | null
+}
+
+/**
+ * `GET /api/v1/admin/accounts/{id}/users?include_credentials=true` — the
+ * credential-recovery read. Reading keys has NO side effects: unlike
+ * `POST .../users/{id}/key` (which re-signs and invalidates the old key), a
+ * read is safe to race from several devices (brief D2).
+ */
+export async function openVikingListUsers(
+  config: OpenVikingConfig,
+  accountId: string,
+): Promise<OpenVikingUser[]> {
+  const result = await openVikingRequest<unknown>(config, {
+    method: 'GET',
+    path: `/api/v1/admin/accounts/${encodeURIComponent(accountId)}/users`,
+    query: new URLSearchParams({ include_credentials: 'true' }),
+    apiKey: config.rootApiKey,
+    timeoutMs: timeouts.provisionMs,
+  })
+  // The list may arrive bare or wrapped in `{users: [...]}` — accept both.
+  const rows = Array.isArray(result)
+    ? result
+    : Array.isArray((result as { users?: unknown } | null)?.users)
+      ? (result as { users: unknown[] }).users
+      : []
+  const users: OpenVikingUser[] = []
+  for (const row of rows) {
+    const candidate = row as {
+      user_id?: unknown
+      id?: unknown
+      username?: unknown
+      role?: unknown
+      user_key?: unknown
+      apiKey?: unknown
+    }
+    const userId = candidate?.user_id ?? candidate?.id
+    if (typeof userId !== 'string' || userId.length === 0) continue
+    const userKey = candidate?.user_key ?? candidate?.apiKey
+    users.push({
+      userId,
+      username: typeof candidate?.username === 'string' ? candidate.username : null,
+      role: typeof candidate?.role === 'string' ? candidate.role : null,
+      userKey: typeof userKey === 'string' && userKey.length > 0 ? userKey : null,
+    })
+  }
+  return users
+}
+
+// ---------------------------------------------------------------------------
+// Data plane — the tenant's user key (the root key is refused here).
+// ---------------------------------------------------------------------------
+
+/** The credential context every data-plane call is bound to. */
+export interface OpenVikingTenantAuth {
+  accountId: string
+  /** The account's service-user key (the data-plane bearer). */
+  userKey: string
+}
+
+function tenantKey(auth: OpenVikingTenantAuth): string {
+  return auth.userKey
+}
+
+/** `POST /api/v1/fs/mkdir` — creates ONE directory level (no recursion). */
+export async function openVikingMkdir(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  input: { uri: string; description?: string },
+): Promise<void> {
+  await openVikingRequest<unknown>(config, {
+    method: 'POST',
+    path: '/api/v1/fs/mkdir',
+    json: { uri: input.uri, ...(input.description !== undefined ? { description: input.description } : {}) },
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.writeMs,
+  })
+}
+
+/** `POST /api/v1/fs/mv` — the target's parent must exist; an existing target is OVERWRITTEN. */
+export async function openVikingMv(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  input: { fromUri: string; toUri: string },
+): Promise<void> {
+  await openVikingRequest<unknown>(config, {
+    method: 'POST',
+    path: '/api/v1/fs/mv',
+    json: { from_uri: input.fromUri, to_uri: input.toUri },
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.writeMs,
+  })
+}
+
+/** `DELETE /api/v1/fs?uri=` — a hard remove; the KB only ever recycles, never deletes. */
+export async function openVikingRemove(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  input: { uri: string; recursive?: boolean },
+): Promise<void> {
+  await openVikingRequest<unknown>(config, {
+    method: 'DELETE',
+    path: '/api/v1/fs',
+    query: new URLSearchParams({ uri: input.uri, recursive: String(input.recursive ?? false) }),
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.writeMs,
+  })
+}
+
+/**
+ * `POST /api/v1/content/write` — the document upload. `tag_mode: 'replace'`
+ * makes the call idempotent: the same URI + content + tags can be retried
+ * after a timeout without duplicating or corrupting state (brief D4).
+ */
+export async function openVikingWriteContent(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  input: { uri: string; content: string; tags?: string[]; processingMode?: OpenVikingProcessingMode },
+): Promise<void> {
+  await openVikingRequest<unknown>(config, {
+    method: 'POST',
+    path: '/api/v1/content/write',
+    json: {
+      uri: input.uri,
+      content: input.content,
+      tag_mode: 'replace',
+      ...(input.tags ? { tags: input.tags } : {}),
+      processing_mode: input.processingMode ?? config.processingMode,
+    },
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.writeMs,
+  })
+}
+
+/**
+ * `GET /api/v1/content/read` — the document body (L2). Missing content reads
+ * as `null` so callers can distinguish "empty document" from "no document".
+ */
+export async function openVikingReadContent(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  uri: string,
+): Promise<string | null> {
+  const result = await openVikingRequest<unknown>(config, {
+    method: 'GET',
+    path: '/api/v1/content/read',
+    query: new URLSearchParams({ uri }),
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.readMs,
+  })
+  const content = (result as { content?: unknown } | null)?.content
+  if (typeof content === 'string') return content
+  if (content === null || content === undefined) {
+    // Some shapes put the text directly in `result`.
+    return typeof result === 'string' ? result : null
+  }
+  return null
+}
+
+/** One node as `fs/ls` / `fs/attrs` report it: uri, tags and the mtime. */
+export interface OpenVikingNode {
+  uri: string
+  tags: Record<string, string>
+  /** Keys that arrived MORE THAN once (strict parsers reject such nodes). */
+  duplicateTagKeys: string[]
+  mtime: string | null
+  /** Directory flag when the listing carries it (files may omit it). */
+  isDirectory: boolean | null
+}
+
+function normalizeNode(raw: {
+  uri?: unknown
+  path?: unknown
+  tags?: unknown
+  mtime?: unknown
+  modified_at?: unknown
+  type?: unknown
+  is_dir?: unknown
+}): OpenVikingNode | null {
+  const uri = raw.uri ?? raw.path
+  if (typeof uri !== 'string' || uri.length === 0) return null
+  const type = raw.type
+  const isDirectory = typeof raw.is_dir === 'boolean'
+    ? raw.is_dir
+    : type === 'dir' || type === 'directory'
+      ? true
+      : type === 'file'
+        ? false
+        : null
+  const mtime = typeof raw.mtime === 'string'
+    ? raw.mtime
+    : typeof raw.modified_at === 'string'
+      ? raw.modified_at
+      : null
+  const { tags, duplicateKeys } = splitOpenVikingTags(raw.tags)
+  return { uri, tags, duplicateTagKeys: duplicateKeys, mtime, isDirectory }
+}
+
+/**
+ * `GET /api/v1/fs/attrs?uri=` — ONE node's metadata. The verified shape is
+ * `{attrs: {tags: [...]}}`; the tag list and any mtime are normalized.
+ */
+export async function openVikingAttrs(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  uri: string,
+): Promise<OpenVikingNode | null> {
+  const result = await openVikingRequest<unknown>(config, {
+    method: 'GET',
+    path: '/api/v1/fs/attrs',
+    query: new URLSearchParams({ uri }),
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.readMs,
+  })
+  const attrs = (result as { attrs?: unknown } | null)?.attrs
+  const source = (attrs ?? result) as {
+    uri?: unknown
+    path?: unknown
+    tags?: unknown
+    mtime?: unknown
+    modified_at?: unknown
+    type?: unknown
+    is_dir?: unknown
+  } | null
+  if (!source || typeof source !== 'object') return null
+  return normalizeNode(source)
+}
+
+/**
+ * `POST /api/v1/fs/attrs/set_tags` — REPLACES the node's retrieval tags by
+ * default (`mode: 'replace'`). This is the KB's state-mutation primitive:
+ * document status travels in tags, and every write sends the FULL tag set so
+ * a retry can never half-apply a transition (brief D4).
+ */
+export async function openVikingSetTags(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  input: { uri: string; tags: string[]; mode?: 'replace' | 'append' | 'clear' },
+): Promise<void> {
+  await openVikingRequest<unknown>(config, {
+    method: 'POST',
+    path: '/api/v1/fs/attrs/set_tags',
+    json: { uri: input.uri, tags: input.tags, mode: input.mode ?? 'replace' },
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.writeMs,
+  })
+}
+
+/** One `fs/ls` page: the nodes on this page and whether more follow. */
+export interface OpenVikingListPage {
+  entries: OpenVikingNode[]
+  hasMore: boolean
+}
+
+/**
+ * `GET /api/v1/fs/ls?uri&include_tags=true&recursive=true&node_limit&offset`
+ * — the recursive one-shot tree walk the collection listing and the status
+ * counts are built from. Dot-directories ARE listed; dotfiles inside them are
+ * hidden by the server unless `show_all_hidden` — the recycle-bin semantics
+ * the KB relies on (brief §1.7).
+ */
+export async function openVikingLs(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  input: {
+    uri: string
+    recursive?: boolean
+    nodeLimit?: number
+    offset?: number
+    /** Server-side `k=v` tag filter (all tags must match). */
+    tags?: string[]
+  },
+): Promise<OpenVikingListPage> {
+  const query = new URLSearchParams({ uri: input.uri, include_tags: 'true' })
+  if (input.recursive) query.set('recursive', 'true')
+  if (input.nodeLimit !== undefined) query.set('node_limit', String(input.nodeLimit))
+  if (input.offset !== undefined) query.set('offset', String(input.offset))
+  for (const tag of input.tags ?? []) query.append('tags', tag)
+  const result = await openVikingRequest<unknown>(config, {
+    method: 'GET',
+    path: '/api/v1/fs/ls',
+    query,
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.readMs,
+  })
+  const record = (result ?? {}) as {
+    entries?: unknown
+    nodes?: unknown
+    children?: unknown
+    has_more?: unknown
+  }
+  const rows = Array.isArray(record.entries)
+    ? record.entries
+    : Array.isArray(record.nodes)
+      ? record.nodes
+      : Array.isArray(record.children)
+        ? record.children
+        : Array.isArray(result)
+          ? (result as unknown[])
+          : []
+  const entries: OpenVikingNode[] = []
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const node = normalizeNode(row as Parameters<typeof normalizeNode>[0])
+    if (node) entries.push(node)
+  }
+  return { entries, hasMore: record.has_more === true }
+}
+
+/** One search hit from `search/find`: uri, score, tags and (opt-in) content. */
+export interface OpenVikingFindResource {
+  uri: string
+  score: number
+  tags: Record<string, string>
+  /** Keys that arrived MORE THAN once (strict parsers reject such hits). */
+  duplicateTagKeys: string[]
+  /** Inlined body — present when `read_content: true` was requested. */
+  content: string | null
+}
+
+/**
+ * `POST /api/v1/search/find` — the ONLY retrieval entry point. `target_uri`
+ * accepts an ARRAY (server-side collection scoping, brief D5), `tags` is the
+ * server-side status filter and `read_content: true` inlines the hit bodies
+ * so the send-time snippet budget is one call, not one per hit (brief D5).
+ */
+export async function openVikingFind(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  input: {
+    query: string
+    targetUri: string | string[]
+    tags?: string[]
+    limit: number
+    readContent?: boolean
+  },
+): Promise<OpenVikingFindResource[]> {
+  const result = await openVikingRequest<Record<string, unknown>>(config, {
     method: 'POST',
     path: '/api/v1/search/find',
     json: {
       query: input.query,
       target_uri: input.targetUri,
-      context_type: input.contextTypes ?? ['resource'],
+      ...(input.tags ? { tags: input.tags } : {}),
       limit: input.limit,
+      ...(input.readContent !== undefined ? { read_content: input.readContent } : {}),
     },
-    timeoutMs: timeouts.searchMs,
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.findMs,
   })
   if (!Array.isArray(result?.resources)) {
     throw new OpenVikingError('openviking_invalid_response', 'OpenViking find returned no resources array')
   }
-  const resources: OpenVikingSearchResource[] = []
+  const resources: OpenVikingFindResource[] = []
   for (const entry of result.resources) {
-    const candidate = entry as { uri?: unknown; score?: unknown; tags?: unknown; abstract?: unknown }
+    const candidate = entry as { uri?: unknown; score?: unknown; tags?: unknown; content?: unknown }
     if (typeof candidate?.uri !== 'string' || candidate.uri.length === 0) continue
     const score = typeof candidate.score === 'number' ? candidate.score : Number(candidate.score)
     if (!Number.isFinite(score)) continue
+    const { tags, duplicateKeys } = splitOpenVikingTags(candidate.tags)
     resources.push({
       uri: candidate.uri,
       score,
-      tags: normalizeTags(candidate.tags),
-      abstract: typeof candidate.abstract === 'string' ? candidate.abstract : null,
+      tags,
+      duplicateTagKeys: duplicateKeys,
+      content: typeof candidate.content === 'string' ? candidate.content : null,
     })
   }
   return resources
 }
 
-export async function openVikingDelete(
+/**
+ * `POST /api/v1/search/glob` — by-name resolution (`docId → URI` in one call,
+ * brief D4). The scope field is `uri` per the instance's openapi.json (the
+ * brief's `target_uri` naming does not exist on this endpoint).
+ */
+export async function openVikingGlob(
   config: OpenVikingConfig,
-  input: { uri: string; recursive?: boolean },
-): Promise<void> {
-  const query = new URLSearchParams({ uri: input.uri, recursive: String(input.recursive ?? false) })
-  await openVikingRequest<unknown>(config, {
-    method: 'DELETE',
-    path: `/api/v1/fs?${query.toString()}`,
-    timeoutMs: timeouts.syncMs,
+  auth: OpenVikingTenantAuth,
+  input: { pattern: string; uri: string; nodeLimit?: number },
+): Promise<string[]> {
+  const result = await openVikingRequest<unknown>(config, {
+    method: 'POST',
+    path: '/api/v1/search/glob',
+    json: {
+      pattern: input.pattern,
+      uri: input.uri,
+      ...(input.nodeLimit !== undefined ? { node_limit: input.nodeLimit } : {}),
+    },
+    apiKey: tenantKey(auth),
+    timeoutMs: timeouts.readMs,
   })
+  const record = (result ?? {}) as { matches?: unknown; paths?: unknown }
+  const rows = Array.isArray(record.matches)
+    ? record.matches
+    : Array.isArray(record.paths)
+      ? record.paths
+      : []
+  const matches: string[] = []
+  for (const row of rows) {
+    if (typeof row === 'string' && row.length > 0) matches.push(row)
+    else if (row && typeof row === 'object') {
+      const uri = (row as { uri?: unknown }).uri
+      if (typeof uri === 'string' && uri.length > 0) matches.push(uri)
+    }
+  }
+  return matches
 }

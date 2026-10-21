@@ -34,7 +34,9 @@ export type CredentialType =
   | 'source_apikey'      // API keys
   | 'source_basic'       // Basic auth (base64 encoded user:pass)
   // Messaging gateway credentials (keyed by workspaceId + platform)
-  | 'messaging_bearer';  // Platform tokens (e.g., Telegram bot token)
+  | 'messaging_bearer'   // Platform tokens (e.g., Telegram bot token)
+  // Knowledge-base tenant credentials (keyed by ProductSpace id)
+  | 'kb_openviking_tenant'; // Service-user key for the KB's remote storage tenant
 
 /** Valid credential types for validation */
 export const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
@@ -51,6 +53,7 @@ export const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
   'source_apikey',
   'source_basic',
   'messaging_bearer',
+  'kb_openviking_tenant',
 ] as const;
 
 /** Check if a string is a valid CredentialType */
@@ -159,6 +162,11 @@ const MESSAGING_CREDENTIAL_TYPES = [
   'messaging_bearer',
 ] as const;
 
+/** Knowledge-base tenant credential types (keyed by ProductSpace id) */
+const KB_TENANT_CREDENTIAL_TYPES = [
+  'kb_openviking_tenant',
+] as const;
+
 /** Check if type is a messaging credential */
 function isMessagingCredential(type: CredentialType): boolean {
   return (MESSAGING_CREDENTIAL_TYPES as readonly string[]).includes(type);
@@ -180,6 +188,11 @@ function isSourceCredential(type: CredentialType): boolean {
 /** Check if type is an LLM connection credential */
 function isLlmCredential(type: CredentialType): boolean {
   return (LLM_CREDENTIAL_TYPES as readonly string[]).includes(type);
+}
+
+/** Check if type is a knowledge-base tenant credential */
+function isKbTenantCredential(type: CredentialType): boolean {
+  return (KB_TENANT_CREDENTIAL_TYPES as readonly string[]).includes(type);
 }
 
 /** Convert CredentialId to credential store account string */
@@ -213,6 +226,14 @@ export function credentialIdToAccount(id: CredentialId): string {
   // messaging_bearer::{workspaceId}::{platform}
   if (isMessagingCredential(id.type) && id.workspaceId && id.name) {
     parts.push(id.workspaceId);
+    parts.push(id.name);
+    return parts.join(CREDENTIAL_DELIMITER);
+  }
+
+  // Knowledge-base tenant format (no workspace segment — the tenant lives on
+  // the ProductSpace, which outlives any single Workspace):
+  // kb_openviking_tenant::{productSpaceId}
+  if (isKbTenantCredential(id.type) && id.name) {
     parts.push(id.name);
     return parts.join(CREDENTIAL_DELIMITER);
   }
@@ -283,6 +304,12 @@ export function accountToCredentialId(account: string): CredentialId | null {
   // messaging_bearer::{workspaceId}::{platform}
   if (isMessagingCredential(type) && parts.length === 3) {
     return { type, workspaceId: parts[1], name: parts[2] };
+  }
+
+  // Knowledge-base tenant format:
+  // kb_openviking_tenant::{productSpaceId}
+  if (isKbTenantCredential(type) && parts.length === 2) {
+    return { type, name: parts[1] };
   }
 
   if (parts.length === 2 && parts[1] === 'global') {
