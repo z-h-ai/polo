@@ -15,7 +15,9 @@ import {
   KB_SNIPPET_CONTEXT_CHARS,
 } from '@polo-ai/shared/protocol'
 import {
+  isManagedOpenViking,
   isOpenVikingAlreadyExists,
+  isOpenVikingNotFound,
   OpenVikingError,
   openVikingAttrs,
   openVikingFind,
@@ -32,6 +34,7 @@ import {
   type OpenVikingNode,
   type OpenVikingTenantAuth,
 } from './openviking-client'
+import { asciiSlug, kbTenantSpaceHash, KB_TENANT_ENTERPRISE_TAG, KB_TENANT_SPACE_TAG } from './tenant'
 import { isTrustedSessionScopeTokenCurrent, type TrustedSessionScopeToken } from '../handlers/rpc/trusted-product-space-account'
 import { KB_SERVICE_UNAVAILABLE_MESSAGE, KbStoreError } from './errors'
 
@@ -128,12 +131,37 @@ const KB_DIR = '.polo-kb'
 const KB_AUDIT_DIR = 'audit'
 const KB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/
 
-/** The account-relative root every collection lives under. */
+/**
+ * The account-relative root of the OSS multi-tenant mode — every collection
+ * lives directly under the account's resource root (unchanged from v3.1).
+ * The MANAGED-library mode (brief v4 D-A) nests each space under its own
+ * directory derived by `kbSpaceRootUri` instead.
+ */
 export const KB_SPACE_ROOT_URI = 'viking://resources/'
+
+/**
+ * The space root every collection/document/recycle/audit URI derives from
+ * (brief v4 D-A). OSS multi-tenant mode keeps the account root verbatim; the
+ * managed mode names one directory per space —
+ * `viking://resources/<asciiSlug(spaceName,≤24,'space')>-<hash8(spaceId)>/` —
+ * reusing the D1 derivation WITHOUT the `polo-` account prefix. Determinism
+ * (same space → same directory on every device) is what lets two devices
+ * share the space's data inside the ONE managed library without a registry.
+ */
+export function kbSpaceRootUri(space: Pick<KbOpenVikingSpace, 'config' | 'binding' | 'spaceName'>): string {
+  if (!isManagedOpenViking(space.config)) return KB_SPACE_ROOT_URI
+  return `viking://resources/${asciiSlug(space.spaceName, 24, 'space')}-${kbTenantSpaceHash(space.binding.productSpaceId)}/`
+}
+
 /** Soft-delete target: a hidden dot directory, out of every listing (§1.7). */
-const KB_RECYCLE_DIR_URI = `${KB_SPACE_ROOT_URI}.recycle`
+function kbRecycleDirUri(space: KbOpenVikingSpace): string {
+  return `${kbSpaceRootUri(space)}.recycle`
+}
+
 /** Best-effort transition log: hidden, one UUID file per transition (D4). */
-const KB_TRANSITIONS_DIR_URI = `${KB_SPACE_ROOT_URI}.audit/transitions`
+function kbTransitionsDirUri(space: KbOpenVikingSpace): string {
+  return `${kbSpaceRootUri(space)}.audit/transitions`
+}
 
 function assertKbId(kind: string, id: string): string {
   if (!KB_ID_PATTERN.test(id)) {
@@ -171,23 +199,29 @@ export function kbPathSegment(name: string): string {
   return cleaned || 'untitled'
 }
 
-export function kbCollectionUri(collectionName: string, collectionId: string): string {
-  return `${KB_SPACE_ROOT_URI}${kbPathSegment(collectionName)}-${collectionId}`
+/**
+ * The collection directory's URI under the given space root (defaults to the
+ * OSS account root, which keeps the two-argument form the v3.1 callers and
+ * tests use). Store callers pass `kbSpaceRootUri(space)` so a managed-mode
+ * space nests its collections under the space's own directory (brief v4 D-A).
+ */
+export function kbCollectionUri(collectionName: string, collectionId: string, spaceRootUri: string = KB_SPACE_ROOT_URI): string {
+  return `${spaceRootUri}${kbPathSegment(collectionName)}-${collectionId}`
 }
 
 export function kbDocumentUri(collectionUri: string, title: string, docId: string): string {
   return `${collectionUri}/${kbPathSegment(title)}-${docId}.md`
 }
 
-/** True for URIs inside the hidden recycle/transition subtrees. */
-function isHiddenKbUri(uri: string): boolean {
-  return uri.startsWith(`${KB_RECYCLE_DIR_URI}/`) || uri.startsWith(`${KB_TRANSITIONS_DIR_URI}/`)
+/** True for URIs inside the hidden recycle/transition subtrees of THIS space. */
+function isHiddenKbUri(space: KbOpenVikingSpace, uri: string): boolean {
+  return uri.startsWith(`${kbRecycleDirUri(space)}/`) || uri.startsWith(`${kbTransitionsDirUri(space)}/`)
 }
 
 /** The `.recycle/` file name a document moves under (keeps its unique suffix). */
-function recycleTargetUri(documentUri: string): string {
+function recycleTargetUri(space: KbOpenVikingSpace, documentUri: string): string {
   const fileName = documentUri.slice(documentUri.lastIndexOf('/') + 1)
-  return `${KB_RECYCLE_DIR_URI}/${fileName}`
+  return `${kbRecycleDirUri(space)}/${fileName}`
 }
 
 // ---------------------------------------------------------------------------
@@ -923,6 +957,65 @@ async function remoteMv(space: KbOpenVikingSpace, fromUri: string, toUri: string
   })
 }
 
+// ---------------------------------------------------------------------------
+// Managed-library space root (brief v4 D-A)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-process record of the managed space roots already created AND verified
+ * in this run. The ensure is idempotent end to end (mkdir tolerates
+ * `ALREADY_EXISTS`, the verified tag write re-reads before it accepts), so
+ * the set is a cost guard, not a correctness device — a second process (or a
+ * wiped tree) simply runs the same idempotent path again.
+ */
+const managedSpaceRootsEnsured = new Set<string>()
+
+/** Test seam: forget which managed space roots this process already ensured. */
+export function resetKbManagedSpaceRootsForTests(): void {
+  managedSpaceRootsEnsured.clear()
+}
+
+/**
+ * Creates the managed mode's space-root directory on first use and pins its
+ * ownership marker (brief v4 D-A). The marker (`polo_space=`/`polo_enterprise=`,
+ * hex-carried past the server's tag lower-casing exactly like the tenant's
+ * account-root marker) is for IDENTIFICATION and display only — within one
+ * managed library the directory name already carries the full hash8, so the
+ * marker never acts as the cross-account fail-closed gate the tenant's
+ * account-root marker is.
+ *
+ * The whole write rides the SAME protected path as every directory write:
+ * audited intent/result, the await-spanning scope token and the live
+ * writability gate revalidated per attempt, and the E1 verified loop (wait
+ * for the fresh directory's ingestion pipeline → write → read back → poll).
+ * A no-op in the OSS mode (the account root is provisioned by `tenant.ts`).
+ *
+ * READ paths never call this — creation happens on the management/write
+ * paths only (brief D2: a read can never trigger a remote write). A read
+ * that arrives before any write sees the missing root as an EMPTY space (the
+ * walk maps its 404 to an empty listing).
+ */
+export async function ensureKbSpaceRoot(space: KbOpenVikingSpace): Promise<void> {
+  if (!isManagedOpenViking(space.config)) return
+  const root = kbSpaceRootUri(space)
+  const cacheKey = `${space.binding.productSpaceId} ${root}`
+  if (managedSpaceRootsEnsured.has(cacheKey)) return
+  await remoteMkdir(space, root)
+  const expectedSpaceTag = kbTagHexEncode(space.binding.productSpaceId)
+  const expectedEnterpriseTag = kbTagHexEncode(space.binding.enterpriseId)
+  await remoteSetDirectoryTagsVerified(
+    space,
+    root,
+    [
+      `${KB_TENANT_SPACE_TAG}=${expectedSpaceTag}`,
+      `${KB_TENANT_ENTERPRISE_TAG}=${expectedEnterpriseTag}`,
+    ],
+    tags => tags[KB_TENANT_SPACE_TAG] === expectedSpaceTag
+      && tags[KB_TENANT_ENTERPRISE_TAG] === expectedEnterpriseTag,
+  )
+  managedSpaceRootsEnsured.add(cacheKey)
+}
+
 /** Reads ONE node's attrs; a missing node reads as `null`. */
 async function remoteAttrs(space: KbOpenVikingSpace, uri: string): Promise<OpenVikingNode | null> {
   try {
@@ -991,6 +1084,9 @@ async function walkKbTree(space: KbOpenVikingSpace, budget?: KbStoreBudget): Pro
   // be reported as a tenant-size anomaly; only walking the page CAP does.
   let ranOutOfBudget = false
   let truncated = false
+  // The managed mode's space root (the OSS mode lists the account root,
+  // which always exists).
+  const spaceRootUri = kbSpaceRootUri(space)
   for (let page = 0; page < KB_LS_MAX_PAGES; page += 1) {
     if (budget?.deadline !== undefined && Date.now() >= budget.deadline) {
       ranOutOfBudget = true
@@ -999,18 +1095,26 @@ async function walkKbTree(space: KbOpenVikingSpace, budget?: KbStoreBudget): Pro
     let result
     try {
       result = await openVikingLs(space.config, space.auth, {
-        uri: KB_SPACE_ROOT_URI,
+        uri: spaceRootUri,
         recursive: true,
         nodeLimit: KB_LS_PAGE_NODES,
         offset,
       })
     } catch (error) {
+      // Managed mode, missing space root: the directory is created on first
+      // WRITE, never on a read path (brief v4 D-A / D2), so a listing that
+      // arrives before any write is an EMPTY space — exactly what the OSS
+      // mode reads for a space that was never provisioned on this device.
+      // Only the clean not-found degrades; every other failure stays an error.
+      if (isManagedOpenViking(space.config) && isOpenVikingNotFound(error)) {
+        return { nodes, truncated: false }
+      }
       throw toKbError('ls', error)
     }
     for (const entry of result.entries) {
       if (seen.has(entry.uri)) continue
       seen.add(entry.uri)
-      if (!isHiddenKbUri(entry.uri)) nodes.push(entry)
+      if (!isHiddenKbUri(space, entry.uri)) nodes.push(entry)
     }
     if (!result.hasMore) return { nodes, truncated: false }
     // A page that advances by nothing can never reach `has_more === false` —
@@ -1060,7 +1164,7 @@ function emptyCounts(): KbCollection['documentCounts'] {
   return { draft: 0, in_review: 0, published: 0, rejected: 0 }
 }
 
-function buildKbIndex(nodes: OpenVikingNode[], truncated: boolean): KbIndex {
+function buildKbIndex(nodes: OpenVikingNode[], truncated: boolean, spaceRootUri: string): KbIndex {
   const collections = new Map<string, KbCollectionIndexEntry>()
   const documents = new Map<string, KbDocumentIndexEntry>()
   for (const node of nodes) {
@@ -1086,7 +1190,7 @@ function buildKbIndex(nodes: OpenVikingNode[], truncated: boolean): KbIndex {
       const createdAt = readTagTimestamp(raw.tags.created)
       if (createdAt) entry.createdAt = createdAt
       if (node.mtime) entry.updatedAt = node.mtime
-      if (!entry.uri && node.uri.startsWith(KB_SPACE_ROOT_URI)) entry.uri = node.uri
+      if (!entry.uri && node.uri.startsWith(spaceRootUri)) entry.uri = node.uri
       continue
     }
     // A document: strict parsing — unknown shapes never reach the views.
@@ -1132,7 +1236,7 @@ export async function listCollections(
 export async function loadKbIndex(space: KbOpenVikingSpace, budget?: KbStoreBudget): Promise<KbIndex> {
   if (budget?.index) return budget.index
   const walk = await walkKbTree(space, budget)
-  return buildKbIndex(walk.nodes, walk.truncated)
+  return buildKbIndex(walk.nodes, walk.truncated, kbSpaceRootUri(space))
 }
 
 export async function listDocuments(
@@ -1192,13 +1296,16 @@ export async function createCollection(
   space: KbOpenVikingSpace,
   input: { name: string; description: string },
 ): Promise<KbCollection> {
+  // Managed mode: the space-root directory must exist before the collection
+  // is mkdir'd under it (brief v4 D-A). OSS mode: no-op.
+  await ensureKbSpaceRoot(space)
   const record = {
     collectionId: createKbId(),
     name: input.name.trim(),
     description: input.description,
     createdAt: nowIso(),
   }
-  const uri = kbCollectionUri(record.name, record.collectionId)
+  const uri = kbCollectionUri(record.name, record.collectionId, kbSpaceRootUri(space))
   await remoteMkdir(space, uri, record.description)
   // E1: the tags land right after the mkdir — inside the processing window
   // the real instance wipes on pipeline completion. The verified write waits
@@ -1237,6 +1344,9 @@ export async function uploadDocument(
   if (Buffer.byteLength(input.content, 'utf-8') > KB_MAX_CONTENT_BYTES) {
     throw new KbStoreError('kb_content_too_large')
   }
+  // Managed mode: same first-use rule as createCollection — the walk below
+  // must see the space root (brief v4 D-A). Idempotent and cached; OSS: no-op.
+  await ensureKbSpaceRoot(space)
   // The collection's URI comes from the listing — a collection id that does
   // not resolve in THIS tenant is a not-found, never a write into nowhere.
   const index = await loadKbIndex(space)
@@ -1286,14 +1396,14 @@ async function locateDocument(space: KbOpenVikingSpace, docId: string): Promise<
   try {
     matches = await openVikingGlob(space.config, space.auth, {
       pattern: `**/*-${docId}.md`,
-      uri: KB_SPACE_ROOT_URI,
+      uri: kbSpaceRootUri(space),
     })
   } catch (error) {
     throw toKbError(`glob ${docId}`, error)
   }
   // Recycled/transition copies never resolve: the live document is the one
   // outside the hidden subtrees.
-  const live = matches.filter(uri => !isHiddenKbUri(uri))
+  const live = matches.filter(uri => !isHiddenKbUri(space, uri))
   if (live.length === 0) {
     throw new KbStoreError('kb_document_not_found')
   }
@@ -1314,7 +1424,7 @@ async function locateRecycledDocument(space: KbOpenVikingSpace, docId: string): 
   try {
     matches = await openVikingGlob(space.config, space.auth, {
       pattern: `**/*-${docId}.md`,
-      uri: KB_RECYCLE_DIR_URI,
+      uri: kbRecycleDirUri(space),
     })
   } catch {
     // An absent `.recycle/` subtree (nothing ever deleted) or a read failure
@@ -1407,7 +1517,7 @@ async function writeTransitionLog(
   },
 ): Promise<void> {
   try {
-    const uri = `${KB_TRANSITIONS_DIR_URI}/${randomUUID()}.md`
+    const uri = `${kbTransitionsDirUri(space)}/${randomUUID()}.md`
     await remoteWriteContent(space, uri, JSON.stringify(entry), [
       `doc=${entry.docId}`,
       `kind=transition`,
@@ -1563,16 +1673,16 @@ export async function deleteDocument(
         updatedAt: recycledAt,
       }))
     }
-    await remoteMkdir(space, KB_RECYCLE_DIR_URI)
+    await remoteMkdir(space, kbRecycleDirUri(space))
     try {
-      await remoteMv(space, uri, recycleTargetUri(uri))
+      await remoteMv(space, uri, recycleTargetUri(space, uri))
     } catch (error) {
       // The move may still have landed past a timeout (B8's `unknown`
       // outcome): the target holding THIS document is success, not an error.
       // The tombstone parse is the LIVE-path one (B7 fix): the moved copy
       // carries `status=deleted`, which the strict wire parser rejects —
       // confirming with it could never confirm a real recycle.
-      const target = await remoteAttrs(space, recycleTargetUri(uri)).catch(() => null)
+      const target = await remoteAttrs(space, recycleTargetUri(space, uri)).catch(() => null)
       const moved = target ? parseLiveDocumentTags(rawTagsOf(target)) : null
       if (!moved || moved.docId !== docId) throw error
     }
@@ -1661,8 +1771,8 @@ export function buildKbSnippetForQuery(content: string, query: string, deadline?
 }
 
 /** Resolves the requested collection ids to their LIVE remote URIs. */
-function resolveCollectionUris(index: KbIndex, collectionIds: string[] | undefined): string[] {
-  if (!collectionIds || collectionIds.length === 0) return [KB_SPACE_ROOT_URI]
+function resolveCollectionUris(index: KbIndex, collectionIds: string[] | undefined, spaceRootUri: string): string[] {
+  if (!collectionIds || collectionIds.length === 0) return [spaceRootUri]
   const uris: string[] = []
   for (const collectionId of collectionIds) {
     const entry = index.collections.get(collectionId)
@@ -1688,13 +1798,34 @@ function resolveCollectionUris(index: KbIndex, collectionIds: string[] | undefin
  * Scores stay the backend's (not confined to [0,1]); results sort by score
  * (desc) then title, capped at the KB search limit. An exhausted budget
  * keeps the hits already mapped — partial results stay valid.
+ *
+ * `includeContent` (brief v4 D-B) attaches each hit's INLINED body to the
+ * returned rows so the send path can assemble the model-context block from
+ * the find it ALREADY paid for — zero extra requests. The field is an
+ * internal, wire-discouraged carry: the send resolver strips it before the
+ * rows become the persisted `kbReferences` snapshot (the SEARCH RPC never
+ * asks for it).
  */
 export async function searchDocuments(
   space: KbOpenVikingSpace,
   query: string,
   collectionIds?: string[],
   budget?: KbStoreBudget,
-): Promise<KbSearchHit[]> {
+): Promise<KbSearchHit[]>
+export async function searchDocuments(
+  space: KbOpenVikingSpace,
+  query: string,
+  collectionIds: string[] | undefined,
+  budget: KbStoreBudget | undefined,
+  opts: { includeContent: true },
+): Promise<Array<KbSearchHit & { content: string }>>
+export async function searchDocuments(
+  space: KbOpenVikingSpace,
+  query: string,
+  collectionIds?: string[],
+  budget?: KbStoreBudget,
+  opts?: { includeContent?: boolean },
+): Promise<Array<KbSearchHit & { content?: string }>> {
   const tokens = tokenizeKbQuery(query)
   if (tokens.length === 0) return []
   if (budget?.deadline !== undefined && Date.now() >= budget.deadline) return []
@@ -1702,7 +1833,7 @@ export async function searchDocuments(
   // mapping — never a second walk of the same tenant (and, review fix round
   // R2, the walk may already have been paid for by the draft-commit phase).
   const index = await loadKbIndex(space, budget)
-  const targetUris = resolveCollectionUris(index, collectionIds)
+  const targetUris = resolveCollectionUris(index, collectionIds, kbSpaceRootUri(space))
   if (targetUris.length === 0) return []
   const wanted = collectionIds ? new Set(collectionIds) : null
   let resources: OpenVikingFindResource[]
@@ -1753,9 +1884,83 @@ export async function searchDocuments(
       title: parsed.title,
       snippet: buildKbSnippetForQuery(content, query, budget?.deadline),
       score: resource.score,
+      ...(opts?.includeContent ? { content } : {}),
     })
   }
   return [...bestByDoc.values()]
     .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
     .slice(0, KB_SEARCH_LIMIT)
+}
+
+// ---------------------------------------------------------------------------
+// Model-context block (brief v4 D-B) — the bounded knowledge context the send
+// path injects into the model prompt
+// ---------------------------------------------------------------------------
+
+/** Hard ceiling for the WHOLE knowledge block (bytes, UTF-8). */
+export const KB_MODEL_CONTEXT_TOTAL_BYTES = 16 * 1024
+/** Hard ceiling for ONE document's inlined body inside the block (bytes). */
+export const KB_MODEL_CONTEXT_DOC_BYTES = 4 * 1024
+
+/** The assembled block plus the counts the injection log reports. */
+export interface KbModelContextBlock {
+  block: string
+  /** Documents actually placed into the block. */
+  docs: number
+  /** UTF-8 byte length of `block`. */
+  bytes: number
+}
+
+/**
+ * Cuts a string at a UTF-8 byte ceiling without producing a broken code
+ * point: the cut walks back over any continuation bytes (0b10xxxxxx) so the
+ * lossy suffix decodes cleanly.
+ */
+function truncateUtf8Bytes(text: string, maxBytes: number): string {
+  const buffer = Buffer.from(text, 'utf-8')
+  if (buffer.byteLength <= maxBytes) return text
+  let end = maxBytes
+  while (end > 0 && (buffer[end]! & 0xc0) === 0x80) end -= 1
+  return `${buffer.subarray(0, end).toString('utf-8')}…`
+}
+
+/**
+ * Assembles the bounded knowledge context from the hits ONE find already
+ * inlined (brief v4 D-B): every entry is labelled 「来自企业知识库」 with its
+ * title, collection and score; a body longer than 4KB is cut (UTF-8-safe);
+ * once the 16KB block budget is spent, the remaining documents are DROPPED
+ * whole — a half-included document could mislead the model about its own
+ * content. Rows whose body never arrived (`read_content` produced nothing)
+ * are skipped: the block only carries what the retrieval actually returned.
+ *
+ * Pure string work over already-fetched data — no await, so it cannot escape
+ * the send deadline that bounded the find feeding it.
+ */
+export function buildKbModelContextBlock(
+  hits: ReadonlyArray<KbSearchHit & { content?: string | null }>,
+  limits: { totalBytes?: number; docBytes?: number } = {},
+): KbModelContextBlock | null {
+  const totalBytes = limits.totalBytes ?? KB_MODEL_CONTEXT_TOTAL_BYTES
+  const docBytes = limits.docBytes ?? KB_MODEL_CONTEXT_DOC_BYTES
+  const sections: string[] = []
+  let docs = 0
+  let spent = 0
+  for (const hit of hits) {
+    const content = typeof hit.content === 'string' ? hit.content.trim() : ''
+    if (!content) continue
+    const body = truncateUtf8Bytes(content, docBytes)
+    const section = [
+      `### 《${hit.title}》`,
+      `来自企业知识库 · 集合「${hit.collectionName}」 · 相关度 ${hit.score}`,
+      body,
+    ].join('\n')
+    const sectionBytes = Buffer.byteLength(section, 'utf-8')
+    if (sections.length > 0 && spent + sectionBytes > totalBytes) break
+    sections.push(section)
+    docs += 1
+    spent += sectionBytes
+  }
+  if (sections.length === 0) return null
+  const block = sections.join('\n\n')
+  return { block, docs, bytes: Buffer.byteLength(block, 'utf-8') }
 }

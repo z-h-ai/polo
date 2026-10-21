@@ -51,6 +51,13 @@ export interface FakeRecordedRequest {
   query: URLSearchParams
   body: unknown
   authorization: string | null
+  /**
+   * The `X-API-Key` header the client sent alongside the bearer (brief v4
+   * D-A sends both in every mode) — recorded so tests can assert the dual
+   * header without changing how the fake AUTHORIZES (the bearer stays the
+   * only credential it reads).
+   */
+  xApiKey: string | null
 }
 
 /** One armed failure: consumed once per matching request, then discarded. */
@@ -389,6 +396,7 @@ export class FakeOpenVikingServer {
       query: url.searchParams,
       body,
       authorization,
+      xApiKey: request.headers.get('x-api-key'),
     }
     this.requests.push(record)
 

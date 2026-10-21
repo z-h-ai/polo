@@ -1,6 +1,9 @@
 import { afterEach, afterAll, describe, expect, it } from 'bun:test'
 import {
   OpenVikingError,
+  isManagedOpenViking,
+  isOpenVikingNotFound,
+  managedOpenVikingAuth,
   openVikingAttrs,
   openVikingCreateAccount,
   openVikingFind,
@@ -16,6 +19,7 @@ import {
   openVikingWaitForProcessing,
   openVikingWriteContent,
   readOpenVikingConfig,
+  resetOpenVikingManagedConflictWarningForTests,
   resetOpenVikingTimeoutsForTests,
   setOpenVikingTimeoutsForTests,
   type OpenVikingConfig,
@@ -37,6 +41,7 @@ interface RecordedRequest {
   rawBody: string
   contentType: string | null
   authorization: string | null
+  xApiKey: string | null
 }
 
 const requests: RecordedRequest[] = []
@@ -63,6 +68,7 @@ const server = Bun.serve({
       rawBody,
       contentType,
       authorization: request.headers.get('authorization'),
+      xApiKey: request.headers.get('x-api-key'),
     })
     return respond(url, request.method, parsed)
   },
@@ -100,6 +106,86 @@ describe('openviking client configuration', () => {
       .toBe('semantic_and_vectors')
     expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://ov:1933', POLO_OPENVIKING_PROCESSING_MODE: 'full' })?.processingMode)
       .toBe('vectors_only')
+  })
+})
+
+describe('openviking managed-library mode (brief v4 D-A)', () => {
+  it('selects the managed mode from POLO_OPENVIKING_API_KEY alone', () => {
+    expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://ov:1933', POLO_OPENVIKING_API_KEY: ' managed-key ' }))
+      .toEqual({
+        baseUrl: 'http://ov:1933',
+        managedApiKey: 'managed-key',
+        rootApiKey: undefined,
+        processingMode: 'vectors_only',
+      })
+  })
+
+  it('keeps the root key when only it is set — the OSS multi-tenant mode', () => {
+    expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://ov:1933', POLO_OPENVIKING_ROOT_API_KEY: 'root' }))
+      .toMatchObject({ managedApiKey: undefined, rootApiKey: 'root' })
+  })
+
+  it('drops the root key entirely and warns ONCE when both keys are set', () => {
+    resetOpenVikingManagedConflictWarningForTests()
+    const warns: string[] = []
+    const originalWarn = console.warn
+    console.warn = (message: unknown) => { warns.push(String(message)) }
+    try {
+      const env = {
+        POLO_OPENVIKING_URL: 'http://ov:1933',
+        POLO_OPENVIKING_API_KEY: 'managed-key',
+        POLO_OPENVIKING_ROOT_API_KEY: 'root-key',
+      }
+      const conflict = readOpenVikingConfig(env)
+      expect(conflict?.managedApiKey).toBe('managed-key')
+      // The root key is not even retained: managed mode has no provisioning
+      // plane, so a leaked root key can never reach an admin call.
+      expect(conflict?.rootApiKey).toBeUndefined()
+      expect(warns).toHaveLength(1)
+      expect(warns[0]).toContain('POLO_OPENVIKING_ROOT_API_KEY')
+      // The values never reach the log — only the conflict itself.
+      expect(warns[0]).not.toContain('managed-key')
+      expect(warns[0]).not.toContain('root-key')
+      // The module-level flag keeps a per-call read from spamming the log.
+      readOpenVikingConfig(env)
+      expect(warns).toHaveLength(1)
+    } finally {
+      console.warn = originalWarn
+      resetOpenVikingManagedConflictWarningForTests()
+    }
+  })
+
+  it('resolves the managed auth as the default account holding the library key', () => {
+    const managed: OpenVikingConfig = { baseUrl: 'http://ov:1933', managedApiKey: 'managed-key', processingMode: 'vectors_only' }
+    expect(isManagedOpenViking(managed)).toBe(true)
+    expect(managedOpenVikingAuth(managed)).toEqual({ accountId: 'default', userKey: 'managed-key' })
+    expect(isManagedOpenViking(config)).toBe(false)
+    expect(isManagedOpenViking(rootConfig)).toBe(false)
+    expect(isManagedOpenViking(null)).toBe(false)
+  })
+
+  it('sends BOTH Authorization Bearer and X-API-Key on every keyed request, both modes', async () => {
+    respond = () => Response.json({ status: 'ok', result: { resources: [] } })
+    // OSS multi-tenant: the per-space user key rides both headers.
+    await openVikingFind(config, tenantAuth, { query: 'q', targetUri: 'viking://resources/', limit: 5 })
+    expect(requests[0]?.authorization).toBe('Bearer ok-tenant-key')
+    expect(requests[0]?.xApiKey).toBe('ok-tenant-key')
+
+    // Cloud-managed: the library key plays the data-plane credential role.
+    const managed: OpenVikingConfig = { baseUrl: config.baseUrl, managedApiKey: 'managed-key', processingMode: 'vectors_only' }
+    await openVikingFind(managed, managedOpenVikingAuth(managed), { query: 'q', targetUri: 'viking://resources/', limit: 5 })
+    expect(requests[1]?.authorization).toBe('Bearer managed-key')
+    expect(requests[1]?.xApiKey).toBe('managed-key')
+  })
+
+  it('flags the not-found failure the managed read paths tolerate, and nothing else', async () => {
+    respond = () => Response.json({ status: 'error', error: { code: 'NOT_FOUND', message: 'missing' } }, { status: 404 })
+    const missing = await openVikingLs(config, tenantAuth, { uri: 'viking://resources/none/' }).catch((caught: unknown) => caught)
+    expect(isOpenVikingNotFound(missing)).toBe(true)
+
+    respond = () => Response.json({ status: 'error', error: { code: 'INTERNAL', message: 'boom' } }, { status: 500 })
+    const failure = await openVikingLs(config, tenantAuth, { uri: 'viking://resources/none/' }).catch((caught: unknown) => caught)
+    expect(isOpenVikingNotFound(failure)).toBe(false)
   })
 })
 

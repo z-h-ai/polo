@@ -47,6 +47,14 @@ import { KB_SERVICE_UNAVAILABLE_MESSAGE, KbStoreError } from './errors'
  * scope: the root-key distribution model is a controlled-dev / single-tenant
  * pilot path; multi-enterprise GA requires the admin-side key custody
  * (follow-up card #1, brief D2).
+ *
+ * Brief v4 D-A: NONE of this runs in the cloud-MANAGED library mode
+ * (`POLO_OPENVIKING_API_KEY`) — that deployment has no provisioning plane
+ * (libraries are created in the vendor console) and no per-space account, so
+ * the handler layer never calls `ensureKbTenant`/`readKbTenantCredential`
+ * there; the config's managed key IS the credential and each space's data
+ * lives under its own directory (derived in the store, which reuses the D1
+ * slug/hash helpers below).
  */
 
 /** The trusted enterprise facts a tenant is derived from. */
@@ -75,9 +83,13 @@ export interface KbTenantCredential {
  */
 export const KB_TENANT_SERVICE_USER_ID = 'polo-service'
 
-/** The ownership tags on the account's resource root (brief §1.6). */
-const KB_TENANT_SPACE_TAG = 'polo_space'
-const KB_TENANT_ENTERPRISE_TAG = 'polo_enterprise'
+/**
+ * The ownership tags on the account's resource root (brief §1.6). Exported so
+ * the store's MANAGED-library space root (brief v4 D-A) carries the SAME
+ * marker keys — one naming, two places a `polo_space` marker can be read.
+ */
+export const KB_TENANT_SPACE_TAG = 'polo_space'
+export const KB_TENANT_ENTERPRISE_TAG = 'polo_enterprise'
 
 /** The resource root every account owns; tags pinning ownership live here. */
 export const KB_TENANT_ROOT_URI = 'viking://resources/'
@@ -92,8 +104,12 @@ export function kbTenantSpaceHash(productSpaceId: string): string {
   return createHash('sha256').update(productSpaceId).digest('hex').slice(0, 8)
 }
 
-/** ASCII slug for the readable part of the account id (CJK → dropped). */
-function asciiSlug(name: string, maxLength: number, fallback: string): string {
+/**
+ * ASCII slug for the readable part of the account id (CJK → dropped).
+ * Exported for the managed-library space root (brief v4 D-A), which reuses
+ * the D1 derivation WITHOUT the `polo-` account prefix.
+ */
+export function asciiSlug(name: string, maxLength: number, fallback: string): string {
   const slug = name
     .normalize('NFKD')
     .replace(/[^a-zA-Z0-9]+/g, '-')

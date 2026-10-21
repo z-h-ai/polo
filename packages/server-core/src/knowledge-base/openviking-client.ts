@@ -16,6 +16,14 @@
  *   `fs/rm` (DELETE /fs), `fs/attrs`, `fs/attrs/set_tags`, `fs/ls`,
  *   `content/write`, `content/read`, `search/find`, `search/glob`.
  *
+ * Brief v4 adds the CLOUD-MANAGED library mode (`POLO_OPENVIKING_API_KEY`):
+ * the same data-plane surface against `https://api.vikingdb.cn-beijing.
+ * volces.com/openviking`, authenticated by the library key ALONE — no admin
+ * plane exists there (libraries are created in the vendor console), so the
+ * provisioning calls below are never reached in that mode. Every request
+ * carries BOTH `Authorization: Bearer <key>` and `X-API-Key: <key>` in both
+ * modes (the local plugin accepts either; the cloud reads the bearer).
+ *
  * The client is deliberately dumb: plain `fetch`, bounded timeouts (provision
  * 30s, writes 120s, reads/attrs/ls/glob 15s, find 8s — brief D10) and
  * structured `OpenVikingError` failures. Error MESSAGES may carry the raw
@@ -77,6 +85,18 @@ export function isOpenVikingAuthError(error: unknown): boolean {
   && (error.status === 401 || error.status === 403)
 }
 
+/**
+ * True when the server answered "no such node" — the managed-library mode
+ * reads a MISSING space root as an empty knowledge base (the space's
+ * directory is created on first use, never on a read path, brief v4 D-A), so
+ * the store must be able to tell that case from a real listing failure. The
+ * OSS mode never hits it (the account root always exists).
+ */
+export function isOpenVikingNotFound(error: unknown): boolean {
+  return error instanceof OpenVikingError
+  && (error.status === 404 || error.serverCode === 'NOT_FOUND')
+}
+
 /** OpenViking ingestion modes (the real API values — there is no `full`). */
 export type OpenVikingProcessingMode = 'vectors_only' | 'semantic_and_vectors'
 
@@ -87,8 +107,23 @@ export interface OpenVikingConfig {
    * The ROOT key (`POLO_OPENVIKING_ROOT_API_KEY`) — provisioning plane only.
    * Data-plane calls use the per-tenant user key handed in per call, so a
    * deployment that never provisions still never needs the root key.
+   *
+   * Ignored whenever `managedApiKey` is set: the cloud-managed library has no
+   * provisioning plane to speak of (the library is created in the vendor
+   * console), so a root key configured alongside the managed key can only be
+   * a misconfiguration — it is dropped and the conflict is warned once.
    */
   rootApiKey?: string
+  /**
+   * The MANAGED-LIBRARY key (`POLO_OPENVIKING_API_KEY`, brief v4 D-A) — the
+   * data-plane credential of one cloud-hosted OpenViking library (Volcano
+   * Engine "OpenViking Context"). When set, the deployment runs managed
+   * mode: this key authenticates every call directly, `tenant.ts` is never
+   * consulted (no per-space account, no CredentialManager binding) and each
+   * space's data lives under its own directory beneath `viking://resources/`
+   * (the store derives it). Unset → the local OSS multi-tenant mode.
+   */
+  managedApiKey?: string
   /**
    * `semantic_and_vectors` additionally asks the server's VLM for abstracts;
    * it needs a configured VLM on the OpenViking side and makes ingestion
@@ -102,13 +137,39 @@ export interface OpenVikingConfig {
  * module load), so a server started without it stays exactly as before and a
  * test can flip the flag per case. Unset `POLO_OPENVIKING_URL` disables every
  * OpenViking behavior — the KB then reports `kb_service_unavailable` (brief D7).
+ *
+ * Mode selection (brief v4 D-A): `POLO_OPENVIKING_API_KEY` selects the
+ * cloud-MANAGED library mode — that key alone is the data-plane credential,
+ * and `POLO_OPENVIKING_ROOT_API_KEY` is ignored for the run (the managed
+ * library has no provisioning plane; a root key set alongside can only be a
+ * misconfiguration, so it is dropped and the conflict is warned ONCE — a
+ * module-level flag keeps a per-call read from spamming the log).
  */
+let warnedManagedRootConflict = false
+
+export function resetOpenVikingManagedConflictWarningForTests(): void {
+  warnedManagedRootConflict = false
+}
+
 export function readOpenVikingConfig(env: Record<string, string | undefined> = process.env): OpenVikingConfig | null {
   const baseUrl = env.POLO_OPENVIKING_URL?.trim()
   if (!baseUrl) return null
+  const managedApiKey = env.POLO_OPENVIKING_API_KEY?.trim() || undefined
+  const rawRootApiKey = env.POLO_OPENVIKING_ROOT_API_KEY?.trim() || undefined
+  if (managedApiKey && rawRootApiKey && !warnedManagedRootConflict) {
+    warnedManagedRootConflict = true
+    // Server log only — the key VALUES never reach the log, only the conflict.
+    console.warn(
+      '[OpenViking] POLO_OPENVIKING_API_KEY (managed-library mode) is set;'
+      + ' ignoring POLO_OPENVIKING_ROOT_API_KEY — the managed library has no provisioning plane',
+    )
+  }
   return {
     baseUrl: baseUrl.replace(/\/+$/, ''),
-    rootApiKey: env.POLO_OPENVIKING_ROOT_API_KEY?.trim() || undefined,
+    managedApiKey,
+    // Managed mode never touches the provisioning plane, so the root key is
+    // not even retained — a leak into an admin call becomes impossible.
+    rootApiKey: managedApiKey ? undefined : rawRootApiKey,
     processingMode: env.POLO_OPENVIKING_PROCESSING_MODE?.trim() === 'semantic_and_vectors'
       ? 'semantic_and_vectors'
       : 'vectors_only',
@@ -117,6 +178,21 @@ export function readOpenVikingConfig(env: Record<string, string | undefined> = p
 
 export function isOpenVikingConfigured(env: Record<string, string | undefined> = process.env): boolean {
   return readOpenVikingConfig(env) !== null
+}
+
+/** True when the deployment talks to ONE cloud-managed library (brief v4 D-A). */
+export function isManagedOpenViking(config: OpenVikingConfig | null | undefined): boolean {
+  return typeof config?.managedApiKey === 'string' && config.managedApiKey.length > 0
+}
+
+/**
+ * The managed mode's data-plane auth (brief v4 D-A): the library key IS the
+ * credential; the account id is the fixed label the cloud model assigns (the
+ * managed plane has no per-account user model). Only meaningful when
+ * `isManagedOpenViking(config)` holds.
+ */
+export function managedOpenVikingAuth(config: OpenVikingConfig): OpenVikingTenantAuth {
+  return { accountId: 'default', userKey: config.managedApiKey ?? '' }
 }
 
 interface OpenVikingTimeouts {
@@ -217,7 +293,14 @@ async function openVikingRequest<T>(config: OpenVikingConfig, options: RequestOp
   // body must hit the same timeout as a stalled handshake.
   const timer = setTimeout(() => controller.abort(), options.timeoutMs)
   const headers: Record<string, string> = { accept: 'application/json' }
-  if (options.apiKey) headers.authorization = `Bearer ${options.apiKey}`
+  if (options.apiKey) {
+    // BOTH credential headers in BOTH modes (brief v4 D-A): the local OSS
+    // plugin accepts either, the cloud gateway reads only the bearer, and a
+    // server that ignores an unknown header is unaffected by the extra one —
+    // one client, one code path, no per-mode header branch to drift.
+    headers.authorization = `Bearer ${options.apiKey}`
+    headers['x-api-key'] = options.apiKey
+  }
   if (options.json !== undefined) headers['content-type'] = 'application/json'
   const query = options.query?.toString()
   const pathWithQuery = query ? `${options.path}?${query}` : options.path

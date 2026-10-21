@@ -23,20 +23,32 @@ import {
   setKbActiveProductSpaceReaderForTests,
 } from '../knowledge-base'
 import {
+  buildKbModelContextBlock,
+  ensureKbSpaceRoot,
   kbCollectionUri,
   kbDocumentUri,
+  kbSpaceRootUri,
   kbTagHexEncode,
   loadKbIndex,
   readAudit,
   resetKbDirectoryTagRetryDelayForTests,
   resetKbDirectoryTagWindowForTests,
+  resetKbManagedSpaceRootsForTests,
   setKbDirectoryTagRetryDelayForTests,
   setKbDirectoryTagWindowForTests,
+  KB_MODEL_CONTEXT_DOC_BYTES,
+  KB_MODEL_CONTEXT_TOTAL_BYTES,
   KB_SERVICE_UNAVAILABLE_MESSAGE,
   type KbOpenVikingSpace,
 } from '../../../knowledge-base/store'
-import { resetOpenVikingTimeoutsForTests, setOpenVikingTimeoutsForTests } from '../../../knowledge-base/openviking-client'
-import { kbTenantAccountId, kbTenantAuth, readKbTenantCredential } from '../../../knowledge-base/tenant'
+import {
+  isManagedOpenViking,
+  managedOpenVikingAuth,
+  resetOpenVikingManagedConflictWarningForTests,
+  resetOpenVikingTimeoutsForTests,
+  setOpenVikingTimeoutsForTests,
+} from '../../../knowledge-base/openviking-client'
+import { asciiSlug, kbTenantAccountId, kbTenantAuth, kbTenantSpaceHash, readKbTenantCredential } from '../../../knowledge-base/tenant'
 import { FakeOpenVikingServer } from '../../../knowledge-base/__tests__/fake-openviking-server'
 
 /**
@@ -184,6 +196,7 @@ beforeEach(async () => {
   await ov.reset()
   currentCredentials = new FakeCredentialManager()
   credentialManagerOverride = currentCredentials
+  resetKbManagedSpaceRootsForTests()
   process.env.POLO_OPENVIKING_URL = ov.baseUrl
   process.env.POLO_OPENVIKING_ROOT_API_KEY = ROOT_KEY
   setRuntimeActiveProductSpace(SPACE_ID)
@@ -209,6 +222,9 @@ afterEach(() => {
   setSyncTrustedProductSpaceAccountId(null)
   delete process.env.POLO_OPENVIKING_URL
   delete process.env.POLO_OPENVIKING_ROOT_API_KEY
+  delete process.env.POLO_OPENVIKING_API_KEY
+  resetKbManagedSpaceRootsForTests()
+  resetOpenVikingManagedConflictWarningForTests()
   rmSync(tempDir, { recursive: true, force: true })
 })
 
@@ -1411,5 +1427,214 @@ describe('measured instance hardening', () => {
       workspaceId: WORKSPACE_ID, query: 'annual leave',
     }) as KbSearchHit[]
     expect(hits.map(hit => hit.title)).toContain(TITLE)
+  })
+})
+
+describe('cloud-managed library mode (brief v4 D-A)', () => {
+  /** The fake account standing in for the ONE cloud-managed library. */
+  const MANAGED_ACCOUNT = 'polo-managed-library'
+
+  /** The derived directory this file's fixture space nests under. */
+  function expectedSpaceRoot(): string {
+    return `viking://resources/${asciiSlug('Example enterprise', 24, 'space')}-${kbTenantSpaceHash(SPACE_ID)}/`
+  }
+
+  /** The same directory as the fake stores it: URIs carry no trailing slash. */
+  function expectedSpaceRootDir(): string {
+    return expectedSpaceRoot().replace(/\/+$/, '')
+  }
+
+  /** A store space speaking managed mode against the fake's library account. */
+  function managedOvSpace(): KbOpenVikingSpace {
+    const config = {
+      baseUrl: ov.baseUrl,
+      managedApiKey: ov.userKey(MANAGED_ACCOUNT),
+      processingMode: 'vectors_only',
+    } as const
+    return {
+      config,
+      auth: managedOpenVikingAuth(config),
+      binding,
+      workspaceRoot: currentDeviceRoot,
+      spaceName: 'Example enterprise',
+      actor: ACCOUNT_ID,
+    }
+  }
+
+  it('derives the OSS root verbatim and the managed root from the space identity', () => {
+    const oss = {
+      config: { baseUrl: ov.baseUrl, processingMode: 'vectors_only' as const },
+      binding,
+      spaceName: 'Example enterprise',
+    }
+    // The OSS multi-tenant mode keeps the account root unchanged (v3.1).
+    expect(kbSpaceRootUri(oss)).toBe('viking://resources/')
+    expect(isManagedOpenViking(oss.config)).toBe(false)
+
+    const managed = {
+      ...oss,
+      config: { ...oss.config, managedApiKey: 'library-key' },
+    }
+    expect(isManagedOpenViking(managed.config)).toBe(true)
+    // Deterministic per space: slug + hash8, no `polo-` prefix, one trailing
+    // slash — the D1 derivation WITHOUT the account prefix.
+    expect(kbSpaceRootUri(managed)).toBe(expectedSpaceRoot())
+    expect(kbSpaceRootUri(managed)).toMatch(/^viking:\/\/resources\/[a-z0-9-]{1,24}-[0-9a-f]{8}\/$/)
+    // A second space (different id) lands in a DIFFERENT directory inside the
+    // same library — the isolation the shared root must provide.
+    const other = { ...managed, binding: { productSpaceId: 'ps-two', enterpriseId: ENTERPRISE_ID } }
+    expect(kbSpaceRootUri(other)).not.toBe(kbSpaceRootUri(managed))
+  })
+
+  it('nests a space under its derived root with hex ownership tags, provisioning nothing', async () => {
+    ov.createAccount(MANAGED_ACCOUNT, 'polo-service')
+    // The managed library key is set; the ROOT key is left in the env on
+    // purpose — managed mode must ignore it (no admin-plane call may appear).
+    process.env.POLO_OPENVIKING_API_KEY = ov.userKey(MANAGED_ACCOUNT)
+    const harness = useDevice()
+
+    ov.requests.length = 0
+    const collection = await createCollection(harness, 'Handbook')
+    const document = await publishInto(harness, collection, {
+      title: 'Flights', content: 'Flights are economy only.',
+    })
+
+    // The whole lifecycle ran on the data plane: zero provisioning calls
+    // despite the root key sitting in the env.
+    expect(ov.requests.filter(request => request.path.startsWith('/api/v1/admin/'))).toEqual([])
+    // Both headers rode the requests (the unified dual-head discipline).
+    expect(ov.requests.every(request => request.authorization === `Bearer ${process.env.POLO_OPENVIKING_API_KEY}`)).toBe(true)
+    expect(ov.requests.every(request => request.xApiKey === process.env.POLO_OPENVIKING_API_KEY)).toBe(true)
+
+    // The derived space root exists as a DIRECTORY carrying the ownership
+    // markers (hex — the lower-casing-service discipline), and the collection
+    // nested inside it.
+    const root = expectedSpaceRoot()
+    const tree = ov.tree(MANAGED_ACCOUNT)
+    expect(tree.get(expectedSpaceRootDir())?.tags).toEqual([
+      `polo_space=${kbTagHexEncode(SPACE_ID)}`,
+      `polo_enterprise=${kbTagHexEncode(ENTERPRISE_ID)}`,
+    ])
+    expect(tree.get(kbCollectionUri('Handbook', collection.id, root))).toBeDefined()
+    expect(tree.get(kbDocumentUri(kbCollectionUri('Handbook', collection.id, root), 'Flights', document.id))).toBeDefined()
+    // The published document is reachable through the normal retrieval.
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'flights',
+    }) as KbSearchHit[]
+    expect(hits.map(hit => hit.title)).toContain('Flights')
+  }, 15_000)
+
+  it('keeps the first-use creation idempotent and the tags byte-exact on re-ensure', async () => {
+    ov.createAccount(MANAGED_ACCOUNT, 'polo-service')
+    process.env.POLO_OPENVIKING_API_KEY = ov.userKey(MANAGED_ACCOUNT)
+
+    // First use: mkdir + verified tag write. Second use: the ensure cache
+    // skips both — the per-process cost gate, not a correctness device (the
+    // mkdir tolerates ALREADY_EXISTS and the verified write is idempotent).
+    await ensureKbSpaceRoot(managedOvSpace())
+    const writesAfterFirst = ov.requests.filter(request => request.path === '/api/v1/fs/attrs/set_tags').length
+    expect(writesAfterFirst).toBeGreaterThanOrEqual(1)
+    await ensureKbSpaceRoot(managedOvSpace())
+    expect(ov.requests.filter(request => request.path === '/api/v1/fs/attrs/set_tags').length).toBe(writesAfterFirst)
+    expect(ov.tree(MANAGED_ACCOUNT).get(expectedSpaceRootDir())?.tags)
+      .toEqual([
+        `polo_space=${kbTagHexEncode(SPACE_ID)}`,
+        `polo_enterprise=${kbTagHexEncode(ENTERPRISE_ID)}`,
+      ])
+  })
+
+  it('reads an EMPTY library as an empty knowledge base — reads create no collection data (D2)', async () => {
+    ov.createAccount(MANAGED_ACCOUNT, 'polo-service')
+    process.env.POLO_OPENVIKING_API_KEY = ov.userKey(MANAGED_ACCOUNT)
+    const harness = useDevice()
+
+    // Nothing was ever written: reads degrade to EMPTY results. The managing
+    // LIST may create the bare space root (the B1 restore path — it is a
+    // provisioning-class write by design), but nothing beyond it may appear,
+    // and the admin plane stays silent throughout.
+    const listing = await harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, {
+      workspaceId: WORKSPACE_ID,
+    }) as KbCollectionList
+    expect(listing.collections).toEqual([])
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'flights',
+    }) as KbSearchHit[]
+    expect(hits).toEqual([])
+
+    const created = [...ov.tree(MANAGED_ACCOUNT).keys()]
+      .filter(uri => uri !== 'viking://resources/' && uri !== expectedSpaceRootDir())
+    expect(created).toEqual([])
+    expect(ov.requests.filter(request => request.path.startsWith('/api/v1/admin/'))).toEqual([])
+  })
+})
+
+describe('knowledge context block (brief v4 D-B)', () => {
+  const hit = (overrides: Partial<KbSearchHit & { content?: string | null }> = {}) => ({
+    docId: 'doc-1',
+    collectionId: 'col-1',
+    collectionName: 'Handbook',
+    title: 'Flights',
+    snippet: 'snip',
+    score: 0.9,
+    content: 'Flights are economy only.',
+    ...overrides,
+  })
+
+  it('labels every section with its title, collection and score', () => {
+    const assembled = buildKbModelContextBlock([
+      hit({ title: 'Flights', collectionName: 'Handbook', score: 0.91 }),
+      hit({ docId: 'doc-2', title: 'Hotels', collectionName: 'Travel', score: 0.42, content: 'Hotels are pre-approved.' }),
+    ])
+    expect(assembled?.docs).toBe(2)
+    expect(assembled?.block).toContain('### 《Flights》')
+    expect(assembled?.block).toContain('来自企业知识库 · 集合「Handbook」 · 相关度 0.91')
+    expect(assembled?.block).toContain('Flights are economy only.')
+    expect(assembled?.block).toContain('### 《Hotels》')
+    expect(assembled?.block).toContain('来自企业知识库 · 集合「Travel」 · 相关度 0.42')
+    expect(assembled?.bytes).toBe(Buffer.byteLength(assembled!.block, 'utf-8'))
+  })
+
+  it('cuts one oversized body at the document ceiling on a UTF-8 boundary', () => {
+    // 3000 CJK characters = 9000 UTF-8 bytes, past the 4KB doc ceiling: the
+    // cut must not split a code point and must still fit the ceiling (plus
+    // the ellipsis).
+    const body = '休'.repeat(3_000)
+    const assembled = buildKbModelContextBlock([hit({ content: body })])
+    expect(assembled?.docs).toBe(1)
+    const bodyLine = assembled!.block.split('\n')[2]!
+    expect(Buffer.byteLength(bodyLine, 'utf-8')).toBeLessThanOrEqual(KB_MODEL_CONTEXT_DOC_BYTES + 3)
+    expect(bodyLine.endsWith('…')).toBe(true)
+    expect(bodyLine).toContain('休')
+    // The cut decodes cleanly — no replacement characters.
+    expect(bodyLine).not.toContain('�')
+  })
+
+  it('drops whole documents once the block budget is spent — never a half document', () => {
+    // Every body truncates to ~4KB; with a 5KB total budget only the FIRST
+    // document fits — doc 2 is dropped WHOLE and doc 3 never even evaluated.
+    const body = 'x'.repeat(9_000)
+    const assembled = buildKbModelContextBlock(
+      [hit({ content: body }), hit({ docId: 'doc-2', title: 'Two', content: body }), hit({ docId: 'doc-3', title: 'Three', content: body })],
+      { totalBytes: 5_000, docBytes: 4_000 },
+    )
+    expect(assembled?.docs).toBe(1)
+    expect(assembled?.block).toContain('《Flights》')
+    expect(assembled?.block).not.toContain('《Two》')
+    expect(assembled?.bytes).toBeLessThanOrEqual(KB_MODEL_CONTEXT_TOTAL_BYTES)
+  })
+
+  it('always places the first readable document even past the total budget', () => {
+    const body = 'x'.repeat(9_000)
+    const assembled = buildKbModelContextBlock([hit({ content: body })], { totalBytes: 4_000, docBytes: 9_000 })
+    // A single hit must not degrade to nothing — one answer beats zero.
+    expect(assembled?.docs).toBe(1)
+    expect(assembled?.block).toContain('x')
+  })
+
+  it('yields nothing when no body arrived — the block only carries real content', () => {
+    expect(buildKbModelContextBlock([])).toBeNull()
+    expect(buildKbModelContextBlock([hit({ content: null })])).toBeNull()
+    expect(buildKbModelContextBlock([hit({ content: '   ' })])).toBeNull()
+    expect(buildKbModelContextBlock([hit({ content: undefined })])).toBeNull()
   })
 })
