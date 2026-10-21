@@ -10,6 +10,30 @@ import { z } from 'zod'
  * messages.
  */
 
+/**
+ * The KB error codes the RPC boundary may put on the wire (POO-108 review fix
+ * round B9). The transport rewrites any code outside its whitelist to
+ * `HANDLER_ERROR`, which would erase the very distinction the renderer's
+ * i18n mapping branches on (e.g. the neutral `kb_service_unavailable` text),
+ * so every KB code MUST be listed there — this union is the contract, the
+ * transport whitelist imports it.
+ */
+export const KB_ERROR_CODES = [
+  'kb_manage_required',
+  'kb_content_too_large',
+  'kb_invalid_transition',
+  'kb_delete_not_allowed',
+  'kb_collection_not_found',
+  'kb_document_not_found',
+  'kb_unavailable_in_personal',
+  'kb_space_read_only',
+  'kb_space_mismatch',
+  'kb_service_unavailable',
+  'kb_collection_not_published',
+  'kb_conflict',
+] as const
+export type KbErrorCode = (typeof KB_ERROR_CODES)[number]
+
 export const KB_MAX_CONTENT_BYTES = 2 * 1024 * 1024
 export const KB_SEARCH_LIMIT = 20
 /** Per-collection hit cap used by the send-time reference lookup. */

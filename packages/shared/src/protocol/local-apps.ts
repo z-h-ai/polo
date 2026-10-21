@@ -368,36 +368,47 @@ export interface LocalAppUninstallOptions {
   preserveData?: boolean
 }
 
-export type LocalAppErrorCode =
-  | 'REMOTE_FORBIDDEN'
-  | 'INVALID_REQUEST'
-  | 'INVALID_MANIFEST'
-  | 'PLATFORM_MISMATCH'
-  | 'ARCH_MISMATCH'
-  | 'DOWNLOAD_FAILED'
-  | 'INSTALL_CANCELLED'
-  | 'INSTALL_TIMEOUT'
-  | 'SIZE_MISMATCH'
-  | 'CHECKSUM_MISMATCH'
-  | 'UNSUPPORTED_ARCHIVE'
-  | 'UNSAFE_ARCHIVE'
-  | 'RUNTIME_UNAVAILABLE'
-  | 'DEPENDENCY_INSTALL_FAILED'
-  | 'RELEASE_CHANGED'
-  | 'CATALOG_ENTRY_MISSING'
-  | 'CATALOG_IDENTITY_DRIFT'
-  | 'APP_UNAVAILABLE'
-  | 'STALE_RUNTIME_GENERATION'
-  | 'NOT_AUTHORIZED'
-  | 'NOT_INSTALLED'
-  | 'SWITCH_IN_PROGRESS'
-  | 'PRODUCT_SPACE_CONTEXT_REQUIRED'
-  | 'START_FAILED'
-  | 'START_TIMEOUT'
-  | 'PORT_UNAVAILABLE'
-  | 'PROCESS_CRASHED'
-  | 'STOP_FAILED'
-  | 'UNINSTALL_FAILED'
+/**
+ * The local-app error codes, as ONE runtime list. The `LocalAppErrorCode`
+ * union AND the transport's wire whitelist (`types.ts`) both derive from this
+ * array, so a new code can no longer land in the type but silently degrade to
+ * `HANDLER_ERROR` on the wire (POO-108 review fix round B9 — nine union
+ * members, including `PRODUCT_SPACE_CONTEXT_REQUIRED`, were in exactly that
+ * state).
+ */
+export const LOCAL_APP_ERROR_CODES = [
+  'REMOTE_FORBIDDEN',
+  'INVALID_REQUEST',
+  'INVALID_MANIFEST',
+  'PLATFORM_MISMATCH',
+  'ARCH_MISMATCH',
+  'DOWNLOAD_FAILED',
+  'INSTALL_CANCELLED',
+  'INSTALL_TIMEOUT',
+  'SIZE_MISMATCH',
+  'CHECKSUM_MISMATCH',
+  'UNSUPPORTED_ARCHIVE',
+  'UNSAFE_ARCHIVE',
+  'RUNTIME_UNAVAILABLE',
+  'DEPENDENCY_INSTALL_FAILED',
+  'RELEASE_CHANGED',
+  'CATALOG_ENTRY_MISSING',
+  'CATALOG_IDENTITY_DRIFT',
+  'APP_UNAVAILABLE',
+  'STALE_RUNTIME_GENERATION',
+  'NOT_AUTHORIZED',
+  'NOT_INSTALLED',
+  'SWITCH_IN_PROGRESS',
+  'PRODUCT_SPACE_CONTEXT_REQUIRED',
+  'START_FAILED',
+  'START_TIMEOUT',
+  'PORT_UNAVAILABLE',
+  'PROCESS_CRASHED',
+  'STOP_FAILED',
+  'UNINSTALL_FAILED',
+] as const
+
+export type LocalAppErrorCode = (typeof LOCAL_APP_ERROR_CODES)[number]
 
 export interface LocalAppErrorPayload {
   code: LocalAppErrorCode
