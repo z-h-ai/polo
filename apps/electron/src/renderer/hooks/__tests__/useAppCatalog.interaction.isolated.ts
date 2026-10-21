@@ -2065,6 +2065,16 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
     }
   }
 
+  it('R8 renderer consumes cloneable install recovery instead of reporting stale context', async () => {
+    wireElectronApi({ entries: [rawEntry()] })
+    const denial = { kind: 'circle_entitlement_required', error: { code: 'CIRCLE_ENTITLEMENT_REQUIRED', message: 'Refresh memberships', details: { reason: 'unknown', recovery: 'refresh_membership' } } }
+    window.electronAPI.localApps.installProductSpaceBundle = async () => JSON.parse(JSON.stringify(denial))
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => expect(result.current.state.catalog?.apps).toHaveLength(1))
+    await act(async () => { await expect(result.current.installProductSpaceBundle(result.current.state.catalog!.apps[0]!)).rejects.toMatchObject({ code: denial.error.code, details: denial.error.details }) })
+    expect(result.current.state.accessMode).toBe('online')
+  })
+
   it('R7 artifact404 only marks that entry unavailable, keeps the space online and refresh recovers it', async () => {
     const entries = [rawEntry(), rawEntry({ catalogEntryId: 'neighbor', artifactInstanceId: 'neighbor-artifact' })]
     wireElectronApi({ entries, resolveLaunch: () => ({ success: false, errorCode: 'NOT_FOUND', status: 404, message: 'missing artifact' }) })

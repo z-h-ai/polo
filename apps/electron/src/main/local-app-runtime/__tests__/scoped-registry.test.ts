@@ -5,7 +5,7 @@ import {
   expect,
   it,
 } from 'bun:test'
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -1209,4 +1209,45 @@ describe('POO-54 R2 scoped exact-version namespaces and fences', () => {
       arch: 'arm64',
     })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
   })
+})
+
+it('R8 a partial legacy filesystem failure retains exact metadata and retries across registry restart', async () => {
+  const legacy = scope('account-r8')
+  const runtimeId = createCatalogRuntimeAppId(legacy)
+  const base = join(rootDir, 'catalog-scopes', createCatalogLocalAppScopeKey(legacy))
+  const appDir = join(base, 'apps', runtimeId)
+  const versionDir = join(appDir, 'versions', '1.0.0')
+  await mkdir(versionDir, { recursive: true })
+  await mkdir(join(appDir, 'data'), { recursive: true })
+  await writeFile(join(base, 'scope.json'), JSON.stringify({ schemaVersion: 1, scope: legacy }))
+  const metadata = { schemaVersion: 1, appId: runtimeId, currentVersion: '1.0.0', versions: { '1.0.0': { checksum: 'a'.repeat(64) }, '2.0.0': { checksum: 'b'.repeat(64) } } }
+  await mkdir(join(appDir, 'versions', '2.0.0'), { recursive: true })
+  await writeFile(join(appDir, 'metadata.json'), JSON.stringify(metadata))
+  await writeFile(join(versionDir, 'index.html'), 'owned legacy')
+  await writeFile(join(appDir, 'data', 'keep.txt'), 'user data')
+  await chmod(versionDir, 0o555)
+  try {
+    const first = new ScopedLocalAppRuntimeRegistry({ rootDir })
+    await expect(first.removeLegacyInstallationState(legacy)).rejects.toMatchObject({ code: 'UNINSTALL_FAILED' })
+    // No source-erasing success: metadata survives even if another version was already removed.
+    expect(JSON.parse(await readFile(join(appDir, 'metadata.json'), 'utf8'))).toEqual(metadata)
+  } finally { await chmod(versionDir, 0o755) }
+  const retry = new ScopedLocalAppRuntimeRegistry({ rootDir })
+  await retry.removeLegacyInstallationState(legacy)
+  await expect(access(join(appDir, 'versions'))).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(access(join(appDir, 'metadata.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await readFile(join(appDir, 'data', 'keep.txt'), 'utf8')).toBe('user data')
+})
+
+it('R8 cleanup cannot call unreadable matching provenance a completed deletion', async () => {
+  let uninstalled = false
+  class UnreadableManager extends LocalAppRuntimeManager {
+    override async readNativeInstallationEvidence() { return null }
+    override async uninstall() { uninstalled = true }
+  }
+  const registry = new ScopedLocalAppRuntimeRegistry({ rootDir, managerFactory: options => new UnreadableManager(options) })
+  const legacy = scope('account-r8-unreadable')
+  await registry.stop(legacy)
+  await expect(registry.removeLegacyInstallationState(legacy)).rejects.toMatchObject({ code: 'UNINSTALL_FAILED' })
+  expect(uninstalled).toBe(false)
 })

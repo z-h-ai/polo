@@ -717,6 +717,7 @@ describe('local app main-process authorization boundary', () => {
     listProductSpaces.mockImplementation(defaultListProductSpaces)
     getProductSpaceCatalog.mockClear()
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    listMemberCircleMemberships.mockClear()
     listMemberCircleMemberships.mockResolvedValue({ memberships: [] })
     resolveProductSpaceLaunch.mockClear()
     getAppCatalog.mockClear()
@@ -3514,6 +3515,43 @@ describe('local app main-process authorization boundary', () => {
         expect(scopedStart).not.toHaveBeenCalled()
         expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
       })
+    }
+    for (const channel of ['install', 'start'] as const) {
+      for (const origin of ['live', 'tombstone'] as const) {
+        for (const state of ['unknown', 'not_entitled'] as const) {
+          it(`R8 missing ${origin} paid artifact reports ${state} recovery at ${channel}`, async () => {
+            const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+            const identity = { ...productSpaceAppIdentity(), sources: [source] }
+            const binding = { catalogEntryId: identity.catalogEntryId, artifactInstanceId: identity.artifactInstanceId, versionId: identity.versionId, version: identity.version, sources: [source] }
+            seedTrustedBinding('account-a', 'organization-a', origin === 'live' ? [binding] : [], { tombstones: origin === 'tombstone' ? [binding] : [] })
+            const reply = await defaultProductSpaceCatalog()
+            getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: [] } as any)
+            listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ state }) })] }))
+            await expect(handlers.get(channel === 'install' ? RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE : RPC_CHANNELS.localApps.START)!(context, channel === 'install' ? { app: identity } : { kind: 'product_space_runtime_start', app: identity }))
+              .rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: state, recovery: 'refresh_membership' } })
+            expect(scopedInstall).not.toHaveBeenCalled()
+            expect(scopedStartExact).not.toHaveBeenCalled()
+            expect(resolveProductSpaceLaunch).not.toHaveBeenCalled()
+            expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+          })
+        }
+      }
+      for (const trust of ['none', 'other-account', 'other-space', 'wrong-version', 'renderer-only', 'entitled'] as const) {
+        it(`R8 ${trust} cannot relabel an arbitrary missing artifact at ${channel}`, async () => {
+          const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Forged renderer source' }
+          const identity = { ...productSpaceAppIdentity(), sources: [source] }
+          const binding = { catalogEntryId: identity.catalogEntryId, artifactInstanceId: identity.artifactInstanceId, versionId: trust === 'wrong-version' ? 'other-version' : identity.versionId, version: identity.version, sources: [source] }
+          if (trust !== 'none' && trust !== 'renderer-only') seedTrustedBinding(trust === 'other-account' ? 'account-b' : 'account-a', trust === 'other-space' ? 'space-b' : 'organization-a', [binding])
+          const reply = await defaultProductSpaceCatalog()
+          getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: [] } as any)
+          listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ state: trust === 'entitled' ? 'entitled' : 'unknown' }) })] }))
+          await expect(handlers.get(channel === 'install' ? RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE : RPC_CHANNELS.localApps.START)!(context, channel === 'install' ? { app: identity } : { kind: 'product_space_runtime_start', app: identity }))
+            .rejects.toMatchObject({ code: 'CATALOG_ENTRY_MISSING' })
+          if (trust !== 'entitled') expect(listMemberCircleMemberships).not.toHaveBeenCalled()
+          expect(scopedInstall).not.toHaveBeenCalled()
+          expect(scopedStartExact).not.toHaveBeenCalled()
+        })
+      }
     }
     it('starts a single entitled circle App normally', async () => {
       const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }

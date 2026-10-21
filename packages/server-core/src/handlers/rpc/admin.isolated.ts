@@ -1947,6 +1947,34 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
 })
 
 describe('registerAdminHandlers', () => {
+  for (const cachedVersion of [null, 'old-config'] as const) {
+    it(`R8 real 200/null validation enters Main online with cached ${cachedVersion}`, async () => {
+      const context = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
+      const { AdminClient: HttpAdminClient } = await import('../../../../shared/src/admin/client')
+      const { AdminError: HttpAdminError } = await import('../../../../shared/src/admin/types')
+      const seen: Array<{ path: string; token: string | null }> = []
+      const http = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+        seen.push({ path: new URL(request.url).pathname, token: request.headers.get('authorization') })
+        return Response.json({ valid: true, configVersion: null, user: { id: 'user-1', username: 'admin', displayName: 'Verified online', role: 'admin', groupIds: [] } })
+      } })
+      try {
+        const harness = createHarness()
+        await harness.login(context, 'admin', 'admin-password')
+        configState.adminConfigVersion = cachedVersion
+        adminClientCalls.length = 0
+        adminClientBehavior.validate = async (token: string) => {
+          try { return await new HttpAdminClient(http.url.href).validate(token) }
+          catch (error) { if (error instanceof HttpAdminError) throw new TestAdminError(error.message, error.errorCode, { status: error.status }); throw error }
+        }
+        const response = await harness.validate(context) as any
+        expect(response).toMatchObject({ loggedIn: true, configVersion: null, user: { displayName: 'Verified online' } })
+        expect(response.offline).not.toBe(true)
+        expect(seen).toEqual([{ path: '/api/auth/validate', token: 'Bearer access-token' }])
+        expect(adminClientCalls.filter(call => call.method === 'getLlmConnections')).toEqual([])
+      } finally { await http.stop(true) }
+    })
+  }
+
   it('registers every admin channel', () => {
     const harness = createHarness()
 
