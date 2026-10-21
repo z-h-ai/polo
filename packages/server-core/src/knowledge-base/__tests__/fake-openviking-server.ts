@@ -160,6 +160,14 @@ export class FakeOpenVikingServer {
   private readonly delays = new Map<string, number>()
   /** When set, `search/find` answers with these rows verbatim. */
   private findOverride: Array<Record<string, unknown>> | null = null
+  /** One-shot tree mutations consumed before the next matching request. */
+  private readonly mutations: Array<{
+    method: string
+    pathPrefix?: string
+    nth: number
+    seen: number
+    hook: (tree: Map<string, FakeOpenVikingNode>) => void
+  }> = []
   /** Requests currently being served — `reset` waits for them to drain. */
   private inflight = 0
   private readonly server: ReturnType<typeof Bun.serve>
@@ -193,6 +201,7 @@ export class FakeOpenVikingServer {
     this.trees.clear()
     this.faults.length = 0
     this.delays.clear()
+    this.mutations.length = 0
     this.findOverride = null
     this.requests.length = 0
   }
@@ -214,6 +223,27 @@ export class FakeOpenVikingServer {
   /** Replaces the `search/find` result set until cleared with `null`. */
   setFindOverride(resources: Array<Record<string, unknown>> | null): void {
     this.findOverride = resources
+  }
+
+  /**
+   * Arms ONE data-plane mutation consumed before the next matching request is
+   * served (review fix round B6). The hook receives the mutable tree, so a
+   * test can rewrite state from "outside" the store — e.g. a concurrent
+   * writer landing on the document tags BETWEEN the store's set_tags and its
+   * attrs read-back. `nth` (1-based) targets a LATER occurrence of the match,
+   * which is how a test reaches the read-back attrs instead of gate-one's.
+   */
+  armMutation(
+    match: { method: string; pathPrefix?: string; nth?: number },
+    hook: (tree: Map<string, FakeOpenVikingNode>) => void,
+  ): void {
+    this.mutations.push({
+      method: match.method,
+      pathPrefix: match.pathPrefix,
+      nth: match.nth ?? 1,
+      seen: 0,
+      hook,
+    })
   }
 
   /** Direct account creation — seeds the "another device provisioned" state. */
@@ -438,6 +468,19 @@ export class FakeOpenVikingServer {
     const tree = this.trees.get(accountId)
     if (!tree) return this.error(404, 'NOT_FOUND', 'unknown account')
     const { method, path, body } = record
+    // One-shot mutations run BEFORE the matched request, so the request sees
+    // the rewritten tree (the B6 "concurrent writer" window). `nth` counts
+    // MATCHING requests; the hook fires when the nth one arrives.
+    const mutationIndex = this.mutations.findIndex(candidate => candidate.method === method
+      && (candidate.pathPrefix === undefined || path.startsWith(candidate.pathPrefix)))
+    if (mutationIndex >= 0) {
+      const mutation = this.mutations[mutationIndex]
+      mutation.seen += 1
+      if (mutation.seen >= mutation.nth) {
+        this.mutations.splice(mutationIndex, 1)
+        mutation.hook(tree)
+      }
+    }
     if (method === 'POST' && path === '/api/v1/fs/mkdir') {
       return this.mkdir(tree, body as { uri?: unknown })
     }
@@ -651,8 +694,11 @@ export class FakeOpenVikingServer {
     const readContent = body?.read_content === true
     const resources = [...tree.values()]
       .filter(node => node.type === 'file')
-      // The retrieval index never sees the hidden subtrees.
-      .filter(node => isListed(node.uri, node.type))
+      // Measured server behavior (brief §1): find indexes EVERY file,
+      // including hidden dot paths — unlike ls, it has no visibility filter.
+      // What keeps a soft-deleted document out of the retrieval face is the
+      // `status=published` tag filter the store sends, not path hiding; that
+      // is exactly why D4 removes the status tag BEFORE the recycle move.
       .filter(node => targets.length === 0 || targets.some(target => underTarget(node.uri, target)))
       .filter(node => matchesTagFilters(node.tags, filters))
       .map(node => ({

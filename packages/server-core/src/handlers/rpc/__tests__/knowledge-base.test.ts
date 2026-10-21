@@ -511,19 +511,17 @@ describe('knowledge-base enterprise isolation', () => {
 })
 
 describe('knowledge-base availability semantics', () => {
-  it('reads stay unavailable and never provision before the first management RPC (brief D2)', async () => {
+  it('a managing LIST restores the binding; plain reads never provision (brief D2, review fix round B1)', async () => {
     const { invoke } = createHarness()
-    // A fresh device has no cached binding: a READ is the neutral
+    // A fresh device has no cached binding. A plain READ stays the neutral
     // availability failure — it must not trigger a remote write.
-    await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
-      .rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
     await expect(invoke(RPC_CHANNELS.kb.SEARCH, { workspaceId: WORKSPACE_ID, query: 'flights' }))
-      .rejects.toMatchObject({ code: 'kb_service_unavailable' })
+      .rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
     expect(ov.requests).toEqual([])
 
     // The neutral error never names the vendor, a URI or a raw response.
     try {
-      await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID })
+      await invoke(RPC_CHANNELS.kb.SEARCH, { workspaceId: WORKSPACE_ID, query: 'flights' })
       throw new Error('expected the read to fail')
     } catch (error) {
       const message = (error as Error).message
@@ -532,12 +530,32 @@ describe('knowledge-base availability semantics', () => {
       expect(message.toLowerCase()).not.toContain('openviking')
     }
 
-    // The first MANAGEMENT RPC provisions, and after it the reads work.
+    // Review fix round B1: a MANAGING LIST is the restore path. Provisioning
+    // is what turns `canManage` on, and the manage UI's action buttons only
+    // exist behind that list — refusing to provision there stranded a fresh
+    // space (or a device that lost its binding) outside every provisioning
+    // RPC.
+    const list = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
+    expect(list.canManage).toBe(true)
+    expect(list.collections).toEqual([])
+    expect(ov.hasAccount(ovAccountId(SPACE_ID))).toBe(true)
+
+    // After the restore, the reads work and the manage surface is usable.
     await invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
       workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
     })
-    const list = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
-    expect(list.collections).toHaveLength(1)
+    const populated = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
+    expect(populated.collections).toHaveLength(1)
+  })
+
+  it('a member LIST reads the binding without ever provisioning (brief D2, review fix round B1)', async () => {
+    // Members hold read-only access: their listing is a cache-only read. With
+    // no binding yet, it degrades to the neutral availability failure and
+    // leaves the remote plane untouched — provisioning stays a managing act.
+    const { invoke } = createHarness({ role: 'member' })
+    await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
+      .rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+    expect(ov.requests).toEqual([])
   })
 
   it('maps a storage outage to the neutral availability error without vendor names (brief D7)', async () => {
@@ -857,7 +875,7 @@ describe('knowledge-base document lifecycle', () => {
     expect(tree.get(recycledUri)?.tags.join(' ')).toContain('status=deleted')
   })
 
-  it('appends an audit entry for every mutation', async () => {
+  it('appends an audit entry for every mutation, intents ahead of results (review fix round B8)', async () => {
     const { invoke } = createHarness()
     const { collection, document } = await seedCollection(invoke, {
       title: 'Audited', content: 'Body.',
@@ -868,12 +886,45 @@ describe('knowledge-base document lifecycle', () => {
     await invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
 
     const entries = readAudit(workspaceRoot, binding)
-    expect(entries.map(entry => entry.action)).toEqual([
-      'openviking.tenant_provisioned',
-      'collection.create', 'document.upload', 'document.submit', 'document.publish', 'document.delete',
-    ])
-    const provisioned = entries[0]
-    expect(provisioned.actor).toBe(ACCOUNT_ID)
+    // Every remote write now pairs an INTENT (recorded before the request —
+    // the only entry a crash leaves behind) with a RESULT (success / failed /
+    // unknown). Status transitions share one status write, so `document.*`
+    // stays a single entry; upload, delete and the transition logs carry
+    // their own remote write pairs.
+    const actions = entries.map(entry => entry.action)
+    expect(actions).toContain('openviking.tenant_provisioned')
+    expect(actions).toContain('collection.create')
+    expect(actions).toContain('document.upload')
+    expect(actions).toContain('document.submit')
+    expect(actions).toContain('document.publish')
+    expect(actions).toContain('document.delete')
+    expect(actions).toContain('remote.content_write.intent')
+    expect(actions).toContain('remote.content_write.result')
+    expect(actions).toContain('remote.set_tags.intent')
+    expect(actions).toContain('remote.set_tags.result')
+    expect(actions).toContain('remote.mv.intent')
+    expect(actions).toContain('remote.mv.result')
+
+    // Intent → result pairing: every result correlates by requestId to an
+    // intent that came BEFORE it, and the write intent of the upload
+    // precedes the audited mutation entry it enabled (review #15's rule,
+    // extended to the remote plane: the trail never lags the request).
+    const writeIntents = entries.filter(entry => entry.action === 'remote.content_write.intent')
+    const writeResults = entries.filter(entry => entry.action === 'remote.content_write.result')
+    expect(writeIntents.length).toBe(writeResults.length)
+    expect(writeIntents.length).toBeGreaterThan(0)
+    for (const result of writeResults) {
+      const intentIndex = entries.findIndex(entry => entry.action === 'remote.content_write.intent'
+        && entry.detail?.requestId === result.detail?.requestId)
+      expect(intentIndex).toBeGreaterThanOrEqual(0)
+      expect(intentIndex).toBeLessThan(entries.indexOf(result))
+    }
+    const firstWriteIntent = entries.findIndex(entry => entry.action === 'remote.content_write.intent')
+    const uploadAudit = entries.findIndex(entry => entry.action === 'document.upload')
+    expect(firstWriteIntent).toBeLessThan(uploadAudit)
+
+    const provisioned = entries.find(entry => entry.action === 'openviking.tenant_provisioned')
+    expect(provisioned?.actor).toBe(ACCOUNT_ID)
     const created = entries.find(entry => entry.action === 'collection.create')
     expect(created).toMatchObject({ actor: ACCOUNT_ID, target: collection.id })
     const uploaded = entries.find(entry => entry.action === 'document.upload')
@@ -882,6 +933,9 @@ describe('knowledge-base document lifecycle', () => {
     expect(submitted?.detail).toMatchObject({ from: 'draft', status: 'in_review' })
     const deleted = entries.find(entry => entry.action === 'document.delete')
     expect(deleted?.detail).toMatchObject({ previousStatus: 'published' })
+    // The successful delete's move result is a `success`.
+    const mvResult = entries.filter(entry => entry.action === 'remote.mv.result')
+    expect(mvResult.at(-1)?.detail).toMatchObject({ outcome: 'success' })
   })
 })
 
@@ -1063,13 +1117,22 @@ describe('knowledge-base send-time reference resolution', () => {
     expect(references).toBeUndefined()
     expect(ov.requests).toEqual([])
     // Reads lose their binding the same way — the neutral unavailability,
-    // never a provisioning side effect from a read path.
+    // never a provisioning side effect from a read path. The send phase and
+    // the GET stay read-only (D2); a managing LIST is the one restore path
+    // (review fix round B1), so only its provisioning is asserted below.
     await expect(invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
       workspaceId: WORKSPACE_ID, docId: document.id,
     })).rejects.toMatchObject({ code: 'kb_service_unavailable' })
-    await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
-      .rejects.toMatchObject({ code: 'kb_service_unavailable' })
-    void collection
+
+    // The managing LIST restores the binding (B1) and the data survived: the
+    // SAME account is reused, so the previously published document is back.
+    const restored = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
+    expect(restored.collections.map(entry => entry.id)).toContain(collection.id)
+    const referenceAfterRestore = await resolveSessionKbReferences(
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
+      'session-9', 'flights?',
+    )
+    expect(referenceAfterRestore).toHaveLength(1)
   })
 })
 
@@ -1299,6 +1362,53 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
       expect(readAudit(workspaceRoot, spaceBinding).filter(entry => entry.action === 'session_scope.set'))
         .toHaveLength(0)
     }
+  })
+
+  it('races the send deadline against the binding read too (review fix round B4)', async () => {
+    const harness = createHarness()
+    const { stored, draftCollection } = await seedScopedSession(harness)
+    // The cached-binding read hangs: it is the FIRST awaited step of phase 2.
+    // The old code awaited it OUTSIDE the deadline race, so a stuck
+    // credential store held the whole send hostage with the deadline
+    // already expired. The gate must end the phase instead.
+    const manager = credentialManagerOverride
+    if (!manager) throw new Error('credential override missing')
+    const originalGet = manager.get.bind(manager)
+    let release: () => void = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    manager.get = async (id: { type: string; name: string }) => {
+      await gate
+      return originalGet(id)
+    }
+    setKbSendResolveTimeoutForTests(25)
+    try {
+      const result = await resolveFor(harness, 'flights', [draftCollection.id])
+      expect(result).toBeUndefined()
+      // The commit never happened: the abandoned attempt degrades the whole
+      // resolution to nothing, like every other timed-out phase.
+      expect(await harness.sessionManager.getSession('session-ro'))
+        .toMatchObject({ kbCollectionIds: [stored.id] })
+      expect(readAudit(workspaceRoot, binding)
+        .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
+    } finally {
+      release()
+      // Let the released read settle so it cannot leak into the next test.
+      await new Promise(resolve => setTimeout(resolve, 10))
+      resetKbSendResolveTimeoutForTests()
+    }
+  })
+
+  it('walks the tenant ONCE per send for the draft checks and the retrieval alike (review fix round R2)', async () => {
+    const harness = createHarness()
+    const { draftCollection } = await seedScopedSession(harness)
+    const lsBefore = ov.requests.filter(request => request.path === '/api/v1/fs/ls').length
+    const references = await resolveFor(harness, 'flights', [draftCollection.id])
+    expect(references?.length).toBeGreaterThan(0)
+    // The draft-commit publish checks and the retrieval's scoping/attribution
+    // both consume the SAME index — the recursive walk happens once per send,
+    // not once per phase.
+    const lsRequests = ov.requests.filter(request => request.path === '/api/v1/fs/ls').slice(lsBefore)
+    expect(lsRequests.filter(request => request.query.get('recursive') === 'true')).toHaveLength(1)
   })
 })
 

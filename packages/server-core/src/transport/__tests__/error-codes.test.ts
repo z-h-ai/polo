@@ -135,6 +135,53 @@ describe('Transport — error code preservation', () => {
       timeoutMs: 1_000,
     })
   })
+
+  // Review fix round B9: the KB codes are thrown by the knowledge-base
+  // handlers and branch-mapped by the renderer. Before the whitelist derived
+  // from the domain union, an unlisted code was rewritten to HANDLER_ERROR on
+  // the wire — the UI's `kb_service_unavailable` branch existed but could
+  // never be reached through the real transport. These round-trips pin the
+  // whole KB wire contract, one code per UI-facing family.
+  it('preserves every KB error code family across the wire', async () => {
+    const codes = [
+      'kb_service_unavailable',
+      'kb_manage_required',
+      'kb_space_read_only',
+      'kb_collection_not_published',
+      'kb_conflict',
+    ] as const
+    for (const code of codes) {
+      const { server, client } = await startPair()
+      server.handle('kb-op', async () => {
+        throw new CodedError(code, `kb failure: ${code}`)
+      })
+
+      let caught: unknown
+      try {
+        await client.invoke('kb-op')
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as { code?: string }).code).toBe(code)
+    }
+  })
+
+  it('preserves a previously unlisted LocalApp error code across the wire', async () => {
+    // PRODUCT_SPACE_CONTEXT_REQUIRED was a union member missing from the old
+    // hand-enumerated whitelist — the same drift B9 closed for the KB codes.
+    const { server, client } = await startPair()
+    server.handle('kb-authorize', async () => {
+      throw new CodedError('PRODUCT_SPACE_CONTEXT_REQUIRED', 'no committed ProductSpace')
+    })
+
+    let caught: unknown
+    try {
+      await client.invoke('kb-authorize')
+    } catch (err) {
+      caught = err
+    }
+    expect((caught as { code?: string }).code).toBe('PRODUCT_SPACE_CONTEXT_REQUIRED')
+  })
 })
 
 describe('Transport — capability introspection', () => {
