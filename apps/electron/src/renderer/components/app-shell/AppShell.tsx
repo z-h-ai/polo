@@ -533,8 +533,6 @@ function AppShellContent({
     openNewChat,
     pendingPermissions,
     pendingQuestions,
-    currentAdminUser,
-    onAdminLogout,
   } = contextValue
 
   const { t } = useTranslation()
@@ -2290,15 +2288,9 @@ function AppShellContent({
                   isCollapsed={false}
                   getItemProps={getSidebarItemProps}
                   focusedItemId={focusedSidebarItemId}
-                  userMenu={currentAdminUser?.username ? {
-                    user: {
-                      username: currentAdminUser.username,
-                      displayName: currentAdminUser.displayName || currentAdminUser.username,
-                    },
-                    onProfile: () => handleSettingsClick('preferences'),
-                    onSettings: () => handleAssistantSettingsClick(),
-                    onLogout: onAdminLogout ?? (async () => {}),
-                  } : null}
+                  // POO-103: no bottom-left avatar/user menu. Assistant settings
+                  // live in the "Settings" row below Automations; account actions
+                  // (logout, spaces) stay in the TopBar account menu.
                   links={[
                     // --- Sessions Section ---
                     // All Sessions: expandable with status children (sortable) + Flagged & Archived as trailing items
