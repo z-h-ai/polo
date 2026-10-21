@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
+import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
 import {
   clientWorkbenchButtonClassName,
   clientWorkbenchDestructiveClassName,
@@ -48,12 +49,19 @@ const KB_STATUS_BADGE: Record<KbDocumentStatus, string> = {
   rejected: 'bg-destructive/10 text-destructive',
 }
 
+/**
+ * POO-108 F2: the electron context bridge re-creates rejected Errors from
+ * their message alone, so a bridged KB error carries its code inside the
+ * message (see shared/rpc-error-bridge.ts). The shared reader accepts both
+ * shapes — a live `code` property (direct transport) and the bridge-carried
+ * marker — so the mapping below never degrades to the generic text.
+ */
 function isKbError(error: unknown, code: string): boolean {
-  return (error as { code?: string } | null)?.code === code
+  return readRpcErrorCode(error) === code
 }
 
 function kbErrorText(t: (key: string, options?: Record<string, unknown>) => string, error: unknown): string {
-  const code = (error as { code?: string } | null)?.code
+  const code = readRpcErrorCode(error)
   if (code === 'kb_manage_required') return t('knowledgeBase.errors.manageRequired')
   if (code === 'kb_content_too_large') return t('knowledgeBase.errors.tooLarge')
   if (code === 'kb_invalid_transition') return t('knowledgeBase.errors.invalidTransition')

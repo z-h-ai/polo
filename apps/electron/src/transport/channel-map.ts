@@ -12,6 +12,11 @@ function invoke(channel: string, transform?: (result: any) => any) {
   return { type: 'invoke' as const, channel, ...(transform && { transform }) }
 }
 
+/** An invoke whose coded errors survive the context bridge (POO-108 F2). */
+function invokeCoded(channel: string) {
+  return { type: 'invoke' as const, channel, codedErrors: true as const }
+}
+
 function listener(channel: string) {
   return { type: 'listener' as const, channel }
 }
@@ -354,20 +359,23 @@ export const CHANNEL_MAP = {
   creatorSkillIgnoreVersion: invoke(RPC_CHANNELS.creatorSkills.IGNORE_VERSION),
   onCreatorSkillProgress: listener(RPC_CHANNELS.creatorSkills.PROGRESS),
 
-  // Enterprise Knowledge Base (POO-108)
-  kbListCollections: invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS),
-  kbCreateCollection: invoke(RPC_CHANNELS.kb.CREATE_COLLECTION),
-  kbListDocuments: invoke(RPC_CHANNELS.kb.LIST_DOCUMENTS),
-  kbUploadDocument: invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT),
-  kbSubmitForReview: invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW),
-  kbPublishDocument: invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT),
-  kbRejectDocument: invoke(RPC_CHANNELS.kb.REJECT_DOCUMENT),
-  kbRevertToDraft: invoke(RPC_CHANNELS.kb.REVERT_TO_DRAFT),
-  kbDeleteDocument: invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT),
-  kbGetDocument: invoke(RPC_CHANNELS.kb.GET_DOCUMENT),
-  kbSearch: invoke(RPC_CHANNELS.kb.SEARCH),
-  kbSetSessionCollections: invoke(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS),
-  kbGetSessionCollections: invoke(RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS),
+  // Enterprise Knowledge Base (POO-108). codedErrors: the renderer's error
+  // mapping branches on the KB codes, which the context bridge erases from
+  // rejected Errors — these channels carry the code in the message instead
+  // (see shared/rpc-error-bridge.ts).
+  kbListCollections: invokeCoded(RPC_CHANNELS.kb.LIST_COLLECTIONS),
+  kbCreateCollection: invokeCoded(RPC_CHANNELS.kb.CREATE_COLLECTION),
+  kbListDocuments: invokeCoded(RPC_CHANNELS.kb.LIST_DOCUMENTS),
+  kbUploadDocument: invokeCoded(RPC_CHANNELS.kb.UPLOAD_DOCUMENT),
+  kbSubmitForReview: invokeCoded(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW),
+  kbPublishDocument: invokeCoded(RPC_CHANNELS.kb.PUBLISH_DOCUMENT),
+  kbRejectDocument: invokeCoded(RPC_CHANNELS.kb.REJECT_DOCUMENT),
+  kbRevertToDraft: invokeCoded(RPC_CHANNELS.kb.REVERT_TO_DRAFT),
+  kbDeleteDocument: invokeCoded(RPC_CHANNELS.kb.DELETE_DOCUMENT),
+  kbGetDocument: invokeCoded(RPC_CHANNELS.kb.GET_DOCUMENT),
+  kbSearch: invokeCoded(RPC_CHANNELS.kb.SEARCH),
+  kbSetSessionCollections: invokeCoded(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS),
+  kbGetSessionCollections: invokeCoded(RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS),
 
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),

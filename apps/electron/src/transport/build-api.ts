@@ -7,13 +7,14 @@
 
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { ElectronAPI } from '../shared/types'
+import { toBridgeCarriableError } from '../shared/rpc-error-bridge'
 
 // ---------------------------------------------------------------------------
 // Channel map entry
 // ---------------------------------------------------------------------------
 
 export type ChannelMapEntry =
-  | { type: 'invoke'; channel: string; transform?: (result: any) => any }
+  | { type: 'invoke'; channel: string; transform?: (result: any) => any; codedErrors?: boolean }
   | { type: 'listener'; channel: string }
 
 export type ChannelMap = Record<string, ChannelMapEntry>
@@ -39,6 +40,20 @@ export function buildClientApi(
       fn = async (...args: any[]) => t(await client.invoke(entry.channel, ...args))
     } else {
       fn = (...args: any[]) => client.invoke(entry.channel, ...args)
+    }
+
+    if (entry.type === 'invoke' && entry.codedErrors) {
+      // POO-108 F2: the context bridge re-creates rejected Errors from their
+      // message alone, erasing `code`. Carry the code in the message (see
+      // rpc-error-bridge.ts) so the renderer-side mapping can recover it.
+      const inner = fn
+      fn = async (...args: any[]) => {
+        try {
+          return await inner(...args)
+        } catch (error) {
+          throw toBridgeCarriableError(error)
+        }
+      }
     }
 
     // Dotted keys like "browserPane.create" become nested: api.browserPane.create
