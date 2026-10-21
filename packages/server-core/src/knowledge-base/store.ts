@@ -396,6 +396,44 @@ function sameDocumentRecord(left: KbDocumentTags, right: KbDocumentTags): boolea
     && left.rejectReason === right.rejectReason
 }
 
+/**
+ * The transition read-back predicate (acceptance finding V1, cloud round):
+ * the MANAGED cloud server stamps `updated` with its own clock during
+ * set_tags (measured on vikingdb serverless v0.4.20.6 — our written
+ * `updated=<nowIso()>` came back rewritten), so exact-equality on the
+ * timestamps would flag every transition as a conflict. Client-owned
+ * identity/state fields stay STRICT (a same-status rejectReason overwrite is
+ * still a conflict, review B6); the two server-stamped timestamps only have
+ * to prove our write is the LATEST one (`actual >= written` by wall clock).
+ * An unparseable server timestamp fails the check — fail closed.
+ */
+function transitionReadBackMatches(written: KbDocumentTags, actual: KbDocumentTags): boolean {
+  if (!sameDocumentRecord(written, actual)) {
+    // Everything must match except possibly the server-stamped timestamps.
+    const strictFieldsMatch = written.docId === actual.docId
+      && written.collectionId === actual.collectionId
+      && written.status === actual.status
+      && written.title === actual.title
+      && written.version === actual.version
+      && written.createdAt === actual.createdAt
+      && written.rejectReason === actual.rejectReason
+    if (!strictFieldsMatch) return false
+    const writtenUpdated = Date.parse(written.updatedAt)
+    const actualUpdated = Date.parse(actual.updatedAt)
+    if (Number.isNaN(writtenUpdated) || Number.isNaN(actualUpdated)) return false
+    if (actualUpdated < writtenUpdated) return false
+    if (written.publishedAt !== null) {
+      const writtenPublished = Date.parse(written.publishedAt)
+      const actualPublished = actual.publishedAt === null ? NaN : Date.parse(actual.publishedAt)
+      if (Number.isNaN(writtenPublished) || Number.isNaN(actualPublished)) return false
+      if (actualPublished < writtenPublished) return false
+    } else if (actual.publishedAt !== null) {
+      return false
+    }
+  }
+  return true
+}
+
 /** The summary fields that differ — diagnostic detail for the conflict (B6). */
 function differingFields(expected: KbDocumentTags, actual: KbDocumentTags): string[] {
   const fields: string[] = []
@@ -1585,7 +1623,7 @@ export async function transitionDocument(
     // as a conflict too (brief D4).
     const after = await remoteAttrs(space, uri)
     const afterParsed = after ? parseDocumentTags(rawTagsOf(after)) : null
-    if (!afterParsed || !sameDocumentRecord(afterParsed, next)) {
+    if (!afterParsed || !transitionReadBackMatches(next, afterParsed)) {
       throw new KbStoreError(
         'kb_conflict',
         'The document changed while the transition was applied',

@@ -744,9 +744,17 @@ describe('review fix round hardening', () => {
       const node = tree.get(uri)
       if (!node) throw new Error(`document node missing at ${uri}`)
       const stamped = encodeURIComponent('2030-01-01T00:00:00.000Z')
+      // Acceptance V1 refined the contract: the managed server restamps
+      // `updated` with its own clock, so a timestamps-only delta is the
+      // NORMAL echo of our own write. The concurrent-overwrite injection
+      // therefore also alters a CLIENT-OWNED field (title) — that is the
+      // same-status collision B6 exists to catch.
+      const rivalTitle = 'A rival Vacation policy'
       node.tags = [
-        ...node.tags.filter(tag => !tag.startsWith('updated=')),
+        ...node.tags.filter(tag => !tag.startsWith('updated=') && !tag.startsWith('t=') && !tag.startsWith('title=')),
         `updated=${stamped}`,
+        `t=${Buffer.from(rivalTitle, 'utf-8').toString('hex')}`,
+        `title=${encodeURIComponent(rivalTitle)}`,
       ]
     })
     await expect(harness.invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, {
@@ -1053,6 +1061,35 @@ describe('review fix round hardening', () => {
     expect(await harness.invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
       workspaceId: WORKSPACE_ID, docId: document.id,
     })).toBeNull()
+  })
+
+  it('accepts a transition whose updated timestamp the managed server restamped (acceptance V1)', async () => {
+    const harness = useDevice()
+    await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    })
+    const cols = await harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
+    const created = await harness.invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, collectionId: cols.collections[0].id,
+      title: 'Vacation', content: 'body',
+    }) as KbDocumentSummary
+    await harness.invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, {
+      workspaceId: WORKSPACE_ID, docId: created.id,
+    })
+    // The managed cloud server stamps `updated` with its own clock during
+    // set_tags: rewrite the tag on every attrs read so the read-back sees a
+    // LATER server timestamp — the transition must still succeed.
+    ov.armMutation({ method: 'POST', pathPrefix: '/api/v1/fs/attrs/set_tags' }, tree => {
+      for (const node of tree.values()) {
+        const updated = node.tags.find((tag: string) => tag.startsWith('updated='))
+        if (updated) node.tags = node.tags.map((tag: string) =>
+          tag === updated ? `updated=2026-10-21t23%3a59%3a59.000z` : tag)
+      }
+    })
+    const published = await harness.invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: created.id,
+    }) as KbDocumentSummary
+    expect(published.status).toBe('published')
   })
 
   it('audits the provisioning writes with the intent/result discipline (review fix round B8 residual)', async () => {
