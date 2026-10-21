@@ -67,9 +67,9 @@ const server = Bun.serve({
   },
 })
 
-const config: OpenVikingConfig = { baseUrl: `http://127.0.0.1:${server.port}` }
+const config: OpenVikingConfig = { baseUrl: `http://127.0.0.1:${server.port}`, processingMode: 'vectors_only' }
 const tenantAuth = { accountId: 'polo-acme-1234abcd', userKey: 'ok-tenant-key' }
-const rootConfig: OpenVikingConfig = { baseUrl: config.baseUrl, rootApiKey: 'ok-root-key' }
+const rootConfig: OpenVikingConfig = { baseUrl: config.baseUrl, rootApiKey: 'ok-root-key', processingMode: 'vectors_only' }
 
 afterEach(() => {
   requests.length = 0
@@ -419,7 +419,7 @@ describe('openviking client failures', () => {
   it('maps a refused connection to a network error', async () => {
     // Port 1 on localhost: nothing listens, the TCP connect fails immediately.
     await expect(openVikingFind(
-      { baseUrl: 'http://127.0.0.1:1' },
+      { baseUrl: 'http://127.0.0.1:1', processingMode: 'vectors_only' },
       tenantAuth,
       { query: 'q', targetUri: 'viking://resources/', limit: 5 },
     )).rejects.toMatchObject({ code: 'openviking_network_error' })

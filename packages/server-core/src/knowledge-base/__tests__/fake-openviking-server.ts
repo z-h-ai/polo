@@ -478,7 +478,7 @@ export class FakeOpenVikingServer {
       return this.error(409, 'ALREADY_EXISTS', `${uri} already exists`)
     }
     const parent = parentUri(uri)
-    if (parent !== ROOT_URI && !tree.has(parent)) {
+    if (parent && parent !== ROOT_URI && !tree.has(parent)) {
       return this.error(404, 'PARENT_NOT_FOUND', `parent ${parent} does not exist`)
     }
     tree.set(uri, { uri, type: 'dir', tags: [], content: null, mtime: nowIso() })
@@ -495,7 +495,7 @@ export class FakeOpenVikingServer {
     const node = tree.get(from)
     if (!node) return this.error(404, 'NOT_FOUND', `${from} does not exist`)
     const parent = parentUri(to)
-    if (parent !== ROOT_URI && !tree.has(parent)) {
+    if (parent && parent !== ROOT_URI && !tree.has(parent)) {
       return this.error(404, 'PARENT_NOT_FOUND', `parent ${parent} does not exist`)
     }
     // An existing target is OVERWRITTEN (the verified semantics the KB's
