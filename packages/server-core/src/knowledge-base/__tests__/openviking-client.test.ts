@@ -2,6 +2,7 @@ import { afterEach, afterAll, describe, expect, it } from 'bun:test'
 import {
   OpenVikingError,
   isManagedOpenViking,
+  isOpenVikingAlreadyExists,
   isOpenVikingNotFound,
   managedOpenVikingAuth,
   openVikingAttrs,
@@ -558,6 +559,20 @@ describe('openviking client failures', () => {
     respond = () => new Response('<html>gateway</html>', { status: 502 })
     await expect(openVikingReadContent(config, tenantAuth, 'viking://resources/a.md'))
       .rejects.toMatchObject({ code: 'openviking_http_error', status: 502 })
+  })
+
+  it('recognizes the managed cloud\'s 409 CONFLICT already-exists answer (acceptance V2)', async () => {
+    // vikingdb serverless answers an idempotent mkdir with HTTP 409 CONFLICT
+    // and an "already exists" message — same meaning as the OSS ALREADY_EXISTS.
+    respond = () => Response.json({
+      status: 'error',
+      error: { code: 'CONFLICT', message: 'already exists: /default/resources/e2e-b454f82c' },
+    }, { status: 409 })
+    let caught: unknown
+    try {
+      await openVikingMkdir(config, tenantAuth, { uri: 'viking://resources/e2e-b454f82c' })
+    } catch (error) { caught = error }
+    expect(isOpenVikingAlreadyExists(caught)).toBe(true)
   })
 
   it('maps a refused connection to a network error', async () => {

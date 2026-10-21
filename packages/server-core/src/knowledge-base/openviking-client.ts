@@ -74,9 +74,17 @@ export class OpenVikingError extends Error {
   }
 }
 
-/** True when the server answered an idempotent-create with "already there". */
+/**
+ * True when the server answered an idempotent-create with "already there".
+ * The two deployments phrase it differently (acceptance finding V2, cloud
+ * round 2026-10-21): the OSS instance answers `ALREADY_EXISTS`, the MANAGED
+ * cloud answers `HTTP 409 CONFLICT` with an "already exists" message — both
+ * are the idempotent-create success this predicate exists to recognize.
+ */
 export function isOpenVikingAlreadyExists(error: unknown): boolean {
-  return error instanceof OpenVikingError && error.serverCode === 'ALREADY_EXISTS'
+  return error instanceof OpenVikingError
+  && (error.serverCode === 'ALREADY_EXISTS'
+    || (error.status === 409 && /already exists/i.test(error.message)))
 }
 
 /** True when the server refused the credential (missing, wrong or forbidden). */
