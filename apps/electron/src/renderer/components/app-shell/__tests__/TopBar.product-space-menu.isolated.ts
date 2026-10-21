@@ -15,7 +15,7 @@ const selectLocalWorkspace = mock(() => {})
 mock.module('@/context/AppShellContext', () => ({ useOptionalAppShellContext: () => ({
   currentAdminUser: { displayName: '本账号', username: 'member' },
   workspaces: [{ id: 'local-project', name: '本地项目目录' }], activeWorkspaceId: 'local-project',
-  onSelectWorkspace: selectLocalWorkspace, onOpenSettings: () => {}, onOpenStoredUserPreferences: () => {},
+  onSelectWorkspace: selectLocalWorkspace, onOpenSettings: () => {},
 }) }))
 mock.module('@/context/ClientPageContext', () => ({ useOptionalClientPage: () => ({ isHeaderLineVisible: false }) }))
 mock.module('@/context/TabShellContext', () => ({ useTabShell: () => ({

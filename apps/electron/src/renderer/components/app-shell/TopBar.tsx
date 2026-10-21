@@ -243,10 +243,9 @@ export function TopBar() {
         <AppMenu
           onNewChat={() => navigate(routes.action.newSession())}
           onNewWindow={() => { void window.electronAPI.menuNewWindow() }}
-          onOpenSettings={() => navigate(routes.view.settings())}
+          onOpenSettings={() => navigate(routes.view.settings('app'))}
           onOpenSettingsSubpage={(subpage) => navigate(routes.view.settings(subpage))}
           onOpenKeyboardShortcuts={() => navigate(routes.view.settings('shortcuts'))}
-          onOpenStoredUserPreferences={() => navigate(routes.view.settings('preferences'))}
           onToggleSidebar={actionRegistry ? () => actionRegistry.execute('view.toggleSidebar') : undefined}
           onToggleFocusMode={actionRegistry ? () => actionRegistry.execute('view.toggleFocusMode') : undefined}
         />
@@ -505,10 +504,6 @@ export function TopBar() {
             )}
             {appShell && (
               <>
-                <StyledDropdownMenuItem onClick={appShell.onOpenStoredUserPreferences}>
-                  <UserRound className="h-3.5 w-3.5" />
-                  {t("topbar.account.preferences")}
-                </StyledDropdownMenuItem>
                 <StyledDropdownMenuItem onClick={appShell.onOpenSettings}>
                   <Settings className="h-3.5 w-3.5" />
                   {t("menu.settings")}

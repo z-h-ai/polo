@@ -97,17 +97,13 @@ describe('TopBar mounts the AppMenu (cross-platform application menu)', () => {
     appMenuProps!.onNewChat!()
     expect(navigateMock).toHaveBeenCalledWith(routes.action.newSession())
 
-    // App.tsx handleOpenSettings.
+    // App.tsx handleOpenSettings → Polo-scope settings, app category.
     appMenuProps!.onOpenSettings!()
-    expect(navigateMock).toHaveBeenCalledWith(routes.view.settings())
+    expect(navigateMock).toHaveBeenCalledWith(routes.view.settings('app'))
 
     // App.tsx onMenuKeyboardShortcuts.
     appMenuProps!.onOpenKeyboardShortcuts!()
     expect(navigateMock).toHaveBeenCalledWith(routes.view.settings('shortcuts'))
-
-    // App.tsx handleOpenStoredUserPreferences.
-    appMenuProps!.onOpenStoredUserPreferences!()
-    expect(navigateMock).toHaveBeenCalledWith(routes.view.settings('preferences'))
 
     // Settings submenu items navigate to their subpage.
     appMenuProps!.onOpenSettingsSubpage!('appearance')

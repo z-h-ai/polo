@@ -1,8 +1,11 @@
 /**
  * SettingsNavigator
  *
- * Navigator panel content for settings. Displays a list of settings sections
- * (App, Workspace, Shortcuts, Preferences) that can be selected to show in the details panel.
+ * Navigator panel content for settings. Displays the settings sections of ONE
+ * scope — the assistant scope (input, tools, workspace, permissions, labels,
+ * messaging, preferences) or the Polo scope (app, account security, appearance,
+ * shortcuts, server) — derived from the selected subpage via the
+ * settings-registry. Selecting a row shows it in the details panel.
  *
  * Styling follows SessionList/SourcesListPanel patterns for visual consistency.
  */
@@ -21,7 +24,8 @@ import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import type { SettingsSubpage } from '../../../shared/types'
-import { getVisibleSettingsItems } from '../../../shared/menu-schema'
+import { DEFAULT_SETTINGS_SUBPAGE, getSettingsPageScope } from '../../../shared/settings-registry'
+import { getSettingsItemsForScope } from '../../../shared/menu-schema'
 import { SETTINGS_ICONS } from '@/components/icons/SettingsIcons'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 
@@ -158,14 +162,23 @@ export default function SettingsNavigator({
   const appShell = useOptionalAppShellContext()
   const isAdminLoggedIn = Boolean(appShell?.currentAdminUser?.username)
 
+  // One navigator lists a single scope. The scope follows the selected subpage
+  // (single source: settings-registry). The bare `settings` route falls back
+  // to the same default as MainContentPanel (`app`, Polo scope) so the list
+  // and the content panel never disagree.
+  const scope = useMemo(
+    () => getSettingsPageScope(selectedSubpage ?? DEFAULT_SETTINGS_SUBPAGE),
+    [selectedSubpage]
+  )
+
   const settingsItems: SettingsItem[] = useMemo(() =>
-    getVisibleSettingsItems(isAdminLoggedIn).map((item) => ({
+    getSettingsItemsForScope(scope, isAdminLoggedIn).map((item) => ({
       id: item.id,
       label: t(item.labelKey),
       icon: SETTINGS_ICONS[item.id],
       description: t(item.descriptionKey),
     })),
-    [isAdminLoggedIn, t]
+    [scope, isAdminLoggedIn, t]
   )
 
   return (

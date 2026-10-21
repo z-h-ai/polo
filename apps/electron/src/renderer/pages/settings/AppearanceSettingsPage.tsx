@@ -1,8 +1,11 @@
 /**
  * AppearanceSettingsPage
  *
- * Visual customization settings: theme mode, color theme, font,
- * workspace-specific theme overrides, and CLI tool icon mappings.
+ * Visual customization settings (Polo scope): theme mode, color theme, font,
+ * workspace-specific theme overrides, connection icons, and CLI tool icon mappings.
+ *
+ * Note: the rich tool descriptions toggle has moved to ToolsSettingsPage —
+ * it controls tool capability, not presentation.
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
@@ -134,16 +137,6 @@ export default function AppearanceSettingsPage() {
   const handleConnectionIconsChange = useCallback((checked: boolean) => {
     setShowConnectionIcons(checked)
     storage.set(storage.KEYS.showConnectionIcons, checked)
-  }, [])
-
-  // Rich tool descriptions toggle (persisted in config.json, read by SDK subprocess)
-  const [richToolDescriptions, setRichToolDescriptions] = useState(true)
-  useEffect(() => {
-    window.electronAPI?.getRichToolDescriptions?.().then(setRichToolDescriptions)
-  }, [])
-  const handleRichToolDescriptionsChange = useCallback(async (checked: boolean) => {
-    setRichToolDescriptions(checked)
-    await window.electronAPI?.setRichToolDescriptions?.(checked)
   }, [])
 
   // Load preset themes on mount
@@ -361,12 +354,6 @@ export default function AppearanceSettingsPage() {
                     description={t("settings.appearance.connectionIconsDesc")}
                     checked={showConnectionIcons}
                     onCheckedChange={handleConnectionIconsChange}
-                  />
-                  <SettingsToggle
-                    label={t("settings.appearance.richToolDescriptions")}
-                    description={t("settings.appearance.richToolDescriptionsDesc")}
-                    checked={richToolDescriptions}
-                    onCheckedChange={handleRichToolDescriptionsChange}
                   />
                 </SettingsCard>
               </SettingsSection>

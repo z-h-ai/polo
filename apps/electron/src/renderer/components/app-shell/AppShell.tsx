@@ -30,6 +30,7 @@ import {
   Bot,
   Info,
   MailOpen,
+  Settings2,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -119,6 +120,7 @@ import {
   type NavigationState,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
+import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, getSettingsPageScope } from "../../../shared/settings-registry"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
@@ -526,7 +528,6 @@ function AppShellContent({
     onRenameSession,
     onOpenSettings,
     onOpenKeyboardShortcuts,
-    onOpenStoredUserPreferences,
     onReset,
     onSendMessage,
     openNewChat,
@@ -1758,6 +1759,13 @@ function AppShellContent({
     navigate(routes.view.settings(subpage))
   }, [])
 
+  // Assistant-scope settings entry (sidebar, below Automations). Lands on the
+  // first assistant category — the navigator derives the assistant scope from
+  // the subpage via settings-registry.
+  const handleAssistantSettingsClick = useCallback(() => {
+    handleSettingsClick(ASSISTANT_SETTINGS_DEFAULT_SUBPAGE)
+  }, [handleSettingsClick])
+
   // ============================================================================
   // EDIT POPOVER STATE
   // ============================================================================
@@ -1999,13 +2007,14 @@ function AppShellContent({
     }
     flattenTree(labelTree)
 
-    // 3. Sources, Skills, Automations
+    // 3. Sources, Skills, Automations, Settings
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
+    result.push({ id: 'nav:settings', type: 'nav', action: handleAssistantSettingsClick })
 
     return result
-  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelTree, handleSourcesClick, handleSkillsClick, handleAutomationsClick])
+  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelTree, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAssistantSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2287,7 +2296,7 @@ function AppShellContent({
                       displayName: currentAdminUser.displayName || currentAdminUser.username,
                     },
                     onProfile: () => handleSettingsClick('preferences'),
-                    onSettings: () => handleSettingsClick(),
+                    onSettings: () => handleAssistantSettingsClick(),
                     onLogout: onAdminLogout ?? (async () => {}),
                   } : null}
                   links={[
@@ -2496,6 +2505,17 @@ function AppShellContent({
                           contextMenu: { type: 'automations' as const, onAddAutomation: openAddAutomation },
                         },
                       ],
+                    },
+                    // --- Assistant Settings (one click, below Automations) ---
+                    {
+                      id: "nav:settings",
+                      title: t("sidebar.settings"),
+                      icon: Settings2,
+                      // Highlighted only while an assistant-scope category is open;
+                      // Polo-scope pages (app/account/appearance/shortcuts) belong to
+                      // the account menu entry, not this sidebar row.
+                      variant: (isSettingsNavigation(navState) && navState.subpage !== null && getSettingsPageScope(navState.subpage) === 'assistant') ? "default" : "ghost",
+                      onClick: handleAssistantSettingsClick,
                     },
                   ]}
                 />
