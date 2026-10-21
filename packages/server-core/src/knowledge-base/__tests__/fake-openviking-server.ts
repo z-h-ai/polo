@@ -62,6 +62,12 @@ export interface FakeFault {
   message: string
   /** How many matching requests fail before the fake turns healthy again. */
   times: number
+  /**
+   * When set, the request's `uri` QUERY parameter must equal it exactly —
+   * how a fault reaches ONE read (`fs/attrs?uri=…`) without touching the
+   * other reads of the same path that precede it.
+   */
+  uriQuery?: string
 }
 
 interface FakeAccount {
@@ -200,7 +206,7 @@ export class FakeOpenVikingServer {
     pathPrefix?: string
     nth: number
     seen: number
-    hook: (tree: Map<string, FakeOpenVikingNode>) => void
+    hook: (tree: Map<string, FakeOpenVikingNode>) => void | Promise<void>
   }> = []
   /** Requests currently being served — `reset` waits for them to drain. */
   private inflight = 0
@@ -291,10 +297,15 @@ export class FakeOpenVikingServer {
    * writer landing on the document tags BETWEEN the store's set_tags and its
    * attrs read-back. `nth` (1-based) targets a LATER occurrence of the match,
    * which is how a test reaches the read-back attrs instead of gate-one's.
+   *
+   * The hook may be ASYNC: the response is held open until it settles, which
+   * models "the mutation executed server-side but the answer never reached
+   * the client" — the tree is already rewritten while the caller times out
+   * (review fix round B7 residual c).
    */
   armMutation(
     match: { method: string; pathPrefix?: string; nth?: number },
-    hook: (tree: Map<string, FakeOpenVikingNode>) => void,
+    hook: (tree: Map<string, FakeOpenVikingNode>) => void | Promise<void>,
   ): void {
     this.mutations.push({
       method: match.method,
@@ -447,6 +458,7 @@ export class FakeOpenVikingServer {
       if (fault.times <= 0) continue
       if (fault.method && fault.method !== record.method) continue
       if (!record.path.startsWith(fault.pathPrefix)) continue
+      if (fault.uriQuery !== undefined && record.query.get('uri') !== fault.uriQuery) continue
       fault.times -= 1
       if (fault.times <= 0) this.faults.splice(index, 1)
       return fault
@@ -581,13 +593,15 @@ export class FakeOpenVikingServer {
   // Data plane
   // -------------------------------------------------------------------------
 
-  private handleDataPlane(accountId: string, record: FakeRecordedRequest): Response {
+  private async handleDataPlane(accountId: string, record: FakeRecordedRequest): Promise<Response> {
     const tree = this.trees.get(accountId)
     if (!tree) return this.error(404, 'NOT_FOUND', 'unknown account')
     const { method, path, body } = record
     // One-shot mutations run BEFORE the matched request, so the request sees
     // the rewritten tree (the B6 "concurrent writer" window). `nth` counts
-    // MATCHING requests; the hook fires when the nth one arrives.
+    // MATCHING requests; the hook fires when the nth one arrives. An async
+    // hook holds the response open until it settles — the lost-answer window
+    // (review fix round B7 residual c).
     const mutationIndex = this.mutations.findIndex(candidate => candidate.method === method
       && (candidate.pathPrefix === undefined || path.startsWith(candidate.pathPrefix)))
     if (mutationIndex >= 0) {
@@ -595,7 +609,7 @@ export class FakeOpenVikingServer {
       mutation.seen += 1
       if (mutation.seen >= mutation.nth) {
         this.mutations.splice(mutationIndex, 1)
-        mutation.hook(tree)
+        await mutation.hook(tree)
       }
     }
     if (method === 'POST' && path === '/api/v1/fs/mkdir') {

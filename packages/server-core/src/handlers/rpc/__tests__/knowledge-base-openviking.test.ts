@@ -963,11 +963,11 @@ describe('review fix round hardening', () => {
   it('rides the lost-response chain: the retry confirms the move the failed call already landed (review fix round B7 residual c)', async () => {
     // Residual a ends happy INSIDE one call: the store's read-back absorbs a
     // lost mv answer. This is the longer chain the wire really produces when
-    // BOTH answers are lost — the mv executed server-side, its own response
-    // never reached the client, and the read-back confirmation died with it.
-    // The first call must surface the failure (the store cannot know the move
-    // landed), and the RETRY must confirm from the recycle path — never
-    // not-found.
+    // BOTH answers are lost — the mv executes server-side the moment the
+    // request ARRIVES, its own response never reaches the client, AND the
+    // read-back confirmation of the recycle target dies in transit. The first
+    // call must surface the failure (the store cannot know the move landed),
+    // and the RETRY must confirm from the recycle path — never not-found.
     const harness = useDevice()
     const collection = await createCollection(harness, 'Handbook')
     const document = await publishInto(harness, collection, {
@@ -976,19 +976,29 @@ describe('review fix round hardening', () => {
     const uri = liveUri(collection, document)
     const recycledUri = `viking://resources/.recycle/${uri.slice(uri.lastIndexOf('/') + 1)}`
     // The mutation hook IS the mv executing for real: the node leaves the live
-    // path and lands in `.recycle/` with the tombstone the status write wrote.
-    // It fires when the fake SERVES the mv — after the delay below — so the
-    // store's own read-back confirmation runs EARLIER, while the move is still
-    // in flight, and reads an empty recycle target: both answers are lost (the
-    // response as a timeout, the confirmation as a miss), which is exactly the
-    // interrupted state residual a's single-call read-back would have absorbed.
-    ov.armMutation({ method: 'POST', pathPrefix: '/api/v1/fs/mv' }, tree => {
+    // path and lands in `.recycle/` with the tombstone the status write wrote
+    // BEFORE anything can observe the in-between. The hook then holds the
+    // response open past the shrunken client write deadline — the answer is
+    // lost as a timeout, while the move is already committed on the tree.
+    ov.armMutation({ method: 'POST', pathPrefix: '/api/v1/fs/mv' }, async tree => {
       const node = tree.get(uri)
       if (!node) return
       tree.delete(uri)
       tree.set(recycledUri, { ...node, uri: recycledUri })
+      await new Promise(resolve => setTimeout(resolve, 400))
     })
-    ov.setDelay('/api/v1/fs/mv', 400)
+    // ...and the FIRST read of the recycle path — the store's own post-mv
+    // confirmation — is lost in transit too: the fault matches that ONE uri,
+    // so the gate reads of the live uri earlier in the flow pass untouched.
+    ov.armFault({
+      method: 'GET',
+      pathPrefix: '/api/v1/fs/attrs',
+      uriQuery: recycledUri,
+      status: 504,
+      code: 'GATEWAY_TIMEOUT',
+      message: 'the confirmation read was lost',
+      times: 1,
+    })
     setOpenVikingTimeoutsForTests({ writeMs: 100 })
     try {
       // Call 1: the client sees the failure — no mv answer ever arrived, and
@@ -996,20 +1006,16 @@ describe('review fix round hardening', () => {
       await expect(harness.invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, {
         workspaceId: WORKSPACE_ID, docId: document.id,
       })).rejects.toMatchObject({ code: 'kb_service_unavailable' })
+      // Asserted AT the failure, not after a settle wait: the move executed
+      // inside the failed call, so the storage side already holds the
+      // completed recycle while the caller holds the error.
+      const tree = ov.tree(ACCOUNT_DERIVED)
+      expect(tree.has(uri)).toBe(false)
+      expect(tree.get(recycledUri)?.tags).toContain('status=deleted')
     } finally {
       // The shrunken deadline must not outlive the window, whatever it did.
       resetOpenVikingTimeoutsForTests()
-      ov.setDelay('/api/v1/fs/mv', 0)
     }
-    // The move is still in flight server-side: the fake serves it after the
-    // delay, past the client's give-up — that IS the lost-response window.
-    for (let waitedMs = 0; !ov.tree(ACCOUNT_DERIVED).has(recycledUri) && waitedMs < 2_000; waitedMs += 20) {
-      await new Promise(resolve => setTimeout(resolve, 20))
-    }
-    // ...and the storage side holds the completed recycle.
-    const tree = ov.tree(ACCOUNT_DERIVED)
-    expect(tree.has(uri)).toBe(false)
-    expect(tree.get(recycledUri)?.tags).toContain('status=deleted')
     // The lost answer is on the trail as `unknown` — the move MAY have landed
     // (B8's classification) — and the failed attempt never claimed the delete.
     const mvResults = readAudit(harness.workspaceRoot, binding)
