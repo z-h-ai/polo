@@ -1,10 +1,19 @@
 import { afterEach, afterAll, describe, expect, it } from 'bun:test'
 import {
   OpenVikingError,
-  openVikingAddResource,
-  openVikingDelete,
+  openVikingAttrs,
+  openVikingCreateAccount,
   openVikingFind,
-  openVikingTempUpload,
+  openVikingGlob,
+  openVikingListAccounts,
+  openVikingListUsers,
+  openVikingLs,
+  openVikingMkdir,
+  openVikingMv,
+  openVikingReadContent,
+  openVikingRemove,
+  openVikingSetTags,
+  openVikingWriteContent,
   readOpenVikingConfig,
   resetOpenVikingTimeoutsForTests,
   setOpenVikingTimeoutsForTests,
@@ -12,27 +21,26 @@ import {
 } from '../openviking-client'
 
 /**
- * Wire-shape tests for the minimal OpenViking client (POO-108 v2): the
- * request/response shapes are the ones verified against a real local
- * OpenViking instance, so the stub asserts them literally — method, path,
- * body fields, multipart field name and the `{"status":"ok","result":…}`
- * envelope — plus the bounded-timeout degradation.
+ * Wire-shape tests for the OpenViking client (POO-108 v3.1). The request and
+ * response shapes are the ones verified against a real local instance
+ * (brief §1), so the stub asserts them literally — method, path, body fields,
+ * query strings, the bearer credential each plane uses and the
+ * `{"status":"ok","result":…}` / `{"status":"error","error":{code,…}}`
+ * envelopes — plus the bounded-timeout degradation.
  */
 
 interface RecordedRequest {
   method: string
   path: string
   search: URLSearchParams
-  body: string
+  rawBody: string
   contentType: string | null
   authorization: string | null
-  /** The `file` multipart entry, when the request carried one. */
-  file: { name: string; content: string } | null
 }
 
 const requests: RecordedRequest[] = []
 
-let respond: (url: URL, method: string) => Response | Promise<Response> = () =>
+let respond: (url: URL, method: string, body: unknown) => Response | Promise<Response> = () =>
   Response.json({ status: 'ok', result: {} })
 
 const server = Bun.serve({
@@ -40,32 +48,28 @@ const server = Bun.serve({
   fetch: async request => {
     const url = new URL(request.url)
     const contentType = request.headers.get('content-type')
-    let file: { name: string; content: string } | null = null
-    let body = ''
-    if (contentType?.startsWith('multipart/form-data')) {
-      const entry = (await request.formData()).get('file')
-      // The Bun/undici `File` type vs the lib `FormData` entry value disagree,
-      // so the file name is read through the runtime shape it actually has.
-      const uploaded = entry as File | null
-      file = uploaded instanceof Blob ? { name: uploaded.name, content: await uploaded.text() } : null
-      body = file ? `file:${file.name}:${file.content}` : '<no file field>'
-    } else {
-      body = await request.text()
+    const rawBody = await request.text()
+    let parsed: unknown = null
+    try {
+      parsed = rawBody ? JSON.parse(rawBody) : null
+    } catch {
+      parsed = null
     }
     requests.push({
       method: request.method,
       path: url.pathname,
       search: url.searchParams,
-      body,
+      rawBody,
       contentType,
       authorization: request.headers.get('authorization'),
-      file,
     })
-    return respond(url, request.method)
+    return respond(url, request.method, parsed)
   },
 })
 
 const config: OpenVikingConfig = { baseUrl: `http://127.0.0.1:${server.port}` }
+const tenantAuth = { accountId: 'polo-acme-1234abcd', userKey: 'ok-tenant-key' }
+const rootConfig: OpenVikingConfig = { baseUrl: config.baseUrl, rootApiKey: 'ok-root-key' }
 
 afterEach(() => {
   requests.length = 0
@@ -82,9 +86,12 @@ describe('openviking client configuration', () => {
     expect(readOpenVikingConfig({})).toBeNull()
     expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: '   ' })).toBeNull()
     expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://127.0.0.1:1933///' }))
-      .toEqual({ baseUrl: 'http://127.0.0.1:1933', apiKey: undefined, processingMode: 'vectors_only' })
-    expect(readOpenVikingConfig({ POLO_OPENVIKING_URL: 'http://ov:1933', POLO_OPENVIKING_API_KEY: ' k ' }))
-      .toEqual({ baseUrl: 'http://ov:1933', apiKey: 'k', processingMode: 'vectors_only' })
+      .toEqual({ baseUrl: 'http://127.0.0.1:1933', rootApiKey: undefined, processingMode: 'vectors_only' })
+    expect(readOpenVikingConfig({
+      POLO_OPENVIKING_URL: 'http://ov:1933',
+      POLO_OPENVIKING_ROOT_API_KEY: ' root ',
+    }))
+      .toEqual({ baseUrl: 'http://ov:1933', rootApiKey: 'root', processingMode: 'vectors_only' })
   })
 
   it('only opts into semantic processing on the exact mode value', () => {
@@ -95,137 +102,333 @@ describe('openviking client configuration', () => {
   })
 })
 
-describe('openviking client wire shapes', () => {
-  it('uploads content as the multipart `file` field and reads back the temp id', async () => {
-    respond = () => Response.json({ status: 'ok', result: { temp_file_id: 'upload_x.md' } })
-    const result = await openVikingTempUpload(config, { filename: 'kb-1.md', content: '# Hello' })
-    expect(result).toEqual({ tempFileId: 'upload_x.md' })
+describe('openviking admin-plane wire shapes', () => {
+  it('creates the account with the root key and reads back the user key', async () => {
+    respond = () => Response.json({
+      status: 'ok',
+      result: { account_id: 'polo-acme-1234abcd', admin_user_id: 'polo-service', user_key: 'ok-secret' },
+    })
+    const result = await openVikingCreateAccount(rootConfig, {
+      accountId: 'polo-acme-1234abcd',
+      adminUserId: 'polo-service',
+    })
+    expect(result).toEqual({ accountId: 'polo-acme-1234abcd', adminUserId: 'polo-service', userKey: 'ok-secret' })
     const request = requests[0]
     expect(request.method).toBe('POST')
-    expect(request.path).toBe('/api/v1/resources/temp_upload')
-    expect(request.contentType?.startsWith('multipart/form-data')).toBe(true)
-    expect(request.file).toEqual({ name: 'kb-1.md', content: '# Hello' })
-    expect(request.body).toBe('file:kb-1.md:# Hello')
+    expect(request.path).toBe('/api/v1/admin/accounts')
+    expect(request.authorization).toBe('Bearer ok-root-key')
+    expect(JSON.parse(request.rawBody)).toEqual({ account_id: 'polo-acme-1234abcd', admin_user_id: 'polo-service' })
   })
 
-  it('refuses a temp_upload result without a temp_file_id', async () => {
-    respond = () => Response.json({ status: 'ok', result: {} })
-    await expect(openVikingTempUpload(config, { filename: 'kb-1.md', content: 'x' }))
+  it('accepts the alternate apiKey field when the instance returns it', async () => {
+    respond = () => Response.json({
+      status: 'ok',
+      result: { account_id: 'polo-acme-1234abcd', apiKey: 'ok-alt' },
+    })
+    const result = await openVikingCreateAccount(rootConfig, {
+      accountId: 'polo-acme-1234abcd',
+      adminUserId: 'polo-service',
+    })
+    expect(result.userKey).toBe('ok-alt')
+    expect(result.adminUserId).toBe('polo-service')
+  })
+
+  it('refuses an account creation result without a usable user key', async () => {
+    respond = () => Response.json({ status: 'ok', result: { account_id: 'polo-acme-1234abcd' } })
+    await expect(openVikingCreateAccount(rootConfig, { accountId: 'a', adminUserId: 'u' }))
       .rejects.toMatchObject({ code: 'openviking_invalid_response', name: 'OpenVikingError' })
   })
 
-  it('adds a resource with the verified body shape and optional bearer auth', async () => {
-    respond = () => Response.json({ status: 'ok', result: { root_uri: 'viking://resources/entspace-x', status: 'success' } })
-    const result = await openVikingAddResource(
-      { baseUrl: config.baseUrl, apiKey: 'secret' },
-      {
-        tempFileId: 'upload_x.md',
-        to: 'viking://resources/entspace-x/.space.md',
-        createParent: true,
-        wait: true,
-        processingMode: 'vectors_only',
-        tags: ['polo_space=ps-one', 'kind=polo_space_manifest'],
-        reason: 'provision',
+  it('lists accounts as a bare array and drops rows without an account id', async () => {
+    respond = () => Response.json({
+      status: 'ok',
+      result: [
+        { account_id: 'polo-a-11111111', created_at: '2026-01-01T00:00:00Z', status: 'active', user_count: 1 },
+        { created_at: 'no id here' },
+      ],
+    })
+    const accounts = await openVikingListAccounts(rootConfig)
+    expect(accounts).toEqual([
+      { accountId: 'polo-a-11111111', createdAt: '2026-01-01T00:00:00Z', status: 'active', userCount: 1 },
+    ])
+  })
+
+  it('lists users with credentials and tolerates both row shapes', async () => {
+    respond = () => Response.json({
+      status: 'ok',
+      result: {
+        users: [
+          { user_id: 'polo-service', username: 'polo-service', role: 'admin', user_key: 'ok-live' },
+          { id: 'second', apiKey: 'ok-second' },
+          { username: 'no id' },
+        ],
       },
-    )
-    expect(result).toEqual({ rootUri: 'viking://resources/entspace-x', status: 'success' })
+    })
+    const users = await openVikingListUsers(rootConfig, 'polo-acme-1234abcd')
+    expect(users).toHaveLength(2)
+    expect(users[0]).toEqual({ userId: 'polo-service', username: 'polo-service', role: 'admin', userKey: 'ok-live' })
+    expect(users[1]).toEqual({ userId: 'second', username: null, role: null, userKey: 'ok-second' })
+    const request = requests[0]
+    expect(request.path).toBe('/api/v1/admin/accounts/polo-acme-1234abcd/users')
+    expect(request.search.get('include_credentials')).toBe('true')
+  })
+})
+
+describe('openviking data-plane wire shapes', () => {
+  it('mkdirs ONE level and sends the optional description', async () => {
+    await openVikingMkdir(config, tenantAuth, { uri: 'viking://resources/Handbook-kb-1', description: 'Policies' })
     const request = requests[0]
     expect(request.method).toBe('POST')
-    expect(request.path).toBe('/api/v1/resources')
-    expect(request.contentType).toBe('application/json')
-    expect(request.authorization).toBe('Bearer secret')
-    expect(JSON.parse(request.body)).toEqual({
-      temp_file_id: 'upload_x.md',
-      to: 'viking://resources/entspace-x/.space.md',
-      create_parent: true,
-      wait: true,
-      processing_mode: 'vectors_only',
-      // Tags stay `k=v` STRINGS — the real instance rejects objects.
-      tags: ['polo_space=ps-one', 'kind=polo_space_manifest'],
-      reason: 'provision',
+    expect(request.path).toBe('/api/v1/fs/mkdir')
+    expect(request.authorization).toBe('Bearer ok-tenant-key')
+    expect(JSON.parse(request.rawBody)).toEqual({
+      uri: 'viking://resources/Handbook-kb-1',
+      description: 'Policies',
     })
   })
 
-  it('finds resources inside a target uri, tolerating both tag shapes', async () => {
+  it('moves a node with the from/to body and removes through the fs query', async () => {
+    await openVikingMv(config, tenantAuth, {
+      fromUri: 'viking://resources/a/kb-1.md',
+      toUri: 'viking://resources/.recycle/kb-1.md',
+    })
+    expect(requests[0].path).toBe('/api/v1/fs/mv')
+    expect(JSON.parse(requests[0].rawBody)).toEqual({
+      from_uri: 'viking://resources/a/kb-1.md',
+      to_uri: 'viking://resources/.recycle/kb-1.md',
+    })
+
+    await openVikingRemove(config, tenantAuth, { uri: 'viking://resources/a/kb-1.md', recursive: false })
+    const removal = requests[1]
+    expect(removal.method).toBe('DELETE')
+    expect(removal.path).toBe('/api/v1/fs')
+    expect(removal.search.get('uri')).toBe('viking://resources/a/kb-1.md')
+    expect(removal.search.get('recursive')).toBe('false')
+  })
+
+  it('writes content with tag_mode replace and the configured processing mode', async () => {
+    await openVikingWriteContent(config, tenantAuth, {
+      uri: 'viking://resources/Handbook-kb-1/Flights-kb-2.md',
+      content: '# Flights',
+      tags: ['doc=kb-2', 'status=draft'],
+      processingMode: 'semantic_and_vectors',
+    })
+    const request = requests[0]
+    expect(request.method).toBe('POST')
+    expect(request.path).toBe('/api/v1/content/write')
+    expect(JSON.parse(request.rawBody)).toEqual({
+      uri: 'viking://resources/Handbook-kb-1/Flights-kb-2.md',
+      content: '# Flights',
+      tag_mode: 'replace',
+      tags: ['doc=kb-2', 'status=draft'],
+      processing_mode: 'semantic_and_vectors',
+    })
+  })
+
+  it('defaults the processing mode to the config value when omitted', async () => {
+    await openVikingWriteContent(
+      { baseUrl: config.baseUrl, processingMode: 'vectors_only' },
+      tenantAuth,
+      { uri: 'viking://resources/a.md', content: 'x' },
+    )
+    const body = JSON.parse(requests[0].rawBody) as Record<string, unknown>
+    expect(body.processing_mode).toBe('vectors_only')
+    expect(body.tags).toBeUndefined()
+  })
+
+  it('reads content back, distinguishing an empty body from a missing node', async () => {
+    respond = url => {
+      if (url.searchParams.get('uri') === 'viking://resources/empty.md') {
+        return Response.json({ status: 'ok', result: { content: null } })
+      }
+      return Response.json({ status: 'ok', result: { content: '# Body' } })
+    }
+    expect(await openVikingReadContent(config, tenantAuth, 'viking://resources/a.md')).toBe('# Body')
+    expect(await openVikingReadContent(config, tenantAuth, 'viking://resources/empty.md')).toBeNull()
+    expect(requests.every(request => request.path === '/api/v1/content/read')).toBe(true)
+  })
+
+  it('reads ONE node through fs/attrs and maps a missing node to null', async () => {
+    respond = url => {
+      if (url.searchParams.get('uri') === 'viking://resources/gone.md') {
+        return Response.json({ status: 'ok', result: { attrs: null } })
+      }
+      return Response.json({
+        status: 'ok',
+        result: { attrs: { uri: 'viking://resources/a.md', tags: ['doc=kb-1'], mtime: '2026-01-01T00:00:00Z', type: 'file' } },
+      })
+    }
+    const node = await openVikingAttrs(config, tenantAuth, 'viking://resources/a.md')
+    expect(node).toEqual({
+      uri: 'viking://resources/a.md',
+      tags: { doc: 'kb-1' },
+      duplicateTagKeys: [],
+      mtime: '2026-01-01T00:00:00Z',
+      isDirectory: false,
+    })
+    expect(await openVikingAttrs(config, tenantAuth, 'viking://resources/gone.md')).toBeNull()
+  })
+
+  it('replaces retrieval tags through the set_tags body', async () => {
+    await openVikingSetTags(config, tenantAuth, {
+      uri: 'viking://resources/a.md',
+      tags: ['doc=kb-1', 'status=published'],
+      mode: 'replace',
+    })
+    const request = requests[0]
+    expect(request.path).toBe('/api/v1/fs/attrs/set_tags')
+    expect(JSON.parse(request.rawBody)).toEqual({
+      uri: 'viking://resources/a.md',
+      tags: ['doc=kb-1', 'status=published'],
+      mode: 'replace',
+    })
+  })
+
+  it('walks the tree with the paged ls query and normalizes the page', async () => {
+    respond = () => Response.json({
+      status: 'ok',
+      result: {
+        entries: [
+          { uri: 'viking://resources/Handbook-kb-1', tags: ['collection=kb-1'], mtime: '2026-01-01T00:00:00Z', type: 'dir' },
+          { path: 'viking://resources/Handbook-kb-1/a.md', tags: ['doc=kb-2', 'doc=kb-2'], is_dir: false },
+        ],
+        has_more: true,
+      },
+    })
+    const page = await openVikingLs(config, tenantAuth, {
+      uri: 'viking://resources/',
+      recursive: true,
+      nodeLimit: 500,
+      offset: 100,
+      tags: ['status=published'],
+    })
+    expect(page.hasMore).toBe(true)
+    expect(page.entries).toHaveLength(2)
+    expect(page.entries[0]?.isDirectory).toBe(true)
+    // Duplicate keys survive into duplicateTagKeys — strict parsers reject
+    // such nodes instead of silently collapsing them.
+    expect(page.entries[1]?.uri).toBe('viking://resources/Handbook-kb-1/a.md')
+    expect(page.entries[1]?.duplicateTagKeys).toEqual(['doc'])
+    const request = requests[0]
+    expect(request.path).toBe('/api/v1/fs/ls')
+    expect(request.search.get('uri')).toBe('viking://resources/')
+    expect(request.search.get('include_tags')).toBe('true')
+    expect(request.search.get('recursive')).toBe('true')
+    expect(request.search.get('node_limit')).toBe('500')
+    expect(request.search.get('offset')).toBe('100')
+    expect(request.search.getAll('tags')).toEqual(['status=published'])
+  })
+
+  it('finds resources inside an array of targets, tolerating both tag shapes', async () => {
     respond = () => Response.json({
       status: 'ok',
       result: {
         resources: [
-          { uri: 'viking://resources/entspace-x/a.md', score: 0.818, tags: ['doc=kb-1', 'polo_space=ps-one'], abstract: '' },
-          { uri: 'viking://resources/entspace-x/b.md', score: '0.5', tags: { doc: 'kb-2' }, abstract: null },
+          { uri: 'viking://resources/a.md', score: 0.818, tags: ['doc=kb-1', 'polo_space=ps-one'], content: '# A' },
+          { uri: 'viking://resources/b.md', score: '0.5', tags: { doc: 'kb-2' }, content: null },
           // Malformed rows are skipped, never fatal.
           { score: 1 },
-          { uri: 'viking://resources/entspace-x/c.md', score: 'not-a-number' },
+          { uri: 'viking://resources/c.md', score: 'not-a-number' },
         ],
       },
     })
-    const resources = await openVikingFind(config, {
+    const resources = await openVikingFind(config, tenantAuth, {
       query: '入职一年有几天年假',
-      targetUri: 'viking://resources/entspace-x',
+      targetUri: ['viking://resources/Handbook-kb-1'],
+      tags: ['status=published'],
       limit: 20,
+      readContent: true,
     })
     expect(resources).toHaveLength(2)
     expect(resources[0]).toEqual({
-      uri: 'viking://resources/entspace-x/a.md',
+      uri: 'viking://resources/a.md',
       score: 0.818,
       tags: { doc: 'kb-1', polo_space: 'ps-one' },
-      abstract: '',
+      duplicateTagKeys: [],
+      content: '# A',
     })
     expect(resources[1].tags).toEqual({ doc: 'kb-2' })
     expect(resources[1].score).toBe(0.5)
-    expect(resources[1].abstract).toBeNull()
-    expect(JSON.parse(requests[0].body)).toEqual({
+    expect(resources[1].content).toBeNull()
+    const body = JSON.parse(requests[0].rawBody) as Record<string, unknown>
+    expect(body).toEqual({
       query: '入职一年有几天年假',
-      target_uri: 'viking://resources/entspace-x',
-      context_type: ['resource'],
+      target_uri: ['viking://resources/Handbook-kb-1'],
+      tags: ['status=published'],
       limit: 20,
+      read_content: true,
     })
   })
 
-  it('deletes through /api/v1/fs with the uri and recursive query params', async () => {
-    await openVikingDelete(config, { uri: 'viking://resources/entspace-x/collections/c/kb-1.md', recursive: false })
-    const request = requests[0]
-    expect(request.method).toBe('DELETE')
-    expect(request.path).toBe('/api/v1/fs')
-    expect(request.search.get('uri')).toBe('viking://resources/entspace-x/collections/c/kb-1.md')
-    expect(request.search.get('recursive')).toBe('false')
+  it('resolves names through search/glob scoped by the uri field', async () => {
+    respond = () => Response.json({
+      status: 'ok',
+      result: { matches: [{ uri: 'viking://resources/Handbook-kb-1/a-kb-2.md' }, 'viking://resources/b.md'] },
+    })
+    const matches = await openVikingGlob(config, tenantAuth, {
+      pattern: '**/*-kb-2.md',
+      uri: 'viking://resources/',
+      nodeLimit: 100,
+    })
+    // Both row shapes normalize to their uri: objects with a `uri` field and
+    // bare strings alike.
+    expect(matches).toEqual([
+      'viking://resources/Handbook-kb-1/a-kb-2.md',
+      'viking://resources/b.md',
+    ])
+    const body = JSON.parse(requests[0].rawBody) as Record<string, unknown>
+    expect(body).toEqual({ pattern: '**/*-kb-2.md', uri: 'viking://resources/', node_limit: 100 })
   })
 })
 
 describe('openviking client failures', () => {
-  it('maps an HTTP error status to a structured error carrying the status', async () => {
-    respond = () => Response.json({ status: 'error', error: 'boom' }, { status: 500 })
-    const error = await openVikingAddResource(config, { tempFileId: 't', to: 'viking://x' }).catch(
+  it('maps an HTTP error status to a structured error carrying the server code', async () => {
+    respond = () => Response.json(
+      { status: 'error', error: { code: 'ALREADY_EXISTS', message: 'account exists', details: null } },
+      { status: 409 },
+    )
+    const error = await openVikingCreateAccount(rootConfig, { accountId: 'a', adminUserId: 'u' }).catch(
       (caught: unknown) => caught,
     )
     expect(error).toBeInstanceOf(OpenVikingError)
-    expect(error).toMatchObject({ code: 'openviking_http_error', status: 500 })
-    expect((error as Error).message).toContain('HTTP 500')
-    expect((error as Error).message).toContain('boom')
+    expect(error).toMatchObject({
+      code: 'openviking_http_error',
+      status: 409,
+      serverCode: 'ALREADY_EXISTS',
+    })
+    expect((error as Error).message).toContain('HTTP 409')
+    expect((error as Error).message).toContain('account exists')
   })
 
   it('maps a non-ok envelope to an invalid-response error', async () => {
     respond = () => Response.json({ status: 'error', error: 'quota exceeded' })
-    await expect(openVikingFind(config, { query: 'q', targetUri: 'viking://x', limit: 5 }))
+    await expect(openVikingFind(config, tenantAuth, { query: 'q', targetUri: 'viking://resources/', limit: 5 }))
       .rejects.toMatchObject({ code: 'openviking_invalid_response' })
   })
 
-  it('maps a non-JSON body to an invalid-response error', async () => {
+  it('maps a non-JSON body to an invalid-response error on success, an HTTP error otherwise', async () => {
     respond = () => new Response('<html>gateway</html>', { status: 200 })
-    await expect(openVikingTempUpload(config, { filename: 'a.md', content: 'x' }))
+    await expect(openVikingReadContent(config, tenantAuth, 'viking://resources/a.md'))
       .rejects.toMatchObject({ code: 'openviking_invalid_response' })
+
+    respond = () => new Response('<html>gateway</html>', { status: 502 })
+    await expect(openVikingReadContent(config, tenantAuth, 'viking://resources/a.md'))
+      .rejects.toMatchObject({ code: 'openviking_http_error', status: 502 })
   })
 
   it('maps a refused connection to a network error', async () => {
     // Port 1 on localhost: nothing listens, the TCP connect fails immediately.
-    await expect(openVikingFind({ baseUrl: 'http://127.0.0.1:1' }, { query: 'q', targetUri: 'viking://x', limit: 5 }))
-      .rejects.toMatchObject({ code: 'openviking_network_error' })
+    await expect(openVikingFind(
+      { baseUrl: 'http://127.0.0.1:1' },
+      tenantAuth,
+      { query: 'q', targetUri: 'viking://resources/', limit: 5 },
+    )).rejects.toMatchObject({ code: 'openviking_network_error' })
   })
 
   it('maps a stalled response to the bounded-timeout error', async () => {
-    setOpenVikingTimeoutsForTests({ searchMs: 50 })
+    setOpenVikingTimeoutsForTests({ findMs: 50 })
     respond = () => new Promise(() => {}) // never settles
-    const pending = openVikingFind(config, { query: 'q', targetUri: 'viking://x', limit: 5 })
+    const pending = openVikingFind(config, tenantAuth, { query: 'q', targetUri: 'viking://resources/', limit: 5 })
     await expect(pending).rejects.toMatchObject({ code: 'openviking_timeout' })
   })
 })

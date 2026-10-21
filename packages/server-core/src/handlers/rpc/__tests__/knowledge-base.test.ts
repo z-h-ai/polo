@@ -1,12 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'fs'
+import { afterEach, afterAll, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { KB_SEND_MAX_SCAN_BYTES, RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { KbCollection, KbCollectionList, KbDocumentSummary } from '@polo-ai/shared/protocol'
 import type { HandlerFn, RpcServer, RequestContext } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../../handler-deps'
 import type { ISessionManager } from '../../session-manager-interface'
+import * as realCredentials from '@polo-ai/shared/credentials'
 import {
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
@@ -28,16 +29,70 @@ import {
 } from '../knowledge-base'
 import {
   isCollectionPublished,
-  kbRootPath,
-  kbSpaceSegment,
+  kbCollectionUri,
+  kbDocumentUri,
   readAudit,
   searchDocuments,
+  KB_SERVICE_UNAVAILABLE_MESSAGE,
+  type KbOpenVikingSpace,
+  type KbSpaceBinding,
 } from '../../../knowledge-base/store'
+import { kbTenantAccountId, kbTenantAuth, readKbTenantCredential } from '../../../knowledge-base/tenant'
+import { readOpenVikingConfig, resetOpenVikingTimeoutsForTests, setOpenVikingTimeoutsForTests } from '../../../knowledge-base/openviking-client'
+import { FakeOpenVikingServer } from '../../../knowledge-base/__tests__/fake-openviking-server'
+
+/**
+ * RPC-surface tests for the enterprise knowledge base (POO-108 v3.1): scope
+ * enforcement, enterprise isolation, the list/session contracts, the document
+ * lifecycle over the REMOTE tenant and the send-time discipline. The storage
+ * backend is the in-memory fake (`fake-openviking-server.ts`) — the tests
+ * assert the neutral wire behavior, never the vendor's shapes.
+ */
 
 const ACCOUNT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const WORKSPACE_ID = 'ws-one'
 const SPACE_ID = 'ps-one'
 const ENTERPRISE_ID = 'ent-one'
+const ROOT_KEY = 'ok-root-key-kb-rpc-tests'
+
+/**
+ * The tenant credential is read through the shared CredentialManager
+ * singleton, which no test can reach into — the module is retargeted with a
+ * pass-through mock: when no fake is installed (any other test file in this
+ * bun process) calls keep hitting the REAL manager.
+ */
+class FakeCredentialManager {
+  private readonly entries = new Map<string, string>()
+
+  async get(id: { type: string; name: string }): Promise<{ value: string } | null> {
+    const value = this.entries.get(`${id.type}:${id.name}`)
+    return value === undefined ? null : { value }
+  }
+
+  async set(id: { type: string; name: string }, credential: { value: string }): Promise<void> {
+    this.entries.set(`${id.type}:${id.name}`, credential.value)
+  }
+
+  async delete(id: { type: string; name: string }): Promise<boolean> {
+    return this.entries.delete(`${id.type}:${id.name}`)
+  }
+
+  async withExclusiveLease<T>(_scope: string, operation: () => Promise<T>): Promise<T> {
+    return operation()
+  }
+
+  /** Simulates a fresh device: the cached binding is gone. */
+  clear(): void {
+    this.entries.clear()
+  }
+}
+
+let credentialManagerOverride: FakeCredentialManager | null = null
+
+mock.module('@polo-ai/shared/credentials', () => ({
+  ...realCredentials,
+  getCredentialManager: () => credentialManagerOverride ?? realCredentials.getCredentialManager(),
+}))
 
 function enterpriseSpace(
   role: 'owner' | 'manager' | 'member',
@@ -54,21 +109,19 @@ function enterpriseSpace(
   }
 }
 
-function personalSpace() {
-  return {
-    id: SPACE_ID, kind: 'personal' as const,
-    name: '我的空间', accessMode: 'active' as const,
-    payer: { kind: 'account' as const },
-  }
-}
-
 let tempDir: string
 let workspaceRoot: string
 
-/** The store directory of the harness's default space. */
-function spaceDir(): string {
-  return kbRootPath(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+/** The fake backend every harness in this file talks to. */
+const ov = FakeOpenVikingServer.start(ROOT_KEY)
+afterAll(() => ov.stop())
+
+/** The account id the D1 derivation produces for a space of this file's fixtures. */
+function ovAccountId(productSpaceId: string, enterpriseId = ENTERPRISE_ID): string {
+  return kbTenantAccountId({ productSpaceId, enterpriseId, spaceName: 'Example enterprise' })
 }
+
+const binding: KbSpaceBinding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
 
 interface HarnessOptions {
   role?: 'owner' | 'manager' | 'member'
@@ -87,7 +140,13 @@ function createHarness(options: HarnessOptions = {}) {
         id: options.spaceId,
         enterpriseId: options.enterpriseId,
       })
-    : personalSpace()
+    : {
+        id: options.spaceId ?? SPACE_ID,
+        kind: 'personal' as const,
+        name: '我的空间',
+        accessMode: 'active' as const,
+        payer: { kind: 'account' as const },
+      }
   // The active-space reader is module state — each harness pins it to its own
   // role/kind so two harnesses in one test see different identities. Like the
   // production reader it only answers for its OWN space id: a fence that has
@@ -113,11 +172,13 @@ function createHarness(options: HarnessOptions = {}) {
     kbCollectionIds: string[]
   }
   const records = new Map<string, SeedRecord>()
+  const harnessSpaceId = space.id
+  const harnessWorkspaceId = WORKSPACE_ID
   const ownRecord = (sessionId: string, kbCollectionIds: string[]): SeedRecord => ({
     id: sessionId,
     accountId: ACCOUNT_ID,
-    productSpaceId: SPACE_ID,
-    workspaceId: WORKSPACE_ID,
+    productSpaceId: harnessSpaceId,
+    workspaceId: harnessWorkspaceId,
     kbCollectionIds,
   })
   const sessionManager = {
@@ -161,10 +222,14 @@ function createHarness(options: HarnessOptions = {}) {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'knowledge-base-rpc-'))
   workspaceRoot = join(tempDir, 'workspace')
   mkdirSync(workspaceRoot, { recursive: true })
+  await ov.reset()
+  credentialManagerOverride = new FakeCredentialManager()
+  process.env.POLO_OPENVIKING_URL = ov.baseUrl
+  process.env.POLO_OPENVIKING_ROOT_API_KEY = ROOT_KEY
   setRuntimeActiveProductSpace(SPACE_ID)
   setRuntimeActiveProductSpaceAccount(ACCOUNT_ID)
   setRuntimeOfflineReadOnly(false)
@@ -174,14 +239,18 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  credentialManagerOverride = null
   resetKbActiveProductSpaceReaderForTests()
   resetKbSendResolveTimeoutForTests()
+  resetOpenVikingTimeoutsForTests()
   setRuntimeProductSpaceRestricted(SPACE_ID, false)
   setRuntimeActiveProductSpace(null)
   setRuntimeActiveProductSpaceAccount(null)
   setRuntimeOfflineReadOnly(false)
   setTrustedProductSpaceAccountProvider(async () => null)
   setSyncTrustedProductSpaceAccountId(null)
+  delete process.env.POLO_OPENVIKING_URL
+  delete process.env.POLO_OPENVIKING_ROOT_API_KEY
   rmSync(tempDir, { recursive: true, force: true })
 })
 
@@ -211,6 +280,27 @@ async function publishDocument(
   await invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
 }
 
+/** The remote uri a seeded collection/document lands under. */
+function remoteDocumentUri(collection: KbCollection, document: { id: string; title: string }): string {
+  return kbDocumentUri(kbCollectionUri(collection.name, collection.id), document.title, document.id)
+}
+
+/** The store binding for direct store-level budget tests (cache must be warm). */
+async function kbSpaceForTests(productSpaceId = SPACE_ID, enterpriseId = ENTERPRISE_ID): Promise<KbOpenVikingSpace> {
+  const config = readOpenVikingConfig()
+  if (!config) throw new Error('the storage env is not configured')
+  const credential = await readKbTenantCredential(productSpaceId, enterpriseId)
+  if (!credential) throw new Error('the tenant credential is not cached')
+  return {
+    config,
+    auth: kbTenantAuth(credential),
+    binding: { productSpaceId, enterpriseId },
+    workspaceRoot,
+    spaceName: 'Example enterprise',
+    actor: ACCOUNT_ID,
+  }
+}
+
 describe('knowledge-base scope enforcement', () => {
   it('rejects every call from a personal space with the explicit error code', async () => {
     const { invoke } = createHarness({ kind: 'personal' })
@@ -222,6 +312,9 @@ describe('knowledge-base scope enforcement', () => {
     await expect(invoke(RPC_CHANNELS.kb.SEARCH, {
       workspaceId: WORKSPACE_ID, query: 'anything',
     })).rejects.toMatchObject({ code: 'kb_unavailable_in_personal' })
+    // Nothing was provisioned for a personal caller — the remote plane is
+    // never touched by a refused request.
+    expect(ov.requests).toEqual([])
   })
 
   it('rejects calls without a committed product space fence', async () => {
@@ -244,20 +337,31 @@ describe('knowledge-base scope enforcement', () => {
       workspaceId: WORKSPACE_ID, name: 'X', description: '',
     })).rejects.toMatchObject({ code: 'OFFLINE_READ_ONLY' })
     setRuntimeOfflineReadOnly(false)
+    // The refusal preceded the tenant work: no provisioning happened.
+    expect(ov.requests).toEqual([])
   })
 
   it('rejects mutations on an online read_only space and on a runtime restriction, keeping reads (review #4)', async () => {
-    const restricted = createHarness({ accessMode: 'read_only' })
-    await expect(restricted.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+    // Seed while the space is active (provisioning is a WRITE, so it must run
+    // before the read-only projection engages), then flip the reader.
+    const seeded = createHarness()
+    const { collection } = await seedCollection(seeded.invoke)
+    setKbActiveProductSpaceReaderForTests(
+      (_accountId, productSpaceId) =>
+        (productSpaceId === SPACE_ID ? enterpriseSpace('owner', { accessMode: 'read_only' }) : null) as never,
+    )
+    await expect(seeded.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
       workspaceId: WORKSPACE_ID, name: 'X', description: '',
     })).rejects.toMatchObject({ code: 'kb_space_read_only' })
-    await expect(restricted.invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, {
+    await expect(seeded.invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, {
       workspaceId: WORKSPACE_ID, docId: 'kb-x',
     })).rejects.toMatchObject({ code: 'kb_space_read_only' })
     // The read side stays usable for the restricted projection.
-    const list = await restricted.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
-    expect(list).toEqual({ canManage: true, collections: [] })
+    const list = await seeded.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
+    expect(list.canManage).toBe(true)
+    expect(list.collections.map(row => row.id)).toEqual([collection.id])
 
+    // The runtime restriction reads the same on an active space.
     const runtime = createHarness()
     setRuntimeProductSpaceRestricted(SPACE_ID, true)
     await expect(runtime.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
@@ -283,8 +387,9 @@ describe('knowledge-base scope enforcement', () => {
     setRuntimeActiveProductSpace(null)
     release()
     await expect(pending).rejects.toMatchObject({ code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' })
-    // Nothing was written: no store, no audit entry.
-    expect(existsSync(spaceDir())).toBe(false)
+    // Nothing was written: no tenant provisioning, no audit trail.
+    expect(ov.requests).toEqual([])
+    expect(readAudit(workspaceRoot, binding)).toEqual([])
   })
 
   it('fails a mutation whose fence is revoked between authorization and the handler body (review #3)', async () => {
@@ -300,7 +405,7 @@ describe('knowledge-base scope enforcement', () => {
     await expect(invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
       workspaceId: WORKSPACE_ID, name: 'Revoked mid-entry', description: '',
     })).rejects.toMatchObject({ code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' })
-    expect(existsSync(spaceDir())).toBe(false)
+    expect(ov.requests).toEqual([])
 
     // The same window may not leave a session-scope write behind either.
     setRuntimeActiveProductSpace(SPACE_ID)
@@ -319,13 +424,13 @@ describe('knowledge-base scope enforcement', () => {
       workspaceId: WORKSPACE_ID, sessionId: 'session-1', collectionIds: [seeded.collection.id],
     })).rejects.toMatchObject({ code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' })
     expect(second.savedCollections.get('session-1')?.kbCollectionIds).toEqual([])
-    expect(readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+    expect(readAudit(workspaceRoot, binding)
       .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
   })
 })
 
 describe('knowledge-base enterprise isolation', () => {
-  it('keeps one store per ProductSpace: another space reads an empty KB, never the first space data (review #1)', async () => {
+  it('keeps one tenant per ProductSpace: another space gets its own empty KB, never the first space data (review #1)', async () => {
     const first = createHarness()
     const { collection, document } = await seedCollection(first.invoke, {
       title: 'Expense policy', content: 'Meals are reimbursed.',
@@ -333,13 +438,16 @@ describe('knowledge-base enterprise isolation', () => {
     if (!document) throw new Error('seed document missing')
     await publishDocument(first.invoke, document)
 
-    // The same workspace, a DIFFERENT enterprise space fence: the store is
-    // per-space, so the second space sees its own (empty) KB and can never
-    // list, search or open the first space's documents.
+    // The same workspace, a DIFFERENT enterprise space fence: the second
+    // space's management RPC brings up ITS OWN tenant — a separate account
+    // the first space's data never appears in.
     setRuntimeActiveProductSpace('ps-two')
     const second = createHarness({ spaceId: 'ps-two', enterpriseId: 'ent-two' })
+    const ownCollection = await second.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Second space KB', description: '',
+    }) as KbCollection
     const list = await second.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
-    expect(list.collections).toEqual([])
+    expect(list.collections.map(row => row.id)).toEqual([ownCollection.id])
     expect(await second.invoke(RPC_CHANNELS.kb.SEARCH, { workspaceId: WORKSPACE_ID, query: 'Meals' })).toEqual([])
     // A document of ANOTHER space reads as "no such document" — the missing
     // document contract, which discloses nothing about the first space.
@@ -349,7 +457,13 @@ describe('knowledge-base enterprise isolation', () => {
     await expect(second.invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, {
       workspaceId: WORKSPACE_ID, docId: document.id,
     })).rejects.toMatchObject({ code: 'kb_document_not_found' })
-    expect(existsSync(join(spaceDir(), 'collections', collection.id))).toBe(true)
+
+    // Two accounts exist, and the first space's collection lives only in its
+    // own tenant's tree.
+    expect(ov.hasAccount(ovAccountId(SPACE_ID))).toBe(true)
+    expect(ov.hasAccount(ovAccountId('ps-two', 'ent-two'))).toBe(true)
+    expect(ov.tree(ovAccountId(SPACE_ID)).has(kbCollectionUri('Handbook', collection.id))).toBe(true)
+    expect(ov.tree(ovAccountId('ps-two', 'ent-two')).has(kbCollectionUri('Handbook', collection.id))).toBe(false)
 
     // Back on the first space's fence, its data is untouched.
     setRuntimeActiveProductSpace(SPACE_ID)
@@ -365,7 +479,7 @@ describe('knowledge-base enterprise isolation', () => {
     const { invoke } = createHarness()
     await seedCollection(invoke)
     // Same ProductSpace id, but the verified context now claims a different
-    // enterprise: the binding marker fails closed.
+    // enterprise: the cached binding fails closed BEFORE any remote call.
     setKbActiveProductSpaceReaderForTests(
       () => enterpriseSpace('owner', { enterpriseId: 'ent-evil' }) as never,
     )
@@ -375,6 +489,67 @@ describe('knowledge-base enterprise isolation', () => {
       workspaceId: WORKSPACE_ID, name: 'X', description: '',
     })).rejects.toMatchObject({ code: 'kb_space_mismatch' })
   })
+
+  it('never lets the root key near the data plane (brief D2)', async () => {
+    const { invoke } = createHarness()
+    await seedCollection(invoke)
+    // Every data-plane request the surface issued carried the TENANT user
+    // key; the root key appeared only on the admin-plane account calls.
+    const tenantKey = ov.userKey(ovAccountId(SPACE_ID))
+    const dataPlane = ov.requests.filter(request => !request.path.startsWith('/api/v1/admin/'))
+    expect(dataPlane.length).toBeGreaterThan(0)
+    for (const request of dataPlane) {
+      expect(request.authorization).toBe(`Bearer ${tenantKey}`)
+    }
+    expect(ov.requests.some(request => request.authorization === `Bearer ${ROOT_KEY}`)).toBe(true)
+    // ...and the fake itself refuses the root key on the data plane.
+    const probe = await fetch(`${ov.baseUrl}/api/v1/fs/attrs?uri=viking://resources/`, {
+      headers: { authorization: `Bearer ${ROOT_KEY}` },
+    })
+    expect(probe.status).toBe(403)
+  })
+})
+
+describe('knowledge-base availability semantics', () => {
+  it('reads stay unavailable and never provision before the first management RPC (brief D2)', async () => {
+    const { invoke } = createHarness()
+    // A fresh device has no cached binding: a READ is the neutral
+    // availability failure — it must not trigger a remote write.
+    await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
+      .rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+    await expect(invoke(RPC_CHANNELS.kb.SEARCH, { workspaceId: WORKSPACE_ID, query: 'flights' }))
+      .rejects.toMatchObject({ code: 'kb_service_unavailable' })
+    expect(ov.requests).toEqual([])
+
+    // The neutral error never names the vendor, a URI or a raw response.
+    try {
+      await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID })
+      throw new Error('expected the read to fail')
+    } catch (error) {
+      const message = (error as Error).message
+      expect(message).toBe(KB_SERVICE_UNAVAILABLE_MESSAGE)
+      expect(message.toLowerCase()).not.toContain('viking')
+      expect(message.toLowerCase()).not.toContain('openviking')
+    }
+
+    // The first MANAGEMENT RPC provisions, and after it the reads work.
+    await invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    })
+    const list = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
+    expect(list.collections).toHaveLength(1)
+  })
+
+  it('maps a storage outage to the neutral availability error without vendor names (brief D7)', async () => {
+    const { invoke } = createHarness()
+    await seedCollection(invoke)
+    // The listing stalls past its own read timeout: the store maps the
+    // failure to the neutral code; the raw cause stays server-side.
+    ov.setDelay('/api/v1/fs/ls', 200)
+    setOpenVikingTimeoutsForTests({ readMs: 25 })
+    await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
+      .rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+  })
 })
 
 describe('knowledge-base list contract', () => {
@@ -383,10 +558,6 @@ describe('knowledge-base list contract', () => {
     // The renderer/channel-map passes ONE object; a bare string is invalid.
     await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, WORKSPACE_ID))
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-
-    // Empty space: the owner's capability is already true.
-    const empty = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
-    expect(empty).toEqual({ canManage: true, collections: [] })
 
     const { collection } = await seedCollection(invoke)
     const list = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
@@ -488,7 +659,7 @@ describe('knowledge-base session scope authorization', () => {
     await invoke(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS, {
       workspaceId: WORKSPACE_ID, sessionId: 'session-1', collectionIds: [collection.id],
     })
-    const scopeEntries = readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+    const scopeEntries = readAudit(workspaceRoot, binding)
       .filter(entry => entry.action === 'session_scope.set')
     expect(scopeEntries).toHaveLength(1)
     expect(scopeEntries[0]).toMatchObject({
@@ -502,7 +673,7 @@ describe('knowledge-base session scope authorization', () => {
     await invoke(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS, {
       workspaceId: WORKSPACE_ID, sessionId: 'session-1', collectionIds: [],
     })
-    const afterClear = readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+    const afterClear = readAudit(workspaceRoot, binding)
       .filter(entry => entry.action === 'session_scope.set')
     expect(afterClear).toHaveLength(2)
     expect(afterClear[1].detail).toMatchObject({ from: [collection.id], to: [] })
@@ -534,7 +705,7 @@ describe('knowledge-base session scope authorization', () => {
     // MUST have been written ahead of it.
     expect(saved).toMatchObject({ ok: true, collectionIds: [collection.id] })
     expect(savedCollections.get('session-1')?.kbCollectionIds).toEqual([collection.id])
-    const entries = readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+    const entries = readAudit(workspaceRoot, binding)
       .filter(entry => entry.action === 'session_scope.set')
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
@@ -546,7 +717,7 @@ describe('knowledge-base session scope authorization', () => {
 })
 
 describe('knowledge-base document lifecycle', () => {
-  it('walks draft → in_review → published and snapshots a version', async () => {
+  it('walks draft → in_review → rejected → draft → published, with the state machine gates', async () => {
     const { invoke } = createHarness()
     const { collection, document } = await seedCollection(invoke, {
       title: 'Onboarding', content: 'Welcome to the company.',
@@ -564,12 +735,19 @@ describe('knowledge-base document lifecycle', () => {
       workspaceId: WORKSPACE_ID, docId: document.id,
     })).rejects.toMatchObject({ code: 'kb_delete_not_allowed' })
 
-    // Publishing is illegal while still a draft — the state machine refuses.
-    await expect(invoke(RPC_CHANNELS.kb.REJECT_DOCUMENT, {
-      workspaceId: WORKSPACE_ID, docId: document.id, reason: 'not yet',
-    })).resolves.toBeTruthy()
+    // The state machine refuses the illegal move (in_review cannot re-submit).
+    await expect(invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    })).rejects.toMatchObject({ code: 'kb_invalid_transition' })
+
     // rejected → draft → in_review → published
-    await invoke(RPC_CHANNELS.kb.REVERT_TO_DRAFT, { workspaceId: WORKSPACE_ID, docId: document.id })
+    await invoke(RPC_CHANNELS.kb.REJECT_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id, reason: 'needs work',
+    })
+    const reverted = await invoke(RPC_CHANNELS.kb.REVERT_TO_DRAFT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    }) as KbDocumentSummary
+    expect(reverted.status).toBe('draft')
     await invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, { workspaceId: WORKSPACE_ID, docId: document.id })
     const published = await invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, {
       workspaceId: WORKSPACE_ID, docId: document.id,
@@ -577,19 +755,20 @@ describe('knowledge-base document lifecycle', () => {
     expect(published.status).toBe('published')
     expect(published.publishedAt).not.toBeNull()
     expect(published.rejectReason).toBeNull()
+    expect(published.version).toBe(1)
 
     // A published document is terminal: no further transitions.
     await expect(invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, {
       workspaceId: WORKSPACE_ID, docId: document.id,
     })).rejects.toMatchObject({ code: 'kb_invalid_transition' })
 
-    const versionDir = join(spaceDir(), 'versions', document.id)
-    expect(readdirSync(versionDir)).toEqual([`v${published.version}.md`])
-
+    // The body lives in the tenant — no local versions tree anymore.
     const fetched = await invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
       workspaceId: WORKSPACE_ID, docId: document.id,
     }) as { content: string }
     expect(fetched.content).toBe('Welcome to the company.')
+    expect(ov.tree(ovAccountId(SPACE_ID)).get(remoteDocumentUri(collection, document))?.content)
+      .toBe('Welcome to the company.')
   })
 
   it('hides drafts from search until published, then ranks title hits first', async () => {
@@ -599,7 +778,8 @@ describe('knowledge-base document lifecycle', () => {
     })
     if (!document) throw new Error('seed document missing')
 
-    // Draft and in_review content is not searchable.
+    // Draft and in_review content is not searchable — the status filter is
+    // enforced by the storage call itself (brief D5).
     expect(await invoke(RPC_CHANNELS.kb.SEARCH, {
       workspaceId: WORKSPACE_ID, query: 'flights',
     })).toEqual([])
@@ -649,7 +829,7 @@ describe('knowledge-base document lifecycle', () => {
     })).rejects.toMatchObject({ code: 'kb_content_too_large' })
   })
 
-  it('recycles deleted documents out of the live listing', async () => {
+  it('recycles deleted documents out of the live tenant (brief D4)', async () => {
     const { invoke } = createHarness()
     const { collection, document } = await seedCollection(invoke, {
       title: 'Obsolete', content: 'Out of date.',
@@ -666,7 +846,15 @@ describe('knowledge-base document lifecycle', () => {
     expect(await invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
       workspaceId: WORKSPACE_ID, docId: document.id,
     })).toBeNull()
-    expect(existsSync(join(spaceDir(), 'recycle', document.id))).toBe(true)
+    // The soft delete moved the node under the hidden recycle directory.
+    const tree = ov.tree(ovAccountId(SPACE_ID))
+    const documentUri = remoteDocumentUri(collection, document)
+    const recycledUri = `viking://resources/.recycle/${documentUri.slice(documentUri.lastIndexOf('/') + 1)}`
+    expect(tree.has(recycledUri)).toBe(true)
+    expect(tree.has(documentUri)).toBe(false)
+    // The recycled copy left the retrieval face with its status: the node
+    // carries the storage-only deleted state.
+    expect(tree.get(recycledUri)?.tags.join(' ')).toContain('status=deleted')
   })
 
   it('appends an audit entry for every mutation', async () => {
@@ -679,21 +867,32 @@ describe('knowledge-base document lifecycle', () => {
     await invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
     await invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
 
-    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
-    const actions = readAudit(workspaceRoot, binding).map(entry => entry.action)
-    expect(actions).toEqual([
+    const entries = readAudit(workspaceRoot, binding)
+    expect(entries.map(entry => entry.action)).toEqual([
+      'openviking.tenant_provisioned',
       'collection.create', 'document.upload', 'document.submit', 'document.publish', 'document.delete',
     ])
-    const entries = readAudit(workspaceRoot, binding)
-    expect(entries[0].actor).toBe(ACCOUNT_ID)
-    expect(entries[0].target).toBe(collection.id)
-    expect(entries[1].detail).toMatchObject({ collectionId: collection.id, title: 'Audited' })
-    expect(entries[2].detail).toMatchObject({ from: 'draft', status: 'in_review' })
-    expect(entries[4].detail).toMatchObject({ previousStatus: 'published' })
+    const provisioned = entries[0]
+    expect(provisioned.actor).toBe(ACCOUNT_ID)
+    const created = entries.find(entry => entry.action === 'collection.create')
+    expect(created).toMatchObject({ actor: ACCOUNT_ID, target: collection.id })
+    const uploaded = entries.find(entry => entry.action === 'document.upload')
+    expect(uploaded?.detail).toMatchObject({ collectionId: collection.id, title: 'Audited' })
+    const submitted = entries.find(entry => entry.action === 'document.submit')
+    expect(submitted?.detail).toMatchObject({ from: 'draft', status: 'in_review' })
+    const deleted = entries.find(entry => entry.action === 'document.delete')
+    expect(deleted?.detail).toMatchObject({ previousStatus: 'published' })
   })
 })
 
 describe('knowledge-base send-time reference resolution', () => {
+  function sendDeps(harness: ReturnType<typeof createHarness>): HandlerDeps {
+    return {
+      sessionManager: harness.sessionManager,
+      platform: { logger: { info: () => {}, warn: () => {}, error: () => {} } },
+    } as never
+  }
+
   it('resolves send-time references from the session scope and commits the first-send draft', async () => {
     const { invoke, sessionManager } = createHarness()
     const { collection, document } = await seedCollection(invoke, {
@@ -707,7 +906,7 @@ describe('knowledge-base send-time reference resolution', () => {
 
     // First send with a composer draft: the draft scope is committed and hits resolve.
     const references = await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'how do I book flights?', [collection.id],
     )
     expect(references).toHaveLength(1)
@@ -718,7 +917,7 @@ describe('knowledge-base send-time reference resolution', () => {
 
     // Later sends read the persisted scope — no draft argument needed.
     const later = await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'flights again',
     )
     expect(later).toHaveLength(1)
@@ -728,7 +927,7 @@ describe('knowledge-base send-time reference resolution', () => {
       workspaceId: WORKSPACE_ID, sessionId: 'session-9', collectionIds: [],
     })
     expect(await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'flights again',
     )).toBeUndefined()
   })
@@ -739,7 +938,7 @@ describe('knowledge-base send-time reference resolution', () => {
     setTrustedProductSpaceAccountProvider(() => new Promise(() => {}))
     setSyncTrustedProductSpaceAccountId(null)
     const result = await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-empty', 'anything',
     )
     expect(result).toBeUndefined()
@@ -748,7 +947,7 @@ describe('knowledge-base send-time reference resolution', () => {
   it('degrades to no references when the session does not exist', async () => {
     const { sessionManager } = createHarness()
     const result = await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-missing', 'anything',
     )
     expect(result).toBeUndefined()
@@ -769,7 +968,7 @@ describe('knowledge-base send-time reference resolution', () => {
     setTrustedProductSpaceAccountProvider(() => new Promise(() => {}))
     const started = Date.now()
     const result = await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'flights?', [collection.id],
     )
     expect(result).toBeUndefined()
@@ -788,10 +987,10 @@ describe('knowledge-base send-time reference resolution', () => {
     await sessionManager.setSessionKbCollections('session-draft', [])
 
     await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-draft', 'flights?', [collection.id],
     )
-    const entries = readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+    const entries = readAudit(workspaceRoot, binding)
       .filter(entry => entry.action === 'session_scope.set')
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
@@ -814,11 +1013,63 @@ describe('knowledge-base send-time reference resolution', () => {
     // send path applies the same bound to the raw message.
     const oversized = 'flights '.repeat(6_000)
     const references = await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', oversized,
     )
     expect(references).toHaveLength(1)
     expect(references?.[0]).toMatchObject({ docId: document.id })
+  })
+
+  it('degrades a send to no references when the tenant is unreachable — the send still resolves (brief D7)', async () => {
+    const { invoke, sessionManager } = createHarness()
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    await sessionManager.setSessionKbCollections('session-9', [collection.id])
+
+    // The retrieval endpoint stalls past its own timeout: phase 2 fails, the
+    // resolution degrades to undefined and the draft stays committed.
+    ov.setDelay('/api/v1/search/find', 300)
+    setOpenVikingTimeoutsForTests({ findMs: 30 })
+    const references = await resolveSessionKbReferences(
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
+      'session-9', 'flights?',
+    )
+    expect(references).toBeUndefined()
+    expect(await sessionManager.getSession('session-9')).toMatchObject({
+      kbCollectionIds: [collection.id],
+    })
+  })
+
+  it('yields no references when the binding is missing — and provisions nothing (brief D2)', async () => {
+    const { invoke, sessionManager } = createHarness()
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    await sessionManager.setSessionKbCollections('session-9', [collection.id])
+
+    // A fresh device: the cached binding is gone. The send must not provision
+    // (no admin-plane calls at all) and must still resolve — to nothing.
+    credentialManagerOverride?.clear()
+    ov.requests.length = 0
+    const references = await resolveSessionKbReferences(
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
+      'session-9', 'flights?',
+    )
+    expect(references).toBeUndefined()
+    expect(ov.requests).toEqual([])
+    // Reads lose their binding the same way — the neutral unavailability,
+    // never a provisioning side effect from a read path.
+    await expect(invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    })).rejects.toMatchObject({ code: 'kb_service_unavailable' })
+    await expect(invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
+      .rejects.toMatchObject({ code: 'kb_service_unavailable' })
+    void collection
   })
 })
 
@@ -841,15 +1092,18 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
     return { stored: stored.collection, draftCollection }
   }
 
+  function sendDeps(harness: ReturnType<typeof createHarness>): HandlerDeps {
+    return {
+      sessionManager: harness.sessionManager,
+      platform: { logger: { info: () => {}, warn: () => {}, error: () => {} } },
+    } as never
+  }
+
   function resolveFor(harness: ReturnType<typeof createHarness>, message: string, draft?: string[]) {
-    return resolveSessionKbReferences(
-      { sessionManager: harness.sessionManager, platform: { logger: { warn: () => {} } } } as never,
-      'session-ro', message, draft,
-    )
+    return resolveSessionKbReferences(sendDeps(harness), 'session-ro', message, draft)
   }
 
   it('ignores the composer draft while the space is read-only and resolves from the stored scope (review #4)', async () => {
-    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
     const scenarios: Array<() => void> = [
       () => setRuntimeOfflineReadOnly(true),
       () => setRuntimeProductSpaceRestricted(SPACE_ID, true),
@@ -907,21 +1161,20 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
     await new Promise(resolve => setTimeout(resolve, 30))
     expect(await harness.sessionManager.getSession('session-ro'))
       .toMatchObject({ kbCollectionIds: [stored.id] })
-    expect(readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+    expect(readAudit(workspaceRoot, binding)
       .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
   })
 
   it('an exhausted publish budget commits nothing — the write gate re-checks the deadline (review N1)', async () => {
     const harness = createHarness()
     const { stored, draftCollection } = await seedScopedSession(harness)
-    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
-    // The publish filter runs SYNCHRONOUSLY, so the abandonment timer cannot
-    // fire inside it — the faithful repro of the gap shifts the wall clock
-    // past the deadline during the commit phase's session read: every
-    // deadline check from there on (the filter AND the pre-write gate) sees
-    // an exhausted budget, while the REAL race timer has not fired, so
-    // `abandoned` is still false and only the absolute deadline can stop
-    // the write of the truncated scope.
+    // The publish loop runs SYNCHRONOUSLY over a pre-loaded index, so the
+    // abandonment timer cannot fire inside it — the faithful repro of the gap
+    // shifts the wall clock past the deadline during the commit phase's
+    // session read: every deadline check from there on (the loop AND the
+    // pre-write gate) sees an exhausted budget, while the REAL race timer has
+    // not fired, so `abandoned` is still false and only the absolute deadline
+    // can stop the write of the truncated scope.
     const realNow = Date.now.bind(Date)
     const manager = harness.sessionManager as unknown as {
       getSession: (sessionId: string) => Promise<unknown>
@@ -975,13 +1228,13 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
       return record
     }
     const result = await resolveSessionKbReferences(
-      { sessionManager: harness.sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps(harness),
       'session-ro', 'flights?', [draftCollection.id], WORKSPACE_ID, entryToken,
     )
     expect(result).toBeUndefined()
     expect(await harness.sessionManager.getSession('session-ro'))
       .toMatchObject({ kbCollectionIds: [stored.id] })
-    expect(readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+    expect(readAudit(workspaceRoot, binding)
       .filter(entry => entry.action === 'session_scope.set')).toHaveLength(0)
   })
 
@@ -999,12 +1252,12 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
     // commit entirely, so the send kept resolving from the scope the user
     // had just emptied.
     const references = await resolveSessionKbReferences(
-      { sessionManager, platform: { logger: { warn: () => {} } } } as never,
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'flights?', [],
     )
     expect(references).toBeUndefined()
     expect(await sessionManager.getSession('session-9')).toMatchObject({ kbCollectionIds: [] })
-    expect(readAudit(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
+    expect(readAudit(workspaceRoot, binding)
       .filter(entry => entry.action === 'session_scope.set')).toHaveLength(1)
   })
 
@@ -1039,79 +1292,65 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
     expect(await harness.sessionManager.getSession('session-ro'))
       .toMatchObject({ kbCollectionIds: [stored.id] })
     // And no audit entry landed in EITHER space's KB.
-    for (const binding of [
+    for (const spaceBinding of [
       { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID },
       { productSpaceId: 'ps-two', enterpriseId: 'ent-two' },
     ]) {
-      expect(readAudit(workspaceRoot, binding).filter(entry => entry.action === 'session_scope.set'))
+      expect(readAudit(workspaceRoot, spaceBinding).filter(entry => entry.action === 'session_scope.set'))
         .toHaveLength(0)
     }
   })
 })
 
 describe('knowledge-base search budget', () => {
-  it('stops on an already-passed deadline before scanning anything (review #7)', async () => {
+  it('stops on an already-passed deadline before asking the storage anything (review #7)', async () => {
     const { invoke } = createHarness()
     const { collection, document } = await seedCollection(invoke, {
       title: 'Travel policy', content: 'Flights are economy only.',
     })
     if (!document) throw new Error('seed document missing')
     await publishDocument(invoke, document)
-    const hits = searchDocuments(
-      workspaceRoot,
-      { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID },
-      'flights',
-      [collection.id],
-      { deadline: Date.now() - 1, maxScannedBytes: KB_SEND_MAX_SCAN_BYTES },
+    ov.requests.length = 0
+    const hits = await searchDocuments(
+      await kbSpaceForTests(), 'flights', [collection.id], { deadline: Date.now() - 1 },
     )
     expect(hits).toEqual([])
+    expect(ov.requests).toEqual([])
   })
 
-  it('scores a document whose read lands exactly on the byte cap (review #7 follow-up)', async () => {
+  it('maps a storage-side find timeout to the neutral availability error (review #7 follow-up)', async () => {
     const { invoke } = createHarness()
-    const { collection } = await seedCollection(invoke)
-    const first = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
-      workspaceId: WORKSPACE_ID, collectionId: collection.id,
-      title: 'First', content: 'alpha beta',
-    }) as KbDocumentSummary
-    const second = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
-      workspaceId: WORKSPACE_ID, collectionId: collection.id,
-      title: 'Second', content: 'alpha gamma',
-    }) as KbDocumentSummary
-    await publishDocument(invoke, first)
-    await publishDocument(invoke, second)
-    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
-    // 10 + 11 = 21 bytes: the cap lands exactly after the second document is
-    // read. The byte budget stops the NEXT read, but the content already in
-    // hand must still be scored — the previous in-loop check dropped it and
-    // the send resolved zero references despite the only match being read.
-    const hits = searchDocuments(workspaceRoot, binding, 'gamma', [collection.id], {
-      maxScannedBytes:
-        Buffer.byteLength('alpha beta', 'utf-8') + Buffer.byteLength('alpha gamma', 'utf-8'),
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
     })
-    expect(hits.map(hit => hit.docId)).toEqual([second.id])
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    // The find stalls past its own bounded timeout: the SEARCH RPC surfaces
+    // the neutral message — never the vendor, the URI or the raw response.
+    ov.setDelay('/api/v1/search/find', 300)
+    setOpenVikingTimeoutsForTests({ findMs: 30 })
+    const failure = await invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'flights', collectionIds: [collection.id],
+    }).catch((caught: unknown) => caught) as { code?: string; message?: string }
+    expect(failure.code).toBe('kb_service_unavailable')
+    expect(failure.message).toBe(KB_SERVICE_UNAVAILABLE_MESSAGE)
+    void document
   })
 
-  it('still refuses to read the document AFTER the byte cap is reached (review #7)', async () => {
+  it('discloses nothing once the budget runs out mid-walk (review #7)', async () => {
     const { invoke } = createHarness()
-    const { collection } = await seedCollection(invoke)
-    for (const title of ['First', 'Second']) {
-      const doc = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
-        workspaceId: WORKSPACE_ID, collectionId: collection.id,
-        title, content: 'alpha alpha',
-      }) as KbDocumentSummary
-      await publishDocument(invoke, doc)
-    }
-    // Two same-sized documents, cap = exactly one document: whichever is read
-    // first is scored, the second is never read — order-independently one hit.
-    const hits = searchDocuments(
-      workspaceRoot,
-      { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID },
-      'alpha',
-      [collection.id],
-      { maxScannedBytes: Buffer.byteLength('alpha alpha', 'utf-8') },
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    // The walk is slowed past the shared budget: the loop that would disclose
+    // hits re-checks the deadline per entry and stops before the first one.
+    ov.setDelay('/api/v1/fs/ls', 100)
+    const hits = await searchDocuments(
+      await kbSpaceForTests(), 'flights', [collection.id], { deadline: Date.now() + 50 },
     )
-    expect(hits).toHaveLength(1)
+    expect(hits).toEqual([])
   })
 
   it('fails the publish check closed once its shared budget is exhausted (review #7)', async () => {
@@ -1119,12 +1358,12 @@ describe('knowledge-base search budget', () => {
     const seeded = await seedCollection(invoke, { title: 'Policy', content: 'Rules.' })
     if (!seeded.document) throw new Error('seed document missing')
     await publishDocument(invoke, seeded.document)
-    const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
+    const space = await kbSpaceForTests()
     // In budget the collection is proven published...
-    expect(isCollectionPublished(workspaceRoot, binding, seeded.collection.id)).toBe(true)
+    expect(await isCollectionPublished(space, seeded.collection.id)).toBe(true)
     // ...while an exhausted budget degrades to "not proven published" instead
-    // of walking the whole metadata listing past the send deadline.
-    expect(isCollectionPublished(workspaceRoot, binding, seeded.collection.id, {
+    // of walking the whole tenant past the send deadline.
+    expect(await isCollectionPublished(space, seeded.collection.id, {
       deadline: Date.now() - 1,
     })).toBe(false)
   })

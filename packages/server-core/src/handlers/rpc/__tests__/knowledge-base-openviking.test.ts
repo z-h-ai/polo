@@ -1,12 +1,12 @@
-import { afterEach, afterAll, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'fs'
+import { afterEach, afterAll, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import type { KbCollection, KbDocument, KbDocumentSummary, KbSearchHit } from '@polo-ai/shared/protocol'
+import type { KbCollectionList, KbDocument, KbDocumentSummary, KbSearchHit } from '@polo-ai/shared/protocol'
+import * as realCredentials from '@polo-ai/shared/credentials'
 import type { HandlerFn, RpcServer, RequestContext } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../../handler-deps'
-import type { ISessionManager } from '../../session-manager-interface'
 import {
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
@@ -20,197 +20,178 @@ import {
 import {
   registerKnowledgeBaseHandlers,
   resetKbActiveProductSpaceReaderForTests,
-  resetKbSendResolveTimeoutForTests,
-  resolveSessionKbReferences,
   setKbActiveProductSpaceReaderForTests,
-  setKbSendResolveTimeoutForTests,
 } from '../knowledge-base'
 import {
-  kbRootPath,
-  kbSpaceSegment,
+  kbCollectionUri,
+  kbDocumentUri,
   readAudit,
-  readOpenVikingSpaceMeta,
+  KB_SERVICE_UNAVAILABLE_MESSAGE,
 } from '../../../knowledge-base/store'
-import {
-  resetOpenVikingTimeoutsForTests,
-  setOpenVikingTimeoutsForTests,
-} from '../../../knowledge-base/openviking-client'
+import { kbTenantAccountId, readKbTenantCredential } from '../../../knowledge-base/tenant'
+import { FakeOpenVikingServer } from '../../../knowledge-base/__tests__/fake-openviking-server'
 
 /**
- * OpenViking integration tests for the KB RPC surface (POO-108 v2): space
- * provisioning at collection creation, the publish sync and its failure
- * degradation, OpenViking-backed search with the local fallback, and the
- * best-effort remote cleanup on revert/delete. The stub asserts the verified
- * wire shapes literally.
+ * End-to-end tenant integration tests for the enterprise knowledge base
+ * (POO-108 v3.1) — the layer ABOVE the RPC tests in `knowledge-base.test.ts`.
+ * They exercise the multi-tenant lifecycle against the in-memory OpenViking
+ * fake: the idempotent provisioning (fresh create, `ALREADY_EXISTS` recovery,
+ * the fail-closed ownership check), the cross-device convergence on ONE
+ * account, the recycle contract as the fake's dot-visibility rules expose it,
+ * the retrieval scoping, and the credential-plane discipline.
  */
 
 const ACCOUNT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const WORKSPACE_ID = 'ws-one'
 const SPACE_ID = 'ps-one'
 const ENTERPRISE_ID = 'ent-one'
+const ROOT_KEY = 'ok-root-key-kb-ov-tests'
 
-function enterpriseSpace() {
-  return {
-    id: SPACE_ID,
-    kind: 'enterprise' as const,
-    enterpriseId: ENTERPRISE_ID,
-    name: 'Example enterprise',
-    role: 'owner' as const,
-    accessMode: 'active' as const,
-    payer: { kind: 'enterprise' as const, enterpriseId: ENTERPRISE_ID },
+/**
+ * The tenant credential flows through the shared CredentialManager singleton
+ * (the real one talks to the OS keychain). The module is retargeted with a
+ * pass-through mock so ONLY this file's window uses the fake — any other test
+ * file sharing this bun process keeps hitting the real manager.
+ */
+class FakeCredentialManager {
+  private readonly entries = new Map<string, string>()
+
+  async get(id: { type: string; name: string }): Promise<{ value: string } | null> {
+    const value = this.entries.get(`${id.type}:${id.name}`)
+    return value === undefined ? null : { value }
+  }
+
+  async set(id: { type: string; name: string }, credential: { value: string }): Promise<void> {
+    this.entries.set(`${id.type}:${id.name}`, credential.value)
+  }
+
+  async delete(id: { type: string; name: string }): Promise<boolean> {
+    return this.entries.delete(`${id.type}:${id.name}`)
+  }
+
+  async withExclusiveLease<T>(_scope: string, operation: () => Promise<T>): Promise<T> {
+    return operation()
+  }
+
+  /** Simulates a second device (or a wiped keychain): the binding is gone. */
+  clear(): void {
+    this.entries.clear()
   }
 }
 
-let tempDir: string
-let workspaceRoot: string
+let credentialManagerOverride: FakeCredentialManager | null = null
 
-function spaceDir(): string {
-  return kbRootPath(workspaceRoot, { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID })
-}
+mock.module('@polo-ai/shared/credentials', () => ({
+  ...realCredentials,
+  getCredentialManager: () => credentialManagerOverride ?? realCredentials.getCredentialManager(),
+}))
 
-function binding() {
-  return { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
-}
+/** The fake backend every test in this file talks to; one root key guards it. */
+const ov = FakeOpenVikingServer.start(ROOT_KEY)
+afterAll(() => ov.stop())
 
-function spaceRootUri(): string {
-  return `viking://resources/entspace-${kbSpaceSegment(SPACE_ID)}`
-}
-
-/** The mutable stub behavior one test configures ahead of its RPC calls. */
-const stub = {
-  resources: [] as Array<{ uri: string; score: number; tags: string[] }>,
-  failAddWith: null as number | null,
-  failDeleteWith: null as number | null,
-  /** artificial stall for `/api/v1/search/find` (the send-path timeout cases). */
-  findDelayMs: 0,
-}
-
-interface RecordedRequest {
-  method: string
-  path: string
-  body: Record<string, unknown> | null
-  file: { name: string; content: string } | null
-}
-
-const requests: RecordedRequest[] = []
-
-const server = Bun.serve({
-  port: 0,
-  fetch: async request => {
-    const url = new URL(request.url)
-    const contentType = request.headers.get('content-type') ?? ''
-    let body: Record<string, unknown> | null = null
-    let file: { name: string; content: string } | null = null
-    if (contentType.startsWith('multipart/form-data')) {
-      // The Bun/undici `File` type vs the lib `FormData` entry value disagree,
-      // so the file is read through the runtime shape it actually has.
-      const uploaded = (await request.formData()).get('file') as File | null
-      if (uploaded instanceof Blob) {
-        file = { name: uploaded.name, content: await uploaded.text() }
-      }
-    } else {
-      body = (await request.json().catch(() => null)) as Record<string, unknown> | null
-    }
-    requests.push({ method: request.method, path: url.pathname, body, file })
-
-    if (request.method === 'DELETE') {
-      if (stub.failDeleteWith !== null) {
-        return Response.json({ status: 'error', error: 'delete refused' }, { status: stub.failDeleteWith })
-      }
-      return Response.json({ status: 'ok', result: {} })
-    }
-    if (url.pathname === '/api/v1/resources/temp_upload') {
-      return Response.json({ status: 'ok', result: { temp_file_id: `upload_${requests.length}.md` } })
-    }
-    if (url.pathname === '/api/v1/resources') {
-      if (stub.failAddWith !== null) {
-        return Response.json({ status: 'error', error: 'add refused' }, { status: stub.failAddWith })
-      }
-      return Response.json({ status: 'ok', result: { root_uri: String(body?.to ?? ''), status: 'success' } })
-    }
-    if (url.pathname === '/api/v1/search/find') {
-      if (stub.findDelayMs > 0) await new Promise(resolve => setTimeout(resolve, stub.findDelayMs))
-      return Response.json({ status: 'ok', result: { resources: stub.resources } })
-    }
-    return Response.json({ status: 'error', error: `unexpected path ${url.pathname}` }, { status: 404 })
-  },
+/** The account id the D1 derivation produces for this file's fixture space. */
+const ACCOUNT_DERIVED = kbTenantAccountId({
+  productSpaceId: SPACE_ID,
+  enterpriseId: ENTERPRISE_ID,
+  spaceName: 'Example enterprise',
 })
 
-function createHarness() {
-  setKbActiveProductSpaceReaderForTests(
-    (_accountId, productSpaceId) => (productSpaceId === SPACE_ID ? enterpriseSpace() : null) as never,
-  )
+const binding = { productSpaceId: SPACE_ID, enterpriseId: ENTERPRISE_ID }
+
+/** The owner identity every device in this file acts as. */
+function ownerSpace(productSpaceId = SPACE_ID, enterpriseId = ENTERPRISE_ID) {
+  return {
+    id: productSpaceId,
+    kind: 'enterprise' as const,
+    enterpriseId,
+    name: 'Example enterprise',
+    role: 'owner' as const,
+    accessMode: 'active' as const,
+    payer: { kind: 'enterprise' as const, enterpriseId },
+  }
+}
+
+/** Pins ownership tags onto an EXISTING account's root (the marker check's input). */
+function pinMarker(accountId: string, tags: string[]): void {
+  const root = ov.tree(accountId).get('viking://resources/')
+  if (!root) throw new Error('the account root is missing')
+  root.tags = tags
+}
+
+interface Harness {
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+  workspaceRoot: string
+  credentials: FakeCredentialManager
+}
+
+let tempDir: string
+/** One root per registered device — each device keeps its own audit trail. */
+let deviceRoots: string[]
+let currentDeviceRoot: string
+let currentCredentials: FakeCredentialManager
+
+/**
+ * Registers ONE device: a fresh workspace root plus its own handler table,
+ * over the SHARED fake server — which is what makes two devices converge on
+ * one derived account.
+ */
+function useDevice(): Harness {
+  const workspaceRoot = join(tempDir, `device-${deviceRoots.length}`)
+  deviceRoots.push(workspaceRoot)
+  mkdirSync(workspaceRoot, { recursive: true })
+  currentDeviceRoot = workspaceRoot
+
   const handlers = new Map<string, HandlerFn>()
-  const serverStub: RpcServer = {
+  const server: RpcServer = {
     handle(channel, handler) { handlers.set(channel, handler) },
     push() {},
     async invokeClient() { return null },
     hasClientCapability() { return false },
     findClientsWithCapability() { return [] },
   }
-  interface SeedRecord {
-    id: string
-    accountId: string
-    productSpaceId: string
-    workspaceId: string
-    kbCollectionIds: string[]
-  }
-  const records = new Map<string, SeedRecord>()
   const sessionManager = {
-    getWorkspaces: () => [{ id: WORKSPACE_ID, rootPath: workspaceRoot, name: 'Workspace One' }],
-    getSessions: () => [...records.values()],
-    getSession: async (sessionId: string) => records.get(sessionId),
-    setSessionKbCollections: async (sessionId: string, collectionIds: string[]) => {
-      records.set(sessionId, {
-        id: sessionId,
-        accountId: ACCOUNT_ID,
-        productSpaceId: SPACE_ID,
-        workspaceId: WORKSPACE_ID,
-        kbCollectionIds: collectionIds,
-      })
-    },
+    getWorkspaces: () => [{ id: WORKSPACE_ID, rootPath: currentDeviceRoot, name: 'Workspace One' }],
+    getSessions: () => [],
+    getSession: async () => null,
+    setSessionKbCollections: async () => {},
   }
   const deps = {
     sessionManager,
     platform: { logger: { info: () => {}, warn: () => {}, error: () => {} } },
   } as unknown as HandlerDeps
-  registerKnowledgeBaseHandlers(serverStub, deps)
+  registerKnowledgeBaseHandlers(server, deps)
   const ctx = { clientId: 'client-1', workspaceId: WORKSPACE_ID, webContentsId: 1 } as unknown as RequestContext
-  return {
-    invoke: async (channel: string, input: unknown) => {
-      const handler = handlers.get(channel)
-      if (!handler) throw new Error(`missing handler for ${channel}`)
-      return handler(ctx, input)
-    },
-    sessionManager: sessionManager as unknown as ISessionManager,
+  const invoke = async (channel: string, ...args: unknown[]) => {
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`missing handler for ${channel}`)
+    return handler(ctx, ...args)
   }
+  return { invoke, workspaceRoot, credentials: currentCredentials }
 }
 
-function setKbReaderRemoved(): void {}
-
-beforeEach(() => {
-  tempDir = mkdtempSync(join(tmpdir(), 'knowledge-base-openviking-'))
-  workspaceRoot = join(tempDir, 'workspace')
-  mkdirSync(workspaceRoot, { recursive: true })
-  process.env.POLO_OPENVIKING_URL = `http://127.0.0.1:${server.port}`
-  delete process.env.POLO_OPENVIKING_API_KEY
-  stub.resources = []
-  stub.failAddWith = null
-  stub.failDeleteWith = null
-  stub.findDelayMs = 0
-  requests.length = 0
+beforeEach(async () => {
+  tempDir = mkdtempSync(join(tmpdir(), 'knowledge-base-ov-'))
+  deviceRoots = []
+  await ov.reset()
+  currentCredentials = new FakeCredentialManager()
+  credentialManagerOverride = currentCredentials
+  process.env.POLO_OPENVIKING_URL = ov.baseUrl
+  process.env.POLO_OPENVIKING_ROOT_API_KEY = ROOT_KEY
   setRuntimeActiveProductSpace(SPACE_ID)
   setRuntimeActiveProductSpaceAccount(ACCOUNT_ID)
   setRuntimeOfflineReadOnly(false)
   setTrustedProductSpaceAccountProvider(async () => ACCOUNT_ID)
   setSyncTrustedProductSpaceAccountId(ACCOUNT_ID)
+  setKbActiveProductSpaceReaderForTests(
+    (_accountId, productSpaceId) => (productSpaceId === SPACE_ID
+      ? ownerSpace()
+      : ownerSpace(productSpaceId, 'ent-two')) as never,
+  )
 })
 
 afterEach(() => {
-  delete process.env.POLO_OPENVIKING_URL
-  delete process.env.POLO_OPENVIKING_API_KEY
-  resetOpenVikingTimeoutsForTests()
-  resetKbSendResolveTimeoutForTests()
+  credentialManagerOverride = null
   resetKbActiveProductSpaceReaderForTests()
   setRuntimeProductSpaceRestricted(SPACE_ID, false)
   setRuntimeActiveProductSpace(null)
@@ -218,409 +199,302 @@ afterEach(() => {
   setRuntimeOfflineReadOnly(false)
   setTrustedProductSpaceAccountProvider(async () => null)
   setSyncTrustedProductSpaceAccountId(null)
+  delete process.env.POLO_OPENVIKING_URL
+  delete process.env.POLO_OPENVIKING_ROOT_API_KEY
   rmSync(tempDir, { recursive: true, force: true })
 })
 
-afterAll(() => {
-  server.stop(true)
-})
-
-/** Creates a collection, uploads a document and walks it to `published`. */
-async function seedPublishedDocument(
-  invoke: (channel: string, input: unknown) => Promise<unknown>,
-  doc: { title: string; content: string },
-): Promise<{ collection: KbCollection; document: KbDocumentSummary; published: KbDocumentSummary }> {
-  const collection = await invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
-    workspaceId: WORKSPACE_ID, name: 'Handbook', description: 'Policies',
-  }) as KbCollection
-  const document = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
-    workspaceId: WORKSPACE_ID, collectionId: collection.id, title: doc.title, content: doc.content,
-  }) as KbDocumentSummary
-  await invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, { workspaceId: WORKSPACE_ID, docId: document.id })
-  const published = await invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, {
-    workspaceId: WORKSPACE_ID, docId: document.id,
-  }) as KbDocumentSummary
-  return { collection, document, published }
+/** Creates one collection through the RPC. */
+async function createCollection(harness: Harness, name: string): Promise<{ id: string; name: string }> {
+  return await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+    workspaceId: WORKSPACE_ID, name, description: '',
+  }) as { id: string; name: string }
 }
 
-describe('knowledge-base OpenViking space provisioning', () => {
-  it('brings the space root up with the first collection, then stays idempotent', async () => {
-    const { invoke } = createHarness()
-    const collection = await invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
-      workspaceId: WORKSPACE_ID, name: 'Handbook', description: 'Policies',
-    }) as KbCollection
+/** Uploads one document into an EXISTING collection and publishes it. */
+async function publishInto(
+  harness: Harness,
+  collection: { id: string },
+  doc: { title: string; content: string },
+): Promise<KbDocumentSummary> {
+  const document = await harness.invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+    workspaceId: WORKSPACE_ID, collectionId: collection.id,
+    title: doc.title, content: doc.content,
+  }) as KbDocumentSummary
+  await harness.invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, { workspaceId: WORKSPACE_ID, docId: document.id })
+  await harness.invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
+  return document
+}
 
-    expect(requests.map(request => request.path)).toEqual([
-      '/api/v1/resources/temp_upload',
-      '/api/v1/resources',
-    ])
-    const add = requests[1].body as Record<string, unknown>
-    expect(add.to).toBe(`${spaceRootUri()}/.space.md`)
-    expect(add.create_parent).toBe(true)
-    expect(add.wait).toBe(true)
-    expect(add.processing_mode).toBe('vectors_only')
-    expect(add.tags).toContain(`polo_space=${SPACE_ID}`)
-    expect(typeof add.reason).toBe('string')
-    // The manifest carries the enterprise space name / ids / creation time.
-    const manifest = requests[0].file
-    expect(manifest?.name).toBe('.space.md')
-    expect(manifest?.content).toContain('Example enterprise')
-    expect(manifest?.content).toContain(SPACE_ID)
-    expect(manifest?.content).toContain(ENTERPRISE_ID)
-    expect(manifest?.content).toContain('created_at')
+/** Convenience: one fresh collection with one published document in it. */
+async function seedPublished(
+  harness: Harness,
+  name: string,
+  doc: { title: string; content: string },
+): Promise<KbDocumentSummary> {
+  return await publishInto(harness, await createCollection(harness, name), doc)
+}
 
-    // The remote root is recorded in the space meta and audited.
-    expect(readOpenVikingSpaceMeta(workspaceRoot, binding())).toMatchObject({
-      rootUri: spaceRootUri(),
-      productSpaceId: SPACE_ID,
-      enterpriseId: ENTERPRISE_ID,
-    })
-    expect(readAudit(workspaceRoot, binding()).filter(entry => entry.action === 'openviking.space_provisioned'))
-      .toHaveLength(1)
-
-    // A second collection reuses the provisioned root — no further calls.
-    requests.length = 0
-    await invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
-      workspaceId: WORKSPACE_ID, name: 'Second', description: '',
-    })
-    expect(requests).toEqual([])
-    expect(collection.name).toBe('Handbook')
-  })
-
-  it('survives a failed provisioning and keeps the local collection', async () => {
-    stub.failAddWith = 500
-    const { invoke } = createHarness()
-    const collection = await invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+describe('tenant provisioning', () => {
+  it('provisions one derived account and pins the ownership marker on its root', async () => {
+    const harness = useDevice()
+    await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
       workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
-    }) as KbCollection
-    expect(collection.name).toBe('Handbook')
-    expect(readOpenVikingSpaceMeta(workspaceRoot, binding())).toBeNull()
-    const actions = readAudit(workspaceRoot, binding()).map(entry => entry.action)
-    expect(actions).toEqual(['collection.create', 'openviking.space_provision_failed'])
+    })
+    expect(ov.hasAccount(ACCOUNT_DERIVED)).toBe(true)
+    const root = ov.tree(ACCOUNT_DERIVED).get('viking://resources/')
+    expect(root?.tags).toContain(`polo_space=${SPACE_ID}`)
+    expect(root?.tags).toContain(`polo_enterprise=${ENTERPRISE_ID}`)
+    // The binding is cached for the NEXT call — reads and sends never
+    // re-enter the admin plane.
+    const credential = await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID)
+    expect(credential?.accountId).toBe(ACCOUNT_DERIVED)
+    expect(credential?.apiKey).toBe(ov.userKey(ACCOUNT_DERIVED))
+  })
+
+  it('serves later calls from the cache without re-entering the admin plane', async () => {
+    const harness = useDevice()
+    await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    })
+    const adminCallsAfterFirst = ov.requests.filter(request => request.path.startsWith('/api/v1/admin/')).length
+    await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Policies', description: '',
+    })
+    // The second creation rode the cached binding: zero new admin-plane calls.
+    expect(ov.requests.filter(request => request.path.startsWith('/api/v1/admin/')).length)
+      .toBe(adminCallsAfterFirst)
+    // The tenant key appeared on the data plane; the root key NEVER did.
+    const dataPlane = ov.requests.filter(request => !request.path.startsWith('/api/v1/admin/'))
+    expect(dataPlane.length).toBeGreaterThan(0)
+    expect(dataPlane.every(request => request.authorization === `Bearer ${ov.userKey(ACCOUNT_DERIVED)}`)).toBe(true)
+  })
+
+  it('recovers an existing tenant through ALREADY_EXISTS by reading the key back', async () => {
+    // Another device provisioned this space already: the account exists, the
+    // marker is pinned, and THIS device has no cached binding.
+    ov.createAccount(ACCOUNT_DERIVED, 'polo-service')
+    pinMarker(ACCOUNT_DERIVED, [`polo_space=${SPACE_ID}`, `polo_enterprise=${ENTERPRISE_ID}`])
+    const existingKey = ov.userKey(ACCOUNT_DERIVED)
+    currentCredentials.clear()
+
+    const harness = useDevice()
+    await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    })
+
+    // Recovery re-adopted the account: the cached key IS the existing key —
+    // re-signing would invalidate the key every other device holds.
+    const credential = await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID)
+    expect(credential?.apiKey).toBe(existingKey)
+    const actions = readAudit(harness.workspaceRoot, binding).map(entry => entry.action)
+    expect(actions).toContain('openviking.tenant_recovered')
+    expect(actions).not.toContain('openviking.tenant_provisioned')
+    // The marker was verified through a READ; it was never rewritten.
+    const markerWrites = ov.requests.filter(request =>
+      request.path === '/api/v1/fs/attrs/set_tags'
+      && JSON.stringify(request.body).includes('polo_space='))
+    expect(markerWrites).toEqual([])
+  })
+
+  it('fails closed when an existing account carries no ownership marker', async () => {
+    // An orphan: created but its marker never landed (a crash between create
+    // and setTags). Adoption MUST refuse instead of taking the account over.
+    ov.createAccount(ACCOUNT_DERIVED, 'polo-service')
+    currentCredentials.clear()
+
+    const harness = useDevice()
+    await expect(harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    })).rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+
+    const mismatch = readAudit(harness.workspaceRoot, binding)
+      .find(entry => entry.action === 'openviking.binding_mismatch')
+    expect(mismatch).toBeDefined()
+    expect(mismatch?.detail).toMatchObject({ markerSpace: null, markerEnterprise: null })
+    // Nothing was cached, so reads stay unavailable rather than re-provision.
+    expect(await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID)).toBeNull()
+    await expect(harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
+      .rejects.toMatchObject({ code: 'kb_service_unavailable' })
+  })
+
+  it('fails closed when the marker names a foreign space', async () => {
+    ov.createAccount(ACCOUNT_DERIVED, 'polo-service')
+    pinMarker(ACCOUNT_DERIVED, ['polo_space=ps-other', 'polo_enterprise=ent-other'])
+    currentCredentials.clear()
+
+    const harness = useDevice()
+    await expect(harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    })).rejects.toMatchObject({ code: 'kb_service_unavailable' })
+    const mismatch = readAudit(harness.workspaceRoot, binding)
+      .find(entry => entry.action === 'openviking.binding_mismatch')
+    expect(mismatch?.detail).toMatchObject({ markerSpace: 'ps-other', markerEnterprise: 'ent-other' })
   })
 })
 
-describe('knowledge-base OpenViking publish sync', () => {
-  it('pushes a published document into the space and records the outcome', async () => {
-    const { invoke } = createHarness()
-    const { collection, document, published } = await seedPublishedDocument(invoke, {
-      title: 'Flights policy', content: 'Flights must be booked economy.',
+describe('cross-device convergence', () => {
+  it('recovers a lost binding through a managing RPC and keeps the data', async () => {
+    // Device A provisions and fills the tenant.
+    const deviceA = useDevice()
+    const document = await seedPublished(deviceA, 'Handbook', {
+      title: 'Vacation policy', content: 'Every employee gets twenty days of paid vacation.',
     })
 
-    const docUri = `${spaceRootUri()}/collections/${collection.id}/${document.id}.md`
-    expect(published.status).toBe('published')
-    expect(published.openViking).toEqual({ uri: docUri, syncedAt: expect.any(String) })
-
-    // The publish produced the verified add_resource body for the DOCUMENT.
-    const docAddRequests = requests.filter(request =>
-      request.path === '/api/v1/resources' && request.body?.to === docUri)
-    expect(docAddRequests).toHaveLength(1)
-    expect(docAddRequests[0].body).toMatchObject({
-      temp_file_id: expect.any(String),
-      create_parent: true,
-      wait: true,
-      processing_mode: 'vectors_only',
-      tags: [`polo_space=${SPACE_ID}`, `collection=${collection.id}`, `doc=${document.id}`],
-    })
-    const upload = requests.find(request => request.path === '/api/v1/resources/temp_upload' && request.file?.name === `${document.id}.md`)
-    expect(upload?.file?.content).toBe('Flights must be booked economy.')
-
-    // The listing carries the sync state and the audit trail records it.
-    const rows = await invoke(RPC_CHANNELS.kb.LIST_DOCUMENTS, {
-      workspaceId: WORKSPACE_ID, collectionId: collection.id,
-    }) as KbDocumentSummary[]
-    expect(rows.find(row => row.id === document.id)?.openViking).toEqual(published.openViking)
-    const actions = readAudit(workspaceRoot, binding()).map(entry => entry.action)
-    expect(actions).toContain('openviking.synced')
-    expect(actions.indexOf('document.publish')).toBeLessThan(actions.indexOf('openviking.synced'))
-  })
-
-  it('never rolls the local publish back when the sync fails', async () => {
-    stub.failAddWith = 500
-    const { invoke } = createHarness()
-    const { collection, document, published } = await seedPublishedDocument(invoke, {
-      title: 'Flights policy', content: 'Flights must be booked economy.',
+    // Device B: fresh workspace, wiped credential store — reads refuse (they
+    // never provision); one managing RPC restores the binding.
+    currentCredentials.clear()
+    const deviceB = useDevice()
+    await expect(deviceB.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }))
+      .rejects.toMatchObject({ code: 'kb_service_unavailable' })
+    await deviceB.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Policies', description: '',
     })
 
-    // The document stays published; the failure lands on the doc meta instead.
-    expect(published.status).toBe('published')
-    expect(published.openViking).toEqual({ error: expect.any(String), failedAt: expect.any(String) })
-    const rows = await invoke(RPC_CHANNELS.kb.LIST_DOCUMENTS, {
-      workspaceId: WORKSPACE_ID, collectionId: collection.id,
-    }) as KbDocumentSummary[]
-    expect(rows.find(row => row.id === document.id)?.status).toBe('published')
-    expect(rows.find(row => row.id === document.id)?.openViking).toMatchObject({ error: expect.any(String) })
-
-    const actions = readAudit(workspaceRoot, binding()).map(entry => entry.action)
-    expect(actions.indexOf('document.publish')).toBeLessThan(actions.indexOf('openviking.sync_failed'))
-    expect(actions).not.toContain('openviking.synced')
-  })
-})
-
-describe('knowledge-base OpenViking search', () => {
-  it('maps find hits back onto local published documents and notes the source', async () => {
-    const { invoke } = createHarness()
-    const { collection, document } = await seedPublishedDocument(invoke, {
-      title: 'Flights policy', content: 'Flights must be booked economy.',
-    })
-    // A draft never synced: a remote hit naming it is stale and must drop.
-    await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
-      workspaceId: WORKSPACE_ID, collectionId: collection.id, title: 'Draft doc', content: 'unrelated',
-    })
-    stub.resources = [
-      { uri: `${spaceRootUri()}/collections/x/known.md`, score: 0.818, tags: [`doc=${document.id}`, `polo_space=${SPACE_ID}`] },
-      // No `doc` tag → unmappable.
-      { uri: `${spaceRootUri()}/.space.md`, score: 0.99, tags: [`polo_space=${SPACE_ID}`] },
-      // Unknown local id → dropped.
-      { uri: `${spaceRootUri()}/collections/x/ghost.md`, score: 0.95, tags: ['doc=kb-ghost'] },
-      // The draft → dropped despite being resolvable as a record.
-      { uri: `${spaceRootUri()}/collections/x/draft.md`, score: 0.9, tags: [`polo_space=${SPACE_ID}`, 'doc=kb-draft'] },
-    ]
-
-    const hits = await invoke(RPC_CHANNELS.kb.SEARCH, {
-      workspaceId: WORKSPACE_ID, query: 'flights',
-    }) as KbSearchHit[]
-
-    expect(hits).toHaveLength(1)
-    expect(hits[0]).toEqual({
-      docId: document.id,
-      collectionId: collection.id,
-      collectionName: 'Handbook',
-      title: 'Flights policy',
-      snippet: expect.stringContaining('Flights'),
-      score: 0.818,
-      source: 'openviking',
-    })
-    expect(requests.at(-1)?.path).toBe('/api/v1/search/find')
-    expect(requests.at(-1)?.body).toEqual({
-      query: 'flights',
-      target_uri: spaceRootUri(),
-      context_type: ['resource'],
-      limit: 20,
-    })
-  })
-
-  it('falls back to the local keyword search when OpenViking is unreachable', async () => {
-    const { invoke } = createHarness()
-    const { document } = await seedPublishedDocument(invoke, {
-      title: 'Flights policy', content: 'Flights must be booked economy.',
-    })
-    // The backend disappears after the content was synced.
-    process.env.POLO_OPENVIKING_URL = 'http://127.0.0.1:1'
-
-    const hits = await invoke(RPC_CHANNELS.kb.SEARCH, {
-      workspaceId: WORKSPACE_ID, query: 'flights',
-    }) as KbSearchHit[]
-    expect(hits).toHaveLength(1)
-    expect(hits[0]).toMatchObject({ docId: document.id, title: 'Flights policy' })
-    expect(hits[0].source).toBeUndefined()
-  })
-})
-
-describe('knowledge-base send-time OpenViking retrieval', () => {
-  const SESSION = 'session-send'
-  const DOC = { title: 'Travel policy', content: 'Flights are economy only.' }
-
-  function resolveFor(harness: ReturnType<typeof createHarness>, message: string) {
-    return resolveSessionKbReferences(
-      {
-        sessionManager: harness.sessionManager,
-        platform: { logger: { info: () => {}, warn: () => {}, error: () => {} } },
-      } as never,
-      SESSION, message,
-    )
-  }
-
-  /** Seeds a published document and a session scoped to its collection. */
-  async function seedScopedSession(harness: ReturnType<typeof createHarness>) {
-    const { invoke, sessionManager } = harness
-    const { collection, document } = await seedPublishedDocument(invoke, DOC)
-    await sessionManager.setSessionKbCollections(SESSION, [collection.id])
-    requests.length = 0
-    return { collection, document }
-  }
-
-  it('ranks send references with ONE space-root find and maps hits back locally', async () => {
-    const harness = createHarness()
-    const { collection, document } = await seedScopedSession(harness)
-    // The vector backend knows this query while the local keyword scan scores
-    // it zero: a hit here proves the send used OpenViking, not the fallback.
-    stub.resources = [
-      {
-        uri: `${spaceRootUri()}/collections/${collection.id}/${document.id}.md`,
-        score: 0.818,
-        tags: [`polo_space=${SPACE_ID}`, `collection=${collection.id}`, `doc=${document.id}`],
-      },
-    ]
-
-    const references = await resolveFor(harness, 'quantum flux')
-
-    expect(references).toHaveLength(1)
-    expect(references?.[0]).toEqual({
-      docId: document.id,
-      collectionId: collection.id,
-      collectionName: 'Handbook',
-      title: 'Travel policy',
-      snippet: 'Flights are economy only.',
-      score: 0.818,
-      source: 'openviking',
-    })
-    expect(requests).toHaveLength(1)
-    expect(requests[0].path).toBe('/api/v1/search/find')
-    expect(requests[0].body).toEqual({
-      query: 'quantum flux',
-      target_uri: spaceRootUri(),
-      context_type: ['resource'],
-      limit: 20,
-    })
-  })
-
-  it('falls back to the local keyword scan when find times out inside the send budget', async () => {
-    const harness = createHarness()
-    const { collection, document } = await seedScopedSession(harness)
-    // The backend stalls past its own search timeout but well inside the send
-    // budget: the client gives up and the fallback answers with the remaining
-    // budget — per-collection caps and the interleave merge unchanged.
-    stub.findDelayMs = 200
-    setOpenVikingTimeoutsForTests({ searchMs: 25 })
-
-    const started = Date.now()
-    const references = await resolveFor(harness, 'flights')
-
-    expect(references).toHaveLength(1)
-    expect(references?.[0]).toMatchObject({
-      docId: document.id, collectionId: collection.id, title: 'Travel policy',
-    })
-    expect(references?.[0].source).toBeUndefined()
-    expect(requests).toHaveLength(1)
-    expect(Date.now() - started).toBeLessThan(1_000)
-  })
-
-  it('never lets a hung find push the send past its wall clock (review #7)', async () => {
-    const harness = createHarness()
-    await seedScopedSession(harness)
-    // The stall outlives the send deadline: the race ends the phase, the
-    // budget is gone, so the fallback scans against the exhausted clock and
-    // resolves to nothing instead of holding the send hostage.
-    stub.findDelayMs = 500
-    setKbSendResolveTimeoutForTests(60)
-
-    const started = Date.now()
-    const references = await resolveFor(harness, 'flights')
-
-    expect(references).toBeUndefined()
-    expect(Date.now() - started).toBeLessThan(1_000)
-  })
-
-  it('keeps the pre-v2 local keyword resolution when OpenViking is not configured', async () => {
-    delete process.env.POLO_OPENVIKING_URL
-    const harness = createHarness()
-    const { collection, document } = await seedScopedSession(harness)
-
-    const references = await resolveFor(harness, 'flights')
-
-    expect(references).toHaveLength(1)
-    expect(references?.[0]).toMatchObject({
-      docId: document.id, collectionId: collection.id, title: 'Travel policy', score: 1,
-    })
-    expect(references?.[0].source).toBeUndefined()
-    expect(requests).toEqual([])
-  })
-})
-
-describe('knowledge-base OpenViking cleanup', () => {
-  it('leaves OpenViking untouched when a rejected document is reverted to draft', async () => {
-    // A rejected document was never published, so it never synced: the revert
-    // cleanup has no remote copy to remove and must not call the backend.
-    const { invoke } = createHarness()
-    const { collection, document } = await seedPublishedDocument(invoke, {
-      title: 'Flights policy', content: 'Flights must be booked economy.',
-    })
-    const other = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
-      workspaceId: WORKSPACE_ID, collectionId: collection.id, title: 'Reviewable', content: 'Body.',
-    }) as KbDocumentSummary
-    await invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, { workspaceId: WORKSPACE_ID, docId: other.id })
-    requests.length = 0
-    await invoke(RPC_CHANNELS.kb.REJECT_DOCUMENT, {
-      workspaceId: WORKSPACE_ID, docId: other.id, reason: 'Not ready',
-    })
-    requests.length = 0
-
-    const reverted = await invoke(RPC_CHANNELS.kb.REVERT_TO_DRAFT, {
-      workspaceId: WORKSPACE_ID, docId: other.id,
-    }) as KbDocumentSummary
-
-    expect(reverted.status).toBe('draft')
-    expect(reverted.openViking).toBeUndefined()
-    expect(requests).toEqual([])
-    expect(readAudit(workspaceRoot, binding()).map(entry => entry.action))
-      .not.toContain('openviking.removed')
-    // The published document keeps its synced copy untouched.
-    const full = await invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
+    // One shared tenant: B sees A's collection AND document.
+    const listing = await deviceB.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, {
+      workspaceId: WORKSPACE_ID,
+    }) as KbCollectionList
+    expect(listing.collections.map(collection => collection.name).sort()).toEqual(['Handbook', 'Policies'])
+    const fetched = await deviceB.invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
       workspaceId: WORKSPACE_ID, docId: document.id,
     }) as KbDocument
-    expect(full.openViking).toMatchObject({ uri: expect.any(String) })
+    expect(fetched.title).toBe('Vacation policy')
+    expect(fetched.content).toContain('twenty days')
+    // Both devices derived the SAME account — one tree, not two.
+    expect(ov.hasAccount(ACCOUNT_DERIVED)).toBe(true)
+    expect(await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID).then(credential => credential?.accountId))
+      .toBe(ACCOUNT_DERIVED)
   })
 
-  it('deletes the remote copy on document delete, best-effort on failure', async () => {
-    const { invoke } = createHarness()
-    const { collection, document, published } = await seedPublishedDocument(invoke, {
-      title: 'Obsolete', content: 'Out of date.',
+  it('keeps two enterprise spaces in two accounts with disjoint trees', async () => {
+    const harness = useDevice()
+    await seedPublished(harness, 'Handbook', {
+      title: 'Vacation policy', content: 'Twenty days of paid vacation.',
     })
-    const docUri = (published.openViking as { uri: string }).uri
 
-    // The remote refuses: the local deletion still goes through.
-    stub.failDeleteWith = 500
-    await invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
-    const failedActions = readAudit(workspaceRoot, binding()).map(entry => entry.action)
-    expect(failedActions).toContain('openviking.remove_failed')
-    expect(failedActions).not.toContain('openviking.removed')
-    const rows = await invoke(RPC_CHANNELS.kb.LIST_DOCUMENTS, {
-      workspaceId: WORKSPACE_ID, collectionId: collection.id,
-    }) as KbDocumentSummary[]
-    expect(rows).toEqual([])
-    expect(existsSync(join(spaceDir(), 'recycle', document.id))).toBe(true)
+    // A DIFFERENT enterprise space: its own derivation, its own account.
+    // The reader maps ps-two to the OTHER enterprise's owner view.
+    setRuntimeActiveProductSpace('ps-two')
+    // The test reader keeps the fixture name for every space, so the derived
+    // account reuses the same slug with the OTHER space's hash.
+    const otherAccount = kbTenantAccountId({
+      productSpaceId: 'ps-two', enterpriseId: 'ent-two', spaceName: 'Example enterprise',
+    })
+    const otherCollection = await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Other Handbook', description: '',
+    }) as { id: string }
+    expect(otherAccount).not.toBe(ACCOUNT_DERIVED)
+    expect(ov.hasAccount(otherAccount)).toBe(true)
 
-    // A healthy backend gets the fs DELETE for the recorded uri.
-    stub.failDeleteWith = null
-    requests.length = 0
-    const second = await invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
-      workspaceId: WORKSPACE_ID, collectionId: collection.id, title: 'Second', content: 'Body.',
-    }) as KbDocumentSummary
-    await invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, { workspaceId: WORKSPACE_ID, docId: second.id })
-    const secondPublished = await invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, {
-      workspaceId: WORKSPACE_ID, docId: second.id,
-    }) as KbDocumentSummary
-    const secondUri = (secondPublished.openViking as { uri: string }).uri
-    requests.length = 0
-    await invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: second.id })
-    expect(requests).toHaveLength(1)
-    expect(requests[0].method).toBe('DELETE')
-    expect(requests[0].path).toBe('/api/v1/fs')
-    expect(requests[0].body).toBeNull()
-    expect(secondUri).toBe(`${spaceRootUri()}/collections/${collection.id}/${second.id}.md`)
-    expect(readAudit(workspaceRoot, binding()).map(entry => entry.action)).toContain('openviking.removed')
+    // Back in the first space: the other space's collection is invisible.
+    setRuntimeActiveProductSpace(SPACE_ID)
+    const listing = await harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, {
+      workspaceId: WORKSPACE_ID,
+    }) as KbCollectionList
+    expect(listing.collections.map(collection => collection.id)).not.toContain(otherCollection.id)
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'vacation',
+    }) as KbSearchHit[]
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.title).toBe('Vacation policy')
   })
 })
 
-describe('knowledge-base without OpenViking', () => {
-  it('makes no OpenViking calls and keeps the pre-v2 shapes when the URL env is unset', async () => {
-    delete process.env.POLO_OPENVIKING_URL
-    const { invoke } = createHarness()
-    const { collection, document, published } = await seedPublishedDocument(invoke, {
-      title: 'Flights policy', content: 'Flights must be booked economy.',
-    })
-    expect(requests).toEqual([])
-    expect(published.openViking).toBeUndefined()
-    expect(readOpenVikingSpaceMeta(workspaceRoot, binding())).toBeNull()
-    expect(readAudit(workspaceRoot, binding()).map(entry => entry.action)).toEqual([
-      'collection.create', 'document.upload', 'document.submit', 'document.publish',
-    ])
-    const hits = await invoke(RPC_CHANNELS.kb.SEARCH, {
-      workspaceId: WORKSPACE_ID, query: 'flights',
+describe('the recycle contract', () => {
+  it('hides a deleted document from every listing while keeping it recoverable', async () => {
+    const harness = useDevice()
+    const collection = await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    }) as { id: string; name: string }
+    const document = await harness.invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, collectionId: collection.id,
+      title: 'Vacation policy', content: 'Twenty days.',
+    }) as KbDocumentSummary
+    await harness.invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, { workspaceId: WORKSPACE_ID, docId: document.id })
+    await harness.invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
+    await harness.invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
+
+    // The soft delete is a real move into the hidden `.recycle/` subtree,
+    // with the deleted status stamped on the moved file.
+    const originalUri = kbDocumentUri(kbCollectionUri(collection.name, collection.id), document.title, document.id)
+    const tree = ov.tree(ACCOUNT_DERIVED)
+    expect(tree.has(originalUri)).toBe(false)
+    const recycledName = originalUri.slice(originalUri.lastIndexOf('/') + 1)
+    const recycled = tree.get(`viking://resources/.recycle/${recycledName}`)
+    expect(recycled?.tags).toContain('status=deleted')
+    // …the document endpoint no longer answers for it…
+    expect(await harness.invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    })).toBeNull()
+    // …the listing counts no published copy…
+    const listing = await harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, {
+      workspaceId: WORKSPACE_ID,
+    }) as KbCollectionList
+    expect(listing.collections[0]?.documentCounts.published).toBe(0)
+    // …and retrieval cannot reach it (the fake hides dot content from find).
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'vacation policy',
     }) as KbSearchHit[]
-    expect(hits).toHaveLength(1)
-    expect(hits[0]).toMatchObject({ docId: document.id, collectionId: collection.id, title: 'Flights policy' })
-    expect(hits[0].source).toBeUndefined()
+    expect(hits).toEqual([])
+  })
+})
+
+describe('retrieval scoping', () => {
+  it('restricts hits to the requested collections and ranks the title match first', async () => {
+    const harness = useDevice()
+    const first = await createCollection(harness, 'Handbook')
+    const second = await createCollection(harness, 'Policies')
+    await publishInto(harness, first, {
+      title: 'Vacation policy', content: 'Twenty days of paid vacation for every employee.',
+    })
+    await publishInto(harness, second, {
+      title: 'Equipment policy', content: 'Vacation laptops must be returned on exit.',
+    })
+
+    // Unscoped: both collections answer; the exact-title hit outranks the
+    // body-only mention.
+    const all = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'vacation',
+    }) as KbSearchHit[]
+    expect(all).toHaveLength(2)
+    expect(all[0]?.title).toBe('Vacation policy')
+    // Scoped to the second collection: only its document comes back.
+    const scoped = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'vacation', collectionIds: [second.id],
+    }) as KbSearchHit[]
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0]?.collectionId).toBe(second.id)
+    // Both scopes together are simply the union again.
+    const union = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'vacation', collectionIds: [first.id, second.id],
+    }) as KbSearchHit[]
+    expect(union).toHaveLength(2)
+  })
+
+  it('drops find rows that no longer map into the space', async () => {
+    const harness = useDevice()
+    const collection = await createCollection(harness, 'Handbook')
+    const document = await publishInto(harness, collection, {
+      title: 'Vacation policy', content: 'Twenty days of paid vacation.',
+    })
+    // The backend answered with rows the index cannot map — a foreign uri, an
+    // unknown doc id, a recycled one — plus the ONE row that really maps.
+    const realUri = kbDocumentUri(
+      kbCollectionUri(collection.name, collection.id), document.title, document.id,
+    )
+    // The mappable row carries the tags the store really wrote (the strict
+    // parse needs doc/collection/title, not just the status).
+    const realTags = [...(ov.tree(ACCOUNT_DERIVED).get(realUri)?.tags ?? [])]
+    ov.setFindOverride([
+      { uri: 'viking://resources/Foreign-kb-x/Gone-kb-y.md', score: 0.9, tags: realTags, content: 'foreign' },
+      { uri: 'viking://resources/Handbook-kb-1/Unknown-kb-z.md', score: 0.8, tags: realTags, content: 'unknown' },
+      { uri: 'viking://resources/.recycle/hidden-kb-r.md', score: 0.7, tags: realTags, content: 'hidden' },
+      { uri: realUri, score: 0.6, tags: realTags, content: 'Twenty days of paid vacation.' },
+    ])
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'vacation',
+    }) as KbSearchHit[]
+    expect(hits.map(hit => hit.title)).toEqual(['Vacation policy'])
   })
 })
