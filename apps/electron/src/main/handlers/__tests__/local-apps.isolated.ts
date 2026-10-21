@@ -74,6 +74,11 @@ function seedAuthorityTuples(
 
 const getCachedAppCatalog = mock(() => catalog)
 const getAppCatalogAccessMode = mock(() => accessMode)
+const getAppCatalog = mock(async () => ({
+  notModified: false as const,
+  appConfigVersion: catalog.appConfigVersion,
+  apps: catalog.apps,
+}))
 const getAppReleaseDownload = mock(async (
   _accessToken: string,
   _organizationId: string,
@@ -122,28 +127,45 @@ const defaultProductSpaceCatalog = async () => ({
   }],
 })
 const getProductSpaceCatalog = mock(defaultProductSpaceCatalog)
-const resolveProductSpaceLaunch = mock(async () => ({
-  contractVersion: 1,
-  productSpaceId: 'organization-a',
-  catalogEntryId: 'catalog-entry-a',
-  resolvedAt: '2099-01-01T00:00:00.000Z',
-  expiresAt: '2099-01-01T00:10:00.000Z',
-  subject: {
-    kind: 'artifact_instance' as const,
-    artifactType: 'app' as const,
+const resolveProductSpaceLaunch = mock(async (
+  _accessToken?: string,
+  _context?: unknown,
+  catalog?: { productSpaceId: string; entries: Array<Record<string, any>> },
+  catalogEntryId?: string,
+) => {
+  const resolvedCatalogEntryId = catalogEntryId ?? 'catalog-entry-a'
+  const entry = (catalog?.entries ?? []).find(candidate =>
+    candidate.kind === 'app' && candidate.catalogEntryId === resolvedCatalogEntryId) ?? {
     artifactInstanceId: 'artifact-instance-a',
-    versionId: 'version-a',
-    version: '2.3.4',
-  },
-  payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-a' },
-  delivery: {
-    kind: 'bundle' as const,
-    downloadUrl: 'https://admin.example.com/api/product-spaces/organization-a/artifacts/artifact-instance-a/versions/version-a/download?launch=issued-nonce-123456',
+    version: { versionId: 'version-a', version: '2.3.4' },
+  } as {
+    artifactInstanceId: string
+    version: { versionId: string; version: string }
+  }
+  const productSpaceId = catalog?.productSpaceId ?? 'organization-a'
+  return {
+    contractVersion: 1,
+    productSpaceId,
+    catalogEntryId: resolvedCatalogEntryId,
+    resolvedAt: '2099-01-01T00:00:00.000Z',
     expiresAt: '2099-01-01T00:10:00.000Z',
-    checksum: 'b'.repeat(64),
-    sizeBytes: 456,
-  },
-}))
+    subject: {
+      kind: 'artifact_instance' as const,
+      artifactType: 'app' as const,
+      artifactInstanceId: entry.artifactInstanceId,
+      versionId: entry.version.versionId,
+      version: entry.version.version,
+    },
+    payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-a' },
+    delivery: {
+      kind: 'bundle' as const,
+      downloadUrl: `https://admin.example.com/api/product-spaces/${productSpaceId}/artifacts/${entry.artifactInstanceId}/versions/${entry.version.versionId}/download?launch=issued-nonce-123456`,
+      expiresAt: '2099-01-01T00:10:00.000Z',
+      checksum: 'b'.repeat(64),
+      sizeBytes: 456,
+    },
+  }
+})
 const scopedInstall = mock(async (request: {
   scope: CatalogLocalAppScope
   version: string
@@ -433,6 +455,7 @@ mock.module('../../app-sdk-service', () => ({ getAppSdkBridge: () => ({ register
 mock.module('@polo-ai/shared/admin', () => ({
   ...nativeInstallationContract,
   AdminClient: class {
+    getAppCatalog = getAppCatalog
     getAppReleaseDownload = getAppReleaseDownload
     listProductSpaces = listProductSpaces
     getProductSpaceCatalog = getProductSpaceCatalog
@@ -683,6 +706,12 @@ describe('local app main-process authorization boundary', () => {
     listProductSpaces.mockClear()
     getProductSpaceCatalog.mockClear()
     resolveProductSpaceLaunch.mockClear()
+    getAppCatalog.mockClear()
+    getAppCatalog.mockImplementation(async () => ({
+      notModified: false as const,
+      appConfigVersion: catalog.appConfigVersion,
+      apps: catalog.apps,
+    }))
     handlers.clear()
     for (const handlerMock of [
       getCachedAppCatalog,
@@ -2752,6 +2781,50 @@ describe('local app main-process authorization boundary', () => {
     isInstalledAndReady.mockResolvedValueOnce(false)
     await expect(start(context, scope()))
       .rejects.toThrow('installed and prepared')
+  })
+
+  it('rejects a ProductSpace START when server ResolveLaunch is forbidden before spawn', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    resolveProductSpaceLaunch.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('distribution revoked'), {
+        errorCode: 'FORBIDDEN',
+      })
+    })
+
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({
+      code: 'REMOTE_FORBIDDEN',
+      message: 'The server denied this ProductSpace App launch',
+    })
+
+    expect(resolveProductSpaceLaunch).toHaveBeenCalledTimes(1)
+    expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+    expect(scopedStartExact).not.toHaveBeenCalled()
+  })
+
+  it('revalidates legacy organization install and start against a fresh server Catalog', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    getAppCatalog.mockImplementation(async () => ({
+      notModified: false as const,
+      appConfigVersion: catalog.appConfigVersion,
+      apps: [],
+    }))
+
+    await expect(install(context, {
+      scope: scope(),
+      appConfigVersion: 'version-1',
+      permissions: [],
+      release: confirmedRelease(),
+    })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(start(context, scope()))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    expect(getAppCatalog).toHaveBeenCalledTimes(2)
+    expect(scopedInstall).not.toHaveBeenCalled()
+    expect(scopedStart).not.toHaveBeenCalled()
   })
 
   it('keeps denied installed apps manageable while lifecycle RPCs fail closed', async () => {

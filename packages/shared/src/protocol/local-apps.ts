@@ -369,6 +369,7 @@ export interface LocalAppUninstallOptions {
 }
 
 export type LocalAppErrorCode =
+  | 'REMOTE_FORBIDDEN'
   | 'INVALID_REQUEST'
   | 'INVALID_MANIFEST'
   | 'PLATFORM_MISMATCH'

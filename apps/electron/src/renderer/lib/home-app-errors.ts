@@ -25,7 +25,12 @@ export function homeAppOperationErrorText(
   spaceKind: HomeAppSpaceKind = null,
 ): string {
   const code = getHomeAppErrorCode(error)
-  if (code === 'NOT_AUTHORIZED' || code === 'FORBIDDEN' || code === 'UNAUTHORIZED') {
+  if (
+    code === 'NOT_AUTHORIZED'
+    || code === 'REMOTE_FORBIDDEN'
+    || code === 'FORBIDDEN'
+    || code === 'UNAUTHORIZED'
+  ) {
     // Personal-space circle grants never use organization phrasing.
     return spaceKind === 'enterprise'
       ? t('homeApps.errors.unavailable')
