@@ -995,10 +995,10 @@ describe('knowledge-base send-time reference resolution', () => {
     await sessionManager.setSessionKbCollections('session-9', [])
 
     // First send with a composer draft: the draft scope is committed and hits resolve.
-    const references = await resolveSessionKbReferences(
+    const references = (await resolveSessionKbReferences(
       sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'how do I book flights?', [collection.id],
-    )
+    ))?.references
     expect(references).toHaveLength(1)
     expect(references?.[0]).toMatchObject({ docId: document.id, collectionId: collection.id })
     expect(await sessionManager.getSession('session-9')).toMatchObject({
@@ -1006,10 +1006,10 @@ describe('knowledge-base send-time reference resolution', () => {
     })
 
     // Later sends read the persisted scope — no draft argument needed.
-    const later = await resolveSessionKbReferences(
+    const later = (await resolveSessionKbReferences(
       sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'flights again',
-    )
+    ))?.references
     expect(later).toHaveLength(1)
 
     // Clearing the scope silences references without mutating past messages.
@@ -1020,6 +1020,31 @@ describe('knowledge-base send-time reference resolution', () => {
       sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'flights again',
     )).toBeUndefined()
+  })
+
+  it('returns the bounded model context alongside the references, and strips the inlined bodies (brief v4 D-B)', async () => {
+    const { invoke, sessionManager } = createHarness()
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    await sessionManager.setSessionKbCollections('session-9', [collection.id])
+
+    const resolved = await resolveSessionKbReferences(
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
+      'session-9', 'flights?',
+    )
+    // The model-facing block carries the source label AND the inlined body.
+    expect(resolved?.modelContext).toBeDefined()
+    expect(resolved?.modelContext?.docs).toBe(1)
+    expect(resolved?.modelContext?.block).toContain('### 《Travel policy》')
+    expect(resolved?.modelContext?.block).toContain('来自企业知识库 · 集合')
+    expect(resolved?.modelContext?.block).toContain('Flights are economy only.')
+    // The persisted chips never carry the body — the content was internal to
+    // the resolution (the wire schema is strict; the bodies do not leak out).
+    expect(resolved?.references).toHaveLength(1)
+    expect(resolved?.references[0]).not.toHaveProperty('content')
   })
 
   it('exits before any await when the session has no KB scope (review #7)', async () => {
@@ -1102,10 +1127,10 @@ describe('knowledge-base send-time reference resolution', () => {
     // 48k characters — beyond the ceiling the SEARCH schema enforces; the
     // send path applies the same bound to the raw message.
     const oversized = 'flights '.repeat(6_000)
-    const references = await resolveSessionKbReferences(
+    const references = (await resolveSessionKbReferences(
       sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', oversized,
-    )
+    ))?.references
     expect(references).toHaveLength(1)
     expect(references?.[0]).toMatchObject({ docId: document.id })
   })
@@ -1164,10 +1189,10 @@ describe('knowledge-base send-time reference resolution', () => {
     // SAME account is reused, so the previously published document is back.
     const restored = await invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, { workspaceId: WORKSPACE_ID }) as KbCollectionList
     expect(restored.collections.map(entry => entry.id)).toContain(collection.id)
-    const referenceAfterRestore = await resolveSessionKbReferences(
+    const referenceAfterRestore = (await resolveSessionKbReferences(
       sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
       'session-9', 'flights?',
-    )
+    ))?.references
     expect(referenceAfterRestore).toHaveLength(1)
   })
 
@@ -1281,6 +1306,7 @@ describe('knowledge-base send-time read-only and timeout discipline', () => {
 
   function resolveFor(harness: ReturnType<typeof createHarness>, message: string, draft?: string[]) {
     return resolveSessionKbReferences(sendDeps(harness), 'session-ro', message, draft)
+      .then(resolved => resolved?.references)
   }
 
   it('ignores the composer draft while the space is read-only and resolves from the stored scope (review #4)', async () => {

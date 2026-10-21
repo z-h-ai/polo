@@ -393,6 +393,14 @@ export interface SendMessageOptions {
    * handler from the session's KB scope) and persisted on the user message.
    */
   kbReferences?: KbReference[]
+  /**
+   * POO-108 v4 D-B: the bounded knowledge context assembled server-side from
+   * the SAME send-time retrieval as `kbReferences`, staged by the
+   * SessionManager for a ONE-SHOT injection into this turn's model prompt.
+   * Internal only — never persisted, never part of the message record, and a
+   * client-supplied value is always dropped.
+   */
+  kbModelContext?: { block: string; docs: number; bytes: number }
 }
 
 // ---------------------------------------------------------------------------

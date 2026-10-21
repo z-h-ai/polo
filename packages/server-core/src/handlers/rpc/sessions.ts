@@ -507,7 +507,11 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // The entry token is handed in (review #3): the resolution authorizes
     // against exactly the token this send was admitted with, never a fresh
     // capture that a revoke-and-recommit could have re-armed.
-    const kbReferences = await resolveSessionKbReferences(
+    //
+    // POO-108 v4 D-B: the SAME resolution also returns the bounded
+    // model-context block; it rides `kbModelContext` into the SessionManager,
+    // which stages it for a one-shot injection into THIS turn's prompt.
+    const resolvedKb = await resolveSessionKbReferences(
       deps,
       sessionId,
       message,
@@ -515,16 +519,20 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       resolveCallerWorkspaceId(ctx),
       sendScopeToken,
     )
+    const kbReferences = resolvedKb?.references
     // Post-authorization CAS after the awaited KB resolution — the send must
     // not dispatch for a scope that moved while references were resolved.
     assertSessionScopeTokenCurrent(sendScopeToken)
     // Client-supplied `kbReferences` are ALWAYS dropped (review #13): only
     // the server-computed snapshot may reach the persisted message, so a
-    // forged title/snippet/docId can never render as a KB citation.
-    const { kbReferences: _clientKbReferences, ...trustedOptions } = options ?? {}
+    // forged title/snippet/docId can never render as a KB citation. The
+    // model-context block is server-computed by the same rule — a client
+    // value can never inject content into the model prompt.
+    const { kbReferences: _clientKbReferences, kbModelContext: _clientKbModelContext, ...trustedOptions } = options ?? {}
     const sendOptions: SendMessageOptions = {
       ...trustedOptions,
       ...(kbReferences && kbReferences.length > 0 ? { kbReferences } : {}),
+      ...(resolvedKb?.modelContext ? { kbModelContext: resolvedKb.modelContext } : {}),
     }
 
     return await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {

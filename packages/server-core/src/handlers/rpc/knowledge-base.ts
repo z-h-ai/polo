@@ -21,6 +21,7 @@ import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import type { ISessionManager } from '../session-manager-interface'
 import type { RequestContext } from '@polo-ai/server-core/transport'
+import type { OpenVikingTenantAuth } from '../../knowledge-base/openviking-client'
 import { getBoundWorkspace, currentWorkspaceId } from './skills'
 import {
   captureCompleteTrustedSessionScope,
@@ -38,8 +39,10 @@ import {
 } from '../../runtime/product-space-executions'
 import {
   appendAudit,
+  buildKbModelContextBlock,
   createCollection,
   deleteDocument,
+  ensureKbSpaceRoot,
   getDocument,
   indexCollectionPublished,
   kbAuditFor,
@@ -57,7 +60,12 @@ import {
   type KbStoreBudget,
 } from '../../knowledge-base/store'
 import { ensureKbTenant, kbTenantAuth, readKbTenantCredential, type KbTenantCredential } from '../../knowledge-base/tenant'
-import { readOpenVikingConfig, type OpenVikingConfig } from '../../knowledge-base/openviking-client'
+import {
+  isManagedOpenViking,
+  managedOpenVikingAuth,
+  readOpenVikingConfig,
+  type OpenVikingConfig,
+} from '../../knowledge-base/openviking-client'
 
 /**
  * Enterprise Knowledge Base RPC handlers (POO-108 v3.1).
@@ -147,10 +155,10 @@ function kbSpaceBinding(scope: KbScope): KbSpaceBinding {
   return { productSpaceId: scope.space.id, enterpriseId: scope.space.enterpriseId }
 }
 
-function kbSpaceFrom(scope: KbScope, config: OpenVikingConfig, credential: KbTenantCredential): KbOpenVikingSpace {
+function kbSpaceFromAuth(scope: KbScope, config: OpenVikingConfig, auth: OpenVikingTenantAuth): KbOpenVikingSpace {
   return {
     config,
-    auth: kbTenantAuth(credential),
+    auth,
     binding: kbSpaceBinding(scope),
     workspaceRoot: scope.workspace.rootPath,
     spaceName: scope.space.name,
@@ -165,12 +173,20 @@ function kbSpaceFrom(scope: KbScope, config: OpenVikingConfig, credential: KbTen
   }
 }
 
+function kbSpaceFrom(scope: KbScope, config: OpenVikingConfig, credential: KbTenantCredential): KbOpenVikingSpace {
+  return kbSpaceFromAuth(scope, config, kbTenantAuth(credential))
+}
+
 /**
  * The store binding for a READ: the deployment must be configured and the
  * space's tenant credential must already be cached on this device. A miss is
  * the neutral availability failure — reads NEVER provision (brief D2), so a
  * space provisioned on another device stays unavailable here until a
  * management RPC recovers the binding.
+ *
+ * Managed-library mode (brief v4 D-A): there IS no per-device binding — the
+ * config's managed key IS the data-plane credential, so the space resolves
+ * directly and `tenant.ts` is never consulted.
  *
  * Review fix round B1: LIST_COLLECTIONS by an owner/manager IS that
  * management RPC. The renderer gates the "new collection" button on the
@@ -185,6 +201,9 @@ async function requireKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
   const config = readOpenVikingConfig()
   if (!config) {
     throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
+  }
+  if (isManagedOpenViking(config)) {
+    return kbSpaceFromAuth(scope, config, managedOpenVikingAuth(config))
   }
   const credential = await readKbTenantCredential(scope.space.id, scope.space.enterpriseId)
   if (!credential) {
@@ -202,11 +221,18 @@ async function requireKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
  * remote listing failure AFTER a binding was found (F1 acceptance round,
  * 2026-10-21 — "no binding" and "bound but the call failed" must stay
  * distinguishable).
+ *
+ * Managed-library mode (brief v4 D-A): the binding always resolves — the
+ * config's managed key IS the credential — and a space whose directory was
+ * never created yet reads as empty through the store's not-found walk rule.
  */
 async function readCachedKbSpaceOrNull(scope: KbScope): Promise<KbOpenVikingSpace | null> {
   const config = readOpenVikingConfig()
   if (!config) {
     throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
+  }
+  if (isManagedOpenViking(config)) {
+    return kbSpaceFromAuth(scope, config, managedOpenVikingAuth(config))
   }
   const credential = await readKbTenantCredential(scope.space.id, scope.space.enterpriseId)
   if (!credential) return null
@@ -219,11 +245,18 @@ async function readCachedKbSpaceOrNull(scope: KbScope): Promise<KbOpenVikingSpac
  * provision, and every content mutation goes through it, so a binding that
  * vanished (fresh device, cleared credential store) is recovered by the first
  * management RPC instead of failing the surface forever.
+ *
+ * Managed-library mode (brief v4 D-A): no provisioning exists — the space
+ * resolves directly from the config, and the space-root directory is created
+ * by the store on first content write (`ensureKbSpaceRoot`).
  */
 async function ensureKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
   const config = readOpenVikingConfig()
   if (!config) {
     throw new KbStoreError('kb_service_unavailable', KB_SERVICE_UNAVAILABLE_MESSAGE)
+  }
+  if (isManagedOpenViking(config)) {
+    return kbSpaceFromAuth(scope, config, managedOpenVikingAuth(config))
   }
   const credential = await ensureKbTenant({
     config,
@@ -247,11 +280,23 @@ async function ensureKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
  * The store binding for ONE send phase: cached credential ONLY (the send path
  * never provisions, brief D2), and every failure degrades to `null` — a KB
  * outage or a missing binding yields "no references", never a failed send
- * (brief D7).
+ * (brief D7). Managed-library mode (brief v4 D-A) resolves straight from the
+ * config — nothing device-local to miss.
  */
 async function readSendKbSpace(capture: SendScopeCapture): Promise<KbOpenVikingSpace | null> {
   const config = readOpenVikingConfig()
   if (!config) return null
+  if (isManagedOpenViking(config)) {
+    return {
+      config,
+      auth: managedOpenVikingAuth(config),
+      binding: capture.binding,
+      workspaceRoot: capture.workspaceRoot,
+      spaceName: capture.space.name,
+      actor: capture.token.accountId,
+      scopeToken: capture.token,
+    }
+  }
   let credential: KbTenantCredential | null
   try {
     credential = await readKbTenantCredential(
@@ -484,6 +529,11 @@ export function registerKnowledgeBaseHandlers(
     let space: KbOpenVikingSpace
     if (scope.canManage) {
       space = await ensureKbSpace(scope)
+      // B1 carries into the managed-library mode (brief v4 D-A): the
+      // management role is already proven, so the list may create the space's
+      // root directory on first use — a member's first list then reads the
+      // empty space instead of a missing-directory failure. OSS mode: no-op.
+      await ensureKbSpaceRoot(space)
     } else {
       // F1 (acceptance round, 2026-10-21): a member opening the surface on a
       // space that was never provisioned ON THIS DEVICE reads the EMPTY list
@@ -934,10 +984,15 @@ async function commitSendDraftScope(
  * Interleaves one find's ranked hits per collection (brief D5): the per-
  * collection cap stops a single dominant collection from filling the list,
  * and the round-robin merge walks the session's selection order so each
- * collection's own ranking is preserved.
+ * collection's own ranking is preserved. Rows may carry the internal
+ * inlined-content field (brief v4 D-B) — the merge only reorders, never
+ * strips.
  */
-function interleaveSendReferences(hits: KbSearchHit[], scopeIds: string[]): KbSearchHit[] {
-  const byCollection = new Map<string, KbSearchHit[]>()
+function interleaveSendReferences(
+  hits: Array<KbSearchHit & { content?: string }>,
+  scopeIds: string[],
+): Array<KbSearchHit & { content?: string }> {
+  const byCollection = new Map<string, Array<KbSearchHit & { content?: string }>>()
   for (const hit of hits) {
     const list = byCollection.get(hit.collectionId)
     if (list) {
@@ -946,7 +1001,7 @@ function interleaveSendReferences(hits: KbSearchHit[], scopeIds: string[]): KbSe
       byCollection.set(hit.collectionId, [hit])
     }
   }
-  const merged: KbSearchHit[] = []
+  const merged: Array<KbSearchHit & { content?: string }> = []
   for (let index = 0; ; index += 1) {
     let added = false
     for (const collectionId of scopeIds) {
@@ -986,7 +1041,7 @@ async function retrieveReferences(
   context: SendKbContext | null,
   deadline: number,
   attempt: { abandoned: boolean },
-): Promise<KbSearchHit[]> {
+): Promise<Array<KbSearchHit & { content?: string }>> {
   if (scopeIds.length === 0) return []
   // The send text is tokenized raw, so it is truncated to the same ceiling
   // the SEARCH RPC schema enforces (review #7).
@@ -1010,16 +1065,19 @@ async function retrieveReferences(
     deps.platform.logger?.info('KB_SEND_REFERENCES: knowledge base index unavailable, no references')
     return []
   }
-  let hits: KbSearchHit[]
+  let hits: Array<KbSearchHit & { content?: string }>
   try {
     let timedOut = false
-    hits = await raceSendDeadline<KbSearchHit[]>(
+    hits = await raceSendDeadline<Array<KbSearchHit & { content?: string }>>(
+      // `includeContent` (brief v4 D-B): the SAME find response also carries
+      // the hit bodies the model-context block is assembled from — the send
+      // budget pays for one retrieval, not one retrieval plus N reads.
       searchDocuments(space, query, scopeIds, {
         deadline,
         // The walk the draft-commit phase already paid for serves the
         // retrieval's attribution too (review fix round R2).
         ...(context?.index ? { index: context.index } : {}),
-      } satisfies KbStoreBudget),
+      } satisfies KbStoreBudget, { includeContent: true }),
       deadline,
       () => {
         timedOut = true
@@ -1042,6 +1100,31 @@ async function retrieveReferences(
 }
 
 /**
+ * The bounded knowledge context assembled alongside the send references
+ * (brief v4 D-B): the <system-reminder> payload the SessionManager injects
+ * one-shot into the SAME turn, plus the counts the server log reports.
+ * `block` travels as an internal options field — it is never persisted and
+ * never enters the message's `kbReferences` snapshot.
+ */
+export interface KbSendModelContext {
+  block: string
+  docs: number
+  bytes: number
+}
+
+/** What one send-time resolution returns — `undefined` means "no references". */
+export interface ResolvedSessionKbReferences {
+  /**
+   * The clean reference rows (title/snippet/score) that persist as the user
+   * message's immutable snapshot — the internal inlined-content field is
+   * stripped before these leave the resolver.
+   */
+  references: KbSearchHit[]
+  /** Present only when at least one hit arrived WITH its inlined body. */
+  modelContext?: KbSendModelContext
+}
+
+/**
  * Send-time reference resolution used by the SEND_MESSAGE handler. Split by
  * authority (review N1): phase 1 is the only step that may change state — it
  * commits the composer draft through the full ownership/read-only/pre-write
@@ -1061,6 +1144,11 @@ async function retrieveReferences(
  * timed-out attempt is abandoned — it may return nothing, but never mutates
  * session scope or audit afterwards. Any KB failure degrades to "no
  * references" — a KB outage must never block a send (brief D7).
+ *
+ * Brief v4 D-B: the SAME find (its inlined `read_content` bodies, zero extra
+ * requests) also yields the bounded model-context block, assembled inside
+ * this resolution so the injected context is EXACTLY the snapshot the user's
+ * reference chips show — one send, one retrieval, two views of it.
  */
 export async function resolveSessionKbReferences(
   deps: HandlerDeps<ISessionManager>,
@@ -1069,7 +1157,7 @@ export async function resolveSessionKbReferences(
   draftCollectionIds?: string[],
   callerWorkspaceId?: string | null,
   entryScopeToken?: TrustedSessionScopeToken | null,
-): Promise<KbSearchHit[] | undefined> {
+): Promise<ResolvedSessionKbReferences | undefined> {
   try {
     // Fast path: the session index is synchronous. A session without a KB
     // scope (and without a composer draft to commit) resolves to nothing
@@ -1161,7 +1249,7 @@ export async function resolveSessionKbReferences(
     // the same deadline (review fix round B4 — the whole phase used to await
     // the binding read outside any race), so a slow binding can no longer
     // push the send past its budget: the deadline ends the phase instead.
-    const references = await raceSendDeadline<KbSearchHit[]>(
+    const hits = await raceSendDeadline<Array<KbSearchHit & { content?: string }>>(
       retrieveReferences(deps, capture, message, scopeIds, context, deadline, attempt),
       deadline,
       () => {
@@ -1169,7 +1257,19 @@ export async function resolveSessionKbReferences(
         return []
       },
     )
-    return references.length > 0 ? references : undefined
+    if (hits.length === 0) return undefined
+    // Brief v4 D-B: the bounded model-context block is assembled from the
+    // SAME rows inside this resolution — pure string work over the already
+    // inlined bodies (no await), so it stays inside the deadline that bounded
+    // the find it feeds on.
+    const modelContext = buildKbModelContextBlock(hits) ?? undefined
+    // The persisted snapshot stays CLEAN: the inlined bodies ride only the
+    // model context, never the `kbReferences` rows (brief v4 D-B).
+    const references: KbSearchHit[] = hits.map(({ content: _inlinedBody, ...hit }) => hit)
+    return {
+      references,
+      ...(modelContext ? { modelContext } : {}),
+    }
   } catch (error) {
     deps.platform.logger?.warn(`KB_SEND_REFERENCES: reference resolution failed: ${error instanceof Error ? error.message : String(error)}`)
     return undefined
