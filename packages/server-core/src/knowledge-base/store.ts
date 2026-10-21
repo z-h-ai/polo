@@ -263,12 +263,16 @@ function parseDocumentStatus(raw: RawTags): KbDocumentStatus | null {
   return status as KbDocumentStatus
 }
 
-/** The tag set uploaded/published with a document — the FULL set, every time. */
+/**
+ * The tag set uploaded/published with a document — the FULL set, every time.
+ * `status` also accepts the storage-only soft-delete state (brief D4), which
+ * never appears on the wire but must be writable into tags.
+ */
 function documentTags(record: {
   docId: string
   collectionId: string
   title: string
-  status: KbDocumentStatus
+  status: KbDocumentStatus | 'deleted'
   version: number
   createdAt: string
   updatedAt: string
@@ -468,8 +472,15 @@ const KB_LS_MAX_PAGES = 10
 async function walkKbTree(space: KbOpenVikingSpace, budget?: KbStoreBudget): Promise<OpenVikingNode[]> {
   const nodes: OpenVikingNode[] = []
   let offset = 0
+  // An exhausted deadline is a NORMAL degradation (the send-time resolver and
+  // the search budget both arrive here already out of time), so it must not
+  // be reported as a tenant-size anomaly; only walking the page CAP does.
+  let ranOutOfBudget = false
   for (let page = 0; page < KB_LS_MAX_PAGES; page += 1) {
-    if (budget?.deadline !== undefined && Date.now() >= budget.deadline) break
+    if (budget?.deadline !== undefined && Date.now() >= budget.deadline) {
+      ranOutOfBudget = true
+      break
+    }
     let result
     try {
       result = await openVikingLs(space.config, space.auth, {
@@ -487,9 +498,11 @@ async function walkKbTree(space: KbOpenVikingSpace, budget?: KbStoreBudget): Pro
     if (!result.hasMore) return nodes
     offset += result.entries.length
   }
-  console.warn(
-    `[KbStore] the knowledge base listing exceeded ${KB_LS_MAX_PAGES * KB_LS_PAGE_NODES} nodes — counting the first pages only`,
-  )
+  if (!ranOutOfBudget) {
+    console.warn(
+      `[KbStore] the knowledge base listing exceeded ${KB_LS_MAX_PAGES * KB_LS_PAGE_NODES} nodes — counting the first pages only`,
+    )
+  }
   return nodes
 }
 
