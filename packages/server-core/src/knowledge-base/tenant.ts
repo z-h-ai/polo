@@ -99,8 +99,16 @@ function asciiSlug(name: string, maxLength: number, fallback: string): string {
 /**
  * The deterministic account id for a ProductSpace (brief D1). The readable
  * slug carries the space NAME (≤24 chars, ASCII-folded) for Studio
- * legibility; uniqueness comes from the hash, so a renamed space still
- * resolves to the same account.
+ * legibility; uniqueness comes from the hash.
+ *
+ * Review fix round R1: the derivation names the account ONLY at first
+ * provision. Once a binding exists — cached on this device or recovered
+ * through the verified `ALREADY_EXISTS` path — that binding is AUTHORITATIVE
+ * and is reused verbatim, even when the slug no longer matches (the space was
+ * renamed, or the derivation changed between versions). Re-deriving would
+ * build a SECOND, empty account and strand the data in the old one, so
+ * slug-only drift is recorded as `openviking.binding_name_drift` and the
+ * established binding always wins.
  */
 export function kbTenantAccountId(identity: KbTenantIdentity): string {
   return `polo-${asciiSlug(identity.spaceName, 24, 'space')}-${kbTenantSpaceHash(identity.productSpaceId)}`
@@ -231,29 +239,44 @@ async function readOwnershipTags(
  * Provisioning failure is ALWAYS `kb_service_unavailable` with the raw cause
  * in `detail` — the caller logs it and surfaces the neutral text (brief D7).
  */
+/**
+ * Review fix round R1: an established binding is AUTHORITATIVE. A slug-only
+ * account-id drift (renamed space, derivation changed between versions) is
+ * recorded and the binding reused — never rebuilt, which would strand the
+ * data in a second, empty account. The enterprise check has already passed by
+ * the time this runs (readKbTenantCredential throws `kb_space_mismatch`),
+ * so the drift cannot hide a cross-enterprise swap.
+ */
+function adoptCachedBinding(
+  cached: KbTenantCredential,
+  identity: KbTenantIdentity,
+  derivedAccountId: string,
+  audit: KbTenantAudit,
+): KbTenantCredential {
+  if (cached.accountId !== derivedAccountId) {
+    audit('openviking.binding_name_drift', identity.productSpaceId, {
+      derived: derivedAccountId,
+      bound: cached.accountId,
+    })
+  }
+  return cached
+}
+
 export async function ensureKbTenant(params: EnsureKbTenantParams): Promise<KbTenantCredential> {
   const { config, identity, actor, audit } = params
   const accountId = kbTenantAccountId(identity)
 
-  // Fast path: a cached binding for THIS space skips the remote plane entirely.
+  // Fast path: a cached binding for THIS space skips the remote plane
+  // entirely — including when the slug has drifted (R1, above).
   const cached = await readKbTenantCredential(identity.productSpaceId, identity.enterpriseId)
-  if (cached && cached.accountId === accountId) return cached
-  // A cached account id that does NOT match the derivation is a corrupted
-  // binding (manual edit, older derivation) — ignore it and re-provision
-  // through the verified path rather than trusting it.
-  if (cached) {
-    audit('openviking.binding_reset', identity.productSpaceId, {
-      reason: 'account_id_mismatch',
-      expected: accountId,
-    })
-  }
+  if (cached) return adoptCachedBinding(cached, identity, accountId, audit)
 
   const manager = getCredentialManager()
   return manager.withExclusiveLease(`kb-ov:${identity.productSpaceId}`, async () => {
     // Double-check: a concurrent waiter may have provisioned while this call
-    // waited for the lease.
+    // waited for the lease. The raced binding wins under the same R1 rule.
     const raced = await readKbTenantCredential(identity.productSpaceId, identity.enterpriseId)
-    if (raced && raced.accountId === accountId) return raced
+    if (raced) return adoptCachedBinding(raced, identity, accountId, audit)
 
     const adminUserId = KB_TENANT_SERVICE_USER_ID
     try {

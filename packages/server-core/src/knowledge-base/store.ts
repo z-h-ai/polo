@@ -16,6 +16,7 @@ import {
 } from '@polo-ai/shared/protocol'
 import {
   isOpenVikingAlreadyExists,
+  OpenVikingError,
   openVikingAttrs,
   openVikingFind,
   openVikingGlob,
@@ -91,6 +92,16 @@ export interface KbOpenVikingSpace {
   actor: string
   /** Captured at the RPC entry; revalidated before every remote write. */
   scopeToken?: TrustedSessionScopeToken
+  /**
+   * The handler's LIVE writability view, re-consulted immediately before
+   * every remote write (review fix round B2). The handler checks writable
+   * once at entry, but a store write is issued only after further awaits
+   * (the tenant walk, the state re-read) — a space that turned read-only or
+   * offline in that window must fail the write, not slip past the entry
+   * check. The callback THROWS the coded refusal (`OFFLINE_READ_ONLY` /
+   * `kb_space_read_only`), so the mapping stays at the boundary that owns it.
+   */
+  isWritable?: () => void
 }
 
 export {
@@ -201,6 +212,8 @@ function tag(key: string, value: string): string {
 }
 
 const KB_DOCUMENT_STATUSES: ReadonlySet<string> = new Set(['draft', 'in_review', 'published', 'rejected'])
+/** The live-path parse also accepts the storage-only soft-delete tombstone. */
+const KB_TOMBSTONE_STATUSES: ReadonlySet<string> = new Set([...KB_DOCUMENT_STATUSES, 'deleted'])
 
 /**
  * The full tag set of ONE document, parsed STRICTLY (brief D5): repeated keys
@@ -232,6 +245,26 @@ function rawTagsOf(node: OpenVikingNode | OpenVikingFindResource): RawTags {
 }
 
 function parseDocumentTags(raw: RawTags): KbDocumentTags | null {
+  const parsed = parseDocumentTagSet(raw, KB_DOCUMENT_STATUSES)
+  return parsed ? { ...parsed, status: parsed.status as KbDocumentStatus } : null
+}
+
+/**
+ * Parses the tags at a LIVE uri, additionally accepting the storage-only
+ * `deleted` tombstone (review fix round B7): an interrupted soft delete
+ * leaves `status=deleted` on the live path, and the delete retry must READ
+ * that state to resume the move instead of discarding the node as
+ * unparseable. The strict wire parser above still rejects it.
+ */
+function parseLiveDocumentTags(raw: RawTags): (Omit<KbDocumentTags, 'status'> & { status: KbDocumentStatus | 'deleted' }) | null {
+  const parsed = parseDocumentTagSet(raw, KB_TOMBSTONE_STATUSES)
+  return parsed ? { ...parsed, status: parsed.status as KbDocumentStatus | 'deleted' } : null
+}
+
+function parseDocumentTagSet(
+  raw: RawTags,
+  allowedStatuses: ReadonlySet<string>,
+): Omit<KbDocumentTags, 'status'> & { status: string } | null {
   if (raw.duplicateKeys.length > 0) return null
   const { tags } = raw
   const docId = tags.doc
@@ -241,12 +274,12 @@ function parseDocumentTags(raw: RawTags): KbDocumentTags | null {
   const createdAt = readTagValue(tags.created)
   const updatedAt = readTagValue(tags.updated)
   if (!docId || !collectionId || !status || !title || !createdAt || !updatedAt) return null
-  if (!KB_DOCUMENT_STATUSES.has(status)) return null
+  if (!allowedStatuses.has(status)) return null
   const version = tags.v !== undefined ? Number(tags.v) : 1
   return {
     docId,
     collectionId,
-    status: status as KbDocumentStatus,
+    status,
     title,
     version: Number.isInteger(version) && version >= 1 ? version : 1,
     createdAt,
@@ -261,6 +294,34 @@ function parseDocumentStatus(raw: RawTags): KbDocumentStatus | null {
   const status = raw.tags.status
   if (!status || !KB_DOCUMENT_STATUSES.has(status)) return null
   return status as KbDocumentStatus
+}
+
+/**
+ * Whether two parsed tag sets describe the SAME document record (review fix
+ * round B6). The read-back after a transition compares EVERY summary field —
+ * status alone cannot see a same-status overwrite (a concurrent reject whose
+ * reason differs from ours lands on the same `rejected` status), which is
+ * exactly the collision the verification exists to catch.
+ */
+function sameDocumentRecord(left: KbDocumentTags, right: KbDocumentTags): boolean {
+  return left.docId === right.docId
+    && left.collectionId === right.collectionId
+    && left.status === right.status
+    && left.title === right.title
+    && left.version === right.version
+    && left.createdAt === right.createdAt
+    && left.updatedAt === right.updatedAt
+    && left.publishedAt === right.publishedAt
+    && left.rejectReason === right.rejectReason
+}
+
+/** The summary fields that differ — diagnostic detail for the conflict (B6). */
+function differingFields(expected: KbDocumentTags, actual: KbDocumentTags): string[] {
+  const fields: string[] = []
+  for (const key of ['docId', 'collectionId', 'status', 'title', 'version', 'createdAt', 'updatedAt', 'publishedAt', 'rejectReason'] as const) {
+    if (expected[key] !== actual[key]) fields.push(key)
+  }
+  return fields
 }
 
 /**
@@ -362,7 +423,9 @@ export function kbAuditFor(space: Pick<KbOpenVikingSpace, 'workspaceRoot' | 'bin
 }
 
 // ---------------------------------------------------------------------------
-// Remote primitives — every WRITE revalidates the scope token first (§3.5)
+// Remote primitives — every WRITE revalidates token AND writability first
+// (§3.5 + review fix round B2), and every write is audited as an intent
+// before the request and a result after it (review fix round B8)
 // ---------------------------------------------------------------------------
 
 function assertScopeTokenCurrent(space: KbOpenVikingSpace): void {
@@ -375,28 +438,134 @@ function assertScopeTokenCurrent(space: KbOpenVikingSpace): void {
 }
 
 /**
+ * The FULL pre-write gate (review fix round B2): the captured scope token must
+ * still be current AND the handler's live writability view must still hold.
+ * The token alone cannot see an offline view or a restriction that landed
+ * while earlier awaits (the tenant walk, the state re-read) were pending —
+ * those states are only observable through the handler's predicate.
+ */
+function assertRemoteWriteAllowed(space: KbOpenVikingSpace): void {
+  assertScopeTokenCurrent(space)
+  space.isWritable?.()
+}
+
+/**
  * Wraps a remote call: vendor failures become the neutral availability error
  * with the RAW cause in `detail` (server-side logs only, brief D7).
  */
 function toKbError(operation: string, error: unknown): KbStoreError {
   if (error instanceof KbStoreError) return error
-  return new KbStoreError(
+  const mapped = new KbStoreError(
     'kb_service_unavailable',
     KB_SERVICE_UNAVAILABLE_MESSAGE,
     `${operation} failed: ${error instanceof Error ? error.message : String(error)}`,
   )
+  // The raw failure rides along for CLASSIFICATION (review fix round B8):
+  // the audit outcome must know whether the request may have landed, which
+  // only the original OpenVikingError can answer.
+  ;(mapped as { cause?: unknown }).cause = error
+  return mapped
+}
+
+/**
+ * How a finished write attempt is recorded (review fix round B8). A timeout
+ * or a broken connection means the request MAY have taken effect — the
+ * storage service has no read-back-your-own-write oracle for this — so it is
+ * recorded as `unknown`, never as a clean `failed`. An intent entry without a
+ * result entry (process died mid-flight) reads as the same `unknown`.
+ */
+type KbRemoteOutcome = 'success' | 'failed' | 'unknown'
+
+function remoteOutcomeOf(error: unknown): KbRemoteOutcome {
+  // The primitives classify AFTER their toKbError mapping, so the raw
+  // transport failure may ride in `cause` (review fix round B8).
+  const raw = error instanceof KbStoreError
+    ? (error as { cause?: unknown }).cause
+    : error
+  // Gateway timeouts/bad-gateway responses are the classic "the origin MAY
+  // have applied it" case: the request left, the answer did not come from
+  // the storage service itself.
+  if (raw instanceof OpenVikingError
+    && raw.code === 'openviking_http_error'
+    && (raw.status === 502 || raw.status === 503 || raw.status === 504)) {
+    return 'unknown'
+  }
+  if (raw instanceof OpenVikingError
+    && (raw.code === 'openviking_timeout' || raw.code === 'openviking_network_error')) {
+    return 'unknown'
+  }
+  return 'failed'
+}
+
+interface KbRemoteIntent {
+  /** Audit action stem, e.g. `remote.set_tags` → `.intent` / `.result`. */
+  action: string
+  target: string
+  detail?: Record<string, unknown>
+}
+
+/**
+ * Audits ONE remote write as `<action>.intent` BEFORE the request and
+ * `<action>.result` after it, correlated by a request id (review fix round
+ * B8). A timeout/interruption is recorded `unknown` — the operation may have
+ * landed — and a crash between the two entries leaves the intent dangling,
+ * which the trail reads as the same `unknown`. The audits are best-effort by
+ * construction (`appendAudit` never throws).
+ */
+async function auditedRemote<T>(
+  space: KbOpenVikingSpace,
+  intent: KbRemoteIntent,
+  run: () => Promise<T>,
+): Promise<T> {
+  const requestId = randomUUID()
+  appendAudit(space.workspaceRoot, space.binding, {
+    actor: space.actor,
+    action: `${intent.action}.intent`,
+    target: intent.target,
+    detail: { requestId, ...(intent.detail ?? {}) },
+  })
+  try {
+    const result = await run()
+    appendAudit(space.workspaceRoot, space.binding, {
+      actor: space.actor,
+      action: `${intent.action}.result`,
+      target: intent.target,
+      detail: { requestId, outcome: 'success' satisfies KbRemoteOutcome },
+    })
+    return result
+  } catch (error) {
+    appendAudit(space.workspaceRoot, space.binding, {
+      actor: space.actor,
+      action: `${intent.action}.result`,
+      target: intent.target,
+      detail: {
+        requestId,
+        outcome: remoteOutcomeOf(error),
+        reason: error instanceof Error ? error.message : String(error),
+        // The mapped error's message is neutral on purpose (D7); the raw
+        // cause rides in `detail` — the audit trail is server-side only, so
+        // THIS is where diagnosability lives (review fix round B8).
+        ...(error instanceof KbStoreError && error.detail !== undefined
+          ? { cause: String(error.detail) }
+          : {}),
+      },
+    })
+    throw error
+  }
 }
 
 async function remoteMkdir(space: KbOpenVikingSpace, uri: string, description?: string): Promise<void> {
-  assertScopeTokenCurrent(space)
-  try {
-    await openVikingMkdir(space.config, space.auth, { uri, description })
-  } catch (error) {
-    // Idempotent on retry: an existing directory is as good as a new one —
-    // the tags write below completes the state either way.
-    if (isOpenVikingAlreadyExists(error)) return
-    throw toKbError(`mkdir ${uri}`, error)
-  }
+  await auditedRemote(space, { action: 'remote.mkdir', target: uri }, async () => {
+    assertRemoteWriteAllowed(space)
+    try {
+      await openVikingMkdir(space.config, space.auth, { uri, description })
+    } catch (error) {
+      // Idempotent on retry: an existing directory is as good as a new one —
+      // the tags write below completes the state either way.
+      if (isOpenVikingAlreadyExists(error)) return
+      throw toKbError(`mkdir ${uri}`, error)
+    }
+  })
 }
 
 async function remoteWriteContent(
@@ -405,30 +574,36 @@ async function remoteWriteContent(
   content: string,
   tags?: string[],
 ): Promise<void> {
-  assertScopeTokenCurrent(space)
-  try {
-    await openVikingWriteContent(space.config, space.auth, { uri, content, tags })
-  } catch (error) {
-    throw toKbError(`write ${uri}`, error)
-  }
+  await auditedRemote(space, { action: 'remote.content_write', target: uri }, async () => {
+    assertRemoteWriteAllowed(space)
+    try {
+      await openVikingWriteContent(space.config, space.auth, { uri, content, tags })
+    } catch (error) {
+      throw toKbError(`write ${uri}`, error)
+    }
+  })
 }
 
 async function remoteSetTags(space: KbOpenVikingSpace, uri: string, tags: string[]): Promise<void> {
-  assertScopeTokenCurrent(space)
-  try {
-    await openVikingSetTags(space.config, space.auth, { uri, tags, mode: 'replace' })
-  } catch (error) {
-    throw toKbError(`set_tags ${uri}`, error)
-  }
+  await auditedRemote(space, { action: 'remote.set_tags', target: uri }, async () => {
+    assertRemoteWriteAllowed(space)
+    try {
+      await openVikingSetTags(space.config, space.auth, { uri, tags, mode: 'replace' })
+    } catch (error) {
+      throw toKbError(`set_tags ${uri}`, error)
+    }
+  })
 }
 
 async function remoteMv(space: KbOpenVikingSpace, fromUri: string, toUri: string): Promise<void> {
-  assertScopeTokenCurrent(space)
-  try {
-    await openVikingMv(space.config, space.auth, { fromUri, toUri })
-  } catch (error) {
-    throw toKbError(`mv ${fromUri}`, error)
-  }
+  await auditedRemote(space, { action: 'remote.mv', target: fromUri, detail: { toUri } }, async () => {
+    assertRemoteWriteAllowed(space)
+    try {
+      await openVikingMv(space.config, space.auth, { fromUri, toUri })
+    } catch (error) {
+      throw toKbError(`mv ${fromUri}`, error)
+    }
+  })
 }
 
 /** Reads ONE node's attrs; a missing node reads as `null`. */
@@ -457,6 +632,13 @@ async function remoteReadContent(space: KbOpenVikingSpace, uri: string): Promise
 export interface KbStoreBudget {
   /** Wall-clock deadline (Date.now() based); an exhausted budget fails closed. */
   deadline?: number
+  /**
+   * An index ALREADY built in this operation, reused instead of walking the
+   * tenant a second time (review fix round R2 — the send path loads the index
+   * once and shares it between the draft-commit publish checks and the
+   * retrieval's collection scoping/hit attribution).
+   */
+  index?: KbIndex
 }
 
 const KB_LS_PAGE_NODES = 2_000
@@ -468,14 +650,30 @@ const KB_LS_MAX_PAGES = 10
  * server hides dotfile CONTENT but lists dot DIRECTORIES (§1.7), so the
  * recycle/transition subtrees are filtered here by prefix. Pages honor the
  * shared deadline; partial results stay valid — callers fail closed.
+ *
+ * Pagination correctness (review fix round R2): the offset advances by what
+ * the server actually served, and the walk DEDUPES by uri, so a server that
+ * returns a short page while reporting `has_more` (or drops malformed rows
+ * mid-walk) cannot make pages overlap — an overlap would count one document
+ * twice in the collection counts, a skip would silently lose it. A walk that
+ * stops at the page CAP reports `truncated` so callers can tell an abnormal
+ * tenant from a complete one.
  */
-async function walkKbTree(space: KbOpenVikingSpace, budget?: KbStoreBudget): Promise<OpenVikingNode[]> {
+interface KbWalk {
+  nodes: OpenVikingNode[]
+  /** True when the walk stopped at the page cap with the server still paging. */
+  truncated: boolean
+}
+
+async function walkKbTree(space: KbOpenVikingSpace, budget?: KbStoreBudget): Promise<KbWalk> {
   const nodes: OpenVikingNode[] = []
+  const seen = new Set<string>()
   let offset = 0
   // An exhausted deadline is a NORMAL degradation (the send-time resolver and
   // the search budget both arrive here already out of time), so it must not
   // be reported as a tenant-size anomaly; only walking the page CAP does.
   let ranOutOfBudget = false
+  let truncated = false
   for (let page = 0; page < KB_LS_MAX_PAGES; page += 1) {
     if (budget?.deadline !== undefined && Date.now() >= budget.deadline) {
       ranOutOfBudget = true
@@ -493,17 +691,23 @@ async function walkKbTree(space: KbOpenVikingSpace, budget?: KbStoreBudget): Pro
       throw toKbError('ls', error)
     }
     for (const entry of result.entries) {
+      if (seen.has(entry.uri)) continue
+      seen.add(entry.uri)
       if (!isHiddenKbUri(entry.uri)) nodes.push(entry)
     }
-    if (!result.hasMore) return nodes
+    if (!result.hasMore) return { nodes, truncated: false }
+    // A page that advances by nothing can never reach `has_more === false` —
+    // stop instead of re-reading the same page until the cap.
+    if (result.entries.length === 0) break
     offset += result.entries.length
   }
-  if (!ranOutOfBudget) {
+  truncated = !ranOutOfBudget
+  if (truncated) {
     console.warn(
       `[KbStore] the knowledge base listing exceeded ${KB_LS_MAX_PAGES * KB_LS_PAGE_NODES} nodes — counting the first pages only`,
     )
   }
-  return nodes
+  return { nodes, truncated }
 }
 
 interface KbCollectionIndexEntry {
@@ -524,13 +728,22 @@ interface KbDocumentIndexEntry {
 export interface KbIndex {
   collections: Map<string, KbCollectionIndexEntry>
   documents: Map<string, KbDocumentIndexEntry>
+  /**
+   * True when the walk hit the page cap while the server was still paging
+   * (review fix round R2): every count below is a consistent prefix of the
+   * tenant, never an overlap-inflated number — but a document the prefix did
+   * not reach is missing from it, so a collection entirely beyond the prefix
+   * reads as unpublished (the natural fail-closed direction: a session scope
+   * is refused, never granted on unverifiable data).
+   */
+  truncated: boolean
 }
 
 function emptyCounts(): KbCollection['documentCounts'] {
   return { draft: 0, in_review: 0, published: 0, rejected: 0 }
 }
 
-function buildKbIndex(nodes: OpenVikingNode[]): KbIndex {
+function buildKbIndex(nodes: OpenVikingNode[], truncated: boolean): KbIndex {
   const collections = new Map<string, KbCollectionIndexEntry>()
   const documents = new Map<string, KbDocumentIndexEntry>()
   for (const node of nodes) {
@@ -567,7 +780,7 @@ function buildKbIndex(nodes: OpenVikingNode[]): KbIndex {
     const existing = documents.get(parsed.docId)
     if (!existing) documents.set(parsed.docId, { uri: node.uri, parsed })
   }
-  return { collections, documents }
+  return { collections, documents, truncated }
 }
 
 function toCollection(entry: KbCollectionIndexEntry, collectionId: string, canManage: boolean): KbCollection {
@@ -595,10 +808,13 @@ export async function listCollections(
 /**
  * ONE walk, ONE index — the shared input for every listing/published check
  * (the send path's for-await loop reuses a single load instead of walking per
- * collection).
+ * collection). An index handed in through the budget is returned as-is: the
+ * caller has already paid for the walk (review fix round R2).
  */
 export async function loadKbIndex(space: KbOpenVikingSpace, budget?: KbStoreBudget): Promise<KbIndex> {
-  return buildKbIndex(await walkKbTree(space, budget))
+  if (budget?.index) return budget.index
+  const walk = await walkKbTree(space, budget)
+  return buildKbIndex(walk.nodes, walk.truncated)
 }
 
 export async function listDocuments(
@@ -789,9 +1005,11 @@ const TRANSITION_TARGET: Record<KbTransitionAction, KbDocumentStatus> = {
 /**
  * The deletion contract covers `draft` / `published` / `rejected` only — a
  * document under review must be rejected (or reverted) first, so the review
- * trail stays meaningful (v2 review #14, unchanged).
+ * trail stays meaningful (v2 review #14, unchanged). `deleted` is the storage
+ * ONLY tombstone (brief D4): a previous attempt that already pulled the
+ * document off the retrieval face but died before the move completed.
  */
-const KB_DELETABLE_STATUSES: ReadonlySet<KbDocumentStatus> = new Set(['draft', 'published', 'rejected'])
+const KB_DELETABLE_STATUSES: ReadonlySet<string> = new Set(['draft', 'published', 'rejected'])
 
 /**
  * Per-document in-process mutex (brief D4): transitions read-modify-write the
@@ -815,7 +1033,10 @@ function withDocumentLock<T>(docId: string, operation: () => Promise<T>): Promis
  * The best-effort shared transition log (brief D4 ii): ONE uuid file per
  * transition in the hidden `.audit/transitions/` tree. Independent files —
  * never an append to a shared one, which would lose concurrent entries —
- * and never fatal: this is a diagnostic trail, not a gate.
+ * and never fatal: this is a diagnostic trail, not a gate. It goes through
+ * the SAME protected write wrapper as every other write (review fix round
+ * B3): the scope token AND the live writability are revalidated first, so a
+ * revoked/read-only scope can never push even a diagnostic file.
  */
 async function writeTransitionLog(
   space: KbOpenVikingSpace,
@@ -830,11 +1051,10 @@ async function writeTransitionLog(
 ): Promise<void> {
   try {
     const uri = `${KB_TRANSITIONS_DIR_URI}/${randomUUID()}.md`
-    await openVikingWriteContent(space.config, space.auth, {
-      uri,
-      content: JSON.stringify(entry),
-      tags: [`doc=${entry.docId}`, `kind=transition`],
-    })
+    await remoteWriteContent(space, uri, JSON.stringify(entry), [
+      `doc=${entry.docId}`,
+      `kind=transition`,
+    ])
   } catch (error) {
     console.warn(
       `[KbStore] transition log for ${entry.docId} failed (best-effort): ${error instanceof Error ? error.message : String(error)}`,
@@ -890,16 +1110,25 @@ export async function transitionDocument(
     }
     await remoteSetTags(space, uri, documentTags(next))
 
-    // Read-back verification: the state machine only commits when the remote
-    // tags say what we just wrote. A mismatch is a hard conflict (the write
-    // itself was unconditional — some other writer has overlapped, brief D4).
+    // Read-back verification (review fix round B6): the state machine only
+    // commits when the remote tags carry the FULL record we just wrote — not
+    // merely the target status. A concurrent writer that lands on the same
+    // status with different summary fields (its own reject reason, its own
+    // timestamps) is the same unconditional-write collision and must surface
+    // as a conflict too (brief D4).
     const after = await remoteAttrs(space, uri)
     const afterParsed = after ? parseDocumentTags(rawTagsOf(after)) : null
-    if (!afterParsed || afterParsed.status !== target) {
+    if (!afterParsed || !sameDocumentRecord(afterParsed, next)) {
       throw new KbStoreError(
         'kb_conflict',
         'The document changed while the transition was applied',
-        { expected: target, actual: afterParsed?.status ?? null },
+        {
+          expected: { status: target, updatedAt: next.updatedAt, rejectReason: next.rejectReason },
+          actual: afterParsed
+            ? { status: afterParsed.status, updatedAt: afterParsed.updatedAt, rejectReason: afterParsed.rejectReason }
+            : null,
+          ...(afterParsed ? { fields: differingFields(next, afterParsed) } : {}),
+        },
       )
     }
     void writeTransitionLog(space, {
@@ -932,9 +1161,15 @@ export async function deleteDocument(
     const uri = await locateDocument(space, docId)
     const node = await remoteAttrs(space, uri)
     if (!node) throw new KbStoreError('kb_document_not_found')
-    const current = parseDocumentTags(rawTagsOf(node))
+    const current = parseLiveDocumentTags(rawTagsOf(node))
     if (!current || current.docId !== docId) throw new KbStoreError('kb_document_not_found')
-    if (!KB_DELETABLE_STATUSES.has(current.status)) {
+    // Review fix round B7: a `deleted` tag at the LIVE uri is the partial
+    // state of an interrupted delete — the status write landed, the move into
+    // `.recycle/` did not. Retrying must RESUME (complete the move) instead
+    // of reading the tombstone as "not deletable" and wedging the document
+    // forever.
+    const resuming = current.status === 'deleted'
+    if (!resuming && !KB_DELETABLE_STATUSES.has(current.status)) {
       throw new KbStoreError(
         'kb_delete_not_allowed',
         `A ${current.status} document cannot be deleted; reject it first`,
@@ -944,18 +1179,33 @@ export async function deleteDocument(
     // recycle target is a hidden dot path, so the move then removes it from
     // every listing too). No permanent deletion exists — same as v2.
     const recycledAt = nowIso()
-    await remoteSetTags(space, uri, documentTags({
-      ...current,
-      status: 'deleted',
-      updatedAt: recycledAt,
-    }))
+    if (!resuming) {
+      await remoteSetTags(space, uri, documentTags({
+        ...current,
+        status: 'deleted',
+        updatedAt: recycledAt,
+      }))
+    }
     await remoteMkdir(space, KB_RECYCLE_DIR_URI)
-    await remoteMv(space, uri, recycleTargetUri(uri))
+    try {
+      await remoteMv(space, uri, recycleTargetUri(uri))
+    } catch (error) {
+      // The move may still have landed past a timeout (B8's `unknown`
+      // outcome): the target holding THIS document is success, not an error.
+      const target = await remoteAttrs(space, recycleTargetUri(uri)).catch(() => null)
+      const moved = target ? parseDocumentTags(rawTagsOf(target)) : null
+      if (!moved || moved.docId !== docId) throw error
+    }
     appendAudit(space.workspaceRoot, space.binding, {
       actor: space.actor,
       action: 'document.delete',
       target: docId,
-      detail: { collectionId: current.collectionId, recycledAt, previousStatus: current.status },
+      detail: {
+        collectionId: current.collectionId,
+        recycledAt,
+        previousStatus: current.status,
+        ...(resuming ? { resumed: true } : {}),
+      },
     })
     return { recycled: true as const }
   })
@@ -1046,9 +1296,14 @@ function resolveCollectionUris(index: KbIndex, collectionIds: string[] | undefin
  * server-side collection scoping (`target_uri` array), the server-side
  * status filter (`status=published`) and inlined hit content — snippets come
  * from the SAME response, never one extra read per hit. Hits are disclosed
- * only after their tags parse STRICTLY and re-confirm collection membership
- * and the published status; anything else (stale index, out-of-band node,
- * corrupted tags) drops silently.
+ * only after their tags parse STRICTLY and the hit maps BACK into this
+ * space's index (review fix round B5): the backend's tags travel with the
+ * row and cannot be trusted on their own — a foreign node carrying a copied
+ * legal tag set would otherwise be disclosed as this space's document. The
+ * mapping is a TRIPLE check: the doc id is known to the index, the hit's
+ * collection matches the index's record for that doc, and the hit's uri
+ * lives under the LIVE collection uri the index saw. Anything else (foreign
+ * body, stale index, out-of-band node, corrupted tags) drops silently.
  *
  * Scores stay the backend's (not confined to [0,1]); results sort by score
  * (desc) then title, capped at the KB search limit. An exhausted budget
@@ -1064,7 +1319,8 @@ export async function searchDocuments(
   if (tokens.length === 0) return []
   if (budget?.deadline !== undefined && Date.now() >= budget.deadline) return []
   // ONE index load serves BOTH the collection-URI resolution and the hit
-  // mapping — never a second walk of the same tenant.
+  // mapping — never a second walk of the same tenant (and, review fix round
+  // R2, the walk may already have been paid for by the draft-commit phase).
   const index = await loadKbIndex(space, budget)
   const targetUris = resolveCollectionUris(index, collectionIds)
   if (targetUris.length === 0) return []
@@ -1094,6 +1350,13 @@ export async function searchDocuments(
     if (!parsed) continue
     if (parsed.status !== 'published') continue
     if (wanted && !wanted.has(parsed.collectionId)) continue
+    // B5 attribution: the hit must be a document THIS space's index knows,
+    // under the collection the tags claim, at the live collection uri.
+    const known = index.documents.get(parsed.docId)
+    if (!known || known.parsed.collectionId !== parsed.collectionId) continue
+    if (known.parsed.status !== 'published') continue
+    const collectionUri = index.collections.get(parsed.collectionId)?.uri
+    if (!collectionUri || !resource.uri.startsWith(`${collectionUri}/`)) continue
     const collectionName = collectionNames.get(parsed.collectionId) ?? parsed.collectionId
     const previous = bestByDoc.get(parsed.docId)
     if (previous && previous.score >= resource.score) continue
