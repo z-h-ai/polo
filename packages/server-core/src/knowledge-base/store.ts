@@ -746,18 +746,31 @@ function sleepForRetry(ms: number): Promise<void> {
 
 /**
  * Races one loop step against the REMAINING budget: `null` reads as "the
- * window ran out first" (review round N1). The loser is never aborted — the
- * transport has no cancellation — so a write that loses the race may still
- * land later; the budget governs how long the loop WAITS for an answer, not
- * what the storage service ends up holding (the step's own audit pair still
- * records the real outcome when it settles).
+ * window ran out first" (review round N1). The step arrives as a LAZY start,
+ * not a promise (P2 residual): the budget is checked BEFORE anything is
+ * dispatched, so a window already spent by the synchronous work ahead of the
+ * request starts nothing at all — a step begun against a spent budget could
+ * never be verified inside it, and the promise it returned would race
+ * nothing and, on rejection, answer to nobody. The loser is never aborted —
+ * the transport has no cancellation — so a write that loses the race may
+ * still land later; the budget governs how long the loop WAITS for an
+ * answer, not what the storage service ends up holding (the step's own audit
+ * pair still records the real outcome when it settles). A dispatched step
+ * also always keeps a rejection handler of its own, so the branch that loses
+ * the race absorbs the late failure silently instead of leaking it as an
+ * unhandledRejection (P2 residual).
  */
-function raceRemainingBudget<T>(step: Promise<T>, remainingMs: number): Promise<T | null> {
+function raceRemainingBudget<T>(start: () => Promise<T>, remainingMs: number): Promise<T | null> {
   if (remainingMs <= 0) return Promise.resolve(null)
   let timer: ReturnType<typeof setTimeout> | undefined
   const clock = new Promise<null>(resolve => {
     timer = setTimeout(() => resolve(null), remainingMs)
   })
+  const step = start()
+  // Consumed twice on purpose: the race surfaces the rejection when the step
+  // wins, and this branch swallows it when the clock already won — the loser
+  // must stay silent.
+  step.catch(() => {})
   return Promise.race([step, clock]).finally(() => clearTimeout(timer))
 }
 
@@ -844,11 +857,21 @@ export async function writeKbDirectoryTagsVerified(
         if (Date.now() >= deadline) throw exhausted()
       }
       host.beforeWrite?.()
+      // The remaining budget is read BEFORE the request is built (P2
+      // residual): synchronous work since the loop top — the per-attempt
+      // audit write, a slow writability gate — must refuse the attempt here,
+      // where nothing has been dispatched, rather than send a request into a
+      // spent window and then discard its answer unhandled. The refusal is
+      // the same exhausted outcome the race would reach, minus the orphaned
+      // request.
+      const writeBudgetMs = deadline - Date.now()
+      if (writeBudgetMs <= 0) throw exhausted()
       // Counted from the moment the write is DISPATCHED: past the before-write
-      // gate the request is handed to the transport — its `remote.set_tags`
-      // intent/result pair lands on the trail even when the call throws — so
-      // a budget-race loss or a transport failure must not under-report the
-      // attempt. Only the refusal above stays uncounted (no request left).
+      // gate and the budget refusal the request is handed to the transport —
+      // its `remote.set_tags` intent/result pair lands on the trail even when
+      // the call throws — so a budget-race loss or a transport failure must
+      // not under-report the attempt. Only the refusals above stay uncounted
+      // (no request left).
       summary.attempts = attempt
       // The write itself rides the REMAINING budget (review round N1): a
       // request that outlasts the window must not hand the loop a verified
@@ -856,11 +879,11 @@ export async function writeKbDirectoryTagsVerified(
       // not only the waits between them. A write that loses the race is a
       // FAILED attempt, not a missing one, and the window has no turn left.
       const written = await raceRemainingBudget(
-        host.write({ attempt, waitedMs: Date.now() - waitStartedAt }),
-        deadline - Date.now(),
+        () => host.write({ attempt, waitedMs: Date.now() - waitStartedAt }),
+        writeBudgetMs,
       )
       if (written === null) throw exhausted()
-      const tags = await raceRemainingBudget(host.read(), deadline - Date.now())
+      const tags = await raceRemainingBudget(() => host.read(), deadline - Date.now())
       // The verification is accepted only INSIDE the window — re-checked at
       // the moment of acceptance, because a read-back that confirms past the
       // deadline breaks the same promise the write race guards (review round
