@@ -156,6 +156,12 @@ function kbSpaceFrom(scope: KbScope, config: OpenVikingConfig, credential: KbTen
     spaceName: scope.space.name,
     actor: scope.accountId,
     scopeToken: scope.token,
+    // Review fix round B2: the store re-consults the LIVE writability view
+    // right before every remote write it issues. The entry check alone can
+    // see only the space as it was BEFORE the handler's awaits (the tenant
+    // walk, the state re-read); a restriction or offline view that lands in
+    // that window must still stop the write.
+    isWritable: () => assertKbWritable(scope),
   }
 }
 
@@ -165,6 +171,15 @@ function kbSpaceFrom(scope: KbScope, config: OpenVikingConfig, credential: KbTen
  * the neutral availability failure — reads NEVER provision (brief D2), so a
  * space provisioned on another device stays unavailable here until a
  * management RPC recovers the binding.
+ *
+ * Review fix round B1: LIST_COLLECTIONS by an owner/manager IS that
+ * management RPC. The renderer gates the "new collection" button on the
+ * `canManage` flag that only a successful list delivers, so a manager whose
+ * binding is missing (fresh device, cleared credential store) would otherwise
+ * never reach any provisioning entry at all — the management role has already
+ * been proven by the trusted-scope authorization, so the list may bring the
+ * tenant up. Members keep the read-only rule: their list uses the cached
+ * binding exclusively and refuses with the neutral error.
  */
 async function requireKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
   const config = readOpenVikingConfig()
@@ -235,6 +250,54 @@ async function readSendKbSpace(capture: SendScopeCapture): Promise<KbOpenVikingS
     spaceName: capture.space.name,
     actor: capture.token.accountId,
     scopeToken: capture.token,
+  }
+}
+
+/**
+ * The ONE tenant read both send phases share (review fix round R2): the
+ * cached binding and the index built from a SINGLE walk. The draft-commit
+ * phase needs the index for its publish checks, the retrieval phase for its
+ * collection scoping and hit attribution — loading it twice would walk the
+ * same tenant twice inside one send budget. Every step is raced against the
+ * shared deadline (review fix round B4 — the binding read used to sit outside
+ * any race), and a timed-out load abandons the attempt like every other
+ * timed-out phase. `null` degrades both phases (no honored draft, no
+ * references); `index: null` with a non-null space means the walk failed but
+ * the binding is fine.
+ */
+interface SendKbContext {
+  space: KbOpenVikingSpace
+  index: KbIndex | null
+}
+
+async function loadSendKbContext(
+  deps: HandlerDeps<ISessionManager>,
+  capture: SendScopeCapture,
+  deadline: number,
+  attempt: { abandoned: boolean },
+): Promise<SendKbContext | null> {
+  const space = await raceSendDeadline<KbOpenVikingSpace | null>(
+    readSendKbSpace(capture),
+    deadline,
+    () => {
+      attempt.abandoned = true
+      return null
+    },
+  )
+  if (!space) return null
+  try {
+    const index = await raceSendDeadline<KbIndex | null>(
+      loadKbIndex(space, { deadline }),
+      deadline,
+      () => {
+        attempt.abandoned = true
+        return null
+      },
+    )
+    return { space, index }
+  } catch (error) {
+    logKbStoreDetail(deps, 'SEND_INDEX', error)
+    return { space, index: null }
   }
 }
 
@@ -394,7 +457,11 @@ export function registerKnowledgeBaseHandlers(
     const input = parseOrThrow(KbListCollectionsInputSchema, rawInput)
     const scope = await requireKbScope(ctx, input.workspaceId, deps)
     assertKbScopeCurrent(scope)
-    const space = await requireKbSpace(scope)
+    // B1: a manager's list recovers/provisions the binding (the UI's create
+    // button is gated on this list's `canManage`); a member's list is a pure
+    // read of the cached binding. An unconfigured deployment still refuses
+    // both with the neutral availability error (brief D2/D7).
+    const space = scope.canManage ? await ensureKbSpace(scope) : await requireKbSpace(scope)
     const rows = await listCollections(space, scope.canManage)
     // Post-await CAS: the disclosure is refused for a scope that moved while
     // the remote listing was in flight (review #3, async-store discipline).
@@ -580,8 +647,12 @@ export function registerKnowledgeBaseHandlers(
     // Final CAS in the same synchronous block as the audit and the write it
     // authorizes (reviews #3/#15): a fence revoked after the entry await —
     // or during the remote steps above — fails here, before anything is
-    // recorded.
+    // recorded. Writability is re-asserted too (review fix round B2): the
+    // space may have turned read-only during the awaited published checks,
+    // and the earlier `assertKbWritable(scope)` at the entry no longer
+    // covers this point.
     assertKbScopeCurrent(scope)
+    assertKbWritable(scope)
     // Audit BEFORE the awaited mutation (review #15): the previous order
     // (mutate → CAS → audit) left a mutated scope with an empty trail when
     // the post-write CAS failed. The write is initiated only while the scope
@@ -750,9 +821,10 @@ async function captureSendScope(
  * STORED scope must be used instead.
  *
  * The publish-state validation shares the resolution's ONE wall clock
- * (review #7): the tenant index is loaded once under the deadline, then each
- * draft entry is checked against it in an EXPLICIT loop (brief §3 item 3 —
- * a `filter(async…)` would pass everything, Promise being truthy). The
+ * (review #7) and ONE index load with the retrieval phase (review fix round
+ * R2 — the context arrives pre-loaded, no second walk): each draft entry is
+ * checked against it in an EXPLICIT loop (brief §3 item 3 — a
+ * `filter(async…)` would pass everything, Promise being truthy). The
  * deadline is re-checked inside the loop, so an exhausted budget commits
  * nothing: the stored scope wins.
  */
@@ -761,6 +833,7 @@ async function commitSendDraftScope(
   capture: SendScopeCapture,
   sessionId: string,
   draft: string[],
+  context: SendKbContext | null,
   attempt: { abandoned: boolean },
   deadline: number,
 ): Promise<string[] | null> {
@@ -776,21 +849,14 @@ async function commitSendDraftScope(
   const scopeIds: string[] = []
   if (draft.length > 0) {
     // Cached binding only — the send path NEVER provisions (brief D2). A
-    // missing binding or an unavailable service means the draft cannot be
-    // PROVEN published, so it is not honored: `null` keeps the stored scope
-    // and the retrieval phase degrades to no references.
-    const space = await readSendKbSpace(capture)
-    if (!space) return null
-    let index: KbIndex
-    try {
-      index = await loadKbIndex(space, { deadline })
-    } catch (error) {
-      logKbStoreDetail(deps, 'SEND_DRAFT_COMMIT', error)
-      return null
-    }
+    // missing binding, an unavailable service or an index that could not be
+    // loaded means the draft cannot be PROVEN published, so it is not
+    // honored: `null` keeps the stored scope and the retrieval phase
+    // degrades to no references.
+    if (!context?.index) return null
     for (const collectionId of draft) {
       if (Date.now() >= deadline) break
-      if (indexCollectionPublished(index, collectionId)) scopeIds.push(collectionId)
+      if (indexCollectionPublished(context.index, collectionId)) scopeIds.push(collectionId)
     }
   }
   if (JSON.stringify(session.kbCollectionIds ?? []) === JSON.stringify(scopeIds)) return scopeIds
@@ -803,9 +869,13 @@ async function commitSendDraftScope(
   // loop above can only STOP at the deadline — an exhausted budget lands
   // here with a truncated `scopeIds` and must not commit it. Time is
   // monotonic, so budget gone → no write, no audit, the stored scope wins.
+  // The WRITABILITY is re-checked in the same block (review fix round B2):
+  // the space may have turned read-only or offline during the awaited index
+  // load above, and a draft commit is a scope WRITE.
   if (
     attempt.abandoned
     || Date.now() >= deadline
+    || !isSendScopeWritable(capture.space)
     || !isTrustedSessionScopeTokenCurrent(capture.token)
   ) return null
   await writeSessionScopeAudited(deps, {
@@ -861,15 +931,20 @@ function interleaveSendReferences(hits: KbSearchHit[], scopeIds: string[]): KbSe
  * Retrieval is ONE bounded find (brief §3 item 4): the cached tenant binding
  * must exist, the storage service scopes by the session's collections and the
  * published status in the same call, and hits arrive with content inlined —
- * there is no local keyword scan to fall back to (brief R3). No binding,
- * a failure or a timeout all degrade to ZERO references: a send is never
- * blocked, and no provisioning is ever triggered from here (brief D2/D7).
+ * there is no local keyword scan to fall back to (brief R3). The binding read
+ * and the index walk arrive pre-raced through the shared context (review fix
+ * round B4 — the binding read used to sit OUTSIDE the deadline race, and the
+ * whole phase is raced again by the caller), so every awaited step of the
+ * phase honours the send budget. No binding, a failure or a timeout all
+ * degrade to ZERO references: a send is never blocked, and no provisioning is
+ * ever triggered from here (brief D2/D7).
  */
 async function retrieveReferences(
   deps: HandlerDeps<ISessionManager>,
   capture: SendScopeCapture,
   message: string,
   scopeIds: string[],
+  context: SendKbContext | null,
   deadline: number,
   attempt: { abandoned: boolean },
 ): Promise<KbSearchHit[]> {
@@ -877,7 +952,7 @@ async function retrieveReferences(
   // The send text is tokenized raw, so it is truncated to the same ceiling
   // the SEARCH RPC schema enforces (review #7).
   const query = message.slice(0, KB_SEARCH_QUERY_MAX_CHARS)
-  const space = await readSendKbSpace(capture)
+  const space = context?.space ?? null
   if (!space) {
     deps.platform.logger?.info('KB_SEND_REFERENCES: no knowledge base binding, no references')
     return []
@@ -890,7 +965,12 @@ async function retrieveReferences(
   try {
     let timedOut = false
     hits = await raceSendDeadline<KbSearchHit[]>(
-      searchDocuments(space, query, scopeIds, { deadline } satisfies KbStoreBudget),
+      searchDocuments(space, query, scopeIds, {
+        deadline,
+        // The walk the draft-commit phase already paid for serves the
+        // retrieval's attribution too (review fix round R2).
+        ...(context?.index ? { index: context.index } : {}),
+      } satisfies KbStoreBudget),
       deadline,
       () => {
         timedOut = true
@@ -975,6 +1055,23 @@ export async function resolveSessionKbReferences(
       },
     )
     if (!capture) return undefined
+    // The ONE shared binding + index load (review fix rounds B4/R2): both
+    // phases consume the same context, the binding read sits inside the
+    // deadline race, and the tenant is never walked twice per send. Loaded
+    // only when a phase actually needs it — a scope-less session with no
+    // draft still exits without touching auth or the store.
+    let scopeIds = storedScope
+    const needsContext = draft !== undefined || scopeIds.length > 0
+    const context = needsContext
+      ? await raceSendDeadline<SendKbContext | null>(
+        loadSendKbContext(deps, capture, deadline, attempt),
+        deadline,
+        () => {
+          attempt.abandoned = true
+          return null
+        },
+      )
+      : null
     // Phase 1 — the only state-changing step. It runs whenever the composer
     // PROVIDED a draft, including an explicit empty one: clearing the
     // selection must commit the clear, or the send would fall back to the
@@ -982,10 +1079,9 @@ export async function resolveSessionKbReferences(
     // promise never rejects (a failed write is audited and logged, the send
     // degrades), so a post-timeout settlement cannot become an unhandled
     // rejection.
-    let scopeIds = storedScope
     if (draft !== undefined) {
       const committed = await raceSendDeadline(
-        commitSendDraftScope(deps, capture, sessionId, draft, attempt, deadline),
+        commitSendDraftScope(deps, capture, sessionId, draft, context, attempt, deadline),
         deadline,
         () => {
           attempt.abandoned = true
@@ -994,10 +1090,19 @@ export async function resolveSessionKbReferences(
       )
       if (committed !== null) scopeIds = committed
     }
-    // Phase 2 — read-only retrieval. Its awaited steps (the binding read and
-    // the single find) are raced against the same deadline inside, so this
-    // await stays within the send budget.
-    const references = await retrieveReferences(deps, capture, message, scopeIds, deadline, attempt)
+    // Phase 2 — read-only retrieval. The binding read and index walk arrived
+    // pre-raced in the shared context; the single find is raced here against
+    // the same deadline (review fix round B4 — the whole phase used to await
+    // the binding read outside any race), so a slow binding can no longer
+    // push the send past its budget: the deadline ends the phase instead.
+    const references = await raceSendDeadline<KbSearchHit[]>(
+      retrieveReferences(deps, capture, message, scopeIds, context, deadline, attempt),
+      deadline,
+      () => {
+        attempt.abandoned = true
+        return []
+      },
+    )
     return references.length > 0 ? references : undefined
   } catch (error) {
     deps.platform.logger?.warn(`KB_SEND_REFERENCES: reference resolution failed: ${error instanceof Error ? error.message : String(error)}`)
