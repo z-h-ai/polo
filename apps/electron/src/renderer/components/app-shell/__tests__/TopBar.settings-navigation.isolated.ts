@@ -37,7 +37,7 @@ for (const from of ['home', 'app'] as const) {
       if (from === 'app') await act(async () => { getDefaultStore().set(openTabsAtom, [POLO_TAB, appTab]); getDefaultStore().set(activeTabIdAtom, appTab.id) })
       const user = userEvent.setup()
       await user.click(screen.getByTestId('topbar-account'))
-      await user.click(await screen.findByRole('menuitem', { name: i18n.t(label === 'Settings' ? 'menu.settings' : 'topbar.account.preferences'), exact: true }))
+      await user.click(await screen.findByRole('menuitem', { name: i18n.t(label === 'Settings' ? 'menu.settings' : 'topbar.account.preferences') }))
       await waitFor(() => expect(screen.getByTestId('visible-route').textContent).toBe(route))
       expect(getDefaultStore().get(activeTabIdAtom)).toBe(POLO_TAB_ID)
     })

@@ -17,6 +17,7 @@ import {
 import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
 import {
   createLocalAppScopeKey,
+  unwrapLocalAppAdmission,
   normalizeLocalAppPermissions,
   type CatalogLocalAppScope,
   type LocalAppRuntimeStatus,
@@ -1373,7 +1374,7 @@ export function useAppCatalog() {
       }))
       let result: LocalAppStartResult | undefined
       try {
-        result = await window.electronAPI.localApps.start(scope)
+        result = unwrapLocalAppAdmission(await window.electronAPI.localApps.start(scope))
         requireCurrent(snapshot)
         // STOP/UNINSTALL are newer user intent for this exact scope. A late
         // START may refresh diagnostics, but its URL must not escape to HomePage.
@@ -1586,9 +1587,9 @@ export function useAppCatalog() {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
       }
       requireCurrent(snapshot)
-      const installed = await window.electronAPI.localApps.installProductSpaceBundle({
+      const installed = unwrapLocalAppAdmission(await window.electronAPI.localApps.installProductSpaceBundle({
         app: identity,
-      })
+      }))
       requireCurrent(snapshot)
       if (
         installed.scope?.kind !== 'catalog'

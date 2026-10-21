@@ -104,7 +104,7 @@ export const AdminValidateResponseSchema = z.discriminatedUnion('valid', [
   z.object({
     valid: z.literal(true),
     user: AdminUserSchema,
-    configVersion: nonBlankString(512),
+    configVersion: nonBlankString(512).nullable(),
   }),
   z.object({
     valid: z.literal(false),

@@ -85,7 +85,7 @@ export type AdminValidateResponse =
   | {
       valid: true;
       user: AdminUser;
-      configVersion: string;
+      configVersion: string | null;
     }
   | {
       valid: false;

@@ -548,8 +548,9 @@ export class ScopedLocalAppRuntimeRegistry {
     const scope = validateCatalogLocalAppScope(rawScope)
     const manager = await this.getExistingManager(scope)
     if (!manager) return
-    const evidence = await manager.readNativeInstallationEvidence(createCatalogRuntimeAppId(scope))
-    if (!evidence || evidence.versions.some(version => version.admissionId !== null)) return
+    const evidence = await manager.readNativeInstallationEvidence(createCatalogRuntimeAppId(scope), { allowMissingVersions: true })
+    if (!evidence) throw new LocalAppRuntimeError('UNINSTALL_FAILED', 'Legacy cleanup provenance could not be verified')
+    if (evidence.versions.some(version => version.admissionId !== null)) return
     await this.stopApps([scope])
     await manager.uninstall(createCatalogRuntimeAppId(scope), { preserveData: true })
   }

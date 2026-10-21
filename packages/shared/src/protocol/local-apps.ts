@@ -447,3 +447,21 @@ export interface ProductSpaceAppRuntimeStartResult {
     | { status: 'available'; transport?: 'browser_bridge' | 'process_http' }
     | { status: 'unavailable'; reason: 'static_runtime_unsupported' }
 }
+
+/** Plain data survives Electron contextBridge; Error custom properties do not. */
+export interface LocalAppAdmissionFailure {
+  kind: 'circle_entitlement_required'
+  error: {
+    code: 'CIRCLE_ENTITLEMENT_REQUIRED'
+    message: string
+    details: { reason: 'unknown' | 'not_entitled' | 'expired'; recovery: 'refresh_membership' }
+  }
+}
+
+export function unwrapLocalAppAdmission<T>(result: T | LocalAppAdmissionFailure): T {
+  if (result && typeof result === 'object' && 'kind' in result && result.kind === 'circle_entitlement_required') {
+    const failure = result as LocalAppAdmissionFailure
+    throw Object.assign(new Error(failure.error.message), { code: failure.error.code, details: failure.error.details })
+  }
+  return result as T
+}

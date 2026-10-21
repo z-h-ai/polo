@@ -1439,7 +1439,9 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
     const localAppCleaner = await runLegacyLocalAppCleaner()
     results.legacyInstallationStateRemoved = localAppCleaner.ok
 
-    results.legacyCatalogCacheRemoved = purgeAppCatalogCache()
+    // This cache is the exact provenance used by the local-app cleaner. A
+    // failed disk cleanup must retain it across process restarts for retry.
+    results.legacyCatalogCacheRemoved = localAppCleaner.ok && purgeAppCatalogCache()
     results.legacySkillCachesRemoved = clearLegacySkillCaches()
     results.legacyAuthorizationCacheRemoved = clearAllOrganizationContextStorage()
 

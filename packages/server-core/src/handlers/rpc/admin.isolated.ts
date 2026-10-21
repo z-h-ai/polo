@@ -1947,11 +1947,10 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
 })
 
 describe('registerAdminHandlers', () => {
-  for (const cachedVersion of [null, 'old-config'] as const) {
+  for (const cachedVersion of [undefined, 'old-config'] as const) {
     it(`R8 real 200/null validation enters Main online with cached ${cachedVersion}`, async () => {
       const context = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
-      const { AdminClient: HttpAdminClient } = await import('../../../../shared/src/admin/client')
-      const { AdminError: HttpAdminError } = await import('../../../../shared/src/admin/types')
+      const { AdminValidateResponseSchema } = await import('../../../../shared/src/admin/schemas')
       const seen: Array<{ path: string; token: string | null }> = []
       const http = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
         seen.push({ path: new URL(request.url).pathname, token: request.headers.get('authorization') })
@@ -1963,8 +1962,13 @@ describe('registerAdminHandlers', () => {
         configState.adminConfigVersion = cachedVersion
         adminClientCalls.length = 0
         adminClientBehavior.validate = async (token: string) => {
-          try { return await new HttpAdminClient(http.url.href).validate(token) }
-          catch (error) { if (error instanceof HttpAdminError) throw new TestAdminError(error.message, error.errorCode, { status: error.status }); throw error }
+          // The barrel-wide AdminClient mock aliases the implementation export
+          // in Bun. Drive the same canonical response schema from owned HTTP.
+          const response = await fetch(new URL('/api/auth/validate', http.url), { method: 'POST', headers: { authorization: `Bearer ${token}` } })
+          expect(response.status).toBe(200)
+          const parsed = AdminValidateResponseSchema.safeParse(await response.json())
+          if (!parsed.success) throw new TestAdminError('Admin response is invalid', 'SERVER_ERROR')
+          return parsed.data
         }
         const response = await harness.validate(context) as any
         expect(response).toMatchObject({ loggedIn: true, configVersion: null, user: { displayName: 'Verified online' } })

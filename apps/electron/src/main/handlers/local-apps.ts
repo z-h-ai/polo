@@ -875,10 +875,41 @@ async function loadAuthoritativeProductSpaceAppsOutcome(
   }
 }
 
+type PriorAppBinding = NonNullable<ReturnType<typeof getProductSpaceCatalogAuthorityRecord>>['entries'][number]
+
+function capturePriorAppBinding(identity: ProductSpaceAppRuntimeIdentity, catalogEntryId?: string): PriorAppBinding | undefined {
+  const record = getProductSpaceCatalogAuthorityRecord(identity.accountId, identity.productSpaceId)
+  return [...(record?.entries ?? []), ...(record?.tombstones ?? [])].find(entry =>
+    (catalogEntryId === undefined || entry.catalogEntryId === catalogEntryId)
+    && entry.artifactInstanceId === identity.artifactInstanceId
+    && entry.versionId === identity.versionId && entry.version === identity.version)
+}
+
+/** Historical identity supplies explanation only. Fresh member authority must
+ * deny that exact account's circle source; entitled never resurrects a missing
+ * artifact, and renderer-declared sources never participate.
+ */
+async function explainMissingCircleAdmission(
+  client: AdminClient, accessToken: string, identity: ProductSpaceAppRuntimeIdentity, prior: PriorAppBinding | undefined,
+): Promise<void> {
+  if (!prior?.sources.some(source => source.kind === 'creator_circle')) return
+  const generation = getRuntimeFenceGeneration()
+  const app: ProductSpaceAppIdentity = { ...identity, catalogEntryId: prior.catalogEntryId, catalogRevision: '', sources: validateIdentitySources(prior.sources), availability: 'available' }
+  const assertCurrent = async () => {
+    await assertProductSpaceAccountCurrent(app)
+    if (getRuntimeFenceGeneration() !== generation) throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'ProductSpace changed during membership recovery check')
+  }
+  await assertCurrent()
+  try { await requireCircleAppAdmission(client, accessToken, { kind: 'app', sources: prior.sources }) }
+  catch (error) { await assertCurrent(); throw error }
+  await assertCurrent()
+}
+
 async function loadAuthoritativeProductSpaceApps(
   rawApps: unknown,
   options: {
     driftCode?: 'RELEASE_CHANGED' | 'CATALOG_IDENTITY_DRIFT'
+    explainMissingAdmission?: boolean
   } = {},
 ): Promise<{
   apps: ProductSpaceAppIdentity[]
@@ -887,8 +918,11 @@ async function loadAuthoritativeProductSpaceApps(
   context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
   catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
 }> {
+  const requested = options.explainMissingAdmission ? parseProductSpaceAppIdentityBatch(rawApps, 'ProductSpace App identities')[0]! : undefined
+  const prior = requested ? capturePriorAppBinding(requested, requested.catalogEntryId) : undefined
   const outcome = await loadAuthoritativeProductSpaceAppsOutcome(rawApps, options)
   if (outcome.kind === 'missing') {
+    if (requested) await explainMissingCircleAdmission(outcome.client, outcome.accessToken, requested, prior)
     throw new LocalAppRuntimeError(
       'CATALOG_ENTRY_MISSING',
       'The ProductSpace Catalog no longer lists this entry',
@@ -1270,7 +1304,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         : null
       const startGate = await captureTrustedStartGate()
       const fenceGeneration = getRuntimeFenceGeneration()
-      const loaded = await loadAuthoritativeProductSpaceApps([rawApp])
+      const loaded = await loadAuthoritativeProductSpaceApps([rawApp], { explainMissingAdmission: true })
       const app = loaded.apps[0]!
       const adminUrl = getAdminUrl()
       const assertDownloadCurrent = () => {
@@ -1916,7 +1950,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
    */
   const fetchAuthoritativeProductSpaceApp = async (
     identity: ProductSpaceAppRuntimeIdentity,
+    requestedEntryId?: string,
   ): Promise<{ app: ProductSpaceAppIdentity; assertEntitlement: () => void }> => {
+    const prior = capturePriorAppBinding(identity, requestedEntryId)
     assertProductSpaceAppOperationCurrent({
       ...identity,
       catalogEntryId: '' as ProductSpaceAppIdentity['catalogEntryId'],
@@ -1962,6 +1998,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       })
       | undefined
     if (!entry) {
+      await explainMissingCircleAdmission(client, tokens.accessToken, identity, prior)
       throw new LocalAppRuntimeError(
         'CATALOG_ENTRY_MISSING',
         'The ProductSpace Catalog no longer lists this App version',
@@ -2054,7 +2091,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     // Fresh-Catalog re-verification BEFORE the switch mutex (network I/O
     // never runs under the lock); the mutex fence re-checks afterwards.
-    const { app, assertEntitlement } = await fetchAuthoritativeProductSpaceApp(runtimeIdentity)
+    const { app, assertEntitlement } = await fetchAuthoritativeProductSpaceApp(runtimeIdentity, options.trustDerivedIdentityOnly ? undefined : requested.catalogEntryId)
     if (
       !options.trustDerivedIdentityOnly
       && (

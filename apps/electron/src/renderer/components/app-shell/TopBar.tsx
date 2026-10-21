@@ -213,6 +213,11 @@ export function TopBar() {
 
   const openPoloTab = openTabs.find((tab) => tab.type === "polo")
 
+  const openSettings = (request: () => void) => {
+    if (openPoloTab) activateTab(openPoloTab.id)
+    request()
+  }
+
   const openSessionFromNotification = (sessionId: string) => {
     if (openPoloTab) activateTab(openPoloTab.id)
     // The bar lives above NavigationProvider (inside TabShell), so the click
@@ -504,11 +509,11 @@ export function TopBar() {
             )}
             {appShell && (
               <>
-                <StyledDropdownMenuItem onClick={appShell.onOpenStoredUserPreferences}>
+                <StyledDropdownMenuItem onClick={() => openSettings(appShell.onOpenStoredUserPreferences)}>
                   <UserRound className="h-3.5 w-3.5" />
                   {t("topbar.account.preferences")}
                 </StyledDropdownMenuItem>
-                <StyledDropdownMenuItem onClick={appShell.onOpenSettings}>
+                <StyledDropdownMenuItem onClick={() => openSettings(appShell.onOpenSettings)}>
                   <Settings className="h-3.5 w-3.5" />
                   {t("menu.settings")}
                 </StyledDropdownMenuItem>

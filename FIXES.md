@@ -474,3 +474,49 @@ Admin 同步交付的只读参考为 `fix/poo79-admin-session-20261019@eb8be26b0
 - Electron/shared/server-core 类型检查、shared 权威构建、Main/Renderer 构建通过；Main/Renderer/shared 定向 lint 0 error，i18n coverage 通过。`useProductSpaceContext` 的两个 hook dependency warning 在 `6f851292` 同文件 stdin lint 中逐项复现，记录于 `baseline-hook-lint.log`，未扩展修复。Renderer chunk 大小为既有构建提示。
 - 受控浏览器四类检查通过、page errors 为空，打开到期同屏、列表、续费及 800px 登录截图；它不替代真实 Admin/Main/支付或正式 Acceptance。自有 preview PID 33647 已停止并核对无监听，浏览器 finally 关闭；用户 R7 报告服务未操作。
 - 已知范围外全仓/额外套件基线仍以此前记录为准（包括 admin-local-app-session-ending mock 加载问题、既有 i18n parity/sort、其他 App/AdminLogin lint），本轮未重写或声称全仓绿色。只提交本分支本轮源码、测试及本段，不 push、不合并 dev；TASK/授权文件保持 untracked，调试与证据均在自有忽略目录。最终提交完成并验证后不再追加提交，等待下一轮验收锁定 HEAD。
+
+## R8FIX — R8 终验四项 Client 边界修复（2026-10-21）
+
+**范围与权威**：执行 `TASK-FIX-R8.md` 四项；Client 基线 `e1670a57`。读取 R8 `RESULT.md` / `product-findings-index.json` 并逐项核对原 finding hash，保留原正式 non-pass 和证据边界，不修改 R8 run_root 或报告服务。Admin `7905aa2f` 的 `shared-contract.md` v1.3 第 301 行明确 validate `configVersion` 可为 null；本轮 Admin 零改动。来源绑定见 `.pipeline/r8fix/source-binding.json`。A1/A2、paid 准入资格与删除范围不扩大。
+
+### R8FIX-01 — 设置请求同时切换外层页签
+
+**根因**：TopBar 直接发送内部 settings 路由，外层 activeTab 仍为 Home 或 App，承载设置的 Polo 页签没有激活。
+
+**修复**：设置及同属设置子路由的账号偏好入口先激活已有 Polo 页签，再执行原路由回调；保留原目标，不重置请求或用户设置。复用当前 TabShell、TopBar 和设置组件，没有新增页面或样式副本。
+
+**验证**：真实 TopBar 菜单 + TabShellProvider 从 Home/App 分别进入设置/偏好，4 个断言组均证明承载页签与请求路由同步变化。受控浏览器实际挂载 SettingsNavigator、AppSettingsPage，从两入口直接显示设置；1440×900、1024×768 截图已打开检查，JS/console/HTTP 错误为空、无横向溢出。这是受控组件场景，不冒充完整生产 App 验收。
+
+### R8FIX-02 — canonical unknown 的结构化恢复指引
+
+**根因**：fresh Catalog 排除旧作品时，install/full START 在读取当前成员权威前就返回 Catalog missing；此外 RPC 已知码表漏登记 CIRCLE_ENTITLEMENT_REQUIRED，Electron contextBridge 会丢失直接抛出的 Error 自定义属性，单靠 Main details 不能完整送到 Renderer。
+
+**修复**：请求开始时捕获 Main 已信任、同账号同空间、作品及版本精确匹配的 live/tombstone 来源。仅在 fresh Catalog 确认缺失且可信旧来源为 creator_circle 时核对 fresh 成员权威，拒绝携带 code、reason、refresh_membership；账号、空间和 generation 在异步前后再核对。历史来源只解释拒绝，不恢复缺失作品；entitled、任意未知 404、renderer 自报来源、他账号/他空间/错误版本仍不能被改造成资格拒绝或获得准入。
+
+RPC 登记该错误码；preload 的 install/full START 把限定的资格拒绝投影为可复制的 plain-data 结果，ElectronAPI 返回类型显式包含该分支。Renderer 的目录安装、旧 start 和 ProductSpace launch bridge 三个消费者统一解包，重建带 code/details 的本地 Error，保留现有用户恢复文案与成功返回形态。
+
+**验证**：两个入口 × live/tombstone × unknown/not_entitled 8 个分支均有结构化恢复、零安装/download resolve/capability/spawn；12 个无可信来源、跨账号/空间、版本不符、renderer-only、entitled 的负向分支保持 Catalog missing。真实 WebSocket RPC 保留 code/data；preload 与 Renderer 安装消费回归通过。真实 Electron contextIsolation=true 的前后对照证明：基线抛 Error 到页面后 code/data 均丢失，修复后 install/start 的 reason/recovery 完整到达页面，成功结果不变。该桥接探针使用受控 RPC client，与 Main 资格测试分别证明，不声称一次真实 Admin→Main→Renderer 全链路付款验收。
+
+### R8FIX-03 — 合法空配置版本保持在线
+
+**根因**：Client 的 schema/type 要求字符串，合法 HTTP200 `valid=true/configVersion=null` 被转成 SERVER_ERROR，Main 进而走临时失败/离线分支。
+
+**修复**：共享 validate DTO schema/type 及 Electron 消费类型接受 nullable。Main 仅在存在实际配置版本且版本变化时同步 LLM 配置；null 明确表示没有已发布的 LLM 配置版本，在线身份核验不受其影响，真实网络错误仍维持原离线恢复。没有改 Admin，也没有伪造配置版本或将 null 写成 offline。
+
+**验证**：真实 AdminClient 200/null 响应解析成功；owned HTTP200 + 同一权威 schema 进入真实 Main validate handler，在无本地版本/旧本地版本两种条件下均 loggedIn=true、configVersion=null、offline 不为 true，不发起无版本 LLM 同步；原断网、401、会话替换/CAS 回归保留。原“null 为非法”的负测 fixture 按本轮锁定契约改为数字 42，继续验证非法类型拒绝，未降低其他断言。Main 夹具使用 owned HTTP + canonical schema adapter，因为 Bun 的 barrel mock 会别名真实 Client 导出；Client 本身另有独立解析测试，不把该夹具表述为完整真实鉴权服务。
+
+### R8FIX-04 — 清理失败保留精确 provenance 并核实重试
+
+**根因**：local cleaner 失败后 RPC 仍 purge Catalog，后续进程丢失精确 legacy 识别来源；而 preserveData 卸载并发删除 metadata 与 versions，可能先删 metadata、再因权限失败留下部分 versions，进一步让重试失去 admission 事实。
+
+**修复**：local cleanup 未成功前不 purge Catalog。preserveData 卸载将 metadata 删除排在 installation/runtime/log 清理成功之后，保留原有版本和 admission 来源；仅 legacy cleanup 的证据读取允许原 metadata 中部分已删除版本目录为 ENOENT，其他证据消费仍严格。匹配来源却无法核实 metadata 时返回 UNINSTALL_FAILED，不把未验证删除视为成功。保留原 schema/metadata 作为唯一来源，没有新增需要手工维护的 ledger；有 native admission 的安装仍不删除，未知归属 scope 和 user data 保留。
+
+**验证**：真实磁盘 chmod 故障使首次 RPC 如实失败且 Catalog 未清；清内存缓存和重建 registry 模拟进程重启后仍能读取精确来源，恢复权限后重试真实删除 metadata/versions。另有两版本部分删除故障回归，metadata 保留，已删除版本不阻断精确重试；不可读 provenance 拒绝且不卸载。19 个 native 安装、未知归属 metadata/versions 与所有用户数据均逐项检查保留；原 native installation evidence 与普通卸载/数据保留回归通过，未枚举扩大删除。
+
+### 验证、基线与交付
+
+- **48 个独立测试进程，1278 pass / 0 fail**。包含原 R7 42 组和新增设置导航、AdminClient、RPC 错误码、API bridge、scoped registry、runtime manager；原 R4 复现别名的 25 次重复执行仍计入运行数，不宣称唯一场景数量。Bun 路径均 `./` 开头，isolated 文件独立进程，每进程先证明临时 HOME/homedir/配置目录隔离。完整输出和退出码写 `verify-r8.log`（忽略、不入库）；复跑 `python3 .pipeline/r8fix/verify.py verify-r8.log`，最终提交绑定在 `.pipeline/r8fix/verification-binding.json`。
+- 先行红测试提交 `ca6c1fb9`；`.pipeline/r8fix/red*.log` 保留复现。后续只补 fixture 的实际菜单文本、RPC 宿主 context、Bun barrel mock 适配和参数类型，未修改业务断言。定向复现转绿后扩展完整相关回归。
+- Electron/shared/server-core 类型检查、shared 权威构建、Main/preload/Renderer 构建通过；本轮修改的 Main/Renderer/transport/shared 定向 lint 0 error / 0 warning，i18n coverage 通过。保留既有 Renderer chunk 大小提示。历史范围外全仓基线问题仍按前轮记录保留，本轮没有宣称全仓测试或正式三卡 Acceptance 通过。
+- 浏览器与两个真实 Electron probe 均退出并回收，独立临时 HOME/userData 已清理；自有 preview PID 60175 已停并核对无监听，记录见 `.pipeline/r8fix/cleanup.json`。截图与日志只在自有忽略目录；没有操作 R8 报告服务、用户资源或历史 run_root。
+- 只提交本 worktree 本轮源码、测试及本段；TASK/授权文件保留 untracked，不 push、不合并 dev。完成后保持最终 HEAD，等待下一轮验收。

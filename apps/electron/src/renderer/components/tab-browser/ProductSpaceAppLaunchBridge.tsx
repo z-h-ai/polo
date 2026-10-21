@@ -3,7 +3,7 @@ import { useStore } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
-import type { ProductSpaceAppRuntimeStartResult } from '@polo-ai/shared/protocol'
+import { unwrapLocalAppAdmission, type ProductSpaceAppRuntimeStartResult } from '@polo-ai/shared/protocol'
 import { useOptionalMemberCatalog } from '@/context/MemberCatalogContext'
 import { useOptionalProductSpaceContext, useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
@@ -105,9 +105,9 @@ export function ProductSpaceAppLaunchBridge() {
           if (pending.launch.delivery.kind === 'web_url') {
             record.tab.url = pending.launch.delivery.url
           } else {
-            const handle = await window.electronAPI.localApps.start({
+            const handle = unwrapLocalAppAdmission(await window.electronAPI.localApps.start({
               kind: 'product_space_runtime_start', app: identityForProductSpaceApp(snapshot, app),
-            }) as ProductSpaceAppRuntimeStartResult
+            })) as ProductSpaceAppRuntimeStartResult
             record.handle = handle
             if (!current()) { await stopExact(handle); return }
             const url = handle.uiUrl ? new URL(handle.uiUrl) : null

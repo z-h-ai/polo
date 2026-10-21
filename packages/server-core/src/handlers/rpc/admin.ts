@@ -1512,7 +1512,7 @@ export function registerAdminHandlers(
       }
       requestContext.session = verifiedSession
 
-      if (getAdminConfigVersion() !== validation.configVersion) {
+      if (validation.configVersion !== null && getAdminConfigVersion() !== validation.configVersion) {
         const synced = await syncAdminConnections({
           adminUrl,
           manager,

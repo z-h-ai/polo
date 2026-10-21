@@ -7,6 +7,7 @@
 
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { ElectronAPI } from '../shared/types'
+import type { LocalAppAdmissionFailure } from '@polo-ai/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Channel map entry
@@ -39,6 +40,23 @@ export function buildClientApi(
       fn = async (...args: any[]) => t(await client.invoke(entry.channel, ...args))
     } else {
       fn = (...args: any[]) => client.invoke(entry.channel, ...args)
+    }
+
+    if (key === 'localApps.installProductSpaceBundle' || key === 'localApps.start') {
+      const invoke = fn
+      fn = async (...args: any[]) => {
+        try { return await invoke(...args) }
+        catch (error) {
+          const coded = error as { code?: unknown; message?: unknown; data?: { reason?: unknown; recovery?: unknown } }
+          if (coded?.code !== 'CIRCLE_ENTITLEMENT_REQUIRED'
+            || !['unknown', 'not_entitled', 'expired'].includes(String(coded.data?.reason))
+            || coded.data?.recovery !== 'refresh_membership') throw error
+          return { kind: 'circle_entitlement_required', error: {
+            code: coded.code, message: String(coded.message),
+            details: { reason: coded.data.reason as LocalAppAdmissionFailure['error']['details']['reason'], recovery: 'refresh_membership' },
+          } } satisfies LocalAppAdmissionFailure
+        }
+      }
     }
 
     // Dotted keys like "browserPane.create" become nested: api.browserPane.create
