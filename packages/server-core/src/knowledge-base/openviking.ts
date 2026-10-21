@@ -22,6 +22,7 @@ import {
   writeOpenVikingSpaceMeta,
   type KbDocumentOpenVikingState,
   type KbSpaceBinding,
+  readCollectionName,
 } from './store'
 
 /**
@@ -36,9 +37,29 @@ import {
  * the local and remote roots stay one-to-one.
  */
 
-/** The remote root a ProductSpace publishes under, e.g. `viking://resources/entspace-<hash>`. */
-export function openVikingSpaceRootUri(productSpaceId: string): string {
-  return `viking://resources/entspace-${kbSpaceSegment(productSpaceId)}`
+/**
+ * OpenViking single-segment safety: the service rejects `.`, `..`, `:` and `+`
+ * inside a segment, so human-readable names are sanitized down to a stable
+ * subset and suffixed with a short id to keep the path unique.
+ */
+export function openVikingPathSegment(name: string, id: string): string {
+  const cleaned = name
+    .replace(/[\u0000-\u001f/\\:*?#%<>|"]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\s]+|[.\s]+$/g, '')
+    .trim()
+    .slice(0, 60)
+  const id8 = id.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 8)
+  return `${cleaned || 'untitled'}-${id8}`
+}
+
+/**
+ * The remote root a ProductSpace publishes under. Readable in the OpenViking
+ * workbench: `viking://resources/polo-kb/<space name>-<hash8>` (tags still
+ * carry the full ids, so retrieval mapping never depends on the path text).
+ */
+export function openVikingSpaceRootUri(productSpaceId: string, spaceName?: string): string {
+  return `viking://resources/polo-kb/${openVikingPathSegment(spaceName ?? 'enterprise space', kbSpaceSegment(productSpaceId))}`
 }
 
 /** The trusted enterprise facts every remote call is bound to. */
@@ -97,7 +118,7 @@ export async function ensureOpenVikingSpace(target: OpenVikingTarget): Promise<s
   const existing = readOpenVikingSpaceMeta(target.workspaceRoot, target.binding)
   if (existing) return existing.rootUri
 
-  const rootUri = openVikingSpaceRootUri(target.space.id)
+  const rootUri = openVikingSpaceRootUri(target.space.id, target.space.name)
   const provisionedAt = nowIso()
   const temp = await openVikingTempUpload(target.config, {
     filename: '.space.md',
@@ -146,7 +167,10 @@ export async function syncPublishedDocumentToOpenViking(
     // The full local content — the same bytes the publish snapshot preserved.
     const document = getDocument(target.workspaceRoot, target.binding, docId)
     if (!document) throw new Error(`Document ${docId} disappeared before its OpenViking sync`)
-    const uri = `${rootUri}/collections/${document.collectionId}/${document.id}.md`
+    const uri = `${rootUri}/collections/${openVikingPathSegment(
+      readCollectionName(target.workspaceRoot, target.binding, document.collectionId),
+      document.collectionId,
+    )}/${openVikingPathSegment(document.title, document.id)}.md`
     const temp = await openVikingTempUpload(target.config, {
       filename: `${document.id}.md`,
       content: document.content,

@@ -397,6 +397,21 @@ export function readDocumentSummary(
   return toSummary(readDocumentRecord(root, assertKbId('docId', docId)))
 }
 
+/** The collection display name for remote readable paths; falls back to the id. */
+export function readCollectionName(
+  workspaceRoot: string,
+  binding: KbSpaceBinding,
+  collectionId: string,
+): string {
+  const root = readSpaceRoot(workspaceRoot, binding)
+  if (!root) return collectionId
+  try {
+    return readCollectionRecord(root, collectionId).name
+  } catch {
+    return collectionId
+  }
+}
+
 /** The local document facts an OpenViking search hit is mapped back onto. */
 export interface KbLookupDocument {
   docId: string
