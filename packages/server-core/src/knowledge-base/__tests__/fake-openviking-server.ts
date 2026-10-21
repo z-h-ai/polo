@@ -150,6 +150,21 @@ function underTarget(uri: string, target: string): boolean {
   return uri === target || uri.startsWith(normalized)
 }
 
+/**
+ * Measured server behavior, e2e round 2026-10-21 (E2): OpenViking lower-cases
+ * EVERY tag VALUE it stores — `"B1"` comes back `"b1"`, an url-encoded
+ * `"Annual%20LEAVE%20Policy"` as `"annual%20leave%20policy"`. Keys are left
+ * alone. The fake applies it on the two write paths (`content/write`,
+ * `attrs/set_tags`) exactly where the real service does.
+ */
+function lowerCaseTagValues(tags: string[]): string[] {
+  return tags.map(tag => {
+    const separator = tag.indexOf('=')
+    if (separator <= 0) return tag
+    return `${tag.slice(0, separator + 1)}${tag.slice(separator + 1).toLowerCase()}`
+  })
+}
+
 export class FakeOpenVikingServer {
   readonly baseUrl: string
   readonly requests: FakeRecordedRequest[] = []
@@ -160,6 +175,13 @@ export class FakeOpenVikingServer {
   private readonly delays = new Map<string, number>()
   /** When set, `search/find` answers with these rows verbatim. */
   private findOverride: Array<Record<string, unknown>> | null = null
+  /**
+   * Measured server behavior, e2e round 2026-10-21 (E1): a `set_tags` issued
+   * within this many ms of a directory's creation answers `ok` while silently
+   * dropping the tags (files are unaffected). 0 disables the window; tests
+   * inject a small one to reproduce the loss and the store's read-back retry.
+   */
+  private directoryTagLossWindowMs = 0
   /** One-shot tree mutations consumed before the next matching request. */
   private readonly mutations: Array<{
     method: string
@@ -203,6 +225,7 @@ export class FakeOpenVikingServer {
     this.delays.clear()
     this.mutations.length = 0
     this.findOverride = null
+    this.directoryTagLossWindowMs = 0
     this.requests.length = 0
   }
 
@@ -223,6 +246,15 @@ export class FakeOpenVikingServer {
   /** Replaces the `search/find` result set until cleared with `null`. */
   setFindOverride(resources: Array<Record<string, unknown>> | null): void {
     this.findOverride = resources
+  }
+
+  /**
+   * Arms the E1 measured loss window: for this many ms after a directory is
+   * created, `attrs/set_tags` on it answers `ok` but writes nothing (real
+   * instance behavior, brief §1 e2e round 2026-10-21). `0` turns it off.
+   */
+  setDirectoryTagLossWindow(ms: number): void {
+    this.directoryTagLossWindowMs = ms
   }
 
   /**
@@ -584,7 +616,7 @@ export class FakeOpenVikingServer {
       tree.set(parent, { uri: parent, type: 'dir', tags: [], content: null, mtime: nowIso() })
     }
     const tags = Array.isArray(body?.tags)
-      ? body.tags.filter((tag): tag is string => typeof tag === 'string')
+      ? lowerCaseTagValues(body.tags.filter((tag): tag is string => typeof tag === 'string'))
       : []
     const existing = tree.get(uri)
     tree.set(uri, {
@@ -626,8 +658,15 @@ export class FakeOpenVikingServer {
     if (!uri) return this.error(400, 'INVALID_ARGUMENT', 'uri is required')
     const node = tree.get(uri)
     if (!node) return this.error(404, 'NOT_FOUND', `${uri} does not exist`)
+    // E1 (measured 2026-10-21): a directory's tags write inside the loss
+    // window answers ok and writes NOTHING — the store's read-back and its
+    // bounded retry are what recover from this.
+    if (this.directoryTagLossWindowMs > 0 && node.type === 'dir'
+      && Date.now() - Date.parse(node.mtime) < this.directoryTagLossWindowMs) {
+      return this.ok({ uri, tags: node.tags })
+    }
     const tags = Array.isArray(body?.tags)
-      ? body.tags.filter((tag): tag is string => typeof tag === 'string')
+      ? lowerCaseTagValues(body.tags.filter((tag): tag is string => typeof tag === 'string'))
       : []
     const mode = typeof body?.mode === 'string' ? body.mode : 'replace'
     if (mode === 'clear') node.tags = []

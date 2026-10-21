@@ -10,6 +10,13 @@ import {
   type OpenVikingTenantAuth,
 } from './openviking-client'
 import { isTrustedSessionScopeTokenCurrent, type TrustedSessionScopeToken } from '../handlers/rpc/trusted-product-space-account'
+import {
+  auditedRemoteWrite,
+  kbDirectoryTagBackoffMs,
+  kbTagHexDecode,
+  kbTagHexEncode,
+  type KbRemoteAuditRecord,
+} from './store'
 import { KB_SERVICE_UNAVAILABLE_MESSAGE, KbStoreError } from './errors'
 
 /**
@@ -227,6 +234,68 @@ async function readOwnershipTags(
 }
 
 /**
+ * Pins the ownership marker onto the account root, with the discipline the
+ * store applies to every directory write:
+ *
+ * - **Audited** (B8 residual): the marker write is a remote write that may
+ *   land past a timeout — it carries the same intent/result/unknown trail as
+ *   the store's writes.
+ * - **Verified** (e2e round 2026-10-21, E1): a `set_tags` issued right after
+ *   the account's creation answers `ok` while silently dropping the tags.
+ *   The write is read back through `fs/attrs` and retried with the store's
+ *   bounded backoff — an unverified marker here would fail-closed the NEXT
+ *   provisioning attempt forever (`binding_mismatch`, marker missing).
+ * - **Hex-carried** (E2): the marker values are exact ids the server's tag
+ *   lower-casing would distort, so they travel hex-encoded (see
+ *   `kbTagHexEncode` in the store).
+ *
+ * The scope token is revalidated before EVERY physical write, retries
+ * included (brief §3 item 5).
+ */
+async function pinOwnershipTags(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  identity: KbTenantIdentity,
+  actor: string,
+  audit: KbTenantAudit,
+  scopeToken: TrustedSessionScopeToken | undefined,
+): Promise<void> {
+  const record: KbRemoteAuditRecord = entry => audit(entry.action, entry.target, entry.detail)
+  const tags = [
+    `${KB_TENANT_SPACE_TAG}=${kbTagHexEncode(identity.productSpaceId)}`,
+    `${KB_TENANT_ENTERPRISE_TAG}=${kbTagHexEncode(identity.enterpriseId)}`,
+  ]
+  for (let attempt = 1; ; attempt += 1) {
+    await auditedRemoteWrite(record, actor, {
+      action: 'remote.set_tags',
+      target: KB_TENANT_ROOT_URI,
+      detail: { kind: 'ownership_marker', attempt },
+    }, async () => {
+      assertScopeTokenCurrent(scopeToken)
+      await openVikingSetTags(config, auth, {
+        uri: KB_TENANT_ROOT_URI,
+        tags,
+        mode: 'append',
+      })
+    })
+    const root = await openVikingAttrs(config, auth, KB_TENANT_ROOT_URI).catch(() => null)
+    if (root?.tags[KB_TENANT_SPACE_TAG] === kbTagHexEncode(identity.productSpaceId)
+      && root?.tags[KB_TENANT_ENTERPRISE_TAG] === kbTagHexEncode(identity.enterpriseId)) {
+      return
+    }
+    if (attempt >= KB_MARKER_ATTEMPTS) {
+      throw unavailable(
+        KB_SERVICE_UNAVAILABLE_MESSAGE,
+        `ownership marker did not stick after ${KB_MARKER_ATTEMPTS} attempts`,
+      )
+    }
+    await new Promise(resolve => setTimeout(resolve, kbDirectoryTagBackoffMs(attempt)))
+  }
+}
+
+const KB_MARKER_ATTEMPTS = 3
+
+/**
  * The one idempotent provisioning entry point (brief D2). Safe to call from
  * any collection-creating RPC on any device:
  *
@@ -279,23 +348,25 @@ export async function ensureKbTenant(params: EnsureKbTenantParams): Promise<KbTe
     if (raced) return adoptCachedBinding(raced, identity, accountId, audit)
 
     const adminUserId = KB_TENANT_SERVICE_USER_ID
+    // B8 residual: the provisioning plane's remote writes (account creation,
+    // ownership marker) carry the SAME intent/result/unknown trail as every
+    // store write — a timeout there may also have landed.
+    const auditRecord: KbRemoteAuditRecord = entry => audit(entry.action, entry.target, entry.detail)
     try {
-      assertScopeTokenCurrent(params.scopeToken)
-      const created = await openVikingCreateAccount(config, { accountId, adminUserId })
+      const created = await auditedRemoteWrite(auditRecord, actor, {
+        action: 'remote.create_account',
+        target: accountId,
+        detail: { adminUserId },
+      }, async () => {
+        assertScopeTokenCurrent(params.scopeToken)
+        return openVikingCreateAccount(config, { accountId, adminUserId })
+      })
       // Pin ownership IMMEDIATELY: between create and marker the account is an
       // orphan a crash cannot distinguish from a foreign one — the next
       // provisioning attempt fails closed and needs manual repair. Accepted:
       // the window is one remote call wide and fail-closed beats takeover.
       const auth: OpenVikingTenantAuth = { accountId, userKey: created.userKey }
-      assertScopeTokenCurrent(params.scopeToken)
-      await openVikingSetTags(config, auth, {
-        uri: KB_TENANT_ROOT_URI,
-        tags: [
-          `${KB_TENANT_SPACE_TAG}=${identity.productSpaceId}`,
-          `${KB_TENANT_ENTERPRISE_TAG}=${identity.enterpriseId}`,
-        ],
-        mode: 'append',
-      })
+      await pinOwnershipTags(config, auth, identity, actor, audit, params.scopeToken)
       const credential: KbTenantCredential = {
         accountId,
         userId: created.adminUserId,
@@ -381,15 +452,21 @@ async function findExistingTenantKey(
   }
 
   const tags = await readOwnershipTags(config, auth)
-  const spaceTag = tags?.[KB_TENANT_SPACE_TAG]
-  const enterpriseTag = tags?.[KB_TENANT_ENTERPRISE_TAG]
+  // E2: markers are hex-carried now (the server lower-cases tag values);
+  // plaintext markers written before that round still compare directly.
+  const spaceTag = kbTagHexDecode(tags?.[KB_TENANT_SPACE_TAG])
+    ?? tags?.[KB_TENANT_SPACE_TAG]
+    ?? null
+  const enterpriseTag = kbTagHexDecode(tags?.[KB_TENANT_ENTERPRISE_TAG])
+    ?? tags?.[KB_TENANT_ENTERPRISE_TAG]
+    ?? null
   if (spaceTag !== identity.productSpaceId || enterpriseTag !== identity.enterpriseId) {
     // Fail closed WITH the reason in the audit trail; the RPC stays neutral.
     audit('openviking.binding_mismatch', accountId, {
       productSpaceId: identity.productSpaceId,
       enterpriseId: identity.enterpriseId,
-      markerSpace: spaceTag ?? null,
-      markerEnterprise: enterpriseTag ?? null,
+      markerSpace: spaceTag,
+      markerEnterprise: enterpriseTag,
     })
     throw unavailable(
       KB_SERVICE_UNAVAILABLE_MESSAGE,

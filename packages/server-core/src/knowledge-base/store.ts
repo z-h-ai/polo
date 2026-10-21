@@ -206,6 +206,50 @@ function readTagValue(value: string | undefined): string | null {
   }
 }
 
+/**
+ * A timestamp tag read back. The server's lower-casing folds the ISO `T`/`Z`
+ * into `t`/`z` (E2, harmless for `Date.parse` but wrong for the B6
+ * full-record comparison and for display), so a parseable value is
+ * re-emitted in the canonical `toISOString()` form; an unparseable value is
+ * kept verbatim for the strict parsers to judge.
+ */
+function readTagTimestamp(value: string | undefined): string | null {
+  const raw = readTagValue(value)
+  if (raw === null) return null
+  const ms = Date.parse(raw)
+  if (Number.isNaN(ms)) return raw
+  return new Date(ms).toISOString()
+}
+
+/**
+ * Measured server behavior, e2e round 2026-10-21 (brief §1): OpenViking
+ * lower-cases EVERY tag value — `"B1"` arrives as `"b1"`, an url-encoded
+ * `"Annual%20LEAVE%20Policy"` as `"annual%20leave%20policy"`, and the ISO
+ * timestamp's `T`/`Z` ride along (harmless for `Date.parse`). Any
+ * case-sensitive exact value is distorted by a tag round-trip, so the
+ * precise title / reject reason / collection name / tenant ownership marker
+ * travels UTF-8 hex-encoded under a dedicated key — the hex alphabet is
+ * itself lower-case and immune. The url-encoded value stays alongside as a
+ * READABLE copy (what the storage workbench shows; NOT authoritative), and
+ * reads fall back to it when the hex key is missing (data written before
+ * this round).
+ */
+export function kbTagHexEncode(value: string): string {
+  return Buffer.from(value, 'utf-8').toString('hex')
+}
+
+/**
+ * Decodes a hex-carried tag value. A value that is not hex, not even-length,
+ * or does not re-encode to itself (an old plaintext value that merely looks
+ * like hex) reads as `null` — the caller falls back to the legacy key.
+ */
+export function kbTagHexDecode(value: string | undefined): string | null {
+  if (value === undefined || value.length < 2 || value.length % 2 !== 0) return null
+  if (!/^[0-9a-f]+$/.test(value)) return null
+  const decoded = Buffer.from(value, 'hex').toString('utf-8')
+  return kbTagHexEncode(decoded) === value ? decoded : null
+}
+
 /** Builds one `k=v` tag, url-encoding the value (lossless round-trip). */
 function tag(key: string, value: string): string {
   return `${key}=${tagValue(value)}`
@@ -270,9 +314,11 @@ function parseDocumentTagSet(
   const docId = tags.doc
   const collectionId = tags.collection
   const status = tags.status
-  const title = readTagValue(tags.title)
-  const createdAt = readTagValue(tags.created)
-  const updatedAt = readTagValue(tags.updated)
+  // E2: the EXACT title/reject reason rides the hex key (immune to the
+  // server's lower-casing); the url-encoded key is the readable fallback.
+  const title = kbTagHexDecode(tags.t) ?? readTagValue(tags.title)
+  const createdAt = readTagTimestamp(tags.created)
+  const updatedAt = readTagTimestamp(tags.updated)
   if (!docId || !collectionId || !status || !title || !createdAt || !updatedAt) return null
   if (!allowedStatuses.has(status)) return null
   const version = tags.v !== undefined ? Number(tags.v) : 1
@@ -284,8 +330,8 @@ function parseDocumentTagSet(
     version: Number.isInteger(version) && version >= 1 ? version : 1,
     createdAt,
     updatedAt,
-    publishedAt: readTagValue(tags.published),
-    rejectReason: readTagValue(tags.reject),
+    publishedAt: readTagTimestamp(tags.published),
+    rejectReason: kbTagHexDecode(tags.r) ?? readTagValue(tags.reject),
   }
 }
 
@@ -344,12 +390,18 @@ function documentTags(record: {
     tag('doc', record.docId),
     tag('collection', record.collectionId),
     tag('status', record.status),
+    // E2: `t=` carries the exact title hex-encoded; `title=` stays as the
+    // lower-cased readable copy the storage workbench shows.
+    `t=${kbTagHexEncode(record.title)}`,
     tag('title', record.title),
     `v=${record.version}`,
     tag('created', record.createdAt),
     tag('updated', record.updatedAt),
     ...(record.publishedAt ? [tag('published', record.publishedAt)] : []),
-    ...(record.rejectReason !== null ? [tag('reject', record.rejectReason)] : []),
+    ...(record.rejectReason !== null ? [
+      `r=${kbTagHexEncode(record.rejectReason)}`,
+      tag('reject', record.rejectReason),
+    ] : []),
   ]
 }
 
@@ -357,6 +409,9 @@ function documentTags(record: {
 function collectionTags(input: { collectionId: string; name: string; description: string; createdAt: string }): string[] {
   return [
     tag('collection', input.collectionId),
+    // E2: `n=` carries the exact collection name hex-encoded; `name=` is the
+    // readable (lower-cased) copy.
+    `n=${kbTagHexEncode(input.name)}`,
     tag('name', input.name),
     // Descriptions beyond the verified tag budget (2048 CJK chars, §1.4)
     // truncate rather than fail the creation.
@@ -504,38 +559,50 @@ interface KbRemoteIntent {
   detail?: Record<string, unknown>
 }
 
+/** The audit sink adapter: one entry into the caller's trail. */
+export type KbRemoteAuditRecord = (entry: {
+  actor: string
+  action: string
+  target: string
+  detail?: Record<string, unknown>
+}) => void
+
 /**
  * Audits ONE remote write as `<action>.intent` BEFORE the request and
  * `<action>.result` after it, correlated by a request id (review fix round
  * B8). A timeout/interruption is recorded `unknown` — the operation may have
  * landed — and a crash between the two entries leaves the intent dangling,
  * which the trail reads as the same `unknown`. The audits are best-effort by
- * construction (`appendAudit` never throws).
+ * construction (the sink never throws). Exported so the TENANT provisioning
+ * writes (account creation, ownership tags) carry the same discipline (B8
+ * residual): those are remote writes too, and a timeout there may also have
+ * landed.
  */
-async function auditedRemote<T>(
-  space: KbOpenVikingSpace,
+export async function auditedRemoteWrite<T>(
+  record: KbRemoteAuditRecord,
+  actor: string,
   intent: KbRemoteIntent,
   run: () => Promise<T>,
 ): Promise<T> {
   const requestId = randomUUID()
-  appendAudit(space.workspaceRoot, space.binding, {
-    actor: space.actor,
+  record({
+    actor,
     action: `${intent.action}.intent`,
     target: intent.target,
     detail: { requestId, ...(intent.detail ?? {}) },
   })
   try {
     const result = await run()
-    appendAudit(space.workspaceRoot, space.binding, {
-      actor: space.actor,
+    record({
+      actor,
       action: `${intent.action}.result`,
       target: intent.target,
       detail: { requestId, outcome: 'success' satisfies KbRemoteOutcome },
     })
     return result
   } catch (error) {
-    appendAudit(space.workspaceRoot, space.binding, {
-      actor: space.actor,
+    record({
+      actor,
       action: `${intent.action}.result`,
       target: intent.target,
       detail: {
@@ -552,6 +619,19 @@ async function auditedRemote<T>(
     })
     throw error
   }
+}
+
+async function auditedRemote<T>(
+  space: KbOpenVikingSpace,
+  intent: KbRemoteIntent,
+  run: () => Promise<T>,
+): Promise<T> {
+  return auditedRemoteWrite(
+    entry => appendAudit(space.workspaceRoot, space.binding, entry),
+    space.actor,
+    intent,
+    run,
+  )
 }
 
 async function remoteMkdir(space: KbOpenVikingSpace, uri: string, description?: string): Promise<void> {
@@ -593,6 +673,57 @@ async function remoteSetTags(space: KbOpenVikingSpace, uri: string, tags: string
       throw toKbError(`set_tags ${uri}`, error)
     }
   })
+}
+
+/**
+ * Directory tags write with a READ-BACK (e2e round 2026-10-21, brief §1):
+ * a `set_tags` issued IMMEDIATELY after a `mkdir` answers `ok` while silently
+ * dropping the tags — reproduced 3/3 on the real instance; waiting ≥1.2s or
+ * simply retrying succeeds. An unverified write here means a collection whose
+ * `collection=` tag never lands, i.e. a directory that vanishes from every
+ * listing forever. So directory-bound tag writes verify the expected keys
+ * through `fs/attrs` and retry with a bounded backoff (3 attempts, 600ms
+ * doubling) before surfacing the neutral availability error.
+ */
+const KB_DIRECTORY_TAG_ATTEMPTS = 3
+let directoryTagRetryBaseDelayMs = 600
+
+export function setKbDirectoryTagRetryDelayForTests(ms: number): void {
+  directoryTagRetryBaseDelayMs = ms
+}
+
+export function resetKbDirectoryTagRetryDelayForTests(): void {
+  directoryTagRetryBaseDelayMs = 600
+}
+
+/** The backoff between verification attempts; shared with the tenant marker write. */
+export function kbDirectoryTagBackoffMs(attempt: number): number {
+  return directoryTagRetryBaseDelayMs * attempt
+}
+
+function sleepForRetry(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function remoteSetDirectoryTagsVerified(
+  space: KbOpenVikingSpace,
+  uri: string,
+  tags: string[],
+  verify: (tags: Record<string, string>) => boolean,
+): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    await remoteSetTags(space, uri, tags)
+    const node = await remoteAttrs(space, uri)
+    if (node && verify(node.tags)) return
+    if (attempt >= KB_DIRECTORY_TAG_ATTEMPTS) {
+      throw new KbStoreError(
+        'kb_service_unavailable',
+        KB_SERVICE_UNAVAILABLE_MESSAGE,
+        `directory tags at ${uri} did not stick after ${KB_DIRECTORY_TAG_ATTEMPTS} attempts`,
+      )
+    }
+    await sleepForRetry(directoryTagRetryBaseDelayMs * attempt)
+  }
 }
 
 async function remoteMv(space: KbOpenVikingSpace, fromUri: string, toUri: string): Promise<void> {
@@ -761,11 +892,12 @@ function buildKbIndex(nodes: OpenVikingNode[], truncated: boolean): KbIndex {
     collections.set(collectionId, entry)
     if (raw.tags.doc === undefined) {
       // The collection directory itself: name/description/timestamps live here.
-      const name = readTagValue(raw.tags.name)
+      // E2: the exact name rides `n=` (hex); `name=` is the readable fallback.
+      const name = kbTagHexDecode(raw.tags.n) ?? readTagValue(raw.tags.name)
       if (name) entry.name = name
       const description = readTagValue(raw.tags.description)
       if (description) entry.description = description
-      const createdAt = readTagValue(raw.tags.created)
+      const createdAt = readTagTimestamp(raw.tags.created)
       if (createdAt) entry.createdAt = createdAt
       if (node.mtime) entry.updatedAt = node.mtime
       if (!entry.uri && node.uri.startsWith(KB_SPACE_ROOT_URI)) entry.uri = node.uri
@@ -882,7 +1014,16 @@ export async function createCollection(
   }
   const uri = kbCollectionUri(record.name, record.collectionId)
   await remoteMkdir(space, uri, record.description)
-  await remoteSetTags(space, uri, collectionTags(record))
+  // E1: the tags land IMMEDIATELY after the mkdir — exactly the window the
+  // real instance drops. The write is verified through a read-back and
+  // retried before the collection is reported created. The verified keys are
+  // the two the server's tag lower-casing cannot distort (the collection id
+  // and the hex-carried name); the ISO `created` value comes back with its
+  // `T`/`Z` folded (E2, harmless for Date.parse) and never takes part.
+  const expectedTags = collectionTags(record)
+  await remoteSetDirectoryTagsVerified(space, uri, expectedTags, tags =>
+    tags.collection === record.collectionId
+    && tags.n === kbTagHexEncode(record.name))
   appendAudit(space.workspaceRoot, space.binding, {
     actor: space.actor,
     action: 'collection.create',
@@ -970,6 +1111,35 @@ async function locateDocument(space: KbOpenVikingSpace, docId: string): Promise<
     throw new KbStoreError('kb_document_not_found')
   }
   return live.sort()[0]
+}
+
+/**
+ * Locates a document's tombstone copy inside `.recycle/` (review fix round
+ * B7, second half): when the recycle move already executed but BOTH of its
+ * responses were lost (the move and the attrs confirmation), the live lookup
+ * finds nothing and the retry must recognize the completed delete instead of
+ * answering `kb_document_not_found` forever. Every candidate is confirmed by
+ * its tags — the tombstone parse accepts `status=deleted`, and a corrupted
+ * or foreign node never masquerades as this document.
+ */
+async function locateRecycledDocument(space: KbOpenVikingSpace, docId: string): Promise<string | null> {
+  let matches: string[]
+  try {
+    matches = await openVikingGlob(space.config, space.auth, {
+      pattern: `**/*-${docId}.md`,
+      uri: KB_RECYCLE_DIR_URI,
+    })
+  } catch {
+    // An absent `.recycle/` subtree (nothing ever deleted) or a read failure
+    // reads as "no copy" — the caller re-raises the original not-found.
+    return null
+  }
+  for (const uri of matches.sort()) {
+    const node = await remoteAttrs(space, uri).catch(() => null)
+    const parsed = node ? parseLiveDocumentTags(rawTagsOf(node)) : null
+    if (parsed?.docId === docId) return uri
+  }
+  return null
 }
 
 export async function getDocument(space: KbOpenVikingSpace, docId: string): Promise<KbDocument | null> {
@@ -1158,7 +1328,27 @@ export async function deleteDocument(
   docId: string,
 ): Promise<{ recycled: true }> {
   return withDocumentLock(docId, async () => {
-    const uri = await locateDocument(space, docId)
+    let uri: string
+    try {
+      uri = await locateDocument(space, docId)
+    } catch (error) {
+      // Review fix round B7, second half: when the recycle move AND its attrs
+      // confirmation were both lost, the document already sits in `.recycle/`
+      // with its tombstone — the delete is DONE, and the retry must answer
+      // idempotent success instead of `kb_document_not_found`.
+      if (error instanceof KbStoreError && error.code === 'kb_document_not_found') {
+        if (await locateRecycledDocument(space, docId)) {
+          appendAudit(space.workspaceRoot, space.binding, {
+            actor: space.actor,
+            action: 'document.delete',
+            target: docId,
+            detail: { alreadyRecycled: true },
+          })
+          return { recycled: true as const }
+        }
+      }
+      throw error
+    }
     const node = await remoteAttrs(space, uri)
     if (!node) throw new KbStoreError('kb_document_not_found')
     const current = parseLiveDocumentTags(rawTagsOf(node))
@@ -1192,8 +1382,11 @@ export async function deleteDocument(
     } catch (error) {
       // The move may still have landed past a timeout (B8's `unknown`
       // outcome): the target holding THIS document is success, not an error.
+      // The tombstone parse is the LIVE-path one (B7 fix): the moved copy
+      // carries `status=deleted`, which the strict wire parser rejects —
+      // confirming with it could never confirm a real recycle.
       const target = await remoteAttrs(space, recycleTargetUri(uri)).catch(() => null)
-      const moved = target ? parseDocumentTags(rawTagsOf(target)) : null
+      const moved = target ? parseLiveDocumentTags(rawTagsOf(target)) : null
       if (!moved || moved.docId !== docId) throw error
     }
     appendAudit(space.workspaceRoot, space.binding, {
@@ -1351,10 +1544,15 @@ export async function searchDocuments(
     if (parsed.status !== 'published') continue
     if (wanted && !wanted.has(parsed.collectionId)) continue
     // B5 attribution: the hit must be a document THIS space's index knows,
-    // under the collection the tags claim, at the live collection uri.
+    // under the collection the tags claim, at the live collection uri — and
+    // (review fix round B5 residual) at the index's EXACT document uri. A
+    // forged file inside the same collection directory carries the known
+    // document's full tag set and passes the prefix check; only the precise
+    // uri the index walked pins the hit to the body it disclosed.
     const known = index.documents.get(parsed.docId)
     if (!known || known.parsed.collectionId !== parsed.collectionId) continue
     if (known.parsed.status !== 'published') continue
+    if (known.uri !== resource.uri) continue
     const collectionUri = index.collections.get(parsed.collectionId)?.uri
     if (!collectionUri || !resource.uri.startsWith(`${collectionUri}/`)) continue
     const collectionName = collectionNames.get(parsed.collectionId) ?? parsed.collectionId

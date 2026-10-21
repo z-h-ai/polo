@@ -1134,6 +1134,87 @@ describe('knowledge-base send-time reference resolution', () => {
     )
     expect(referenceAfterRestore).toHaveLength(1)
   })
+
+  it('commits an explicit EMPTY draft before the remote load, so a hung credential cannot drop the clear (review fix round R2 residual a)', async () => {
+    const { invoke, sessionManager } = createHarness()
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    await sessionManager.setSessionKbCollections('session-9', [collection.id])
+
+    // The credential read hangs forever (a dead keychain). Clearing the
+    // selection needs NO remote fact — there is no collection left to prove
+    // published — so the empty draft must commit BEFORE the shared context
+    // load, or the send deadline abandons the attempt and the session stays
+    // pinned to the scope the user just emptied. (The hanging read is the
+    // store credential, not the local space reader: the capture and the
+    // clear-commit are both local facts and must not need the keychain.)
+    class HungCredentials extends FakeCredentialManager {
+      override async get(_id: { type: string; name: string }): Promise<{ value: string } | null> {
+        return new Promise(() => {})
+      }
+    }
+    credentialManagerOverride = new HungCredentials()
+    setKbSendResolveTimeoutForTests(50)
+    const started = Date.now()
+    const references = await resolveSessionKbReferences(
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
+      'session-9', 'flights?', [],
+    )
+    expect(references).toBeUndefined()
+    expect(Date.now() - started).toBeLessThan(2_000)
+    // The clear LANDED — the stored scope is empty, committed exactly once
+    // as a send-draft commit.
+    expect(await sessionManager.getSession('session-9')).toMatchObject({
+      kbCollectionIds: [],
+    })
+    const sets = readAudit(workspaceRoot, binding)
+      .filter(entry => entry.action === 'session_scope.set')
+    expect(sets).toHaveLength(1)
+    expect(sets[0]).toMatchObject({
+      target: 'session-9',
+      detail: { from: [collection.id], to: [], source: 'send_draft_commit' },
+    })
+  })
+
+  it('does not re-walk the index a second time after a failed first load (review fix round R2 residual b)', async () => {
+    const { invoke, sessionManager } = createHarness()
+    const { collection, document } = await seedCollection(invoke, {
+      title: 'Travel policy', content: 'Flights are economy only.',
+    })
+    if (!document) throw new Error('seed document missing')
+    await publishDocument(invoke, document)
+    await sessionManager.setSessionKbCollections('session-9', [collection.id])
+
+    // The FIRST walk of the send fails (the ls 500s). The shared context
+    // records `index: null`; the retrieval phase must degrade to no
+    // references on that fact instead of sending `searchDocuments` off
+    // without an index — which would walk the same tenant a SECOND time
+    // inside one send budget.
+    ov.armFault({
+      method: 'GET', pathPrefix: '/api/v1/fs/ls', times: 1,
+      status: 500, code: 'INTERNAL', message: 'walk exploded',
+    })
+    const requestsBefore = ov.requests.length
+    const references = await resolveSessionKbReferences(
+      sendDeps({ sessionManager } as ReturnType<typeof createHarness>),
+      'session-9', 'flights?', [collection.id],
+    )
+    expect(references).toBeUndefined()
+    // One walk inside the send, not two — and no find either, since the
+    // degraded attempt never reaches the retrieval backend.
+    const lsDuringSend = ov.requests.slice(requestsBefore).filter(request => request.method === 'GET'
+      && request.path === '/api/v1/fs/ls').length
+    expect(lsDuringSend).toBe(1)
+    expect(ov.requests.slice(requestsBefore).some(request => request.path === '/api/v1/search/find')).toBe(false)
+    // The draft itself committed before the walk failed — the scope write is
+    // not a casualty of the retrieval degrade.
+    expect(await sessionManager.getSession('session-9')).toMatchObject({
+      kbCollectionIds: [collection.id],
+    })
+  })
 })
 
 describe('knowledge-base send-time read-only and timeout discipline', () => {

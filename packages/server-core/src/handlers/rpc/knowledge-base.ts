@@ -961,6 +961,16 @@ async function retrieveReferences(
     attempt.abandoned = true
     return []
   }
+  // Review fix round R2 residual (b): the shared context already TRIED to
+  // build the index and failed (`index: null` — the walk threw or the
+  // deadline ended it). Sending the retrieval off WITHOUT it would make
+  // `searchDocuments` walk the same tenant a second time inside one budget;
+  // two failed walks only double the spend. Attribution (B5) is impossible
+  // without this space's index anyway — degrade to no references.
+  if (context && context.index === null) {
+    deps.platform.logger?.info('KB_SEND_REFERENCES: knowledge base index unavailable, no references')
+    return []
+  }
   let hits: KbSearchHit[]
   try {
     let timedOut = false
@@ -1061,7 +1071,25 @@ export async function resolveSessionKbReferences(
     // only when a phase actually needs it — a scope-less session with no
     // draft still exits without touching auth or the store.
     let scopeIds = storedScope
-    const needsContext = draft !== undefined || scopeIds.length > 0
+    // Review fix round R2 residual (a): an explicit EMPTY draft is the
+    // "clear the selection" commit, and it needs NO remote fact — there is
+    // no collection left to prove published. It commits BEFORE the shared
+    // context load, so a hung credential read or a slow walk can no longer
+    // abandon the clear and pin the session to the scope the user just
+    // emptied. (An empty draft over an empty stored scope already exited on
+    // the fast path above.)
+    if (draft !== undefined && draft.length === 0 && scopeIds.length > 0) {
+      const committed = await raceSendDeadline(
+        commitSendDraftScope(deps, capture, sessionId, [], null, attempt, deadline),
+        deadline,
+        () => {
+          attempt.abandoned = true
+          return null
+        },
+      )
+      if (committed !== null) scopeIds = committed
+    }
+    const needsContext = (draft?.length ?? 0) > 0 || scopeIds.length > 0
     const context = needsContext
       ? await raceSendDeadline<SendKbContext | null>(
         loadSendKbContext(deps, capture, deadline, attempt),
@@ -1073,13 +1101,12 @@ export async function resolveSessionKbReferences(
       )
       : null
     // Phase 1 — the only state-changing step. It runs whenever the composer
-    // PROVIDED a draft, including an explicit empty one: clearing the
-    // selection must commit the clear, or the send would fall back to the
-    // stored scope the user just emptied (review #12 regression). The commit
+    // PROVIDED a non-empty draft; an explicit empty one was committed above,
+    // ahead of the remote load (review fix round R2 residual a). The commit
     // promise never rejects (a failed write is audited and logged, the send
     // degrades), so a post-timeout settlement cannot become an unhandled
     // rejection.
-    if (draft !== undefined) {
+    if (draft !== undefined && draft.length > 0) {
       const committed = await raceSendDeadline(
         commitSendDraftScope(deps, capture, sessionId, draft, context, attempt, deadline),
         deadline,

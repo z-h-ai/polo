@@ -25,10 +25,15 @@ import {
 import {
   kbCollectionUri,
   kbDocumentUri,
+  kbTagHexEncode,
+  loadKbIndex,
   readAudit,
+  resetKbDirectoryTagRetryDelayForTests,
+  setKbDirectoryTagRetryDelayForTests,
   KB_SERVICE_UNAVAILABLE_MESSAGE,
+  type KbOpenVikingSpace,
 } from '../../../knowledge-base/store'
-import { kbTenantAccountId, readKbTenantCredential } from '../../../knowledge-base/tenant'
+import { kbTenantAccountId, kbTenantAuth, readKbTenantCredential } from '../../../knowledge-base/tenant'
 import { FakeOpenVikingServer } from '../../../knowledge-base/__tests__/fake-openviking-server'
 
 /**
@@ -211,6 +216,20 @@ async function createCollection(harness: Harness, name: string): Promise<{ id: s
   }) as { id: string; name: string }
 }
 
+/** The store binding for direct store-level assertions (cache must be warm). */
+async function ovSpace(): Promise<KbOpenVikingSpace> {
+  const credential = await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID)
+  if (!credential) throw new Error('the tenant credential is not cached')
+  return {
+    config: { baseUrl: ov.baseUrl, processingMode: 'vectors_only' },
+    auth: kbTenantAuth(credential),
+    binding,
+    workspaceRoot: currentDeviceRoot,
+    spaceName: 'Example enterprise',
+    actor: ACCOUNT_ID,
+  }
+}
+
 /** Uploads one document into an EXISTING collection and publishes it. */
 async function publishInto(
   harness: Harness,
@@ -243,8 +262,10 @@ describe('tenant provisioning', () => {
     })
     expect(ov.hasAccount(ACCOUNT_DERIVED)).toBe(true)
     const root = ov.tree(ACCOUNT_DERIVED).get('viking://resources/')
-    expect(root?.tags).toContain(`polo_space=${SPACE_ID}`)
-    expect(root?.tags).toContain(`polo_enterprise=${ENTERPRISE_ID}`)
+    // E2 (measured 2026-10-21): the marker values are exact ids the server's
+    // tag lower-casing would distort, so they travel hex-encoded.
+    expect(root?.tags).toContain(`polo_space=${kbTagHexEncode(SPACE_ID)}`)
+    expect(root?.tags).toContain(`polo_enterprise=${kbTagHexEncode(ENTERPRISE_ID)}`)
     // The binding is cached for the NEXT call — reads and sends never
     // re-enter the admin plane.
     const credential = await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID)
@@ -577,6 +598,32 @@ describe('retrieval scoping', () => {
     expect(hits[0]).toMatchObject({ docId: ours.id, collectionId: first.id })
     expect(JSON.stringify(hits)).not.toContain('laptops')
   })
+
+  it('drops a forged SAME-collection row carrying a known document\'s full tag set (review fix round B5 residual)', async () => {
+    // The prefix check alone cannot see an impostor INSIDE the real
+    // collection directory: a file planted there with the published
+    // document's complete tag set passes the doc-id, collection and uri-
+    // prefix checks while disclosing a body the space never wrote. Only the
+    // index's EXACT document uri pins the hit to the real body.
+    const harness = useDevice()
+    const collection = await createCollection(harness, 'Handbook')
+    const document = await publishInto(harness, collection, {
+      title: 'Vacation policy', content: 'Twenty days of paid vacation.',
+    })
+    // The impostor lives under the LIVE collection uri — every prefix agrees.
+    const forgedUri = `${kbCollectionUri(collection.name, collection.id)}/Impostor-kb-00000000-0000-4000-8000-000000000000.md`
+    const realUri = kbDocumentUri(kbCollectionUri(collection.name, collection.id), document.title, document.id)
+    const realTags = [...(ov.tree(ACCOUNT_DERIVED).get(realUri)?.tags ?? [])]
+    if (realTags.length === 0) throw new Error('real document tags missing')
+    ov.setFindOverride([
+      { uri: forgedUri, score: 0.99, tags: realTags, content: 'FORGED BODY — never disclosed' },
+    ])
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'vacation',
+    }) as KbSearchHit[]
+    expect(hits).toEqual([])
+    expect(JSON.stringify(hits)).not.toContain('FORGED')
+  })
 })
 
 /**
@@ -814,5 +861,281 @@ describe('review fix round hardening', () => {
       workspaceId: WORKSPACE_ID, query: 'R2 bulk 02049',
     }) as KbSearchHit[]
     expect(hits.map(hit => hit.title)).toContain('R2 bulk 02049')
+  })
+
+  it('confirms a recycle move that landed past its own response (review fix round B7 residual a)', async () => {
+    // The 504 fault of the earlier test covers "the move never left". THIS
+    // side of the same B7 window is the opposite: the move EXECUTED but its
+    // response was lost. The mutation hook performs the move for real, so
+    // the actual mv request arrives to find `from` gone and fails with 404 —
+    // then the read-back of the recycle target must recognize the moved
+    // tombstone (which the strict wire parser rejects) as success.
+    const harness = useDevice()
+    const collection = await createCollection(harness, 'Handbook')
+    const document = await publishInto(harness, collection, {
+      title: 'Vacation policy', content: 'Twenty days.',
+    })
+    const uri = liveUri(collection, document)
+    const recycledUri = `viking://resources/.recycle/${uri.slice(uri.lastIndexOf('/') + 1)}`
+    ov.armMutation({ method: 'POST', pathPrefix: '/api/v1/fs/mv' }, tree => {
+      const node = tree.get(uri)
+      if (!node) return
+      tree.delete(uri)
+      tree.set(recycledUri, { ...node, uri: recycledUri })
+    })
+    await harness.invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    })
+    const tree = ov.tree(ACCOUNT_DERIVED)
+    expect(tree.has(uri)).toBe(false)
+    expect(tree.get(recycledUri)?.tags).toContain('status=deleted')
+    expect(await harness.invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    })).toBeNull()
+  })
+
+  it('answers an already-recycled document with idempotent success, never not-found (review fix round B7 residual b)', async () => {
+    // Both the move AND its confirmation were lost: the live uri holds
+    // nothing while `.recycle/` holds the tombstone. A retry that only
+    // resolves the live path answers kb_document_not_found forever — the
+    // recycle-side lookup completes the delete instead.
+    const harness = useDevice()
+    const collection = await createCollection(harness, 'Handbook')
+    const document = await publishInto(harness, collection, {
+      title: 'Vacation policy', content: 'Twenty days.',
+    })
+    const uri = liveUri(collection, document)
+    const recycledUri = `viking://resources/.recycle/${uri.slice(uri.lastIndexOf('/') + 1)}`
+    const tree = ov.tree(ACCOUNT_DERIVED)
+    const node = tree.get(uri)
+    if (!node) throw new Error('the document node is missing')
+    tree.delete(uri)
+    tree.set(recycledUri, {
+      ...node,
+      uri: recycledUri,
+      tags: node.tags.map(tag => tag.startsWith('status=') ? 'status=deleted' : tag),
+    })
+    await harness.invoke(RPC_CHANNELS.kb.DELETE_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    })
+    expect(readAudit(harness.workspaceRoot, binding)
+      .some(entry => entry.action === 'document.delete' && entry.detail?.alreadyRecycled === true))
+      .toBe(true)
+    expect(await harness.invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    })).toBeNull()
+  })
+
+  it('audits the provisioning writes with the intent/result discipline (review fix round B8 residual)', async () => {
+    const harness = useDevice()
+    await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    })
+    const trail = readAudit(harness.workspaceRoot, binding)
+    // Account creation AND the ownership marker are remote writes that may
+    // land past a timeout — both carry intent → result pairs correlated by
+    // a request id, with the intent ahead of its result.
+    for (const action of ['remote.create_account', 'remote.set_tags']) {
+      const intents = trail.filter(entry => entry.action === `${action}.intent`)
+      const results = trail.filter(entry => entry.action === `${action}.result`)
+      expect(intents.length).toBeGreaterThan(0)
+      expect(intents.length).toBe(results.length)
+      for (const result of results) {
+        expect(result.detail?.outcome).toBe('success')
+        const intent = intents.find(entry => entry.detail?.requestId === result.detail?.requestId)
+        expect(intent).toBeDefined()
+        expect(trail.indexOf(intent!)).toBeLessThan(trail.indexOf(result))
+      }
+    }
+    // The marker write is the audited set_tags against the account root.
+    expect(trail.some(entry => entry.action === 'remote.set_tags.intent'
+      && entry.target === 'viking://resources/')).toBe(true)
+  })
+
+  it('records a failed account creation as a failed audited result (review fix round B8 residual)', async () => {
+    const harness = useDevice()
+    ov.armFault({
+      method: 'POST', pathPrefix: '/api/v1/admin/accounts', times: 1,
+      status: 500, code: 'INTERNAL', message: 'admin plane exploded',
+    })
+    await expect(harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+      workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+    })).rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+    const results = readAudit(harness.workspaceRoot, binding)
+      .filter(entry => entry.action === 'remote.create_account.result')
+    expect(results).toHaveLength(1)
+    expect(results[0]?.detail).toMatchObject({ outcome: 'failed' })
+    // The raw cause stays in the trail (server-side only), off the wire.
+    expect(JSON.stringify(results[0]?.detail)).toContain('admin plane exploded')
+    const intents = readAudit(harness.workspaceRoot, binding)
+      .filter(entry => entry.action === 'remote.create_account.intent')
+    expect(intents).toHaveLength(1)
+  })
+
+  it('marks a walk that hit the page cap as truncated with prefix-exact counts (review fix round R2 residual)', async () => {
+    // The walk stops at 10 pages × 2000 nodes = 20000. A tenant ONE node past
+    // that cap must report `truncated` and count EXACTLY the prefix — an
+    // overlap would inflate, a skip would silently lose a document.
+    const harness = useDevice()
+    const collection = await createCollection(harness, 'Handbook')
+    const collectionUri = kbCollectionUri(collection.name, collection.id)
+    const CAP = 20_000
+    const stamp = encodeURIComponent(new Date().toISOString())
+    for (let index = 0; index < CAP + 1; index += 1) {
+      const docId = `kb-cap-${String(index).padStart(6, '0')}`
+      ov.putNode(ACCOUNT_DERIVED, {
+        uri: `${collectionUri}/Cap bulk ${String(index).padStart(6, '0')} ${docId}.md`,
+        type: 'file',
+        content: `Cap bulk document ${index}.`,
+        tags: [
+          `doc=${docId}`,
+          `collection=${collection.id}`,
+          'status=published',
+          `t=${Buffer.from(`Cap bulk ${String(index).padStart(6, '0')}`, 'utf-8').toString('hex')}`,
+          `title=${encodeURIComponent(`Cap bulk ${String(index).padStart(6, '0')}`)}`,
+          'v=1',
+          `created=${stamp}`,
+          `updated=${stamp}`,
+          `published=${stamp}`,
+        ],
+      })
+    }
+    const index = await loadKbIndex(await ovSpace())
+    expect(index.truncated).toBe(true)
+    // The walk's 20000-node budget counts the collection directory too, so
+    // the counted prefix is CAP minus that one directory. An overlap would
+    // inflate past it, a skipped page would land short of it.
+    expect(index.collections.get(collection.id)?.documentCounts.published).toBe(CAP - 1)
+    // The prefix stays consistent for retrieval too — the last counted row
+    // answers a search, the first row past the truncation line never does
+    // (the scored query shares its other tokens with every row, so the
+    // assertion is membership, not exclusivity).
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'cap bulk 019998',
+    }) as KbSearchHit[]
+    expect(hits.map(hit => hit.title)).toContain('Cap bulk 019998')
+    const pastTheLine = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'cap bulk 019999',
+    }) as KbSearchHit[]
+    expect(pastTheLine.map(hit => hit.title)).not.toContain('Cap bulk 019999')
+  })
+})
+
+/**
+ * The measured-instance round (brief §1, e2e 2026-10-21): two behaviors the
+ * REAL OpenViking v0.5.1.1 exhibits that the fake originally did not — the
+ * directory tag loss window (E1) and the tag value lower-casing (E2). Both
+ * are pinned HERE against the fake that now reproduces them, so a future
+ * regression on either side re-fails these.
+ */
+describe('measured instance hardening', () => {
+  /** Counts the set_tags requests the store aimed at one uri. */
+  function setTagsRequestsTo(uri: string): number {
+    return ov.requests.filter(request => request.method === 'POST'
+      && request.path === '/api/v1/fs/attrs/set_tags'
+      && (request.body as { uri?: string } | null)?.uri === uri).length
+  }
+
+  it('recovers a directory tag write the measured loss window swallowed (e2e E1)', async () => {
+    // The measured instance answers `ok` to a set_tags issued right after a
+    // mkdir while dropping the tags. The verified write MUST notice via the
+    // attrs read-back and retry — a silent loss here strands a collection
+    // that lists as a bare directory (or, for the marker, fail-closes the
+    // NEXT provisioning).
+    const harness = useDevice()
+    ov.setDirectoryTagLossWindow(300)
+    setKbDirectoryTagRetryDelayForTests(120)
+    try {
+      const collection = await createCollection(harness, 'Latency Handbook')
+      const uri = kbCollectionUri(collection.name, collection.id)
+      // Attempts at t≈0 and t≈120 land inside the 300ms window; t≈360 clears
+      // it — exactly the bounded-retry shape the fix specifies.
+      expect(setTagsRequestsTo(uri)).toBeGreaterThanOrEqual(3)
+      const listing = await harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, {
+        workspaceId: WORKSPACE_ID,
+      }) as KbCollectionList
+      expect(listing.collections.find(entry => entry.id === collection.id)?.name).toBe('Latency Handbook')
+    } finally {
+      ov.setDirectoryTagLossWindow(0)
+      resetKbDirectoryTagRetryDelayForTests()
+    }
+  })
+
+  it('gives up with kb_service_unavailable when the loss never clears (e2e E1 bound)', async () => {
+    const harness = useDevice()
+    await createCollection(harness, 'Handbook')
+    // A window no bounded retry outlives: the collection directory NEVER
+    // takes its tags, so the write must fail loudly instead of listing a
+    // collection whose identity tags are gone.
+    ov.setDirectoryTagLossWindow(60_000)
+    setKbDirectoryTagRetryDelayForTests(1)
+    try {
+      await expect(harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+        workspaceId: WORKSPACE_ID, name: 'Frozen', description: '',
+      })).rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+      // Exactly the bounded three attempts — no silent fourth, no unbounded
+      // retry loop against a window that will not clear.
+      const frozenAttempts = ov.requests.filter(request => request.method === 'POST'
+        && request.path === '/api/v1/fs/attrs/set_tags'
+        && (request.body as { uri?: string } | null)?.uri?.includes('Frozen')).length
+      expect(frozenAttempts).toBe(3)
+    } finally {
+      ov.setDirectoryTagLossWindow(0)
+      resetKbDirectoryTagRetryDelayForTests()
+    }
+  })
+
+  it('keeps title, reject reason and collection name byte-exact past the lower-casing service (e2e E2)', async () => {
+    // The measured instance lower-cases EVERY tag value. The readable
+    // `title=`/`reject=`/`name=` copies therefore come back distorted — the
+    // hex-carried `t=`/`r=`/`n=` keys are the authority, and every read path
+    // must prefer them.
+    const harness = useDevice()
+    const NAME = 'Q3 Annual LEAVE Handbook'
+    const TITLE = 'Annual LEAVE Policy'
+    const REASON = 'Rejected By ADMIN'
+    const collection = await createCollection(harness, NAME)
+    const document = await harness.invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, collectionId: collection.id, title: TITLE, content: 'Twenty days.',
+    }) as KbDocumentSummary
+    await harness.invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, { workspaceId: WORKSPACE_ID, docId: document.id })
+    await harness.invoke(RPC_CHANNELS.kb.REJECT_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id, reason: REASON,
+    })
+
+    // The wire holds the distorted readable copy NEXT TO the exact hex value
+    // — this is the anchor proving the lower-casing is really in play.
+    const docUri = kbDocumentUri(kbCollectionUri(NAME, collection.id), TITLE, document.id)
+    const docTags = ov.tree(ACCOUNT_DERIVED).get(docUri)?.tags ?? []
+    expect(docTags).toContain(`t=${kbTagHexEncode(TITLE)}`)
+    expect(docTags).toContain('title=annual%20leave%20policy')
+    expect(docTags).toContain(`r=${kbTagHexEncode(REASON)}`)
+    const collectionTags = ov.tree(ACCOUNT_DERIVED).get(kbCollectionUri(NAME, collection.id))?.tags ?? []
+    expect(collectionTags).toContain(`n=${kbTagHexEncode(NAME)}`)
+    expect(collectionTags).toContain('name=q3%20annual%20leave%20handbook')
+
+    // Every read path decodes back to the byte-exact value.
+    const rejected = await harness.invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    }) as KbDocument
+    expect(rejected.title).toBe(TITLE)
+    expect(rejected.rejectReason).toBe(REASON)
+    // The state machine only re-opens a rejected document through draft.
+    await harness.invoke(RPC_CHANNELS.kb.REVERT_TO_DRAFT, { workspaceId: WORKSPACE_ID, docId: document.id })
+    await harness.invoke(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW, { workspaceId: WORKSPACE_ID, docId: document.id })
+    await harness.invoke(RPC_CHANNELS.kb.PUBLISH_DOCUMENT, { workspaceId: WORKSPACE_ID, docId: document.id })
+    const published = await harness.invoke(RPC_CHANNELS.kb.GET_DOCUMENT, {
+      workspaceId: WORKSPACE_ID, docId: document.id,
+    }) as KbDocument
+    expect(published.title).toBe(TITLE)
+    expect(published.rejectReason).toBeNull()
+    const listing = await harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, {
+      workspaceId: WORKSPACE_ID,
+    }) as KbCollectionList
+    expect(listing.collections.find(entry => entry.id === collection.id)?.name).toBe(NAME)
+    const hits = await harness.invoke(RPC_CHANNELS.kb.SEARCH, {
+      workspaceId: WORKSPACE_ID, query: 'annual leave',
+    }) as KbSearchHit[]
+    expect(hits.map(hit => hit.title)).toContain(TITLE)
   })
 })
