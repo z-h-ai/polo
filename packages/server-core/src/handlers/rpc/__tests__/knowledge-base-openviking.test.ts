@@ -1241,6 +1241,46 @@ describe('measured instance hardening', () => {
     }
   }, 15_000)
 
+  it('fails the run when a single request outlasts the window instead of reporting success (review round N1)', async () => {
+    // The window used to bound only the waits BETWEEN requests: a write that
+    // took 95ms against a 60ms window still handed back a verified success at
+    // ~98ms — the promised bound was decorative. Now the write AND its
+    // read-back race the remaining budget, so a window smaller than one
+    // request exhausts the run: the loop must answer the neutral availability
+    // error, never a success it could not verify inside the promise.
+    const harness = useDevice()
+    await createCollection(harness, 'Handbook')
+    setKbDirectoryTagWindowForTests(60)
+    // The retry interval stays at its production 1s, so the loop's wait step
+    // draws no budget at all — the single slow request IS the whole story.
+    ov.setDelay('/api/v1/fs/attrs/set_tags', 95)
+    try {
+      await expect(harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+        workspaceId: WORKSPACE_ID, name: 'Raced', description: '',
+      })).rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
+      // The attempt is counted even though the request threw past the budget:
+      // the write was dispatched (its set_tags pair is on the trail), so the
+      // result must report one attempt, not zero.
+      const results = readAudit(harness.workspaceRoot, binding)
+        .filter(entry => entry.action === 'remote.directory_tags.result'
+          && entry.target.includes('Raced'))
+      expect(results).toHaveLength(1)
+      expect(results[0]?.detail).toMatchObject({ outcome: 'failed', attempts: 1 })
+      // The request itself did leave — it was the budget that gave up on it.
+      expect(ov.requests.some(request => request.method === 'POST'
+        && request.path === '/api/v1/fs/attrs/set_tags'
+        && ((request.body as { uri?: string } | null)?.uri ?? '').includes('Raced'))).toBe(true)
+      // A collection whose tags were never verified inside the window was
+      // never reported created.
+      expect(readAudit(harness.workspaceRoot, binding)
+        .filter(entry => entry.action === 'collection.create')
+        .map(entry => entry.detail)).not.toContainEqual({ name: 'Raced' })
+    } finally {
+      ov.setDelay('/api/v1/fs/attrs/set_tags', 0)
+      resetKbDirectoryTagWindowForTests()
+    }
+  }, 15_000)
+
   it('never lets the pipeline wait outlive the window — the write still gets its turn (e2e E1 bound)', async () => {
     // Review round M1, scenario A: the deadline used to be checked only at
     // the loop top, so a wait entering at t=11.9s ran to its own 12s timeout

@@ -744,6 +744,23 @@ function sleepForRetry(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+/**
+ * Races one loop step against the REMAINING budget: `null` reads as "the
+ * window ran out first" (review round N1). The loser is never aborted — the
+ * transport has no cancellation — so a write that loses the race may still
+ * land later; the budget governs how long the loop WAITS for an answer, not
+ * what the storage service ends up holding (the step's own audit pair still
+ * records the real outcome when it settles).
+ */
+function raceRemainingBudget<T>(step: Promise<T>, remainingMs: number): Promise<T | null> {
+  if (remainingMs <= 0) return Promise.resolve(null)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const clock = new Promise<null>(resolve => {
+    timer = setTimeout(() => resolve(null), remainingMs)
+  })
+  return Promise.race([step, clock]).finally(() => clearTimeout(timer))
+}
+
 /** Everything the shared verified loop needs from ITS caller (store or tenant). */
 export interface KbDirectoryTagWriteHost {
   /** The audit sink for the loop's own `remote.directory_tags` pair. */
@@ -778,6 +795,12 @@ export interface KbDirectoryTagWriteHost {
  * (`remote.directory_tags`) whose result carries the retry detail — attempt
  * count, ms spent waiting for the pipeline, absorbed wait failures — and each
  * physical write stays audited by the host on top of it.
+ *
+ * The window bounds the WHOLE run, not only the waits (review round N1): the
+ * pipeline wait, the write and its read-back each race what remains of the
+ * budget, and the verification is re-checked against the deadline at the
+ * moment it is accepted — a single slow request can never stretch a 12s
+ * promise into 12.1s of reported success.
  */
 export async function writeKbDirectoryTagsVerified(
   host: KbDirectoryTagWriteHost,
@@ -821,12 +844,29 @@ export async function writeKbDirectoryTagsVerified(
         if (Date.now() >= deadline) throw exhausted()
       }
       host.beforeWrite?.()
-      await host.write({ attempt, waitedMs: Date.now() - waitStartedAt })
-      // Counted only once the write is OUT — a write/before-write throw must
-      // not report an attempt the trail has no `remote.set_tags` pair for.
+      // Counted from the moment the write is DISPATCHED: past the before-write
+      // gate the request is handed to the transport — its `remote.set_tags`
+      // intent/result pair lands on the trail even when the call throws — so
+      // a budget-race loss or a transport failure must not under-report the
+      // attempt. Only the refusal above stays uncounted (no request left).
       summary.attempts = attempt
-      const tags = await host.read()
-      if (tags !== null && verify(tags)) return
+      // The write itself rides the REMAINING budget (review round N1): a
+      // request that outlasts the window must not hand the loop a verified
+      // success at 2× the promised bound — the window covers every request,
+      // not only the waits between them. A write that loses the race is a
+      // FAILED attempt, not a missing one, and the window has no turn left.
+      const written = await raceRemainingBudget(
+        host.write({ attempt, waitedMs: Date.now() - waitStartedAt }),
+        deadline - Date.now(),
+      )
+      if (written === null) throw exhausted()
+      const tags = await raceRemainingBudget(host.read(), deadline - Date.now())
+      // The verification is accepted only INSIDE the window — re-checked at
+      // the moment of acceptance, because a read-back that confirms past the
+      // deadline breaks the same promise the write race guards (review round
+      // N1). A lost read-back race is a miss, so it falls through to the
+      // remaining-budget check below and reads as exhaustion.
+      if (tags !== null && verify(tags) && Date.now() < deadline) return
       const remainingMs = deadline - Date.now()
       if (remainingMs <= 0) throw exhausted()
       await sleepForRetry(Math.min(directoryTagPollIntervalMs, remainingMs))
