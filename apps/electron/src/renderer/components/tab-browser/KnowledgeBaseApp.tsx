@@ -33,11 +33,12 @@ import {
 } from '@/components/ui/client-workbench'
 
 /**
- * The enterprise knowledge base app tab (POO-108): write-side management over
- * the workspace's `.polo-kb/` store through the LOCAL_ONLY kb RPC surface.
+ * The enterprise knowledge base app tab (POO-108 v3.1): write-side management
+ * over the workspace's knowledge base through the LOCAL_ONLY kb RPC surface.
  * Members read published documents; owners/managers run the draft → review →
  * publish flow. Every server mutation is permission-checked and audited
- * server-side — this surface only renders the outcome.
+ * server-side — this surface only renders the outcome, and where the content
+ * physically lives is invisible here by contract.
  */
 
 const KB_STATUS_BADGE: Record<KbDocumentStatus, string> = {
@@ -61,6 +62,9 @@ function kbErrorText(t: (key: string, options?: Record<string, unknown>) => stri
   if (code === 'kb_unavailable_in_personal') return t('knowledgeBase.errors.personalSpace')
   if (code === 'kb_space_read_only') return t('knowledgeBase.errors.spaceReadOnly')
   if (code === 'kb_space_mismatch') return t('knowledgeBase.errors.spaceMismatch')
+  // The knowledge base service could not be reached (POO-108 v3.1): the text
+  // stays neutral — never the storage vendor, a URI or a raw response.
+  if (code === 'kb_service_unavailable') return t('knowledgeBase.errors.serviceUnavailable')
   if (code === 'OFFLINE_READ_ONLY') return t('knowledgeBase.errors.offline')
   return t('knowledgeBase.errors.generic')
 }
@@ -476,9 +480,6 @@ export function KnowledgeBaseApp() {
                       >
                         {statusLabel(doc.status)}
                       </span>
-                      {doc.status === 'published' && (
-                        <SyncBadge doc={doc} />
-                      )}
                       <span className="shrink-0 text-[11px] text-foreground-40">
                         {t('knowledgeBase.versionShort', { version: doc.version })}
                       </span>
@@ -734,31 +735,5 @@ function DeleteButton({ disabled, label, onClick }: { disabled: boolean; label: 
     >
       <Icons.Trash2 className="size-[13px]" aria-hidden="true" />
     </Button>
-  )
-}
-
-/**
- * OpenViking publish-sync outcome, shown next to the「已发布」badge (POO-108
- * v2). Only a document the server recorded a sync outcome for renders it —
- * a deployment without OpenViking keeps the row exactly as before.
- */
-function SyncBadge({ doc }: { doc: KbDocumentSummary }) {
-  const { t } = useTranslation()
-  const state = doc.openViking
-  if (!state) return null
-  const synced = 'uri' in state
-  return (
-    <span
-      className={`inline-flex min-h-[20px] shrink-0 items-center gap-[4px] rounded-full px-[8px] text-[10px] font-semibold ${
-        synced ? 'bg-success/11 text-success' : 'bg-destructive/10 text-destructive'
-      }`}
-      data-testid={`kb-document-sync-${doc.id}`}
-      title={synced ? state.uri : state.error}
-    >
-      {synced
-        ? <Icons.CloudUpload className="size-[11px]" aria-hidden="true" />
-        : <Icons.CloudOff className="size-[11px]" aria-hidden="true" />}
-      {synced ? t('knowledgeBase.sync.synced') : t('knowledgeBase.sync.failed')}
-    </span>
   )
 }
