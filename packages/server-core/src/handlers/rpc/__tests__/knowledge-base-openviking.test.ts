@@ -1773,6 +1773,34 @@ describe('admin-managed per-space library (brief v5 §B)', () => {
     expect(adminStub?.requests).toHaveLength(1)
   })
 
+  it('drops a definitive 404 from BOTH cache tiers — the persisted copy included', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    let gone = false
+    const stub = installFakeAdminEndpoint(() => jsonResponse(gone ? 404 : 200, gone
+      ? { error: 'not_found' }
+      : adminCredentialPayload()))
+    setAdminKbCredentialTtlForTests(30)
+    const first = await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
+    expect(first?.apiKey).toBe(ov.userKey(ADMIN_LIBRARY_ACCOUNT))
+
+    // The library disappears for this member and the TTL passes: the last
+    // good answer serves this read, then the background refresh takes it
+    // away — from memory AND from the encrypted store.
+    gone = true
+    await Bun.sleep(60)
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual(first)
+    await Bun.sleep(30)
+    expect(stub.requests).toHaveLength(2)
+
+    // Forgetting only the IN-MEMORY state (a restarted process): a cold read
+    // must not resurrect the dead key off the persisted copy — the answer is
+    // a real miss, not the warm credential.
+    resetAdminKbCredentialCacheForTests()
+    setAdminKbCredentialAdminUrlForTests(ADMIN_ORIGIN)
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toBeNull()
+    expect(stub.requests).toHaveLength(3)
+  })
+
   it('serves the stale credential past its TTL while the background refresh fails', async () => {
     ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
     let healthy = true

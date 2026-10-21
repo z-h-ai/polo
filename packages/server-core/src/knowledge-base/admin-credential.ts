@@ -90,7 +90,8 @@ const lastRefreshAttemptAt = new Map<string, number>()
 
 let ttlMs = ADMIN_KB_CREDENTIAL_TTL_MS
 let missTtlMs = ADMIN_KB_CREDENTIAL_MISS_TTL_MS
-let warnedEnvOverride = false
+/** Re-armed by the test reset so each file sees the precedence warning once. */
+let warnedOnce = false
 
 /** Production source of the admin origin; tests pin it explicitly. */
 let resolveAdminUrl: () => string | null = () => getAdminUrl() ?? null
@@ -116,7 +117,7 @@ export function resetAdminKbCredentialCacheForTests(): void {
   lastRefreshAttemptAt.clear()
   ttlMs = ADMIN_KB_CREDENTIAL_TTL_MS
   missTtlMs = ADMIN_KB_CREDENTIAL_MISS_TTL_MS
-  warnedEnvOverride = false
+  warnedOnce = false
   resolveAdminUrl = () => getAdminUrl() ?? null
 }
 
@@ -248,8 +249,10 @@ async function fetchAdminCredential(
       if (typeof status === 'number' && status === 404) {
         // Gone for good — no such library for this member any more. A stale
         // key would only produce data-plane 401s, so it is dropped even at
-        // the cost of losing the warm answer.
+        // the cost of losing the warm answer — from BOTH tiers, memory and
+        // the encrypted store.
         cache.delete(productSpaceId)
+        await deletePersistedCredential(productSpaceId)
       }
       rememberMiss(productSpaceId, expectedEnterpriseId)
       return null
@@ -260,6 +263,21 @@ async function fetchAdminCredential(
     return await run
   } finally {
     inflight.delete(productSpaceId)
+  }
+}
+
+/**
+ * Drops the persisted copy too. A 404 means the library is gone for this
+ * member; without this, the next cold read would serve the dead key straight
+ * off the encrypted store and the "404 wins over a stale answer" rule would
+ * only hold until the process restarts. Best-effort: a failed delete keeps
+ * the dead key around and the next 404 retries.
+ */
+async function deletePersistedCredential(productSpaceId: string): Promise<void> {
+  try {
+    await getCredentialManager().delete(credentialId(productSpaceId))
+  } catch (error) {
+    console.warn(`[KbAdminCredential] persist delete failed: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -332,8 +350,6 @@ export async function readAdminKbCredential(
   return fetchAdminCredential(productSpaceId, expectedEnterpriseId)
 }
 
-let warnedOnce = false
-
 /**
  * The resolved OpenViking config for an admin-issued library (brief v5 §B):
  * the ADMIN baseUrl replaces the env one, and NEITHER env key applies — the
@@ -365,9 +381,4 @@ export function adminKbAuth(credential: AdminKbLibraryCredential): OpenVikingTen
   // The account id is the library's ResourceID — the label the cloud model
   // assigns, unused by the data plane (the bearer key is the credential).
   return { accountId: credential.resourceId, userKey: credential.apiKey }
-}
-
-/** Test seam: re-arm the once-per-run precedence warning. */
-export function resetAdminKbOverrideWarningForTests(): void {
-  warnedOnce = false
 }
