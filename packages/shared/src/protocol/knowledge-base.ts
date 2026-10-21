@@ -43,9 +43,13 @@ export const KB_SNIPPET_CONTEXT_CHARS = 80
  * Send-time reference resolution must never hold a message hostage (POO-108
  * review #7): the whole resolution is raced against this wall clock — the
  * single remote find, the tenant walk it needs and the snippet building all
- * honour the same deadline.
+ * honour the same deadline. Sized for the v3 native backend (measured
+ * 2026-10-21): the tenant credential read + one recursive ls walk + a remote
+ * find whose QUERY EMBEDDING is a cloud round-trip legitimately costs 1-3s —
+ * the 1.5s v2 budget dropped every reference on a real instance, so the send
+ * budget now covers one full remote resolution while staying bounded.
  */
-export const KB_SEND_RESOLVE_TIMEOUT_MS = 1_500
+export const KB_SEND_RESOLVE_TIMEOUT_MS = 4_000
 /** Same ceiling the SET_SESSION_COLLECTIONS input schema enforces. */
 export const KB_SESSION_COLLECTIONS_MAX = 100
 /**
