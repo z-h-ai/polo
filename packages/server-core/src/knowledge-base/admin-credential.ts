@@ -314,9 +314,19 @@ async function guardedSharedSlotDelete(productSpaceId: string): Promise<void> {
         await getCredentialManager().delete(legacyId)
       })
     } catch {
-      // No lease either — the re-verified delete above is the pre-fix
-      // behaviour; the shared slot is going away regardless.
-      await getCredentialManager().delete(legacyId)
+      // No lease either (review v5 residual): a blind delete here could still
+      // remove a credential another mode JUST wrote into the shared slot. The
+      // purge is hygiene, not correctness — a stale admin copy left behind is
+      // simply re-purged by the next definitive 404. Re-verify ownership and
+      // only delete what still decodes as an admin payload; on any doubt, keep.
+      try {
+        const recheck = await getCredentialManager().get(legacyId)
+        if (recheck && typeof recheck.value === 'string' && decodeStoredPayload(recheck.value)) {
+          await getCredentialManager().delete(legacyId)
+        }
+      } catch {
+        // Still unverifiable — keep the copy; the next 404 purge retries.
+      }
     }
   } catch (error) {
     console.warn(`[KbAdminCredential] shared-slot cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
