@@ -6,15 +6,16 @@ import {
   openVikingCreateAccount,
   openVikingListUsers,
   openVikingSetTags,
+  openVikingWaitForProcessing,
   type OpenVikingConfig,
   type OpenVikingTenantAuth,
 } from './openviking-client'
 import { isTrustedSessionScopeTokenCurrent, type TrustedSessionScopeToken } from '../handlers/rpc/trusted-product-space-account'
 import {
   auditedRemoteWrite,
-  kbDirectoryTagBackoffMs,
   kbTagHexDecode,
   kbTagHexEncode,
+  writeKbDirectoryTagsVerified,
   type KbRemoteAuditRecord,
 } from './store'
 import { KB_SERVICE_UNAVAILABLE_MESSAGE, KbStoreError } from './errors'
@@ -237,14 +238,18 @@ async function readOwnershipTags(
  * Pins the ownership marker onto the account root, with the discipline the
  * store applies to every directory write:
  *
- * - **Audited** (B8 residual): the marker write is a remote write that may
+ * - **Audited** (B8 residual): each marker write is a remote write that may
  *   land past a timeout — it carries the same intent/result/unknown trail as
- *   the store's writes.
- * - **Verified** (e2e round 2026-10-21, E1): a `set_tags` issued right after
- *   the account's creation answers `ok` while silently dropping the tags.
- *   The write is read back through `fs/attrs` and retried with the store's
- *   bounded backoff — an unverified marker here would fail-closed the NEXT
- *   provisioning attempt forever (`binding_mismatch`, marker missing).
+ *   the store's writes, and the shared verified loop wraps the whole run in
+ *   one `remote.directory_tags` pair whose result holds the retry detail.
+ * - **Verified** (e2e round 2026-10-21, E1): the account root is itself a
+ *   freshly created directory — its ingestion pipeline wipes a `set_tags`
+ *   issued before it completes (measured: the marker written immediately
+ *   after the account creation was dropped; `system/wait` blocked ~4.5s and
+ *   the next write stuck). The shared loop waits the pipeline out, reads the
+ *   marker back through `fs/attrs` and polls — an unverified marker here
+ *   would fail-closed the NEXT provisioning attempt forever
+ *   (`binding_mismatch`, marker missing).
  * - **Hex-carried** (E2): the marker values are exact ids the server's tag
  *   lower-casing would distort, so they travel hex-encoded (see
  *   `kbTagHexEncode` in the store).
@@ -265,35 +270,26 @@ async function pinOwnershipTags(
     `${KB_TENANT_SPACE_TAG}=${kbTagHexEncode(identity.productSpaceId)}`,
     `${KB_TENANT_ENTERPRISE_TAG}=${kbTagHexEncode(identity.enterpriseId)}`,
   ]
-  for (let attempt = 1; ; attempt += 1) {
-    await auditedRemoteWrite(record, actor, {
+  const expectedSpaceTag = kbTagHexEncode(identity.productSpaceId)
+  const expectedEnterpriseTag = kbTagHexEncode(identity.enterpriseId)
+  await writeKbDirectoryTagsVerified({
+    record,
+    actor,
+    beforeWrite: () => assertScopeTokenCurrent(scopeToken),
+    write: detail => auditedRemoteWrite(record, actor, {
       action: 'remote.set_tags',
       target: KB_TENANT_ROOT_URI,
-      detail: { kind: 'ownership_marker', attempt },
-    }, async () => {
-      assertScopeTokenCurrent(scopeToken)
-      await openVikingSetTags(config, auth, {
-        uri: KB_TENANT_ROOT_URI,
-        tags,
-        mode: 'append',
-      })
-    })
-    const root = await openVikingAttrs(config, auth, KB_TENANT_ROOT_URI).catch(() => null)
-    if (root?.tags[KB_TENANT_SPACE_TAG] === kbTagHexEncode(identity.productSpaceId)
-      && root?.tags[KB_TENANT_ENTERPRISE_TAG] === kbTagHexEncode(identity.enterpriseId)) {
-      return
-    }
-    if (attempt >= KB_MARKER_ATTEMPTS) {
-      throw unavailable(
-        KB_SERVICE_UNAVAILABLE_MESSAGE,
-        `ownership marker did not stick after ${KB_MARKER_ATTEMPTS} attempts`,
-      )
-    }
-    await new Promise(resolve => setTimeout(resolve, kbDirectoryTagBackoffMs(attempt)))
-  }
+      detail: { kind: 'ownership_marker', ...detail },
+    }, () => openVikingSetTags(config, auth, {
+      uri: KB_TENANT_ROOT_URI,
+      tags,
+      mode: 'append',
+    })),
+    read: async () => (await openVikingAttrs(config, auth, KB_TENANT_ROOT_URI).catch(() => null))?.tags ?? null,
+    wait: budgetMs => openVikingWaitForProcessing(config, auth, budgetMs),
+  }, KB_TENANT_ROOT_URI, root => root[KB_TENANT_SPACE_TAG] === expectedSpaceTag
+    && root[KB_TENANT_ENTERPRISE_TAG] === expectedEnterpriseTag)
 }
-
-const KB_MARKER_ATTEMPTS = 3
 
 /**
  * The one idempotent provisioning entry point (brief D2). Safe to call from

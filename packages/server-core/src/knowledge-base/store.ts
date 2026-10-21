@@ -25,6 +25,7 @@ import {
   openVikingMv,
   openVikingReadContent,
   openVikingSetTags,
+  openVikingWaitForProcessing,
   openVikingWriteContent,
   type OpenVikingConfig,
   type OpenVikingFindResource,
@@ -557,6 +558,13 @@ interface KbRemoteIntent {
   action: string
   target: string
   detail?: Record<string, unknown>
+  /**
+   * Extra detail resolved when the RESULT entry is written — the shape for
+   * facts only the run knows (the verified directory-tag loop reports its
+   * attempt count and the pipeline-wait spend there, review fix round E1).
+   * A throw still resolves it, so a failed run reports how far it got.
+   */
+  resultDetail?: () => Record<string, unknown>
 }
 
 /** The audit sink adapter: one entry into the caller's trail. */
@@ -597,7 +605,13 @@ export async function auditedRemoteWrite<T>(
       actor,
       action: `${intent.action}.result`,
       target: intent.target,
-      detail: { requestId, outcome: 'success' satisfies KbRemoteOutcome },
+      detail: {
+        // Host detail spreads FIRST: `requestId`/`outcome`/`cause` are this
+        // wrapper's audit contract and a host summary must not override them.
+        ...(intent.resultDetail?.() ?? {}),
+        requestId,
+        outcome: 'success' satisfies KbRemoteOutcome,
+      },
     })
     return result
   } catch (error) {
@@ -606,6 +620,7 @@ export async function auditedRemoteWrite<T>(
       action: `${intent.action}.result`,
       target: intent.target,
       detail: {
+        ...(intent.resultDetail?.() ?? {}),
         requestId,
         outcome: remoteOutcomeOf(error),
         reason: error instanceof Error ? error.message : String(error),
@@ -664,8 +679,13 @@ async function remoteWriteContent(
   })
 }
 
-async function remoteSetTags(space: KbOpenVikingSpace, uri: string, tags: string[]): Promise<void> {
-  await auditedRemote(space, { action: 'remote.set_tags', target: uri }, async () => {
+async function remoteSetTags(
+  space: KbOpenVikingSpace,
+  uri: string,
+  tags: string[],
+  detail?: Record<string, unknown>,
+): Promise<void> {
+  await auditedRemote(space, { action: 'remote.set_tags', target: uri, detail }, async () => {
     assertRemoteWriteAllowed(space)
     try {
       await openVikingSetTags(space.config, space.auth, { uri, tags, mode: 'replace' })
@@ -676,33 +696,142 @@ async function remoteSetTags(space: KbOpenVikingSpace, uri: string, tags: string
 }
 
 /**
- * Directory tags write with a READ-BACK (e2e round 2026-10-21, brief §1):
- * a `set_tags` issued IMMEDIATELY after a `mkdir` answers `ok` while silently
- * dropping the tags — reproduced 3/3 on the real instance; waiting ≥1.2s or
- * simply retrying succeeds. An unverified write here means a collection whose
- * `collection=` tag never lands, i.e. a directory that vanishes from every
- * listing forever. So directory-bound tag writes verify the expected keys
- * through `fs/attrs` and retry with a bounded backoff (3 attempts, 600ms
- * doubling) before surfacing the neutral availability error.
+ * Directory tag writes, verified (brief §1.10). The measured instance runs an
+ * ingestion pipeline over every freshly created directory — `mkdir` with or
+ * without a description, and the account's resource root after an account
+ * creation — and REBUILDS the directory's attributes when it finishes, wiping
+ * whatever `set_tags` landed inside that window while answering `ok` (the
+ * window measured ~4.5s in `semantic_and_vectors`; a plain mkdir drained in
+ * ~0.5s). A `set_tags` issued after the pipeline completes sticks reliably.
+ *
+ * So every directory-bound tag write runs the same bounded loop:
+ *
+ *   wait for the pipeline (`POST /api/v1/system/wait`, raced against the
+ *     client's own wait timeout — a timed-out or failing wait is ABSORBED,
+ *     never fatal) → write → read the tags back through `fs/attrs` →
+ *     still missing → poll again at a fixed 1s interval (the wait may run
+ *     before every retry) until the read-back verifies, for at most the
+ *     window below; only then surface the neutral availability error.
+ *
+ * An unverified write here means a collection whose `collection=` tag never
+ * lands — a directory that vanishes from every listing — or an ownership
+ * marker that fail-closes the NEXT provisioning forever.
  */
-const KB_DIRECTORY_TAG_ATTEMPTS = 3
-let directoryTagRetryBaseDelayMs = 600
+export const KB_DIRECTORY_TAG_WINDOW_MS = 12_000
 
+let directoryTagWindowMs = KB_DIRECTORY_TAG_WINDOW_MS
+let directoryTagPollIntervalMs = 1_000
+
+/** Test seam: the poll interval between verification attempts. */
 export function setKbDirectoryTagRetryDelayForTests(ms: number): void {
-  directoryTagRetryBaseDelayMs = ms
+  directoryTagPollIntervalMs = ms
 }
 
 export function resetKbDirectoryTagRetryDelayForTests(): void {
-  directoryTagRetryBaseDelayMs = 600
+  directoryTagPollIntervalMs = 1_000
 }
 
-/** The backoff between verification attempts; shared with the tenant marker write. */
-export function kbDirectoryTagBackoffMs(attempt: number): number {
-  return directoryTagRetryBaseDelayMs * attempt
+/** Test seam: the total window a verified directory write may take. */
+export function setKbDirectoryTagWindowForTests(ms: number): void {
+  directoryTagWindowMs = ms
+}
+
+export function resetKbDirectoryTagWindowForTests(): void {
+  directoryTagWindowMs = KB_DIRECTORY_TAG_WINDOW_MS
 }
 
 function sleepForRetry(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/** Everything the shared verified loop needs from ITS caller (store or tenant). */
+export interface KbDirectoryTagWriteHost {
+  /** The audit sink for the loop's own `remote.directory_tags` pair. */
+  record: KbRemoteAuditRecord
+  actor: string
+  /** Revalidated before EVERY physical write (the await-spanning scope token). */
+  beforeWrite?: () => void
+  /**
+   * The physical write, audited by the HOST (the store's `remote.set_tags`
+   * pair per attempt, the tenant's marker pair). `detail` carries the attempt
+   * number and the pipeline-wait spend for the trail.
+   */
+  write: (detail: { attempt: number; waitedMs: number }) => Promise<void>
+  /**
+   * The read-back; `null` reads as a miss and keeps the loop going. A
+   * transport error must read as a miss too — a set_tags that landed followed
+   * by one flaky `fs/attrs` is a poll-away success, not a failure.
+   */
+  read: () => Promise<Record<string, string> | null>
+  /**
+   * The bounded pipeline wait; the loop passes the budget it may use (what
+   * remains of the window minus one poll interval) and ABSORBS its failure —
+   * a timed-out or failing wait never fails the write.
+   */
+  wait: (budgetMs: number) => Promise<void>
+}
+
+/**
+ * The ONE verified directory-tag loop, shared by the store's collection
+ * writes and the tenant's ownership marker (both are directory writes against
+ * the same measured window). The whole loop is one audited remote operation
+ * (`remote.directory_tags`) whose result carries the retry detail — attempt
+ * count, ms spent waiting for the pipeline, absorbed wait failures — and each
+ * physical write stays audited by the host on top of it.
+ */
+export async function writeKbDirectoryTagsVerified(
+  host: KbDirectoryTagWriteHost,
+  uri: string,
+  verify: (tags: Record<string, string>) => boolean,
+): Promise<void> {
+  const summary = { attempts: 0, waitedMs: 0, waitFailures: 0 }
+  const windowMs = directoryTagWindowMs
+  const deadline = Date.now() + windowMs
+  const exhausted = () => new KbStoreError(
+    'kb_service_unavailable',
+    KB_SERVICE_UNAVAILABLE_MESSAGE,
+    `directory tags at ${uri} did not stick within ${windowMs}ms`
+      + ` (${summary.attempts} attempts, ${summary.waitedMs}ms waiting,`
+      + ` ${summary.waitFailures} failed waits)`,
+  )
+  await auditedRemoteWrite(host.record, host.actor, {
+    action: 'remote.directory_tags',
+    target: uri,
+    resultDetail: () => ({ ...summary, windowMs }),
+  }, async () => {
+    for (let attempt = 1; ; attempt += 1) {
+      if (Date.now() >= deadline) throw exhausted()
+      // The pipeline wait FIRST: a write issued after the drain sticks on the
+      // first attempt, so the poll below is the fallback, not the plan. The
+      // wait's budget is what remains minus one poll interval — a wait may
+      // never convert the whole window into one silent block and leave the
+      // write+read-back no turn (review round M1: an unbounded wait ran to
+      // its own 12s timeout and pushed the write to ~2× the window).
+      const waitBudgetMs = deadline - Date.now() - directoryTagPollIntervalMs
+      const waitStartedAt = Date.now()
+      if (waitBudgetMs > 0) {
+        try {
+          await host.wait(waitBudgetMs)
+        } catch {
+          summary.waitFailures += 1
+        }
+        summary.waitedMs += Date.now() - waitStartedAt
+        // Re-checked AFTER the wait: no write may be issued that the window
+        // can no longer verify.
+        if (Date.now() >= deadline) throw exhausted()
+      }
+      host.beforeWrite?.()
+      await host.write({ attempt, waitedMs: Date.now() - waitStartedAt })
+      // Counted only once the write is OUT — a write/before-write throw must
+      // not report an attempt the trail has no `remote.set_tags` pair for.
+      summary.attempts = attempt
+      const tags = await host.read()
+      if (tags !== null && verify(tags)) return
+      const remainingMs = deadline - Date.now()
+      if (remainingMs <= 0) throw exhausted()
+      await sleepForRetry(Math.min(directoryTagPollIntervalMs, remainingMs))
+    }
+  })
 }
 
 async function remoteSetDirectoryTagsVerified(
@@ -711,19 +840,13 @@ async function remoteSetDirectoryTagsVerified(
   tags: string[],
   verify: (tags: Record<string, string>) => boolean,
 ): Promise<void> {
-  for (let attempt = 1; ; attempt += 1) {
-    await remoteSetTags(space, uri, tags)
-    const node = await remoteAttrs(space, uri)
-    if (node && verify(node.tags)) return
-    if (attempt >= KB_DIRECTORY_TAG_ATTEMPTS) {
-      throw new KbStoreError(
-        'kb_service_unavailable',
-        KB_SERVICE_UNAVAILABLE_MESSAGE,
-        `directory tags at ${uri} did not stick after ${KB_DIRECTORY_TAG_ATTEMPTS} attempts`,
-      )
-    }
-    await sleepForRetry(directoryTagRetryBaseDelayMs * attempt)
-  }
+  await writeKbDirectoryTagsVerified({
+    record: entry => appendAudit(space.workspaceRoot, space.binding, entry),
+    actor: space.actor,
+    write: detail => remoteSetTags(space, uri, tags, detail),
+    read: async () => (await remoteAttrs(space, uri).catch(() => null))?.tags ?? null,
+    wait: budgetMs => openVikingWaitForProcessing(space.config, space.auth, budgetMs),
+  }, uri, verify)
 }
 
 async function remoteMv(space: KbOpenVikingSpace, fromUri: string, toUri: string): Promise<void> {
@@ -1014,12 +1137,13 @@ export async function createCollection(
   }
   const uri = kbCollectionUri(record.name, record.collectionId)
   await remoteMkdir(space, uri, record.description)
-  // E1: the tags land IMMEDIATELY after the mkdir — exactly the window the
-  // real instance drops. The write is verified through a read-back and
-  // retried before the collection is reported created. The verified keys are
-  // the two the server's tag lower-casing cannot distort (the collection id
-  // and the hex-carried name); the ISO `created` value comes back with its
-  // `T`/`Z` folded (E2, harmless for Date.parse) and never takes part.
+  // E1: the tags land right after the mkdir — inside the processing window
+  // the real instance wipes on pipeline completion. The verified write waits
+  // the pipeline out (`system/wait`), then reads the tags back and polls
+  // before the collection is reported created. The verified keys are the two
+  // the server's tag lower-casing cannot distort (the collection id and the
+  // hex-carried name); the ISO `created` value comes back with its `T`/`Z`
+  // folded (E2, harmless for Date.parse) and never takes part.
   const expectedTags = collectionTags(record)
   await remoteSetDirectoryTagsVerified(space, uri, expectedTags, tags =>
     tags.collection === record.collectionId

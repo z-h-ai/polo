@@ -28,6 +28,17 @@ export const OPENVIKING_PROVISION_TIMEOUT_MS = 30_000
 export const OPENVIKING_WRITE_TIMEOUT_MS = 120_000
 export const OPENVIKING_READ_TIMEOUT_MS = 15_000
 export const OPENVIKING_FIND_TIMEOUT_MS = 8_000
+/**
+ * The pipeline wait (`POST /api/v1/system/wait`). The measured instance blocks
+ * there for the length of a directory's ingestion — ~0.5s for a plain mkdir,
+ * ~4.5s right after an account creation in `semantic_and_vectors` (measured
+ * 2026-10-21) — so the bound covers the slow mode. It is a CEILING only: the
+ * verified directory-tag loop passes a per-call budget of what remains of its
+ * own 12s window (review round M1), so in practice the wait never outlives
+ * the loop. A timed-out wait is absorbed (the tag write still runs, the poll
+ * loop catches a loss).
+ */
+export const OPENVIKING_WAIT_TIMEOUT_MS = 12_000
 
 export type OpenVikingErrorCode =
   | 'openviking_timeout'
@@ -117,6 +128,8 @@ interface OpenVikingTimeouts {
   readMs: number
   /** search/find — bounded hard because the send path awaits it. */
   findMs: number
+  /** system/wait — the ingestion-pipeline drain the directory writes ride. */
+  waitMs: number
 }
 
 let timeouts: OpenVikingTimeouts = {
@@ -124,6 +137,7 @@ let timeouts: OpenVikingTimeouts = {
   writeMs: OPENVIKING_WRITE_TIMEOUT_MS,
   readMs: OPENVIKING_READ_TIMEOUT_MS,
   findMs: OPENVIKING_FIND_TIMEOUT_MS,
+  waitMs: OPENVIKING_WAIT_TIMEOUT_MS,
 }
 
 /** Test seam: shrink the wall clocks so a timeout can be observed quickly. */
@@ -137,6 +151,7 @@ export function resetOpenVikingTimeoutsForTests(): void {
     writeMs: OPENVIKING_WRITE_TIMEOUT_MS,
     readMs: OPENVIKING_READ_TIMEOUT_MS,
     findMs: OPENVIKING_FIND_TIMEOUT_MS,
+    waitMs: OPENVIKING_WAIT_TIMEOUT_MS,
   }
 }
 
@@ -450,6 +465,34 @@ export async function openVikingMkdir(
   })
 }
 
+/**
+ * `POST /api/v1/system/wait` — blocks until the account's ingestion pipelines
+ * drain ("Wait for all processing to complete", the instance's openapi.json).
+ * Measured on the real v0.5.1.1 (2026-10-21, data-plane user key accepted,
+ * body `{}`): it answers `{status:'ok', result:{<pipeline>:{processed,
+ * requeue_count, error_count, errors[]}}, ...}` and returns only once the
+ * directory processing spawned by a mkdir/account creation has finished —
+ * which is exactly when a directory stops dropping `set_tags` (brief §1.10).
+ * The counts are diagnostics; the caller only needs the completion.
+ *
+ * `budgetMs` caps THIS call below the configured `waitMs` ceiling — the
+ * verified directory-tag loop passes what remains of its window so a slow
+ * pipeline cannot silently eat the write+read-back's turn (review round M1).
+ */
+export async function openVikingWaitForProcessing(
+  config: OpenVikingConfig,
+  auth: OpenVikingTenantAuth,
+  budgetMs: number = timeouts.waitMs,
+): Promise<void> {
+  await openVikingRequest<unknown>(config, {
+    method: 'POST',
+    path: '/api/v1/system/wait',
+    json: {},
+    apiKey: tenantKey(auth),
+    timeoutMs: Math.min(budgetMs, timeouts.waitMs),
+  })
+}
+
 /** `POST /api/v1/fs/mv` — the target's parent must exist; an existing target is OVERWRITTEN. */
 export async function openVikingMv(
   config: OpenVikingConfig,
@@ -570,8 +613,14 @@ function normalizeNode(raw: {
 }
 
 /**
- * `GET /api/v1/fs/attrs?uri=` — ONE node's metadata. The verified shape is
- * `{attrs: {tags: [...]}}`; the tag list and any mtime are normalized.
+ * `GET /api/v1/fs/attrs?uri=` — ONE node's metadata, normalized. The measured
+ * v0.5.1.1 shape is `{uri, context_type, attrs: {tags}}`: the node IDENTITY
+ * rides at the top level while only the tags (and sometimes mtime/type) sit
+ * inside `attrs` — a parser that reads `attrs` as the node itself finds no
+ * `uri` there and reports "no node", which silently turned every read-back
+ * into a miss on the real instance (measured 2026-10-21, the E1 hardening
+ * round). The fake's `{attrs: {uri, tags, …}}` and a flat top-level node both
+ * parse too: the levels are MERGED before normalizing.
  */
 export async function openVikingAttrs(
   config: OpenVikingConfig,
@@ -585,8 +634,11 @@ export async function openVikingAttrs(
     apiKey: tenantKey(auth),
     timeoutMs: timeouts.readMs,
   })
-  const attrs = (result as { attrs?: unknown } | null)?.attrs
-  const source = (attrs ?? result) as {
+  const record = (result ?? {}) as Record<string, unknown>
+  const attrs = record.attrs
+  const source = (attrs && typeof attrs === 'object'
+    ? { ...record, ...(attrs as Record<string, unknown>) }
+    : record) as {
     uri?: unknown
     path?: unknown
     tags?: unknown
@@ -594,8 +646,7 @@ export async function openVikingAttrs(
     modified_at?: unknown
     type?: unknown
     is_dir?: unknown
-  } | null
-  if (!source || typeof source !== 'object') return null
+  }
   return normalizeNode(source)
 }
 

@@ -35,6 +35,13 @@ export interface FakeOpenVikingNode {
   tags: string[]
   content: string | null
   mtime: string
+  /**
+   * When the directory's ingestion pipeline finishes (epoch ms). Set at
+   * creation for DIRECTORIES only — the measured instance processes a fresh
+   * directory and rebuilds its attributes on completion, wiping tags written
+   * before that (e2e E1). Files are never processed.
+   */
+  processingUntil?: number
 }
 
 /** A request the fake saw, recorded for wire-shape assertions. */
@@ -176,12 +183,17 @@ export class FakeOpenVikingServer {
   /** When set, `search/find` answers with these rows verbatim. */
   private findOverride: Array<Record<string, unknown>> | null = null
   /**
-   * Measured server behavior, e2e round 2026-10-21 (E1): a `set_tags` issued
-   * within this many ms of a directory's creation answers `ok` while silently
-   * dropping the tags (files are unaffected). 0 disables the window; tests
-   * inject a small one to reproduce the loss and the store's read-back retry.
+   * Measured server behavior, e2e round 2026-10-21 (E1) + the hardening round:
+   * every directory a client creates (mkdir, and the account's resource root
+   * at account creation) starts an ingestion pipeline that lasts this many ms
+   * and REBUILDS the directory's attributes when it finishes — a `set_tags`
+   * issued before that answers `ok` while silently dropping the tags (files
+   * are unaffected). `system/wait` blocks until the pipeline drains, which is
+   * when the writes start to stick. 0 disables the pipeline; tests inject a
+   * small one to reproduce the loss and the store's wait+poll recovery, or a
+   * window longer than the client's 12s bound to reproduce the give-up.
    */
-  private directoryTagLossWindowMs = 0
+  private directoryPipelineMs = 0
   /** One-shot tree mutations consumed before the next matching request. */
   private readonly mutations: Array<{
     method: string
@@ -192,6 +204,13 @@ export class FakeOpenVikingServer {
   }> = []
   /** Requests currently being served — `reset` waits for them to drain. */
   private inflight = 0
+  /**
+   * Live `system/wait` sleepers, woken by `reset()`. The request signal's
+   * abort-on-disconnect is platform-dependent, so the drain never relies on
+   * it alone: a wait a finished test abandoned must not pin `inflight` into
+   * the next test (review round m1).
+   */
+  private readonly pendingPipelineWaits = new Set<() => void>()
   private readonly server: ReturnType<typeof Bun.serve>
 
   private constructor(rootApiKey: string) {
@@ -215,6 +234,9 @@ export class FakeOpenVikingServer {
    * aimed at, so their responses never land in the next test's log.
    */
   async reset(): Promise<void> {
+    // Wake abandoned pipeline waits BEFORE the drain loop — the sleepers are
+    // the inflight requests most likely to outlive their test.
+    for (const wake of [...this.pendingPipelineWaits]) wake()
     const deadline = Date.now() + 5_000
     while (this.inflight > 0 && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 1))
@@ -225,7 +247,7 @@ export class FakeOpenVikingServer {
     this.delays.clear()
     this.mutations.length = 0
     this.findOverride = null
-    this.directoryTagLossWindowMs = 0
+    this.directoryPipelineMs = 0
     this.requests.length = 0
   }
 
@@ -249,12 +271,17 @@ export class FakeOpenVikingServer {
   }
 
   /**
-   * Arms the E1 measured loss window: for this many ms after a directory is
-   * created, `attrs/set_tags` on it answers `ok` but writes nothing (real
-   * instance behavior, brief §1 e2e round 2026-10-21). `0` turns it off.
+   * Arms the E1 measured pipeline: every directory created while this is set
+   * runs an ingestion pipeline of this many ms, and a `attrs/set_tags` issued
+   * before the pipeline finishes answers `ok` but writes nothing (real
+   * instance behavior, brief §1.10) — the pipeline's attribute rebuild wipes
+   * it. `system/wait` blocks until the pipeline drains. Defaults to the
+   * ~4s the semantic mode measured; `0` turns it off. Arm BEFORE the mkdir:
+   * the pipeline duration is fixed when the directory is created, exactly as
+   * the real pipeline starts with it.
    */
-  setDirectoryTagLossWindow(ms: number): void {
-    this.directoryTagLossWindowMs = ms
+  setDirectoryTagLossWindow(ms = 4_000): void {
+    this.directoryPipelineMs = ms
   }
 
   /**
@@ -373,6 +400,29 @@ export class FakeOpenVikingServer {
     if (!token) {
       return this.error(401, 'UNAUTHORIZED', 'missing bearer token')
     }
+    // `POST /api/v1/system/wait` answers on BOTH planes on the real instance
+    // (verified: root key and account user key both accepted) and blocks
+    // until the ingestion pipelines of the caller's scope have drained — the
+    // drain a directory tag write waits for before it can stick (e2e E1).
+    if (request.method === 'POST' && url.pathname === '/api/v1/system/wait') {
+      const accounts = token === this.rootApiKey
+        ? [...this.accounts.keys()]
+        : [this.accountForUserKey(token)].filter((id): id is string => id !== null)
+      if (accounts.length === 0) {
+        return this.error(401, 'UNAUTHORIZED', 'unknown credential')
+      }
+      await this.awaitPipelines(request.signal, accounts)
+      return this.ok({
+        Embedding: { processed: 0, requeue_count: 0, error_count: 0, errors: [] },
+        Semantic: { processed: 0, requeue_count: 0, error_count: 0, errors: [] },
+        ExternalParse: { processed: 0, requeue_count: 0, error_count: 0, errors: [] },
+        AddResource: { processed: 0, requeue_count: 0, error_count: 0, errors: [] },
+        Reindex: { processed: 0, requeue_count: 0, error_count: 0, errors: [] },
+        SessionCommit: { processed: 0, requeue_count: 0, error_count: 0, errors: [] },
+        ExternalTask: { processed: 0, requeue_count: 0, error_count: 0, errors: [] },
+        UserDeletion: { processed: 0, requeue_count: 0, error_count: 0, errors: [] },
+      })
+    }
     if (url.pathname.startsWith('/api/v1/admin/')) {
       if (token !== this.rootApiKey) {
         return this.error(403, 'PERMISSION_DENIED', 'the admin plane requires the root key')
@@ -411,6 +461,37 @@ export class FakeOpenVikingServer {
       }
     }
     return null
+  }
+
+  /**
+   * `system/wait`'s drain: sleeps until the latest pipeline in scope has
+   * finished. The sleep ends on whichever comes first: the pipeline's own
+   * deadline, the request signal aborting (fast path when it does fire), or
+   * the next `reset()` waking the sleeper explicitly.
+   */
+  private async awaitPipelines(signal: AbortSignal, accountIds: string[]): Promise<void> {
+    let latest = 0
+    for (const accountId of accountIds) {
+      for (const node of this.trees.get(accountId)?.values() ?? []) {
+        if (node.type === 'dir' && node.processingUntil !== undefined && node.processingUntil > latest) {
+          latest = node.processingUntil
+        }
+      }
+    }
+    const remainingMs = latest - Date.now()
+    if (remainingMs <= 0) return
+    await new Promise<void>(resolve => {
+      const finish = (): void => {
+        this.pendingPipelineWaits.delete(finish)
+        clearTimeout(timer)
+        signal.removeEventListener('abort', finish)
+        resolve()
+      }
+      const timer = setTimeout(finish, remainingMs)
+      this.pendingPipelineWaits.add(finish)
+      if (signal.aborted) return finish()
+      signal.addEventListener('abort', finish)
+    })
   }
 
   private error(status: number, code: string, message: string): Response {
@@ -482,12 +563,16 @@ export class FakeOpenVikingServer {
     account.users.set(adminUserId, { username: adminUserId, role: 'admin', apiKey: userKey })
     this.accounts.set(accountId, account)
     // Every account starts with its resource root; ownership tags land on it.
+    // The root is a freshly created DIRECTORY: it runs the same ingestion
+    // pipeline as any mkdir (e2e E1 — the marker written right after the
+    // creation was dropped on the real instance), so it is armed identically.
     this.trees.set(accountId, new Map([[ROOT_URI, {
       uri: ROOT_URI,
       type: 'dir',
       tags: [],
       content: null,
       mtime: nowIso(),
+      ...this.pipelineFromNow(),
     }]]))
     return { accountId, userKey }
   }
@@ -556,8 +641,15 @@ export class FakeOpenVikingServer {
     if (parent && parent !== ROOT_URI && !tree.has(parent)) {
       return this.error(404, 'PARENT_NOT_FOUND', `parent ${parent} does not exist`)
     }
-    tree.set(uri, { uri, type: 'dir', tags: [], content: null, mtime: nowIso() })
+    tree.set(uri, { uri, type: 'dir', tags: [], content: null, mtime: nowIso(), ...this.pipelineFromNow() })
     return this.ok({ uri })
+  }
+
+  /** The ingestion pipeline a freshly created directory runs, if armed. */
+  private pipelineFromNow(): { processingUntil?: number } {
+    return this.directoryPipelineMs > 0
+      ? { processingUntil: Date.now() + this.directoryPipelineMs }
+      : {}
   }
 
   private mv(
@@ -658,11 +750,12 @@ export class FakeOpenVikingServer {
     if (!uri) return this.error(400, 'INVALID_ARGUMENT', 'uri is required')
     const node = tree.get(uri)
     if (!node) return this.error(404, 'NOT_FOUND', `${uri} does not exist`)
-    // E1 (measured 2026-10-21): a directory's tags write inside the loss
-    // window answers ok and writes NOTHING — the store's read-back and its
-    // bounded retry are what recover from this.
-    if (this.directoryTagLossWindowMs > 0 && node.type === 'dir'
-      && Date.now() - Date.parse(node.mtime) < this.directoryTagLossWindowMs) {
+    // E1 (measured 2026-10-21): a directory's tags write issued while its
+    // ingestion pipeline is still running answers ok and writes NOTHING — the
+    // pipeline's attribute rebuild wipes it on completion. The store's
+    // wait-for-pipeline + read-back poll is what recovers from this.
+    if (node.type === 'dir' && node.processingUntil !== undefined
+      && Date.now() < node.processingUntil) {
       return this.ok({ uri, tags: node.tags })
     }
     const tags = Array.isArray(body?.tags)

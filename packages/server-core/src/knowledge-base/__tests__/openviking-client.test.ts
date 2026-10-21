@@ -13,6 +13,7 @@ import {
   openVikingReadContent,
   openVikingRemove,
   openVikingSetTags,
+  openVikingWaitForProcessing,
   openVikingWriteContent,
   readOpenVikingConfig,
   resetOpenVikingTimeoutsForTests,
@@ -175,6 +176,39 @@ describe('openviking admin-plane wire shapes', () => {
 })
 
 describe('openviking data-plane wire shapes', () => {
+  it('waits the ingestion pipelines out with an empty body and the tenant key (measured 2026-10-21)', async () => {
+    // The real `POST /api/v1/system/wait` takes no parameters, accepts the
+    // data-plane user key and answers the standard envelope with the
+    // per-pipeline drain counts (diagnostics only — the caller wants the
+    // completion). It is the drain a directory tag write waits for.
+    respond = () => Response.json({
+      status: 'ok',
+      result: {
+        Embedding: { processed: 227, requeue_count: 0, error_count: 0, errors: [] },
+        Semantic: { processed: 129, requeue_count: 101, error_count: 0, errors: [] },
+      },
+      error: null,
+    })
+    await openVikingWaitForProcessing(config, tenantAuth)
+    const request = requests[0]
+    expect(request.method).toBe('POST')
+    expect(request.path).toBe('/api/v1/system/wait')
+    expect(request.authorization).toBe('Bearer ok-tenant-key')
+    expect(JSON.parse(request.rawBody)).toEqual({})
+  })
+
+  it('races the pipeline wait against its own bounded timeout', async () => {
+    // A pipeline that outlives the bound must surface as the structured
+    // timeout — the store's verified loop absorbs it and polls instead.
+    setOpenVikingTimeoutsForTests({ waitMs: 30 })
+    respond = async () => {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      return Response.json({ status: 'ok', result: {} })
+    }
+    await expect(openVikingWaitForProcessing(config, tenantAuth))
+      .rejects.toMatchObject({ code: 'openviking_timeout' })
+  })
+
   it('mkdirs ONE level and sends the optional description', async () => {
     await openVikingMkdir(config, tenantAuth, { uri: 'viking://resources/Handbook-kb-1', description: 'Policies' })
     const request = requests[0]
@@ -267,6 +301,30 @@ describe('openviking data-plane wire shapes', () => {
       isDirectory: false,
     })
     expect(await openVikingAttrs(config, tenantAuth, 'viking://resources/gone.md')).toBeNull()
+  })
+
+  it('parses the REAL v0.5.1.1 attrs shape whose node identity rides at the top level (measured 2026-10-21)', async () => {
+    // The live instance answers `{uri, context_type, attrs: {tags}}` — the
+    // tags live INSIDE attrs while the uri does NOT. Reading `attrs` as the
+    // node itself finds no uri and reports "no node", which silently turned
+    // every directory-tag read-back into a miss on the real instance (E1
+    // hardening round). This test pins the merged parsing against that wire
+    // shape, byte for byte as probed.
+    respond = () => Response.json({
+      status: 'ok',
+      result: {
+        uri: 'viking://resources/Live Check Handbook-kb-7a50559e-a744-4861-ac32-1046d0ae31ce',
+        context_type: 'resource',
+        attrs: { tags: ['collection=7a50559e-a744-4861-ac32-1046d0ae31ce'] },
+      },
+    })
+    expect(await openVikingAttrs(config, tenantAuth, 'viking://resources/Live Check Handbook-kb-7a50559e-a744-4861-ac32-1046d0ae31ce')).toEqual({
+      uri: 'viking://resources/Live Check Handbook-kb-7a50559e-a744-4861-ac32-1046d0ae31ce',
+      tags: { collection: '7a50559e-a744-4861-ac32-1046d0ae31ce' },
+      duplicateTagKeys: [],
+      mtime: null,
+      isDirectory: null,
+    })
   })
 
   it('replaces retrieval tags through the set_tags body', async () => {

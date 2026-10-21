@@ -29,10 +29,13 @@ import {
   loadKbIndex,
   readAudit,
   resetKbDirectoryTagRetryDelayForTests,
+  resetKbDirectoryTagWindowForTests,
   setKbDirectoryTagRetryDelayForTests,
+  setKbDirectoryTagWindowForTests,
   KB_SERVICE_UNAVAILABLE_MESSAGE,
   type KbOpenVikingSpace,
 } from '../../../knowledge-base/store'
+import { resetOpenVikingTimeoutsForTests, setOpenVikingTimeoutsForTests } from '../../../knowledge-base/openviking-client'
 import { kbTenantAccountId, kbTenantAuth, readKbTenantCredential } from '../../../knowledge-base/tenant'
 import { FakeOpenVikingServer } from '../../../knowledge-base/__tests__/fake-openviking-server'
 
@@ -272,6 +275,37 @@ describe('tenant provisioning', () => {
     expect(credential?.accountId).toBe(ACCOUNT_DERIVED)
     expect(credential?.apiKey).toBe(ov.userKey(ACCOUNT_DERIVED))
   })
+
+  it('pins the ownership marker past the account-creation pipeline (e2e E1)', async () => {
+    // The account's resource root is a freshly created directory: its own
+    // ingestion pipeline wiped the marker written right after the creation on
+    // the real instance, which would fail-closed EVERY later provisioning
+    // (`binding_mismatch`, marker missing). The provisioning write runs the
+    // same verified loop — wait the pipeline out, then write, then verify.
+    ov.setDirectoryTagLossWindow(600)
+    try {
+      const harness = useDevice()
+      await harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+        workspaceId: WORKSPACE_ID, name: 'Handbook', description: '',
+      })
+      const root = ov.tree(ACCOUNT_DERIVED).get('viking://resources/')
+      expect(root?.tags).toContain(`polo_space=${kbTagHexEncode(SPACE_ID)}`)
+      expect(root?.tags).toContain(`polo_enterprise=${kbTagHexEncode(ENTERPRISE_ID)}`)
+      // One write, after the wait: the drained pipeline took the marker.
+      const markerWrites = ov.requests.filter(request =>
+        request.method === 'POST'
+        && request.path === '/api/v1/fs/attrs/set_tags'
+        && JSON.stringify(request.body).includes('polo_space='))
+      expect(markerWrites).toHaveLength(1)
+      const verified = readAudit(harness.workspaceRoot, binding)
+        .filter(entry => entry.action === 'remote.directory_tags.result'
+          && entry.target === 'viking://resources/')
+      expect(verified).toHaveLength(1)
+      expect(verified[0]?.detail).toMatchObject({ outcome: 'success', attempts: 1 })
+    } finally {
+      ov.setDirectoryTagLossWindow(0)
+    }
+  }, 15_000)
 
   it('serves later calls from the cache without re-entering the admin plane', async () => {
     const harness = useDevice()
@@ -1036,54 +1070,175 @@ describe('measured instance hardening', () => {
       && (request.body as { uri?: string } | null)?.uri === uri).length
   }
 
-  it('recovers a directory tag write the measured loss window swallowed (e2e E1)', async () => {
-    // The measured instance answers `ok` to a set_tags issued right after a
-    // mkdir while dropping the tags. The verified write MUST notice via the
-    // attrs read-back and retry — a silent loss here strands a collection
-    // that lists as a bare directory (or, for the marker, fail-closes the
-    // NEXT provisioning).
+  it('waits the ingestion pipeline out and lands the collection tags on the first write (e2e E1, 4s window)', async () => {
+    // The measured instance runs an ingestion pipeline over every fresh
+    // directory and rebuilds its attributes on completion, wiping a set_tags
+    // issued inside the window (~4s in semantic mode) while answering `ok`.
+    // The verified write therefore waits the pipeline out through
+    // `system/wait` FIRST, so the one write it issues sticks — the poll loop
+    // below stays the fallback, not the plan.
     const harness = useDevice()
-    ov.setDirectoryTagLossWindow(300)
-    setKbDirectoryTagRetryDelayForTests(120)
+    ov.setDirectoryTagLossWindow(4_000)
     try {
       const collection = await createCollection(harness, 'Latency Handbook')
       const uri = kbCollectionUri(collection.name, collection.id)
-      // Attempts at t≈0 and t≈120 land inside the 300ms window; t≈360 clears
-      // it — exactly the bounded-retry shape the fix specifies.
-      expect(setTagsRequestsTo(uri)).toBeGreaterThanOrEqual(3)
+      // The wait happened, and the write came after it — the pipeline was
+      // already drained when the tags were written.
+      const waitIndex = ov.requests.findIndex(request => request.method === 'POST'
+        && request.path === '/api/v1/system/wait')
+      const writeIndex = ov.requests.findIndex(request => request.method === 'POST'
+        && request.path === '/api/v1/fs/attrs/set_tags'
+        && (request.body as { uri?: string } | null)?.uri === uri)
+      expect(waitIndex).toBeGreaterThanOrEqual(0)
+      expect(writeIndex).toBeGreaterThan(waitIndex)
+      // Exactly one write: the drained pipeline took it on the first attempt.
+      expect(setTagsRequestsTo(uri)).toBe(1)
+      // The tags are in place on the remote tree, byte-exact through the
+      // lower-casing service (the hex keys are the authority, E2).
+      const node = ov.tree(ACCOUNT_DERIVED).get(uri)
+      expect(node?.tags).toContain(`collection=${collection.id}`)
+      expect(node?.tags).toContain(`n=${kbTagHexEncode(collection.name)}`)
+      // The verified write is one audited remote operation whose result
+      // carries the retry detail — a first-attempt success here.
+      const verified = readAudit(harness.workspaceRoot, binding)
+        .filter(entry => entry.action === 'remote.directory_tags.result'
+          && entry.target === uri)
+      expect(verified).toHaveLength(1)
+      expect(verified[0]?.detail).toMatchObject({ outcome: 'success', attempts: 1 })
       const listing = await harness.invoke(RPC_CHANNELS.kb.LIST_COLLECTIONS, {
         workspaceId: WORKSPACE_ID,
       }) as KbCollectionList
       expect(listing.collections.find(entry => entry.id === collection.id)?.name).toBe('Latency Handbook')
     } finally {
       ov.setDirectoryTagLossWindow(0)
-      resetKbDirectoryTagRetryDelayForTests()
     }
-  })
+  }, 20_000)
 
-  it('gives up with kb_service_unavailable when the loss never clears (e2e E1 bound)', async () => {
+  it('gives up with kb_service_unavailable and audits the retry detail when the pipeline outlasts the window (e2e E1 bound)', async () => {
     const harness = useDevice()
     await createCollection(harness, 'Handbook')
-    // A window no bounded retry outlives: the collection directory NEVER
+    // A pipeline no bounded window outlives: the collection directory NEVER
     // takes its tags, so the write must fail loudly instead of listing a
-    // collection whose identity tags are gone.
-    ov.setDirectoryTagLossWindow(60_000)
-    setKbDirectoryTagRetryDelayForTests(1)
+    // collection whose identity tags are gone. The three bounds are the
+    // production seams, shrunk to keep the wall clock out of the test: the
+    // pipeline (30s > any client bound), the client's wait timeout (raced
+    // out and ABSORBED — a failed wait is never fatal) and the 12s window
+    // the poll loop runs inside.
+    ov.setDirectoryTagLossWindow(30_000)
+    setKbDirectoryTagWindowForTests(600)
+    setKbDirectoryTagRetryDelayForTests(50)
+    setOpenVikingTimeoutsForTests({ waitMs: 120 })
     try {
       await expect(harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
         workspaceId: WORKSPACE_ID, name: 'Frozen', description: '',
       })).rejects.toMatchObject({ code: 'kb_service_unavailable', message: KB_SERVICE_UNAVAILABLE_MESSAGE })
-      // Exactly the bounded three attempts — no silent fourth, no unbounded
-      // retry loop against a window that will not clear.
+      // More than one write was attempted — the loop really polled — and the
+      // failures were absorbed waits, each raced against the client timeout.
       const frozenAttempts = ov.requests.filter(request => request.method === 'POST'
         && request.path === '/api/v1/fs/attrs/set_tags'
         && (request.body as { uri?: string } | null)?.uri?.includes('Frozen')).length
-      expect(frozenAttempts).toBe(3)
+      expect(frozenAttempts).toBeGreaterThanOrEqual(2)
+      expect(ov.requests.filter(request => request.method === 'POST'
+        && request.path === '/api/v1/system/wait').length).toBeGreaterThanOrEqual(frozenAttempts)
+      // The loop's own audit pair carries the retry detail: how far the
+      // window got, and that the waits failed rather than the writes.
+      const results = readAudit(harness.workspaceRoot, binding)
+        .filter(entry => entry.action === 'remote.directory_tags.result'
+          && entry.target.includes('Frozen'))
+      expect(results).toHaveLength(1)
+      expect(results[0]?.detail).toMatchObject({
+        outcome: 'failed',
+        attempts: frozenAttempts,
+        waitFailures: frozenAttempts,
+      })
+      // The raw cause rides in the same entry (B8) — the window, the attempt
+      // count and the wait spend are all in the trail, off the wire.
+      const cause = String(results[0]?.detail?.cause)
+      expect(cause).toContain('did not stick within 600ms')
+      expect(cause).toContain(String(frozenAttempts))
+      // A collection whose tags never landed was never reported created.
+      expect(readAudit(harness.workspaceRoot, binding)
+        .filter(entry => entry.action === 'collection.create')
+        .map(entry => entry.detail)).not.toContainEqual({ name: 'Frozen' })
     } finally {
       ov.setDirectoryTagLossWindow(0)
+      resetKbDirectoryTagWindowForTests()
+      resetKbDirectoryTagRetryDelayForTests()
+      resetOpenVikingTimeoutsForTests()
+    }
+  }, 15_000)
+
+  it('never lets the pipeline wait outlive the window — the write still gets its turn (e2e E1 bound)', async () => {
+    // Review round M1, scenario A: the deadline used to be checked only at
+    // the loop top, so a wait entering at t=11.9s ran to its own 12s timeout
+    // and pushed the write to ~2× the promised window. The wait now draws a
+    // budget of what REMAINS of the window minus one poll interval — pinned
+    // here with the production waitMs (12s) against a 600ms window: the wait
+    // must give up at ~550ms, absorbed, and the exhausted run must report the
+    // window it actually spent, not the timeout it wanted.
+    const harness = useDevice()
+    await createCollection(harness, 'Handbook')
+    ov.setDirectoryTagLossWindow(30_000)
+    setKbDirectoryTagWindowForTests(600)
+    setKbDirectoryTagRetryDelayForTests(50)
+    try {
+      await expect(harness.invoke(RPC_CHANNELS.kb.CREATE_COLLECTION, {
+        workspaceId: WORKSPACE_ID, name: 'Bounded', description: '',
+      })).rejects.toMatchObject({ code: 'kb_service_unavailable' })
+      const results = readAudit(harness.workspaceRoot, binding)
+        .filter(entry => entry.action === 'remote.directory_tags.result'
+          && entry.target.includes('Bounded'))
+      expect(results).toHaveLength(1)
+      const detail = results[0]?.detail as { attempts?: number; waitedMs?: number; waitFailures?: number }
+      expect(detail.attempts).toBe(1)
+      expect(detail.waitFailures).toBe(1)
+      // The wait spent the REMAINING window, never its own 12s ceiling.
+      expect(detail.waitedMs).toBeLessThanOrEqual(600)
+    } finally {
+      ov.setDirectoryTagLossWindow(0)
+      resetKbDirectoryTagWindowForTests()
       resetKbDirectoryTagRetryDelayForTests()
     }
-  })
+  }, 15_000)
+
+  it('polls a dropped write back onto the directory once the pipeline drains (e2e E1)', async () => {
+    // Review round M1, scenario B: with the wait timeout at the window's
+    // length the poll loop was unreachable — one silent wait ate everything.
+    // Here the wait keeps timing out (120ms against a 1.75s pipeline — off
+    // the poll cycle's multiples, so the drain never collides with a write)
+    // while the 4s window has room to poll, so the tags land on a LATER
+    // attempt: the poll is the fallback that actually catches a loss.
+    const harness = useDevice()
+    await createCollection(harness, 'Handbook')
+    ov.setDirectoryTagLossWindow(1_750)
+    setKbDirectoryTagWindowForTests(4_000)
+    setKbDirectoryTagRetryDelayForTests(50)
+    setOpenVikingTimeoutsForTests({ waitMs: 120 })
+    try {
+      const collection = await createCollection(harness, 'Polled Handbook')
+      const uri = kbCollectionUri(collection.name, collection.id)
+      const node = ov.tree(ACCOUNT_DERIVED).get(uri)
+      expect(node?.tags).toContain(`collection=${collection.id}`)
+      expect(node?.tags).toContain(`n=${kbTagHexEncode(collection.name)}`)
+      // More than one write went out — the poll really ran — and every wait
+      // along the way timed out against the pipeline rather than failing the
+      // write (the absorbed-wait discipline).
+      expect(setTagsRequestsTo(uri)).toBeGreaterThanOrEqual(2)
+      const verified = readAudit(harness.workspaceRoot, binding)
+        .filter(entry => entry.action === 'remote.directory_tags.result'
+          && entry.target === uri)
+      expect(verified).toHaveLength(1)
+      const detail = verified[0]?.detail as { attempts?: number; waitFailures?: number; outcome?: string }
+      expect(detail.outcome).toBe('success')
+      expect(detail.attempts ?? 0).toBeGreaterThanOrEqual(2)
+      expect(detail.waitFailures).toBe((detail.attempts ?? 1) - 1)
+    } finally {
+      ov.setDirectoryTagLossWindow(0)
+      resetKbDirectoryTagWindowForTests()
+      resetKbDirectoryTagRetryDelayForTests()
+      resetOpenVikingTimeoutsForTests()
+    }
+  }, 15_000)
 
   it('keeps title, reject reason and collection name byte-exact past the lower-casing service (e2e E2)', async () => {
     // The measured instance lower-cases EVERY tag value. The readable
