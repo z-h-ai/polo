@@ -34,11 +34,25 @@ import { readOpenVikingConfig } from './openviking-client'
  *   transport failure keeps the stale value.
  *
  * The last good answer is also persisted in the CredentialManager under the
- * tenant credential id (`kb_openviking_tenant::{productSpaceId}`, payload
- * marked `source: 'admin'` — `tenant.ts` refuses that marker, so the two
- * modes can share the id without ever adopting each other's key). The
- * encrypted store survives a process restart: the first KB call after a
- * restart serves the persisted answer and refreshes in the background.
+ * admin mode's OWN credential id (`kb_openviking_tenant::{productSpaceId}#admin`,
+ * payload marked `source: 'admin'`). The dedicated id (review fix round v5
+ * regression B1) is what keeps a definitive-404 purge from ever reaching the
+ * OSS tenant credential: the two modes no longer share a storage slot at all,
+ * so "delete the admin answer" cannot delete anyone else's key. Rows written
+ * by the pre-fix build under the shared id are migrated by probe on the first
+ * cold read — adopted only when they carry the `admin` marker, re-homed to
+ * the new id, and removed from the shared slot behind a guarded delete.
+ * `tenant.ts` still refuses the `admin` marker, so even a legacy shared row
+ * is never adopted by the OSS path. The encrypted store survives a process
+ * restart: the first KB call after a restart serves the persisted answer and
+ * refreshes in the background.
+ *
+ * Absolute staleness ceiling (review fix round v5 regression B3): a persisted
+ * — or in-memory — answer older than `ADMIN_KB_CREDENTIAL_MAX_AGE_MS` counts
+ * as a MISS no matter how the TTL cache feels about it. The TTL keeps request
+ * volume down; it is not a statement that the key is still valid — the admin
+ * may have rotated or revoked the library's key, and a day-old answer must be
+ * re-fetched before it is trusted again.
  *
  * Failure semantics (brief D7, read-path discipline): this module NEVER
  * throws — an unconfigured admin URL, a signed-out session, a 404/409, a
@@ -75,6 +89,15 @@ export const ADMIN_KB_CREDENTIAL_MISS_TTL_MS = 30 * 1000
  */
 export const ADMIN_KB_CREDENTIAL_TIMEOUT_MS = 3_000
 
+/**
+ * The ABSOLUTE lifetime of any answer, memory or encrypted store alike (review
+ * fix round v5 regression B3). Past this age the answer counts as a miss and
+ * is re-fetched before it is served again: the TTL above only bounds request
+ * volume, while this bound asserts the answer is still current — an admin key
+ * older than a day may have been rotated or revoked underneath it.
+ */
+export const ADMIN_KB_CREDENTIAL_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
 interface AdminKbCacheEntry {
   /** The last good answer; `null` while the admin answers "nothing usable". */
   credential: AdminKbLibraryCredential | null
@@ -90,6 +113,7 @@ const lastRefreshAttemptAt = new Map<string, number>()
 
 let ttlMs = ADMIN_KB_CREDENTIAL_TTL_MS
 let missTtlMs = ADMIN_KB_CREDENTIAL_MISS_TTL_MS
+let maxAgeMs = ADMIN_KB_CREDENTIAL_MAX_AGE_MS
 /** Re-armed by the test reset so each file sees the precedence warning once. */
 let warnedOnce = false
 
@@ -110,6 +134,11 @@ export function setAdminKbCredentialMissTtlForTests(ms: number): void {
   missTtlMs = ms
 }
 
+/** Test seam: shrink the absolute staleness ceiling so expiry is observable. */
+export function setAdminKbCredentialMaxAgeForTests(ms: number): void {
+  maxAgeMs = ms
+}
+
 /** Test seam: forget every cached answer, cadence gate and warning flag. */
 export function resetAdminKbCredentialCacheForTests(): void {
   cache.clear()
@@ -117,6 +146,7 @@ export function resetAdminKbCredentialCacheForTests(): void {
   lastRefreshAttemptAt.clear()
   ttlMs = ADMIN_KB_CREDENTIAL_TTL_MS
   missTtlMs = ADMIN_KB_CREDENTIAL_MISS_TTL_MS
+  maxAgeMs = ADMIN_KB_CREDENTIAL_MAX_AGE_MS
   warnedOnce = false
   resolveAdminUrl = () => getAdminUrl() ?? null
 }
@@ -133,7 +163,22 @@ interface AdminKbStoredPayload extends AdminKbLibraryCredential {
   fetchedAt: string
 }
 
+/**
+ * The admin mode's own credential id (review fix round v5 regression B1).
+ * The pre-fix build shared the OSS tenant slot verbatim, so the definitive-404
+ * purge (`deletePersistedCredential`) could reach a perfectly valid OSS
+ * tenant key and delete it. The `#admin` name namespace gives the two modes
+ * disjoint storage slots — the purge can now only ever touch this mode's own
+ * answer — while the payload's `source` marker keeps its old role: proof of
+ * ownership, and the migration probe for rows the pre-fix build left behind.
+ */
 function credentialId(productSpaceId: string): { type: 'kb_openviking_tenant'; name: string } {
+  return { type: 'kb_openviking_tenant', name: `${productSpaceId}#admin` }
+}
+
+/** The pre-fix shared slot; read by the migration probe, deleted only when it
+ * verifiably holds THIS mode's payload. */
+function legacySharedCredentialId(productSpaceId: string): { type: 'kb_openviking_tenant'; name: string } {
   return { type: 'kb_openviking_tenant', name: productSpaceId }
 }
 
@@ -152,13 +197,20 @@ function decodeStoredPayload(value: string): AdminKbStoredPayload | null {
   }
 }
 
-/** Reads the persisted answer off the encrypted store; `null` on any trouble. */
-async function readPersistedEntry(
-  productSpaceId: string,
+/** Reads + validates one stored payload against the trusted enterprise.
+ * `null` on any trouble — an unreadable store, a foreign marker, a different
+ * enterprise, or an answer past the ABSOLUTE staleness ceiling. That last one
+ * also drops the stored copy (a day-old key must not survive to be re-served
+ * after the next restart either): the legacy shared slot goes through the
+ * guarded delete, the admin mode's own slot through the plain one. */
+async function readStoredPayload(
+  id: { type: 'kb_openviking_tenant'; name: string },
   expectedEnterpriseId: string,
+  productSpaceId: string,
+  isLegacySlot: boolean,
 ): Promise<{ credential: AdminKbLibraryCredential; fetchedAt: number } | null> {
   try {
-    const stored = await getCredentialManager().get(credentialId(productSpaceId))
+    const stored = await getCredentialManager().get(id)
     if (!stored || typeof stored.value !== 'string') return null
     const payload = decodeStoredPayload(stored.value)
     // A payload naming a DIFFERENT enterprise is never adopted — the same
@@ -166,14 +218,124 @@ async function readPersistedEntry(
     // module answers `null` and lets the network decide.
     if (!payload || payload.enterpriseId !== expectedEnterpriseId) return null
     const stamp = Date.parse(payload.fetchedAt)
+    const fetchedAt = Number.isNaN(stamp) ? 0 : stamp
+    if (Date.now() - fetchedAt >= maxAgeMs) {
+      console.warn(
+        `[KbAdminCredential] persisted answer for space ${productSpaceId} is past its absolute lifetime; refetching`,
+      )
+      if (isLegacySlot) await guardedSharedSlotDelete(productSpaceId)
+      else await dropPersistedEntry(id, productSpaceId)
+      return null
+    }
     return {
       credential: { resourceId: payload.resourceId, apiKey: payload.apiKey, baseUrl: payload.baseUrl },
-      fetchedAt: Number.isNaN(stamp) ? 0 : stamp,
+      fetchedAt,
     }
   } catch {
     // An unreadable credential store degrades to the network path.
     return null
   }
+}
+
+/**
+ * The persisted-answer read for a cold cache: the admin mode's own slot
+ * first, then — once — the pre-fix shared slot. A legacy hit is re-homed to
+ * the new id and removed from the shared slot, so from then on the two modes
+ * own disjoint storage and the 404 purge cannot reach anyone else's key.
+ */
+async function readPersistedEntry(
+  productSpaceId: string,
+  expectedEnterpriseId: string,
+): Promise<{ credential: AdminKbLibraryCredential; fetchedAt: number } | null> {
+  const own = await readStoredPayload(credentialId(productSpaceId), expectedEnterpriseId, productSpaceId, false)
+  if (own) return own
+  const legacy = await readStoredPayload(legacySharedCredentialId(productSpaceId), expectedEnterpriseId, productSpaceId, true)
+  if (!legacy) return null
+  await migrateLegacySharedEntry(productSpaceId, legacy.fetchedAt)
+  return legacy
+}
+
+/**
+ * Re-homes a legacy shared-slot payload to the admin mode's own id. The
+ * delete from the shared slot is guarded: it must re-verify the slot still
+ * holds the `admin` payload it just read, and the guard-to-delete sequence
+ * runs under the store's exclusive lease so an interleaved OSS write (same
+ * slot, other mode) can never be deleted by this mode's migration.
+ */
+async function migrateLegacySharedEntry(productSpaceId: string, fetchedAt: number): Promise<void> {
+  const legacyId = legacySharedCredentialId(productSpaceId)
+  try {
+    const stored = await getCredentialManager().get(legacyId)
+    const payload = stored && typeof stored.value === 'string' ? decodeStoredPayload(stored.value) : null
+    if (!stored || !payload) return
+    await getCredentialManager().set(credentialId(productSpaceId), {
+      value: JSON.stringify({
+        source: 'admin' as const,
+        resourceId: payload.resourceId,
+        apiKey: payload.apiKey,
+        baseUrl: payload.baseUrl,
+        enterpriseId: payload.enterpriseId,
+        fetchedAt: new Date(fetchedAt).toISOString(),
+      }),
+    })
+    await guardedSharedSlotDelete(productSpaceId)
+  } catch (error) {
+    // Migration is best-effort: the legacy value was already served to the
+    // caller, and the next cold read retries the re-homing.
+    console.warn(`[KbAdminCredential] legacy migration failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/**
+ * Removes the pre-fix shared-slot entry — but ONLY what this mode owns. The
+ * slot is re-read and must still decode as an `admin` payload at delete time;
+ * anything else (most importantly a live OSS tenant credential, whose payload
+ * carries a different marker) is left strictly alone. The verify-and-delete
+ * pair runs under the store's exclusive lease where the backend offers one;
+ * a backend without CAS/lease support degrades to the verified delete.
+ */
+async function guardedSharedSlotDelete(productSpaceId: string): Promise<void> {
+  const legacyId = legacySharedCredentialId(productSpaceId)
+  try {
+    const stored = await getCredentialManager().get(legacyId)
+    if (!stored || typeof stored.value !== 'string') return
+    if (!decodeStoredPayload(stored.value)) return
+    // Prefer the store's atomic compare-and-swap: an interleaved overwrite
+    // (the OSS mode reusing the slot) makes the CAS fall through instead of
+    // deleting what another mode just wrote.
+    try {
+      await getCredentialManager().compareAndSwap(legacyId, { value: stored.value }, null)
+      return
+    } catch {
+      // No CAS on this backend — fall through to the lease-guarded delete.
+    }
+    try {
+      await getCredentialManager().withExclusiveLease(`kb-admin-credential::${productSpaceId}`, async () => {
+        await getCredentialManager().delete(legacyId)
+      })
+    } catch {
+      // No lease either — the re-verified delete above is the pre-fix
+      // behaviour; the shared slot is going away regardless.
+      await getCredentialManager().delete(legacyId)
+    }
+  } catch (error) {
+    console.warn(`[KbAdminCredential] shared-slot cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/** Drops one persisted entry. `forgetShared` extends the purge to the legacy
+ * shared slot — guarded, so only an admin-marked payload ever goes away. */
+async function dropPersistedEntry(
+  id: { type: 'kb_openviking_tenant'; name: string },
+  productSpaceId: string,
+  forgetShared = false,
+): Promise<void> {
+  try {
+    await getCredentialManager().delete(id)
+  } catch (error) {
+    console.warn(`[KbAdminCredential] persist delete failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (forgetShared) await guardedSharedSlotDelete(productSpaceId)
 }
 
 async function persistCredential(productSpaceId: string, entry: AdminKbCacheEntry): Promise<void> {
@@ -270,15 +432,14 @@ async function fetchAdminCredential(
  * Drops the persisted copy too. A 404 means the library is gone for this
  * member; without this, the next cold read would serve the dead key straight
  * off the encrypted store and the "404 wins over a stale answer" rule would
- * only hold until the process restarts. Best-effort: a failed delete keeps
- * the dead key around and the next 404 retries.
+ * only hold until the process restarts. The purge reaches ONLY this mode's
+ * own slot (plus — guarded — an admin-marked legacy shared entry): the
+ * pre-fix build deleted the shared tenant slot verbatim and took a live OSS
+ * credential down with it (review fix round v5 regression B1). Best-effort:
+ * a failed delete keeps the dead key around and the next 404 retries.
  */
 async function deletePersistedCredential(productSpaceId: string): Promise<void> {
-  try {
-    await getCredentialManager().delete(credentialId(productSpaceId))
-  } catch (error) {
-    console.warn(`[KbAdminCredential] persist delete failed: ${error instanceof Error ? error.message : String(error)}`)
-  }
+  await dropPersistedEntry(credentialId(productSpaceId), productSpaceId, true)
 }
 
 /**
@@ -305,24 +466,32 @@ function scheduleBackgroundRefresh(productSpaceId: string, expectedEnterpriseId:
   void fetchAdminCredential(productSpaceId, expectedEnterpriseId)
 }
 
-/**
- * The ONE admin credential lookup every KB entry rides (brief v5 §B).
- * Resolves to `null` — never throws — when the admin cannot answer, so the
- * caller falls through to the env-configured credential modes unchanged.
- *
- * Cache policy (see module doc): fresh in-memory → zero requests; TTL-expired
- * → serve stale + one cadence-bounded background refresh; expired miss → one
- * retry; cold → the persisted answer if it survives, then the network.
- */
-export async function readAdminKbCredential(
+/** The shared cache walk behind both read flavours. `awaitColdFetch` decides
+ * what a COLD read (no memory entry, no persisted answer) does: the read and
+ * admin paths wait for the network (the caller's budget is its own), the send
+ * path must not — it schedules the same single-flight fetch and answers
+ * `null` immediately, leaving the caller to its env/no-reference degradation
+ * while the answer warms up for the next round (review fix round v5
+ * regression B2). */
+async function readAdminKbCredentialInternal(
   productSpaceId: string,
   expectedEnterpriseId: string,
+  awaitColdFetch: boolean,
 ): Promise<AdminKbLibraryCredential | null> {
   const entry = cache.get(productSpaceId)
   if (entry && entry.enterpriseId !== expectedEnterpriseId) {
     // The trusted scope moved the space to another enterprise: the cached key
     // is not this enterprise's any more. Drop it — never serve it, never let
     // a background refresh pin it back.
+    cache.delete(productSpaceId)
+    lastRefreshAttemptAt.delete(productSpaceId)
+  }
+  // Absolute staleness ceiling (review fix round v5 regression B3): past
+  // `maxAgeMs` even a HELD answer stops being servable — the TTL only bounds
+  // request volume, it is no proof the admin's key still exists. The entry is
+  // dropped and the read proceeds as a cold one.
+  const held = cache.get(productSpaceId)
+  if (held?.credential && Date.now() - held.fetchedAt >= maxAgeMs) {
     cache.delete(productSpaceId)
     lastRefreshAttemptAt.delete(productSpaceId)
   }
@@ -336,7 +505,8 @@ export async function readAdminKbCredential(
   // Cold (or an expired miss): the persisted answer — if any — is served
   // immediately and refreshed in the background, so a restarted process does
   // not block its first KB call on the admin. A stamp of 0 (unparseable) simply
-  // counts as stale — the background refresh re-stamps it.
+  // counts as stale — the background refresh re-stamps it. The persisted read
+  // itself refuses anything past the absolute ceiling.
   const persisted = await readPersistedEntry(productSpaceId, expectedEnterpriseId)
   if (persisted) {
     cache.set(productSpaceId, {
@@ -347,7 +517,46 @@ export async function readAdminKbCredential(
     scheduleBackgroundRefresh(productSpaceId, expectedEnterpriseId)
     return persisted.credential
   }
+  if (!awaitColdFetch) {
+    // Send path (review fix round v5 regression B2): schedule the ONE
+    // cadence-gated fetch and answer immediately — a cold send never waits
+    // out the admin; it degrades to env / no references, and the next round
+    // finds the warmed answer.
+    scheduleBackgroundRefresh(productSpaceId, expectedEnterpriseId)
+    return null
+  }
   return fetchAdminCredential(productSpaceId, expectedEnterpriseId)
+}
+
+/**
+ * The ONE admin credential lookup every read/admin KB entry rides (brief v5
+ * §B). Resolves to `null` — never throws — when the admin cannot answer, so
+ * the caller falls through to the env-configured credential modes unchanged.
+ *
+ * Cache policy (see module doc): fresh in-memory → zero requests; TTL-expired
+ * → serve stale + one cadence-bounded background refresh; expired miss → one
+ * retry; cold → the persisted answer if it survives, then the network.
+ */
+export async function readAdminKbCredential(
+  productSpaceId: string,
+  expectedEnterpriseId: string,
+): Promise<AdminKbLibraryCredential | null> {
+  return readAdminKbCredentialInternal(productSpaceId, expectedEnterpriseId, true)
+}
+
+/**
+ * The SEND path's flavour (brief D2/D7): identical cache walk, but a cold
+ * read NEVER waits on the network — a miss answers `null` immediately (the
+ * send degrades to env / no references within its own deadline) while the
+ * single-flight fetch warms the cache for subsequent rounds. Everything the
+ * caller could already be served — fresh, stale, persisted — behaves exactly
+ * as in the read flavour.
+ */
+export async function readAdminKbCredentialCached(
+  productSpaceId: string,
+  expectedEnterpriseId: string,
+): Promise<AdminKbLibraryCredential | null> {
+  return readAdminKbCredentialInternal(productSpaceId, expectedEnterpriseId, false)
 }
 
 /**

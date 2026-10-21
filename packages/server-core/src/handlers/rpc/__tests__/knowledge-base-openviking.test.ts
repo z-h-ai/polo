@@ -50,9 +50,12 @@ import {
 } from '../../../knowledge-base/openviking-client'
 import { asciiSlug, kbTenantAccountId, kbTenantAuth, kbTenantSpaceHash, readKbTenantCredential } from '../../../knowledge-base/tenant'
 import {
+  ADMIN_KB_CREDENTIAL_MAX_AGE_MS,
   readAdminKbCredential,
+  readAdminKbCredentialCached,
   resetAdminKbCredentialCacheForTests,
   setAdminKbCredentialAdminUrlForTests,
+  setAdminKbCredentialMaxAgeForTests,
   setAdminKbCredentialTtlForTests,
 } from '../../../knowledge-base/admin-credential'
 import { FakeOpenVikingServer } from '../../../knowledge-base/__tests__/fake-openviking-server'
@@ -102,6 +105,22 @@ class FakeCredentialManager {
 
   async delete(id: { type: string; name: string }): Promise<boolean> {
     return this.entries.delete(`${id.type}:${id.name}`)
+  }
+
+  /** Mirrors the real store's cross-process compare-and-swap: a delete-via-null
+   * lands only when the entry still holds the expected value — the guard the
+   * admin-credential purge relies on (review fix round v5 regression B1). */
+  async compareAndSwap(
+    id: { type: string; name: string },
+    expected: { value: string },
+    replacement: { value: string } | null,
+  ): Promise<{ current: { value: string } | null }> {
+    const key = `${id.type}:${id.name}`
+    const current = this.entries.get(key)
+    if (current !== expected.value) return { current: current === undefined ? null : { value: current } }
+    if (replacement === null) this.entries.delete(key)
+    else this.entries.set(key, replacement.value)
+    return { current: null }
   }
 
   async getAdminTokens(): Promise<typeof this.adminTokens> {
@@ -1647,7 +1666,7 @@ describe('admin-managed per-space library (brief v5 §B)', () => {
    * OpenViking data plane — through to the real fake server.
    */
   function installFakeAdminEndpoint(
-    respond: (url: URL, authorization: string | null) => Response,
+    respond: (url: URL, authorization: string | null) => Response | Promise<Response>,
   ): AdminStub {
     const stub: AdminStub = { requests: [] }
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -1693,6 +1712,9 @@ describe('admin-managed per-space library (brief v5 §B)', () => {
     globalThis.fetch = realFetch
     adminStub = null
     resetAdminKbCredentialCacheForTests()
+    // The encrypted store is file-level too — one test's persisted answer
+    // must never warm the next one's cold read.
+    credentialManagerOverride?.clear()
   })
 
   it('serves the admin credential ahead of both env modes and roots data at the library root', async () => {
@@ -1885,9 +1907,9 @@ describe('admin-managed per-space library (brief v5 §B)', () => {
     ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
     installFakeAdminEndpoint(() => jsonResponse(200, adminCredentialPayload()))
     await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
-    // Both modes share `kb_openviking_tenant::{productSpaceId}`; the admin
-    // marker (`source: 'admin'`) is what keeps the OSS tenant read from ever
-    // adopting a cloud library key as a local tenant key.
+    // The admin payload rests under the `#admin` name namespace (review fix
+    // round v5 regression B1); the marker check below stays as the second
+    // line of defence for rows the pre-fix build left in the shared slot.
     expect(await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID)).toBeNull()
     // ...and the admin read still answers from its own marker.
     expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual({
@@ -1895,6 +1917,196 @@ describe('admin-managed per-space library (brief v5 §B)', () => {
       apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
       baseUrl: ov.baseUrl,
     })
+    expect(credentialManagerOverride!.get({ type: 'kb_openviking_tenant', name: `${SPACE_ID}#admin` })).toBeDefined()
+  })
+
+  it('an admin 404 never touches the OSS tenant credential sitting in the legacy shared slot', async () => {
+    // Regression B1: the pre-fix build persisted BOTH modes under
+    // `kb_openviking_tenant::{productSpaceId}` and the definitive-404 purge
+    // deleted that slot verbatim — taking a perfectly valid OSS tenant key
+    // down with the admin answer. The OSS payload must survive.
+    const ossCredential = {
+      accountId: 'polo-oss-tenant-account',
+      userId: 'polo-oss-user',
+      apiKey: 'ok-oss-tenant-key',
+      enterpriseId: ENTERPRISE_ID,
+      provisionedAt: new Date().toISOString(),
+    }
+    await credentialManagerOverride!.set(
+      { type: 'kb_openviking_tenant', name: SPACE_ID },
+      { value: JSON.stringify(ossCredential) },
+    )
+    installFakeAdminEndpoint(() => jsonResponse(404, { error: 'not_found' }))
+
+    // The admin read is a real miss (the legacy slot holds no admin marker,
+    // so it is not adopted) and the 404 purge runs.
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toBeNull()
+
+    // The OSS credential is untouched and still answers — the send/read
+    // fallback keeps its env-independent degradation path.
+    expect(await readKbTenantCredential(SPACE_ID, ENTERPRISE_ID)).toEqual(ossCredential)
+  })
+
+  it('migrates a pre-fix shared-slot admin payload to its own id on the first cold read', async () => {
+    // The build before the id split wrote the admin answer into the shared
+    // slot; that row must keep warming cold reads, then move out of the slot
+    // the OSS mode also uses.
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    const legacy = {
+      source: 'admin',
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+      baseUrl: ov.baseUrl,
+      enterpriseId: ENTERPRISE_ID,
+      fetchedAt: new Date().toISOString(),
+    }
+    await credentialManagerOverride!.set(
+      { type: 'kb_openviking_tenant', name: SPACE_ID },
+      { value: JSON.stringify(legacy) },
+    )
+    const stub = installFakeAdminEndpoint(() => jsonResponse(200, adminCredentialPayload()))
+
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual({
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+      baseUrl: ov.baseUrl,
+    })
+    // Adopted WITHOUT the read waiting on the network, re-homed to the
+    // `#admin` id, and gone from the shared slot. The ONE admin request is
+    // the cadence-gated background refresh any warm answer schedules (same
+    // as the restart warm-up case).
+    expect(stub.requests).toHaveLength(1)
+    const ownEntry = await credentialManagerOverride!.get({ type: 'kb_openviking_tenant', name: `${SPACE_ID}#admin` })
+    expect(ownEntry && JSON.parse(ownEntry.value)).toMatchObject({ source: 'admin', resourceId: ADMIN_LIBRARY_ACCOUNT })
+    expect(await credentialManagerOverride!.get({ type: 'kb_openviking_tenant', name: SPACE_ID })).toBeNull()
+  })
+
+  it('a definitive 404 purges the legacy shared slot too — but only an admin-marked payload', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    const legacy = {
+      source: 'admin',
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+      baseUrl: ov.baseUrl,
+      enterpriseId: ENTERPRISE_ID,
+      fetchedAt: new Date().toISOString(),
+    }
+    await credentialManagerOverride!.set(
+      { type: 'kb_openviking_tenant', name: SPACE_ID },
+      { value: JSON.stringify(legacy) },
+    )
+    installFakeAdminEndpoint(() => jsonResponse(404, { error: 'not_found' }))
+
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual({
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+      baseUrl: ov.baseUrl,
+    })
+
+    // The migrated copy's background refresh meets the 404 and purges it from
+    // BOTH slots (give the async refresh a beat to land).
+    await Bun.sleep(30)
+
+    // A restart later (cold everywhere) the stale-then-404 cycle must not
+    // leave the dead key in the SHARED slot either — while an OSS payload in
+    // that slot would have survived (the previous test).
+    resetAdminKbCredentialCacheForTests()
+    setAdminKbCredentialAdminUrlForTests(ADMIN_ORIGIN)
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toBeNull()
+    expect(await credentialManagerOverride!.get({ type: 'kb_openviking_tenant', name: SPACE_ID })).toBeNull()
+    expect(await credentialManagerOverride!.get({ type: 'kb_openviking_tenant', name: `${SPACE_ID}#admin` })).toBeNull()
+  })
+
+  it('the send path answers a cold read instantly instead of waiting out the admin', async () => {
+    // Regression B2: a cold send used to sit inside the admin's own 3s
+    // ceiling. The cached flavour must answer `null` right away (the send
+    // degrades to env / no references) while the fetch warms in the
+    // background.
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    let releaseAdmin: (() => void) | null = null
+    const gated = new Promise<Response>((resolve) => {
+      releaseAdmin = () => resolve(jsonResponse(200, adminCredentialPayload()))
+    })
+    const stub = installFakeAdminEndpoint(() => gated)
+
+    const startedAt = Date.now()
+    expect(await readAdminKbCredentialCached(SPACE_ID, ENTERPRISE_ID)).toBeNull()
+    // Nowhere near the admin timeout — the read did not wait for the answer.
+    expect(Date.now() - startedAt).toBeLessThan(1_000)
+    // ...but exactly ONE background fetch was scheduled and is in flight.
+    expect(stub.requests).toHaveLength(1)
+
+    releaseAdmin!()
+    await Bun.sleep(30)
+    // The warmed answer serves the NEXT round through the same flavour.
+    expect(await readAdminKbCredentialCached(SPACE_ID, ENTERPRISE_ID)).toEqual({
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+      baseUrl: ov.baseUrl,
+    })
+    expect(stub.requests).toHaveLength(1)
+  })
+
+  it('a persisted answer past its absolute lifetime is a miss, never a served key', async () => {
+    // Regression B3: the encrypted store survives restarts, and "survives"
+    // must not mean "serves forever" — an admin may have rotated or revoked
+    // the library key. Past the absolute ceiling the persisted answer is
+    // dropped and the admin is asked again.
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    const staleFetchedAt = new Date(Date.now() - ADMIN_KB_CREDENTIAL_MAX_AGE_MS - 60_000).toISOString()
+    await credentialManagerOverride!.set(
+      { type: 'kb_openviking_tenant', name: `${SPACE_ID}#admin` },
+      {
+        value: JSON.stringify({
+          source: 'admin',
+          resourceId: ADMIN_LIBRARY_ACCOUNT,
+          apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+          baseUrl: ov.baseUrl,
+          enterpriseId: ENTERPRISE_ID,
+          fetchedAt: staleFetchedAt,
+        }),
+      },
+    )
+    const stub = installFakeAdminEndpoint(() => jsonResponse(200, adminCredentialPayload()))
+
+    // The stale key is NOT served — the read goes to the admin instead, and
+    // the fresh answer re-homes itself with a new stamp.
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual({
+      resourceId: ADMIN_LIBRARY_ACCOUNT,
+      apiKey: ov.userKey(ADMIN_LIBRARY_ACCOUNT),
+      baseUrl: ov.baseUrl,
+    })
+    expect(stub.requests).toHaveLength(1)
+    const ownEntry = await credentialManagerOverride!.get({ type: 'kb_openviking_tenant', name: `${SPACE_ID}#admin` })
+    expect(ownEntry && JSON.parse(ownEntry.value).fetchedAt).not.toBe(staleFetchedAt)
+
+    // And a restarted process cannot resurrect the stale copy either: wiped
+    // memory + the (now fresh) persisted answer warms normally, but a wiped
+    // STORE would have nothing stale to fall back on.
+    expect(staleFetchedAt === (ownEntry && JSON.parse(ownEntry.value).fetchedAt)).toBe(false)
+  })
+
+  it('an in-memory answer past its absolute lifetime stops being served even when refreshes keep failing', async () => {
+    ov.createAccount(ADMIN_LIBRARY_ACCOUNT, 'polo-service')
+    let healthy = true
+    const stub = installFakeAdminEndpoint(() => jsonResponse(healthy ? 200 : 500, healthy
+      ? adminCredentialPayload()
+      : { error: 'admin_unavailable' }))
+    // TTL far below the absolute ceiling: the entry would serve stale forever
+    // without the ceiling.
+    setAdminKbCredentialTtlForTests(10)
+    setAdminKbCredentialMaxAgeForTests(120)
+    const first = await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)
+    expect(first?.apiKey).toBe(ov.userKey(ADMIN_LIBRARY_ACCOUNT))
+
+    healthy = false
+    await Bun.sleep(60)
+    // Past TTL but within the ceiling: the stale answer still serves.
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toEqual(first)
+    await Bun.sleep(120)
+    // Past the ceiling: the day-old answer is NOT served any more — the read
+    // goes to the (failing) admin and answers null.
+    expect(await readAdminKbCredential(SPACE_ID, ENTERPRISE_ID)).toBeNull()
   })
 })
 

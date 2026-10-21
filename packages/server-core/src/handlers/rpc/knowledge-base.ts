@@ -64,6 +64,7 @@ import {
   adminKbAuth,
   adminKbSpaceConfig,
   readAdminKbCredential,
+  readAdminKbCredentialCached,
   type AdminKbLibraryCredential,
 } from '../../knowledge-base/admin-credential'
 import {
@@ -336,7 +337,13 @@ async function ensureKbSpace(scope: KbScope): Promise<KbOpenVikingSpace> {
  */
 async function readSendKbSpace(capture: SendScopeCapture): Promise<KbOpenVikingSpace | null> {
   const config = readOpenVikingConfig()
-  const adminCredential: AdminKbLibraryCredential | null = await readAdminKbCredential(
+  // The send path rides the CACHED read flavour (review fix round v5
+  // regression B2): a cold cache never waits out the admin's own 3s ceiling —
+  // the send answers `null` right away and degrades to env / no references
+  // while the single-flight fetch warms the cache for the next round. Fresh,
+  // stale and persisted answers behave exactly as in the read path. The whole
+  // read still sits inside the send deadline race below.
+  const adminCredential: AdminKbLibraryCredential | null = await readAdminKbCredentialCached(
     capture.binding.productSpaceId,
     capture.binding.enterpriseId,
   )
