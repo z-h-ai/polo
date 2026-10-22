@@ -27,6 +27,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // window — Electron window management
   RPC_CHANNELS.window.GET_WORKSPACE,
   RPC_CHANNELS.window.GET_MODE,
+  RPC_CHANNELS.window.GET_LAUNCH_CONTEXT,
+  RPC_CHANNELS.window.REPORT_WORKBENCH_READY,
   RPC_CHANNELS.window.OPEN_WORKSPACE,
   RPC_CHANNELS.window.OPEN_SESSION_IN_NEW_WINDOW,
   RPC_CHANNELS.window.SWITCH_WORKSPACE,
@@ -131,6 +133,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // menu — local menu events
   RPC_CHANNELS.menu.NEW_CHAT,
   RPC_CHANNELS.menu.NEW_WINDOW,
+  // menu — main→renderer failure broadcast for new-window requests the main
+  // process initiated (native menu / webview shortcut); local window matter.
+  RPC_CHANNELS.menu.NEW_WINDOW_FAILED,
   RPC_CHANNELS.menu.OPEN_SETTINGS,
   RPC_CHANNELS.menu.KEYBOARD_SHORTCUTS,
   RPC_CHANNELS.menu.TOGGLE_FOCUS_MODE,

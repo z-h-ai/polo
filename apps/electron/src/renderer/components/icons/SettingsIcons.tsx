@@ -1,9 +1,8 @@
 /**
  * Settings Icons
  *
- * Shared Lucide icon mapping for settings pages. Used by both:
- * - AppMenu (logo dropdown settings submenu)
- * - SettingsNavigator (settings sidebar panel)
+ * Shared Lucide icon mapping for settings pages, consumed by the
+ * SettingsNavigator settings sidebar panel.
  */
 
 import {
@@ -36,8 +35,8 @@ export const ShortcutsIcon = ({ className }: IconProps) => <Keyboard className={
 export const PreferencesIcon = ({ className }: IconProps) => <UserCircle className={className} />
 
 /**
- * Map of settings subpage IDs to their icon components.
- * Used by both AppMenu and SettingsNavigator for consistent icons.
+ * Map of settings subpage IDs to their icon components
+ * (consistent with the Lucide names in `shared/menu-schema.ts`).
  */
 export const SETTINGS_ICONS: Record<SettingsSubpage, React.ComponentType<IconProps>> = {
   app: AppSettingsIcon,

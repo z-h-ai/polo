@@ -14,6 +14,7 @@ import type {
   UpdateInfo,
   BrowserInstanceInfo,
   DeepLinkNavigation,
+  NewWindowFailureReason,
 } from './dto'
 
 export interface BroadcastEventMap {
@@ -68,6 +69,9 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.menu.KEYBOARD_SHORTCUTS]: []
   [RPC_CHANNELS.menu.TOGGLE_FOCUS_MODE]: []
   [RPC_CHANNELS.menu.TOGGLE_SIDEBAR]: []
+  // POO-117 P117-07: a main-process-initiated new-window request failed —
+  // the focused renderer surfaces the failure so it is never a silent no-op.
+  [RPC_CHANNELS.menu.NEW_WINDOW_FAILED]: [reason: NewWindowFailureReason]
 
   // Messaging gateway broadcasts
   [RPC_CHANNELS.messaging.BINDING_CHANGED]: [workspaceId: string]

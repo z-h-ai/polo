@@ -3,7 +3,11 @@ import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbench
  * TopBar - The single global workbench bar (frozen POO-41 `.workbench-bar`
  * semantics, unified with the tab strip per the POO-70 hifi prototype).
  *
- * Layout: [traffic-light inset] [AppMenu (Polo logo dropdown)] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
+ * Layout: [traffic-light inset] [Polo brand mark (static, POO-117)] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
+ *
+ * POO-117: the logo no longer hosts a menu — the former AppMenu entries moved
+ * into the avatar dropdown (`WorkbenchAccountMenu`), and the in-app quit item
+ * was dropped. The brand mark is decorative and its corner stays drag region.
  *
  * P70-NAV-01: this bar is the ONLY top navigation — the opened app tabs, the
  * current ProductSpace identity and the account menu live here, and there is no
@@ -30,28 +34,21 @@ import { useOptionalAppShellContext } from "@/context/AppShellContext"
 import { useOptionalClientPage } from "@/context/ClientPageContext"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { useTabShell } from "@/context/TabShellContext"
-import { useOptionalTheme } from "@/context/ThemeContext"
 import { navigate, routes } from "@/lib/navigate"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
-import { useOptionalActionRegistry } from "@/actions"
-import { AppMenu } from "@/components/AppMenu"
+import { requestNewMainWindow } from "@/lib/new-window-request"
 import { getSessionTitle } from "@/utils/session"
-import {
-  ChevronRight,
-  LogOut,
-  Settings,
-  SunMoon,
-  UserRound,
-} from "lucide-react"
+import { ChevronRight, UserRound } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
-  StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
-import { ProductSpaceSwitcher, CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
+import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
+import { PoloAiSymbol } from "../icons/PoloAiSymbol"
+import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
 import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
 import poloAppIcon from "../../../../resources/icon.png"
 
@@ -78,7 +75,6 @@ export function TopBar() {
   const workbenchStyle = useClientWorkbenchStyle()
   const appShell = useOptionalAppShellContext()
   const productSpace = useOptionalProductSpaceContext()
-  const actionRegistry = useOptionalActionRegistry()
   const {
     activeTab,
     activeTabId,
@@ -89,29 +85,16 @@ export function TopBar() {
     closeTab,
     reorderTabs,
   } = useTabShell()
-  const theme = useOptionalTheme()
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
 
-  const isHome = activeTab.type === "home"
-  const showNavigation = activeTab.type === "webapp"
-  const trafficLightInset = isMac && !isWebUI ? 86 : 8
-
-  // P70-NAV-03 header hairline: the bar's bottom border responds ONLY to the
-  // current page's registered MAIN scroll container (ClientPageContext) and
-  // starts hidden. Assistant-internal scrollers never register, so opening
-  // the Polo tab can never show the hairline. Web app tabs keep the frozen
-  // POO-41 always-on border (their scroller lives inside the webview and is
-  // out of this contract's scope); the narrow-window guard below the shell
-  // replaces the whole bar, so mobile stays out of scope as well.
-  const clientPage = useOptionalClientPage()
-  const showHeaderLine = showNavigation
-    ? true
-    : (clientPage?.isHeaderLineVisible ?? false)
-
-  const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
   // POO107-01: the TopBar runtime count and its execution dialog are removed.
   // The active-execution registry itself stays — space switching (PC-F06) and
   // the App close confirmation still consume it.
+  // Payment handoff state lives HERE, not in the dropdown content: the bar is
+  // mounted for the whole app lifetime while Radix unmounts the menu on close,
+  // and both the one-handoff-at-a-time guard and the visible-scope mirror must
+  // survive close/reopen (a remount would drop delayed handoffs and re-mint
+  // tickets).
   const paymentScope = useRef(productSpace)
   useInsertionEffect(() => {
     paymentScope.current = productSpace
@@ -140,6 +123,24 @@ export function TopBar() {
     } catch { if (paymentScope.current === scope) toast.error(t("topbar.account.paymentError")) }
     finally { paymentHandoffInFlight.current = false }
   }
+
+  const isHome = activeTab.type === "home"
+  const showNavigation = activeTab.type === "webapp"
+  const trafficLightInset = isMac && !isWebUI ? 86 : 8
+
+  // P70-NAV-03 header hairline: the bar's bottom border responds ONLY to the
+  // current page's registered MAIN scroll container (ClientPageContext) and
+  // starts hidden. Assistant-internal scrollers never register, so opening
+  // the Polo tab can never show the hairline. Web app tabs keep the frozen
+  // POO-41 always-on border (their scroller lives inside the webview and is
+  // out of this contract's scope); the narrow-window guard below the shell
+  // replaces the whole bar, so mobile stays out of scope as well.
+  const clientPage = useOptionalClientPage()
+  const showHeaderLine = showNavigation
+    ? true
+    : (clientPage?.isHeaderLineVisible ?? false)
+
+  const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
 
   const unreadSessions = useMemo(() => (
     sessionMetas
@@ -176,23 +177,13 @@ export function TopBar() {
       )}
       style={{ ...workbenchStyle, height: "var(--topbar-height)", paddingLeft: trafficLightInset, paddingRight: 8 }}
     >
-      {/* === LEFT: App menu (Polo logo dropdown) ===
-          This is the cross-platform application menu (Win/Linux have no native
-          menu bar). Handlers mirror the macOS native-menu broadcast consumers:
-          App.tsx onMenuNewChat/onMenuOpenSettings/onMenuKeyboardShortcuts and
-          AppShell's toggle listeners. The bar sits above NavigationProvider,
-          so every handler routes through the global navigate() event — same
-          contract as openSessionFromNotification below. */}
-      <div className="pointer-events-auto flex flex-none items-center">
-        <AppMenu
-          onNewChat={() => navigate(routes.action.newSession())}
-          onNewWindow={() => { void window.electronAPI.menuNewWindow() }}
-          onOpenSettings={() => navigate(routes.view.settings('app'))}
-          onOpenSettingsSubpage={(subpage) => navigate(routes.view.settings(subpage))}
-          onOpenKeyboardShortcuts={() => navigate(routes.view.settings('shortcuts'))}
-          onToggleSidebar={actionRegistry ? () => actionRegistry.execute('view.toggleSidebar') : undefined}
-          onToggleFocusMode={actionRegistry ? () => actionRegistry.execute('view.toggleFocusMode') : undefined}
-        />
+      {/* === LEFT: static Polo AI brand mark (POO-117 P117-01) ===
+          The logo is decorative — no button semantics, no dropdown. Every
+          former entry now lives in the avatar menu (WorkbenchAccountMenu).
+          pointer-events-none lets the corner stay part of the titlebar drag
+          region owned by the bar container. */}
+      <div aria-hidden data-testid="topbar-brand-mark" className="pointer-events-none flex flex-none select-none items-center pl-[2px]">
+        <PoloAiSymbol className="h-4 text-accent" />
       </div>
 
       {/* === Tabs: Home tab + open web tabs === */}
@@ -351,45 +342,16 @@ export function TopBar() {
             </button>
           </DropdownMenuTrigger>
           <StyledDropdownMenuContent style={workbenchStyle} className={clientWorkbenchMenuClassName + " w-[min(294px,calc(100vw-24px))]"} align="end" minWidth="min-w-0">
-            {user && (
-              <div className="truncate px-2 py-1.5 text-[12px]">
-                <span className="font-medium text-foreground">{userLabel}</span>
-                {user.displayName && user.username ? (
-                  <span className="text-muted-foreground"> · {user.username}</span>
-                ) : null}
-              </div>
-            )}
-            {appShell && (
-              <>
-                <StyledDropdownMenuItem onClick={appShell.onOpenSettings}>
-                  <Settings className="h-3.5 w-3.5" />
-                  {t("menu.settings")}
-                </StyledDropdownMenuItem>
-                <StyledDropdownMenuSeparator />
-              </>
-            )}
-            {canOpenPayment && <StyledDropdownMenuItem data-testid="topbar-payment" onClick={() => { void openPayment() }}>
-              <Icons.Coins className="h-4 w-4" />
-              {t("topbar.account.payment")}
-            </StyledDropdownMenuItem>}
-            <ProductSpaceSwitcher />
-            {theme && (
-              <StyledDropdownMenuItem
-                onClick={() => theme.setMode(theme.resolvedMode === "dark" ? "light" : "dark")}
-              >
-                <SunMoon className="h-3.5 w-3.5" />
-                {t("topbar.account.toggleTheme")}
-              </StyledDropdownMenuItem>
-            )}
-            {user && appShell?.onAdminLogout && (
-              <>
-                <StyledDropdownMenuSeparator />
-                <StyledDropdownMenuItem onClick={() => { void appShell.onAdminLogout?.() }}>
-                  <LogOut className="h-3.5 w-3.5" />
-                  {t("topbar.account.logout")}
-                </StyledDropdownMenuItem>
-              </>
-            )}
+            {/* POO-117 P117-02/P117-03: the single workbench menu — account
+                entries plus the migrated app menu, in one place. The bar sits
+                above NavigationProvider, so new chat routes through the global
+                navigate() event (same contract as openSessionFromNotification). */}
+            <WorkbenchAccountMenu
+              onNewChat={() => navigate(routes.action.newSession())}
+              onNewWindow={() => { void requestNewMainWindow() }}
+              canOpenPayment={canOpenPayment ?? undefined}
+              onOpenPayment={() => { void openPayment() }}
+            />
           </StyledDropdownMenuContent>
         </DropdownMenu>
       </div>

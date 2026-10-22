@@ -109,6 +109,8 @@ import { resolveEntityColor } from "@polo-ai/shared/colors"
 import * as storage from "@/lib/local-storage"
 import { toast } from "sonner"
 import { navigate, routes } from "@/lib/navigate"
+import { requestNewMainWindow } from "@/lib/new-window-request"
+import { useAssistantViewActions } from '@/hooks/useAssistantViewActions'
 import {
   useNavigation,
   useNavigationState,
@@ -1131,11 +1133,8 @@ function AppShellContent({
     setIsSidebarVisible(v => !v)
   }, [isSidebarAndNavigatorHidden])
 
-  // Sidebar toggle (CMD+B)
-  useAction('view.toggleSidebar', handleToggleSidebar)
-
-  // Focus mode toggle (CMD+.) - hides both sidebars
-  useAction('view.toggleFocusMode', () => setIsSidebarAndNavigatorHidden(v => !v))
+  const handleToggleFocusMode = useCallback(() => setIsSidebarAndNavigatorHidden(v => !v), [])
+  useAssistantViewActions(handleToggleSidebar, handleToggleFocusMode)
 
   // Panel focus navigation (CMD+SHIFT+[ / ])
   const focusNextPanel = useSetAtom(focusNextPanelAtom)
@@ -1153,8 +1152,9 @@ function AppShellContent({
   // Keyboard shortcuts
   useAction('app.keyboardShortcuts', onOpenKeyboardShortcuts)
 
-  // New window
-  useAction('app.newWindow', () => window.electronAPI.menuNewWindow())
+  // New window — POO-117: shared helper owns the in-flight guard and the
+  // failure toast, same outcome as the avatar-menu entry.
+  useAction('app.newWindow', () => { void requestNewMainWindow() })
 
   // Quit (note: also handled by native menu on macOS)
   useAction('app.quit', () => window.electronAPI.menuQuit())
@@ -1659,22 +1659,6 @@ function AppShellContent({
     storage.set(storage.KEYS.focusModeEnabled, isSidebarAndNavigatorHidden)
   }, [isSidebarAndNavigatorHidden])
 
-  // Listen for focus mode toggle from menu (View → Focus Mode)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onMenuToggleFocusMode?.(() => {
-      setIsSidebarAndNavigatorHidden(v => !v)
-    })
-    return cleanup
-  }, [])
-
-  // Listen for sidebar toggle from menu (View → Toggle Sidebar)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onMenuToggleSidebar?.(() => {
-      handleToggleSidebar()
-    })
-    return cleanup
-  }, [handleToggleSidebar])
-
   // Persist per-view filter map to localStorage (workspace-scoped)
   React.useEffect(() => {
     if (!activeWorkspaceId) return
@@ -1902,7 +1886,12 @@ function AppShellContent({
 
   // Create a new chat and select it
   const handleNewChat = useCallback((newPanel: boolean = false) => {
-    if (!activeWorkspace) return
+    if (!activeWorkspace) {
+      // POO-117 P117-06: the scope is not ready (e.g. mid space switch) — the
+      // request must not die silently, the user is told to wait and retry.
+      toast.error(t('toast.newChatNotReady'))
+      return
+    }
 
     // Exit search mode and switch to All Sessions
     setSearchActive(false)
@@ -1916,7 +1905,7 @@ function AppShellContent({
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, navigate])
+  }, [activeWorkspace, focusZone, navigate, t])
 
   // Create a brand new dedicated browser window and focus it.
   // Intentionally unbound: this action should always create a NEW window.

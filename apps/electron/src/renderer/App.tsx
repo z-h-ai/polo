@@ -80,6 +80,7 @@ import { getFileManagerName } from '@/lib/platform'
 import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
+import { newWindowFailureMessage } from '@/lib/new-window-request'
 import { TabShellProvider } from '@/context/TabShellContext'
 import { TabShell } from '@/components/tab-browser/TabShell'
 import {
@@ -1051,7 +1052,9 @@ export default function App() {
     }
 
     try {
-      const next = await bootstrapProductSpace(accountId)
+      const launchContext = await window.electronAPI.getWindowLaunchContext?.() ?? null
+      if (!isCurrent() || currentAdminUserIdRef.current !== accountId) return
+      const next = await bootstrapProductSpace(accountId, launchContext)
       if (!isCurrent() || currentAdminUserIdRef.current !== accountId || next === null) return
       if (next === 'ready') {
         continueAfterProductSpace(workspaceId)
@@ -1855,10 +1858,17 @@ export default function App() {
     const unsubShortcuts = window.electronAPI.onMenuKeyboardShortcuts(() => {
       navigate(routes.view.settings('shortcuts'))
     })
+    // POO-117 P117-07: new-window requests initiated in the main process
+    // (native menu, webview shortcut) have no renderer caller to await —
+    // failures are pushed here so they are never a silent no-op.
+    const unsubNewWindowFailed = window.electronAPI.onMenuNewWindowFailed((reason) => {
+      toast.error(newWindowFailureMessage(reason))
+    })
     return () => {
       unsubNewChat()
       unsubSettings()
       unsubShortcuts()
+      unsubNewWindowFailed()
     }
   }, [])
 

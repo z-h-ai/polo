@@ -20,8 +20,10 @@ if (typeof window === 'undefined') {
 }
 setupI18n()
 
-// Context mocks mirror TopBar.product-space-menu.isolated.ts.
-mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => ({ resolvedMode: 'light', setMode: () => {} }) }))
+// Context mocks mirror TopBar.product-space-menu.isolated.ts. ThemeContext is
+// mocked before any importer loads: its module body uses Vite's
+// import.meta.glob, which does not exist under bun test.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
 mock.module('@/atoms/sessions', () => ({ sessionMetaMapAtom: {} }))
 mock.module('jotai', () => ({ useAtomValue: () => new Map() }))
 mock.module('@/context/AppShellContext', () => ({ useOptionalAppShellContext: () => null }))
@@ -31,98 +33,78 @@ mock.module('@/context/TabShellContext', () => ({ useTabShell: () => ({
   activateTab: () => {}, closeTab: () => {}, reorderTabs: () => {},
 }) }))
 
-// Capture the props TopBar hands to AppMenu; the component itself has its own
-// coverage via the playground and this test only asserts the TopBar wiring.
-let appMenuProps: import('@/components/AppMenu').AppMenuProps | null = null
-mock.module('@/components/AppMenu', () => ({
-  AppMenu: (props: import('@/components/AppMenu').AppMenuProps) => {
-    appMenuProps = props
-    return createElement('div', { 'data-testid': 'topbar-app-menu' })
-  },
-}))
-
 // navigate() dispatches a window event; record calls instead. The real routes
 // table stays intact so assertions use production route strings.
 const navigateMock = mock(() => {})
 const { routes } = await import('../../../../shared/routes')
 mock.module('@/lib/navigate', () => ({ navigate: navigateMock, routes, NAVIGATE_EVENT: 'polo-ai-navigate' }))
 
-const menuNewWindow = mock(async () => {})
+// Capture the props TopBar hands to the avatar menu; WorkbenchAccountMenu has
+// its own coverage (menu-schema-driven rendering) and this file only asserts
+// the TopBar wiring — POO-117 moved the app menu into this one component.
+let accountMenuProps: { onNewChat: () => void; onNewWindow: () => void } | null = null
+mock.module('@/components/app-menu/WorkbenchAccountMenu', () => ({
+  WorkbenchAccountMenu: (props: { onNewChat: () => void; onNewWindow: () => void }) => {
+    accountMenuProps = props
+    return createElement('div', { 'data-testid': 'topbar-account-menu' })
+  },
+}))
+
+const menuNewWindow = mock(async () => ({ ok: true, diagnostics: {
+  source: 'renderer', workspaceId: null, workspaceResolved: false, created: false, visible: true,
+} }))
 Object.defineProperty(window, 'electronAPI', { configurable: true, value: { menuNewWindow } })
 
 const { render, screen, cleanup } = await import('@testing-library/react')
-const { ActionRegistryProvider, useAction } = await import('@/actions')
+const userEvent = (await import('@testing-library/user-event')).default
 const { TopBar } = await import('../TopBar')
 
-const toggleSidebarSpy = mock(() => {})
-const toggleFocusModeSpy = mock(() => {})
-
-/** Registers action handlers the way AppShell does in production. */
-function ActionProbe() {
-  useAction('view.toggleSidebar', toggleSidebarSpy)
-  useAction('view.toggleFocusMode', toggleFocusModeSpy)
-  return null
+function tree() {
+  return createElement(I18nextProvider, { i18n }, createElement(TopBar))
 }
 
-function tree() {
-  return createElement(
-    I18nextProvider,
-    { i18n },
-    createElement(ActionRegistryProvider, null,
-      createElement(ActionProbe),
-      createElement(TopBar),
-    ),
-  )
+/** Radix mounts dropdown content on open — the avatar menu needs a click. */
+async function openAccountMenu() {
+  render(tree())
+  await userEvent.setup().click(screen.getByTestId('topbar-account'))
+  await screen.findByTestId('topbar-account-menu')
 }
 
 afterEach(() => {
   cleanup()
   navigateMock.mockClear()
   menuNewWindow.mockClear()
-  toggleSidebarSpy.mockClear()
-  toggleFocusModeSpy.mockClear()
 })
 
-describe('TopBar mounts the AppMenu (cross-platform application menu)', () => {
-  it('renders AppMenu in the left brand slot', () => {
+describe('TopBar brand slot and avatar menu (POO-117)', () => {
+  it('renders the logo as a static decorative mark — no menu, no button semantics', () => {
     render(tree())
-    expect(screen.getByTestId('topbar-app-menu')).toBeTruthy()
+    const mark = screen.getByTestId('topbar-brand-mark')
+    expect(mark.getAttribute('aria-hidden')).toBe('true')
+    // The dropdown trigger of the former AppMenu is gone.
+    expect(screen.queryByTestId('topbar-app-menu')).toBeNull()
+    // The mark must not host interactive elements (buttons keep focus/Enter
+    // semantics that a decorative brand mark must not have).
+    expect(mark.querySelector('button')).toBeNull()
   })
 
-  it('wires menu handlers to the same routes the macOS native-menu broadcasts use', () => {
-    render(tree())
-    expect(appMenuProps).toBeTruthy()
+  it('mounts WorkbenchAccountMenu inside the avatar dropdown', async () => {
+    await openAccountMenu()
+    expect(accountMenuProps).toBeTruthy()
+  })
 
-    // App.tsx onMenuNewChat -> AppShell handleNewChat -> navigate(newSession).
-    appMenuProps!.onNewChat!()
+  it('wires newChat to the same global navigate event the assistant tab surfaces on', async () => {
+    await openAccountMenu()
+    accountMenuProps!.onNewChat()
     expect(navigateMock).toHaveBeenCalledWith(routes.action.newSession())
-
-    // App.tsx handleOpenSettings → Polo-scope settings, app category.
-    appMenuProps!.onOpenSettings!()
-    expect(navigateMock).toHaveBeenCalledWith(routes.view.settings('app'))
-
-    // App.tsx onMenuKeyboardShortcuts.
-    appMenuProps!.onOpenKeyboardShortcuts!()
-    expect(navigateMock).toHaveBeenCalledWith(routes.view.settings('shortcuts'))
-
-    // Settings submenu items navigate to their subpage.
-    appMenuProps!.onOpenSettingsSubpage!('appearance')
-    expect(navigateMock).toHaveBeenCalledWith(routes.view.settings('appearance'))
   })
 
-  it('wires newWindow to the menuNewWindow RPC (AppShell app.newWindow parity)', () => {
-    render(tree())
-    appMenuProps!.onNewWindow!()
+  it('wires newWindow to the outcome-checked menuNewWindow RPC', async () => {
+    await openAccountMenu()
+    accountMenuProps!.onNewWindow()
+    // The handler is async (fire-and-forget); the RPC call itself is sync.
     expect(menuNewWindow).toHaveBeenCalledTimes(1)
-  })
-
-  it('wires view toggles through the action registry handlers AppShell registers', () => {
-    render(tree())
-    appMenuProps!.onToggleSidebar!()
-    expect(toggleSidebarSpy).toHaveBeenCalledTimes(1)
-    appMenuProps!.onToggleFocusMode!()
-    expect(toggleFocusModeSpy).toHaveBeenCalledTimes(1)
-    // Toggle dispatches the action, not a navigation.
-    expect(navigateMock).not.toHaveBeenCalled()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(menuNewWindow).toHaveBeenCalledTimes(1)
   })
 })

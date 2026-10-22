@@ -22,11 +22,13 @@ mock.module('@/context/TabShellContext', () => ({ useTabShell: () => ({
   activeTab: { type: 'home' }, activeTabId: 'home', openTabs: [], activateHome: () => {},
   activateTab: () => {}, closeTab: () => {}, reorderTabs: () => {},
 }) }))
-// The AppMenu (Polo logo dropdown) has its own coverage in
-// TopBar.app-menu.isolated.ts; stub it here so this file stays focused on the
-// account menu and does not need the action registry provider.
-mock.module('@/components/AppMenu', () => ({
-  AppMenu: () => createElement('div', { 'data-testid': 'topbar-app-menu' }),
+// POO-117: the account menu is the real WorkbenchAccountMenu (the payment and
+// ProductSpace entries under test now live inside it). Hotkey labels come from
+// the action registry, which needs the App-level provider this reduced tree
+// omits — stub the reads instead of growing the fixture.
+mock.module('@/actions', () => ({
+  useActionLabel: () => ({ label: '', hotkey: null }),
+  useOptionalActionRegistry: () => null,
 }))
 const { render, screen, cleanup, waitFor } = await import('@testing-library/react')
 const userEvent = (await import('@testing-library/user-event')).default
@@ -48,6 +50,7 @@ function tree(active: ProductSpaceSummary, productSpaces = [personal, enterprise
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: {
     productSpaceListActiveExecutions: async () => ({ success: true, executions: [] }),
     adminPaymentHandoff: paymentHandoff, openUrl: openPaymentUrl,
+    isDebugMode: async () => false,
   } })
   return createElement(I18nextProvider, { i18n }, createElement(ProductSpaceProvider, {
     children: createElement(TopBar),

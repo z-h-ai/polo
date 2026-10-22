@@ -9,6 +9,8 @@ import { isUsableGitBashPath, validateGitBashPath } from '@polo-ai/server-core/s
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
+import { createMainWindowWithOutcome } from '../new-window-launch'
+import { mainLog } from '../logger'
 import { describeDeepLinkForLog } from '../deep-link-log'
 import { captureCircleReturnAccountView, getCircleReturnCandidateStore } from '../circle-return-candidate-store'
 import {
@@ -49,6 +51,8 @@ export const GUI_HANDLED_CHANNELS = [
   RPC_CHANNELS.notification.SET_ENABLED,
   RPC_CHANNELS.menu.QUIT,
   RPC_CHANNELS.menu.NEW_WINDOW,
+  RPC_CHANNELS.window.GET_LAUNCH_CONTEXT,
+  RPC_CHANNELS.window.REPORT_WORKBENCH_READY,
   RPC_CHANNELS.menu.MINIMIZE,
   RPC_CHANNELS.menu.MAXIMIZE,
   RPC_CHANNELS.menu.ZOOM_IN,
@@ -315,13 +319,16 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
     deps.platform.quit?.()
   })
 
+  // POO-117 P117-05/P117-07: the request reports an observable outcome instead
+  // of silently returning when the window manager or the caller's workspace
+  // mapping is missing — the renderer surfaces failures to the user.
   server.handle(RPC_CHANNELS.menu.NEW_WINDOW, async (ctx) => {
-    if (!windowManager) return
-    const workspaceId = ctx.workspaceId ?? windowManager.getWorkspaceForWindow(ctx.webContentsId!)
-    if (workspaceId) {
-      windowManager.createWindow({ workspaceId })
-    }
+    if (windowManager) return windowManager.createNewMainWindow(ctx.webContentsId ?? -1, 'renderer')
+    return createMainWindowWithOutcome({ createWindow: null, waitForWorkbenchReady: async () => false, log: mainLog }, { source: 'renderer' })
   })
+
+  server.handle(RPC_CHANNELS.window.GET_LAUNCH_CONTEXT, ctx => windowManager?.getWindowLaunchContext(ctx.webContentsId ?? -1) ?? null)
+  server.handle(RPC_CHANNELS.window.REPORT_WORKBENCH_READY, (ctx, context) => windowManager?.reportWorkbenchReady(ctx.webContentsId ?? -1, context) ?? false)
 
   server.handle(RPC_CHANNELS.menu.MINIMIZE, async (ctx) => {
     if (!windowManager) return
