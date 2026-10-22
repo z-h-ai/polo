@@ -159,6 +159,15 @@ const electronApiExplicit: Record<string, unknown> = {
   adminLogin: mock(async () => { authenticated = true; return { success: true, user: FIXTURE_USER } }),
   adminVerifyPhoneAuthCode: mock(async () => { authenticated = true; return { success: true, user: FIXTURE_USER, isNewUser: true } }),
   productSpaceRevokeActiveContext: async () => ({ success: true }),
+  // ClientHomeRouter mounts useCircleReturn; its B1 bridge probe reads these
+  // properties off window.electronAPI. Declare the slice so the fail-fast
+  // proxy does not treat the probe itself as unfixed production access.
+  circleReturn: {
+    getPending: async () => ({ status: 'none' }) as const,
+    ack: async () => ({ status: 'not_found' }) as const,
+    cancel: async () => ({ status: 'cancelled' }) as const,
+  },
+  onCircleReturnCandidate: () => UNSUBSCRIBE,
   adminLogout: async () => { authenticated = false; return { success: true } },
   clearClaudeOAuthState: async () => {},
   onAdminReauthRequired: (listener: (value: unknown) => void) => { reauthListener = listener; return () => { reauthListener = undefined } },
