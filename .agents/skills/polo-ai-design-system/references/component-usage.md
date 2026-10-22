@@ -1,6 +1,6 @@
 # Polo 组件素材使用索引（可再生展示与生产落点）
 
-版本：`poo105-client-material-r2-20261021`。本文是 Skill 的维护源（登记于 `references/design-system.json` sources），由 `docs/mvp-complete-flow-hifi/tools/check_design_system.py` 校验其与 playground 注册的一致性。
+版本：`native-materials-r3-20261022`。本文是 Skill 的维护源（登记于 `references/design-system.json` sources），由 `docs/mvp-complete-flow-hifi/tools/check_design_system.py` 校验其与 playground 注册的一致性。
 
 ## 定位与边界
 
@@ -29,7 +29,7 @@
 | 圈子列表 | `circles-list`（付费+免费两条样例） | `circles/MyCirclesPage.tsx` + `MemberCircleRow.tsx` |
 | 圈子详情 | `circle-detail-content` / `circle-detail-updates` / `circle-detail-subscription`（可读订阅周期+续费预览契约） | `circles/CircleDetailPage.tsx` + `CircleSubscriptionPanel.tsx` |
 | 助手 | `chat-input-container` / `chat-turn-card` / `chat-turn-card-tasks`（整体复用 playground chat 注册的 wrapper/mockData 协议） | `playground/registry/chat.tsx` 消费的 InputContainer/TurnCard 生产组件 |
-| 设置 | `settings-app` / `settings-account-security` / `settings-appearance` / `settings-input` / `settings-workspace` / `settings-permissions` / `settings-labels` / `settings-messaging` / `settings-server` / `settings-shortcuts` / `settings-preferences`（由 `SETTINGS_PAGE_COMPONENTS` 注册表自动遍历，注册表增页自动进基线） | `pages/settings/settings-pages.ts` + `pages/settings/*.tsx`（注册表 11 个子页） |
+| 设置 | `settings-<注册表 key>`；完整集合见 baseline-manifest.json，另有账号安全未登录态 | `pages/settings/settings-pages.ts` + `pages/settings/*.tsx`（注册表自动遍历，不手抄场景目录） |
 
 Settings 分类注册（`registry/settings.tsx`，与本文联动校验；id 集合必须与下面列表一致）：
 
@@ -50,7 +50,7 @@ Settings 分类注册（`registry/settings.tsx`，与本文联动校验；id 集
 
 ## 生产组件消费
 
-- 设置页组件：`@/components/settings`（导出面 `apps/electron/src/renderer/components/settings/index.ts`）；页面消费方 `apps/electron/src/renderer/pages/settings/*`（`settings-pages.ts` 注册表 11 个子页，自动保存 500ms debounce）。
+- 设置页组件：`@/components/settings`（导出面 `apps/electron/src/renderer/components/settings/index.ts`）；页面消费方 `apps/electron/src/renderer/pages/settings/*`（`settings-pages.ts` 注册表子页，当前集合以源码和生成 manifest 为准，自动保存 500ms debounce）。
 - 应用侧原子基元：`apps/electron/src/renderer/components/ui/`（button/badge/input/switch/dialog/popover/select/dropdown-menu/table/avatar/empty 等 shadcn 式基元 + DataTable/EntityList 等复合件）。
 - 共享技术组件库：`@polo-ai/ui`（`packages/ui/src/index.ts`，约 108 个导出：Spinner、Tooltip、Drawer、TurnCard 体系、Markdown/overlay/code-viewer 等）。
 - 工作台样式桥梁（产品面 skill token → renderer）：
@@ -78,7 +78,9 @@ Settings 分类注册（`registry/settings.tsx`，与本文联动校验；id 集
 
 ## 新增/更新组件展示的规则
 
-1. 生产组件变更不需要改本文；playground 直接 import，展示自动跟随。
+1. 生产组件变更无需复制实现；playground 直接 import。离线画廊必须重新运行 `tools/source-baseline/build.py` 并 `--check`，导出不会自动更新。
 2. 新增 Settings 分类条目：加进 `registry/settings.tsx` 并同步更新本文「Settings 分类注册」id 列表（检查器强制一致）。
 3. 新分类条目（非 Settings）：在 `registry/index.ts` 注册并在 `registry/types.ts` 的 `Category` 与 `categoryOrder` 登记；本文只需在「相邻可参考」提一句。
 4. 禁止把生产组件实现复制进 Skill assets 或任何展示 HTML。
+
+原生候选继续 import 原模块；任务内叶子副本的 alias、providers、fixture 和导出命令见 [native-reuse.md](native-reuse.md)。样式来源/预览见 [style-usage.md](style-usage.md)。

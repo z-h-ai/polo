@@ -5,7 +5,7 @@ description: Apply the polo-ai repository design system within its declared plat
 
 # polo-ai Design System
 
-Adoption revision: `poo105-client-material-r2-20261021`. Mode: `extracted`.
+Adoption revision: `native-materials-r3-20261022`. Mode: `extracted`.
 
 ## Applicability
 
@@ -15,6 +15,19 @@ Adoption revision: `poo105-client-material-r2-20261021`. Mode: `extracted`.
 - Modules: 登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉
 
 If repository identity or path scope does not match, do not apply this Skill. Read [the bound design model](references/design-system.json) and verify its sources before high-fidelity work.
+
+## Start a new requirement
+
+Read the [native reuse guide](<references/native-reuse.md>) for applicability, coverage and gaps. Find a matching page or region first, then actual components, then variables. Follow existing repository routing; this is the single project design Skill entry.
+Implementation reuse coverage can extend beyond confirmed design scope. Distinguish current implementation, confirmed design, task candidate and version-labelled history. Preserve the selected theme, providers, CSS cascade and assets; do not mix style systems.
+
+- [Page / region baselines](<references/page-baselines.md>) — coverage/gaps, applicability, browsing entry, editable native source, reuse and regeneration/check commands.
+- [Real components and variants](<references/component-usage.md>) — coverage/gaps, applicability, browsing entry, editable native source, reuse and regeneration/check commands.
+- [Variables and style preview](<references/style-usage.md>) — coverage/gaps, applicability, browsing entry, editable native source, reuse and regeneration/check commands.
+
+Create an editable task-local candidate from the native scene/composition using the guide and existing project tools. Keep layout, imports, providers, styles, assets and fixtures; implement only the requirement delta. Generated HTML is an export. Production edits are a separate authorized implementation step.
+A Placeholder is allowed only for an unchanged region that cannot be reproduced. Name its source and gap. Never hide the requested change, required entry/back path or resulting state behind a Placeholder.
+Source-binding checks establish source consistency only. When actual material inputs change, reconcile their semantic impact, regenerate affected material with its native tool, and check real inputs, outputs and reproduction separately. Never refresh hashes to disguise an old export. Browser fidelity and independent consumption require their own evidence.
 
 ## Sources
 
@@ -30,21 +43,23 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 - `.agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `a5de1ede777f48032a3d945983bd987c28e42a6cd1f2efd5852e1f8c35a7ab73`
 - `.agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `dda528141636c0253fe70afaeeb23a9919aa8264e562d63235c77316a6248de7`
 - `.agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `b26fcc98fb62dc2d9ee91ddbed21a5bd83a23f830b9acea9028a40f747934808`
-- `.agents/skills/polo-ai-design-system/references/usage-playbook.md` — authority; 新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑; SHA-256 `47cd6163d373d8474c2b869268dccd415447bba15ecfce1fddfbb7dda0809d5b`
-- `.agents/skills/polo-ai-design-system/references/page-baselines.md` — authority; 页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出; SHA-256 `37f64e5b0d7c768d30cdbb65c754a8b778ddbfbc2fc9872c77dac40d1592ce7b`
-- `.agents/skills/polo-ai-design-system/references/component-usage.md` — authority; 组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界; SHA-256 `f9603d0b71bb0705e06f8a2aec848d56d34c49f8263d56bf96f69a7a56ed23ac`
+- `.agents/skills/polo-ai-design-system/references/usage-playbook.md` — authority; 新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑; SHA-256 `09d515b56869e00eac76a45dee328b5d26dc59c73ccba7cd1ea160e653ffaf5a`
+- `.agents/skills/polo-ai-design-system/references/page-baselines.md` — authority; 页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出; SHA-256 `313d85c22643c772f0abbcd74f10ddaba374a631b5471605f456390912974027`
+- `.agents/skills/polo-ai-design-system/references/component-usage.md` — authority; 组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界; SHA-256 `e542cd359b48193857fdf97d6bec0ba0d94902aa3b5e78c9e4a7059590ee6553`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.config.mjs` — implementation; 当前实现基线生成器：vite 配置（alias @→renderer 源码，单文件内联，模块图与 watch 文件收集入输入指纹，确定性构建无时间戳）; SHA-256 `8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.scene-ids.config.mjs` — implementation; 场景清单 SSR 提取构建（ssr noExternal 全打包，单 cjs 输出）; SHA-256 `eff52dc6b1854c66cddd6242ad42735092cece0c77a2b197b160caf5e6b03252`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/scene-ids-runner.cjs` — implementation; happy-dom 下执行场景清单 SSR bundle，stdout 输出 JSON 行（只求值模块作用域，不渲染组件）; SHA-256 `4af8277faaf90e266f9a5051f5379d8abde722fb0f9c187f598fd969de9f2975`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/tsconfig.json` — implementation; 基线入口真实类型检查配置（继承 apps/electron tsconfig，检查器强制跑通）; SHA-256 `fe55756c85d43c98d8776a79b18188dc89dbe873ebf6eb9b5e79ffc8b3f6e0e4`
-- `.agents/skills/polo-ai-design-system/tools/source-baseline/build.py` — implementation; 基线落位生成器：tsc→vite SSR 场景提取→浏览器单文件打包→落位 assets/source-baseline→manifest+统一入口；--out 保护非拥有目录；--check 校验真实输入指纹与输出逐字节再生; SHA-256 `d9d87d3c601a5dd55c81ce813c2d21115ba27c9cec7246d2e923e9813603c8ae`
+- `.agents/skills/polo-ai-design-system/tools/source-baseline/build.py` — implementation; 基线落位生成器：tsc→vite SSR 场景提取→浏览器单文件打包→落位 assets/source-baseline→manifest+统一入口；--out 保护非拥有目录；--check 校验真实输入指纹与输出逐字节再生; SHA-256 `aa3f8aeeb445244037df2da327bba32ac21323082de2c7096ae3916515837f36`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx` — implementation; 基线入口：Provider 栈+材质作用域+场景路由（?scene/#scene/pure），导出运行时场景 ID 清单供再生核对; SHA-256 `6033e00e1aa89a0e267b84b2df2e8a73117827d0db4bea703e32e149ae81b855`
-- `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx` — implementation; 基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置 11 子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致; SHA-256 `958a39ebee44cc66a3c674c69d0eaf5cdad27279c338e66d22ffc2d4d42b36ed`
+- `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx` — implementation; 基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致; SHA-256 `958a39ebee44cc66a3c674c69d0eaf5cdad27279c338e66d22ffc2d4d42b36ed`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx` — implementation; 第二层组件画廊：三组生产组件卡复用 playground 注册渲染协议，真实变体切换+生产落点索引；布局 guard 只抑制自动聚焦滚动，用户滚动立即接管; SHA-256 `3973d12d5b6356c1c3f7c3adcd3aaf805f7351dde4a1e0dbb098b0e4d5c3e227`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/scene-ids.ts` — implementation; 场景清单提取入口：求值真实场景注册表模块并输出 ID/region/fullBleed JSON; SHA-256 `95ce8fbb7474bdb0fc408c7cc23ab6dd710f24374d794f896dea824e2b477b9f`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/fixtures.tsx` — implementation; 受控 fixture：真实类型 satisfies+zod parse，只替换后端数据（正常态默认，写接口仅内存完成，不存任何 secret）; SHA-256 `d5c4761835f8a6a48425169e27abf2a50c518feabd6ecfbb8070705a40c4ee07`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css` — implementation; 基线浏览壳样式：@import renderer index.css + 本目录入口/场景/画廊的 Tailwind @source 扫描声明 + 仅基线文档的滚动覆盖; SHA-256 `3f708acb93832bbb1340748efaa4ae032b0eff163282f5e8c1c6ffb7e16e1cf6`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.html` — implementation; 基线 HTML 入口; SHA-256 `262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc`
+- `.agents/skills/polo-ai-design-system/references/native-reuse.md` — implementation; 当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口; SHA-256 `2889ecb9f1564c36a58bdf8420aad1467708630549e4e473e5bbfb1d5acb01d3`
+- `.agents/skills/polo-ai-design-system/references/style-usage.md` — implementation; 工作台与renderer样式体系、变量预览、原生消费和再生方法; SHA-256 `95e746851c5437f9d3495c40d41c3e1f86c4f579463b8c97c28e875cc2987958`
 
 ## Reuse
 
@@ -79,10 +94,11 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 
 ## Prototype guidance
 
+- 新需求先读 references/native-reuse.md：原生入口、任务内叶子副本/组合、providers与CSS扫描、独立依赖、真实预览和导出命令；assets是生成物，不手改、不静默改生产。
 - 先读 references/foundations.md，产品行为读Spec；当前实现基线直接打开 assets/source-baseline/index.html（file:// 可开；场景直达 entries/baseline.html?scene=<ID>）；目标设计仍消费 docs/mvp-complete-flow-hifi/prototype.html 与主manifest，逐卡按scene定位，与当前基线分开使用。
 - 实施流程按 references/usage-playbook.md：核实基线版本与范围→定位页面/区域→选择组件→消费变量→只修改必要区域→浏览器核验；新需求优先复用 Skill 内当前页面/区域基线，再真实组件，最后 token；旧目标设计按已确认范围另列，不覆盖当前实现基线。
-- 当前实现基线（assets/source-baseline/）是 tools/source-baseline/build.py 的生成产物，不独立手改；含第二层组件画廊（components-gallery，三组生产组件卡与变体）与第三层页面/区域场景目录，场景清单以 assets/source-baseline/baseline-manifest.json 为准；当前性由 build.py --check 按真实输入指纹与输出逐字节再生判定，--out 只写入该工具自有目录。
-- 页面/区域基线与覆盖缺口索引读 references/page-baselines.md；无法复现的区域标 Placeholder 并绑定真实代码路径，不得用历史画廊或快照冒充高保真；场景数量不是还原证明。
+- 当前实现基线（assets/source-baseline/）是 tools/source-baseline/build.py 的生成产物，不独立手改；含第二层组件画廊（components-gallery，三组生产组件卡与变体）与页面/区域场景目录，场景清单以 assets/source-baseline/baseline-manifest.json 为准；当前性由 build.py --check 按真实输入指纹与输出逐字节再生判定，--out 只写入该工具自有目录。
+- 页面/区域基线与覆盖缺口索引读 references/page-baselines.md；仅未修改且无法复现区域可标 Placeholder；需求区及必需入口/返回/结果须完整原生复用，不得用历史画廊或快照冒充高保真；场景数量不是还原证明。
 - 组件消费与可再生展示读 references/component-usage.md；第二层组件画廊离线浏览生产组件卡与变体（渲染协议与 playground 注册同源），playground（bun run electron:dev 后 :5173/playground.html）为完整交互调参台；assets/components/*.js 是原型行为脚本不是组件库。
 - 设计变量浏览 assets/tokens/token-preview.html（由 tools/build-token-preview.py 从两份权威 token CSS 确定性生成，禁手改）；产品面 hex 与 renderer oklch 两套 token 体系不可混用。
 - 最新原型是目标呈现；已确认风格/入口/文案与待复看整页布局分别记录。
@@ -98,7 +114,7 @@ If repository identity or path scope does not match, do not apply this Skill. Re
 - `python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py`
 - `env VITE_BIN="$PWD/node_modules/.bin/vite" POLO_ELECTRON_ROOT="$PWD" python3 docs/mvp-complete-flow-hifi/tools/build_review.py`
 - `POLO_REVIEW_EVIDENCE=/tmp/poo70-design-structure python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py`
-- `python3 docs/mvp-complete-flow-hifi/tools/check_navigation_header.py`
+- `POLO_REVIEW_EVIDENCE="$(mktemp -d /tmp/polo-navigation.XXXXXX)" python3 docs/mvp-complete-flow-hifi/tools/check_navigation_header.py`
 - `python3 .agents/skills/polo-ai-design-system/tools/build-token-preview.py`
 - `python3 .agents/skills/polo-ai-design-system/tools/source-baseline/build.py --check`
 
@@ -146,8 +162,7 @@ Generated wrappers never delete or overwrite assets. Readiness and hashes are no
 - 浏览器交接: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
 - 微透材质表面: foundation, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
 
-## Task-scoped scene source
+## Task-scoped native source
 
-For a selected consumer manifest and scene ID, inspect the manifest first. If it declares `react_source`, run `product-ui-prototype/scripts/react_source.py <bundle> --scenes <IDs>` from the pinned framework checkout. Read the returned native JSX/TSX/CSS files, state/data, global entries, tokens, package and config once per task; follow additional imports when needed.
-Prototype components are design references. Production components stay in their owning `src` modules; read their bound source paths and current contracts instead of copying prototype implementations.
-HTML-only consumers keep their scoped scene reader when present. The offline `review.html` and `prototype.html` export remains bound to the authored source.
+Use the native reuse guide above to locate the editable composition, its real imports, providers, styles and fixtures. Follow its project-owned preview/export commands from the declared cwd. No globally installed authoring Skill is needed to consume these materials.
+Keep task-local candidate sources and generated exports distinct. Production modules remain in their owning paths; reuse their imports and current contracts.
