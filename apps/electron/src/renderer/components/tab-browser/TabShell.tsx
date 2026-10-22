@@ -4,7 +4,9 @@ import { TabContent } from './TabContent'
 import { TopBar } from '@/components/app-shell/TopBar'
 import { useTabShell } from '@/context/TabShellContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
-import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
+import { NAVIGATE_EVENT } from '@/lib/navigate'
+import { shouldSurfaceAssistantForNavigate } from './settings-navigate'
+import { HOME_TAB_ID, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 
 interface TabShellProps {
   renderPolo: () => ReactNode
@@ -25,7 +27,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps) {
-  const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab } = useTabShell()
+  const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab, openApp } = useTabShell()
   // Frozen narrow-window boundary (Review R38, restores the POO-41 contract):
   // at/below the frozen 640px line EVERY route fails closed to the frozen
   // WindowWidthGuard — the POO-41 authoritative 390x844 result is the guard
@@ -61,6 +63,24 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
       }
     })
   }, [isReady, activateTab, openTabs])
+
+  useEffect(() => {
+    // POO-103: the account menu, the Polo app menu, Cmd+, and the native
+    // Settings menu all dispatch the global navigate event from ABOVE
+    // NavigationProvider (the TopBar sits inside TabShell). The route changes
+    // inside the Polo tab — mounted but hidden while the Home tab is active —
+    // so the user saw no visible change. Surface the Polo tab for settings
+    // routes, same contract as the deep-link handler above (openApp also
+    // restores a closed Polo tab).
+    if (!isReady) return
+    const handleNavigate = (event: Event) => {
+      const route = (event as CustomEvent<{ route?: unknown }>).detail?.route
+      if (!shouldSurfaceAssistantForNavigate(route)) return
+      openApp(POLO_APP_DEFINITION)
+    }
+    window.addEventListener(NAVIGATE_EVENT, handleNavigate)
+    return () => window.removeEventListener(NAVIGATE_EVENT, handleNavigate)
+  }, [isReady, openApp])
 
   useEffect(() => {
     // Scope-neutral pre-hydration (Review R33/R34): keyboard shortcuts stay

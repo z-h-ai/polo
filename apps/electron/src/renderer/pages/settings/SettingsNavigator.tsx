@@ -12,7 +12,7 @@
 
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, AppWindow } from 'lucide-react'
+import { MoreHorizontal, AppWindow, Bot } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import type { SettingsSubpage } from '../../../shared/types'
-import { DEFAULT_SETTINGS_SUBPAGE, getSettingsPageScope } from '../../../shared/settings-registry'
+import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, DEFAULT_SETTINGS_SUBPAGE, getSettingsPageScope } from '../../../shared/settings-registry'
 import { getSettingsItemsForScope } from '../../../shared/menu-schema'
 import { SETTINGS_ICONS } from '@/components/icons/SettingsIcons'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
@@ -50,6 +50,12 @@ interface SettingsItem {
   label: string
   icon: React.ComponentType<{ className?: string }>
   description: string
+  /**
+   * POO-103: cross-scope shortcut row. The Polo navigator ends with a jump
+   * into the assistant scope so the assistant categories stay reachable while
+   * the assistant sidebar is hidden (Polo settings is a two-column surface).
+   */
+  isAssistantShortcut?: boolean
 }
 
 interface SettingsItemRowProps {
@@ -68,7 +74,8 @@ function SettingsItemRow({ item, isSelected, isFirst, onSelect }: SettingsItemRo
   const [menuOpen, setMenuOpen] = useState(false)
   const Icon = item.icon
 
-  // Open settings page in a new window via deep link
+  // Open settings page in a new window via deep link. The assistant shortcut
+  // row lands on the assistant scope's first category, same as its click.
   const handleOpenInNewWindow = () => {
     window.electronAPI.openUrl(`poloai://settings/${item.id}?window=focused`)
   }
@@ -94,7 +101,7 @@ function SettingsItemRow({ item, isSelected, isFirst, onSelect }: SettingsItemRo
         </div>
         {/* Main content button */}
         <button
-          data-testid={`settings-item-${item.id}`}
+          data-testid={item.isAssistantShortcut ? 'settings-item-assistant-shortcut' : `settings-item-${item.id}`}
           type="button"
           onClick={onSelect}
           className={cn(
@@ -171,15 +178,28 @@ export default function SettingsNavigator({
     [selectedSubpage]
   )
 
-  const settingsItems: SettingsItem[] = useMemo(() =>
-    getSettingsItemsForScope(scope, isAdminLoggedIn).map((item) => ({
+  const settingsItems: SettingsItem[] = useMemo(() => {
+    const items: SettingsItem[] = getSettingsItemsForScope(scope, isAdminLoggedIn).map((item) => ({
       id: item.id,
       label: t(item.labelKey),
       icon: SETTINGS_ICONS[item.id],
       description: t(item.descriptionKey),
-    })),
-    [scope, isAdminLoggedIn, t]
-  )
+    }))
+    // POO-103: the Polo navigator ends with a shortcut into the assistant
+    // scope (lands on its first category) so users can reach the assistant
+    // settings directly from the account-menu surface. Clicking navigates to
+    // a real assistant subpage — no new settings page, no registry entry.
+    if (scope === 'polo') {
+      items.push({
+        id: ASSISTANT_SETTINGS_DEFAULT_SUBPAGE,
+        label: t('settings.assistantShortcut.title'),
+        icon: Bot,
+        description: t('settings.assistantShortcut.description'),
+        isAssistantShortcut: true,
+      })
+    }
+    return items
+  }, [scope, isAdminLoggedIn, t])
 
   return (
     <div className="flex flex-col h-full">

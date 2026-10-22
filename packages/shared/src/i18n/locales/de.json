@@ -1690,6 +1690,8 @@
   "settings.appearance.usingDefaultTheme": "Standarddesign wird verwendet",
   "settings.appearance.workspaceThemes": "Workspace-Designs",
   "settings.appearance.workspaceThemesDesc": "Designeinstellungen pro Workspace überschreiben",
+  "settings.assistantShortcut.description": "Eingabe, Werkzeuge, Workspace und mehr",
+  "settings.assistantShortcut.title": "Polo AI-Assistent-Einstellungen",
   "settings.input.autoCapitalisation": "Automatische Großschreibung",
   "settings.input.autoCapitalisationDesc": "Den ersten Buchstaben beim Tippen einer Nachricht automatisch großschreiben.",
   "settings.input.cmdEnterKey": "⌘ Enter",

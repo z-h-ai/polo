@@ -1706,6 +1706,8 @@
   "settings.appearance.usingDefaultTheme": "using default theme",
   "settings.appearance.workspaceThemes": "Workspace Themes",
   "settings.appearance.workspaceThemesDesc": "Override theme settings per workspace",
+  "settings.assistantShortcut.description": "Input, tools, workspace and more",
+  "settings.assistantShortcut.title": "Polo AI assistant settings",
   "settings.input.autoCapitalisation": "Auto capitalisation",
   "settings.input.autoCapitalisationDesc": "Automatically capitalise the first letter when typing a message.",
   "settings.input.cmdEnterKey": "⌘ Enter",

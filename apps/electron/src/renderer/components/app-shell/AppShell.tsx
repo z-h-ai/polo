@@ -120,7 +120,7 @@ import {
   type NavigationState,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
-import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, getSettingsPageScope } from "../../../shared/settings-registry"
+import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, DEFAULT_SETTINGS_SUBPAGE, getSettingsPageScope } from "../../../shared/settings-registry"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
@@ -582,6 +582,16 @@ function AppShellContent({
   // UNIFIED NAVIGATION STATE - single source of truth from NavigationContext
   // Derived from focused panel's route — all panels are peers
   const navState = useNavigationState()
+
+  // POO-103: Polo-scope settings (the TopBar account-menu / Cmd+, entry) is an
+  // independent two-column surface — settings navigator + details — and does
+  // NOT show the assistant sidebar. The assistant scope (sidebar Settings row)
+  // keeps the main sidebar. Scope comes from settings-registry only.
+  const isPoloSettingsRoute =
+    isSettingsNavigation(navState) &&
+    getSettingsPageScope(navState.subpage ?? DEFAULT_SETTINGS_SUBPAGE) === 'polo'
+  const isAssistantSidebarVisible =
+    isSidebarVisible && !effectiveSidebarAndNavigatorHidden && !isPoloSettingsRoute
 
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
@@ -1247,7 +1257,7 @@ function AppShellContent({
           setSidebarHandleY(e.clientY - rect.top)
         }
       } else if (isResizing === 'session-list') {
-        const offset = isSidebarVisible ? sidebarWidth : 0
+        const offset = isAssistantSidebarVisible ? sidebarWidth : 0
         const newWidth = Math.min(Math.max(e.clientX - offset, 240), 480)
         setSessionListWidth(newWidth)
         if (sessionListHandleRef.current) {
@@ -1279,7 +1289,7 @@ function AppShellContent({
     isResizing,
     sidebarWidth,
     sessionListWidth,
-    isSidebarVisible,
+    isAssistantSidebarVisible,
   ])
 
   // Spring transition config - shared between sidebar and header
@@ -2519,15 +2529,15 @@ function AppShellContent({
             </div>
           </div>
           }
-          sidebarWidth={effectiveSidebarAndNavigatorHidden ? 0 : (isSidebarVisible ? sidebarWidth : 0)}
+          sidebarWidth={isAssistantSidebarVisible ? sidebarWidth : 0}
           navigatorSlot={
             <div
               style={{ width: isAutoCompact ? '100%' : sessionListWidth }}
               className="h-full flex flex-col min-w-0 relative z-panel"
             >
             <PanelHeader
-              title={isSidebarVisible ? listTitle : undefined}
-              compensateForStoplight={!isSidebarVisible}
+              title={isAssistantSidebarVisible ? listTitle : undefined}
+              compensateForStoplight={!isAssistantSidebarVisible}
               badge={automationFilter?.automationType === 'scheduled' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -3306,7 +3316,7 @@ function AppShellContent({
             width: PANEL_SASH_HIT_WIDTH,
             top: PANEL_STACK_VERTICAL_OVERFLOW,
             bottom: PANEL_STACK_VERTICAL_OVERFLOW,
-            left: isSidebarVisible
+            left: isAssistantSidebarVisible
               ? sidebarWidth + (PANEL_GAP / 2) - PANEL_SASH_HALF_HIT_WIDTH
               : -PANEL_GAP,
             transition: isResizing === 'sidebar' ? undefined : 'left 0.15s ease-out',
@@ -3340,7 +3350,7 @@ function AppShellContent({
             top: PANEL_STACK_VERTICAL_OVERFLOW,
             bottom: PANEL_STACK_VERTICAL_OVERFLOW,
             left:
-              (isSidebarVisible ? sidebarWidth + PANEL_GAP : PANEL_EDGE_INSET) +
+              (isAssistantSidebarVisible ? sidebarWidth + PANEL_GAP : PANEL_EDGE_INSET) +
               sessionListWidth +
               (PANEL_GAP / 2) -
               PANEL_SASH_HALF_HIT_WIDTH,
