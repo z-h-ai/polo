@@ -599,7 +599,7 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
 })
 
 
-it('R3FIX global Home and brand reset the real ClientPage stack inside TabShell', async () => {
+it('R3FIX home tab keeps the real ClientPage stack inside TabShell (POO-100 preserve-depth contract)', async () => {
   const { ModalProvider } = await import('@/context/ModalContext')
   const { ClientPageProvider, useClientPage } = await import('@/context/ClientPageContext')
   const { act, fireEvent } = await import('@testing-library/react')
@@ -610,18 +610,18 @@ it('R3FIX global Home and brand reset the real ClientPage stack inside TabShell'
     children: createElement(ModalProvider, { children: [buildShellTree(SCOPE_A), createElement(Probe, { key: 'route-probe' })] }),
   }))
   await waitFor(() => expect(screen.getByTestId('app-topbar')).toBeTruthy())
-  for (const target of ['home', 'brand']) {
-    act(() => {
-      page.navigate({ kind: 'circles' })
-      page.navigate({ kind: 'circle-detail', circleId: 'circle-r3', section: 'content' })
-    })
-    expect(page.route.kind).toBe('circle-detail')
-    const button = target === 'home' ? screen.getByTestId('topbar-home-tab')
-      : screen.getByTestId('app-topbar').querySelector('button[aria-label="' + i18n.t('topbar.brand.home') + '"]')!
-    fireEvent.click(button)
-    expect(page.route).toEqual({ kind: 'home' })
-    expect(page.canGoBack).toBe(false)
-    act(() => page.back())
-    expect(page.route.kind).toBe('home')
-  }
+  act(() => {
+    page.navigate({ kind: 'circles' })
+    page.navigate({ kind: 'circle-detail', circleId: 'circle-r3', section: 'content' })
+  })
+  expect(page.route.kind).toBe('circle-detail')
+  // The R3FIX reset-on-home-entry behavior was superseded by the POO-100
+  // preserve-depth design (the route stack lives OUTSIDE TabShell exactly so
+  // a tab switch never loses the page or its depth) and is NOT reintroduced:
+  // the home tab only activates the shell tab, the stack stays.
+  fireEvent.click(screen.getByTestId('topbar-home-tab'))
+  expect(page.route.kind).toBe('circle-detail')
+  expect(page.canGoBack).toBe(true)
+  // POO-117 P117-01: the brand is a decorative mark — no button to click.
+  expect(screen.getByTestId('app-topbar').querySelector('button[aria-label="' + i18n.t('topbar.brand.home') + '"]')).toBeNull()
 })

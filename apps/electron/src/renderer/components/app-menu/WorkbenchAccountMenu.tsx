@@ -5,6 +5,7 @@ import { isMac } from "@/lib/platform"
 import { useActionLabel, useOptionalActionRegistry } from "@/actions"
 import { useOptionalAppShellContext } from "@/context/AppShellContext"
 import { useOptionalTheme } from "@/context/ThemeContext"
+import { useTabShell } from "@/context/TabShellContext"
 import { navigate, routes } from "@/lib/navigate"
 import {
   DropdownMenuSub,
@@ -201,11 +202,22 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
   const appShell = useOptionalAppShellContext()
   const theme = useOptionalTheme()
   const actionRegistry = useOptionalActionRegistry()
+  const { openTabs, activateTab } = useTabShell()
   const [isDebugMode, setIsDebugMode] = useState(false)
 
   useEffect(() => {
     window.electronAPI.isDebugMode().then(setIsDebugMode)
   }, [])
+
+  // R8 navigation boundary: settings pages are Polo-scope routes rendered
+  // inside the Polo tab. Firing the navigation from this menu while another
+  // tab is active would change no visible surface, so activate the carrier
+  // first (no-op when the tab was closed).
+  const openPoloTab = openTabs.find((tab) => tab.type === "polo")
+  const openPoloScoped = (request: () => void) => {
+    if (openPoloTab) activateTab(openPoloTab.id)
+    request()
+  }
 
   const user = appShell?.currentAdminUser ?? null
   const userLabel = user?.displayName || user?.username || ""
@@ -230,7 +242,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
         </div>
       )}
       {appShell && (
-        <StyledDropdownMenuItem onClick={appShell.onOpenSettings}>
+        <StyledDropdownMenuItem onClick={() => openPoloScoped(appShell.onOpenSettings)}>
           <Icons.Settings className="h-3.5 w-3.5" />
           {t("menu.settings")}
         </StyledDropdownMenuItem>
@@ -300,7 +312,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
             )
           })}
           <StyledDropdownMenuItem
-            onClick={() => navigate(routes.view.settings('shortcuts'))}
+            onClick={() => openPoloScoped(() => navigate(routes.view.settings('shortcuts')))}
           >
             <Icons.Keyboard className="h-3.5 w-3.5" />
             {t(ROOT_MENU.keyboardShortcuts.labelKey)}

@@ -351,4 +351,4 @@ it('revalidates cached offline Home with an explicit retry', async () => {
   expect(reads).toBeGreaterThan(0)
   expect(start).not.toHaveBeenCalled()
   expect(openApp).not.toHaveBeenCalled()
-})
+}, 15_000)

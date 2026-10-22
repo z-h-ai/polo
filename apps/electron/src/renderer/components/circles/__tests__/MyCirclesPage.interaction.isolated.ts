@@ -869,6 +869,8 @@ describe('R5FIX-05 real partial receipt refresh', () => {
       fireEvent.click(screen.getByTestId('my-circles-partial-retry'))
       await waitFor(() => expect(screen.queryByTestId('my-circles-partial-banner')).toBeNull())
       expect(screen.getAllByTestId('circle-row').length).toBe(5)
-    })
+      // The real-refresh twins load-flake above bun's 5s default (verified on
+      // the fix branch itself under machine load); 15s covers the waitFor.
+    }, 15_000)
   }
 })
