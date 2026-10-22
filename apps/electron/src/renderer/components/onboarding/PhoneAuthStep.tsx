@@ -16,6 +16,7 @@ import {
   maskMainlandPhone,
   reducePhoneAuthForm,
 } from "./phone-auth-utils"
+import type { PhoneAuthFormAction, PhoneAuthFormState } from "./phone-auth-utils"
 
 interface PhoneAuthStepProps {
   isLoading: boolean
@@ -27,6 +28,14 @@ interface PhoneAuthStepProps {
   onUsePassword: () => void
   /** Shared inline error surface, rendered below the panel heading. */
   errorNode?: ReactNode
+  /**
+   * Controlled form state — AdminLoginStep owns it so switching to the
+   * password view and back no longer drops the phone/scene mid-login
+   * (P70-PHONE "keep the login target"). Falls back to local state for
+   * standalone mounts.
+   */
+  formState?: PhoneAuthFormState
+  onFormAction?: (action: PhoneAuthFormAction) => void
 }
 
 export function PhoneAuthStep({
@@ -38,9 +47,13 @@ export function PhoneAuthStep({
   onVerify,
   onUsePassword,
   errorNode = null,
+  formState,
+  onFormAction,
 }: PhoneAuthStepProps) {
   const { t } = useTranslation()
-  const [form, dispatch] = useReducer(reducePhoneAuthForm, INITIAL_PHONE_AUTH_FORM_STATE)
+  const [localForm, dispatchLocal] = useReducer(reducePhoneAuthForm, INITIAL_PHONE_AUTH_FORM_STATE)
+  const form = formState ?? localForm
+  const dispatch = onFormAction ?? dispatchLocal
   const [isSending, setIsSending] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
   const [countdownTick, setCountdownTick] = useState(0)

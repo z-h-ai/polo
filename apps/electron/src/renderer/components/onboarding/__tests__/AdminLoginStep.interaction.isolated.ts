@@ -351,3 +351,42 @@ it('R5FIX-01 exposes an explicit retry for incomplete local sign-out', async () 
   fireEvent.click(screen.getByTestId('admin-logout-retry'))
   expect(onCancel).toHaveBeenCalledTimes(1)
 })
+
+
+describe('phone scene survives a password-mode round trip', () => {
+  it('keeps the code scene, typed phone and consent when switching to the password view and back', async () => {
+    const user = userEvent.setup({ document: window.document })
+    renderWithI18n(createElement(AdminLoginStep, {
+      isLoading: false,
+      phoneAuthEnabled: true,
+      onClearError: () => {},
+      onSubmit: () => {},
+      onSendPhoneCode: async () => ({
+        success: true as const,
+        accepted: true as const,
+        expiresIn: 300,
+        resendAfter: 60,
+      }),
+      onVerifyPhoneCode: async () => false,
+    }))
+
+    fireEvent.change(screen.getByLabelText('Phone number'), {
+      target: { value: '13800138000' },
+    })
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByTestId('phone-auth-send-code'))
+    expect(await screen.findByLabelText('Verification code')).toBeTruthy()
+
+    // Round trip through the password view…
+    await user.click(screen.getByTestId('admin-login-method-password'))
+    expect(screen.getByTestId('admin-password-login-form')).toBeTruthy()
+    await user.click(screen.getByTestId('admin-login-method-phone'))
+
+    // …must not reset the login target: the code scene (not the entry ask)
+    // comes back with the same phone and the consent still checked — the
+    // resent deadline the user is now waiting on is for THIS scene.
+    expect(screen.getByLabelText('Verification code')).toBeTruthy()
+    expect(screen.getByText('+86 138 •••• 8000')).toBeTruthy()
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true)
+  })
+})
