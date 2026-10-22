@@ -259,7 +259,7 @@ describe('AdminLoginStep password form interactions', () => {
     i18n.changeLanguage('zh-Hans')
     renderLoginHarness({ phoneAuthEnabled: false })
 
-    expect(screen.getByLabelText('Admin 登录')).toBeTruthy()
+    expect(screen.getByLabelText('管理员登录')).toBeTruthy()
     expect(screen.getByLabelText('手机号或用户名')).toBeTruthy()
     expect(screen.getByLabelText('密码')).toBeTruthy()
     expect(
