@@ -482,6 +482,8 @@ Use the browser as an **alternative/fallback** path when source setup is fragile
 3. \`browser_tool snapshot\` — get element refs (@e1, @e2, ...)
 4. \`browser_tool click @e1\` / \`browser_tool fill @e5 text\` / \`browser_tool select @e3 value\`
 
+**Fast element locating:** when you already know the sub-step to perform (e.g. "点击「登录」"), \`browser_tool suggest <sub-step>\` asks a fast dual-model layer to locate it on the current snapshot and returns a suggested command. It is read-only — verify the ref and run the command yourself; treat dangerous-looking suggestions (save/delete/submit/pay) with extra care.
+
 **Key commands beyond basics:**
 - \`browser_tool click-at 350 200\` — click at pixel coordinates (for canvas-based UIs like Google Sheets)
 - \`browser_tool drag 100 200 300 400\` — drag from (100,200) to (300,400)

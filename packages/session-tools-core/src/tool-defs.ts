@@ -920,6 +920,7 @@ Examples:
 - \`--help\`
 - \`open\`
 - \`navigate https://example.com\`
+- \`suggest 点击「登录」\` — ask the fast decider to locate a planned sub-step (read-only suggestion; verify then run the command yourself)
 - \`snapshot\`
 - \`find login button\` — search elements by keyword
 - \`click @e12\`

@@ -6,6 +6,8 @@ export * from './conversation-summary.ts';
 export { PiAgent, PiBackend } from './pi-agent.ts';
 export * from './errors.ts';
 export * from './options.ts';
+export type { BrowserFastDeciderFn, FastDeciderInput, FastDeciderResult } from './browser-fast-decider.ts';
+export { createBrowserFastDecider } from './browser-fast-decider.ts';
 
 // Export session-scoped-tools - tools scoped to a specific session
 export {

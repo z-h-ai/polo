@@ -53,6 +53,24 @@ import {
 } from './models.ts';
 
 // Config stored in JSON file (credentials stored in encrypted file, not here)
+
+/** One fast-decider path: a named slot bound to an existing LLM connection + model. */
+export interface BrowserFastDeciderPathConfig {
+  name: 'A' | 'B';
+  /** Slug of an existing LLM connection (OpenAI-compatible baseUrl required). */
+  connectionSlug: string;
+  /** Model id, e.g. 'deepseek-flash' / 'glm-5.3-flashx'. */
+  model: string;
+  /** Extra request-body params merged over per-model defaults (e.g. reasoning_effort). */
+  requestParams?: Record<string, unknown>;
+}
+
+export interface BrowserFastDeciderConfig {
+  enabled?: boolean;        // default true
+  timeoutMs?: number;       // per-path timeout, default 3000
+  paths?: BrowserFastDeciderPathConfig[];
+}
+
 export interface StoredConfig {
   // LLM Connections (authoritative source for auth and model config)
   llmConnections?: LlmConnection[];
@@ -79,6 +97,14 @@ export interface StoredConfig {
   // Tools
   browserToolEnabled?: boolean;  // Enable built-in browser tool (default: true). Disable for Playwright/Puppeteer.
   allowRemoteEvaluate?: boolean;  // Allow remote agents to call `browser_tool evaluate` on local browser (default: true).
+  /**
+   * Browser fast decider ("System One" fast layer, POO-113): dual fast-model
+   * grounding for `browser_tool suggest`. Managed config — written by the
+   * admin channel, no user-facing settings UI. No plaintext keys here:
+   * paths reference existing LLM connections by slug; credentials resolve
+   * through the credential store (same channel as the main model).
+   */
+  browserFastDecider?: BrowserFastDeciderConfig;
   // Generative UI
   generativeUiInlineEnabled?: boolean;  // Enable render_ui Generative UI inline cards (shipped default: false). User-level kill switch.
   generativeUiCanvasEnabled?: boolean;  // Enable generate_app Generative UI canvas apps (shipped default: false). User-level kill switch.
@@ -571,6 +597,16 @@ export function setBrowserToolEnabled(enabled: boolean): void {
   // Clear session tool caches so all sessions pick up the change immediately.
   // Lazy import to avoid circular dependency (storage ← session-scoped-tools ← storage).
   import('../agent/session-scoped-tools.ts').then(m => m.invalidateAllSessionToolsCaches()).catch(() => {});
+}
+
+/**
+ * Get the browser fast decider config (POO-113 managed config).
+ * Sensible defaults when absent: enabled with no paths — the decider then
+ * resolves zero endpoints and `browser_tool suggest` degrades gracefully.
+ */
+export function getBrowserFastDeciderConfig(): BrowserFastDeciderConfig {
+  const config = loadStoredConfig();
+  return config?.browserFastDecider ?? { enabled: true, timeoutMs: 3000, paths: [] };
 }
 
 /**

@@ -53,6 +53,7 @@ browser_tool({ command: "open --foreground" })
 browser_tool({ command: "navigate https://example.com" })
 browser_tool({ command: "snapshot" })
 browser_tool({ command: "find login button" })
+browser_tool({ command: "suggest 点击「登录」" })
 browser_tool({ command: "click @e12" })
 browser_tool({ command: "click-at 350 200" })
 browser_tool({ command: "drag 100 200 300 400" })
@@ -119,6 +120,15 @@ Returns an accessibility tree with refs and element metadata.
 
 ### `find <query>`
 Performs keyword search over the snapshot accessibility nodes (`role`, `name`, `value`, `description`) and returns matching refs.
+
+### `suggest <sub-step>`
+Ask the fast decider layer to locate a planned sub-step on the current page. Input the sub-step you already planned (e.g. `suggest 点击「登录」`); two fast models run in parallel against the current snapshot and the tool returns:
+
+- `Suggested command` (e.g. `click @e12`) with an `Agreement` signal (`both` / `single-A` / `single-B` / `none`)
+- A `⚠ Dangerous-looking target` warning when the target looks like save/delete/submit/pay/…
+- Per-path raw answers and latencies
+
+Read-only by design: **nothing is executed**. Verify the suggested ref (e.g. with `find` or the element name in the last `snapshot`) and run the command yourself. When paths disagree or the decider is unconfigured, decide the next command manually. Snapshots larger than 120 elements are rejected — narrow first (`find <query>`).
 
 ### `click <ref> [waitFor] [timeoutMs]`
 Click an element ref from `snapshot`. Optional wait modes: `none`, `navigation`, `network-idle`.

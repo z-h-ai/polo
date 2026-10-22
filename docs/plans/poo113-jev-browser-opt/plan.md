@@ -35,7 +35,8 @@ Reviewed by: Douglas（2026-10-22） · Accepted by: Douglas（2026-10-22，六�
 | new-by-this-task | `packages/shared/src/agent/__tests__/browser-fast-decider.test.ts` | 新增 | 本任务 | 纯函数契约测试（fuse/isExecutable/agreement/dangerous/degrade，mock fetch，不联网） | 同目录已有 browser-tools.test.ts 等约定 |
 | existing | `packages/shared/src/agent/browser-tool-runtime.ts` | 修改 | 本任务 | ① 导出 `BROWSER_TOOL_ACTION_MENU`（动词菜单单一来源）；② 新增 `suggest` 分支（经注入的可选 `fastDecider` 调用，缺失时友好报错） | :1729 命令 switch 处无 `suggest` 冲突（已核对）；snapshot 经现有 `fns.snapshot()` |
 | existing | `packages/shared/src/agent/browser-tools.ts` | 修改 | 本任务 | 工厂签名增加可选 `fastDecider` 注入并透传 runtime | :233 工厂存在；沿用 `BrowserPaneFns` 同层注入模式 |
-| existing | `packages/shared/src/config/llm-connections.ts` | 修改 | 本任务 | 新增 `resolveBrowserFastDeciderPaths()`：从**管理后台下发的托管 LLM 配置**（与主模型同通道）解析 A/B 两路（baseUrl/model/key/参数：A=deepseek-flash 关思考，B=glm-5.3-flashx reasoning_effort=low；模型可配，flash 为降成本候选）；无有效配置 → 返回空（suggest 报"快层未配置"） | `getMiniModel()`(:256) 所在文件；托管连接体系同文件；**仓库不落任何明文 key** |
+| existing | `packages/shared/src/config/llm-connections.ts` | 不改（实现偏差已同步） | 本任务 | 原计划在此新增 `resolveBrowserFastDeciderPaths()`；实现时移入 `browser-fast-decider.ts` 的 `resolveBrowserFastDeciderEndpoints()`（避免 config 层反向依赖 agent 层类型），仅复用本文件导出的 `getLlmCredentialKey`(:356) | `getLlmCredentialKey` 已核对存在 |
+| existing | `packages/shared/src/agent/pi-agent.ts` | 修改 | 本任务 | Pi 后端浏览器命令执行处(:1858)透传 `getFastDecider`（plan 风险表中"执行时核对"项，已核对并补上） | `getSessionScopedToolCallbacks` 调用点已核对 |
 | existing | `packages/shared/src/config/storage.ts` | 修改 | 本任务 | 内部设置项 `browserFastDecider?: { enabled: boolean; timeoutMs?: number }`（默认 enabled=true；无用户配置 UI，模型与 key 均走托管配置） | `browserToolEnabled`(:80/:157/:556) 同文件同模式 |
 | existing | `packages/server-core/src/sessions/SessionManager.ts` | 修改 | 本任务 | 组装 decider 实例（连接解析 + 每会话单例）并传入 browser 工具工厂 | :5860 browserPaneFns 绑定处、:5396 miniModel 注入模式 |
 | existing | `apps/electron/resources/docs/browser-tools.md` | 修改 | 本任务 | 新增 `suggest` 用法、快层说明、危险标记语义、"建议≠执行" | 文件存在（模型必读文档，prerequisite 门不变） |
@@ -90,10 +91,12 @@ interface FastDeciderResult {
 
 | 任务 | 验收时机 | 检查类型 | 场景 | 集中任务 |
 |---|---|---|---|---|
-| POO-113-P1（本卡） | 实现完成时 | `bun run typecheck:all` + `bun run lint` | 全仓库 | 无（单卡 per_card） |
-| 同上 | 实现完成时 | `bun test packages/shared/src/agent/__tests__/browser-fast-decider.test.ts packages/shared/src/agent/__tests__/browser-tools.test.ts` | 快层契约 5 硬约束 + suggest 四态（一致/分歧/危险/未配置） | 同卡 |
-| 同上 | 合并前 | 手动冒烟：`electron:dev` 起真实会话，对内置浏览器执行 `suggest 点击「搜索」`，截图建议输出与耗时 | 真实浏览器端到端（≥1 条） | 同卡 |
-| 同上（可选，建议） | 合并前 | 离线回放：用 `eval/` 135 案例集对 decider 纯函数层跑批（录制 API 或直连），格式合规 100%、定位全对率 ≥90% | Mind2Web 回归 | 同卡 |
+| POO-113-P1（本卡） | 实现完成时（✅ 2026-10-22） | `bun run typecheck:all` + `bun run lint` | 全仓库 | 无（单卡 per_card） |
+| 同上 | 实现完成时（✅） | `bun test .../browser-fast-decider.test.ts .../browser-tools.test.ts` | 快层契约 5 硬约束 + suggest 四态（一致/分歧/危险/未配置） | 同卡 |
+| 同上 | 合并前（⏳ 待人工） | 手动冒烟：`electron:dev` 起真实会话，对内置浏览器执行 `suggest 点击「搜索」`，截图建议输出与耗时 | 真实浏览器端到端（≥1 条） | 同卡 |
+| 同上（建议级，✅ 已做） | 合并前 | 生产代码路径（直接 import browser-fast-decider.ts）对 Mind2Web 定位口径抽样 30 例直连跑批 | 回归结果：**28/30 = 93.3% 全对，29/30 双路一致**（与 eval 口径 94.8%/88.1% 吻合） | 同卡 |
+
+**实现完成自检（2026-10-22）**：typecheck:all 0 错误；browser-fast-decider 16/16、browser-tools 91/91（含 suggest 6）、session-tools-core 278/278、browser-tool-detection+names 13/13；shared/agent 套件 1187 例中仅 `base-agent.test.ts > Lifecycle > should track chat calls` 1 例失败（已验证无本次改动亦失败，属分支既有问题）；electron lint 4 个错误位于 onboarding 组件（未触碰，分支既有）；lint:ipc-sends / lint:tool-name-checks 所需 shell 脚本不在仓库（既有环境缺口）。
 
 无 UI 改动 → 视觉验收不适用（无 journey/node 表）。
 

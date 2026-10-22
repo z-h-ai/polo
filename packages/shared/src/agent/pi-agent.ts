@@ -1859,6 +1859,7 @@ export class PiAgent extends BaseAgent {
             command: (args.command as string | string[]) ?? '',
             fns: browserFns,
             sessionId: this._sessionId,
+            getFastDecider: () => callbacks?.browserFastDecider,
           });
 
           let content = result.output;

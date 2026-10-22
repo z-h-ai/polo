@@ -13,7 +13,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, createBrowserFastDecider, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
 import { fingerprintOwnerToken, getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
@@ -114,7 +114,7 @@ import { resolveAuthEnvVars } from '@polo-ai/shared/config'
 import { getLastApiError } from '@polo-ai/shared/interceptor'
 import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { restoreFiles } from '@polo-ai/shared/utils/bundle-files'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { getCredentialManager, accountToCredentialId } from '@polo-ai/shared/credentials'
 import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId, GENUI_MODEL_CONTEXT_MAX_QUEUE } from '@polo-ai/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
@@ -6090,6 +6090,18 @@ export class SessionManager implements ISessionManager {
         }
         mergeSessionScopedToolCallbacks(sid, {
           browserPaneFns: this.guardManagedCallbackRecord(managed, 'browserPaneFns', rawBrowserPaneFns.browserPaneFns),
+          // POO-113 fast layer: dual fast-model grounding for `browser_tool suggest`.
+          // Endpoints resolve from the managed browserFastDecider config + LLM
+          // connection credentials; with no paths configured this degrades to a
+          // "not configured" suggestion and never blocks the session.
+          browserFastDecider: createBrowserFastDecider({
+            resolveApiKey: async (credentialKey) => {
+              const id = accountToCredentialId(credentialKey)
+              if (!id) return null
+              const stored = await getCredentialManager().get(id)
+              return stored?.value ?? null
+            },
+          }),
         }, this.runtimeOwnerTokenOf(managed))
       }
 
