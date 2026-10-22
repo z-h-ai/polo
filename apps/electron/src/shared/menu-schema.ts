@@ -397,11 +397,16 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
 }
 
 /**
- * All settings pages - derived from settings-registry (single source of truth)
- * Order is determined by SETTINGS_PAGES in settings-registry.ts
+ * Visible settings pages - derived from settings-registry (single source of
+ * truth). Order is determined by SETTINGS_PAGES in settings-registry.ts.
+ * Feature-gated pages (server) and pages hidden from users (messaging, POO-121)
+ * are filtered out here; everything downstream derives from this list.
  */
 export const SETTINGS_ITEMS: SettingsMenuItem[] = SETTINGS_PAGES
   .filter(page => page.id !== 'server' || FEATURE_FLAGS.embeddedServer)
+  // POO-121: messaging is still being iterated on — keep the page registered
+  // but out of every settings navigator. To re-list it, delete this line.
+  .filter(page => page.id !== 'messaging')
   .map(page => ({
     id: page.id,
     labelKey: page.labelKey,
