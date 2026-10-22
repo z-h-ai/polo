@@ -1,5 +1,4 @@
 import type { ComponentEntry } from './types'
-import { AppMenuMobilePreview } from '../demos/mobile-webui/AppMenuMobilePreview'
 import { SessionListMobilePreview } from '../demos/mobile-webui/SessionListMobilePreview'
 import { ChatDisplayMobilePreview } from '../demos/mobile-webui/ChatDisplayMobilePreview'
 
@@ -10,35 +9,10 @@ const DEVICE_OPTIONS = [
 ]
 
 export const mobileWebUIComponents: ComponentEntry[] = [
-  {
-    id: 'mobile-webui-app-menu',
-    name: 'AppMenu (Mobile)',
-    category: 'Mobile WebUI',
-    description: 'TopBar Polo AI-logo dropdown rendered in compact mode — Settings/Help submenus flatten.',
-    component: AppMenuMobilePreview,
-    layout: 'top',
-    previewOverflow: 'visible',
-    props: [
-      {
-        name: 'device',
-        description: 'Phone preset for the frame.',
-        control: { type: 'select', options: DEVICE_OPTIONS },
-        defaultValue: 'iphone-15',
-      },
-      {
-        name: 'showBezel',
-        description: 'Show the iPhone-style bezel + status bar.',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
-    ],
-    variants: [
-      { name: 'iPhone 15 (default)', props: { device: 'iphone-15', showBezel: true } },
-      { name: 'iPhone SE (small)', props: { device: 'iphone-se', showBezel: true } },
-      { name: 'No bezel', props: { device: 'iphone-15', showBezel: false } },
-    ],
-    mockData: () => ({}),
-  },
+  // POO-117: the AppMenu (Mobile) demo was removed together with the AppMenu
+  // component — the logo is a static brand mark and its menu lives in the
+  // TopBar avatar dropdown (WorkbenchAccountMenu), which has no compact
+  // variant to preview.
   {
     id: 'mobile-webui-session-list',
     name: 'SessionList (Mobile)',

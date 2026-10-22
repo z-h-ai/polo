@@ -1,0 +1,39 @@
+{
+  "reviewer": "/root/classic_style_review",
+  "revision": "poo70-workbench-r15-ui-refinement",
+  "input_policy": "Spec §13.11 and PC-F03, project Design System, actual maintained product/runtime/style/export sources, final four artifacts and own browser evidence. No author quality reports, evidence README or other semantic verdicts read.",
+  "executed": [
+    {
+      "action": "Read source authority, shared style, stop sequence, runtime and actual circle markup; checked review-shell boundary."
+    },
+    {
+      "action": "Reproduced stale stop callback after confirm, review jump to loading, then back to stopping; captured actual unwanted personal-home result.",
+      "evidence": "old-callback-reentry.json"
+    },
+    {
+      "action": "Identified newly navigable data/annual details lacked their own subscription exit, checked PC-F03 preservation; retained original screenshots.",
+      "evidence": [
+        "initial-P-M07-DETAIL-DATA-800.png",
+        "initial-P-M07-YEAR-RESULT-800.png"
+      ]
+    },
+    {
+      "action": "Reported both findings to controller; did not edit product files."
+    },
+    {
+      "action": "After controller fixes and final freeze reran sequence_review.py, membership_review.py, content_review.py, all_scene_availability.py and browser_review.py against current four artifacts."
+    },
+    {
+      "action": "Reviewed screenshots of home, list, growth/data cards, data/monthly/annual subscriptions and confirmations, assistant canvas, skill layout and review boundary."
+    }
+  ],
+  "harness_notes": [
+    {
+      "issue": "First suspend probe lacked protocol session initialization and its invalid message was correctly ignored. Fixed test by initializing show-scene session before suspend; preserved raw failed-harness observations in sequence-harness-uninitialized-session.json. Not a product finding."
+    },
+    {
+      "issue": "Initial fast screenshots could capture dialog fade-in; final screenshots wait 300ms and disable finite animations. Render behavior and conclusions were not fabricated."
+    }
+  ],
+  "protocol_fixture_scope": "Missing-stop-ACK test supplies a running enterprise assistant state through the public prototype peer protocol in a standalone MVP page. No assistant frame acknowledges. It checks refusal to complete with missing ACK; no live AI task/backend stop was executed."
+}

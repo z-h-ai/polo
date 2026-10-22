@@ -5,8 +5,26 @@ import * as SwitchPrimitive from "@radix-ui/react-switch"
 
 import { cn } from "@/lib/utils"
 
+const switchThumbClassName = cn(
+  "bg-background dark:data-[state=unchecked]:bg-foreground dark:data-[state=checked]:bg-background pointer-events-none block size-4 rounded-full ring-0 transition-transform data-[state=checked]:translate-x-[calc(100%-2px)] data-[state=unchecked]:translate-x-0"
+)
+
+function SwitchThumb({
+  className,
+  ...props
+}: React.ComponentProps<typeof SwitchPrimitive.Thumb>) {
+  return (
+    <SwitchPrimitive.Thumb
+      data-slot="switch-thumb"
+      className={cn(switchThumbClassName, className)}
+      {...props}
+    />
+  )
+}
+
 function Switch({
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof SwitchPrimitive.Root>) {
   return (
@@ -18,14 +36,11 @@ function Switch({
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb
-        data-slot="switch-thumb"
-        className={cn(
-          "bg-background dark:data-[state=unchecked]:bg-foreground dark:data-[state=checked]:bg-background pointer-events-none block size-4 rounded-full ring-0 transition-transform data-[state=checked]:translate-x-[calc(100%-2px)] data-[state=unchecked]:translate-x-0"
-        )}
-      />
+      {/* asChild callers supply their own element (with their own thumb);
+          the default renders the knob directly. */}
+      {children ?? <SwitchThumb />}
     </SwitchPrimitive.Root>
   )
 }
 
-export { Switch }
+export { Switch, SwitchThumb, switchThumbClassName }

@@ -12,6 +12,11 @@ function invoke(channel: string, transform?: (result: any) => any) {
   return { type: 'invoke' as const, channel, ...(transform && { transform }) }
 }
 
+/** An invoke whose coded errors survive the context bridge (POO-108 F2). */
+function invokeCoded(channel: string) {
+  return { type: 'invoke' as const, channel, codedErrors: true as const }
+}
+
 function listener(channel: string) {
   return { type: 'listener' as const, channel }
 }
@@ -23,6 +28,7 @@ export const CHANNEL_MAP = {
   markAllSessionsRead: invoke(RPC_CHANNELS.sessions.MARK_ALL_READ),
   getSessionMessages: invoke(RPC_CHANNELS.sessions.GET_MESSAGES),
   createSession: invoke(RPC_CHANNELS.sessions.CREATE),
+  createEditPopoverSession: invoke(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION),
   deleteSession: invoke(RPC_CHANNELS.sessions.DELETE),
   sendMessage: invoke(RPC_CHANNELS.sessions.SEND_MESSAGE),
   cancelProcessing: invoke(RPC_CHANNELS.sessions.CANCEL),
@@ -30,6 +36,8 @@ export const CHANNEL_MAP = {
   getTaskOutput: invoke(RPC_CHANNELS.tasks.GET_OUTPUT),
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
+  respondToQuestion: invoke(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION),
+  getEditPopoverPendingQuestion: invoke(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),
   exportSession: invoke(RPC_CHANNELS.sessions.EXPORT),
   importSession: invoke(RPC_CHANNELS.sessions.IMPORT),
@@ -59,6 +67,8 @@ export const CHANNEL_MAP = {
   // Window management
   getWindowWorkspace: invoke(RPC_CHANNELS.window.GET_WORKSPACE),
   getWindowMode: invoke(RPC_CHANNELS.window.GET_MODE),
+  getWindowLaunchContext: invoke(RPC_CHANNELS.window.GET_LAUNCH_CONTEXT),
+  reportWorkbenchReady: invoke(RPC_CHANNELS.window.REPORT_WORKBENCH_READY),
   openWorkspace: invoke(RPC_CHANNELS.window.OPEN_WORKSPACE),
   openSessionInNewWindow: invoke(RPC_CHANNELS.window.OPEN_SESSION_IN_NEW_WINDOW),
   switchWorkspace: invoke(RPC_CHANNELS.window.SWITCH_WORKSPACE),
@@ -112,6 +122,8 @@ export const CHANNEL_MAP = {
   onMenuKeyboardShortcuts: listener(RPC_CHANNELS.menu.KEYBOARD_SHORTCUTS),
   onMenuToggleFocusMode: listener(RPC_CHANNELS.menu.TOGGLE_FOCUS_MODE),
   onMenuToggleSidebar: listener(RPC_CHANNELS.menu.TOGGLE_SIDEBAR),
+  // POO-117 P117-07: main-initiated new-window request failed (native menu / webview shortcut)
+  onMenuNewWindowFailed: listener(RPC_CHANNELS.menu.NEW_WINDOW_FAILED),
 
   // Deep link
   onDeepLinkNavigate: listener(RPC_CHANNELS.deeplink.NAVIGATE),
@@ -120,9 +132,19 @@ export const CHANNEL_MAP = {
   getTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.GET_APPS),
   saveTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.SAVE_APPS),
 
+  // Generative UI canvas apps
+  appendGenUiAudit: invoke(RPC_CHANNELS.genui.AUDIT_APP_PIN),
+  registerGenUiCard: invoke(RPC_CHANNELS.genui.REGISTER_UI_CARD),
+  unregisterGenUiCard: invoke(RPC_CHANNELS.genui.UNREGISTER_UI_CARD),
+  packageGenUiAppArtifact: invoke(RPC_CHANNELS.genui.PUBLISH_APP_AS_ARTIFACT),
+
   // Local App Bundle runtime
   'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),
   'localApps.install': invoke(RPC_CHANNELS.localApps.INSTALL),
+  'localApps.installProductSpaceBundle': invoke(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE),
+  'localApps.getProductSpaceInstallStates': invoke(RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES),
+  'localApps.getProductSpaceWithdrawnInstallStates': invoke(RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES),
+  'localApps.uninstallProductSpaceBundle': invoke(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE),
   'localApps.cancelInstall': invoke(RPC_CHANNELS.localApps.CANCEL_INSTALL),
   'localApps.start': invoke(RPC_CHANNELS.localApps.START),
   'localApps.stop': invoke(RPC_CHANNELS.localApps.STOP),
@@ -152,6 +174,7 @@ export const CHANNEL_MAP = {
   adminLogout: invoke(RPC_CHANNELS.admin.LOGOUT),
   adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
   adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+  adminPaymentHandoff: invoke(RPC_CHANNELS.admin.PAYMENT_HANDOFF),
   adminSyncAppCatalog: invoke(RPC_CHANNELS.admin.SYNC_APP_CATALOG),
   creatorAppPublish: invoke(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP),
   onAdminReauthRequired: listener('admin:reauthRequired'),
@@ -167,6 +190,25 @@ export const CHANNEL_MAP = {
   organizationRevokeJoinLink: invoke(RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK),
   organizationUpdateMember: invoke(RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER),
   organizationRemoveMember: invoke(RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER),
+  productSpaceList: invoke(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES),
+  productSpaceListActiveExecutions: invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS),
+  productSpaceStopAllExecutions: invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS),
+  productSpaceStopExecution: invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION),
+  productSpaceRestrictActiveSpace: invoke(RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE),
+  productSpaceGetRestrictionState: invoke(RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE),
+  productSpaceGetCatalog: invoke(RPC_CHANNELS.productSpace.CATALOG),
+  productSpaceResolveLaunch: invoke(RPC_CHANNELS.productSpace.RESOLVE_LAUNCH),
+  productSpaceInstallSkill: invoke(RPC_CHANNELS.productSpace.INSTALL_SKILL),
+  productSpaceUninstallSkill: invoke(RPC_CHANNELS.productSpace.UNINSTALL_SKILL),
+  productSpaceListSkills: invoke(RPC_CHANNELS.productSpace.LIST_SKILLS),
+  productSpaceSetSkillEnablement: invoke(RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT),
+  productSpacePrepareSwitch: invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH),
+  productSpaceStopSwitchExecutions: invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS),
+  productSpaceCommitSwitch: invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH),
+  productSpaceCancelSwitch: invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH),
+  productSpaceRestoreOfflineView: invoke(RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW),
+  productSpaceRevokeActiveContext: invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT),
+  productSpaceCleanupLegacyState: invoke(RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE),
   creatorArtifactGetCapabilities: invoke(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES),
   creatorArtifactList: invoke(RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS),
   creatorArtifactGet: invoke(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT),
@@ -252,11 +294,19 @@ export const CHANNEL_MAP = {
   writePreferences: invoke(RPC_CHANNELS.preferences.WRITE),
   getHomeRecentApps: invoke(RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS),
   setHomeRecentApps: invoke(RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS),
+  getHomeQuickAccess: invoke(RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS),
+  setHomeQuickAccess: invoke(RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS),
   getOrganizationContextStorage: invoke(
     RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   ),
   updateOrganizationContextStorage: invoke(
     RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  ),
+  getProductSpaceContextStorage: invoke(
+    RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+  ),
+  updateProductSpaceContextStorage: invoke(
+    RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
   ),
 
   // Session Drafts
@@ -296,10 +346,13 @@ export const CHANNEL_MAP = {
 
   // Skills
   getSkills: invoke(RPC_CHANNELS.skills.GET),
+  getSkillsUnfiltered: invoke(RPC_CHANNELS.skills.GET_UNFILTERED),
   getSkillFiles: invoke(RPC_CHANNELS.skills.GET_FILES),
   deleteSkill: invoke(RPC_CHANNELS.skills.DELETE),
   openSkillInEditor: invoke(RPC_CHANNELS.skills.OPEN_EDITOR),
   openSkillInFinder: invoke(RPC_CHANNELS.skills.OPEN_FINDER),
+  listManagedSkills: invoke(RPC_CHANNELS.skills.LIST_MANAGED),
+  setManagedSkillEnablement: invoke(RPC_CHANNELS.skills.SET_MANAGED_ENABLEMENT),
   onSkillsChanged: listener(RPC_CHANNELS.skills.CHANGED),
   creatorSkillInstall: invoke(RPC_CHANNELS.creatorSkills.INSTALL),
   creatorSkillCancel: invoke(RPC_CHANNELS.creatorSkills.CANCEL),
@@ -309,6 +362,24 @@ export const CHANNEL_MAP = {
   creatorSkillUpdateSafetyStatus: invoke(RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS),
   creatorSkillIgnoreVersion: invoke(RPC_CHANNELS.creatorSkills.IGNORE_VERSION),
   onCreatorSkillProgress: listener(RPC_CHANNELS.creatorSkills.PROGRESS),
+
+  // Enterprise Knowledge Base (POO-108). codedErrors: the renderer's error
+  // mapping branches on the KB codes, which the context bridge erases from
+  // rejected Errors — these channels carry the code in the message instead
+  // (see shared/rpc-error-bridge.ts).
+  kbListCollections: invokeCoded(RPC_CHANNELS.kb.LIST_COLLECTIONS),
+  kbCreateCollection: invokeCoded(RPC_CHANNELS.kb.CREATE_COLLECTION),
+  kbListDocuments: invokeCoded(RPC_CHANNELS.kb.LIST_DOCUMENTS),
+  kbUploadDocument: invokeCoded(RPC_CHANNELS.kb.UPLOAD_DOCUMENT),
+  kbSubmitForReview: invokeCoded(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW),
+  kbPublishDocument: invokeCoded(RPC_CHANNELS.kb.PUBLISH_DOCUMENT),
+  kbRejectDocument: invokeCoded(RPC_CHANNELS.kb.REJECT_DOCUMENT),
+  kbRevertToDraft: invokeCoded(RPC_CHANNELS.kb.REVERT_TO_DRAFT),
+  kbDeleteDocument: invokeCoded(RPC_CHANNELS.kb.DELETE_DOCUMENT),
+  kbGetDocument: invokeCoded(RPC_CHANNELS.kb.GET_DOCUMENT),
+  kbSearch: invokeCoded(RPC_CHANNELS.kb.SEARCH),
+  kbSetSessionCollections: invokeCoded(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS),
+  kbGetSessionCollections: invokeCoded(RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS),
 
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
@@ -375,6 +446,10 @@ export const CHANNEL_MAP = {
   // Tools settings
   getBrowserToolEnabled: invoke(RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED),
   setBrowserToolEnabled: invoke(RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED),
+  getGenerativeUiInlineEnabled: invoke(RPC_CHANNELS.tools.GET_GENERATIVE_UI_INLINE_ENABLED),
+  setGenerativeUiInlineEnabled: invoke(RPC_CHANNELS.tools.SET_GENERATIVE_UI_INLINE_ENABLED),
+  getGenerativeUiCanvasEnabled: invoke(RPC_CHANNELS.tools.GET_GENERATIVE_UI_CANVAS_ENABLED),
+  setGenerativeUiCanvasEnabled: invoke(RPC_CHANNELS.tools.SET_GENERATIVE_UI_CANVAS_ENABLED),
 
   // Prompt caching & context
   getExtendedPromptCache: invoke(RPC_CHANNELS.caching.GET_EXTENDED_PROMPT_CACHE),

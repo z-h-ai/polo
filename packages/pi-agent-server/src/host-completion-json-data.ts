@@ -1,0 +1,191 @@
+import { types } from 'node:util'
+// Single responsibility: bounded, descriptor-safe reading of inert JSON-data shapes and bounded
+// structural comparison. This kernel never applies Host policy (512KiB, slots, claims, tool
+// max-or-double); it returns structured outcomes and explicit comparison reasons (R12 §6.2).
+
+export interface ComparisonBudget {
+  pairs: number
+  dead: boolean
+  outcome: JsonComparisonOutcome | null
+}
+export type JsonComparisonOutcome = 'equal' | 'different' | 'unsafe_shape' | 'pair_budget_exhausted' | 'key_budget_exhausted' | 'depth_exhausted'
+export type OwnDataRead = { kind: 'data'; value: unknown } | { kind: 'missing' } | { kind: 'unsafe' }
+
+// Comparison boundaries (R12 §6.6): the root pair sits at depth 0 and consumes pair unit 1; every
+// visited child pair charges exactly one unit before its values are read (8192 allowed, the 8193rd
+// latches pair_budget_exhausted). Each side of a plain-object pair captures at most 8192 key
+// records; the 8193rd key latches key_budget_exhausted before its descriptor is inspected. Depth 16
+// is allowed, entering depth 17 latches depth_exhausted without reading the value. Maps match by
+// key name and size, so insertion order never affects equality. The first non-equal outcome or any
+// budget/shape latch stops all further descriptor, value and pair access.
+const COMPARISON_PAIR_BUDGET = 8192
+const COMPARISON_KEY_RECORD_BUDGET = 8192
+const COMPARISON_DEPTH_LIMIT = 16
+
+// Proxy-first gate: util.types.isProxy runs before any getPrototypeOf/enumeration/descriptor trap;
+// only plain objects (prototype Object.prototype or null) are inert JSON-data objects.
+export function isInertJsonDataObject(value: unknown): value is object {
+  if (typeof value !== 'object' || value === null || types.isProxy(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+// Proxy arrays pass Array.isArray, so every array path re-checks isProxy before length/index reads.
+export function isInertJsonDataArray(value: unknown): value is unknown[] {
+  return Array.isArray(value) && !types.isProxy(value)
+}
+// Descriptor-kind classification (R10 issue 0): JavaScript permits an accessor descriptor whose
+// `get` and `set` slots are BOTH explicitly undefined — it has no data value slot. Kinds are
+// therefore classified by the descriptor's OWN slots, never by comparing slot values: a plain
+// data descriptor must own a `value` slot, and any descriptor with own `get`/`set` slots (even
+// undefined) — or with no recognizable data slot at all — is unsafe and fails closed.
+function classifyOwnDescriptor(descriptor: PropertyDescriptor): OwnDataRead {
+  if (Object.hasOwn(descriptor, 'get') || Object.hasOwn(descriptor, 'set')) return { kind: 'unsafe' }
+  if (!Object.hasOwn(descriptor, 'value')) return { kind: 'unsafe' }
+  return { kind: 'data', value: descriptor.value }
+}
+// Structural read (array `length` and friends): Proxy-first, then own data descriptor only — the
+// non-enumerable array `length` is a sanctioned structural property. Missing → `missing`;
+// accessor (including getterless/setterless), Proxy, exception or illegal descriptor → `unsafe`;
+// getters are never invoked.
+export function readOwnDescriptor(source: object, key: string): OwnDataRead {
+  if (types.isProxy(source)) return { kind: 'unsafe' }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(source, key)
+    if (descriptor === undefined) return { kind: 'missing' }
+    return classifyOwnDescriptor(descriptor)
+  } catch {
+    return { kind: 'unsafe' }
+  }
+}
+// Fixed-field read (message/content/block/canonical/usage/model): Proxy-first, then only an
+// ENUMERABLE own data descriptor belongs to the JSON-data domain (R14 §3.1). Truly missing →
+// `missing`; present but non-enumerable, accessor-backed (including a getterless/setterless
+// accessor whose get/set slots are both explicitly undefined), Proxy, exception or illegal
+// descriptor → `unsafe`, stopping before any value read; getters are never invoked. A
+// non-enumerable field is never disguised as absent.
+export function readOwnEnumerableDataDescriptor(source: object, key: string): OwnDataRead {
+  if (types.isProxy(source)) return { kind: 'unsafe' }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(source, key)
+    if (descriptor === undefined) return { kind: 'missing' }
+    if (descriptor.enumerable !== true) return { kind: 'unsafe' }
+    return classifyOwnDescriptor(descriptor)
+  } catch {
+    return { kind: 'unsafe' }
+  }
+}
+// Array length is read through its own data descriptor — never through the `length` property get,
+// which a Proxy array or accessor would intercept (R12 §6.2 rule 6). `length` is intentionally a
+// non-enumerable structural property and stays outside the enumerable content rule above.
+export function readArrayLength(array: unknown[]): number | null {
+  const descriptor = readOwnDescriptor(array, 'length')
+  if (descriptor.kind !== 'data') return null
+  if (typeof descriptor.value !== 'number' || !Number.isInteger(descriptor.value) || descriptor.value < 0) return null
+  return descriptor.value
+}
+// Array elements use their own ENUMERABLE data descriptor: holes stay distinguishable from
+// undefined data, accessor and non-enumerable indexes are unsafe; prototype values are never
+// read (R12 §6.2 rule 7).
+export function readArrayElement(array: unknown[], index: number): OwnDataRead {
+  return readOwnEnumerableDataDescriptor(array, String(index))
+}
+// Streaming own-enumerable string-key projection: no key-array materialization. chargeKey runs
+// after Object.hasOwn and BEFORE the descriptor is read so budget latches stop pre-read; an
+// unsafe, missing or non-enumerable descriptor latches through `latch` without ever invoking a
+// getter. Symbols stay outside the JSON-data domain (R12 §6.2 rules 4/5/10).
+export function* forEachOwnEnumerableDataProperty(source: object, chargeKey: () => boolean, latch: () => void): Generator<[string, unknown]> {
+  for (const key in source) {
+    if (!Object.hasOwn(source, key)) continue
+    if (!chargeKey()) return latch()
+    const descriptor = readOwnEnumerableDataDescriptor(source, key)
+    if (descriptor.kind !== 'data') return latch()
+    yield [key, descriptor.value]
+  }
+}
+export function createComparisonBudget(): ComparisonBudget {
+  return { pairs: 0, dead: false, outcome: null }
+}
+function latchComparison(budget: ComparisonBudget, outcome: JsonComparisonOutcome): JsonComparisonOutcome {
+  budget.dead = true
+  budget.outcome = outcome
+  return outcome
+}
+function captureKeyRecords(source: object, budget: ComparisonBudget): Map<string, unknown> {
+  const records = new Map<string, unknown>()
+  let discovered = 0
+  for (const [key, value] of forEachOwnEnumerableDataProperty(source, () => {
+    discovered += 1
+    if (discovered > COMPARISON_KEY_RECORD_BUDGET) {
+      budget.dead = true
+      budget.outcome = 'key_budget_exhausted'
+    }
+    return !budget.dead
+  }, () => {
+    if (budget.outcome === null) budget.outcome = 'unsafe_shape'
+    budget.dead = true
+  })) {
+    if (budget.dead) return records
+    records.set(key, value)
+  }
+  return records
+}
+// Pre-charges one child pair (pair unit + depth) BEFORE either boundary descriptor/value is read.
+// Returns null when the child visit may proceed, otherwise the latched conservative outcome.
+function preChargeChildPair(depth: number, budget: ComparisonBudget): JsonComparisonOutcome | null {
+  if (budget.dead) return budget.outcome ?? 'unsafe_shape'
+  budget.pairs += 1
+  if (budget.pairs > COMPARISON_PAIR_BUDGET) return latchComparison(budget, 'pair_budget_exhausted')
+  if (depth > COMPARISON_DEPTH_LIMIT) return latchComparison(budget, 'depth_exhausted')
+  return null
+}
+export function compareJsonData(left: unknown, right: unknown, depth: number, budget: ComparisonBudget): JsonComparisonOutcome {
+  if (budget.dead) return budget.outcome ?? 'unsafe_shape'
+  budget.pairs += 1
+  if (budget.pairs > COMPARISON_PAIR_BUDGET) return latchComparison(budget, 'pair_budget_exhausted')
+  if (depth > COMPARISON_DEPTH_LIMIT) return latchComparison(budget, 'depth_exhausted')
+  return compareCharged(left, right, depth, budget)
+}
+// Compares an already-charged pair. The equality fast path is reserved for primitives: an object
+// or array identical by reference (the same Proxy, the same accessor array) must still pass the
+// plain-shape gates. Every child pair is pre-charged and depth-checked BEFORE either boundary
+// descriptor/value is read; the 8193rd pair and depth-17 entry latch without touching the value.
+function compareCharged(left: unknown, right: unknown, depth: number, budget: ComparisonBudget): JsonComparisonOutcome {
+  const leftIsPrimitive = left === null || typeof left !== 'object'
+  const rightIsPrimitive = right === null || typeof right !== 'object'
+  if (leftIsPrimitive || rightIsPrimitive) {
+    if (leftIsPrimitive && rightIsPrimitive) return left === right ? 'equal' : 'different'
+    return 'different'
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return 'different'
+    if (!isInertJsonDataArray(left) || !isInertJsonDataArray(right)) return latchComparison(budget, 'unsafe_shape')
+    const leftLength = readArrayLength(left)
+    const rightLength = readArrayLength(right)
+    if (leftLength === null || rightLength === null) return latchComparison(budget, 'unsafe_shape')
+    if (leftLength !== rightLength) return 'different'
+    for (let index = 0; index < leftLength; index++) {
+      const preCharge = preChargeChildPair(depth + 1, budget)
+      if (preCharge !== null) return preCharge
+      const leftElement = readArrayElement(left, index)
+      const rightElement = readArrayElement(right, index)
+      if (leftElement.kind !== 'data' || rightElement.kind !== 'data') return latchComparison(budget, 'unsafe_shape')
+      const outcome = compareCharged(leftElement.value, rightElement.value, depth + 1, budget)
+      if (outcome !== 'equal') return outcome
+    }
+    return 'equal'
+  }
+  if (!isInertJsonDataObject(left) || !isInertJsonDataObject(right)) return latchComparison(budget, 'unsafe_shape')
+  const leftRecords = captureKeyRecords(left, budget)
+  if (budget.dead) return budget.outcome ?? 'unsafe_shape'
+  const rightRecords = captureKeyRecords(right, budget)
+  if (budget.dead) return budget.outcome ?? 'unsafe_shape'
+  if (leftRecords.size !== rightRecords.size) return 'different'
+  for (const [key, leftValue] of leftRecords) {
+    if (!rightRecords.has(key)) return 'different'
+    const preCharge = preChargeChildPair(depth + 1, budget)
+    if (preCharge !== null) return preCharge
+    const outcome = compareCharged(leftValue, rightRecords.get(key), depth + 1, budget)
+    if (outcome !== 'equal') return outcome
+  }
+  return 'equal'
+}

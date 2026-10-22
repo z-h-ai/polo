@@ -85,6 +85,7 @@ export interface CreatorSkillArchiveValidation {
   contentDigest: string
   manifest: CreatorSkillManifestEntry[]
   metadata: SkillVersionMetadata
+  slug: string
   warnings: SkillValidationIssue[]
   expandedBytes: number
 }
@@ -281,7 +282,7 @@ function entryKind(entry: Entry): 'file' | 'directory' | 'link' | 'special' {
 function inspectArchiveDirectory(
   rawEntries: Entry[],
   policy: SkillArchivePolicy,
-  slug: string,
+  slug?: string,
 ): {
   normalizedEntries: NormalizedArchiveEntry[]
   warnings: SkillValidationIssue[]
@@ -388,7 +389,7 @@ function inspectArchiveDirectory(
 
   const businessEntries = normalizedEntries.filter(entry => !entry.ignored)
   try {
-    resolveCreatorSkillRoot(businessEntries.map(entry => ({
+    slug = resolveCreatorSkillRoot(businessEntries.map(entry => ({
       path: entry.normalizedPath,
       directory: entry.directory,
     })), slug)
@@ -843,7 +844,7 @@ export async function preflightCreatorSkillArchive(args: {
 
 export async function validateCreatorSkillArchive(args: {
   archivePath: string
-  slug: string
+  slug?: string
   destinationRoot?: string
   policy?: SkillArchivePolicy
   expectedArchiveChecksum?: string
@@ -879,6 +880,7 @@ export async function validateCreatorSkillArchive(args: {
       policy,
       args.slug,
     )
+    const slug = resolveCreatorSkillRoot(normalizedEntries.map(entry => ({ path: entry.normalizedPath, directory: entry.directory })), args.slug)
     const businessEntries = normalizedEntries.filter(entry => !entry.ignored)
 
     const manifest: CreatorSkillManifestEntry[] = []
@@ -938,14 +940,14 @@ export async function validateCreatorSkillArchive(args: {
           [issue('executable_binary', archiveEntry.normalizedPath, 'ELF, PE, and Mach-O binaries are rejected')],
         )
       }
-      if (archiveEntry.normalizedPath === `${args.slug}/icon.png`) {
+      if (archiveEntry.normalizedPath === `${slug}/icon.png`) {
         validatePngIcon(data, archiveEntry.normalizedPath)
       }
-      if (archiveEntry.normalizedPath === `${args.slug}/SKILL.md`) {
+      if (archiveEntry.normalizedPath === `${slug}/SKILL.md`) {
         skillContent = data
       }
 
-      const relativePath = archiveEntry.normalizedPath.slice(args.slug.length + 1)
+      const relativePath = archiveEntry.normalizedPath.slice(slug.length + 1)
       manifest.push({
         path: relativePath,
         size: data.length,
@@ -978,10 +980,10 @@ export async function validateCreatorSkillArchive(args: {
       const parsed = parseCreatorSkillMetadata(businessEntries.map(archiveEntry => ({
         path: archiveEntry.normalizedPath,
         directory: archiveEntry.directory,
-        ...(archiveEntry.normalizedPath === `${args.slug}/SKILL.md` && skillContent !== undefined
+        ...(archiveEntry.normalizedPath === `${slug}/SKILL.md` && skillContent !== undefined
           ? { content: skillContent }
           : {}),
-      })), args.slug)
+      })), slug)
       metadata = parsed.metadata
     } catch (error) {
       if (!(error instanceof CreatorSkillMetadataError)) throw error
@@ -1017,6 +1019,7 @@ export async function validateCreatorSkillArchive(args: {
       )
     }
     return {
+      slug,
       archiveChecksum,
       contentDigest,
       manifest,

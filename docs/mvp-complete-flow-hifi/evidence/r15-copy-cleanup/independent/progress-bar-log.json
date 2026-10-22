@@ -1,0 +1,92 @@
+[
+  {
+    "viewport": 1440,
+    "count": 0,
+    "bar_target_width": "0%",
+    "task_states": [
+      "正在停止",
+      "正在停止",
+      "正在停止"
+    ]
+  },
+  {
+    "viewport": 1440,
+    "count": 1,
+    "bar_target_width": "33.3333%",
+    "task_states": [
+      "已停止",
+      "正在停止",
+      "正在停止"
+    ]
+  },
+  {
+    "viewport": 1440,
+    "count": 2,
+    "bar_target_width": "66.6667%",
+    "task_states": [
+      "已停止",
+      "正在停止",
+      "已停止"
+    ]
+  },
+  {
+    "viewport": 1024,
+    "count": 0,
+    "bar_target_width": "0%",
+    "task_states": [
+      "正在停止",
+      "正在停止",
+      "正在停止"
+    ]
+  },
+  {
+    "viewport": 1024,
+    "count": 1,
+    "bar_target_width": "33.3333%",
+    "task_states": [
+      "已停止",
+      "正在停止",
+      "正在停止"
+    ]
+  },
+  {
+    "viewport": 1024,
+    "count": 2,
+    "bar_target_width": "66.6667%",
+    "task_states": [
+      "已停止",
+      "正在停止",
+      "已停止"
+    ]
+  },
+  {
+    "viewport": 800,
+    "count": 0,
+    "bar_target_width": "0%",
+    "task_states": [
+      "正在停止",
+      "正在停止",
+      "正在停止"
+    ]
+  },
+  {
+    "viewport": 800,
+    "count": 1,
+    "bar_target_width": "33.3333%",
+    "task_states": [
+      "已停止",
+      "正在停止",
+      "正在停止"
+    ]
+  },
+  {
+    "viewport": 800,
+    "count": 2,
+    "bar_target_width": "66.6667%",
+    "task_states": [
+      "已停止",
+      "正在停止",
+      "已停止"
+    ]
+  }
+]

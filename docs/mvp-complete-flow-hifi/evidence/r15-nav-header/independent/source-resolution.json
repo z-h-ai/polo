@@ -1,0 +1,12 @@
+{
+  "finding": "NAV-SEM-001",
+  "original_observation": "Spec complete feature map M06 still named Polo 一级「技能」, while §13.9 required homepage assistant-card entry. IA summary also needed synchronization.",
+  "original_input_sha256": "f9b79c02c753da53d0bfb3f0c7091744b971e01809dd27c371e4aef6fe2c8f4e",
+  "current_sha256": "09796ab56fbc59373f7346fa5bb15e1121e0eb26187a4ac5df597621193576a2",
+  "verified_source_lines": {
+    "104": "| M06 Skills 与工具 | 查看当前空间授权，按本人启停，使用 Sources/Automations/Browser | 首页 Polo 助手卡片「管理技能」；助手内选用/跳转；数据源与工具留助手 | 保留；授权、本人启用、设备准备分开；管理创作者版本更新 | 已有组件；待验同名、失权、跨设备与企业隔离 |",
+    "158": "  首页：当前空间 + 固定 Polo 助手 + 自动最近使用的完整应用目录；助手卡片内管理技能入口"
+  },
+  "status": "resolved",
+  "reviewer": "/root/nav_header_review"
+}

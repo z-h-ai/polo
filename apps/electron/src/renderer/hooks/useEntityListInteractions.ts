@@ -39,6 +39,13 @@ export interface UseEntityListInteractionsOptions<T> {
   /** Multi-select (opt-in — set to true to enable) */
   multiSelect?: boolean
 
+  /**
+   * Exclude items from multi-select entirely: ⌘-click toggles, shift-ranges,
+   * right-click adoptions and select-all all skip them. Rendering is up to the
+   * consumer (e.g. Skills rows without a checkbox affordance).
+   */
+  isSelectable?: (item: T) => boolean
+
   /** Search filtering (opt-in) */
   search?: {
     /** Current search query */
@@ -120,6 +127,7 @@ export function useEntityListInteractions<T>({
   getId,
   keyboard: keyboardOpts,
   multiSelect: multiSelectEnabled = false,
+  isSelectable,
   search,
   selectionStore,
   selectedIdOverride,
@@ -140,17 +148,29 @@ export function useEntityListInteractions<T>({
 
   const allIds = useMemo(() => items.map(getId), [items, getId])
 
+  const isItemSelectable = useCallback((item: T) => isSelectable?.(item) ?? true, [isSelectable])
+  const selectableIds = useMemo(
+    () => new Set(items.filter(isItemSelectable).map(getId)),
+    [items, getId, isItemSelectable],
+  )
+
   const toggle = useCallback((id: string, index: number) => {
+    // Non-selectable rows (e.g. always-on bundled skills) never enter batch.
+    if (!selectableIds.has(id)) return
     setSelectionState(prev => MultiSelect.toggleSelect(prev, id, index))
-  }, [])
+  }, [selectableIds])
 
   const range = useCallback((toIndex: number) => {
-    setSelectionState(prev => MultiSelect.rangeSelect(prev, toIndex, allIds))
-  }, [allIds])
+    setSelectionState(prev => {
+      const next = MultiSelect.rangeSelect(prev, toIndex, allIds)
+      const selectedIds = new Set([...next.selectedIds].filter(id => selectableIds.has(id)))
+      return { ...next, selectedIds }
+    })
+  }, [allIds, selectableIds])
 
   const selectAllItems = useCallback(() => {
-    setSelectionState(MultiSelect.selectAll(allIds))
-  }, [allIds])
+    setSelectionState(MultiSelect.selectAll([...selectableIds]))
+  }, [selectableIds])
 
   const clearSelection = useCallback(() => {
     setSelectionState(prev => MultiSelect.clearMultiSelect(prev))
@@ -221,7 +241,7 @@ export function useEntityListInteractions<T>({
 
       // Right-click: preserve multi-select, let context menu handle batch actions
       if (e.button === 2) {
-        if (multiSelectEnabled && isMultiSelectActive && !selectionState.selectedIds.has(id)) {
+        if (multiSelectEnabled && isMultiSelectActive && selectableIds.has(id) && !selectionState.selectedIds.has(id)) {
           // Right-clicking an unselected item during multi-select: add it to selection
           toggle(id, index)
         }
@@ -250,7 +270,7 @@ export function useEntityListInteractions<T>({
       lastClickIndexRef.current = index
       setActiveIndex(index)
     }
-  }, [getId, multiSelectEnabled, isMultiSelectActive, selectionState.selectedIds, toggle, range, setActiveIndex])
+  }, [getId, multiSelectEnabled, isMultiSelectActive, selectionState.selectedIds, selectableIds, toggle, range, setActiveIndex])
 
   // ---- Search input keyboard forwarding ----
   // Forwards ArrowDown/ArrowUp from a search input to the roving tabindex handler.

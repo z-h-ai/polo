@@ -2,6 +2,9 @@ import { atom } from 'jotai'
 import {
   createTabId,
   HOME_TAB_ID,
+  KNOWLEDGE_BASE_APP_DEFINITION,
+  KNOWLEDGE_BASE_TAB,
+  KNOWLEDGE_BASE_TAB_ID,
   normalizeInstalledApps,
   POLO_APP_ID,
   POLO_TAB,
@@ -45,6 +48,21 @@ export const openAppTabAtom = atom(
       return
     }
 
+    // POO-108: the knowledge base is a local built-in surface — a single
+    // shared tab instance regardless of which entry opened it, positioned
+    // right after the permanent assistant tab.
+    if (app.id === KNOWLEDGE_BASE_APP_DEFINITION.id) {
+      const tabs = get(openTabsAtom)
+      if (!tabs.some((tab) => tab.id === KNOWLEDGE_BASE_TAB_ID)) {
+        const poloIndex = tabs.findIndex((tab) => tab.id === POLO_TAB_ID)
+        const nextTabs = [...tabs]
+        nextTabs.splice(poloIndex === -1 ? 0 : poloIndex + 1, 0, KNOWLEDGE_BASE_TAB)
+        set(openTabsAtom, nextTabs)
+      }
+      set(activeTabIdAtom, KNOWLEDGE_BASE_TAB_ID)
+      return
+    }
+
     const existing = get(openTabsAtom).find((tab) => tab.appId === app.id)
     if (existing) {
       set(openTabsAtom, get(openTabsAtom).map(tab => (
@@ -78,8 +96,15 @@ export const openAppTabAtom = atom(
 export const closeTabAtom = atom(
   null,
   (get, set, tabId: string) => {
-    if (tabId === HOME_TAB_ID || tabId === POLO_TAB_ID) {
+    if (tabId === HOME_TAB_ID) {
       set(activeTabIdAtom, HOME_TAB_ID)
+      return
+    }
+
+    // POO-104: the assistant tab is a permanent entry. A close request must
+    // be an idempotent no-op — it must never yank the active tab to Home
+    // while another app is focused, and never remove the tab itself.
+    if (tabId === POLO_TAB_ID) {
       return
     }
 

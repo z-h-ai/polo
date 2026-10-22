@@ -133,6 +133,63 @@ export interface LocalAppCatalogInstallRequest {
   permissions: string[]
 }
 
+/**
+ * One normalized authoritative source, sealed in canonical
+ * null-coalesced form (idempotent under re-normalization) so Main can
+ * compare the renderer-confirmed sources against its captured authority
+ * binding byte-for-byte without re-deriving absent fields.
+ */
+export interface ProductSpaceAppIdentitySource {
+  kind: string
+  name: string | null
+  circleId: string | null
+}
+
+/**
+ * Immutable identity copied from one validated ProductSpace Catalog entry.
+ * Main re-fetches the authoritative Catalog and compares every field before
+ * reading installation state, installing, or uninstalling a bundle.
+ */
+export interface ProductSpaceAppIdentity {
+  accountId: string
+  productSpaceId: string
+  catalogEntryId: string
+  artifactInstanceId: string
+  versionId: string
+  version: string
+  /**
+   * The catalog revision the renderer confirmed when building this
+   * identity. Renderer-supplied: it serves ONLY as an index — Main proves
+   * it against its own pre-await captured authority binding.
+   */
+  catalogRevision: string
+  /**
+   * The normalized authoritative sources of the rendered entry, in canonical
+   * null-coalesced form. Renderer-sealed from the SAME entry the operation
+   * was confirmed against; Main proves them against its pre-await captured
+   * authority binding before any registry call.
+   */
+  sources: ReadonlyArray<ProductSpaceAppIdentitySource>
+  /**
+   * The RAW authoritative availability of the rendered entry (including
+   * 'withdrawn' for retained tombstones). The UI-effective availability is a
+   * lossy projection ('blocked' collapses into 'unavailable') and is
+   * therefore never used for identity sealing.
+   */
+  availability: 'available' | 'unavailable' | 'blocked' | 'withdrawn'
+}
+
+export interface ProductSpaceBundleInstallRequest {
+  app: ProductSpaceAppIdentity
+}
+
+export interface ProductSpaceAppInstallState {
+  app: ProductSpaceAppIdentity
+  state: 'not_installed' | 'installing' | 'installed'
+  currentVersion?: string
+  progressPercent?: number
+}
+
 export interface LocalAppLegacyInstallRequest extends LocalAppInstallRequest {
   scope: LegacyLocalAppScope
 }
@@ -311,32 +368,92 @@ export interface LocalAppUninstallOptions {
   preserveData?: boolean
 }
 
-export type LocalAppErrorCode =
-  | 'INVALID_REQUEST'
-  | 'INVALID_MANIFEST'
-  | 'PLATFORM_MISMATCH'
-  | 'ARCH_MISMATCH'
-  | 'DOWNLOAD_FAILED'
-  | 'INSTALL_CANCELLED'
-  | 'INSTALL_TIMEOUT'
-  | 'SIZE_MISMATCH'
-  | 'CHECKSUM_MISMATCH'
-  | 'UNSUPPORTED_ARCHIVE'
-  | 'UNSAFE_ARCHIVE'
-  | 'RUNTIME_UNAVAILABLE'
-  | 'DEPENDENCY_INSTALL_FAILED'
-  | 'RELEASE_CHANGED'
-  | 'NOT_AUTHORIZED'
-  | 'NOT_INSTALLED'
-  | 'START_FAILED'
-  | 'START_TIMEOUT'
-  | 'PORT_UNAVAILABLE'
-  | 'PROCESS_CRASHED'
-  | 'STOP_FAILED'
-  | 'UNINSTALL_FAILED'
+/**
+ * The local-app error codes, as ONE runtime list. The `LocalAppErrorCode`
+ * union AND the transport's wire whitelist (`types.ts`) both derive from this
+ * array, so a new code can no longer land in the type but silently degrade to
+ * `HANDLER_ERROR` on the wire (POO-108 review fix round B9 — nine union
+ * members, including `PRODUCT_SPACE_CONTEXT_REQUIRED`, were in exactly that
+ * state).
+ */
+export const LOCAL_APP_ERROR_CODES = [
+  'REMOTE_FORBIDDEN',
+  'INVALID_REQUEST',
+  'INVALID_MANIFEST',
+  'PLATFORM_MISMATCH',
+  'ARCH_MISMATCH',
+  'DOWNLOAD_FAILED',
+  'INSTALL_CANCELLED',
+  'INSTALL_TIMEOUT',
+  'SIZE_MISMATCH',
+  'CHECKSUM_MISMATCH',
+  'UNSUPPORTED_ARCHIVE',
+  'UNSAFE_ARCHIVE',
+  'RUNTIME_UNAVAILABLE',
+  'DEPENDENCY_INSTALL_FAILED',
+  'RELEASE_CHANGED',
+  'CATALOG_ENTRY_MISSING',
+  'CATALOG_IDENTITY_DRIFT',
+  'APP_UNAVAILABLE',
+  'STALE_RUNTIME_GENERATION',
+  'NOT_AUTHORIZED',
+  'NOT_INSTALLED',
+  'SWITCH_IN_PROGRESS',
+  'PRODUCT_SPACE_CONTEXT_REQUIRED',
+  'START_FAILED',
+  'START_TIMEOUT',
+  'PORT_UNAVAILABLE',
+  'PROCESS_CRASHED',
+  'STOP_FAILED',
+  'UNINSTALL_FAILED',
+] as const
+
+export type LocalAppErrorCode = (typeof LOCAL_APP_ERROR_CODES)[number]
 
 export interface LocalAppErrorPayload {
   code: LocalAppErrorCode
   message: string
   details?: Record<string, unknown>
+}
+
+/**
+ * Strict request shape for the localApps lifecycle RPC: a bare
+ * CatalogLocalAppScope (legacy, renderer-reachable) or one of the two
+ * discriminated ProductSpace runtime branches. There is deliberately NO
+ * `legacy_scope` wrapper branch — the legacy member travels as the bare
+ * scope itself, exactly as the handler/renderer always accepted.
+ */
+export type LocalAppLifecycleRequest =
+  | CatalogLocalAppScope
+  | { kind: 'product_space_runtime_start'; app: ProductSpaceAppIdentity }
+  | {
+      kind: 'product_space_runtime_handle'
+      executionId: string
+      expectedRuntimeGeneration: number
+    }
+
+export function isProductSpaceRuntimeRequest(
+  value: unknown,
+): value is Exclude<LocalAppLifecycleRequest, CatalogLocalAppScope> {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && ((value as { kind?: unknown }).kind === 'product_space_runtime_start'
+      || (value as { kind?: unknown }).kind === 'product_space_runtime_handle'),
+  )
+}
+
+/** Non-secret ProductSpace start result: never exposes capability or gateway URL. */
+export interface ProductSpaceAppRuntimeStartResult {
+  appId: string
+  version: string
+  executionId: string
+  runtimeGeneration: number
+  scopeGeneration: number
+  runtimeKind: LocalAppRuntimeKind
+  /** Public loopback App UI from this exact start; never the capability gateway. Session-memory only. */
+  uiUrl?: string
+  platformApi:
+    | { status: 'available'; transport?: 'browser_bridge' | 'process_http' }
+    | { status: 'unavailable'; reason: 'static_runtime_unsupported' }
 }

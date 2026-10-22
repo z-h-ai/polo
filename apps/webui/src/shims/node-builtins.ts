@@ -21,6 +21,11 @@ export const mkdirSync = () => {}
 export const readdirSync = () => []
 export const readdir = () => {}
 export const copyFileSync = () => {}
+export const chmodSync = () => {}
+export const closeSync = () => {}
+export const fsyncSync = () => {}
+export const openSync = () => { throw new Error('openSync not available in browser') }
+export const rmSync = () => {}
 export const promises = {
   readFile: async () => { throw new Error('fs.promises not available in browser') },
   writeFile: async () => { throw new Error('fs.promises not available in browser') },
@@ -51,6 +56,8 @@ export const win32 = posix
 export const execSync = () => { throw new Error('execSync not available in browser') }
 export const exec = () => { throw new Error('exec not available in browser') }
 export const spawn = () => { throw new Error('spawn not available in browser') }
+export const execFileSync = () => { throw new Error('execFileSync not available in browser') }
+export const spawnSync = () => { throw new Error('spawnSync not available in browser') }
 
 // os
 export const homedir = () => '/home/user'

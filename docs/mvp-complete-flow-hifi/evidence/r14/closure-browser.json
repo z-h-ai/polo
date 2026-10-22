@@ -1,0 +1,28 @@
+{
+  "revision": "poo70-workbench-r14",
+  "actions": [],
+  "checks": [
+    "circle return does not query",
+    "enterprise pending retained",
+    "member support no financial details",
+    "circle approval removed",
+    "P-M07-SUPPORT no ticket created",
+    "P-M07-SUPPORT-LOAD-FAIL no ticket created",
+    "P-M07-RENEW-RETURN original object retained",
+    "P-M07-RENEW-RESULT original object retained",
+    "P-M07-LIST-RENEWED original object retained",
+    "P-M07-LIST original object retained",
+    "P-M11-SUPPORT-ACCOUNT-ADMIN original object retained",
+    "P-M11-SUPPORT-BROWSER original object retained",
+    "phone login preserves original circle target"
+  ],
+  "errors": [],
+  "network": [],
+  "passed": true,
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "a5b78ef3994e3f26e2852ba29a049211a56bdb9c5326c954576455757dcd1c90",
+    "docs/mvp-complete-flow-hifi/prototype.html": "44e4302d617ab8f9f982fa4994eeed8f598dbffca2c5f253a6499b4a8d949fd9",
+    "docs/mvp-complete-flow-hifi/review.html": "64ae6f8dc156b1dc935001df29c0bde27d91aab592a364a593d79a39eea53268",
+    "design-demos/polo-client-source-baseline/prototype.html": "1d4dd957a5db933653d22cfcf5d5a48880a49222d31c5f7e02e604bb0c42d952"
+  }
+}

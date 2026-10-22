@@ -22,6 +22,7 @@ const { createHash } = require('crypto');
 const {
   packagedResourcesDir,
   validatePackagedCliLayout,
+  validateMacMainNativePayload,
 } = require('./packaged-cli-layout.cjs');
 
 function validatePackagedCli(context) {
@@ -29,6 +30,13 @@ function validatePackagedCli(context) {
   const isWindows = context.electronPlatformName === 'win32';
   const resourcesDir = packagedResourcesDir(context);
   const appDir = path.join(resourcesDir, 'app');
+  const sdkPreloadPath = path.join(appDir, 'dist', 'app-sdk-preload.cjs');
+  if (!fs.existsSync(sdkPreloadPath)) throw new Error('Missing packaged App SDK preload');
+  const sdkPreload = fs.readFileSync(sdkPreloadPath, 'utf8');
+  const sdkRequires = [...sdkPreload.matchAll(/require\(["']([^"']+)["']\)/g)].map(match => match[1]);
+  if (!sdkPreload.length || sdkRequires.some(name => name !== 'electron')) {
+    throw new Error('App SDK sandbox preload has an unsupported runtime dependency');
+  }
   const cli = path.join(appDir, 'dist', 'cli', 'polo-cli.js');
   const server = path.join(appDir, 'dist', 'server', 'polo-server.js');
   const manifestPath = path.join(appDir, 'dist', 'cli', 'artifact-manifest.json');
@@ -106,6 +114,7 @@ function validatePackagedCli(context) {
     platform: context.electronPlatformName,
     expectedVersion: appVersion,
   });
+  if (isMac) validateMacMainNativePayload(resourcesDir, expectedArch);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   if (manifest.version !== appVersion) {
     throw new Error(`POO-14 unpacked CLI/App version mismatch: ${manifest.version} vs ${appVersion}`);

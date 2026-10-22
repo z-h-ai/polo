@@ -11,6 +11,21 @@ export interface SkillArchivePolicy {
 }
 export declare const DEFAULT_SKILL_ARCHIVE_POLICY: SkillArchivePolicy;
 export declare const HARD_SKILL_ARCHIVE_POLICY: SkillArchivePolicy;
+/**
+ * Hard ceiling for web_app (Generative UI canvas) bundles, following the
+ * HARD_SKILL_ARCHIVE_POLICY pattern: hardcoded client-side, admin policy can
+ * only tighten. `maxBundleBytes` mirrors GENERATE_APP_MAX_HTML_BYTES in
+ * @polo-ai/session-tools-core (the generation path enforces the same 512KB
+ * cap; that leaf package cannot import this one, so the pair is guarded by
+ * tests on both sides). One self-contained index.html per bundle, hence
+ * maxFileCount 1.
+ */
+export interface WebAppBundlePolicy {
+    version: string;
+    maxBundleBytes: number;
+    maxFileCount: number;
+}
+export declare const HARD_WEBAPP_BUNDLE_POLICY: WebAppBundlePolicy;
 export interface CreatorArtifact {
     id: string;
     organizationId: string;
@@ -136,6 +151,19 @@ export interface CreatorSkillDownloadGrant {
     manifest: CreatorSkillManifestEntry[];
     validationPolicy: SkillArchivePolicy;
 }
+/** Main-owned canonical source; never derived from a package slug or organization. */
+export interface CanonicalSkillSource {
+    accountId: string;
+    productSpaceId: string;
+    subjectKind: 'personal_artifact' | 'enterprise_instance';
+    subjectId: string;
+    versionId: string;
+}
+export type CanonicalSkillDownloadGrant = Omit<CreatorSkillDownloadGrant, 'organizationId'> & {
+    canonicalSource: CanonicalSkillSource;
+    organizationId?: never;
+};
+export type ManagedSkillDownloadGrant = CreatorSkillDownloadGrant | CanonicalSkillDownloadGrant;
 export interface CreatorSkillSafetyStatus {
     artifactId: string;
     version: string;
@@ -148,8 +176,11 @@ export interface CreatorSkillsLedger {
     installed: InstalledCreatorSkill[];
 }
 export interface InstalledCreatorSkill {
+    /** Trusted Main/server admission captured before this native commit. */
+    nativeInstallationAdmissionId?: string;
     artifactId: string;
-    organizationId: string;
+    organizationId?: string;
+    canonicalSource?: CanonicalSkillSource;
     slug: string;
     version: string;
     archiveChecksum: string;
@@ -159,6 +190,14 @@ export interface InstalledCreatorSkill {
     lastCheckedAt?: string;
     ignoredVersion?: string;
 }
+export type LegacyInstalledCreatorSkill = InstalledCreatorSkill & {
+    organizationId: string;
+    canonicalSource?: never;
+};
+export type CanonicalInstalledSkill = InstalledCreatorSkill & {
+    organizationId?: never;
+    canonicalSource: CanonicalSkillSource;
+};
 export type CreatorSkillOperationStage = 'download' | 'validate' | 'prepare' | 'commit' | 'refresh';
 export interface CreatorSkillOperationProgress {
     operationId: string;
@@ -185,7 +224,7 @@ export interface CreatorSkillInstallInput {
     /** Server-derived project directory; never accepted from renderer RPC input. */
     workingDirectory?: string;
     operationId: string;
-    grant: CreatorSkillDownloadGrant;
+    grant: ManagedSkillDownloadGrant;
     replaceExisting?: boolean;
     confirmGlobalOverride?: boolean;
     backupLocalChanges?: boolean;

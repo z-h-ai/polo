@@ -884,7 +884,7 @@ export function migrateAuthType(
 // Auth Environment Variable Resolution
 // ============================================================
 
-const CLAUDE_BEDROCK_ROUTING_ENV_KEYS = [
+export const CLAUDE_BEDROCK_ROUTING_ENV_KEYS = [
   'CLAUDE_CODE_USE_BEDROCK',
   'AWS_BEARER_TOKEN_BEDROCK',
   'ANTHROPIC_BEDROCK_BASE_URL',
@@ -894,7 +894,7 @@ const CLAUDE_BEDROCK_ROUTING_ENV_KEY_SET = new Set<string>(
   CLAUDE_BEDROCK_ROUTING_ENV_KEYS,
 )
 
-const MANAGED_ANTHROPIC_AUTH_ENV_KEYS = [
+export const MANAGED_ANTHROPIC_AUTH_ENV_KEYS = [
   'ANTHROPIC_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
@@ -941,6 +941,41 @@ export function resetManagedAnthropicAuthEnvVars(): void {
       delete process.env[key]
     } else {
       process.env[key] = originalValue
+    }
+  }
+}
+
+/**
+ * R50: an exact snapshot of every managed credential env key (including the
+ * Bedrock routing keys) for transactional post-init application — a timed-out
+ * or destroyed construction restores precisely this snapshot instead of
+ * leaving an erased or overwritten process-global credential state behind.
+ */
+export interface ManagedAnthropicAuthEnvSnapshot {
+  [key: string]: string | undefined
+}
+
+export function captureManagedAnthropicAuthEnvSnapshot(): ManagedAnthropicAuthEnvSnapshot {
+  if (typeof process === 'undefined' || !process?.env) {
+    return {}
+  }
+  const snapshot: ManagedAnthropicAuthEnvSnapshot = {}
+  for (const key of MANAGED_ANTHROPIC_AUTH_ENV_KEYS) {
+    snapshot[key] = process.env[key]
+  }
+  return snapshot
+}
+
+export function restoreManagedAnthropicAuthEnvSnapshot(snapshot: ManagedAnthropicAuthEnvSnapshot): void {
+  if (typeof process === 'undefined' || !process?.env) {
+    return
+  }
+  for (const key of MANAGED_ANTHROPIC_AUTH_ENV_KEYS) {
+    const value = snapshot[key]
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
     }
   }
 }

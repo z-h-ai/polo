@@ -1,0 +1,4 @@
+7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47  /Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/prototype-manifest.json
+13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4  /Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/prototype.html
+21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3  /Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html
+2677f79495c15c1da170d4c45af407b5f34023774bd801e4d433f5716e98b05d  /Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/design-demos/polo-client-source-baseline/prototype.html

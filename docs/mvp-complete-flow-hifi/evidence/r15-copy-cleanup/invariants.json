@@ -1,0 +1,199 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "check": "new conversation excludes prior messages",
+      "passed": true
+    },
+    {
+      "check": "new conversation empty draft",
+      "passed": true
+    },
+    {
+      "check": "new conversation has no old fixture",
+      "passed": true
+    },
+    {
+      "check": "original conversation kept",
+      "passed": true
+    },
+    {
+      "check": "offline file navigation keeps send blocked",
+      "passed": true
+    },
+    {
+      "check": "offline new conversation keeps send blocked",
+      "passed": true
+    },
+    {
+      "check": "preblock file navigation keeps send blocked",
+      "passed": true
+    },
+    {
+      "check": "preblock new conversation keeps send blocked",
+      "passed": true
+    },
+    {
+      "check": "cut file navigation keeps send blocked",
+      "passed": true
+    },
+    {
+      "check": "cut new conversation keeps send blocked",
+      "passed": true
+    },
+    {
+      "check": "deleted session no file access",
+      "passed": true
+    },
+    {
+      "check": "deleted session no old content",
+      "passed": true
+    },
+    {
+      "check": "personal removal keeps revoked authorization",
+      "passed": true
+    },
+    {
+      "check": "personal cancel remains revoked",
+      "passed": true
+    },
+    {
+      "check": "personal detail does not enable",
+      "passed": true
+    },
+    {
+      "check": "personal update retains disabled",
+      "passed": true
+    },
+    {
+      "check": "personal cancel retains version",
+      "passed": true
+    },
+    {
+      "check": "enterprise removal keeps revoked authorization",
+      "passed": true
+    },
+    {
+      "check": "enterprise cancel remains revoked",
+      "passed": true
+    },
+    {
+      "check": "enterprise detail does not enable",
+      "passed": true
+    },
+    {
+      "check": "enterprise update retains disabled",
+      "passed": true
+    },
+    {
+      "check": "enterprise cancel retains version",
+      "passed": true
+    },
+    {
+      "check": "empty credential cannot connect",
+      "passed": true
+    },
+    {
+      "check": "cancel is not successful connection",
+      "passed": true
+    },
+    {
+      "check": "replacement requires file picker",
+      "passed": true
+    },
+    {
+      "check": "replacement names selected file",
+      "passed": true
+    },
+    {
+      "check": "not yet preserves interrupted output",
+      "passed": true
+    },
+    {
+      "check": "budget queries budget",
+      "passed": true
+    },
+    {
+      "check": "credit recovery does not clear budget",
+      "passed": true
+    },
+    {
+      "check": "surface switch keeps draft",
+      "passed": true
+    },
+    {
+      "check": "all compatibility links",
+      "passed": true
+    },
+    {
+      "check": "catalogue navigation cannot reauthorize",
+      "passed": true
+    },
+    {
+      "check": "catalogue preserves builtin preference",
+      "passed": true
+    },
+    {
+      "check": "device preparation preserves flags",
+      "passed": true
+    },
+    {
+      "check": "network retry really unlocks send",
+      "passed": true
+    },
+    {
+      "check": "navigation retains recovery route",
+      "passed": true
+    },
+    {
+      "check": "member budget query is not recharge",
+      "passed": true
+    },
+    {
+      "check": "owner query retains role",
+      "passed": true
+    },
+    {
+      "check": "empty conversation has no fixture files",
+      "passed": true
+    },
+    {
+      "check": "A-personal-empty-skills empty navigator",
+      "passed": true
+    },
+    {
+      "check": "A-personal-empty-sources empty navigator",
+      "passed": true
+    },
+    {
+      "check": "attachment alone creates no generated file",
+      "passed": true
+    },
+    {
+      "check": "attachment viewer shows selected text",
+      "passed": true
+    },
+    {
+      "check": "sourcefailed list navigation retains connection failure",
+      "passed": true
+    },
+    {
+      "check": "sourcedenied list navigation retains connection failure",
+      "passed": true
+    },
+    {
+      "check": "standalone legacy deep link",
+      "passed": true
+    },
+    {
+      "check": "standalone home enters new assistant",
+      "passed": true
+    }
+  ],
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "35dab681265bdd5d49e9056d394389a14706f21915cc3792241b02f0392a2597",
+    "docs/mvp-complete-flow-hifi/review.html": "6cf5cac8e865474f8ceea3edb84743af4e89693dd61c35f88fa1d8351f0aa468",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a1d6d28d39414799d3f266a37cc25328a124581c5bc1f146e579a794d1ea9c87",
+    "design-demos/polo-client-source-baseline/prototype.html": "fc013de26e2f7e4ee6bbe4eb2bc835b693cdf7c601f84b956c2057782b3a6339"
+  }
+}

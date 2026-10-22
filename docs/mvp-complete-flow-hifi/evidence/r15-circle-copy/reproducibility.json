@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "first": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "9342037ca2d8bd70745b4ba6e713f0881e145799159bee2837606e5f8453df1e",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a2c75eea2658b49d6f72699c4900565a2655a14569e5e59eb79687d876fad59b",
+    "docs/mvp-complete-flow-hifi/review.html": "dcf1e3c70f6a215b1f0976f53048f4b1cb9e74d3fa7fda615b6df1b423f491be",
+    "design-demos/polo-client-source-baseline/prototype.html": "d7d6308be42cb50eff4a803079a359b3bb2653916414d10163b32df094f0397a",
+    "design-demos/polo-client-source-baseline/prototype-manifest.json": "68a3f8f576e747ba4f5e5cdc7327a1fd04d49a57ed9f4d10b81aaa8888ab4992"
+  },
+  "second": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "9342037ca2d8bd70745b4ba6e713f0881e145799159bee2837606e5f8453df1e",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a2c75eea2658b49d6f72699c4900565a2655a14569e5e59eb79687d876fad59b",
+    "docs/mvp-complete-flow-hifi/review.html": "dcf1e3c70f6a215b1f0976f53048f4b1cb9e74d3fa7fda615b6df1b423f491be",
+    "design-demos/polo-client-source-baseline/prototype.html": "d7d6308be42cb50eff4a803079a359b3bb2653916414d10163b32df094f0397a",
+    "design-demos/polo-client-source-baseline/prototype-manifest.json": "68a3f8f576e747ba4f5e5cdc7327a1fd04d49a57ed9f4d10b81aaa8888ab4992"
+  }
+}

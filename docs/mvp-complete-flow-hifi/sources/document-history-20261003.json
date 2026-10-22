@@ -1,0 +1,651 @@
+{
+  "schema_version": 1,
+  "scope": "Historical POO-70 inputs and pre-cleanup snapshots; not current product requirements.",
+  "sot": "docs/client-journey-review/spec.md",
+  "archive": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
+  "archive_sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+  "entries": [
+    {
+      "path": "docs/client-journey-review/evidence-manifest.json",
+      "sha256": "b86048c33f5f984140936a9eaa0f61649da43ffe95ba8608aaffd657c57fc4fb",
+      "bytes": 18319,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-DOC-0019-runtime-metering-and-prepaid-recharge-are-separate.md",
+      "sha256": "8dcbdc2bf8ed54e83ea16f3b83c572c112f60d46471647bee4f1e73b34425e41",
+      "bytes": 589,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-DOC-CONTEXT.md",
+      "sha256": "f29473cee6a2427ca6ca06dbe27fc33719f269ae0f39700555fe0a1abaae68e3",
+      "bytes": 38727,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-DOC-polo-client-user-flows.md",
+      "sha256": "bc52fea34f68dfbab7b4d1bc47afd31819db4913440616e8c3d096497a6d4b84",
+      "bytes": 19349,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-DOC-product-function-baseline.md",
+      "sha256": "1898f27c1a9fbce290f932633205c922b5e533fd65c652f14eaebe22f820f4cd",
+      "bytes": 28154,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-DOC-product-space-contract.md",
+      "sha256": "ebcb6bc81f4cc5cd0caa50d4753f154ef2feec3ef68d0166059bdef3107f3a5b",
+      "bytes": 17732,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-DOC-user-flows-permissions-and-states.md",
+      "sha256": "2e5c350342d8983784f67691451bd46ebf4bd7bed5f5106e60e205882898c046",
+      "bytes": 38703,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-PAY-payment-requirements-round2-handoff.md",
+      "sha256": "20e3c5e891f01eae2f8dabe193ec36ae0fdba09e14b9c3a3e28f04595a671a99",
+      "bytes": 57085,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-PAY-payment-round2-implementation-orchestration-plan.md",
+      "sha256": "4f4f60054040ca9bdbae4cca6358573eb1122306d863353fa30fdd5e42a45142",
+      "bytes": 11817,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/A-PAY-payment-round2-user-flows-and-page-states.md",
+      "sha256": "ac4a2e73473870a85daec79f1b1f4eb1b0fc138d0efd73e3d9ce4db088f18ec2",
+      "bytes": 49202,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/C-INT-App.tsx",
+      "sha256": "2da4fb84e62dcf2f4a766b1aa860ba028d6af0eb13157d2bf3b61c17afa9ce34",
+      "bytes": 137661,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/C-INT-DESIGN.md",
+      "sha256": "214e90085d7d1f9dfb9cc45a81de182a92bbb85523d4d726929419844b21efdf",
+      "bytes": 22768,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/C-INT-HomePage.tsx",
+      "sha256": "b56e82b77ad99678b5df4bd0ee9ebb378267628d73a1fcb1c3450d93170702de",
+      "bytes": 49646,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/C-INT-HomeSpaceContext.tsx",
+      "sha256": "bdb56963443572e35165a4f8ee8af44b1c856a0e3805cee4d6ea3ceed5e6964e",
+      "bytes": 8326,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/C-INT-ProductSpaceContractGate.tsx",
+      "sha256": "3441fc49ec2a004c7d54dea97c0f39c7ea465a437905dc37e6dcc85238c82e76",
+      "bytes": 3527,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/C-INT-ProductSpaceSwitcher.tsx",
+      "sha256": "9ca993876bcefc8a0599c85ea09304aab521d0d31313672f6cbff0403a300886",
+      "bytes": 4045,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/C-INT-useProductSpaceContext.ts",
+      "sha256": "42d1c592941c443d2d8574d1ace17a853bfe4f540789aa656c4c72863d487b13",
+      "bytes": 59036,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-111-spec-input.md",
+      "sha256": "7049994a11402ce73c9881f3bc8b88fd448b6ac169a786e06815aca685f8f5b2",
+      "bytes": 9156,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-111.md",
+      "sha256": "7049994a11402ce73c9881f3bc8b88fd448b6ac169a786e06815aca685f8f5b2",
+      "bytes": 9156,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-112-r10.md",
+      "sha256": "5c460280d1e08439a7f578b20ad158efc36859e1f99d464d597ebd41d6039330",
+      "bytes": 33703,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-112-r5.md",
+      "sha256": "c5439190a890b46a78a00deaafebdbd5eddd85979451584e89ab6b6adfdf72c3",
+      "bytes": 43163,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-112-r6.md",
+      "sha256": "6ffb9f785c5ee4b274675dd8b81bbe64ed3fcf4390d8437fce85a0a01fa65644",
+      "bytes": 45358,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-112-r8.md",
+      "sha256": "483d8d7098a2bef77a16b0d08f78cc5d6bf3e54e6d1538f880012690431b8539",
+      "bytes": 50201,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-112-spec-input.md",
+      "sha256": "62ce5a83c7eae9d3eb8763bb9de994b97542a9e2fc22d0678b5d3f10e9051c54",
+      "bytes": 42734,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-112.md",
+      "sha256": "cdabdc172bf6504ff5daca9c4382e3d4979fbd613e32d2dfa9e424bf256f2231",
+      "bytes": 39044,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-94-spec-input.md",
+      "sha256": "f6bfadc4a94a954e959be63beb609ee81a27f01af04c489b843e99754cdc207f",
+      "bytes": 4028,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POL-94.md",
+      "sha256": "f6bfadc4a94a954e959be63beb609ee81a27f01af04c489b843e99754cdc207f",
+      "bytes": 4028,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-41-spec-input.md",
+      "sha256": "7ba81f65ba4f1d18adf45fbe2c60965bc66ce757faddaa689f0fccff9746456f",
+      "bytes": 5258,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-41.md",
+      "sha256": "7ba81f65ba4f1d18adf45fbe2c60965bc66ce757faddaa689f0fccff9746456f",
+      "bytes": 5258,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-42-spec-input.md",
+      "sha256": "24b6db8bd76790d9209217feafe798b5b7d597766693e278a8328aae27542f2e",
+      "bytes": 10619,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-43-spec-input.md",
+      "sha256": "6079926c0d60c70e65c50d3ab2d10aaceb0caa23f43f22b1cb1b20b03c311d17",
+      "bytes": 3154,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-43.md",
+      "sha256": "5438f1fe8525cc0ff74852080bfd0c33d1d64dda083b8123cd104e0fa9927a40",
+      "bytes": 3153,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-47-spec-input.md",
+      "sha256": "0782424ede598675faa4cb285ed7aec583ff8f73c7c6bd7d2fd6b5ee4b08ed61",
+      "bytes": 27864,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-47.md",
+      "sha256": "0782424ede598675faa4cb285ed7aec583ff8f73c7c6bd7d2fd6b5ee4b08ed61",
+      "bytes": 27864,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-48-spec-input.md",
+      "sha256": "ca51953b479ea77bc01340cc344253afdf3c3b291d6ecb9548d94b5ab766b96d",
+      "bytes": 16376,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-49-spec-input.md",
+      "sha256": "ee6a47b61c990579e4eb8a21bfd834409cddcdda18175c94b7919d304ebb0e2e",
+      "bytes": 17596,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-52-spec-input.md",
+      "sha256": "93d1c144b2957dcba04aa9e2b8ce63b7fdd7bf3c9cf4c86619c6a3ea930aede3",
+      "bytes": 18163,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-53-spec-input.md",
+      "sha256": "5d32c3fa9cbe184b45e1b681809f6ca071d59b2f7e080b31a124dffaace87d07",
+      "bytes": 5227,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-54-spec-input.md",
+      "sha256": "574ea6ce98bd138a719509ed1efae8ab60e0398b6b1d5624d1f3d49786789cad",
+      "bytes": 3420,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-55-spec-input.md",
+      "sha256": "f9c3dc31f862477158dbf3657a5ab636b36085a50032e18d3bcc9342b3b2626e",
+      "bytes": 2070,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-55.md",
+      "sha256": "f9c3dc31f862477158dbf3657a5ab636b36085a50032e18d3bcc9342b3b2626e",
+      "bytes": 2070,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-56-spec-input.md",
+      "sha256": "7731067fad29a2ee2fdf4a726746734c23f927c52c7999b32cadd516d85f6822",
+      "bytes": 1781,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-56.md",
+      "sha256": "7731067fad29a2ee2fdf4a726746734c23f927c52c7999b32cadd516d85f6822",
+      "bytes": 1781,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-57-spec-input.md",
+      "sha256": "ae6238c2a3955e92da83ada9649a02831b0f0989ead39b10c4e7d5f6fdc9d57a",
+      "bytes": 1714,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-57.md",
+      "sha256": "ae6238c2a3955e92da83ada9649a02831b0f0989ead39b10c4e7d5f6fdc9d57a",
+      "bytes": 1714,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-58-spec-input.md",
+      "sha256": "91612c7b34220002cca4ccd8a902b353afff3c6c47aa26d8bc0ba082d9fdedd2",
+      "bytes": 2087,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-59-spec-input.md",
+      "sha256": "c3fec91db1c08ef7bf655732444fd24ba18c6a9586a406f0dca1f41e5ee4d05b",
+      "bytes": 1859,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-60-spec-input.md",
+      "sha256": "e14e3cac93a86ec54fd691438906975246639eb22853aa43882d35140b14d45e",
+      "bytes": 1713,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-61-spec-input.md",
+      "sha256": "367a99c870cb92ce29863062578da734abe05edcd6416d40ebbf080a7ea5caaa",
+      "bytes": 1690,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-62-spec-input.md",
+      "sha256": "2134a8047c37dd92ac53e4ae88568175c777409dc9bdd93edd5dbe73dcf9bc6b",
+      "bytes": 1943,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-63-spec-input.md",
+      "sha256": "c8d36be91611a47afd111f68fb2e9a9ed8874398ec193dcc4c326e8e9651ede9",
+      "bytes": 1935,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-64-spec-input.md",
+      "sha256": "6dea7f81208c859e94b2ede26177b389ce0fe858e7928091c19f033c84cfe056",
+      "bytes": 2239,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-65-spec-input.md",
+      "sha256": "e14d64a6ff0d2196ec2a195aa76ae4933508962b818b999624a5b668661cb242",
+      "bytes": 2214,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-66-spec-input.md",
+      "sha256": "5ac359dec449a26c6e0acc08f59d352c9186dd889c87a75987a31467e096db5a",
+      "bytes": 1954,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-70-spec-input.md",
+      "sha256": "724298103c4fc3c7265f24c171a1f5bb72390c1ff5dbb979506be4f6ca5765cc",
+      "bytes": 39805,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/POO-70.md",
+      "sha256": "7876b37311cea0eb030e15b69f9502a2ee828534d5a2e5685a35e804c300ddeb",
+      "bytes": 7674,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/assistant-flows-presented-r7.md",
+      "sha256": "b7cca0b9ba05edef3023d0cfedba2eb00a97b4c7a87fc76a60e306663a152d89",
+      "bytes": 7445,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/flow-before-acceptance.json",
+      "sha256": "c55b27b75a7a9c4ce7edfa04aad3aed439bcb0dce0b66eea2d64553c080735f8",
+      "bytes": 126091,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/master-r10-change-log.md",
+      "sha256": "9953de0b85388f038a7bc903d9cdeed2a01aa81ca88490c43d9f6caff252d6e2",
+      "bytes": 3256,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/master-r9-change-log.md",
+      "sha256": "27120eed5fd6eeadfc53199629f27c712e28d637bbba23fe4c2bc57a42912944",
+      "bytes": 3362,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/module-m02-r1.md",
+      "sha256": "b64232d02f2ee4140d00ca2b76c9c56d9c9c2ee47a5b808972628cb251588ca4",
+      "bytes": 4026,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/module-review-accepted-v1.md",
+      "sha256": "cf905ef07eb2e88e70cafab78d53bce48534111040cae90043b168e5d14d724b",
+      "bytes": 41011,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/module-review-m01-m02.md",
+      "sha256": "8a30ea335b9df9de582dd30086c447903b1b41a5231c982cd818bb23c7bf2317",
+      "bytes": 9151,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/module-review-presented.md",
+      "sha256": "b31f336e269ccbadefe278bc928232fab830893eb23281eb678b853e8bb42dff",
+      "bytes": 40343,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/repositories-spec-v1.json",
+      "sha256": "4e5a898cf3135be9d0feeb7c122f5988ae80a95e34f162ffd23fad18ab78f76c",
+      "bytes": 1462,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/review-r1-original.md",
+      "sha256": "5dc06f68935ad01ca2cdebecb0c69bba79e3c2555b79576193c7c086dd89cdd8",
+      "bytes": 25677,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/review-r1.md",
+      "sha256": "5dc06f68935ad01ca2cdebecb0c69bba79e3c2555b79576193c7c086dd89cdd8",
+      "bytes": 25677,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/review-r2.md",
+      "sha256": "3efb5516fdf4636b164769a68c9a7e8de2cc285682644dcb29f0dd61130f7630",
+      "bytes": 27083,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/review-r3.md",
+      "sha256": "8a4abd266dd83a3cddf31a1793cf7f077291066dbfdb07af829725800f34dbb6",
+      "bytes": 30074,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/review-r4.md",
+      "sha256": "7ea4ba027de4a30bc944bf97f0aae05b8fa117a0c75e3986f3966ba15fa53ad6",
+      "bytes": 31589,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/spec-v1-before-acceptance.md",
+      "sha256": "45bc8d9116c1f9ced710ec20f1e2e683a517f8ee9b9fd24e89bfdc1ba30cd430",
+      "bytes": 52666,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r10.md",
+      "sha256": "6632e91ffc8bff40d2a877e41a939f843a1ffdc1197fea9083cf372877395e44",
+      "bytes": 1970,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r2.md",
+      "sha256": "8f88ab57a8ccad0fb3d246bb68c122e344d89f33a76a2c3e6974c57a709d8351",
+      "bytes": 376,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r3.md",
+      "sha256": "42a0cf6869cab30473d9bcbd2ce30fbef3b6a64ddcad873ff77710c655bf328f",
+      "bytes": 1300,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r4.md",
+      "sha256": "7b311f3ccafa026ca1e4142aca3f1613101dc779315036ddc24251ee136c8c10",
+      "bytes": 498,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r5.md",
+      "sha256": "4d04051001e5186f1cd0f5944ca52420f8759f682bc2aa03df378aefd2725b46",
+      "bytes": 1811,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r6.md",
+      "sha256": "4929fac5901f279de3d9fbf13dd282f4d07d4244c5cb100912e57ff0cc45c486",
+      "bytes": 2341,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r7.md",
+      "sha256": "6d69c3b9acac2c18d79d644aa71383881cdf222a957ae143297e1e3307714161",
+      "bytes": 1782,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r8.md",
+      "sha256": "8602918997cdee8488d463e9dc92a585ded3498a9ae5c1a9083f020d4d764a46",
+      "bytes": 1617,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/sources/user-decision-r9.md",
+      "sha256": "89f3fdad774948e12e15bd7f149e13b9bf0a9a707e711aae83c4ed9599c22668",
+      "bytes": 1494,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/desktop-container-brief-r6.md",
+      "sha256": "c835871be3cde862ded03f91e1af3caf25ad075e626868a3d6fd19bef3f9b5d8",
+      "bytes": 4342,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/mac-window-controls-r7.md",
+      "sha256": "38c62cdb288ad039d0cef9337645bba5fefcbc99b3d61971126dfceac21b5f8a",
+      "bytes": 290,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/poo70-implementation-delta-review.md",
+      "sha256": "6d46787dccc2769bf2acd7625ad1aad8ce7509548e8042d12706dda2dc59b540",
+      "bytes": 20854,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/poo70-module-review.md",
+      "sha256": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f",
+      "bytes": 40724,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/poo70-spec-before-master-r10.md",
+      "sha256": "630d8ac00de04d49045a7e6fbb10575311372f8bcb6292def6f8dadc45bf2936",
+      "bytes": 61817,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/poo70-spec-before-master-r9.md",
+      "sha256": "346d94926c940bf97676424ccba810e2cdccf937176e79b6d9b554001ecd762d",
+      "bytes": 55845,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/poo70-spec.md",
+      "sha256": "a761d200b1449acef9f71c928646c5d477cdc5bce6a6630e2ac97325a70cb871",
+      "bytes": 64605,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/revoked-space-menu-r10.md",
+      "sha256": "6d427ab39e1ed22ddc97c40ecfa101aa9adeaf2f23446d4344ff5ba964a487e0",
+      "bytes": 551,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/space-entry-in-account-r9.md",
+      "sha256": "31d4c45a1ea2923187167658b623330f839078a4a533b709acaa9948425bb09c",
+      "bytes": 774,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/tab-close-alignment-r8.md",
+      "sha256": "46c93f40b2a7a8e185c574683c62e47d79f3a8a0af0455102aae9d50231f56d6",
+      "bytes": 201,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/user-decision-r8.md",
+      "sha256": "8602918997cdee8488d463e9dc92a585ded3498a9ae5c1a9083f020d4d764a46",
+      "bytes": 1617,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/build_manifest.py",
+      "sha256": "4f102910061becf54e5373e7f34d772cf5d37d5e3f183b10aa870a6b1b56a49f",
+      "bytes": 19019,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/build_surface.py",
+      "sha256": "c81d9f37148351766ced0b2c097644d68f02049c8d2876a97a5e9aa04498b275",
+      "bytes": 7228,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/optimize_desktop_r6.py",
+      "sha256": "5438cc07d9b2d1d1dad6b1ea717644d34b4c7cfd9ba410af90a1d2f4042d5abc",
+      "bytes": 49696,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/rebuild_dpc07.py",
+      "sha256": "2447d7fda5839cf8fe9b8c6a73b470414d714ebe22048ad322f4bd51e147e87e",
+      "bytes": 17183,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/rebuild_master_r10.py",
+      "sha256": "38c813a87e93b5f183c8653fffb228735762cff07210d17131b685b6974fb661",
+      "bytes": 21798,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/rebuild_master_r9.py",
+      "sha256": "de98b3e41846a54e51b21fb09df2ecf7e91c2ae9704d02a006176ebe1f86580b",
+      "bytes": 18574,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/rebuild_shell.py",
+      "sha256": "af49adcb29ca45bb61436bfbff5f06b2ad49d42767671fc198dc32998d41d3b4",
+      "bytes": 2703,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/ux_round.py",
+      "sha256": "163f227e4ef334bd7ad7a2e097f1341e8ced3a42d2d5e361aa6cd21f8b14cd33",
+      "bytes": 4921,
+      "removed_from_active_tree": true
+    },
+    {
+      "path": "docs/client-journey-review/spec.md",
+      "sha256": "4853853621280894296359507ae8892cfbe730afd9692f5058a18bd087606a4a",
+      "bytes": 101297,
+      "removed_from_active_tree": false
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/README.md",
+      "sha256": "02c949528ac43700f69983663bf98ed4f9e8762aab704750398cec38a657d3c7",
+      "bytes": 4445,
+      "removed_from_active_tree": false
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+      "sha256": "0c1f946d6b3e55e2cd428a0f7ef7b907b81df892f4905d2ebdb38051587feed8",
+      "bytes": 1561599,
+      "removed_from_active_tree": false
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/prototype.html",
+      "sha256": "c50181bf0fb3bd2e1bf5dcc1077cd750ec419e3c068105a3f1d518192edb390a",
+      "bytes": 2350033,
+      "removed_from_active_tree": false
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/review.html",
+      "sha256": "59a94fc3410a2b5fde7e30d3fc3527f758841aa388465f684d625c11f041ecd4",
+      "bytes": 1174649,
+      "removed_from_active_tree": false
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/quality-report.json",
+      "sha256": "b0f4b4dc22a791eed9f76a310bcb4c2b3b133b24a244785b4557aad2477a626c",
+      "bytes": 21493,
+      "removed_from_active_tree": false
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/prototype.html",
+      "sha256": "fc013de26e2f7e4ee6bbe4eb2bc835b693cdf7c601f84b956c2057782b3a6339",
+      "bytes": 600714,
+      "removed_from_active_tree": false
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/validate_unified.py",
+      "sha256": "7321ac6d84cea038343202826a785e6c2ac9d6cbf32680a9eb0792f8919aadf9",
+      "bytes": 4770,
+      "removed_from_active_tree": false
+    }
+  ]
+}

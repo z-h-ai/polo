@@ -18,6 +18,7 @@ import AppSettingsPage from './AppSettingsPage'
 import AccountSecuritySettingsPage from './AccountSecuritySettingsPage'
 import AppearanceSettingsPage from './AppearanceSettingsPage'
 import InputSettingsPage from './InputSettingsPage'
+import ToolsSettingsPage from './ToolsSettingsPage'
 import WorkspaceSettingsPage from './WorkspaceSettingsPage'
 import PermissionsSettingsPage from './PermissionsSettingsPage'
 import LabelsSettingsPage from './LabelsSettingsPage'
@@ -35,6 +36,7 @@ export const SETTINGS_PAGE_COMPONENTS: Record<SettingsSubpage, ComponentType> = 
   'account-security': AccountSecuritySettingsPage,
   appearance: AppearanceSettingsPage,
   input: InputSettingsPage,
+  tools: ToolsSettingsPage,
   workspace: WorkspaceSettingsPage,
   permissions: PermissionsSettingsPage,
   labels: LabelsSettingsPage,

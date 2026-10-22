@@ -6,6 +6,17 @@ created: 2026-07-07
 
 # poloai:// 协议双向化 Spec
 
+## 版本
+
+| 版本 | 状态 | 内容 | 关联任务 |
+| ---- | ---- | ---- | -------- |
+| v1 | 现状（本文档主体） | `poloai://` 单向请求 + `callbackId` 双向响应通道（ack / text_delta / complete / error）；仅限标签页浏览器 Web App | POO-1 |
+| v2 | 预留 | 新增 `ui-event` 事件族：宿主向 Web App 派发 UI 事件（如画布轻应用与宿主的交互回路），复用 v1 的 `postMessage` 回传通道与 `callbackId` 关联机制 | POO-102 P2 / 待立项 |
+
+> v2 的 `ui-event` 仅作协议位预留，本文其余章节描述的均为 v1 现状。Generative UI 画布轻应用
+> （`generate_app`，POO-102 P1）**不接入** `poloai://`：会话产物被静态扫描禁止引用该协议，
+> webview 沙箱也不允许其导航到 `poloai://`。
+
 ## 1. 背景与目标
 
 ### 1.1 现状

@@ -1,0 +1,14 @@
+{
+  "extends": "../../../../../apps/electron/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "composite": false
+  },
+  "include": [
+    "entries/**/*.tsx",
+    "entries/**/*.ts",
+    "../../../../../apps/electron/src/**/*.d.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

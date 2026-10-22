@@ -21,6 +21,7 @@ import {
   handleTypedError,
   handleSourcesChanged,
   handleLabelsChanged,
+  handleKbCollectionsChanged,
   handleSessionStatusChanged,
   handleSessionFlagged,
   handleSessionUnflagged,
@@ -46,6 +47,8 @@ import {
   handleSessionUnshared,
   handleAuthRequest,
   handleAuthCompleted,
+  handleQuestionRequest,
+  handleQuestionResolved,
   handleUsageUpdate,
 } from './handlers/session'
 
@@ -156,6 +159,9 @@ export function processEvent(
     case 'labels_changed':
       return handleLabelsChanged(state, event)
 
+    case 'kb_collections_changed':
+      return handleKbCollectionsChanged(state, event)
+
     case 'session_status_changed':
       return handleSessionStatusChanged(state, event)
 
@@ -179,6 +185,12 @@ export function processEvent(
 
     case 'credential_request':
       return handleCredentialRequest(state, event)
+
+    case 'question_request':
+      return handleQuestionRequest(state, event)
+
+    case 'question_resolved':
+      return handleQuestionResolved(state, event)
 
     case 'plan_submitted':
       return handlePlanSubmitted(state, event)

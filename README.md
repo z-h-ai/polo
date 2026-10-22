@@ -251,14 +251,20 @@ docker run -d \
 a compatibility alias and invokes the same implementation.
 
 `polo run` and `polo exec` each start an independent, invocation-scoped runtime.
-They do not connect to or reuse the Electron server, even when Electron is
-already running. CLI Threads are stored separately from Electron sessions.
+Their Agents and Threads remain separate from Electron sessions. Owned compute
+works with the App closed. `--provider polo` uses the running, signed-in App
+only as a narrow authorization, billing and cancellation broker for its current
+personal or enterprise space; the CLI still executes in its own server/runtime.
 
 ### Installation
 
-- macOS: launch Polo once and choose **Complete Now** when asked to complete
-  setup. The same actions are available later under **Settings → Polo terminal
-  features**.
+- macOS: the App includes the CLI, Bun runtime, server, and Agent worker; no
+  separate npm package or install script is needed. Choose **Enable command**
+  at first launch or in **Settings → Polo terminal features** for the optional
+  `polo` PATH shortcut. Without that shortcut, invoke the bundled CLI directly:
+  `"/Applications/Polo AI.app/Contents/MacOS/Polo AI" --polo-cli exec "Hello"`.
+  Use your actual App path. Owned connections can run after the App exits;
+  Polo managed compute requires the App to remain running and signed in.
 - Linux and Windows: the app installer creates `polo` and adds its managed
   directory to the user PATH.
 - `polo-ai` remains a compatibility shim until Polo 1.0.
@@ -288,6 +294,7 @@ workspace that supplies sources, skills, permissions, and LLM configuration.
 ```bash
 polo exec --yolo --json "hello"
 polo exec -C ./my-project "Summarize this repository"
+polo exec --provider polo -C ./my-project "Use the current Polo space"
 polo exec sessions
 polo exec resume --last "Continue"
 polo exec delete 550e8400-e29b-41d4-a716-446655440000
@@ -298,7 +305,11 @@ polo run --source github -C ./my-project "List open PRs"
 
 Provider, model, base URL, and API-key flags apply only to the current
 invocation. `polo exec --help` and `polo run --help` show their complete option
-sets.
+sets. Managed compute rejects API-key/base-URL overrides, requires an allowlisted
+model, and binds persistent history to its original account and space.
+`--space <id>` asserts the current space without switching it. See [the CLI
+guide](docs/cli.md#polo-personal-and-enterprise-compute) for supported transports,
+lifecycle and stable errors.
 
 ### Remote server commands
 

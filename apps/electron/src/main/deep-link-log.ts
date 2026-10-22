@@ -7,13 +7,20 @@ export interface DeepLinkLogContext {
 
 export type UrlLogContext = DeepLinkLogContext | { url: string }
 
+// Hosts accepted as compound view routes by parseDeepLink — keep in sync with
+// COMPOUND_ROUTE_PREFIXES in deep-link.ts so these links log as 'view' instead
+// of 'unknown'.
 const VIEW_HOSTS = new Set([
   'allSessions',
+  'archived',
+  'automations',
   'flagged',
+  'label',
   'settings',
   'skills',
   'sources',
   'state',
+  'view',
 ])
 
 function inferDeepLinkRouteType(url: string): DeepLinkLogContext['routeType'] {

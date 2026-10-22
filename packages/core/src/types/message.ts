@@ -3,6 +3,21 @@
  */
 
 /**
+ * Immutable per-message Enterprise Knowledge Base reference snapshot (POO-108).
+ * Persisted with the user message when the session had a KB scope at send
+ * time; rendered as reference chips. Clearing the session selection never
+ * mutates an already-persisted snapshot.
+ */
+export interface KbReference {
+  docId: string;
+  collectionId: string;
+  collectionName: string;
+  title: string;
+  snippet: string;
+  score: number;
+}
+
+/**
  * Message roles for display (runtime)
  */
 export type MessageRole =
@@ -275,6 +290,8 @@ export interface Message {
   attachments?: StoredAttachment[];
   // Content badges for inline display (sources, skills)
   badges?: ContentBadge[];
+  /** Knowledge Base reference snapshot attached at send time (POO-108) */
+  kbReferences?: KbReference[];
   /** Annotation payloads for this message */
   annotations?: AnnotationV1[];
   isError?: boolean;
@@ -329,6 +346,26 @@ export interface Message {
   authError?: string;             // Error message if auth failed
   authEmail?: string;             // Authenticated email (for OAuth)
   authWorkspace?: string;         // Authenticated workspace (for Slack)
+  // Question-specific fields (for request_user_input answers)
+  questionResponse?: QuestionResponseMetadata;   // Structured answer payload
+  // Question cancellation record (user chose "skip for now")
+  questionResolution?: QuestionResolutionMetadata;
+}
+
+/** Structured metadata persisted on user messages that answer a question request. */
+export interface QuestionResponseMetadata {
+  requestId: string;
+  answers: Array<{
+    questionId: string;
+    selectedOptionIds: string[];
+    otherText?: string;
+  }>;
+}
+
+/** Structured metadata persisted on user messages that skip a question request. */
+export interface QuestionResolutionMetadata {
+  action: 'cancel';
+  requestId: string;
 }
 
 /**
@@ -363,6 +400,8 @@ export interface StoredMessage {
   attachments?: StoredAttachment[];
   /** Content badges for inline display (sources, skills) */
   badges?: ContentBadge[];
+  /** Knowledge Base reference snapshot attached at send time (POO-108) */
+  kbReferences?: KbReference[];
   /** Annotations persisted at message level */
   annotations?: AnnotationV1[];
   // Turn grouping - critical for TurnCard rendering after reload
@@ -408,6 +447,9 @@ export interface StoredMessage {
   authError?: string;
   authEmail?: string;
   authWorkspace?: string;
+  // Question-specific fields (persisted for reload / idempotency checks)
+  questionResponse?: QuestionResponseMetadata;
+  questionResolution?: QuestionResolutionMetadata;
   // Queued: user message that is waiting to be processed (persisted for recovery)
   isQueued?: boolean;
 }
@@ -549,6 +591,11 @@ export type AgentEvent =
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
+  // P0-2 render_ui skeleton streaming: throttled, capped partial input for an
+  // in-flight render_ui tool call (Claude path only — the Pi subprocess has no
+  // equivalent stream event and simply skips skeletons). Renderer-internal:
+  // never enters the tab protocol page whitelist, never persisted.
+  | { type: 'tool_input_delta'; toolUseId: string; toolName: string; delta: string; seq: number }
   | {
       type: 'permission_request';
       requestId: string;

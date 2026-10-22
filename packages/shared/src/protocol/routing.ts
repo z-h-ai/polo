@@ -27,6 +27,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // window — Electron window management
   RPC_CHANNELS.window.GET_WORKSPACE,
   RPC_CHANNELS.window.GET_MODE,
+  RPC_CHANNELS.window.GET_LAUNCH_CONTEXT,
+  RPC_CHANNELS.window.REPORT_WORKBENCH_READY,
   RPC_CHANNELS.window.OPEN_WORKSPACE,
   RPC_CHANNELS.window.OPEN_SESSION_IN_NEW_WINDOW,
   RPC_CHANNELS.window.SWITCH_WORKSPACE,
@@ -62,6 +64,30 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // skills — local filesystem actions (guarded for remote)
   RPC_CHANNELS.skills.OPEN_EDITOR,
   RPC_CHANNELS.skills.OPEN_FINDER,
+  // skills — local enablement store is account × local-workspace scoped; remote
+  // workspaces get no toggle at all (POO-106 S1, K3).
+  RPC_CHANNELS.skills.LIST_MANAGED,
+  RPC_CHANNELS.skills.SET_MANAGED_ENABLEMENT,
+  // skills — unfiltered management inventory of the local workspace; remote
+  // workspaces resolve no local rows and the panel falls back to GET (POO-106 S1).
+  RPC_CHANNELS.skills.GET_UNFILTERED,
+
+  // kb — the Enterprise Knowledge Base stores content under the local
+  // workspace's `.polo-kb/` directory (POO-108); a remote server has no
+  // access to this filesystem scope, so every kb channel stays local.
+  RPC_CHANNELS.kb.LIST_COLLECTIONS,
+  RPC_CHANNELS.kb.CREATE_COLLECTION,
+  RPC_CHANNELS.kb.LIST_DOCUMENTS,
+  RPC_CHANNELS.kb.UPLOAD_DOCUMENT,
+  RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW,
+  RPC_CHANNELS.kb.PUBLISH_DOCUMENT,
+  RPC_CHANNELS.kb.REJECT_DOCUMENT,
+  RPC_CHANNELS.kb.REVERT_TO_DRAFT,
+  RPC_CHANNELS.kb.DELETE_DOCUMENT,
+  RPC_CHANNELS.kb.GET_DOCUMENT,
+  RPC_CHANNELS.kb.SEARCH,
+  RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS,
+  RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS,
 
   // system — local OS info
   RPC_CHANNELS.system.VERSIONS,
@@ -107,6 +133,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // menu — local menu events
   RPC_CHANNELS.menu.NEW_CHAT,
   RPC_CHANNELS.menu.NEW_WINDOW,
+  // menu — main→renderer failure broadcast for new-window requests the main
+  // process initiated (native menu / webview shortcut); local window matter.
+  RPC_CHANNELS.menu.NEW_WINDOW_FAILED,
   RPC_CHANNELS.menu.OPEN_SETTINGS,
   RPC_CHANNELS.menu.KEYBOARD_SHORTCUTS,
   RPC_CHANNELS.menu.TOGGLE_FOCUS_MODE,
@@ -133,9 +162,22 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.tabBrowser.GET_APPS,
   RPC_CHANNELS.tabBrowser.SAVE_APPS,
 
+  // genui — canvas app pin audit writes the local session directory; card
+  // registration feeds the Main-owned UiCardRegistry (POO-103); the publish
+  // packaging reads session-local bundle bytes (POO-104) — all of it stays on
+  // this device, the upload itself goes through the admin channel separately.
+  RPC_CHANNELS.genui.AUDIT_APP_PIN,
+  RPC_CHANNELS.genui.REGISTER_UI_CARD,
+  RPC_CHANNELS.genui.UNREGISTER_UI_CARD,
+  RPC_CHANNELS.genui.PUBLISH_APP_AS_ARTIFACT,
+
   // localApps — downloaded bundles and processes live on this device
   RPC_CHANNELS.localApps.GET_HOST_INFO,
   RPC_CHANNELS.localApps.INSTALL,
+  RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE,
+  RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+  RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+  RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE,
   RPC_CHANNELS.localApps.CANCEL_INSTALL,
   RPC_CHANNELS.localApps.START,
   RPC_CHANNELS.localApps.STOP,
@@ -185,6 +227,10 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // tools — local tool settings
   RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED,
+  RPC_CHANNELS.tools.GET_GENERATIVE_UI_INLINE_ENABLED,
+  RPC_CHANNELS.tools.SET_GENERATIVE_UI_INLINE_ENABLED,
+  RPC_CHANNELS.tools.GET_GENERATIVE_UI_CANVAS_ENABLED,
+  RPC_CHANNELS.tools.SET_GENERATIVE_UI_CANVAS_ENABLED,
 
   // browserPane — Electron BrowserView
   RPC_CHANNELS.browserPane.CREATE,
@@ -242,6 +288,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
   RPC_CHANNELS.admin.SYNC_APP_CATALOG,
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
+  RPC_CHANNELS.admin.LIST_PRODUCT_SPACES,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
   RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
@@ -270,12 +317,63 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // Creator publication consumes local File bytes and local authenticated
   // credentials; it must never be proxied to a workspace server.
   RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
+  // Payment handoff resolves on the local trusted Admin session.
+  RPC_CHANNELS.admin.PAYMENT_HANDOFF,
+
+  // memberCircles — member-side circle reads run on the device's trusted
+  // Admin session (same trust boundary as admin.*); never workspace-proxied.
+  RPC_CHANNELS.memberCircles.LIST,
+  RPC_CHANNELS.memberCircles.LIST_MEMBERSHIPS,
+  RPC_CHANNELS.memberCircles.PREVIEW_RENEWAL,
+  RPC_CHANNELS.memberCircles.LEAVE,
+  RPC_CHANNELS.memberCircles.GET_ORDER,
+  RPC_CHANNELS.memberCircles.GET_CHECKOUT_RESULT,
+  RPC_CHANNELS.memberCircles.GET_UPDATES,
+  RPC_CHANNELS.memberCircles.GET_PROFILE,
+  RPC_CHANNELS.memberCircles.GET_SUPPORT,
+
+  // circleReturn — the F1 web→desktop return candidate lives in the Electron
+  // Main process next to the deep-link parser and the trusted account mirror;
+  // like memberCircles it must never be workspace-proxied. CANDIDATE is a
+  // push-only channel (Main → renderer), classified for routing coverage.
+  RPC_CHANNELS.circleReturn.GET_PENDING,
+  RPC_CHANNELS.circleReturn.ACK,
+  RPC_CHANNELS.circleReturn.CANCEL,
+  RPC_CHANNELS.circleReturn.CANDIDATE,
 
   // preferences — device-local launcher and verified Admin organization state
   RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
   RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS,
+  RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS,
   RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
+
+  // productSpace — device-local space selection state and the local runtime
+  // execution gate (active executions live on the local session runtime)
+  RPC_CHANNELS.productSpace.LIST,
+  RPC_CHANNELS.productSpace.CATALOG,
+  RPC_CHANNELS.productSpace.RESOLVE_LAUNCH,
+  RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT,
+  RPC_CHANNELS.productSpace.INSTALL_SKILL,
+  RPC_CHANNELS.productSpace.UNINSTALL_SKILL,
+  RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+  RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+  RPC_CHANNELS.productSpace.STOP_EXECUTION,
+  RPC_CHANNELS.productSpace.PREPARE_SWITCH,
+  RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS,
+  RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+  RPC_CHANNELS.productSpace.CANCEL_SWITCH,
+  RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT,
+  RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW,
+  RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+  RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE,
+  RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE,
+  // Space skill catalog reads run on the local trusted Admin session fence,
+  // same boundary as the rest of productSpace.*.
+  RPC_CHANNELS.productSpace.LIST_SKILLS,
 ])
 
 // ---------------------------------------------------------------------------
@@ -299,6 +397,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sessions.MARK_ALL_READ,
   RPC_CHANNELS.sessions.UNREAD_SUMMARY_CHANGED,
   RPC_CHANNELS.sessions.CREATE,
+  RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION,
   RPC_CHANNELS.sessions.DELETE,
   RPC_CHANNELS.sessions.GET_MESSAGES,
   RPC_CHANNELS.sessions.SEND_MESSAGE,
@@ -306,6 +405,8 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sessions.KILL_SHELL,
   RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION,
   RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL,
+  RPC_CHANNELS.sessions.RESPOND_TO_QUESTION,
+  RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION,
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
   RPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE,

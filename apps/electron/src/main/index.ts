@@ -3,6 +3,7 @@
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
+import { disconnectCliManagedClient, shutdownCliManagedBrokers } from '@polo-ai/server-core/runtime/cli-managed-broker'
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, powerMonitor, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
@@ -75,7 +76,7 @@ Sentry.setUser({ id: machineId })
 
 import { join, delimiter } from 'path'
 import { existsSync, readFileSync } from 'fs'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS, LEGACY_OPEN_DEEP_LINK_SCHEME } from '@polo-ai/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
 import { registerAllRpcHandlers } from './handlers/index'
 import {
@@ -87,6 +88,9 @@ import type { PlatformServices } from '../runtime/platform'
 import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import { bootstrapServer, releaseServerLock } from '@polo-ai/server-core/bootstrap'
+import { endAccountProductSpaceRuntimes } from './account-lifecycle'
+import { getCircleReturnCandidateStore } from './circle-return-candidate-store'
+import { whenInitialSyncTrustedProductSpaceAccountRestored } from '@polo-ai/server-core/handlers/rpc'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
@@ -127,6 +131,9 @@ import {
   getScopedLocalAppRuntimeRegistry,
   hasLocalAppRuntimeManager,
   shutdownLocalAppRuntime,
+  teardownCoordinatorRuntimesForAccount,
+  teardownCoordinatorRuntimesForCatalogScopes,
+  teardownCoordinatorRuntimesForOrganization,
 } from './local-app-runtime'
 import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 import {
@@ -140,6 +147,7 @@ import {
 } from './local-app-runtime/quit-guard'
 import {
   getTerminalIntegrationStatus,
+  shutdownTerminalIntegration,
   installTerminalIntegration,
   setTerminalSetupDismissed,
   toTerminalIntegrationErrorPayload,
@@ -259,7 +267,17 @@ if (poloCliArgIndex >= 0) {
   }
   const result = spawnSync(bun, ['run', entry, ...process.argv.slice(poloCliArgIndex + 1)], {
     stdio: 'inherit',
-    env: process.env,
+    // Match the self-relative packaged launcher: CLI snapshots need bundled
+    // defaults before normal desktop initialization calls setBundledAssetsRoot.
+    env: {
+      ...process.env,
+      ...(app.isPackaged ? {
+        POLO_AI_RESOURCES_PATH: join(app.getAppPath(), 'dist', 'resources'),
+        POLO_AI_BUNDLED_ASSETS_ROOT: join(app.getAppPath(), 'dist'),
+        POLO_AI_IS_PACKAGED: 'true',
+      } : {}),
+      POLO_AI_CLI_JSON_ONLY: process.env.POLO_AI_CLI_JSON_ONLY ?? '1',
+    },
     cwd: process.cwd(),
   })
   process.exit(result.status ?? 1)
@@ -308,12 +326,12 @@ function terminalIntegrationOptions(): TerminalIntegrationOptions {
   }
 }
 
-function terminalIntegrationIpcResult(
+async function terminalIntegrationIpcResult(
   operation: TerminalIntegrationOperation,
   run: () => ReturnType<typeof getTerminalIntegrationStatus>,
-): TerminalIntegrationResult {
+): Promise<TerminalIntegrationResult> {
   try {
-    return { success: true, status: run() }
+    return { success: true, status: await run() }
   } catch (error) {
     mainLog.error(`[terminal-integration] ${operation} failed`, error)
     return {
@@ -413,10 +431,26 @@ if (process.defaultApp) {
   // Development mode: need to pass the app path
   if (process.argv.length >= 2) {
     app.setAsDefaultProtocolClient(DEEPLINK_SCHEME, process.execPath, [process.argv[1]])
+    // Legacy published provider entry (polo://open, F1 G6): best-effort
+    // registration keeps the already-published browser "打开 Polo" entry
+    // launching the desktop app. Launch compat ONLY — parseDeepLink never
+    // derives a navigation target from the legacy scheme
+    // (P70-RETURN-BRIDGE-01).
+    try {
+      app.setAsDefaultProtocolClient(LEGACY_OPEN_DEEP_LINK_SCHEME, process.execPath, [process.argv[1]])
+    } catch (error) {
+      mainLog.warn('[DeepLink] Legacy scheme registration failed:', error instanceof Error ? error.message : String(error))
+    }
   }
 } else {
   // Production mode
   app.setAsDefaultProtocolClient(DEEPLINK_SCHEME)
+  // Legacy published provider entry (polo://open) — see the dev branch above.
+  try {
+    app.setAsDefaultProtocolClient(LEGACY_OPEN_DEEP_LINK_SCHEME)
+  } catch (error) {
+    mainLog.warn('[DeepLink] Legacy scheme registration failed:', error instanceof Error ? error.message : String(error))
+  }
 }
 
 // Apply network proxy settings early (Node-level only — Electron sessions require app.whenReady)
@@ -585,7 +619,7 @@ app.whenReady().then(async () => {
       return
     }
     try {
-      const status = executeTerminalIntegrationCommand(
+      const status = await executeTerminalIntegrationCommand(
         terminalIntegrationCommand!,
         terminalIntegrationOptions(),
       )
@@ -798,14 +832,14 @@ app.whenReady().then(async () => {
       terminalIntegrationIpcResult('status', () =>
         getTerminalIntegrationStatus(terminalIntegrationOptions())))
     ipcMain.handle('terminal-integration:install', () =>
-      terminalIntegrationIpcResult('install', () => {
-        const result = installTerminalIntegration(terminalIntegrationOptions())
+      terminalIntegrationIpcResult('install', async () => {
+        const result = await installTerminalIntegration(terminalIntegrationOptions())
         setTerminalSetupDismissed(terminalIntegrationOptions(), false)
         return result
       }))
     ipcMain.handle('terminal-integration:uninstall', () =>
-      terminalIntegrationIpcResult('uninstall', () => {
-        const result = uninstallTerminalIntegration(terminalIntegrationOptions())
+      terminalIntegrationIpcResult('uninstall', async () => {
+        const result = await uninstallTerminalIntegration(terminalIntegrationOptions())
         setTerminalSetupDismissed(terminalIntegrationOptions(), true)
         return result
       }))
@@ -947,37 +981,68 @@ app.whenReady().then(async () => {
             },
           })
           return {
+            desktopManagedCli: true,
             sessionManager: sm,
             sessionStorage: sm.sessionStorage,
             platform: p,
+            // POO-106 S1: managed-skill enablement lives under the desktop
+            // userData dir, scoped per account × local workspace.
+            managedSkillsRoot: join(app.getPath('userData'), 'managed-skills'),
             windowManager: windowManager ?? undefined,
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
-            onAdminSessionEnding: (accountId: string) =>
-              getScopedLocalAppRuntimeRegistry().stopAccount(accountId),
+            onAdminSessionEnding: (accountId: string) => {
+              // Circle-return candidate (P70-RETURN-BRIDGE-03): mark the
+              // account session end. Main cannot distinguish logout from a
+              // replacement here — the store only detaches the candidate's
+              // account anchor; a following session start converts it into a
+              // retained account-switch candidate, a missing start is a full
+              // logout and the candidate is cleared at the next pending read.
+              getCircleReturnCandidateStore().noteAccountSessionEnding(accountId)
+              // Fence FIRST (synchronously blocks new starts via the deny
+              // gate + lifecycle generation), then coordinator revoke/abort/
+              // bounded cleanup, then the slow exact-generation stops.
+              getScopedLocalAppRuntimeRegistry().fenceAccount(accountId)
+              return teardownCoordinatorRuntimesForAccount(accountId).then(() =>
+                endAccountProductSpaceRuntimes(
+                  accountId,
+                  getScopedLocalAppRuntimeRegistry(),
+                ))
+            },
             onAdminSessionStarted: (accountId: string) => {
+              // Deliberate account switch / re-login: retain the circle-return
+              // navigation candidate for re-verification under the new account
+              // (P70-RETURN-BRIDGE-03, vs. full-logout clearing).
+              getCircleReturnCandidateStore().noteAccountSessionStarted(accountId)
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },
             onAdminCatalogScopeDenied: (
               accountId: string,
               organizationId: string,
-            ) => getScopedLocalAppRuntimeRegistry().stopOrganization(
-              accountId,
-              organizationId,
-            ),
+            ) => {
+              getScopedLocalAppRuntimeRegistry().fenceOrganization(accountId, organizationId)
+              return teardownCoordinatorRuntimesForOrganization(accountId, organizationId)
+                .then(() => getScopedLocalAppRuntimeRegistry().stopOrganization(
+                  accountId,
+                  organizationId,
+                ))
+            },
             onAdminCatalogAppsWithdrawn: (
               accountId: string,
               organizationId: string,
               catalogAppIds: readonly string[],
-            ) => getScopedLocalAppRuntimeRegistry().stopApps(
-              catalogAppIds.map(catalogAppId => ({
+            ) => {
+              const scopes = catalogAppIds.map(catalogAppId => ({
                 kind: 'catalog' as const,
                 accountId,
                 organizationId,
                 catalogAppId,
-              })),
-            ),
+              }))
+              getScopedLocalAppRuntimeRegistry().fenceApps(scopes)
+              return teardownCoordinatorRuntimesForCatalogScopes(scopes)
+                .then(() => getScopedLocalAppRuntimeRegistry().stopApps(scopes))
+            },
             onAdminCatalogAppsAuthorized: (
               accountId: string,
               organizationId: string,
@@ -1024,6 +1089,7 @@ app.whenReady().then(async () => {
           if (webContentsId != null) clientMap.set(webContentsId, clientId)
         },
         cleanupClientResources: (clientId) => {
+          disconnectCliManagedClient(clientId)
           for (const [wcId, cId] of clientMap) {
             if (cId === clientId) { clientMap.delete(wcId); break }
           }
@@ -1220,6 +1286,49 @@ app.whenReady().then(async () => {
         }
       })
 
+      // Export a session bundle to a local JSON file (session menu → "Export").
+      // Main-process orchestrated: the renderer has no generic save-dialog or
+      // writeFile capability, so the whole flow (bundle → save dialog → write)
+      // runs here. Returns the written file path, or null when the user
+      // cancelled the save dialog.
+      ipcMain.handle('__session:exportToFile', async (event, sessionId: string) => {
+        if (!sessionId || typeof sessionId !== 'string') throw new Error('sessionId is required')
+        if (!sessionManager) throw new Error('Session manager not initialized')
+
+        const { getWorkspaceByNameOrId } = await import('@polo-ai/shared/config')
+        const { sanitizeFilename } = await import('@polo-ai/server-core/handlers')
+
+        const workspaceId = windowManager?.getWorkspaceForWindow(event.sender.id)
+        if (!workspaceId) throw new Error('Unable to resolve workspace for export')
+        const workspace = getWorkspaceByNameOrId(workspaceId)
+        if (!workspace) throw new Error(`Source workspace ${workspaceId} not found`)
+
+        const bundle = await sessionManager.exportSession(sessionId, workspace.id)
+        if (!bundle) throw new Error(`Failed to export session ${sessionId}`)
+
+        // Default filename: sanitized session display name + short id suffix
+        // (keeps exports identifiable without risking path traversal or
+        // filesystem-invalid characters). Falls back to the bare session id.
+        const sessionName = sessionManager.getSessions(workspace.id).find(s => s.id === sessionId)?.name
+        const defaultBase = sessionName
+          ? `${sanitizeFilename(sessionName)}-${sessionId.slice(0, 8)}`
+          : sessionId
+
+        const saveOptions = {
+          defaultPath: join(app.getPath('downloads'), `${defaultBase}.json`),
+          filters: [{ name: 'JSON', extensions: ['json'] }],
+        }
+        const parentWindow = BrowserWindow.fromWebContents(event.sender)
+        const result = parentWindow
+          ? await dialog.showSaveDialog(parentWindow, saveOptions)
+          : await dialog.showSaveDialog(saveOptions)
+        if (result.canceled || !result.filePath) return null
+
+        const { writeFile } = await import('fs/promises')
+        await writeFile(result.filePath, JSON.stringify(bundle, null, 2), 'utf-8')
+        return result.filePath
+      })
+
       // App relaunch (for server config changes — NOT an update install)
       ipcMain.handle('app:relaunch', () => {
         app.relaunch()
@@ -1347,6 +1456,16 @@ app.whenReady().then(async () => {
         console.log(`POLO_AI_SERVER_TOKEN=${instance.token}`)
       }
     }
+
+    // Restore the synchronous authenticated-account mirror from the
+    // persisted Admin credentials BEFORE any window exists, so the webview
+    // attach gate never has to decide on the fail-closed `unknown` state in
+    // practice. Bounded: on a stalled restore the gate stays `unknown` and
+    // refuses every partition (fail-closed) instead of blocking startup.
+    await Promise.race([
+      whenInitialSyncTrustedProductSpaceAccountRestored(),
+      new Promise(resolve => setTimeout(resolve, 5_000)),
+    ])
 
     // Create initial windows (restores from saved state or opens first workspace)
     // In headless mode the server runs without any UI — skip window creation.
@@ -1507,6 +1626,7 @@ function captureAndSaveWindowState(reason: 'before-quit' | 'pre-update'): number
 }
 
 // Save window state and clean up resources before quitting.
+app.on('will-quit', shutdownTerminalIntegration)
 app.on('before-quit', (event) => {
   if (beforeQuitCleanup.isExitAllowed()) return
   const mustStopLocalApps = hasLocalAppRuntimeManager()
@@ -1551,6 +1671,12 @@ app.on('before-quit', (event) => {
         mainLog.error('Quit cancelled because local app runtimes were not fully stopped')
         return false
       }
+    }
+
+    if (!await shutdownCliManagedBrokers()) {
+      windowManager?.setAppQuitting(false)
+      mainLog.error('Quit cancelled because managed CLI runtimes were not fully stopped')
+      return false
     }
 
     // Flush all pending session writes before quitting

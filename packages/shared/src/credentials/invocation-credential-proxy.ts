@@ -6,7 +6,9 @@ import {
   type ServerResponse,
 } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { ManagedBillingObservation, newManagedHostRequestId, readManagedRequest, type ManagedBillingHooks, type ManagedBillingLease } from './managed-billing-observation'
+import { parseProviderCorrelation } from '../admin/provider-observation'
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -62,6 +64,10 @@ export interface InvocationCredentialProxy {
 }
 
 export interface InvocationCredentialProxyOptions {
+  assertExecutionCurrent?: () => void
+  billing?: ManagedBillingHooks
+  /** Desktop managed gateways accept only this fixed OpenAI route/model set. */
+  managedPolicy?: { allowedModels: readonly string[] }
   /**
    * Some provider SDKs parse non-secret routing claims from their auth value
    * before sending a request. Callers may supply an opaque, short-lived alias
@@ -154,6 +160,7 @@ function buildUpstreamHeaders(
       || CREDENTIAL_HEADERS.has(lowerName)
       || lowerName === 'content-length'
       || lowerName === 'accept-encoding'
+      || lowerName === 'x-polo-request-id'
     ) {
       continue
     }
@@ -194,16 +201,26 @@ function requestUpstream(
   upstreamUrl: URL,
   incoming: IncomingMessage,
   headers: OutgoingHttpHeaders,
+  body?: Buffer,
+  downstream?: ServerResponse,
+  signal?: AbortSignal,
 ): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
     const request = (upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest)(
       upstreamUrl,
-      { method: incoming.method, headers },
+      { method: incoming.method, headers, signal },
       resolve,
     )
     request.once('error', reject)
+    const cancel = () => { if (!downstream?.writableEnded) request.destroy(new Error('Original downstream closed')) }
+    downstream?.once('close', cancel)
+    const downstreamSocket = incoming.socket
+    downstreamSocket?.once('close', cancel)
+    request.once('close', () => { downstream?.off('close', cancel); downstreamSocket?.off('close', cancel) })
+    if (downstream?.destroyed) { cancel(); return }
     incoming.once('aborted', () => request.destroy())
-    incoming.pipe(request)
+    if (body) request.end(body)
+    else incoming.pipe(request)
   })
 }
 
@@ -279,6 +296,8 @@ async function proxyResponse(
   upstream: IncomingMessage,
   response: ServerResponse,
   secrets: readonly Buffer[],
+  observation?: ManagedBillingObservation,
+  complete?: () => Promise<void>,
 ): Promise<void> {
   const contentEncoding = upstream.headers['content-encoding']
   if (
@@ -300,6 +319,7 @@ async function proxyResponse(
       HOP_BY_HOP_HEADERS.has(lowerName)
       || CREDENTIAL_HEADERS.has(lowerName)
       || lowerName === 'content-length'
+      || lowerName === 'x-polo-request-id'
       || value === undefined
     ) {
       continue
@@ -314,14 +334,25 @@ async function proxyResponse(
 
   const redactor = new StreamingCredentialRedactor(secrets)
   for await (const chunk of upstream) {
+    if (response.destroyed) throw new Error('Original downstream closed')
+    observation?.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
     const safe = redactor.transform(
       Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
     )
     if (safe.length > 0 && !response.write(safe)) {
-      await new Promise<void>((resolve) => response.once('drain', resolve))
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => { response.off('drain', drained); response.off('close', closed); response.off('error', failed) }
+        const drained = () => { cleanup(); resolve() }
+        const closed = () => { cleanup(); reject(new Error('Original downstream closed')) }
+        const failed = (error: Error) => { cleanup(); reject(error) }
+        response.once('drain', drained); response.once('close', closed); response.once('error', failed)
+        if (response.destroyed) closed()
+      })
     }
   }
   const final = redactor.transform(Buffer.alloc(0), true)
+  observation?.push(Buffer.alloc(0), true)
+  await complete?.()
   if (final.length > 0) response.write(final)
   response.end()
 }
@@ -338,9 +369,29 @@ export async function startInvocationCredentialProxy(
       'Credential proxy capability must be an opaque value of at least 32 characters',
     )
   }
+  if (options.managedPolicy && !options.billing) throw new Error('Managed proxy requires billing')
   let closed = false
+  let expectedHost = ''
+  const pending = new Set<Promise<void>>()
+  const controllers = new Set<AbortController>()
+  const sockets = new Set<import('node:net').Socket>()
 
   const server = createServer(async (request, response) => {
+    const controller = new AbortController()
+    controllers.add(controller)
+    let finishRequest!: () => void
+    const finished = new Promise<void>(resolve => { finishRequest = resolve })
+    pending.add(finished)
+    const done = () => { controllers.delete(controller); pending.delete(finished); finishRequest() }
+    let lease: ManagedBillingLease | undefined
+    let observation: ManagedBillingObservation | undefined
+    let completed = false
+    let privateCorrelation: string | undefined
+    const complete = async (ended: boolean) => {
+      if (!lease || completed) return
+      completed = true
+      await lease.complete(observation?.result(ended) ?? { inputTokens: 0, outputTokens: 0, providerObservation: { version: 1, state: 'missing' }, outputDisposition: 'unknown', terminalReason: 'transport_not_observed' })
+    }
     const targetSnapshot = normalizeTarget(target)
     if (
       closed
@@ -352,29 +403,66 @@ export async function startInvocationCredentialProxy(
     ) {
       response.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' })
       response.end('Unauthorized')
+      done()
       return
     }
     try {
+      if (options.managedPolicy && (request.headers.host !== expectedHost || request.headers.origin !== undefined
+        || request.rawHeaders.filter((_, i) => i % 2 === 0 && request.rawHeaders[i]!.toLowerCase() === 'host').length !== 1
+        || request.url !== '/v1/chat/completions' || request.method !== 'POST')) throw new Error('POLO_MANAGED_REQUEST_REJECTED')
+      options.assertExecutionCurrent?.()
       const upstreamUrl = resolveUpstreamUrl(
         targetSnapshot.upstreamBaseUrl,
         request.url || '/',
       )
+      let body: Buffer | undefined
+      let requestedModel: string | undefined
+      const headers = buildUpstreamHeaders(request, capability, targetSnapshot)
+      if (options.billing) {
+        const parsed = await readManagedRequest(request, upstreamUrl)
+        if (options.managedPolicy && !options.managedPolicy.allowedModels.includes(parsed.model)) throw new Error('POLO_MODEL_NOT_ALLOWED')
+        body = parsed.body
+        requestedModel = parsed.model
+        if (!targetSnapshot.credential) throw new Error('Managed upstream credential is unavailable')
+        lease = await options.billing.beforeSend({ model: parsed.model, hostRequestId: newManagedHostRequestId(), transportBaseUrl: targetSnapshot.upstreamBaseUrl.replace(/\/$/, ''), credentialFingerprint: createHash('sha256').update(targetSnapshot.credential).digest('hex') })
+        const correlation = parseProviderCorrelation(lease.providerCorrelation)
+        if (!correlation) throw new Error('Managed admission correlation is invalid')
+        lease.assertCurrent()
+        if (request.aborted || response.destroyed) throw new Error('Managed request was cancelled before send')
+        headers[correlation.header] = correlation.nonce
+        privateCorrelation = correlation.nonce
+      }
+      options.assertExecutionCurrent?.()
       const upstream = await requestUpstream(
         upstreamUrl,
         request,
-        buildUpstreamHeaders(request, capability, targetSnapshot),
+        headers,
+        body,
+        response,
+        controller.signal,
       )
-      await proxyResponse(upstream, response, credentialSecrets(targetSnapshot))
-    } catch {
+      if (lease) observation = new ManagedBillingObservation(upstream, requestedModel)
+      // Disposing/cancelling the child stops original transport, without
+      // losing its already-admitted receipt or automatically resending it.
+      const abortUpstream = () => { if (!response.writableEnded) upstream.destroy() }
+      response.once('close', abortUpstream)
+      const secrets = [...credentialSecrets(targetSnapshot), ...(privateCorrelation ? [Buffer.from(privateCorrelation)] : [])]
+      try { await proxyResponse(upstream, response, secrets, observation, () => complete(true)) }
+      finally { response.off('close', abortUpstream); await complete(false) }
+    } catch (error) {
+      await complete(false).catch(() => {})
       if (!response.headersSent) {
         response.writeHead(502, {
           'content-type': 'text/plain; charset=utf-8',
         })
       }
-      response.end('Credential proxy upstream request failed')
-    }
+      const code = (error as { errorCode?: string })?.errorCode
+      response.end(options.managedPolicy && ['insufficient_credit', 'insufficient_quota', 'budget_exceeded', 'INSUFFICIENT_BALANCE'].includes(code ?? '')
+        ? 'POLO_INSUFFICIENT_CREDIT' : 'Credential proxy upstream request failed')
+    } finally { done() }
   })
 
+  server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)) })
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
       server.off('listening', onListening)
@@ -395,6 +483,7 @@ export async function startInvocationCredentialProxy(
     throw new Error('Credential proxy did not bind a loopback TCP port')
   }
 
+  expectedHost = `127.0.0.1:${address.port}`
   return {
     url: `http://127.0.0.1:${address.port}`,
     capability,
@@ -405,10 +494,13 @@ export async function startInvocationCredentialProxy(
     async close() {
       if (closed) return
       closed = true
+      for (const controller of controllers) controller.abort()
+      for (const socket of sockets) socket.destroy()
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
         server.closeAllConnections?.()
       })
+      await Promise.all([...pending])
     },
   }
 }

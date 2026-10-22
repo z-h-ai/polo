@@ -105,6 +105,7 @@
   --accent-rgb: 104, 78, 133;               /* darkened RGB for shadow-tinted (70% of accent) */
   --info: oklch(0.75 0.16 70);              /* amber - warnings, Ask mode */
   --info-rgb: 180, 120, 40;                 /* RGB for shadow-tinted */
+  --workbench-info: #3275d8;                /* frozen POO-41 informational blue (guard, notifications) */
   --success: oklch(0.55 0.17 145);          /* green - connected, checkmarks */
   --success-rgb: 34, 120, 60;               /* RGB for shadow-tinted */
   --destructive: oklch(0.58 0.24 28);       /* red - errors, failed */
@@ -169,6 +170,14 @@
   --muted-foreground: var(--foreground-50);
   --card: var(--background);
   --card-foreground: var(--foreground);
+  /* Frozen POO-41 card surface (source-derived --surface): the elevated
+     white card body on the near-white launcher background. */
+  --surface: #ffffff;
+  /* Genuinely small global xs elevation (Tailwind-default scale). The large
+     card-specific elevation is scoped to the Home/Catalog card regions via
+     --shadow-xs overrides there — shared textarea/switch/onboarding controls
+     must not inherit card elevation. */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --popover: var(--background);
   --popover-foreground: var(--foreground);
   --border: oklch(from var(--foreground) l c h / 0.05);
@@ -245,6 +254,66 @@
 
 }
 
+/* === FROZEN POO-41 TOKEN PARITY (surface-scoped) === */
+/* The POO-43 Home launcher and the narrow-window guard are gated against
+   the frozen POO-41 sources, whose accent/muted tokens are the source-
+   derived values below. Scoped here so the rest of the renderer keeps its
+   product tokens. */
+[data-testid='home-app-hub'],
+[data-testid='window-width-guard'] {
+  /* Frozen source-derived body font stack (source-derived.css `body`),
+     with the zh-Hans system font pinned so CJK glyph metrics on the gated
+     surfaces resolve exactly like the frozen reference (the frozen page
+     declares lang=zh-Hans; the product html is language-agnostic). */
+  font-family: Inter, "PingFang SC", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --accent: #6e56cf;
+  --success: #27956a;
+  --muted-foreground: oklch(0.52 0.012 270);
+}
+
+.dark [data-testid='home-app-hub'],
+.dark [data-testid='window-width-guard'] {
+  --accent: #a98be1;
+  --success: #62c99a;
+  --muted-foreground: oklch(0.68 0.01 270);
+}
+
+/* The Catalog region is gated against the accepted ALIGNED reference
+   (app-catalog-two-source contract v2). The reference page declares
+   lang=zh-Hans, so its default family list resolves CJK to PingFang SC;
+   the product html is language-agnostic and must pin the family the same
+   way the gated Home surface does. Its accent/success/muted tokens are the
+   same source-derived values the frozen POO-41 surfaces pin. */
+[data-testid='all-apps-view'] {
+  font-family: system-ui, "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* The aligned reference declares no font smoothing — the browser default
+     (subpixel) is its rendering contract; the global body override must not
+     leak into this gated region. */
+  -webkit-font-smoothing: auto;
+  --accent: #6e56cf;
+  --success: #27956a;
+  --muted-foreground: oklch(0.52 0.012 270);
+}
+
+.dark [data-testid='all-apps-view'] {
+  --accent: #a98be1;
+  --success: #62c99a;
+  --muted-foreground: oklch(0.68 0.01 270);
+}
+
+/* The accepted card elevation (source-derived two-layer shadow) is scoped to
+   the Home and Catalog card regions ONLY — shared textarea/switch/onboarding
+   controls outside these regions keep the small global xs shadow. */
+[data-testid='home-app-hub'],
+[data-testid='all-apps-view'] {
+  --shadow-xs: 0 1px 2px rgb(25 23 32 / 8%), 0 8px 22px rgb(25 23 32 / 4%);
+}
+
+.dark [data-testid='home-app-hub'],
+.dark [data-testid='all-apps-view'] {
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 26px rgb(0 0 0 / 16%);
+}
+
 /* Dark Mode */
 .dark {
   /* === 6 BASE COLORS (must match DEFAULT_THEME.dark in theme.ts) === */
@@ -259,6 +328,7 @@
   --accent-rgb: 130, 75, 185;               /* darkened RGB for shadow-tinted (70% of accent) */
   --info: oklch(0.78 0.14 70);               /* amber */
   --info-rgb: 210, 155, 55;                  /* RGB for shadow-tinted */
+  --workbench-info: #6da3ec;                 /* frozen POO-41 informational blue (dark) */
   --success: oklch(0.60 0.17 145);           /* green */
   --success-rgb: 50, 140, 80;               /* RGB for shadow-tinted */
   --destructive: oklch(0.65 0.22 28);        /* brighter red in dark */
@@ -297,6 +367,9 @@
   --muted-foreground: var(--foreground-50);
   --card: var(--background);
   --card-foreground: var(--foreground);
+  /* Frozen POO-41 dark card surface (source-derived dark --surface). */
+  --surface: oklch(0.205 0.014 270);
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --popover: var(--background);
   --popover-foreground: var(--foreground);
   --border: oklch(from var(--foreground) l c h / 0.05);
@@ -397,8 +470,14 @@ html[data-font="inter"] {
   --color-foreground: var(--foreground);
   --color-accent: var(--accent);
   --color-info: var(--info);
+  --color-workbench-info: var(--workbench-info);
   --color-success: var(--success);
   --color-destructive: var(--destructive);
+  /* Theme-mixed tinted text (documents light/dark contrast for tinted
+     surfaces: banners, badges, status pills). */
+  --color-success-text: var(--success-text);
+  --color-destructive-text: var(--destructive-text);
+  --color-info-text: var(--info-text);
 
   /* === MIX VARIANTS (solid interpolation) === */
   --color-foreground-1\.5: var(--foreground-1\.5);
@@ -425,6 +504,7 @@ html[data-font="inter"] {
   /* === LEGACY COMPATIBILITY === */
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-surface: var(--surface);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-secondary: var(--secondary);
@@ -1455,21 +1535,16 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 }
 
 /* ==========================================================================
-   Tab browser and TopBar heights.
+   Unified workbench bar height (single global bar: brand + tabs + actions).
    ========================================================================== */
 :root {
-  --tabbar-height: 36px;
-  --topbar-height: 48px;
-  --content-top-offset: var(--tabbar-height);
-}
-
-:root[data-active-tab="polo"] {
-  --content-top-offset: calc(var(--tabbar-height) + var(--topbar-height));
+  --topbar-height: 64px;
+  --content-top-offset: var(--topbar-height);
 }
 
 @media (max-width: 768px) {
   :root {
-    --topbar-height: 56px;
+    --topbar-height: 64px;
   }
 
   /* Bump TopBar icons from 18px → 20px in compact mode. Kept tight inside the
@@ -1485,4 +1560,122 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 [data-compact] .turn-action-btn {
   min-height: 31px;
   padding: 6px 8px;
+}
+
+/* ==========================================================================
+   POO-105 默认浅色微透材质（Spec §13.14，用户 2026-10-19 接受 explore-r5 A）。
+
+   作用域：documentElement 上的 data-client-material="light"（由
+   useClientMaterialScope 在浅色宿主投放；深色/未标记宿主没有任何规则生效，
+   完整回落既有不透明样式）。令牌 --client-material-* 由 canonical 源派生并
+   从宿主根注入；本文件只声明语义类，不维护第二套色值。
+
+   合同：透明度只作用于背景色；文字/图标/头像/输入内容与 placeholder 一律
+   实色；选中用强调色 9% 背景；真禁用实色灰表达，禁止整容器 opacity 淡化。
+   ========================================================================== */
+
+/* 画布底板：shell 根与登录根共用一块微透板，直接承在窗口原生材质上。 */
+[data-client-material='light'] .client-material-canvas {
+  background: var(--client-material-canvas);
+}
+
+/* Header 与底板同层同色：bar 自身不再画第二块 93% 色板（两层 93% 会叠出
+   ≈99.5% 的「假白」），背景透明让唯一画布板透出；任何滚动状态都不出现
+   分层背景与细线（BG-01）。TopBar 是 fixed、悬浮于画布之上（内容区以
+   padding 让位），blur 为将来内容穿越预留可读性、不形成第二色板
+   （原型布局 bar 无 blur）。 */
+[data-client-material='light'] .client-material-bar {
+  background: transparent;
+  backdrop-filter: blur(var(--client-material-blur));
+  border-bottom-color: transparent;
+}
+
+/* 列表面（会话列表/分组容器）94% 表面。 */
+[data-client-material='light'] .client-material-list {
+  background: var(--client-material-list);
+  backdrop-filter: blur(var(--client-material-blur));
+}
+
+/* 阅读面（聚焦工作面板）99% 表面。 */
+[data-client-material='light'] .client-material-reading {
+  background: var(--client-material-reading);
+  backdrop-filter: blur(var(--client-material-blur));
+}
+
+/* 卡片/表单/弹窗/菜单与激活标签片 98% 表面。 */
+[data-client-material='light'] .client-material-card {
+  background: var(--client-material-card);
+  backdrop-filter: blur(var(--client-material-blur));
+}
+
+/* 登录品牌面：近背景 94%。 */
+[data-client-material='light'] .client-material-brand {
+  background: var(--client-material-brand);
+  backdrop-filter: blur(var(--client-material-blur));
+}
+
+/* 前景合同：稳定前景一律实色——次级操作 #45474f 系、次级文本/图标 #60636a 系。
+   只在这些语义类内收敛，不全局改写 muted 前景。 */
+[data-client-material='light'] .client-material-fg-secondary {
+  color: var(--client-material-fg-secondary);
+}
+[data-client-material='light'] .client-material-fg-muted {
+  color: var(--client-material-fg-muted);
+  /* 实色合同：即便宿主带 opacity-*（如路径/分支提示的 opacity-70），
+     材质作用域内也回到不透明，保证 ≥4.5:1 的辅助文本可读性。 */
+  opacity: 1;
+}
+[data-client-material='light'] .client-material-fg-muted-bg {
+  background-color: var(--client-material-fg-muted);
+}
+/* 材质规则在层外，恒压过 @layer utilities 的 hover:text-*；挂配套语义类
+   在材质作用域内接管 hover 回主前景（未标记宿主仍走原 utility）。 */
+[data-client-material='light'] .client-material-fg-hover:hover {
+  color: var(--foreground);
+}
+
+/* placeholder：实色 #676a73 系且 opacity:1（作用域内全局，含原生输入与
+   contentEditable 的覆盖层）。 */
+[data-client-material='light'] input::placeholder,
+[data-client-material='light'] textarea::placeholder {
+  opacity: 1;
+  color: var(--client-material-placeholder);
+}
+[data-client-material='light'] .client-material-placeholder-fg {
+  color: var(--client-material-placeholder);
+}
+
+/* 选中：强调色 9% 背景 + 深紫文字（导航项与列表行）。color 只落在选中
+   容器，行内显式色（badges/timestamp 等）保持各自合同色。 */
+[data-client-material='light'] .client-material-selected {
+  background: var(--client-material-selected-bg);
+  color: var(--client-material-selected-fg);
+}
+
+/* 真禁用：实色灰底/灰字，opacity:1。control 用于按钮类（含底色），
+   action 用于图标/文字操作（无底色），input 用于输入区内容色。 */
+[data-client-material='light'] .client-material-control:disabled,
+[data-client-material='light'] .client-material-control:disabled:hover {
+  opacity: 1;
+  cursor: not-allowed;
+  border-color: transparent;
+  background: var(--client-material-disabled-bg);
+  color: var(--client-material-disabled-fg);
+}
+[data-client-material='light'] .client-material-action:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  color: var(--client-material-disabled-fg);
+}
+/* 危险按钮禁用态保留降饱和 danger 身份，不坍缩为中性灰
+   （Spec §13.14：危险/提交中状态按既有语义适配）。 */
+[data-client-material='light'] .client-material-control.destructive:disabled,
+[data-client-material='light'] .client-material-control.destructive:disabled:hover {
+  background: color-mix(in srgb, var(--destructive) 10%, var(--client-material-disabled-bg));
+  color: color-mix(in srgb, var(--destructive) 55%, var(--client-material-disabled-fg));
+}
+[data-client-material='light'] .client-material-input-disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  color: var(--client-material-disabled-fg);
 }

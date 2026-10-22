@@ -54,6 +54,12 @@ interface ColumnDef {
   label: string
   type?: 'text' | 'number' | 'currency' | 'percent' | 'boolean' | 'date' | 'badge'
   align?: 'left' | 'center' | 'right'
+  /** percent columns only: change = up/down move (signed, colored); rate/share = unsigned, neutral */
+  semantics?: 'rate' | 'share' | 'change'
+  /** badge columns only: cell value → chip color; unmatched values stay neutral */
+  badgeColors?: Record<string, 'info' | 'success' | 'warning' | 'error'>
+  /** iter/row-actions: render values as external links (http(s) value or { value, link }) */
+  link?: boolean
 }
 
 interface DatatableData {
@@ -73,7 +79,53 @@ type SortDir = 'asc' | 'desc' | null
 
 // ── Cell formatting ──────────────────────────────────────────────────────────
 
-function formatCell(value: unknown, type?: ColumnDef['type']): React.ReactNode {
+export type BadgeColorName = 'info' | 'success' | 'warning' | 'error'
+
+/** Chip classes per declared badge color; `warning` rides the amber `info` token (no separate warning color in the theme). */
+const BADGE_COLOR_CLASSES: Record<BadgeColorName, string> = {
+  info: 'bg-accent/10 text-accent',
+  success: 'bg-success/10 text-success',
+  warning: 'bg-info/10 text-info',
+  error: 'bg-destructive/10 text-destructive',
+}
+const BADGE_NEUTRAL_CLASS = 'bg-muted text-muted-foreground'
+
+/**
+ * Unsigned, magnitude-aware percent for rate/share semantics columns
+ * (decimal fraction in: 0.068 → "6.8%"). No sign, no coloring — a share or a
+ * loss rate is not an up/down move, so "+" and green/red would mislead.
+ * Thousands separators kick in past 1000%; precision tightens as magnitudes
+ * shrink so sub-1% rates keep their digits.
+ */
+export function formatNeutralPercent(pct: number): string {
+  const scaled = pct * 100
+  const abs = Math.abs(scaled)
+  const maxFractionDigits = abs >= 1000 ? 1 : abs >= 1 ? 2 : 4
+  return scaled.toLocaleString('en-US', { maximumFractionDigits: maxFractionDigits }) + '%'
+}
+
+/**
+ * Chip class for a badge cell. When the column declares `badgeColors`, the
+ * cell value is matched against it case-insensitively — a hit renders that
+ * color, a miss stays neutral (a declared map replaces the builtin guesses).
+ * Without `badgeColors`, the builtin status-word mapping applies unchanged.
+ */
+export function resolveBadgeChipClass(value: string, badgeColors?: ColumnDef['badgeColors']): string {
+  if (badgeColors) {
+    const needle = value.toLowerCase()
+    for (const [key, color] of Object.entries(badgeColors)) {
+      if (key.toLowerCase() === needle) return BADGE_COLOR_CLASSES[color]
+    }
+    return BADGE_NEUTRAL_CLASS
+  }
+  const s = value.toLowerCase()
+  if (s === 'active' || s === 'passing' || s === 'success' || s === 'done') return BADGE_COLOR_CLASSES.success
+  if (s === 'revoked' || s === 'failed' || s === 'error') return BADGE_COLOR_CLASSES.error
+  return BADGE_NEUTRAL_CLASS
+}
+
+function formatCell(value: unknown, col: ColumnDef): React.ReactNode {
+  const type = col.type
   if (value === null || value === undefined) return <span className="text-muted-foreground/40">—</span>
   switch (type) {
     case 'currency': {
@@ -84,6 +136,10 @@ function formatCell(value: unknown, type?: ColumnDef['type']): React.ReactNode {
     case 'percent': {
       const pct = typeof value === 'number' ? value : Number(value)
       if (isNaN(pct)) return String(value)
+      // rate/share: unsigned, neutral. change (default): signed + green/red.
+      if (col.semantics === 'rate' || col.semantics === 'share') {
+        return <span className="tabular-nums">{formatNeutralPercent(pct)}</span>
+      }
       const formatted = (pct * 100).toFixed(1) + '%'
       const positive = pct > 0
       return <span className={cn('tabular-nums', positive && 'text-success', pct < 0 && 'text-destructive')}>{positive ? '+' : ''}{formatted}</span>
@@ -96,12 +152,7 @@ function formatCell(value: unknown, type?: ColumnDef['type']): React.ReactNode {
     case 'boolean':
       return value ? <span className="text-success">Yes</span> : <span className="text-muted-foreground">No</span>
     case 'badge': {
-      const s = String(value).toLowerCase()
-      const color = s === 'active' || s === 'passing' || s === 'success' || s === 'done'
-        ? 'bg-success/10 text-success'
-        : s === 'revoked' || s === 'failed' || s === 'error'
-        ? 'bg-destructive/10 text-destructive'
-        : 'bg-muted text-muted-foreground'
+      const color = resolveBadgeChipClass(String(value), col.badgeColors)
       return <span className={cn('inline-block px-1.5 py-0.5 rounded text-[11px] font-medium', color)}>{String(value)}</span>
     }
     default:
@@ -269,6 +320,165 @@ function defaultGranularity(type: ColumnDef['type'], options: GranularityOption[
   return options.length > 1 ? options[1]!.value : options[0]!.value
 }
 
+// ── Client-side column filters (P0-1 view-state boundary) ────────────────────
+//
+// View-state operations (filter/sort/group) are the table's own concern —
+// they never round-trip through the model. Filter state lives in component
+// React state only: ephemeral, never in the datatable spec, never persisted,
+// never exported into share URLs. Opt-in via `enableColumnFilters` (GenUICard
+// DataTableView); the markdown ```datatable rich block path must behave
+// exactly as before.
+
+/** Max distinct text values for which a column still gets filter chips. */
+export const DATATABLE_FILTER_CHIP_MAX_DISTINCT = 12
+
+/** One column's active filter: text equality via chip, or a numeric range. */
+export type ColumnFilter =
+  | { kind: 'text'; value: string }
+  | { kind: 'range'; min?: number; max?: number }
+
+/** Active filters keyed by column key. */
+export type ColumnFilters = Record<string, ColumnFilter>
+
+export function isNumericFilterColumnType(type?: ColumnDef['type']): boolean {
+  return type === 'number' || type === 'currency' || type === 'percent'
+}
+
+/**
+ * Distinct display values of a text-ish column in first-appearance order,
+ * or null when the column has more than `maxDistinct` distinct values (no
+ * chips then — avoids chip explosions on free-form columns). Null/undefined
+ * cell values never become chips.
+ */
+export function computeTextFilterChips(
+  rows: Record<string, unknown>[],
+  columnKey: string,
+  maxDistinct: number = DATATABLE_FILTER_CHIP_MAX_DISTINCT,
+): string[] | null {
+  const seen = new Set<string>()
+  for (const row of rows) {
+    const value = row[columnKey]
+    if (value === null || value === undefined) continue
+    seen.add(String(value))
+    if (seen.size > maxDistinct) return null
+  }
+  return [...seen]
+}
+
+/**
+ * Chip display label (N4): boolean columns show Yes/No the way formatCell
+ * renders the cells, instead of the raw true/false the chip value carries.
+ * Filter MATCHING stays on the raw value — only the label is localized.
+ * Returns the i18n key to display, or null to show the raw chip value.
+ */
+export function filterChipLabelKey(chip: string, col: ColumnDef): string | null {
+  if (col.type !== 'boolean') return null
+  if (chip === 'true') return 'common.yes'
+  if (chip === 'false') return 'common.no'
+  return null
+}
+
+/** Parse one min/max bound input; empty or non-numeric input → undefined (ignored). */
+export function parseFilterBound(raw: string): number | undefined {
+  const trimmed = raw.trim()
+  if (trimmed === '') return undefined
+  const parsed = Number(trimmed)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+function rowMatchesFilter(row: Record<string, unknown>, columnKey: string, filter: ColumnFilter): boolean {
+  const value = row[columnKey]
+  if (value === null || value === undefined) return false
+  if (filter.kind === 'text') {
+    return String(value) === filter.value
+  }
+  const num = typeof value === 'number' ? value : Number(value)
+  if (Number.isNaN(num)) return false
+  if (filter.min !== undefined && num < filter.min) return false
+  if (filter.max !== undefined && num > filter.max) return false
+  return true
+}
+
+/** Filters with a concrete constraint set — empty bounds/text are dropped. */
+function isConcreteFilter(filter: ColumnFilter): boolean {
+  if (filter.kind === 'text') return filter.value !== ''
+  return filter.min !== undefined || filter.max !== undefined
+}
+
+/** Active (concrete) filters as ordered entries for status rendering. */
+export function activeColumnFilterEntries(filters: ColumnFilters): Array<[string, ColumnFilter]> {
+  return Object.entries(filters).filter(([, filter]) => isConcreteFilter(filter))
+}
+
+/** Apply every concrete filter conjunctively (AND across columns). */
+export function applyColumnFilters(
+  rows: Record<string, unknown>[],
+  filters: ColumnFilters,
+): Record<string, unknown>[] {
+  const active = activeColumnFilterEntries(filters)
+  if (active.length === 0) return rows
+  return rows.filter(row => active.every(([key, filter]) => rowMatchesFilter(row, key, filter)))
+}
+
+/** Sort step of the view-state pipeline (filter → sort → group). */
+export function applyViewSort(
+  rows: Record<string, unknown>[],
+  sortKey: string | null,
+  sortDir: SortDir,
+): Record<string, unknown>[] {
+  const sorted = [...rows]
+  if (sortKey && sortDir) {
+    sorted.sort((a, b) => {
+      const av = a[sortKey]
+      const bv = b[sortKey]
+      if (av === bv) return 0
+      if (av === null || av === undefined) return 1
+      if (bv === null || bv === undefined) return -1
+      const cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }
+  return sorted
+}
+
+/**
+ * Overlay subtitle + export/copy scope (Wave-1.5 F2, WYSIWYG): export and
+ * copy always operate on the CURRENT VIEW — the filter+sort output — and the
+ * scope is visible to the user (overlay subtitle count, export trigger title
+ * and menu header). Grouping is presentation-only: the export set is the
+ * flattened view, so collapsed groups export too.
+ */
+export interface DatatableViewScope {
+  /** Row set handed to TableExportDropdown — the current view, flattened. */
+  exportRows: Record<string, unknown>[]
+  /** Rows visible under the current filters. */
+  shownRows: number
+  /** Rows before filtering. */
+  totalRows: number
+  /** Subtitle i18n key: a filtered view shows shown/total, else the plain count. */
+  subtitleKey: string
+  subtitleParams: Record<string, unknown>
+}
+
+export function resolveDatatableViewScope(
+  viewRows: Record<string, unknown>[],
+  totalRows: number,
+  hasActiveFilters: boolean,
+): DatatableViewScope {
+  const shownRows = viewRows.length
+  return {
+    exportRows: viewRows,
+    shownRows,
+    totalRows,
+    subtitleKey: hasActiveFilters ? 'datatable.rowCountFiltered' : 'datatable.rowCount',
+    subtitleParams: hasActiveFilters
+      ? { count: shownRows, shown: shownRows, total: totalRows }
+      : { count: totalRows },
+  }
+}
+
 // ── Error boundary ───────────────────────────────────────────────────────────
 
 class DatatableErrorBoundary extends React.Component<
@@ -288,12 +498,37 @@ class DatatableErrorBoundary extends React.Component<
 
 // ── Main component ───────────────────────────────────────────────────────────
 
+/**
+ * Opt-in row-level render hooks. Only the GenUI data-table passes these
+ * (GenUICard's DataTableView); the markdown ```datatable rich block never
+ * does, and with both undefined the component renders exactly as before.
+ *
+ * - renderColumnCell replaces a cell's content; it receives the default node
+ *   (formatCell output) so callers can wrap it or discard it for a custom one.
+ * - renderRowAction appends a trailing, non-sortable, non-exported action
+ *   column with one control per row (group headers/empty rows span it).
+ */
 export interface MarkdownDatatableBlockProps {
   code: string
   className?: string
+  renderColumnCell?: (
+    col: ColumnDef,
+    row: Record<string, unknown>,
+    defaultCell: React.ReactNode,
+  ) => React.ReactNode
+  renderRowAction?: (row: Record<string, unknown>) => React.ReactNode
+  /**
+   * Opt-in client-side column filters (P0-1 view-state boundary): text
+   * columns get value chips (≤12 distinct values), numeric columns get
+   * min/max range inputs. Default false — the markdown ```datatable rich
+   * block path renders exactly as before. Only GenUICard's DataTableView
+   * passes true. Filter state is ephemeral component state: it never enters
+   * the spec/schema, is never persisted, and never leaks into export URLs.
+   */
+  enableColumnFilters?: boolean
 }
 
-export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlockProps) {
+export function MarkdownDatatableBlock({ code, className, renderColumnCell, renderRowAction, enableColumnFilters = false }: MarkdownDatatableBlockProps) {
   const { t } = useTranslation()
   const { onReadFile } = usePlatform()
 
@@ -368,6 +603,11 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
   const [groupKey, setGroupKey] = React.useState<string | null>(null)
   const [groupGranularity, setGroupGranularity] = React.useState<string>('exact')
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(new Set())
+  // Ephemeral column-filter state (P0-1). rangeInputs keeps the raw input
+  // strings so a half-typed/invalid bound stays visible in the input but is
+  // simply not applied (parseFilterBound drops it).
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFilters>({})
+  const [rangeInputs, setRangeInputs] = React.useState<Record<string, { min: string; max: string }>>({})
   const { scrollRef, maskImage } = useScrollFade()
 
   const handleSort = React.useCallback((key: string) => {
@@ -378,25 +618,65 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
     })
   }, [])
 
-  const processedRows = React.useMemo(() => {
-    if (!parsed) return []
-    let rows = [...parsed.rows]
-    // Sort
-    if (sortKey && sortDir) {
-      rows.sort((a, b) => {
-        const av = a[sortKey]
-        const bv = b[sortKey]
-        if (av === bv) return 0
-        if (av === null || av === undefined) return 1
-        if (bv === null || bv === undefined) return -1
-        const cmp = typeof av === 'number' && typeof bv === 'number'
-          ? av - bv
-          : String(av).localeCompare(String(bv))
-        return sortDir === 'asc' ? cmp : -cmp
-      })
+  // ── Column filter interactions (only reachable when enableColumnFilters) ──
+
+  const toggleTextFilter = React.useCallback((key: string, value: string) => {
+    setColumnFilters((prev) => {
+      const current = prev[key]
+      if (current?.kind === 'text' && current.value === value) {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
+      return { ...prev, [key]: { kind: 'text', value } }
+    })
+  }, [])
+
+  const setRangeFilter = React.useCallback((key: string, bound: 'min' | 'max', raw: string) => {
+    setRangeInputs((prev) => {
+      const current = prev[key] ?? { min: '', max: '' }
+      return { ...prev, [key]: { ...current, [bound]: raw } }
+    })
+    const parsed = parseFilterBound(raw)
+    setColumnFilters((prev) => {
+      const base: { kind: 'range'; min?: number; max?: number } =
+        prev[key]?.kind === 'range' ? prev[key] : { kind: 'range' }
+      const next: { kind: 'range'; min?: number; max?: number } = { ...base, [bound]: parsed }
+      const copy = { ...prev }
+      if (next.min === undefined && next.max === undefined) delete copy[key]
+      else copy[key] = next
+      return copy
+    })
+  }, [])
+
+  const clearFilters = React.useCallback(() => {
+    setColumnFilters({})
+    setRangeInputs({})
+  }, [])
+
+  // Filter chips per text column (numeric columns use range inputs instead).
+  const textChipValues = React.useMemo(() => {
+    const map = new Map<string, string[] | null>()
+    if (!enableColumnFilters || !parsed) return map
+    for (const col of parsed.columns) {
+      if (isNumericFilterColumnType(col.type)) continue
+      map.set(col.key, computeTextFilterChips(parsed.rows, col.key))
     }
-    return rows
-  }, [parsed, sortKey, sortDir])
+    return map
+  }, [enableColumnFilters, parsed])
+
+  // View-state pipeline: filter FIRST, then sort, then group — grouping
+  // counts and row actions all see the filtered set (user-visible rows only).
+  const filteredRows = React.useMemo(() => {
+    if (!parsed) return []
+    if (!enableColumnFilters) return parsed.rows
+    return applyColumnFilters(parsed.rows, columnFilters)
+  }, [parsed, enableColumnFilters, columnFilters])
+
+  const processedRows = React.useMemo(
+    () => applyViewSort(filteredRows, sortKey, sortDir),
+    [filteredRows, sortKey, sortDir]
+  )
 
   const granularityOptions = React.useMemo(() => {
     if (!parsed) return new Map<string, GranularityOption[]>()
@@ -428,7 +708,8 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
     })
   }, [])
 
-  const hasActiveControls = (sortKey !== null && sortDir !== null) || groupKey !== null
+  const activeFilterCount = enableColumnFilters ? activeColumnFilterEntries(columnFilters).length : 0
+  const hasActiveControls = (sortKey !== null && sortDir !== null) || groupKey !== null || activeFilterCount > 0
 
   const clearControls = React.useCallback(() => {
     setSortKey(null)
@@ -436,6 +717,8 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
     setGroupKey(null)
     setGroupGranularity('exact')
     setCollapsedGroups(new Set())
+    setColumnFilters({})
+    setRangeInputs({})
   }, [])
 
   // Loading state for file-backed datatable
@@ -470,14 +753,91 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
 
   const groupColumnLabel = groupKey ? parsed.columns.find((c) => c.key === groupKey)?.label ?? groupKey : ''
 
+  // Export/copy scope (F2 WYSIWYG): the current view is the single source —
+  // the overlay subtitle, the export trigger title and the exported rows all
+  // read from it, so what the user sees is exactly what leaves the table.
+  const viewScope = resolveDatatableViewScope(processedRows, parsed.rows.length, activeFilterCount > 0)
+
+  // The optional GenUI action column widens every grid span by one.
+  const columnCount = parsed.columns.length + (renderRowAction ? 1 : 0)
+
+  // Per-column filter control rendered under the header label. Clicks are
+  // stopped so they never trigger the th's sort handler.
+  const renderColumnFilterControl = (col: ColumnDef) => {
+    if (!enableColumnFilters) return null
+    const active = columnFilters[col.key]
+    if (isNumericFilterColumnType(col.type)) {
+      const raw = rangeInputs[col.key] ?? { min: '', max: '' }
+      return (
+        <div className="mt-1 flex items-center gap-1 whitespace-normal" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={raw.min}
+            onChange={(e) => setRangeFilter(col.key, 'min', e.target.value)}
+            placeholder={t('datatable.filterMin')}
+            aria-label={`${col.label} ${t('datatable.filterMin')}`}
+            className="w-14 px-1 py-0.5 text-[11px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <span className="text-muted-foreground/50 text-[11px]">–</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={raw.max}
+            onChange={(e) => setRangeFilter(col.key, 'max', e.target.value)}
+            placeholder={t('datatable.filterMax')}
+            aria-label={`${col.label} ${t('datatable.filterMax')}`}
+            className="w-14 px-1 py-0.5 text-[11px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </div>
+      )
+    }
+    const chips = textChipValues.get(col.key)
+    if (!chips || chips.length === 0) return null
+    return (
+      // max-width bounds this container's max-content contribution — the
+      // table is w-max, so without it flex-wrap could never fire (N3).
+      <div className="mt-1 flex flex-wrap gap-1 whitespace-normal max-w-[240px]" onClick={(e) => e.stopPropagation()}>
+        {chips.map((chip) => {
+          const isActive = active?.kind === 'text' && active.value === chip
+          const labelKey = filterChipLabelKey(chip, col)
+          return (
+            <button
+              key={chip}
+              type="button"
+              aria-pressed={isActive}
+              onClick={() => toggleTextFilter(col.key, chip)}
+              className={cn(
+                'px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors max-w-full truncate',
+                'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                isActive
+                  ? 'bg-accent/10 text-accent border-accent/30 hover:bg-accent/15'
+                  : 'bg-background text-muted-foreground border-foreground/10 hover:text-foreground hover:border-foreground/25',
+              )}
+            >
+              {labelKey ? t(labelKey) : chip}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
   const renderRows = (rows: Record<string, unknown>[]) =>
     rows.map((row, i) => (
       <tr key={i} className="border-b border-foreground/[0.03] last:border-0 hover:bg-foreground/[0.015] transition-colors">
         {parsed.columns.map((col) => (
           <td key={col.key} className={cn('py-2 px-3 whitespace-nowrap', colAlign(col.type, col.align))}>
-            {formatCell(row[col.key], col.type)}
+            {renderColumnCell
+              ? renderColumnCell(col, row, formatCell(row[col.key], col))
+              : formatCell(row[col.key], col)}
           </td>
         ))}
+        {renderRowAction && (
+          <td className="py-2 px-3 whitespace-nowrap text-right">
+            {renderRowAction(row)}
+          </td>
+        )}
       </tr>
     ))
 
@@ -497,15 +857,24 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
             {parsed.columns.map((col) => (
               <th
                 key={col.key}
-                className={cn('py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap', colAlign(col.type, col.align))}
+                // align-top only when a filter control may stack under the
+                // label — the markdown rich-block path (no filters) keeps the
+                // exact pre-filter class list.
+                className={cn(
+                  'py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap',
+                  enableColumnFilters && 'align-top',
+                  colAlign(col.type, col.align),
+                )}
                 onClick={() => handleSort(col.key)}
               >
                 <span className="inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors">
                   {col.label}
                   <SortIcon dir={sortKey === col.key ? sortDir : null} />
                 </span>
+                {renderColumnFilterControl(col)}
               </th>
             ))}
+            {renderRowAction && <th className="py-2 px-3 whitespace-nowrap" aria-hidden="true" />}
           </tr>
         </thead>
         <tbody>
@@ -515,7 +884,7 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
                 className="cursor-pointer select-none"
                 onClick={() => toggleCollapsed(group.value)}
               >
-                <td colSpan={parsed.columns.length} className="py-2 px-3 bg-foreground/[0.03] border-b border-foreground/[0.06]">
+                <td colSpan={columnCount} className="py-2 px-3 bg-foreground/[0.03] border-b border-foreground/[0.06]">
                   <span className="inline-flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
                     <ChevronRight className={cn('w-3 h-3 transition-transform', !collapsedGroups.has(group.value) && 'rotate-90')} />
                     {groupColumnLabel}: {group.value}
@@ -527,7 +896,7 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
             </React.Fragment>
           )) : processedRows.length ? renderRows(processedRows) : (
             <tr>
-              <td colSpan={parsed.columns.length} className="py-6 text-center text-muted-foreground text-[13px]">
+              <td colSpan={columnCount} className="py-6 text-center text-muted-foreground text-[13px]">
                 No rows
               </td>
             </tr>
@@ -662,6 +1031,24 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
     </DropdownMenu>
   )
 
+  // Active filter status bar — shared by the inline view and the fullscreen
+  // overlay (F2: filters must stay visible where they apply, or the overlay
+  // hides why its row set is a subset).
+  const renderFilterStatusBar = () => activeFilterCount > 0 ? (
+    <div className="px-3 py-1.5 border-b bg-accent/[0.04] flex items-center justify-between gap-2">
+      <span className="text-[12px] text-muted-foreground" aria-live="polite">
+        {t('datatable.filterStatus', { shown: filteredRows.length, total: parsed.rows.length })}
+      </span>
+      <button
+        type="button"
+        onClick={clearFilters}
+        className="text-[12px] text-accent hover:underline cursor-pointer rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        {t('datatable.clearFilters')}
+      </button>
+    </div>
+  ) : null
+
   return (
     <DatatableErrorBoundary fallback={fallback}>
       <div className={cn('relative group rounded-[8px] overflow-hidden border bg-muted/10', className)}>
@@ -692,6 +1079,9 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
           </span>
         </div>
 
+        {/* Active filter status (P0-1 view-state, ephemeral) */}
+        {renderFilterStatusBar()}
+
         {/* Table with max height and scroll fade */}
         {tableContent(true, true)}
       </div>
@@ -701,16 +1091,25 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
         isOpen={isFullscreen}
         onClose={() => setIsFullscreen(false)}
         title={parsed.title || t('datatable.defaultTitle')}
-        subtitle={t('datatable.rowCount', { count: parsed.rows.length })}
+        subtitle={t(viewScope.subtitleKey, viewScope.subtitleParams)}
         headerActions={
           <div className="flex items-center gap-1.5">
             {renderControlsDropdown(true)}
-            <TableExportDropdown columns={parsed.columns} rows={parsed.rows} filename={parsed.title || t('datatable.defaultTitle')} />
+            <TableExportDropdown
+              columns={parsed.columns}
+              rows={viewScope.exportRows}
+              shownRows={viewScope.shownRows}
+              totalRows={viewScope.totalRows}
+              filename={parsed.title || t('datatable.defaultTitle')}
+            />
           </div>
         }
       >
         <div className="px-6">
           <div className="bg-background shadow-minimal rounded-[12px] overflow-hidden">
+            {/* F2: filters stay visible in fullscreen — the overlayed table's
+                subset is explainable and its clear control stays reachable. */}
+            {renderFilterStatusBar()}
             {tableContent(false)}
           </div>
         </div>

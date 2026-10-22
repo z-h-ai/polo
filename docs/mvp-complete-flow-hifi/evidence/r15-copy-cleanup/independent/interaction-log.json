@@ -1,0 +1,272 @@
+[
+  {
+    "case": "fallback-dedup-and-authorization",
+    "viewport": 1440,
+    "shared_opens": true,
+    "revoked_only_rejoin": true
+  },
+  {
+    "case": "hidden-item-restoration",
+    "viewport": 1440,
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1440,
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "keys": [
+      "assistant",
+      "meeting",
+      "brand",
+      "report",
+      "growth"
+    ]
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1440,
+    "scene": "P-M03-ALL-APPS",
+    "keys": [
+      "assistant",
+      "meeting",
+      "brand",
+      "report",
+      "growth"
+    ]
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1440,
+    "scene": "P-M03-ALL-APPS-ENT",
+    "keys": [
+      "assistant",
+      "quote",
+      "contract",
+      "verify"
+    ]
+  },
+  {
+    "case": "enterprise-empty-preserves-assistant",
+    "viewport": 1440
+  },
+  {
+    "case": "skill-single-title-separate-built-in",
+    "viewport": 1440,
+    "scope": "personal"
+  },
+  {
+    "case": "skill-single-title-separate-built-in",
+    "viewport": 1440,
+    "scope": "enterprise"
+  },
+  {
+    "case": "direct-progress-static",
+    "viewport": 1440
+  },
+  {
+    "case": "count-row-progress-and-auto-completion",
+    "viewport": 1440,
+    "samples": [
+      {
+        "n": 0,
+        "text": "正在停止任务\n已停止 0 / 3 项\n正在停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      },
+      {
+        "n": 1,
+        "text": "正在停止任务\n已停止 1 / 3 项\n已停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      },
+      {
+        "n": 2,
+        "text": "正在停止任务\n已停止 2 / 3 项\n已停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n已停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      }
+    ]
+  },
+  {
+    "case": "stop-cancel-no-late-switch",
+    "viewport": 1440
+  },
+  {
+    "case": "reset-clears-count-and-callback",
+    "viewport": 1440
+  },
+  {
+    "case": "fallback-dedup-and-authorization",
+    "viewport": 1024,
+    "shared_opens": true,
+    "revoked_only_rejoin": true
+  },
+  {
+    "case": "hidden-item-restoration",
+    "viewport": 1024,
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1024,
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "keys": [
+      "assistant",
+      "meeting",
+      "brand",
+      "report",
+      "growth"
+    ]
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1024,
+    "scene": "P-M03-ALL-APPS",
+    "keys": [
+      "assistant",
+      "meeting",
+      "brand",
+      "report",
+      "growth"
+    ]
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1024,
+    "scene": "P-M03-ALL-APPS-ENT",
+    "keys": [
+      "assistant",
+      "quote",
+      "contract",
+      "verify"
+    ]
+  },
+  {
+    "case": "enterprise-empty-preserves-assistant",
+    "viewport": 1024
+  },
+  {
+    "case": "skill-single-title-separate-built-in",
+    "viewport": 1024,
+    "scope": "personal"
+  },
+  {
+    "case": "skill-single-title-separate-built-in",
+    "viewport": 1024,
+    "scope": "enterprise"
+  },
+  {
+    "case": "direct-progress-static",
+    "viewport": 1024
+  },
+  {
+    "case": "count-row-progress-and-auto-completion",
+    "viewport": 1024,
+    "samples": [
+      {
+        "n": 0,
+        "text": "正在停止任务\n已停止 0 / 3 项\n正在停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      },
+      {
+        "n": 1,
+        "text": "正在停止任务\n已停止 1 / 3 项\n已停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      },
+      {
+        "n": 2,
+        "text": "正在停止任务\n已停止 2 / 3 项\n已停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n已停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      }
+    ]
+  },
+  {
+    "case": "stop-cancel-no-late-switch",
+    "viewport": 1024
+  },
+  {
+    "case": "reset-clears-count-and-callback",
+    "viewport": 1024
+  },
+  {
+    "case": "fallback-dedup-and-authorization",
+    "viewport": 800,
+    "shared_opens": true,
+    "revoked_only_rejoin": true
+  },
+  {
+    "case": "hidden-item-restoration",
+    "viewport": 800,
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 800,
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "keys": [
+      "assistant",
+      "meeting",
+      "brand",
+      "report",
+      "growth"
+    ]
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 800,
+    "scene": "P-M03-ALL-APPS",
+    "keys": [
+      "assistant",
+      "meeting",
+      "brand",
+      "report",
+      "growth"
+    ]
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 800,
+    "scene": "P-M03-ALL-APPS-ENT",
+    "keys": [
+      "assistant",
+      "quote",
+      "contract",
+      "verify"
+    ]
+  },
+  {
+    "case": "enterprise-empty-preserves-assistant",
+    "viewport": 800
+  },
+  {
+    "case": "skill-single-title-separate-built-in",
+    "viewport": 800,
+    "scope": "personal"
+  },
+  {
+    "case": "skill-single-title-separate-built-in",
+    "viewport": 800,
+    "scope": "enterprise"
+  },
+  {
+    "case": "direct-progress-static",
+    "viewport": 800
+  },
+  {
+    "case": "count-row-progress-and-auto-completion",
+    "viewport": 800,
+    "samples": [
+      {
+        "n": 0,
+        "text": "正在停止任务\n已停止 0 / 3 项\n正在停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      },
+      {
+        "n": 1,
+        "text": "正在停止任务\n已停止 1 / 3 项\n已停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      },
+      {
+        "n": 2,
+        "text": "正在停止任务\n已停止 2 / 3 项\n已停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n已停止\n数据报表生成器\n同空间后台运行\n取消切换"
+      }
+    ]
+  },
+  {
+    "case": "stop-cancel-no-late-switch",
+    "viewport": 800
+  },
+  {
+    "case": "reset-clears-count-and-callback",
+    "viewport": 800
+  }
+]

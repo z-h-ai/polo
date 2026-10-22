@@ -10,6 +10,7 @@ import type {
   Message,
   TypedError,
   ContentBadge,
+  KbReference,
   ToolDisplayMeta,
   AnnotationV1,
   PermissionRequest as BasePermissionRequest,
@@ -48,6 +49,18 @@ export interface Session {
   workspaceId: string
   workspaceName: string
   name?: string
+  /**
+   * Immutable ProductSpace binding recorded when the session was created.
+   * Assigned once by the runtime from the trusted account context; renderer
+   * values can never reclassify an existing session.
+   */
+  productSpaceId?: string
+  /**
+   * Immutable trusted Admin account binding recorded when the session was
+   * created (R32-2). Assigned by the runtime from the trusted account
+   * context; space-bound records without it are quarantined.
+   */
+  accountId?: string
   /** Preview of first user message (from JSONL header, for lazy-loaded sessions) */
   preview?: string
   lastMessageAt: number
@@ -67,6 +80,8 @@ export interface Session {
    */
   hasUnread?: boolean
   enabledSourceSlugs?: string[]
+  /** Per-session Enterprise Knowledge Base scope (POO-108, collection IDs) */
+  kbCollectionIds?: string[]
   workingDirectory?: string
   sessionFolderPath?: string
   sharedUrl?: string
@@ -98,12 +113,38 @@ export interface Session {
   }
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
-  /** Host experience that owns the session. */
-  origin?: 'cli-run' | 'cli-exec'
+  /** Host experience that owns this session. */
+  origin?: SessionOrigin
+  /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
+  popoverOwner?: string
   isArchived?: boolean
   archivedAt?: number
   supportsBranching?: boolean
+  /** True when an agent question is awaiting an answer (session list badge). */
+  hasPendingQuestion?: boolean
+  /** requestId of the pending question, when hasPendingQuestion is true. */
+  pendingQuestionRequestId?: string
+  /**
+   * Full pending question payload (present when hasPendingQuestion is true).
+   * Lets renderers restore the question UI after refresh/switch/restart
+   * without a dedicated RPC.
+   */
+  pendingQuestion?: QuestionRequest
 }
+
+/**
+ * Host experiences that can own a session (persisted origin identity).
+ * `edit-popover` marks the renderer Edit Popover's hidden+mini session. It is
+ * stamped SERVER-SIDE by the dedicated trusted creation path and can NEVER be
+ * requested through the generic creation API.
+ */
+export type SessionOrigin = 'cli-run' | 'cli-exec' | 'edit-popover'
+
+/**
+ * Origins a generic caller may request at session-creation time. The
+ * privilege-granting `edit-popover` origin is deliberately excluded.
+ */
+export type CreatableSessionOrigin = Exclude<SessionOrigin, 'edit-popover'>
 
 export interface CreateSessionOptions {
   name?: string
@@ -126,8 +167,13 @@ export interface CreateSessionOptions {
   llmConnection?: string
   systemPromptPreset?: 'default' | 'mini' | string
   hidden?: boolean
-  /** Host experience that owns the session. */
-  origin?: 'cli-run' | 'cli-exec'
+  /**
+   * Host experience that owns the session. Only the non-privileged values are
+   * requestable here; the server-verified `edit-popover` origin is stamped
+   * exclusively by the dedicated Edit Popover creation path — a value passed
+   * through this generic field is stripped (fail closed).
+   */
+  origin?: CreatableSessionOrigin
   sessionStatus?: SessionStatus
   labels?: string[]
   isFlagged?: boolean
@@ -140,6 +186,13 @@ export interface CreateSessionOptions {
   /** Parent session ID used together with branchFromMessageId. */
   branchFromSessionId?: string
 }
+
+/**
+ * Dedicated creation options for the renderer Edit Popover session. The
+ * server stamps the 'edit-popover' origin here — this path is the ONLY way
+ * that origin can be granted, and the popover owner identity is REQUIRED.
+ */
+export type CreateEditPopoverSessionOptions = Omit<CreateSessionOptions, 'origin'> & { popoverOwner: string }
 
 export interface RemoteSessionTransferPayload {
   sourceSessionId: string
@@ -162,6 +215,91 @@ export interface PermissionModeState {
   changedAt: string
   changedBy: 'user' | 'system' | 'restore' | 'automation' | 'unknown'
 }
+
+// ---------------------------------------------------------------------------
+// Question request types (request_user_input)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the current chat turn was invoked from. Only `desktop` turns register
+ * the request_user_input tool; every other source fails closed. Defaults to
+ * `internal` when a caller doesn't pass an explicit source.
+ */
+export type InvocationSource = 'desktop' | 'messaging' | 'automation' | 'headless' | 'internal'
+
+/** A preset option within one question. */
+export interface QuestionRequestOption {
+  id: string
+  label: string
+  description: string
+  /** Marks the suggested option (at most one per question). */
+  recommended?: boolean
+  /** Multi-select only: selecting this option clears all other selections. */
+  exclusive?: boolean
+}
+
+/** One question within a question request. */
+export interface QuestionRequestQuestion {
+  id: string
+  header: string
+  question: string
+  /** When true the user may select multiple options. */
+  multiple?: boolean
+  options: QuestionRequestOption[]
+}
+
+/**
+ * A pending question request originated by the agent via request_user_input.
+ * `requestId` is generated by Polo (never by the model) and is the identity
+ * used for persistence, idempotency, and stale detection.
+ *
+ * `invocationSource` records the trusted entry capability of the turn that
+ * produced the question (validated at request time by the session layer). It
+ * is persisted with the pending state so the post-answer resume, its failure
+ * retries, and restart recovery all re-derive the same tool visibility instead
+ * of re-inferring it.
+ */
+export interface QuestionRequest {
+  requestId: string
+  sessionId: string
+  createdAt: number
+  questions: QuestionRequestQuestion[]
+  invocationSource?: InvocationSource
+}
+
+/** The answer to a single question. */
+export interface QuestionAnswer {
+  questionId: string
+  selectedOptionIds: string[]
+  /** Free-text "Other" answer (UI-reserved `__other__` option). */
+  otherText?: string
+}
+
+/** Structured answer payload delivered through respondToQuestion. */
+export interface QuestionResponse {
+  requestId: string
+  answers: QuestionAnswer[]
+}
+
+/** User decision for a pending question: answer it or skip it. */
+export type QuestionResolution =
+  | { action: 'answer'; response: QuestionResponse }
+  | { action: 'cancel'; requestId: string }
+
+/**
+ * Result contract for respondToQuestion:
+ * - accepted / cancelled: card cleared, input restored
+ * - already_answered: idempotent success, card cleared
+ * - stale / session_missing: one-time notice, stale card cleared
+ * - transient_failure: keep selections and allow retry
+ */
+export type QuestionResolutionResult =
+  | { status: 'accepted' }
+  | { status: 'cancelled' }
+  | { status: 'already_answered' }
+  | { status: 'stale' }
+  | { status: 'session_missing' }
+  | { status: 'transient_failure'; message: string }
 
 // ---------------------------------------------------------------------------
 // Session events (main → renderer)
@@ -189,6 +327,10 @@ export type SessionEvent =
   | { type: 'plan_submitted'; sessionId: string; message: Message }
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
   | { type: 'labels_changed'; sessionId: string; labels: string[] }
+  // POO-108: the authoritative per-session KB scope, broadcast after every
+  // server-side write (explicit save or first-send draft commit) so every
+  // window converges on the persisted value instead of its own draft.
+  | { type: 'kb_collections_changed'; sessionId: string; collectionIds: string[] }
   | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean }
   | { type: 'task_backgrounded'; sessionId: string; toolUseId: string; taskId: string; intent?: string; turnId?: string }
   | { type: 'shell_backgrounded'; sessionId: string; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }
@@ -209,15 +351,56 @@ export type SessionEvent =
   | { type: 'session_unshared'; sessionId: string }
   | { type: 'auth_request'; sessionId: string; message: Message; request: SharedAuthRequest }
   | { type: 'auth_completed'; sessionId: string; requestId: string; success: boolean; cancelled?: boolean; error?: string }
+  | { type: 'question_request'; sessionId: string; request: QuestionRequest }
+  | { type: 'question_resolved'; sessionId: string; requestId: string; action: 'answer' | 'cancel' }
   | { type: 'source_activated'; sessionId: string; sourceSlug: string; originalMessage: string }
   | { type: 'usage_update'; sessionId: string; tokenUsage: { inputTokens: number; contextWindow?: number } }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
   | { type: 'working_directory_error'; sessionId: string; error: string }
+  // P0-2 render_ui skeleton streaming (Wave-1): partial tool input for an
+  // in-flight render_ui call, so the chat can preview "building <type> —
+  // <title>" skeleton cards before the tool call completes.
+  //
+  // RENDERER-INTERNAL CHANNEL — three hard rules (guarded by
+  // genui-tool-input-delta-isolation.test.ts):
+  //   1. NEVER added to the tab protocol page whitelist (PoloaiProtocolEvent
+  //      union / toProtocolEvent fan-out) — same discipline as ui_state.
+  //   2. NEVER persisted — no message is created, nothing enters session JSONL.
+  //   3. Emitted for render_ui only, throttled (GENUI_TOOL_INPUT_DELTA_FLUSH_MS)
+  //      and capped (GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS); the completed
+  //      tool_start/tool_result pair remains the authoritative payload path.
+  | { type: 'tool_input_delta'; sessionId: string; toolUseId: string; toolName: string; delta: string; seq: number; timestamp?: number }
 
 export interface SendMessageOptions {
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string
+  /**
+   * Where this turn was invoked from. Only `desktop` turns register the
+   * request_user_input tool; omitted sources fall back to `internal`
+   * (fail closed).
+   */
+  invocationSource?: InvocationSource
+  /**
+   * Knowledge Base scope carried by the FIRST send of a new session
+   * (POO-108): the composer's pre-session draft is committed to the session
+   * snapshot before the KB references are resolved. Omitted turns keep the
+   * session's stored scope.
+   */
+  kbCollectionIds?: string[]
+  /**
+   * Resolved KB references for this turn (computed by the SEND_MESSAGE
+   * handler from the session's KB scope) and persisted on the user message.
+   */
+  kbReferences?: KbReference[]
+  /**
+   * POO-108 v4 D-B: the bounded knowledge context assembled server-side from
+   * the SAME send-time retrieval as `kbReferences`, staged by the
+   * SessionManager for a ONE-SHOT injection into this turn's model prompt.
+   * Internal only — never persisted, never part of the message record, and a
+   * client-supplied value is always dropped.
+   */
+  kbModelContext?: { block: string; docs: number; bytes: number }
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +781,8 @@ export interface DeepLinkNavigation {
   callbackId?: string
   /** Opaque organization invitation/public-join token from poloai://join/<token>. */
   joinToken?: string
+  /** ProductSpace list refresh signal from poloai://product-spaces/refresh. */
+  productSpaceRefresh?: true
 }
 
 // ---------------------------------------------------------------------------
@@ -615,6 +800,14 @@ export type PoloaiProtocolErrorCode =
   | 'session_not_found'
   | 'not_authorized'
   | 'internal_error'
+  // POO-103 ui-event loop (proposal §7.3): the six-step host validation maps
+  // every rejection onto one of these codes over the existing poloai:error
+  // channel — a canvas card always learns WHY its event was dropped.
+  | 'invalid_payload'
+  | 'card_not_registered'
+  | 'capability_denied'
+  | 'payload_too_large'
+  | 'rate_limited'
 
 export interface PoloaiProtocolError {
   code: PoloaiProtocolErrorCode
@@ -636,17 +829,301 @@ export interface PoloaiProtocolEvent {
     | 'complete'
     | 'error'
     | 'interrupted'
+    // POO-103: private widget state pushed back to exactly the card that sent
+    // the ui-event (never broadcast — the SessionEvent union has no ui_state,
+    // so handleSessionEvent can never leak one to other protocol pages).
+    | 'ui_state'
   sessionId: string
   delta?: string
   text?: string
   toolName?: string
   error?: string
+  /** ui_state: the card that owns this state snapshot. */
+  cardId?: string
+  /** ui_state: the app-declared privateState payload, card-local only. */
+  state?: unknown
+  /** ui_state: whether the paired modelContext exceeded the 2KB cap and was truncated. */
+  modelContextTruncated?: boolean
 }
 
 export interface PoloaiProtocolMessage {
   type: 'poloai:ack' | 'poloai:event' | 'poloai:error'
   callbackId: string
-  result?: { sessionId?: string }
+  result?: { sessionId?: string; eventId?: string }
   event?: PoloaiProtocolEvent
   error?: PoloaiProtocolError
 }
+
+// ---------------------------------------------------------------------------
+// poloai://action/ui-event — GenUI canvas card event loop (POO-103)
+// ---------------------------------------------------------------------------
+
+/** Deep-link action name: poloai://action/ui-event/{sessionId}. */
+export const GENUI_UI_EVENT_ACTION = 'ui-event'
+
+/** Event types a canvas card may send; anything else is invalid_payload. */
+export const GENUI_UI_EVENT_TYPES = ['button-click', 'value-change', 'submit'] as const
+export type GenUiUiEventType = (typeof GENUI_UI_EVENT_TYPES)[number]
+
+/** Hard cap on the inline `payload` URL parameter (UTF-8 bytes). */
+export const GENUI_UI_EVENT_MAX_PAYLOAD_BYTES = 8 * 1024
+/** Hard cap on a payloadSrc file read (UTF-8 bytes) — big objects live in data/. */
+export const GENUI_UI_EVENT_MAX_PAYLOAD_SRC_BYTES = 1024 * 1024
+/**
+ * Hard cap on the modelContext segment injected into the next turn's context
+ * (UTF-8 bytes, truncated — never rejected — per proposal §8 GENUI-09).
+ */
+export const GENUI_MODEL_CONTEXT_MAX_BYTES = 2048
+/** Bounded per-session queue of pending GenUI model-context injections. */
+export const GENUI_MODEL_CONTEXT_MAX_QUEUE = 8
+/**
+ * Per-card sliding-window rate limit: at most this many ui-events per second
+ * (proposal §7.2 step 6); excess events are rate_limited.
+ */
+export const GENUI_UI_EVENT_RATE_LIMIT = 10
+export const GENUI_UI_EVENT_RATE_WINDOW_MS = 1000
+
+/**
+ * The `<meta name="polo-bridge-capabilities" content="…">` declaration a
+ * generate_app bundle uses to opt into host bridge features. Mechanism per
+ * ADR-0020 (mount-time issuance, invalidated when the document changes) —
+ * NOT its Catalog trust root: the declaration is read by Main from the exact
+ * document the guest attaches with, so a stale or forged renderer claim can
+ * never broaden it.
+ */
+export const GENUI_BRIDGE_CAPABILITIES_META_NAME = 'polo-bridge-capabilities'
+/** The only bridge capability defined so far. Unknown tokens fail closed. */
+export const GENUI_BRIDGE_CAPABILITY_UI_EVENT = 'ui-event'
+export const GENUI_BRIDGE_CAPABILITIES = [GENUI_BRIDGE_CAPABILITY_UI_EVENT] as const
+
+// ---------------------------------------------------------------------------
+// P1-3 canvas app data channel — `<meta name="polo-app-data" content="…">`
+// ---------------------------------------------------------------------------
+
+/**
+ * The `<meta name="polo-app-data" content="data/state.json">` declaration a
+ * generate_app bundle uses to declare its mutable-state JSON files (P1-3).
+ * Paths are relative to the session data/ directory. Main reads the meta from
+ * the exact attached document (same issue-at-mount discipline as the bridge
+ * capabilities above — no manifest trust root) and pushes the file contents
+ * to the mounted card as ui_state; `update_app_data` iterates the same files.
+ */
+export const GENUI_APP_DATA_META_NAME = 'polo-app-data'
+/** Hard cap on declared data files per card — a card cannot farm watchers. */
+export const GENUI_APP_DATA_MAX_FILES_PER_CARD = 3
+/**
+ * Hard cap on one declared data file read/write (UTF-8 bytes). Mirrors the
+ * payloadSrc confinement (big objects live in data/; the ui_state channel
+ * stays bounded). session-tools-core pins the same value for the
+ * update_app_data write cap — the parity guard lives in the shared-side test.
+ */
+export const GENUI_APP_DATA_MAX_FILE_BYTES = GENUI_UI_EVENT_MAX_PAYLOAD_SRC_BYTES
+/** Max characters of one declared path token (mirrors payloadSrc's bound). */
+export const GENUI_APP_DATA_MAX_SRC_LENGTH = 1024
+/** P2-1: minimum quiet period before a data-file change is pushed to the card. */
+export const GENUI_APP_DATA_WATCH_DEBOUNCE_MS = 1000
+
+/**
+ * Parse a Main-extracted `polo-app-data` meta content value into the declared
+ * data file paths. Tokens are whitespace/comma separated (same grammar as the
+ * bridge capabilities meta), deduped, and capped at
+ * GENUI_APP_DATA_MAX_FILES_PER_CARD — a declaration above the cap keeps its
+ * first entries and drops the rest (fail closed, never grows unbounded).
+ * Malformed tokens (empty, NUL, over-length) are dropped.
+ */
+export function parseGenUiAppDataDeclaration(content: string | undefined | null): string[] {
+  if (typeof content !== 'string') return []
+  // Fail closed on NUL: it can never legitimately appear in a real attribute
+  // value, so a content that carries one is malformed as a whole — the whole
+  // declaration is voided instead of being split into plausible halves.
+  if (content.includes('\0')) return []
+  const tokens = content.split(/[\s,]+/).filter(Boolean)
+  const seen = new Set<string>()
+  for (const token of tokens) {
+    if (token.length > GENUI_APP_DATA_MAX_SRC_LENGTH) continue
+    if (token.includes('\0')) continue
+    seen.add(token)
+    if (seen.size >= GENUI_APP_DATA_MAX_FILES_PER_CARD) break
+  }
+  return [...seen]
+}
+
+// ---------------------------------------------------------------------------
+// P0-2 render_ui skeleton streaming — emission parameters
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum interval between two tool_input_delta emissions for the same
+ * toolUseId (renderer-internal channel — see the SessionEvent comment).
+ */
+export const GENUI_TOOL_INPUT_DELTA_FLUSH_MS = 250
+
+/**
+ * Cap on tool_input_delta emission per toolUseId: once the emitter has
+ * RECEIVED this many input characters for the call, it flushes what is
+ * buffered and goes silent (the completed tool call remains the authoritative
+ * payload path). Not a byte-exact output guarantee — the final flush at the
+ * threshold carries everything accumulated since the previous flush, so the
+ * emitted total may overshoot by up to one buffered chunk.
+ */
+export const GENUI_TOOL_INPUT_DELTA_MAX_TOTAL_CHARS = 8192
+
+/** Strict cardId shape shared by the registry, the deep link and the renderer. */
+export const GENUI_UI_CARD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
+export function isValidGenUiUiCardId(value: unknown): value is string {
+  return typeof value === 'string' && GENUI_UI_CARD_ID_PATTERN.test(value)
+}
+
+export function isValidGenUiUiEventType(value: unknown): value is GenUiUiEventType {
+  return typeof value === 'string' && (GENUI_UI_EVENT_TYPES as readonly string[]).includes(value)
+}
+
+/**
+ * UTF-8-safe truncation for modelContext injection: cuts at a code-point
+ * boundary (never mid-surrogate) and reports whether anything was dropped.
+ * A context at or under the cap is returned untouched with truncated=false.
+ */
+export function truncateGenUiModelContext(
+  context: string,
+  maxBytes = GENUI_MODEL_CONTEXT_MAX_BYTES,
+): { text: string; truncated: boolean } {
+  if (Buffer.byteLength(context, 'utf8') <= maxBytes) {
+    return { text: context, truncated: false }
+  }
+  let low = 0
+  let high = context.length
+  // Binary search the longest prefix that fits; adding one char at a time
+  // would be O(n·m) on pathological multi-byte input.
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (Buffer.byteLength(context.slice(0, mid), 'utf8') <= maxBytes) {
+      low = mid
+    } else {
+      high = mid - 1
+    }
+  }
+  // `low` is the longest fitting char count; drop a trailing lone surrogate
+  // half if the cut landed between a surrogate pair.
+  let cut = low
+  const tail = context.charCodeAt(cut - 1)
+  if (tail >= 0xd800 && tail <= 0xdbff) cut -= 1
+  return { text: context.slice(0, cut), truncated: true }
+}
+
+/**
+ * Parse a Main-extracted `polo-bridge-capabilities` meta content value into
+ * the known capability set. Unknown tokens are dropped (fail closed), not
+ * carried — a future capability must be added here before a bundle can use it.
+ */
+export function parseGenUiBridgeCapabilities(content: string | undefined | null): string[] {
+  if (typeof content !== 'string') return []
+  const tokens = content.split(/[\s,]+/).filter(Boolean)
+  const known = new Set<string>(GENUI_BRIDGE_CAPABILITIES)
+  return [...new Set(tokens)].filter(token => known.has(token))
+}
+
+// ---------------------------------------------------------------------------
+// poloai://circle-return — F1 versioned web→desktop return target protocol
+// (POO-70 B1, P70-RETURN-BRIDGE-02/03)
+//
+// Wire format (implementation plan, bound here and in the F1 contract
+// docs/client-journey-review/development-plan/member-circle-contract.json —
+// NOT an existing provider fact, see G6):
+//   poloai://circle-return?v=1&circleId=<uuid>&membershipId=<uuid>&orderId=<uuid>
+// The three ids are optional but at least one must be present. The provider
+// (POL-114) has not adopted this yet — until then the ONLY provider link is
+// the parameter-less legacy launch entry polo://open, which is handled as a
+// no-target launch and never guessed into an order/circle.
+// ---------------------------------------------------------------------------
+
+/** Wire protocol version. Links advertising a different version fail closed. */
+export const CIRCLE_RETURN_PROTOCOL_VERSION = 1 as const
+
+/** The only host that carries a circle-return target. */
+export const CIRCLE_RETURN_DEEP_LINK_HOST = 'circle-return' as const
+
+/**
+ * Legacy published launch entry scheme (public-circle provider, F1 G6):
+ * `polo://open` — scheme mismatch with the registered `poloai`, no params.
+ * Registered best-effort for launch compatibility ONLY; it never carries a
+ * return target.
+ */
+export const LEGACY_OPEN_DEEP_LINK_SCHEME = 'polo' as const
+
+/** The only host accepted under the legacy scheme. */
+export const LEGACY_OPEN_DEEP_LINK_HOST = 'open' as const
+
+const POLO_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Strict UUID validation for circle-return target ids (fail closed). */
+export function isValidPoloUuid(value: unknown): value is string {
+  return typeof value === 'string' && POLO_UUID_PATTERN.test(value)
+}
+
+/**
+ * The navigation target carried by a circle-return link. Ids only ADDRESS a
+ * page — this is never an authorization, membership evidence or an order
+ * receipt. Consumers re-verify every object/permission through the C1
+ * memberCircles trusted bridge before rendering anything.
+ */
+export interface CircleReturnTargetIds {
+  circleId?: string
+  membershipId?: string
+  orderId?: string
+}
+
+/**
+ * A single pending web→desktop return candidate held by the Main process.
+ * `candidateId` is Main-generated and is the dedup/consume handle for both
+ * the typed event and the get/ack/cancel RPCs.
+ */
+export interface CircleReturnCandidate {
+  candidateId: string
+  protocolVersion: number
+  target: CircleReturnTargetIds
+  /** ISO timestamp of when Main recorded the candidate. */
+  createdAt: string
+}
+
+/**
+ * Result of circleReturn.getPending(). Delivery is gated on the trusted
+ * account mirror: `unavailable` (startup not settled) never delivers and
+ * never mutates; a signed-out viewer gets `none` (an account-bound candidate
+ * is cleared — logout cleanup — while a pre-login candidate is retained for
+ * delivery after the pending login verification).
+ */
+export type CircleReturnPendingState =
+  | { status: 'pending'; candidate: CircleReturnCandidate }
+  | { status: 'none' }
+  | { status: 'unavailable'; reason: 'session_unavailable' }
+
+export type CircleReturnAckResult =
+  | { status: 'acked' }
+  | { status: 'not_found' }
+
+export type CircleReturnCancelResult =
+  | { status: 'cancelled' }
+  | { status: 'not_found' }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POO-117 P117-05/P117-07 — new-main-window outcome
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Product identity inherited by a main window, distinct from its runtime workspace. */
+export interface WorkbenchWindowContext {
+  accountId: string
+  productSpaceId: string
+}
+
+/** Where a new-main-window request originated. */
+export type NewWindowRequestSource = 'renderer' | 'native_menu' | 'webview_shortcut'
+
+/** Why a new-main-window request did not produce a visible window. */
+export type NewWindowFailureReason =
+  | 'window_manager_missing'
+  | 'workspace_unresolved'
+  | 'create_failed'
+  | 'show_timeout'
+  | 'scope_unavailable'
+  | 'show_failed'

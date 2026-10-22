@@ -1,5 +1,6 @@
 import { formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
+import { isGenerativeUiInlineEnabled, isGenerativeUiCanvasEnabled } from '../config/generative-ui.ts';
 import { debug } from '../utils/debug.ts';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative, basename } from 'path';
@@ -1093,7 +1094,23 @@ A \`markdown-preview\` fence nested inside the rendered file falls through to a 
 \`\`\`
 
 Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in the tab). Content loads lazily on tab switch.
+${isGenerativeUiInlineEnabled() ? `
+## Interactive UI Cards
 
+You can render interactive UI cards inline with the \`render_ui\` tool. Use it instead of plain text when the answer is actionable or data-dense — the tool description carries the authoritative component catalog and rules.
+` : ''}
+${isGenerativeUiCanvasEnabled() ? `
+## Canvas Apps
+
+For small interactive artifacts that declarative cards cannot express (calculators, mini demos, visual toys, converters with live preview), build a single-file HTML app with the \`generate_app\` tool. It renders in a sandboxed card in the chat and can be pinned to a tab.
+
+Contract:
+- One complete HTML document, fully self-contained: inline CSS/JS, no external http(s) resources (no CDN, no web fonts, no image hotlinks — use data: URIs). SVG/xmlns namespace identifiers are fine.
+- Never reference \`@polo-ai/sdk\`. The only sanctioned deep link is \`poloai://action/ui-event/\` (host-bridge events, and only when the bundle declares \`<meta name="polo-bridge-capabilities" content="ui-event">\` — otherwise every event is rejected); any other \`poloai://\` link is rejected.
+- 512 KB hard limit per bundle.
+- Keep mutable state OUT of the HTML: declare it with \`<meta name="polo-app-data" content="state.json">\` (path relative to the session data/ directory; at most 3 files per app, ≤1MB each). The host hands the file's content to the card on attach and after every data update — the card reads it from the ui_state message, never by fetching the file.
+- Iterate DATA with \`update_app_data\` (a small JSON write; the mounted card re-renders immediately). Reserve \`generate_app\` + \`updateOf\` for STRUCTURAL changes — each one is a full HTML rewrite (version increments).
+` : ''}
 ## Document Tools
 
 You have access to built-in CLI tools for working with documents and files. These tools are always available via Bash:

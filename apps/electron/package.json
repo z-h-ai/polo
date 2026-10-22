@@ -1,6 +1,6 @@
 {
   "name": "@polo-ai/electron",
-  "version": "0.16.3",
+  "version": "0.17.0",
   "description": "Electron desktop app for Polo AI",
   "main": "dist/main.cjs",
   "private": true,
@@ -24,8 +24,8 @@
     "build:renderer": "vite build",
     "build:copy": "bun scripts/copy-assets.ts",
     "build:validate": "bun scripts/validate-assets.ts",
-    "build": "bun run build:cli && bun run lint && bun run build:main && bun run build:preload && bun run build:preload-toolbar && bun run build:interceptor && bun run build:renderer && bun run build:copy && bun run build:validate",
-    "build:win": "bun run build:cli && bun run build:main:win && bun run build:preload && bun run build:preload-toolbar && bun run build:interceptor && bun run build:renderer && bun run build:copy && bun run build:validate",
+    "build": "bun run build:cli && bun run lint && bun run build:main && bun run build:preload && bun run build:preload-toolbar && bun run build:preload-sdk && bun run build:interceptor && bun run build:renderer && bun run build:copy && bun run build:validate",
+    "build:win": "bun run build:cli && bun run build:main:win && bun run build:preload && bun run build:preload-toolbar && bun run build:preload-sdk && bun run build:interceptor && bun run build:renderer && bun run build:copy && bun run build:validate",
     "start": "bun run build && electron .",
     "start:win": "bun run build:win && electron .",
     "dev": "vite dev",
@@ -35,7 +35,8 @@
     "dist:win": "bun run ../../scripts/electron-dist.ts --platform=win32 --arch=x64",
     "dist:linux": "bun run ../../scripts/electron-dist.ts --platform=linux --arch=x64",
     "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint:fix": "eslint src/ --fix",
+    "build:preload-sdk": "esbuild src/preload/app-sdk.ts --bundle --platform=node --format=cjs --outfile=dist/app-sdk-preload.cjs --external:electron"
   },
   "dependencies": {
     "@polo-ai/core": "workspace:*",

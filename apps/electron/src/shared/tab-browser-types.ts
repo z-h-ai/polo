@@ -1,5 +1,21 @@
 export type AppDefinitionType = 'builtin' | 'webapp'
-export type TabInstanceType = 'home' | 'polo' | 'webapp'
+export type TabInstanceType = 'home' | 'polo' | 'knowledge-base' | 'webapp'
+
+/**
+ * Non-secret, immutable identity handed to the POO-47 Runtime boundary.
+ * Delivery credentials deliberately stay out of persisted tab state.
+ */
+export interface ProductSpaceAppLaunchContext {
+  accountId: string
+  productSpaceId: string
+  catalogEntryId: string
+  artifactInstanceId: string
+  versionId: string
+  version: string
+  deliveryKind: 'web_url' | 'bundle'
+  resolvedAt: string
+  expiresAt: string
+}
 
 export interface AppDefinition {
   id: string
@@ -19,11 +35,21 @@ export interface TabInstance {
   favicon?: string
   isLoading?: boolean
   url?: string
+  /** Ephemeral ProductSpace App tab. Its local UI URL must never be persisted/restored. */
+  productSpaceApp?: { accountId: string; productSpaceId: string; contextVersion: number }
+  runtimeError?: string
+  /** Explicit background choice hides the tab while retaining its guest. */
+  background?: boolean
 }
 
 export const HOME_TAB_ID = 'home'
 export const POLO_APP_ID = 'polo-ai'
 export const POLO_TAB_ID = 'polo-ai-tab'
+// POO-108: the enterprise knowledge base ships as a second built-in app. The
+// displayed name resolves through i18n at render time; the definition keeps a
+// non-secret fallback for persisted-state debugging.
+export const KNOWLEDGE_BASE_APP_ID = 'enterprise-knowledge'
+export const KNOWLEDGE_BASE_TAB_ID = 'enterprise-knowledge-tab'
 
 export const POLO_APP_DEFINITION: AppDefinition = {
   id: POLO_APP_ID,
@@ -34,8 +60,18 @@ export const POLO_APP_DEFINITION: AppDefinition = {
   order: 0,
 }
 
+export const KNOWLEDGE_BASE_APP_DEFINITION: AppDefinition = {
+  id: KNOWLEDGE_BASE_APP_ID,
+  name: '企业知识库',
+  url: 'poloai://knowledge-base',
+  type: 'builtin',
+  createdAt: 0,
+  order: 1,
+}
+
 export const BUILTIN_APP_DEFINITIONS: AppDefinition[] = [
   POLO_APP_DEFINITION,
+  KNOWLEDGE_BASE_APP_DEFINITION,
 ]
 
 export const BUILTIN_APP_IDS = new Set(BUILTIN_APP_DEFINITIONS.map((a) => a.id))
@@ -52,6 +88,13 @@ export const POLO_TAB: TabInstance = {
   appId: POLO_APP_ID,
   type: 'polo',
   title: 'Polo 助手',
+}
+
+export const KNOWLEDGE_BASE_TAB: TabInstance = {
+  id: KNOWLEDGE_BASE_TAB_ID,
+  appId: KNOWLEDGE_BASE_APP_ID,
+  type: 'knowledge-base',
+  title: '企业知识库',
 }
 
 export function createTabId(prefix = 'tab'): string {
@@ -71,29 +114,4 @@ export function normalizeInstalledApps(apps: AppDefinition[] | undefined | null)
     .sort((a, b) => a.order - b.order)
 
   return [...BUILTIN_APP_DEFINITIONS, ...webApps]
-}
-
-export function isValidWebAppUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol === 'https:') return true
-    if (parsed.protocol !== 'http:') return false
-
-    const host = parsed.hostname.toLowerCase()
-    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
-    if (host.startsWith('192.168.')) return true
-    if (host.startsWith('10.')) return true
-
-    const private172 = /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-    return private172
-  } catch {
-    return false
-  }
-}
-
-export function normalizeWebAppUrl(input: string): string {
-  const trimmed = input.trim()
-  if (!trimmed) return trimmed
-  if (/^[a-z][a-z\d+\-.]*:\/\//i.test(trimmed)) return trimmed
-  return `https://${trimmed}`
 }

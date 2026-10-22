@@ -23,6 +23,7 @@ export const RPC_CHANNELS = {
     MARK_ALL_READ: 'sessions:markAllRead',
     UNREAD_SUMMARY_CHANGED: 'sessions:unreadSummaryChanged',
     CREATE: 'sessions:create',
+    CREATE_EDIT_POPOVER_SESSION: 'sessions:createEditPopoverSession',
     DELETE: 'sessions:delete',
     GET_MESSAGES: 'sessions:getMessages',
     SEND_MESSAGE: 'sessions:sendMessage',
@@ -30,6 +31,8 @@ export const RPC_CHANNELS = {
     KILL_SHELL: 'sessions:killShell',
     RESPOND_TO_PERMISSION: 'sessions:respondToPermission',
     RESPOND_TO_CREDENTIAL: 'sessions:respondToCredential',
+    RESPOND_TO_QUESTION: 'sessions:respondToQuestion',
+    GET_EDIT_POPOVER_PENDING_QUESTION: 'sessions:getEditPopoverPendingQuestion',
     COMMAND: 'sessions:command',
     GET_PENDING_PLAN_EXECUTION: 'sessions:getPendingPlanExecution',
     GET_PERMISSION_MODE_STATE: 'sessions:getPermissionModeState',
@@ -66,6 +69,8 @@ export const RPC_CHANNELS = {
   window: {
     GET_WORKSPACE: 'window:getWorkspace',
     GET_MODE: 'window:getMode',
+    GET_LAUNCH_CONTEXT: 'window:getLaunchContext',
+    REPORT_WORKBENCH_READY: 'window:reportWorkbenchReady',
     OPEN_WORKSPACE: 'window:openWorkspace',
     OPEN_SESSION_IN_NEW_WINDOW: 'window:openSessionInNewWindow',
     SWITCH_WORKSPACE: 'window:switchWorkspace',
@@ -134,6 +139,7 @@ export const RPC_CHANNELS = {
   menu: {
     NEW_CHAT: 'menu:newChat',
     NEW_WINDOW: 'menu:newWindow',
+    NEW_WINDOW_FAILED: 'menu:newWindowFailed',
     OPEN_SETTINGS: 'menu:openSettings',
     KEYBOARD_SHORTCUTS: 'menu:keyboardShortcuts',
     TOGGLE_FOCUS_MODE: 'menu:toggleFocusMode',
@@ -160,9 +166,31 @@ export const RPC_CHANNELS = {
     GET_APPS: 'tab-browser:getApps',
     SAVE_APPS: 'tab-browser:saveApps',
   },
+  genui: {
+    // Canvas app (generate_app) pin audit. Main derives the session directory
+    // path itself and validates the bundle path before appending audit.jsonl —
+    // the renderer never names a writable path.
+    AUDIT_APP_PIN: 'genui:auditAppPin',
+    // POO-103: canvas card mount/unmount registration for the ui-event
+    // two-dimensional ownership model. Main only honors a registration whose
+    // guest webContents it observed attaching itself (webview-security) —
+    // the renderer reports ids, Main verifies them.
+    REGISTER_UI_CARD: 'genui:registerUiCard',
+    UNREGISTER_UI_CARD: 'genui:unregisterUiCard',
+    // POO-104 publish chain: Main packages the session-local canvas app into
+    // the upload payload (zip, root layout) behind the same trust anchors as
+    // the pin audit. The payload crosses this channel once, renderer → Main
+    // never — Main hands the packaged bytes BACK to the caller, which submits
+    // them through the existing admin.PUBLISH_CREATOR_APP chain.
+    PUBLISH_APP_AS_ARTIFACT: 'genui:publishAppArtifact',
+  },
   localApps: {
     GET_HOST_INFO: 'local-apps:getHostInfo',
     INSTALL: 'local-apps:install',
+    INSTALL_PRODUCT_SPACE_BUNDLE: 'local-apps:installProductSpaceBundle',
+    GET_PRODUCT_SPACE_INSTALL_STATES: 'local-apps:getProductSpaceInstallStates',
+    GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES: 'local-apps:getProductSpaceWithdrawnInstallStates',
+    UNINSTALL_PRODUCT_SPACE_BUNDLE: 'local-apps:uninstallProductSpaceBundle',
     CANCEL_INSTALL: 'local-apps:cancelInstall',
     START: 'local-apps:start',
     STOP: 'local-apps:stop',
@@ -204,8 +232,10 @@ export const RPC_CHANNELS = {
     LOGOUT: 'admin:logout',
     GET_STATUS: 'admin:getStatus',
     SYNC_CONNECTIONS: 'admin:syncConnections',
+    PAYMENT_HANDOFF: 'admin:paymentHandoff',
     SYNC_APP_CATALOG: 'admin:syncAppCatalog',
     LIST_ORGANIZATIONS: 'admin:listOrganizations',
+    LIST_PRODUCT_SPACES: 'admin:listProductSpaces',
     CREATE_ORGANIZATION: 'admin:createOrganization',
     PREVIEW_ORGANIZATION_JOIN: 'admin:previewOrganizationJoin',
     ACCEPT_ORGANIZATION_JOIN: 'admin:acceptOrganizationJoin',
@@ -232,6 +262,31 @@ export const RPC_CHANNELS = {
     GET_CREATOR_SKILL_DOWNLOAD_GRANT: 'admin:getCreatorSkillDownloadGrant',
     GET_CREATOR_SKILL_SAFETY_STATUS: 'admin:getCreatorSkillSafetyStatus',
     PUBLISH_CREATOR_APP: 'admin:publishCreatorApp',
+  },
+  memberCircles: {
+    // Member-side circle reads/writes (POO-70 C1). Trusted-session only:
+    // handlers derive identity from the Main-process Admin session and never
+    // accept a renderer-supplied userId. No purchase/createOrder channel.
+    LIST: 'memberCircles:list',
+    LIST_MEMBERSHIPS: 'memberCircles:listMemberships',
+    PREVIEW_RENEWAL: 'memberCircles:previewRenewal',
+    LEAVE: 'memberCircles:leave',
+    GET_ORDER: 'memberCircles:getOrder',
+    GET_CHECKOUT_RESULT: 'memberCircles:getCheckoutResult',
+    GET_UPDATES: 'memberCircles:getUpdates',
+    GET_PROFILE: 'memberCircles:getProfile',
+    GET_SUPPORT: 'memberCircles:getSupport',
+  },
+  circleReturn: {
+    // F1 web→desktop return bridge (POO-70 B1). Main-process GUI handlers own
+    // a single pending navigation candidate; the ids only ADDRESS a page —
+    // every object/permission re-verification happens through the C1
+    // memberCircles bridge (P70-RETURN-BRIDGE-02/03). No join/pay/auth here.
+    GET_PENDING: 'circleReturn:getPending',
+    ACK: 'circleReturn:ack',
+    CANCEL: 'circleReturn:cancel',
+    /** Main → renderer push of a pending CircleReturnCandidate (dedup by candidateId). */
+    CANDIDATE: 'circleReturn:candidate',
   },
   llmConnections: {
     LIST: 'LLM_Connection:list',
@@ -284,8 +339,33 @@ export const RPC_CHANNELS = {
     WRITE: 'preferences:write',
     GET_HOME_RECENT_APPS: 'preferences:getHomeRecentApps',
     SET_HOME_RECENT_APPS: 'preferences:setHomeRecentApps',
+    GET_HOME_QUICK_ACCESS: 'preferences:getHomeQuickAccess',
+    SET_HOME_QUICK_ACCESS: 'preferences:setHomeQuickAccess',
     GET_ORGANIZATION_CONTEXT_STORAGE: 'preferences:getOrganizationContextStorage',
     UPDATE_ORGANIZATION_CONTEXT_STORAGE: 'preferences:updateOrganizationContextStorage',
+    GET_PRODUCT_SPACE_CONTEXT_STORAGE: 'preferences:getProductSpaceContextStorage',
+    UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE: 'preferences:updateProductSpaceContextStorage',
+  },
+  productSpace: {
+    LIST: 'product-space:list',
+    CATALOG: 'product-space:catalog',
+    RESOLVE_LAUNCH: 'product-space:resolveLaunch',
+    LIST_SKILLS: 'product-space:listSkills',
+    SET_SKILL_ENABLEMENT: 'product-space:setSkillEnablement',
+    INSTALL_SKILL: 'product-space:installSkill',
+    UNINSTALL_SKILL: 'product-space:uninstallSkill',
+    LIST_ACTIVE_EXECUTIONS: 'product-space:listActiveExecutions',
+    STOP_ALL_EXECUTIONS: 'product-space:stopAllExecutions',
+    STOP_EXECUTION: 'product-space:stopExecution',
+    RESTRICT_ACTIVE_SPACE: 'product-space:restrictActiveSpace',
+    GET_RESTRICTION_STATE: 'product-space:getRestrictionState',
+    PREPARE_SWITCH: 'product-space:prepareSwitch',
+    STOP_SWITCH_EXECUTIONS: 'product-space:stopSwitchExecutions',
+    COMMIT_SWITCH: 'product-space:commitSwitch',
+    CANCEL_SWITCH: 'product-space:cancelSwitch',
+    REVOKE_ACTIVE_CONTEXT: 'product-space:revokeActiveContext',
+    RESTORE_OFFLINE_VIEW: 'product-space:restoreOfflineView',
+    CLEANUP_LEGACY_STATE: 'product-space:cleanupLegacyState',
   },
   drafts: {
     GET: 'drafts:get',
@@ -327,6 +407,29 @@ export const RPC_CHANNELS = {
     OPEN_EDITOR: 'skills:openEditor',
     OPEN_FINDER: 'skills:openFinder',
     CHANGED: 'skills:changed',
+    // Management-workbench view of the same discovery, without the enablement
+    // filter — a disabled skill must stay listed or it could never be
+    // re-enabled (POO-106 S1, B1). The composer keeps consuming GET (SM-09).
+    GET_UNFILTERED: 'skills:getUnfiltered',
+    LIST_MANAGED: 'skills:listManaged',
+    SET_MANAGED_ENABLEMENT: 'skills:setManagedEnablement',
+  },
+  // Enterprise Knowledge Base (POO-108): local workspace-scoped file store,
+  // every channel is LOCAL_ONLY (see routing.ts).
+  kb: {
+    LIST_COLLECTIONS: 'kb:listCollections',
+    CREATE_COLLECTION: 'kb:createCollection',
+    LIST_DOCUMENTS: 'kb:listDocuments',
+    UPLOAD_DOCUMENT: 'kb:uploadDocument',
+    SUBMIT_FOR_REVIEW: 'kb:submitForReview',
+    PUBLISH_DOCUMENT: 'kb:publishDocument',
+    REJECT_DOCUMENT: 'kb:rejectDocument',
+    REVERT_TO_DRAFT: 'kb:revertToDraft',
+    DELETE_DOCUMENT: 'kb:deleteDocument',
+    GET_DOCUMENT: 'kb:getDocument',
+    SEARCH: 'kb:search',
+    SET_SESSION_COLLECTIONS: 'kb:setSessionCollections',
+    GET_SESSION_COLLECTIONS: 'kb:getSessionCollections',
   },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',
@@ -385,6 +488,10 @@ export const RPC_CHANNELS = {
   tools: {
     GET_BROWSER_TOOL_ENABLED: 'tools:getBrowserToolEnabled',
     SET_BROWSER_TOOL_ENABLED: 'tools:setBrowserToolEnabled',
+    GET_GENERATIVE_UI_INLINE_ENABLED: 'tools:getGenerativeUiInlineEnabled',
+    SET_GENERATIVE_UI_INLINE_ENABLED: 'tools:setGenerativeUiInlineEnabled',
+    GET_GENERATIVE_UI_CANVAS_ENABLED: 'tools:getGenerativeUiCanvasEnabled',
+    SET_GENERATIVE_UI_CANVAS_ENABLED: 'tools:setGenerativeUiCanvasEnabled',
   },
   caching: {
     GET_EXTENDED_PROMPT_CACHE: 'caching:getExtendedPromptCache',

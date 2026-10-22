@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "review_id": "POO-70-sot-cleanup-independent",
+  "reviewed_at": "2026-10-02",
+  "status": "passed",
+  "passed": true,
+  "reviewer_context": {
+    "agent": "/root/closure_semantic_review",
+    "independent": true,
+    "review_kind": "document consolidation and current artifact source binding",
+    "prior_context": "同一独立 reviewer 的上一轮 closure-r13 已读 Spec 和最终产物哈希作为已知基线；未读取任何历史归档正文。",
+    "delivery_boundary": "仅文档收敛与当前产物绑定复核，不重新产品访谈、视觉批准或实际产品验收。"
+  },
+  "independence": {
+    "allowed_inputs_only": true,
+    "allowed_semantic_inputs": [
+      "docs/client-journey-review/spec.md",
+      "docs/mvp-complete-flow-hifi/sources/closure-r13-inputs.json",
+      ".agents/skills/polo-ai-design-system/SKILL.md",
+      "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+      "docs/mvp-complete-flow-hifi/prototype.html",
+      "docs/mvp-complete-flow-hifi/review.html",
+      "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md",
+      "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/documentation-equivalence.json"
+    ],
+    "hash_only_addition": "design-demos/polo-client-source-baseline/prototype.html",
+    "not_read": [
+      "归档正文",
+      "生成器",
+      "产品源码",
+      "quality-report",
+      "作者自评",
+      "其他工作树"
+    ],
+    "writes": [
+      "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/semantic.json"
+    ]
+  },
+  "inputs": [
+    {
+      "path": "docs/client-journey-review/spec.md",
+      "sha256": "fb0100e312ec65e050b24d1d4f50be8a00c59b668f68db0fb1433a2412a41304"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/closure-r13-inputs.json",
+      "sha256": "c3034f48e94a64f04a4cb7937c5aff27c1dcaa2aa884cd45aefc4fa48b30965e"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/SKILL.md",
+      "sha256": "668d8be4a5f0eb76a9fe7d6b82fa83d42639cd70bf13be31bbdbae973ff9a1de"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+      "sha256": "f74e35f4cf005edcdc637fc4ee2ff373b5f1705650b2ca1610e57bd12a312d0c"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/prototype.html",
+      "sha256": "a49d524776e98f8fd123f62175795391a2b62189c2f518c2545980a72e5e17ec"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/review.html",
+      "sha256": "1347082ce96fccf9a0dd239756f361bf80e78b90184e6c63dfc17b85267ec309"
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md",
+      "sha256": "8c9b11cfe7432029a8ce3261b10bae0842e8f49cf784eb062d68f2883edeed36"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/documentation-equivalence.json",
+      "sha256": "c064c58b3d860894da0ae75bf758dafaf0ae36122e97badb257198cd37e789a6"
+    }
+  ],
+  "artifacts": {
+    "manifest": {
+      "path": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+      "sha256": "f74e35f4cf005edcdc637fc4ee2ff373b5f1705650b2ca1610e57bd12a312d0c"
+    },
+    "prototype": {
+      "path": "docs/mvp-complete-flow-hifi/prototype.html",
+      "sha256": "a49d524776e98f8fd123f62175795391a2b62189c2f518c2545980a72e5e17ec"
+    },
+    "review": {
+      "path": "docs/mvp-complete-flow-hifi/review.html",
+      "sha256": "1347082ce96fccf9a0dd239756f361bf80e78b90184e6c63dfc17b85267ec309"
+    },
+    "assistant_prototype": {
+      "path": "design-demos/polo-client-source-baseline/prototype.html",
+      "sha256": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102"
+    }
+  },
+  "scope": {
+    "current_sot": "docs/client-journey-review/spec.md",
+    "reviewed_sections": [
+      "唯一 SoT 与成熟度声明",
+      "本轮跨端收口与已确认规则",
+      "来源、历史证据和接受边界",
+      "§12 原型、复看范围与维护",
+      "SCENE-TRACEABILITY 当前来源入口",
+      "manifest sources / surfaces / scenes / confirmations 与 HTML 内嵌映射"
+    ],
+    "scene_count": 339,
+    "surface_scene_counts": {
+      "mvp": 127,
+      "assistant": 212
+    },
+    "new_product_rules": false,
+    "visual_approval_requested": false
+  },
+  "findings": [],
+  "checks": [
+    {
+      "id": "SOT-01",
+      "passed": true,
+      "evidence": "Spec 的唯一维护入口、派生产物、历史材料用途和当前成熟度分开说明；§12 没有新增圈子/身份/资金政策，也没有把历史 Done、原型或用户确认提升为真实运行验收。"
+    },
+    {
+      "id": "SOT-02",
+      "passed": true,
+      "evidence": "圈子自助加入、月/年日历续费、企业指定邀请/共享审批和原对象客服恢复继续消费原 owner 规则；§12 的集中复看表保持这些边界，不重开助手设计。"
+    },
+    {
+      "id": "SOT-03",
+      "passed": true,
+      "evidence": "Spec 与 SCENE-TRACEABILITY 将当前产品规则指回同一 Spec；场景索引指向 manifest，组件追溯保留固定 Renderer 版本及提案/实现区别。"
+    },
+    {
+      "id": "SOT-04",
+      "passed": true,
+      "evidence": "实际解析 prototype.html 和 review.html 内嵌 manifest，与当前独立 manifest 全结构相等。339 个场景 ID 唯一，127 个 MVP / 212 个助手场景分配与 surfaces 映射匹配。"
+    },
+    {
+      "id": "SOT-05",
+      "passed": true,
+      "evidence": "当前 Spec、closure-r13-inputs、SCENE-TRACEABILITY 的实际 sha256 均与 manifest 对应来源绑定相符；DS 和 closure-r13-inputs 哈希与上一轮相同。"
+    },
+    {
+      "id": "SOT-06",
+      "passed": true,
+      "evidence": "documentation-equivalence.json 记录 manifest 仅 sources 变化，339 场景映射未变，prototype/review 除内嵌 manifest 外字节一致；其 Spec before 哈希与本 reviewer 上一轮实际绑定 ccf9861aa56a1a685c27d50272039fd522dd8db96698ad4ffd550f4421b23324 一致。未读取该报告引用的归档。"
+    },
+    {
+      "id": "SOT-07",
+      "passed": true,
+      "evidence": "助手 prototype 实际 sha256 仍为 42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102，与本 reviewer 上一轮实际绑定完全一致；仅哈希读取，不重做助手内容审查。"
+    }
+  ],
+  "limitations": [
+    "前后完整字节等价结论使用允许输入 documentation-equivalence.json；没有解包历史归档独立重算其比较。当前来源哈希、内嵌 manifest 和助手产物哈希已实际核对。",
+    "未读取被删除六份重复正文或归档全内容，因此本报告不独立证明归档完整性或每一条历史材料保留；该项由文档清理的独立归档/引用证据承担。",
+    "未重新浏览或批准产品视觉；上轮六项修复结果及真实二维码/API限制未因纯文档整理改变。",
+    "真实客服二维码未提供，真实扫码联系、Electron、API、支付、安装及 AI 运行未验证。",
+    "业务规则继续沿既有确认，新页面布局/视觉仍待复看；本报告不代表用户产品批准、实施完成或正式 Acceptance。"
+  ],
+  "summary": {
+    "findings_total": 0,
+    "resolved": 0,
+    "open": 0
+  },
+  "product_approval": false,
+  "formal_acceptance": false
+}

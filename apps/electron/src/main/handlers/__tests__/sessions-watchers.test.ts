@@ -7,10 +7,24 @@ import { registerSessionsHandlers, cleanupSessionFileWatchForClient } from '@pol
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
-type HandlerFn = (ctx: { clientId: string }, ...args: any[]) => Promise<any> | any
+type HandlerFn = (ctx: { clientId: string; workspaceId?: string | null }, ...args: any[]) => Promise<any> | any
+
+// R34-1: watchers are Workspace-scoped — every watch call binds the caller
+// to its Main-owned Workspace.
+const watchContext = (clientId: string) => ({ clientId, workspaceId: 'ws-watch' })
 
 const CLIENT_A = 'sessions-watchers-client-a'
 const CLIENT_B = 'sessions-watchers-client-b'
+
+const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId } = await import('@polo-ai/server-core/handlers/rpc/trusted-product-space-account')
+
+setRuntimeActiveProductSpace('watch-test-space')
+// R32-2: the session fence now also requires the trusted account binding.
+// R37-3: the atomic capture additionally proves the FENCE account equals
+// the synchronous mirror, so the runtime fence account is seeded too.
+setRuntimeActiveProductSpaceAccount('watch-test-account')
+setSyncTrustedProductSpaceAccountId('watch-test-account')
 
 describe('sessions file watchers', () => {
   const handlers = new Map<string, HandlerFn>()
@@ -68,6 +82,10 @@ describe('sessions file watchers', () => {
           if (sessionId === 'session-b') return sessionDirB
           return null
         },
+        getSessions: () => [
+          { id: 'session-a', workspaceId: 'ws-watch', productSpaceId: 'watch-test-space', accountId: 'watch-test-account', isProcessing: false },
+          { id: 'session-b', workspaceId: 'ws-watch', productSpaceId: 'watch-test-space', accountId: 'watch-test-account', isProcessing: false },
+        ],
       } as unknown as HandlerDeps['sessionManager'],
       platform: {
         appRootPath: '',
@@ -145,8 +163,8 @@ describe('sessions file watchers', () => {
     expect(watch).toBeTruthy()
     expect(unwatch).toBeTruthy()
 
-    await watch!({ clientId: CLIENT_A }, 'session-a')
-    await watch!({ clientId: CLIENT_B }, 'session-b')
+    await watch!(watchContext(CLIENT_A), 'session-a')
+    await watch!(watchContext(CLIENT_B), 'session-b')
 
     const clientAChanged = waitForClientPush(CLIENT_A)
     const clientBChanged = waitForClientPush(CLIENT_B)
@@ -179,7 +197,7 @@ describe('sessions file watchers', () => {
     const watch = handlers.get(RPC_CHANNELS.sessions.WATCH_FILES)
     expect(watch).toBeTruthy()
 
-    await watch!({ clientId: CLIENT_A }, 'session-a')
+    await watch!(watchContext(CLIENT_A), 'session-a')
 
     cleanupSessionFileWatchForClient(CLIENT_A)
     pushed.length = 0

@@ -1,0 +1,22 @@
+{
+  "note": "Manual re-verification of A-personal-new rendering after census wait-window timeouts. Reconstructed from this reviewer session's ad-hoc Playwright runs (each started with an independent page load of review.html, then reset + hash navigation '#scene=A-personal-new').",
+  "checks": [
+    {
+      "run": "port 8951 single-scene extraction validation",
+      "observed": "shell document.body.dataset.currentScene == 'A-personal-new'; assistant surface frame (design-demos/polo-client-source-baseline/prototype.html) had .scene-active fallback [data-prototype-scene] == 'A-personal-new' with rendered text ('Polo 助手 / 新建会话 / 我的空间…'); rendered: True"
+    },
+    {
+      "run": "port 8953 replicate census sequence (previous M05 scene -> reset -> hash to A-personal-new)",
+      "observed": "matched at first poll (0.25s): shell currentScene == 'A-personal-new' and frame active scene attr == 'A-personal-new'"
+    },
+    {
+      "run": "port 8965 per-second observation",
+      "observed": "frame document.readyState == 'complete', frame body.dataset.currentScene == 'A-personal-skills' control case READY within 1s; no pageerror, no console error, no failed request"
+    },
+    {
+      "run": "port 8972 diagnostic",
+      "observed": "assistant iframe visible (not hidden), READY immediately; events list empty (no pageerror/console error/requestfailed/4xx)"
+    }
+  ],
+  "conclusion": "A-personal-new renders correctly; census timeouts were environment contention, not a prototype defect. Screenshot evidence: screenshots/desktop-1440x900/A-personal-new.png captured during census screenshot pass."
+}

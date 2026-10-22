@@ -1,6 +1,6 @@
 export declare const CREATOR_SKILL_NAME_PATTERN: RegExp;
 export declare const CREATOR_SKILL_NAME_MAX_LENGTH = 64;
-export declare const CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+export declare const CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 8192;
 export declare const CREATOR_SKILL_MAX_METADATA_ITEMS = 1000;
 export declare const CREATOR_SKILL_ICON_MAX_LENGTH = 64;
 export declare const CREATOR_SKILL_GLOB_MAX_LENGTH = 2048;

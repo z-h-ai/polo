@@ -26,8 +26,8 @@ coverage
 
 # logs
 logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # dotenv environment variable files
 .env
@@ -82,3 +82,13 @@ credentials.enc
 # act (local GitHub Actions runner)
 .secrets
 .actrc
+
+# ZCode session plan artifacts
+.zcode/
+
+# HiFi implementation orchestrator specs (POO-70)
+.tmp/
+
+# POO-70 原型派生产物：对 prototype.html / prototype-manifest.json 现场生成，永不提交（防新旧分叉）
+docs/mvp-complete-flow-hifi/build/
+docs/mvp-complete-flow-hifi/screenshots/

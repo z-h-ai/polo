@@ -43,6 +43,9 @@ export type {
 export { handleCredentialPrompt } from './credential-prompt.ts';
 export type { CredentialPromptArgs } from './credential-prompt.ts';
 
+// Request User Input
+export { handleRequestUserInput } from './request-user-input.ts';
+
 // Update Preferences
 export { handleUpdatePreferences } from './update-preferences.ts';
 export type { UpdatePreferencesArgs } from './update-preferences.ts';
@@ -58,6 +61,14 @@ export type { ScriptSandboxArgs } from './script-sandbox.ts';
 // Render Template
 export { handleRenderTemplate } from './render-template.ts';
 export type { RenderTemplateArgs } from './render-template.ts';
+
+// Render UI (Generative UI inline cards)
+export { handleRenderUi } from './render-ui.ts';
+export type { RenderUiArgs } from './render-ui.ts';
+
+// Update App Data (Generative UI canvas app data iteration, P1-3)
+export { handleUpdateAppData } from './update-app-data.ts';
+export type { UpdateAppDataArgs } from './update-app-data.ts';
 
 // Send Developer Feedback
 export { handleSendDeveloperFeedback } from './send-developer-feedback.ts';

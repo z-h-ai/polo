@@ -13,6 +13,7 @@ export {
   CreatorSkillSafetyStatusSchema,
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
+  WebAppArtifactPolicySchema,
 } from '../creator-skills/schemas.ts'
 
 const nonBlankString = (maxLength: number) =>
@@ -193,7 +194,7 @@ export const CatalogAppSchema = z.object({
   description: z.string().max(4_096),
   iconUrl: httpUrl.optional(),
   creatorName: z.string().max(512).optional(),
-  deliveryMode: z.enum(['remote_url', 'local_bundle']),
+  deliveryMode: z.enum(['remote_url', 'local_bundle', 'resolve_launch']),
   remoteUrl: httpUrl.optional(),
   currentRelease: AppReleaseSummarySchema.optional(),
   permissions: z.array(nonBlankString(512)).max(1_000).optional(),
@@ -266,11 +267,16 @@ export const AdminPlatformReleaseCreatedResponseSchema = z.object({
 export const DeniedCatalogAppSchema = z.object({
   id: entityId,
   organizationId: entityId,
+  // Non-secret stable UI identity retained for the frozen restricted view.
+  catalogEntryId: entityId.optional(),
+  artifactInstanceId: entityId.optional(),
+  // Source display metadata (names only, no delivery capability).
+  sourceNames: z.array(nonBlankString(256)).max(1_000).optional(),
   name: nonBlankString(256),
   description: z.string().max(4_096),
   iconUrl: httpUrl.optional(),
   creatorName: z.string().max(512).optional(),
-  deliveryMode: z.enum(['remote_url', 'local_bundle']),
+  deliveryMode: z.enum(['remote_url', 'local_bundle', 'resolve_launch']),
   sortOrder: z.number().int(),
   availability: z.literal('unavailable'),
 }).strict()
@@ -429,3 +435,47 @@ export const UpdateOrganizationMemberRpcInputSchema = z.object({
 export const RemoveOrganizationMemberRpcInputSchema = z.object({
   reason: z.string().trim().min(1).max(512).optional(),
 }).strict()
+
+// POO-112 browser payment handoff: strictly the four fields the desktop may
+// know. The ticket is the ONLY credential allowed to travel through the
+// renderer, and only inside a URL fragment built by the server-core layer —
+// never a session token, never a server-authored redirect URL.
+export const PaymentHandoffTicketSchema = z.object({
+  ticket: nonBlankString(64).refine(
+    value => /^[A-Za-z0-9_-]{43}$/.test(value),
+    'Payment handoff ticket must be base64url of 32 bytes',
+  ),
+  expiresAt: z.string().datetime({ offset: true }),
+  accountId: AdminEntityIdSchema,
+  productSpaceId: AdminEntityIdSchema,
+}).strict()
+export type PaymentHandoffTicket = z.infer<typeof PaymentHandoffTicketSchema>
+
+// POO-108 v5: the enterprise space's cloud-managed OpenViking library
+// credential. Strictly the three fields a data-plane call needs — only a READY
+// library the caller's account belongs to answers, and a pending/failed one or
+// a non-member caller arrives as an HTTP error, never as a partial credential.
+export const AdminKbCredentialSchema = z.object({
+  baseUrl: httpUrl,
+  resourceId: AdminEntityIdSchema,
+  apiKey: nonBlankString(4096),
+}).strict()
+export type AdminKbCredential = z.infer<typeof AdminKbCredentialSchema>
+
+export {
+  billingRuntimeRequestResponseSchema as AdminGetAppRequestResponseSchema,
+  billingRuntimeAdmissionResponseSchema as AdminAdmitAppRequestResponseSchema,
+  billingRuntimeStartResponseSchema as AdminStartAppRunResponseSchema,
+  billingRuntimeUsageResponseSchema as AdminRecordAppUsageResponseSchema,
+  billingRuntimeFinishResponseSchema as AdminFinishAppRunResponseSchema,
+} from './billing-runtime-contract'
+export const APP_BILLING_ERROR_CODES = ['insufficient_credit', 'idempotency_conflict', 'run_finalized'] as const
+export type AppBillingErrorCode = (typeof APP_BILLING_ERROR_CODES)[number]
+export function readAppBillingErrorCode(data: unknown): AppBillingErrorCode | null {
+  const code = data && typeof data === 'object'
+    ? (data as Record<string, unknown>).errorCode ?? (data as Record<string, unknown>).code
+    : undefined
+  return typeof code === 'string' && (APP_BILLING_ERROR_CODES as readonly string[]).includes(code)
+    ? code as AppBillingErrorCode
+    : null
+}

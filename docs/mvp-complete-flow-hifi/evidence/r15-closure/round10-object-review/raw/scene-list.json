@@ -1,0 +1,4242 @@
+[
+ {
+  "id": "P-M01-LOGIN-PASSWORD",
+  "surface": "mvp",
+  "title": "登录 · 密码登录",
+  "module": "M01",
+  "state": "default",
+  "category": "复用",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-LOGIN-PHONE",
+  "surface": "mvp",
+  "title": "登录 · 验证码登录",
+  "module": "M01",
+  "state": "default",
+  "category": "复用",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-LOGIN-CODE",
+  "surface": "mvp",
+  "title": "登录 · 验证码已发送",
+  "module": "M01",
+  "state": "default",
+  "category": "复用",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M01-LOGIN-CANCEL",
+  "surface": "mvp",
+  "title": "登录 · 用户取消",
+  "module": "M01",
+  "state": "default",
+  "category": "状态",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-PERSONAL-PREP",
+  "surface": "mvp",
+  "title": "我的空间 · 准备中",
+  "module": "M01",
+  "state": "default",
+  "category": "调整",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M01-PERSONAL-PREP-FAIL",
+  "surface": "mvp",
+  "title": "我的空间 · 准备失败",
+  "module": "M01",
+  "state": "default",
+  "category": "调整",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-REOPEN",
+  "surface": "mvp",
+  "title": "重开 · 登录恢复",
+  "module": "M01",
+  "state": "default",
+  "category": "状态",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-INVITE-BROWSER",
+  "surface": "mvp",
+  "title": "企业邀请已在浏览器处理",
+  "module": "M01",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-INVITE-MISMATCH",
+  "surface": "mvp",
+  "title": "邀请 · 账号不匹配",
+  "module": "M01",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-INVITE-PENDING",
+  "surface": "mvp",
+  "title": "共享邀请 · 待审批",
+  "module": "M01",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M01-REFRESH-FAIL",
+  "surface": "mvp",
+  "title": "企业列表刷新失败",
+  "module": "M01",
+  "state": "default",
+  "category": "状态",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-NOT-INSTALLED",
+  "surface": "mvp",
+  "title": "未安装 · 下载指引",
+  "module": "M01",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M01-CREATE-ENT",
+  "surface": "mvp",
+  "title": "创建企业（浏览器交接）",
+  "module": "M01",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-COLD-START",
+  "surface": "mvp",
+  "title": "冷启动 · 候选目标重验",
+  "module": "M01",
+  "state": "default",
+  "category": "状态",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M02-SWITCHER",
+  "surface": "mvp",
+  "title": "切换空间 · 企业空间",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M02-SWITCHER-PERSONAL",
+  "surface": "mvp",
+  "title": "切换空间 · 我的空间",
+  "module": "M02",
+  "state": "default",
+  "category": "新增",
+  "journey": "J2 空间切换",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M02-CONFIRM",
+  "surface": "mvp",
+  "title": "切换确认 · 终止 3 项",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M02-CONFIRM-PERSONAL",
+  "surface": "mvp",
+  "title": "切换确认 · 从我的空间到企业",
+  "module": "M02",
+  "state": "default",
+  "category": "调整",
+  "journey": "J2 空间切换",
+  "n_transitions": 21
+ },
+ {
+  "id": "P-M02-STOPPING",
+  "surface": "mvp",
+  "title": "终止进度",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M02-STOP-FAILED",
+  "surface": "mvp",
+  "title": "部分停止失败",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M02-STOP-CANCEL",
+  "surface": "mvp",
+  "title": "取消切换 · 仍在原空间",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M02-TARGET-LOADING",
+  "surface": "mvp",
+  "title": "目标空间加载中",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 15
+ },
+ {
+  "id": "P-M02-TARGET-FAILED",
+  "surface": "mvp",
+  "title": "目标空间加载失败",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M02-ACCESS-LOST",
+  "surface": "mvp",
+  "title": "目标无权访问",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M03-HOME-PERSONAL",
+  "surface": "mvp",
+  "title": "首页 · 我的空间",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M03-HOME-ZERO",
+  "surface": "mvp",
+  "title": "首页 · 首次使用",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M03-HOME-EMPTY-DIR",
+  "surface": "mvp",
+  "title": "首页 · 真空目录",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M03-HOME-LOAD-FAIL",
+  "surface": "mvp",
+  "title": "首页 · 目录加载失败",
+  "module": "M03",
+  "state": "default",
+  "category": "状态",
+  "journey": "J3 首页与目录",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M03-HOME-OFFLINE",
+  "surface": "mvp",
+  "title": "首页 · 离线缓存目录",
+  "module": "M03",
+  "state": "default",
+  "category": "状态",
+  "journey": "J3 首页与目录",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M03-HOME-ENT",
+  "surface": "mvp",
+  "title": "首页 · 企业空间（晨星科技）",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M03-HOME-ENT-AFTER-CANCEL",
+  "surface": "mvp",
+  "title": "首页 · 晨星科技（取消切换后）",
+  "module": "M03",
+  "state": "default",
+  "category": "新增",
+  "journey": "J3 首页与目录",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M03-HOME-ENT-AFTER-CLOSE",
+  "surface": "mvp",
+  "title": "首页 · 晨星科技（报价整理已关闭）",
+  "module": "M03",
+  "state": "default",
+  "category": "新增",
+  "journey": "J3 首页与目录",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M03-ALL-APPS",
+  "surface": "mvp",
+  "title": "全部 Apps · 作品去重与授权来源",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M03-ALL-APPS-ZERO",
+  "surface": "mvp",
+  "title": "我的应用 · 首次使用",
+  "module": "M03",
+  "state": "default",
+  "category": "新增",
+  "journey": "J3 首页与目录",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M07-SOURCE-FALLBACK",
+  "surface": "mvp",
+  "title": "授权来源更新 · 仍可使用",
+  "module": "M07",
+  "state": "default",
+  "category": "调整",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M03-ALL-APPS-ENT-EMPTY",
+  "surface": "mvp",
+  "title": "我的应用 · 企业尚未分发",
+  "module": "M03",
+  "state": "default",
+  "category": "状态",
+  "journey": "J3 首页与目录",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M03-INSPECTOR",
+  "surface": "mvp",
+  "title": "App 详情（inspector）",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M03-MANAGE-HOME",
+  "surface": "mvp",
+  "title": "我的应用 · 本机隐藏项",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M03-CONTROLS",
+  "surface": "mvp",
+  "title": "我的应用 · 恢复隐藏项",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M04-APP-VIEW",
+  "surface": "mvp",
+  "title": "应用 · 报价整理",
+  "module": "M04",
+  "state": "default",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 14
+ },
+ {
+  "id": "P-M04-APP-VIEW-PERSONAL",
+  "surface": "mvp",
+  "title": "应用 · 会议纪要整理",
+  "module": "M04",
+  "state": "default",
+  "category": "新增",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M04-PREPARE",
+  "surface": "mvp",
+  "title": "应用请求访问所选文件",
+  "module": "M04",
+  "state": "default",
+  "category": "状态",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M04-PREP-FAILED",
+  "surface": "mvp",
+  "title": "应用加载失败 · 合同审查",
+  "module": "M04",
+  "state": "default",
+  "category": "状态",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M04-CLOSE-ACTIVE",
+  "surface": "mvp",
+  "title": "关闭 · 三选项",
+  "module": "M04",
+  "state": "default",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M04-TERM-FAILED",
+  "surface": "mvp",
+  "title": "终止失败 · 标签保留",
+  "module": "M04",
+  "state": "default",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M04-BACKGROUND",
+  "surface": "mvp",
+  "title": "后台继续",
+  "module": "M04",
+  "state": "default",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M04-RUNTIME",
+  "surface": "mvp",
+  "title": "运行状态中心",
+  "module": "M04",
+  "state": "default",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 24
+ },
+ {
+  "id": "P-M04-NOTIFY-ENT",
+  "surface": "mvp",
+  "title": "通知中心",
+  "module": "M04",
+  "state": "default",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 23
+ },
+ {
+  "id": "P-M04-RUNTIME-PERSONAL",
+  "surface": "mvp",
+  "title": "运行状态 · 我的空间",
+  "module": "M04",
+  "state": "default",
+  "category": "新增",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 21
+ },
+ {
+  "id": "P-M04-NOTIFY-PERSONAL",
+  "surface": "mvp",
+  "title": "通知 · 我的空间",
+  "module": "M04",
+  "state": "default",
+  "category": "新增",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 20
+ },
+ {
+  "id": "P-M04-PERM-DENIED",
+  "surface": "mvp",
+  "title": "OS 权限被拒",
+  "module": "M04",
+  "state": "default",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M07-LIST",
+  "surface": "mvp",
+  "title": "我的圈子 · 列表",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M07-EMPTY",
+  "surface": "mvp",
+  "title": "我的圈子 · 空态",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M07-DETAIL-FOCUS",
+  "surface": "mvp",
+  "title": "圈子详情 · 已加入",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 28
+ },
+ {
+  "id": "P-M07-JOIN-FREE",
+  "surface": "mvp",
+  "title": "使用圈子分享链接",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-DETAIL-PAID",
+  "surface": "mvp",
+  "title": "付费订阅详情",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 32
+ },
+ {
+  "id": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+  "surface": "mvp",
+  "title": "圈子详情 · 已退出",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 27
+ },
+ {
+  "id": "P-M07-PAY-BROWSER",
+  "surface": "mvp",
+  "title": "在圈子公开页确认购买",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-PAY-RETURN-FAIL",
+  "surface": "mvp",
+  "title": "订单与资格暂时无法核对",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M07-RENEW",
+  "surface": "mvp",
+  "title": "手动续费",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 35
+ },
+ {
+  "id": "P-M07-RENEW-EXPIRED",
+  "surface": "mvp",
+  "title": "手动续费 · 到期恢复",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 30
+ },
+ {
+  "id": "P-M07-EXPIRED",
+  "surface": "mvp",
+  "title": "圈子到期",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 27
+ },
+ {
+  "id": "P-M07-LEAVE",
+  "surface": "mvp",
+  "title": "退出圈子",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 28
+ },
+ {
+  "id": "P-M07-LEAVE-PAID",
+  "surface": "mvp",
+  "title": "退出圈子 · 晨星设计圈",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 32
+ },
+ {
+  "id": "P-M09-APP-BANNER",
+  "surface": "mvp",
+  "title": "App 企业积分不足",
+  "module": "M09",
+  "state": "default",
+  "category": "新增",
+  "journey": "J9 积分与恢复",
+  "n_transitions": 14
+ },
+ {
+  "id": "P-M09-BROWSER",
+  "surface": "mvp",
+  "title": "充值（浏览器交接）",
+  "module": "M09",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J9 积分与恢复",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-MENU",
+  "surface": "mvp",
+  "title": "账号菜单 · 有管理资格",
+  "module": "M10",
+  "state": "default",
+  "category": "调整",
+  "journey": "J10 账号与设置",
+  "n_transitions": 22
+ },
+ {
+  "id": "P-M10-MENU-ENT",
+  "surface": "mvp",
+  "title": "账号菜单 · 晨星科技",
+  "module": "M10",
+  "state": "default-ent",
+  "category": "调整",
+  "journey": "J10 账号与设置",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M10-MENU-NOPRIV",
+  "surface": "mvp",
+  "title": "账号菜单 · 无创作资格 · 晨星科技",
+  "module": "M10",
+  "state": "default",
+  "category": "调整",
+  "journey": "J10 账号与设置",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M10-SETTINGS",
+  "surface": "mvp",
+  "title": "设置 · 账号安全",
+  "module": "M10",
+  "state": "default",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 24
+ },
+ {
+  "id": "P-M10-SETTINGS-ENT",
+  "surface": "mvp",
+  "title": "设置 · 晨星科技",
+  "module": "M10",
+  "state": "default-ent",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 23
+ },
+ {
+  "id": "P-M10-SETTINGS-APPEARANCE",
+  "surface": "mvp",
+  "title": "设置 · 外观",
+  "module": "M10",
+  "state": "default",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 15
+ },
+ {
+  "id": "P-M10-SETTINGS-APPEARANCE-ENT",
+  "surface": "mvp",
+  "title": "外观设置 · 晨星科技",
+  "module": "M10",
+  "state": "default-ent",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 14
+ },
+ {
+  "id": "P-M10-ADMIN-BROWSER",
+  "surface": "mvp",
+  "title": "北方贸易 · 企业管理后台（个人空间返回）",
+  "module": "M10",
+  "state": "admin-personal",
+  "category": "跨端交接",
+  "journey": "J-PC-06",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-ADMIN-RETURN",
+  "surface": "mvp",
+  "title": "返回后 · 资格刷新 · 晨星科技",
+  "module": "M10",
+  "state": "default",
+  "category": "状态",
+  "journey": "J10 账号与设置",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M11-REAUTH",
+  "surface": "mvp",
+  "title": "会话过期 · 重新登录",
+  "module": "M11",
+  "state": "default",
+  "category": "状态",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M11-REVOKE",
+  "surface": "mvp",
+  "title": "运行中被移除",
+  "module": "M11",
+  "state": "default",
+  "category": "调整",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M11-PERSONAL-RESTRICTED",
+  "surface": "mvp",
+  "title": "个人也受限 · 安全页",
+  "module": "M11",
+  "state": "default",
+  "category": "调整",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-BLOCKED-WITHDRAWN",
+  "surface": "mvp",
+  "title": "作品 · 分发被撤下",
+  "module": "M11",
+  "state": "default",
+  "category": "状态",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M11-BLOCKED-EXPIRED",
+  "surface": "mvp",
+  "title": "作品 · 最后一个来源失效",
+  "module": "M11",
+  "state": "default",
+  "category": "状态",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M11-BLOCKED-VERSION",
+  "surface": "mvp",
+  "title": "作品 · 版本紧急阻断",
+  "module": "M11",
+  "state": "default",
+  "category": "状态",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M11-OFFLINE-HOME",
+  "surface": "mvp",
+  "title": "离线打开",
+  "module": "M11",
+  "state": "default",
+  "category": "状态",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M11-OFFLINE-RUNNING",
+  "surface": "mvp",
+  "title": "运行中断网",
+  "module": "M11",
+  "state": "default",
+  "category": "调整",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M11-CONTRACT",
+  "surface": "mvp",
+  "title": "需要升级 Polo",
+  "module": "M11",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-CONTRACT-DL",
+  "surface": "mvp",
+  "title": "正在下载更新",
+  "module": "M11",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M11-CONTRACT-FAIL",
+  "surface": "mvp",
+  "title": "更新没有完成",
+  "module": "M11",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-SPACE-ERROR",
+  "surface": "mvp",
+  "title": "空间列表加载失败",
+  "module": "M11",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M11-REOPEN-RECOVERY",
+  "surface": "mvp",
+  "title": "重开恢复",
+  "module": "M11",
+  "state": "default",
+  "category": "调整",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M11-SUPPORT-BROWSER",
+  "surface": "mvp",
+  "title": "联系企业管理员",
+  "module": "M11",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M03-INSPECTOR-PERSONAL",
+  "surface": "mvp",
+  "title": "App 详情 · 我的空间",
+  "module": "M03",
+  "state": "default",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 21
+ },
+ {
+  "id": "P-M02-ACCESS-LOST-ENT",
+  "surface": "mvp",
+  "title": "目标无权访问 · 企业空间",
+  "module": "M02",
+  "state": "default",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M09-BROWSER-STREAM",
+  "surface": "mvp",
+  "title": "充值（生成中断）",
+  "module": "M09",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J9 积分与恢复",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M09-BROWSER-MENU",
+  "surface": "mvp",
+  "title": "充值与账单（浏览器交接）",
+  "module": "M09",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J9 积分与恢复",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M09-BROWSER-MENU-ENT",
+  "surface": "mvp",
+  "title": "充值与账单（浏览器交接 · 企业）",
+  "module": "M09",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J9 积分与恢复",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-PAY-BROWSER-EXPIRED",
+  "surface": "mvp",
+  "title": "在圈子公开页确认购买",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M03-ALL-APPS-ENT",
+  "surface": "mvp",
+  "title": "全部应用 · 企业提供",
+  "module": "M03",
+  "state": "p-m03-all-apps-ent",
+  "category": "调整",
+  "journey": "J3 首页与目录",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M04-APP-CONTRACT",
+  "surface": "mvp",
+  "title": "应用 · 合同审查",
+  "module": "M04",
+  "state": "p-m04-app-contract",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 14
+ },
+ {
+  "id": "P-M04-APP-GROWTH",
+  "surface": "mvp",
+  "title": "应用 · 增长打法手册",
+  "module": "M04",
+  "state": "p-m04-app-growth",
+  "category": "新增",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M04-APP-REPORT",
+  "surface": "mvp",
+  "title": "应用 · 数据报表生成器",
+  "module": "M04",
+  "state": "p-m04-app-report",
+  "category": "新增",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 14
+ },
+ {
+  "id": "P-M04-APP-BRAND",
+  "surface": "mvp",
+  "title": "应用 · 品牌语气分析",
+  "module": "M04",
+  "state": "p-m04-app-brand",
+  "category": "新增",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M04-APP-ACTIVE",
+  "surface": "mvp",
+  "title": "应用 · 有后台 AI 请求",
+  "module": "M04",
+  "state": "p-m04-app-active",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M04-REPORT-STOPPED",
+  "surface": "mvp",
+  "title": "数据报表生成器 · 后台请求已停止",
+  "module": "M04",
+  "state": "p-m04-report-stopped",
+  "category": "新增",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M09-BROWSER-OWNER",
+  "surface": "mvp",
+  "title": "企业充值（浏览器交接）",
+  "module": "M09",
+  "state": "owner",
+  "category": "跨端交接",
+  "journey": "J-PC-03",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M09-BROWSER-BUDGET",
+  "surface": "mvp",
+  "title": "企业预算（浏览器交接）",
+  "module": "M09",
+  "state": "budget",
+  "category": "跨端交接",
+  "journey": "J-PC-03",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M07-PUBLIC-WEB",
+  "surface": "mvp",
+  "title": "在圈子网页完成加入",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-RETURN",
+  "surface": "mvp",
+  "title": "核对圈子加入结果",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-RETURN-FAIL",
+  "surface": "mvp",
+  "title": "暂时无法刷新圈子资格",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-ACCOUNT-MISMATCH",
+  "surface": "mvp",
+  "title": "当前账号没有这次加入记录",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-LOGIN",
+  "surface": "mvp",
+  "title": "切回完成加入的账号",
+  "module": "M07",
+  "state": "default",
+  "category": "复用",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-RETURN",
+  "surface": "mvp",
+  "title": "核对可进入的企业",
+  "module": "M01",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-01",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-ENTERPRISE-READY",
+  "surface": "mvp",
+  "title": "可以进入晨星科技",
+  "module": "M01",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-01",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-PAY-RETURN",
+  "surface": "mvp",
+  "title": "返回后核对原订阅订单",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-SUPPORT",
+  "surface": "mvp",
+  "title": "联系客服",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M07-SUPPORT-LOAD-FAIL",
+  "surface": "mvp",
+  "title": "联系客服",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-SUPPORT-MEMBER",
+  "surface": "mvp",
+  "title": "联系客服",
+  "module": "M11",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-01",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M07-RENEW-YEAR",
+  "surface": "mvp",
+  "title": "年度订阅续费",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-YEAR-WEB",
+  "surface": "mvp",
+  "title": "在年度圈网页确认续费",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M07-YEAR-RETURN",
+  "surface": "mvp",
+  "title": "核对年度圈的原订单",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-YEAR-RESULT",
+  "surface": "mvp",
+  "title": "星河年度圈 · 订阅权益",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M07-RENEW-LIMIT",
+  "surface": "mvp",
+  "title": "暂时不能提前续费",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-LOGIN-PHONE",
+  "surface": "mvp",
+  "title": "切回加入账号 · 验证码登录",
+  "module": "M01",
+  "state": "default",
+  "category": "复用",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-LOGIN-CODE",
+  "surface": "mvp",
+  "title": "切回加入账号 · 输入验证码",
+  "module": "M01",
+  "state": "default",
+  "category": "复用",
+  "journey": "J1 登录与空间承接",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-SUPPORT-ACCOUNT-ADMIN",
+  "surface": "mvp",
+  "title": "账号受限 · 联系企业管理员",
+  "module": "M11",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J11 异常与恢复",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-RENEW-WEB",
+  "surface": "mvp",
+  "title": "在网页确认月度续费",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-RENEW-RETURN",
+  "surface": "mvp",
+  "title": "返回后核对原续费订单",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-RENEW-RESULT",
+  "surface": "mvp",
+  "title": "月度续费已核对",
+  "module": "M07",
+  "state": "default",
+  "category": "跨端接收",
+  "journey": "J-PC-05",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-LIST-RENEWED",
+  "surface": "mvp",
+  "title": "我的圈子 · 月付续费后",
+  "module": "M07",
+  "state": "default",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M07-DETAIL-FOCUS-UPDATES",
+  "surface": "mvp",
+  "title": "晨星增长圈",
+  "module": "M07",
+  "state": "updates",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+  "surface": "mvp",
+  "title": "晨星增长圈",
+  "module": "M07",
+  "state": "subscription",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 16
+ },
+ {
+  "id": "P-M07-DETAIL-PAID-UPDATES",
+  "surface": "mvp",
+  "title": "晨星设计圈",
+  "module": "M07",
+  "state": "updates",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 20
+ },
+ {
+  "id": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+  "surface": "mvp",
+  "title": "晨星设计圈",
+  "module": "M07",
+  "state": "subscription",
+  "category": "新增",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 20
+ },
+ {
+  "id": "P-M10-SETTINGS-DEVICE",
+  "surface": "mvp",
+  "title": "Polo 设置",
+  "module": "M10",
+  "state": "device",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M10-SETTINGS-PERMISSIONS",
+  "surface": "mvp",
+  "title": "Polo 设置",
+  "module": "M10",
+  "state": "permissions",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M10-SETTINGS-SHORTCUTS",
+  "surface": "mvp",
+  "title": "Polo 设置",
+  "module": "M10",
+  "state": "shortcuts",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M10-SETTINGS-ENT-DEVICE",
+  "surface": "mvp",
+  "title": "Polo 设置",
+  "module": "M10",
+  "state": "device",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M10-SETTINGS-ENT-PERMISSIONS",
+  "surface": "mvp",
+  "title": "Polo 设置",
+  "module": "M10",
+  "state": "permissions",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M10-SETTINGS-ENT-SHORTCUTS",
+  "surface": "mvp",
+  "title": "Polo 设置",
+  "module": "M10",
+  "state": "shortcuts",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M10-SETTINGS-DEVICE-FAILED",
+  "surface": "mvp",
+  "title": "Polo 设置 · 保存失败",
+  "module": "M10",
+  "state": "save-failed",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 18
+ },
+ {
+  "id": "P-M10-SETTINGS-ENT-DEVICE-FAILED",
+  "surface": "mvp",
+  "title": "Polo 设置 · 保存失败",
+  "module": "M10",
+  "state": "save-failed",
+  "category": "复用",
+  "journey": "J10 账号与设置",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M07-DETAIL-DATA",
+  "surface": "mvp",
+  "title": "数据工坊圈",
+  "module": "M07",
+  "state": "content",
+  "category": "圈子内容",
+  "journey": "J-PC-05",
+  "n_transitions": 15
+ },
+ {
+  "id": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+  "surface": "mvp",
+  "title": "数据工坊圈 · 订阅",
+  "module": "M07",
+  "state": "subscription",
+  "category": "圈子订阅",
+  "journey": "J-PC-05",
+  "n_transitions": 15
+ },
+ {
+  "id": "P-M07-LEAVE-DATA",
+  "surface": "mvp",
+  "title": "退出数据工坊圈",
+  "module": "M07",
+  "state": "leave-confirmation",
+  "category": "圈子订阅",
+  "journey": "J-PC-05",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M07-LEAVE-YEAR",
+  "surface": "mvp",
+  "title": "退出星河年度圈",
+  "module": "M07",
+  "state": "leave-confirmation",
+  "category": "圈子订阅",
+  "journey": "J-PC-05",
+  "n_transitions": 15
+ },
+ {
+  "id": "P-M10-CREATOR-BROWSER",
+  "surface": "mvp",
+  "title": "创作者工作台（个人空间返回）",
+  "module": "M10",
+  "state": "creator-personal",
+  "category": "跨端交接",
+  "journey": "J-PC-06",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-ADMIN-BROWSER-ENT",
+  "surface": "mvp",
+  "title": "北方贸易 · 企业管理后台（企业空间返回）",
+  "module": "M10",
+  "state": "admin-ent",
+  "category": "跨端交接",
+  "journey": "J-PC-06",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-CREATOR-BROWSER-ENT",
+  "surface": "mvp",
+  "title": "创作者工作台（企业空间返回）",
+  "module": "M10",
+  "state": "creator-ent",
+  "category": "跨端交接",
+  "journey": "J-PC-06",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M11-CONTRACT-HELP",
+  "surface": "mvp",
+  "title": "升级帮助",
+  "module": "M11",
+  "state": "p-m11-contract-help",
+  "category": "已确认恢复规则",
+  "journey": "J-PC-06",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M11-CONTRACT-READY",
+  "surface": "mvp",
+  "title": "升级检查通过",
+  "module": "M11",
+  "state": "p-m11-contract-ready",
+  "category": "已确认恢复规则",
+  "journey": "J-PC-06",
+  "n_transitions": 1
+ },
+ {
+  "id": "P-M02-STOPPING-PERSONAL",
+  "surface": "mvp",
+  "title": "正在停止我的空间任务",
+  "module": "M02",
+  "state": "p-m02-stopping-personal",
+  "category": "调整",
+  "journey": "J2 空间切换",
+  "n_transitions": 20
+ },
+ {
+  "id": "P-M02-TARGET-LOADING-ENT",
+  "surface": "mvp",
+  "title": "正在进入晨星科技",
+  "module": "M02",
+  "state": "p-m02-target-loading-ent",
+  "category": "集成候选",
+  "journey": "J2 空间切换",
+  "n_transitions": 15
+ },
+ {
+  "id": "P-M04-CLOSE-REPORT",
+  "surface": "mvp",
+  "title": "关闭运行中的数据报表生成器",
+  "module": "M04",
+  "state": "p-m04-close-report",
+  "category": "新增",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M04-CLOSE-CONTRACT",
+  "surface": "mvp",
+  "title": "关闭运行中的合同审查",
+  "module": "M04",
+  "state": "p-m04-close-contract",
+  "category": "调整",
+  "journey": "J4 App 执行与运行",
+  "n_transitions": 17
+ },
+ {
+  "id": "P-M02-STOP-FAILED-PERSONAL",
+  "surface": "mvp",
+  "title": "未能停止我的空间任务",
+  "module": "M02",
+  "state": "p-m02-stop-failed-personal",
+  "category": "调整",
+  "journey": "J2 空间切换",
+  "n_transitions": 21
+ },
+ {
+  "id": "P-M09-APP-NOTIFIED",
+  "surface": "mvp",
+  "title": "已通知企业所有者",
+  "module": "M09",
+  "state": "p-m09-app-notified",
+  "category": "新增",
+  "journey": "J9 积分与恢复",
+  "n_transitions": 13
+ },
+ {
+  "id": "P-M01-CREATE-BROWSER",
+  "surface": "mvp",
+  "title": "在系统浏览器创建企业",
+  "module": "M01",
+  "state": "p-m01-create-browser",
+  "category": "已确认企业创建交接",
+  "journey": "J-PC-01",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-CREATE-RETURN",
+  "surface": "mvp",
+  "title": "核对企业创建结果",
+  "module": "M01",
+  "state": "p-m01-create-return",
+  "category": "已确认企业创建交接",
+  "journey": "J-PC-01",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-CREATE-READY",
+  "surface": "mvp",
+  "title": "晨星科技已创建",
+  "module": "M01",
+  "state": "p-m01-create-ready",
+  "category": "已确认企业创建交接",
+  "journey": "J-PC-01",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M01-CREATE-PENDING",
+  "surface": "mvp",
+  "title": "尚未核对到新企业",
+  "module": "M01",
+  "state": "p-m01-create-pending",
+  "category": "已确认企业创建交接",
+  "journey": "J-PC-01",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M01-CREATE-QUERY-FAILED",
+  "surface": "mvp",
+  "title": "暂时无法核对创建结果",
+  "module": "M01",
+  "state": "p-m01-create-query-failed",
+  "category": "已确认企业创建交接",
+  "journey": "J-PC-01",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M07-REJOIN-BROWSER",
+  "surface": "mvp",
+  "title": "重新加入晨星设计圈",
+  "module": "M07",
+  "state": "rejoin-browser",
+  "category": "跨端",
+  "journey": "J7 圈子加入与订阅",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M11-GOVERNANCE-PAUSED-MEMBER",
+  "surface": "mvp",
+  "title": "企业已暂停",
+  "module": "M11",
+  "state": "paused-member",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-PAUSED-MANAGER",
+  "surface": "mvp",
+  "title": "企业已暂停",
+  "module": "M11",
+  "state": "paused-manager",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-PAUSED-OWNER",
+  "surface": "mvp",
+  "title": "企业已暂停",
+  "module": "M11",
+  "state": "paused-owner",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-CLOSING-MEMBER",
+  "surface": "mvp",
+  "title": "企业关闭处理中",
+  "module": "M11",
+  "state": "closing-member",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-CLOSING-MANAGER",
+  "surface": "mvp",
+  "title": "企业关闭处理中",
+  "module": "M11",
+  "state": "closing-manager",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-CLOSING-OWNER",
+  "surface": "mvp",
+  "title": "企业关闭处理中",
+  "module": "M11",
+  "state": "closing-owner",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-ARREARS-MEMBER",
+  "surface": "mvp",
+  "title": "企业因欠费受限",
+  "module": "M11",
+  "state": "arrears-member",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-ARREARS-MANAGER",
+  "surface": "mvp",
+  "title": "企业因欠费受限",
+  "module": "M11",
+  "state": "arrears-manager",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-ARREARS-OWNER",
+  "surface": "mvp",
+  "title": "企业因欠费受限",
+  "module": "M11",
+  "state": "arrears-owner",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-STATUS",
+  "surface": "mvp",
+  "title": "晨星科技暂不可用",
+  "module": "M11",
+  "state": "status",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 4
+ },
+ {
+  "id": "P-M11-GOVERNANCE-BROWSER",
+  "surface": "mvp",
+  "title": "在系统浏览器处理企业限制",
+  "module": "M11",
+  "state": "browser",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M11-GOVERNANCE-CONTACT",
+  "surface": "mvp",
+  "title": "联系企业所有者",
+  "module": "M11",
+  "state": "contact",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M11-GOVERNANCE-RETURN",
+  "surface": "mvp",
+  "title": "重新核对晨星科技",
+  "module": "M11",
+  "state": "return",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-PENDING",
+  "surface": "mvp",
+  "title": "企业限制尚未解除",
+  "module": "M11",
+  "state": "pending",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-FAILED",
+  "surface": "mvp",
+  "title": "暂时无法核对企业状态",
+  "module": "M11",
+  "state": "failed",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 3
+ },
+ {
+  "id": "P-M11-GOVERNANCE-READY",
+  "surface": "mvp",
+  "title": "企业治理限制已解除",
+  "module": "M11",
+  "state": "ready",
+  "category": "企业治理限制",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-MENU-RESPONSIBILITY",
+  "surface": "mvp",
+  "title": "创作者资格失效 · 责任只读 · 我的空间",
+  "module": "M10",
+  "state": "creator-responsibility",
+  "category": "调整",
+  "journey": "J10 账号与设置",
+  "n_transitions": 22
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-BROWSER",
+  "surface": "mvp",
+  "title": "在浏览器查看创作者责任",
+  "module": "M10",
+  "state": "browser",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-BROWSER-FAILED",
+  "surface": "mvp",
+  "title": "暂时无法打开责任页面",
+  "module": "M10",
+  "state": "browser-failed",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-RETURN",
+  "surface": "mvp",
+  "title": "核对原账号资格",
+  "module": "M10",
+  "state": "return",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-QUERY-FAILED",
+  "surface": "mvp",
+  "title": "暂时无法核对资格",
+  "module": "M10",
+  "state": "query-failed",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-VERIFIED",
+  "surface": "mvp",
+  "title": "责任只读资格已核对",
+  "module": "M10",
+  "state": "verified",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-MENU-RESPONSIBILITY-ENT",
+  "surface": "mvp",
+  "title": "创作者资格失效 · 责任只读 · 企业空间",
+  "module": "M10",
+  "state": "creator-responsibility",
+  "category": "调整",
+  "journey": "J10 账号与设置",
+  "n_transitions": 19
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+  "surface": "mvp",
+  "title": "在浏览器查看创作者责任",
+  "module": "M10",
+  "state": "browser",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-BROWSER-FAILED-ENT",
+  "surface": "mvp",
+  "title": "暂时无法打开责任页面",
+  "module": "M10",
+  "state": "browser-failed",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-RETURN-ENT",
+  "surface": "mvp",
+  "title": "核对原账号资格",
+  "module": "M10",
+  "state": "return",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-QUERY-FAILED-ENT",
+  "surface": "mvp",
+  "title": "暂时无法核对资格",
+  "module": "M10",
+  "state": "query-failed",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "P-M10-RESPONSIBILITY-VERIFIED-ENT",
+  "surface": "mvp",
+  "title": "责任只读资格已核对",
+  "module": "M10",
+  "state": "verified",
+  "category": "创作者责任只读",
+  "journey": "J-PC-03",
+  "n_transitions": 2
+ },
+ {
+  "id": "A-personal-new",
+  "surface": "assistant",
+  "title": "新会话 · 我的空间",
+  "module": "M05",
+  "state": "new",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-conversation",
+  "surface": "assistant",
+  "title": "原会话 · 我的空间",
+  "module": "M05",
+  "state": "conversation",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-generating",
+  "surface": "assistant",
+  "title": "正在生成 · 我的空间",
+  "module": "M05",
+  "state": "generating",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-stopped",
+  "surface": "assistant",
+  "title": "已停止 · 我的空间",
+  "module": "M05",
+  "state": "stopped",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-question",
+  "surface": "assistant",
+  "title": "等待回答 · 我的空间",
+  "module": "M05",
+  "state": "question",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-personal-reopen",
+  "surface": "assistant",
+  "title": "重开后恢复问题 · 我的空间",
+  "module": "M05",
+  "state": "reopen",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-personal-answered",
+  "surface": "assistant",
+  "title": "已回答 · 我的空间",
+  "module": "M05",
+  "state": "answered",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-deferred",
+  "surface": "assistant",
+  "title": "暂不回答 · 我的空间",
+  "module": "M05",
+  "state": "deferred",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-expired",
+  "surface": "assistant",
+  "title": "问题已过期 · 我的空间",
+  "module": "M05",
+  "state": "expired",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-deleted",
+  "surface": "assistant",
+  "title": "原会话不可访问 · 我的空间",
+  "module": "M05",
+  "state": "deleted",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-personal-answerfailed",
+  "surface": "assistant",
+  "title": "回答未提交 · 我的空间",
+  "module": "M05",
+  "state": "answerfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-personal-offline",
+  "surface": "assistant",
+  "title": "网络已断开 · 我的空间",
+  "module": "M05",
+  "state": "offline",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-service",
+  "surface": "assistant",
+  "title": "服务暂时不可用 · 我的空间",
+  "module": "M05",
+  "state": "service",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-personal-restored",
+  "surface": "assistant",
+  "title": "重新验证完成 · 我的空间",
+  "module": "M05",
+  "state": "restored",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-completezero",
+  "surface": "assistant",
+  "title": "本次生成已完成 · 我的空间",
+  "module": "M05",
+  "state": "completezero",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-files",
+  "surface": "assistant",
+  "title": "原对话附件与生成文件 · 我的空间",
+  "module": "M08",
+  "state": "files",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 19
+ },
+ {
+  "id": "A-personal-viewer",
+  "surface": "assistant",
+  "title": "查看生成文件 · 我的空间",
+  "module": "M08",
+  "state": "viewer",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-attachment",
+  "surface": "assistant",
+  "title": "查看原对话附件 · 我的空间",
+  "module": "M08",
+  "state": "attachment",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-missing",
+  "surface": "assistant",
+  "title": "文件已移动或删除 · 我的空间",
+  "module": "M08",
+  "state": "missing",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-personal-reselected",
+  "surface": "assistant",
+  "title": "已重新选择材料 · 我的空间",
+  "module": "M08",
+  "state": "reselected",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 17
+ },
+ {
+  "id": "A-personal-sources",
+  "surface": "assistant",
+  "title": "数据源与工具 · 我的空间",
+  "module": "M06",
+  "state": "sources",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-personal-sourceauth",
+  "surface": "assistant",
+  "title": "数据源需要认证 · 我的空间",
+  "module": "M06",
+  "state": "sourceauth",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-personal-sourcefailed",
+  "surface": "assistant",
+  "title": "数据源连接失败 · 我的空间",
+  "module": "M06",
+  "state": "sourcefailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-personal-sourcedenied",
+  "surface": "assistant",
+  "title": "数据源权限被拒绝 · 我的空间",
+  "module": "M06",
+  "state": "sourcedenied",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-personal-automations",
+  "surface": "assistant",
+  "title": "自动化 · 我的空间",
+  "module": "M06",
+  "state": "automations",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-browser",
+  "surface": "assistant",
+  "title": "助手浏览器 · 我的空间",
+  "module": "M06",
+  "state": "browser",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-return",
+  "surface": "assistant",
+  "title": "返回后待查询 · 我的空间",
+  "module": "M09",
+  "state": "return",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-preblock",
+  "surface": "assistant",
+  "title": "发送前积分不足 · 我的空间",
+  "module": "M09",
+  "state": "preblock",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-cut",
+  "surface": "assistant",
+  "title": "生成因积分不足停止 · 我的空间",
+  "module": "M09",
+  "state": "cut",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-checking",
+  "surface": "assistant",
+  "title": "正在查询 · 我的空间",
+  "module": "M09",
+  "state": "checking",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-personal-notyet",
+  "surface": "assistant",
+  "title": "尚未到账 · 我的空间",
+  "module": "M09",
+  "state": "notyet",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-queryfailed",
+  "surface": "assistant",
+  "title": "查询失败 · 我的空间",
+  "module": "M09",
+  "state": "queryfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-personal-resumed",
+  "surface": "assistant",
+  "title": "积分可用 · 我的空间",
+  "module": "M09",
+  "state": "resumed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-personal-skills",
+  "surface": "assistant",
+  "title": "技能 · 我的空间",
+  "module": "M06",
+  "state": "skills",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 19
+ },
+ {
+  "id": "A-personal-discover",
+  "surface": "assistant",
+  "title": "获取技能 · 我的空间",
+  "module": "M06",
+  "state": "discover",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-personal-acquire",
+  "surface": "assistant",
+  "title": "技能详情 · 我的空间",
+  "module": "M06",
+  "state": "acquire",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-personal-enabledpending",
+  "surface": "assistant",
+  "title": "已启用 · 设备待准备 · 我的空间",
+  "module": "M06",
+  "state": "enabledpending",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-personal-installing",
+  "surface": "assistant",
+  "title": "正在准备本机 · 我的空间",
+  "module": "M06",
+  "state": "installing",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-installfailed",
+  "surface": "assistant",
+  "title": "设备准备失败 · 我的空间",
+  "module": "M06",
+  "state": "installfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-personal-installed",
+  "surface": "assistant",
+  "title": "已安装 · 我的空间",
+  "module": "M06",
+  "state": "installed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-personal-enabled",
+  "surface": "assistant",
+  "title": "已启用 · 我的空间",
+  "module": "M06",
+  "state": "enabled",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-personal-detail",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "detail",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-personal-updated",
+  "surface": "assistant",
+  "title": "版本已更新 · 我的空间",
+  "module": "M06",
+  "state": "updated",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-personal-updatefailed",
+  "surface": "assistant",
+  "title": "更新失败 · 我的空间",
+  "module": "M06",
+  "state": "updatefailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-personal-remove",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "remove",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-personal-uninstalled",
+  "surface": "assistant",
+  "title": "本机已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-personal-denied",
+  "surface": "assistant",
+  "title": "未获授权 · 我的空间",
+  "module": "M06",
+  "state": "denied",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-personal-restricted",
+  "surface": "assistant",
+  "title": "最后来源失效 · 我的空间",
+  "module": "M06",
+  "state": "restricted",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-personal-fallback",
+  "surface": "assistant",
+  "title": "部分来源失效 · 我的空间",
+  "module": "M06",
+  "state": "fallback",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-personal-reauthorized",
+  "surface": "assistant",
+  "title": "来源恢复 · 我的空间",
+  "module": "M06",
+  "state": "reauthorized",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-personal-builtinoff",
+  "surface": "assistant",
+  "title": "内置技能已停用 · 我的空间",
+  "module": "M06",
+  "state": "builtinoff",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-personal-builtinon",
+  "surface": "assistant",
+  "title": "内置技能已启用 · 我的空间",
+  "module": "M06",
+  "state": "builtinon",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-enterprise-new",
+  "surface": "assistant",
+  "title": "新会话 · 晨星科技",
+  "module": "M05",
+  "state": "new",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-conversation",
+  "surface": "assistant",
+  "title": "原会话 · 晨星科技",
+  "module": "M05",
+  "state": "conversation",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-generating",
+  "surface": "assistant",
+  "title": "正在生成 · 晨星科技",
+  "module": "M05",
+  "state": "generating",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-stopped",
+  "surface": "assistant",
+  "title": "已停止 · 晨星科技",
+  "module": "M05",
+  "state": "stopped",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-question",
+  "surface": "assistant",
+  "title": "等待回答 · 晨星科技",
+  "module": "M05",
+  "state": "question",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-enterprise-reopen",
+  "surface": "assistant",
+  "title": "重开后恢复问题 · 晨星科技",
+  "module": "M05",
+  "state": "reopen",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-enterprise-answered",
+  "surface": "assistant",
+  "title": "已回答 · 晨星科技",
+  "module": "M05",
+  "state": "answered",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-deferred",
+  "surface": "assistant",
+  "title": "暂不回答 · 晨星科技",
+  "module": "M05",
+  "state": "deferred",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-expired",
+  "surface": "assistant",
+  "title": "问题已过期 · 晨星科技",
+  "module": "M05",
+  "state": "expired",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-deleted",
+  "surface": "assistant",
+  "title": "原会话不可访问 · 晨星科技",
+  "module": "M05",
+  "state": "deleted",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-answerfailed",
+  "surface": "assistant",
+  "title": "回答未提交 · 晨星科技",
+  "module": "M05",
+  "state": "answerfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-enterprise-offline",
+  "surface": "assistant",
+  "title": "网络已断开 · 晨星科技",
+  "module": "M05",
+  "state": "offline",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-service",
+  "surface": "assistant",
+  "title": "服务暂时不可用 · 晨星科技",
+  "module": "M05",
+  "state": "service",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-enterprise-restored",
+  "surface": "assistant",
+  "title": "重新验证完成 · 晨星科技",
+  "module": "M05",
+  "state": "restored",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-completezero",
+  "surface": "assistant",
+  "title": "本次生成已完成 · 晨星科技",
+  "module": "M05",
+  "state": "completezero",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-files",
+  "surface": "assistant",
+  "title": "原对话附件与生成文件 · 晨星科技",
+  "module": "M08",
+  "state": "files",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 19
+ },
+ {
+  "id": "A-enterprise-viewer",
+  "surface": "assistant",
+  "title": "查看生成文件 · 晨星科技",
+  "module": "M08",
+  "state": "viewer",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-attachment",
+  "surface": "assistant",
+  "title": "查看原对话附件 · 晨星科技",
+  "module": "M08",
+  "state": "attachment",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-missing",
+  "surface": "assistant",
+  "title": "文件已移动或删除 · 晨星科技",
+  "module": "M08",
+  "state": "missing",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 16
+ },
+ {
+  "id": "A-enterprise-reselected",
+  "surface": "assistant",
+  "title": "已重新选择材料 · 晨星科技",
+  "module": "M08",
+  "state": "reselected",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 17
+ },
+ {
+  "id": "A-enterprise-sources",
+  "surface": "assistant",
+  "title": "数据源与工具 · 晨星科技",
+  "module": "M06",
+  "state": "sources",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-sourceauth",
+  "surface": "assistant",
+  "title": "数据源需要认证 · 晨星科技",
+  "module": "M06",
+  "state": "sourceauth",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-enterprise-sourcefailed",
+  "surface": "assistant",
+  "title": "数据源连接失败 · 晨星科技",
+  "module": "M06",
+  "state": "sourcefailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-enterprise-sourcedenied",
+  "surface": "assistant",
+  "title": "数据源权限被拒绝 · 晨星科技",
+  "module": "M06",
+  "state": "sourcedenied",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-enterprise-automations",
+  "surface": "assistant",
+  "title": "自动化 · 晨星科技",
+  "module": "M06",
+  "state": "automations",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-browser",
+  "surface": "assistant",
+  "title": "助手浏览器 · 晨星科技",
+  "module": "M06",
+  "state": "browser",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-return",
+  "surface": "assistant",
+  "title": "返回后待查询 · 晨星科技",
+  "module": "M09",
+  "state": "return",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-ownerreturn",
+  "surface": "assistant",
+  "title": "企业返回后待查询 · 晨星科技",
+  "module": "M09",
+  "state": "ownerreturn",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-preblock",
+  "surface": "assistant",
+  "title": "发送前积分不足 · 晨星科技",
+  "module": "M09",
+  "state": "preblock",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-cut",
+  "surface": "assistant",
+  "title": "生成因积分不足停止 · 晨星科技",
+  "module": "M09",
+  "state": "cut",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-checking",
+  "surface": "assistant",
+  "title": "正在查询 · 晨星科技",
+  "module": "M09",
+  "state": "checking",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-enterprise-notyet",
+  "surface": "assistant",
+  "title": "尚未到账 · 晨星科技",
+  "module": "M09",
+  "state": "notyet",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-queryfailed",
+  "surface": "assistant",
+  "title": "查询失败 · 晨星科技",
+  "module": "M09",
+  "state": "queryfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-resumed",
+  "surface": "assistant",
+  "title": "积分可用 · 晨星科技",
+  "module": "M09",
+  "state": "resumed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-notify",
+  "surface": "assistant",
+  "title": "企业积分不足 · 晨星科技",
+  "module": "M09",
+  "state": "notify",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-notified",
+  "surface": "assistant",
+  "title": "已通知所有者 · 晨星科技",
+  "module": "M09",
+  "state": "notified",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-budget",
+  "surface": "assistant",
+  "title": "企业预算已达上限 · 晨星科技",
+  "module": "M09",
+  "state": "budget",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-budgetowner",
+  "surface": "assistant",
+  "title": "所有者处理企业预算 · 晨星科技",
+  "module": "M09",
+  "state": "budgetowner",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-ownerblock",
+  "surface": "assistant",
+  "title": "所有者处理企业积分 · 晨星科技",
+  "module": "M09",
+  "state": "ownerblock",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 15
+ },
+ {
+  "id": "A-enterprise-ownerresumed",
+  "surface": "assistant",
+  "title": "企业积分可用 · 晨星科技",
+  "module": "M09",
+  "state": "ownerresumed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-skills",
+  "surface": "assistant",
+  "title": "技能 · 晨星科技",
+  "module": "M06",
+  "state": "skills",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 19
+ },
+ {
+  "id": "A-enterprise-discover",
+  "surface": "assistant",
+  "title": "获取技能 · 晨星科技",
+  "module": "M06",
+  "state": "discover",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-enterprise-acquire",
+  "surface": "assistant",
+  "title": "技能详情 · 晨星科技",
+  "module": "M06",
+  "state": "acquire",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-enterprise-enabledpending",
+  "surface": "assistant",
+  "title": "已启用 · 设备待准备 · 晨星科技",
+  "module": "M06",
+  "state": "enabledpending",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-enterprise-installing",
+  "surface": "assistant",
+  "title": "正在准备本机 · 晨星科技",
+  "module": "M06",
+  "state": "installing",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-installfailed",
+  "surface": "assistant",
+  "title": "设备准备失败 · 晨星科技",
+  "module": "M06",
+  "state": "installfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-enterprise-installed",
+  "surface": "assistant",
+  "title": "已安装 · 晨星科技",
+  "module": "M06",
+  "state": "installed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-enabled",
+  "surface": "assistant",
+  "title": "已启用 · 晨星科技",
+  "module": "M06",
+  "state": "enabled",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-detail",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "detail",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-updated",
+  "surface": "assistant",
+  "title": "版本已更新 · 晨星科技",
+  "module": "M06",
+  "state": "updated",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-updatefailed",
+  "surface": "assistant",
+  "title": "更新失败 · 晨星科技",
+  "module": "M06",
+  "state": "updatefailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-enterprise-remove",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "remove",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-enterprise-uninstalled",
+  "surface": "assistant",
+  "title": "本机已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-enterprise-denied",
+  "surface": "assistant",
+  "title": "未获授权 · 晨星科技",
+  "module": "M06",
+  "state": "denied",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-enterprise-restricted",
+  "surface": "assistant",
+  "title": "最后来源失效 · 晨星科技",
+  "module": "M06",
+  "state": "restricted",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 14
+ },
+ {
+  "id": "A-enterprise-reauthorized",
+  "surface": "assistant",
+  "title": "来源恢复 · 晨星科技",
+  "module": "M06",
+  "state": "reauthorized",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-enterprise-builtinoff",
+  "surface": "assistant",
+  "title": "内置技能已停用 · 晨星科技",
+  "module": "M06",
+  "state": "builtinoff",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-enterprise-builtinon",
+  "surface": "assistant",
+  "title": "内置技能已启用 · 晨星科技",
+  "module": "M06",
+  "state": "builtinon",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 12
+ },
+ {
+  "id": "A-personal-legacy-local-100-0-0",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-local-100-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-detail-100-0-0",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-detail-100-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-legacy-remove-100-0-0",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "legacy-remove-100-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-local-100-0-1",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-local-100-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-detail-100-0-1",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-detail-100-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-legacy-remove-100-0-1",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "legacy-remove-100-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-local-100-1-0",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-local-100-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-detail-100-1-0",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-detail-100-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-legacy-remove-100-1-0",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "legacy-remove-100-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-local-100-1-1",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-local-100-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-detail-100-1-1",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-detail-100-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-legacy-remove-100-1-1",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "legacy-remove-100-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-local-110-0-0",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-local-110-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-detail-110-0-0",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-detail-110-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-remove-110-0-0",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "legacy-remove-110-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-local-110-0-1",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-local-110-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-detail-110-0-1",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-detail-110-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-remove-110-0-1",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "legacy-remove-110-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-local-110-1-0",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-local-110-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-detail-110-1-0",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-detail-110-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-remove-110-1-0",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "legacy-remove-110-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-local-110-1-1",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-local-110-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-detail-110-1-1",
+  "surface": "assistant",
+  "title": "技能版本 · 我的空间",
+  "module": "M06",
+  "state": "legacy-detail-110-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-legacy-remove-110-1-1",
+  "surface": "assistant",
+  "title": "卸载确认 · 我的空间",
+  "module": "M06",
+  "state": "legacy-remove-110-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-local-100-0-0",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-local-100-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-detail-100-0-0",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-detail-100-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-legacy-remove-100-0-0",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-remove-100-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-local-100-0-1",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-local-100-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-detail-100-0-1",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-detail-100-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-legacy-remove-100-0-1",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-remove-100-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-local-100-1-0",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-local-100-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-detail-100-1-0",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-detail-100-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-legacy-remove-100-1-0",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-remove-100-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-local-100-1-1",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-local-100-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-detail-100-1-1",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-detail-100-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-legacy-remove-100-1-1",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-remove-100-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-local-110-0-0",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-local-110-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-detail-110-0-0",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-detail-110-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-remove-110-0-0",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-remove-110-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-local-110-0-1",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-local-110-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-detail-110-0-1",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-detail-110-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-remove-110-0-1",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-remove-110-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-local-110-1-0",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-local-110-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-detail-110-1-0",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-detail-110-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-remove-110-1-0",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-remove-110-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-local-110-1-1",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-local-110-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-detail-110-1-1",
+  "surface": "assistant",
+  "title": "技能版本 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-detail-110-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-legacy-remove-110-1-1",
+  "surface": "assistant",
+  "title": "卸载确认 · 晨星科技",
+  "module": "M06",
+  "state": "legacy-remove-110-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-restricted-remove",
+  "surface": "assistant",
+  "title": "卸载已失效副本 · 我的空间",
+  "module": "M06",
+  "state": "restricted-remove",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 9
+ },
+ {
+  "id": "A-personal-restricted-uninstalled",
+  "surface": "assistant",
+  "title": "已失效副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "restricted-uninstalled",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-uninstalled-100-0-0",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled-100-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-uninstalled-100-0-1",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled-100-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-uninstalled-100-1-0",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled-100-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-uninstalled-100-1-1",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled-100-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-uninstalled-110-0-0",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled-110-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-uninstalled-110-0-1",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled-110-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-uninstalled-110-1-0",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled-110-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-uninstalled-110-1-1",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 我的空间",
+  "module": "M06",
+  "state": "uninstalled-110-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-restricted-remove",
+  "surface": "assistant",
+  "title": "卸载已失效副本 · 晨星科技",
+  "module": "M06",
+  "state": "restricted-remove",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 9
+ },
+ {
+  "id": "A-enterprise-restricted-uninstalled",
+  "surface": "assistant",
+  "title": "已失效副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "restricted-uninstalled",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-uninstalled-100-0-0",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled-100-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-uninstalled-100-0-1",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled-100-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-uninstalled-100-1-0",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled-100-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-uninstalled-100-1-1",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled-100-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-uninstalled-110-0-0",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled-110-0-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-uninstalled-110-0-1",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled-110-0-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-uninstalled-110-1-0",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled-110-1-0",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-uninstalled-110-1-1",
+  "surface": "assistant",
+  "title": "本机副本已卸载 · 晨星科技",
+  "module": "M06",
+  "state": "uninstalled-110-1-1",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-empty-skills",
+  "surface": "assistant",
+  "title": "暂无额外技能 · 我的空间",
+  "module": "M06",
+  "state": "empty-skills",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-personal-empty-sources",
+  "surface": "assistant",
+  "title": "暂无数据源 · 我的空间",
+  "module": "M06",
+  "state": "empty-sources",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-personal-sourcedisconnected",
+  "surface": "assistant",
+  "title": "数据源未连接 · 我的空间",
+  "module": "M06",
+  "state": "sourcedisconnected",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-personal-sourceconnecting",
+  "surface": "assistant",
+  "title": "正在连接数据源 · 我的空间",
+  "module": "M06",
+  "state": "sourceconnecting",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-personal-permission",
+  "surface": "assistant",
+  "title": "需要文件访问权限 · 我的空间",
+  "module": "M05",
+  "state": "permission",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-permissiondenied",
+  "surface": "assistant",
+  "title": "文件访问权限被拒绝 · 我的空间",
+  "module": "M05",
+  "state": "permissiondenied",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-permissiongranted",
+  "surface": "assistant",
+  "title": "访问权限已授予 · 我的空间",
+  "module": "M05",
+  "state": "permissiongranted",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-empty-skills",
+  "surface": "assistant",
+  "title": "暂无额外技能 · 晨星科技",
+  "module": "M06",
+  "state": "empty-skills",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-enterprise-empty-sources",
+  "surface": "assistant",
+  "title": "暂无数据源 · 晨星科技",
+  "module": "M06",
+  "state": "empty-sources",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-enterprise-sourcedisconnected",
+  "surface": "assistant",
+  "title": "数据源未连接 · 晨星科技",
+  "module": "M06",
+  "state": "sourcedisconnected",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 8
+ },
+ {
+  "id": "A-enterprise-sourceconnecting",
+  "surface": "assistant",
+  "title": "正在连接数据源 · 晨星科技",
+  "module": "M06",
+  "state": "sourceconnecting",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-enterprise-permission",
+  "surface": "assistant",
+  "title": "需要文件访问权限 · 晨星科技",
+  "module": "M05",
+  "state": "permission",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-permissiondenied",
+  "surface": "assistant",
+  "title": "文件访问权限被拒绝 · 晨星科技",
+  "module": "M05",
+  "state": "permissiondenied",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-permissiongranted",
+  "surface": "assistant",
+  "title": "访问权限已授予 · 晨星科技",
+  "module": "M05",
+  "state": "permissiongranted",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-returnstream",
+  "surface": "assistant",
+  "title": "生成中断后返回 · 我的空间",
+  "module": "M09",
+  "state": "returnstream",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-checkingstream",
+  "surface": "assistant",
+  "title": "正在查询充值 · 我的空间",
+  "module": "M09",
+  "state": "checkingstream",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 9
+ },
+ {
+  "id": "A-personal-notyetstream",
+  "surface": "assistant",
+  "title": "生成中断 · 未到账 · 我的空间",
+  "module": "M09",
+  "state": "notyetstream",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-failedstream",
+  "surface": "assistant",
+  "title": "生成中断 · 查询失败 · 我的空间",
+  "module": "M09",
+  "state": "failedstream",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-personal-resumedstream",
+  "surface": "assistant",
+  "title": "生成中断 · 积分可用 · 我的空间",
+  "module": "M09",
+  "state": "resumedstream",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-ownerchecking",
+  "surface": "assistant",
+  "title": "企业积分 · 正在查询 · 晨星科技",
+  "module": "M09",
+  "state": "ownerchecking",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 9
+ },
+ {
+  "id": "A-enterprise-ownerpending",
+  "surface": "assistant",
+  "title": "企业积分 · 尚未恢复 · 晨星科技",
+  "module": "M09",
+  "state": "ownerpending",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-ownerfailed",
+  "surface": "assistant",
+  "title": "企业积分 · 查询失败 · 晨星科技",
+  "module": "M09",
+  "state": "ownerfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-budgetreturn",
+  "surface": "assistant",
+  "title": "企业预算 · 返回后待查询 · 晨星科技",
+  "module": "M09",
+  "state": "budgetreturn",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-budgetchecking",
+  "surface": "assistant",
+  "title": "企业预算 · 正在查询 · 晨星科技",
+  "module": "M09",
+  "state": "budgetchecking",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 9
+ },
+ {
+  "id": "A-enterprise-budgetpending",
+  "surface": "assistant",
+  "title": "企业预算 · 尚未恢复 · 晨星科技",
+  "module": "M09",
+  "state": "budgetpending",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-budgetfailed",
+  "surface": "assistant",
+  "title": "企业预算 · 查询失败 · 晨星科技",
+  "module": "M09",
+  "state": "budgetfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 11
+ },
+ {
+  "id": "A-enterprise-budgetresumed",
+  "surface": "assistant",
+  "title": "企业预算 · 已恢复可用 · 晨星科技",
+  "module": "M09",
+  "state": "budgetresumed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-availability",
+  "surface": "assistant",
+  "title": "恢复发送 · 我的空间",
+  "module": "M05",
+  "state": "availability",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 13
+ },
+ {
+  "id": "A-enterprise-availability",
+  "surface": "assistant",
+  "title": "恢复发送 · 晨星科技",
+  "module": "M05",
+  "state": "availability",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 17
+ },
+ {
+  "id": "A-enterprise-budgetnotified",
+  "surface": "assistant",
+  "title": "已通知所有者调整预算 · 晨星科技",
+  "module": "M09",
+  "state": "budgetnotified",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-budgetmemberchecking",
+  "surface": "assistant",
+  "title": "正在核对企业预算 · 晨星科技",
+  "module": "M09",
+  "state": "budgetmemberchecking",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 9
+ },
+ {
+  "id": "A-enterprise-budgetmemberpending",
+  "surface": "assistant",
+  "title": "企业预算仍受限 · 晨星科技",
+  "module": "M09",
+  "state": "budgetmemberpending",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-budgetmemberfailed",
+  "surface": "assistant",
+  "title": "预算查询失败 · 晨星科技",
+  "module": "M09",
+  "state": "budgetmemberfailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-enterprise-budgetmemberresumed",
+  "surface": "assistant",
+  "title": "企业预算恢复 · 晨星科技",
+  "module": "M09",
+  "state": "budgetmemberresumed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-03",
+  "n_transitions": 10
+ },
+ {
+  "id": "A-personal-activity",
+  "surface": "assistant",
+  "title": "助手任务 · 我的空间",
+  "module": "M04",
+  "state": "activity",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-07",
+  "n_transitions": 9
+ },
+ {
+  "id": "A-personal-preferences",
+  "surface": "assistant",
+  "title": "助手偏好 · 我的空间",
+  "module": "M05",
+  "state": "preferences",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-personal-preferences-savefailed",
+  "surface": "assistant",
+  "title": "助手偏好保存失败 · 我的空间",
+  "module": "M05",
+  "state": "preferences-savefailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-personal-close",
+  "surface": "assistant",
+  "title": "关闭 Polo 助手 · 我的空间",
+  "module": "M04",
+  "state": "close",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-07",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-personal-closefailed",
+  "surface": "assistant",
+  "title": "未能停止任务 · 我的空间",
+  "module": "M04",
+  "state": "closefailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-07",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-enterprise-activity",
+  "surface": "assistant",
+  "title": "助手任务 · 晨星科技",
+  "module": "M04",
+  "state": "activity",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-07",
+  "n_transitions": 9
+ },
+ {
+  "id": "A-enterprise-preferences",
+  "surface": "assistant",
+  "title": "助手偏好 · 晨星科技",
+  "module": "M05",
+  "state": "preferences",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-enterprise-preferences-savefailed",
+  "surface": "assistant",
+  "title": "助手偏好保存失败 · 晨星科技",
+  "module": "M05",
+  "state": "preferences-savefailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-enterprise-close",
+  "surface": "assistant",
+  "title": "关闭 Polo 助手 · 晨星科技",
+  "module": "M04",
+  "state": "close",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-07",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-enterprise-closefailed",
+  "surface": "assistant",
+  "title": "未能停止任务 · 晨星科技",
+  "module": "M04",
+  "state": "closefailed",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-07",
+  "n_transitions": 7
+ },
+ {
+  "id": "A-personal-transfer-export",
+  "surface": "assistant",
+  "title": "导出允许的对话内容 · 我的空间",
+  "module": "M08",
+  "state": "transfer-export",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-personal-transfer-exported",
+  "surface": "assistant",
+  "title": "对话内容已导出 · 我的空间",
+  "module": "M08",
+  "state": "transfer-exported",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 2
+ },
+ {
+  "id": "A-personal-transfer-import",
+  "surface": "assistant",
+  "title": "导入对话内容 · 我的空间",
+  "module": "M08",
+  "state": "transfer-import",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-personal-transfer-preview",
+  "surface": "assistant",
+  "title": "确认导入 · 我的空间",
+  "module": "M08",
+  "state": "transfer-preview",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-personal-transfer-done",
+  "surface": "assistant",
+  "title": "已建立导入对话 · 我的空间",
+  "module": "M08",
+  "state": "transfer-done",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-personal-transfer-invalid",
+  "surface": "assistant",
+  "title": "无法导入此文件 · 我的空间",
+  "module": "M08",
+  "state": "transfer-invalid",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-personal-legacy-isolation",
+  "surface": "assistant",
+  "title": "旧数据归属待核验 · 我的空间",
+  "module": "M08",
+  "state": "legacy-isolation",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 2
+ },
+ {
+  "id": "A-enterprise-transfer-export",
+  "surface": "assistant",
+  "title": "导出允许的对话内容 · 晨星科技",
+  "module": "M08",
+  "state": "transfer-export",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-enterprise-transfer-exported",
+  "surface": "assistant",
+  "title": "对话内容已导出 · 晨星科技",
+  "module": "M08",
+  "state": "transfer-exported",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 2
+ },
+ {
+  "id": "A-enterprise-transfer-import",
+  "surface": "assistant",
+  "title": "导入对话内容 · 晨星科技",
+  "module": "M08",
+  "state": "transfer-import",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-enterprise-transfer-preview",
+  "surface": "assistant",
+  "title": "确认导入 · 晨星科技",
+  "module": "M08",
+  "state": "transfer-preview",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-enterprise-transfer-done",
+  "surface": "assistant",
+  "title": "已建立导入对话 · 晨星科技",
+  "module": "M08",
+  "state": "transfer-done",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-enterprise-transfer-invalid",
+  "surface": "assistant",
+  "title": "无法导入此文件 · 晨星科技",
+  "module": "M08",
+  "state": "transfer-invalid",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 3
+ },
+ {
+  "id": "A-enterprise-legacy-isolation",
+  "surface": "assistant",
+  "title": "旧数据归属待核验 · 晨星科技",
+  "module": "M08",
+  "state": "legacy-isolation",
+  "category": "新基线组件复用 + MVP 状态补充（待复看）",
+  "journey": "J-PC-04",
+  "n_transitions": 2
+ }
+]

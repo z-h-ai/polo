@@ -39,7 +39,14 @@ These files are used by electron-builder or the app directly, not synced to user
 | `source.png` | Default source icon |
 | `generate-icons.sh` | Icon generation script |
 | `bridge-mcp-server/` | Bundled MCP server for Codex/Copilot API source bridge |
-| `session-mcp-server/` | Bundled MCP server for session tools |
+| `pi-agent-server/` | Pi backend model subprocess bundle (staged at build time) |
+| `builtin-skills/` | Read-only app-shipped Skills (`*/SKILL.md`) served in place via `getBundledSkillsRoot()` — never synced to user home and never copied out; users cannot edit or remove them, and a same-slug user Skill always overrides one (POO-110). Dev note: edits here are picked up after restart or a skills-cache clear (5-minute TTL; the watcher only listens on user directories). |
+
+## Removed Resources
+
+| Folder | Removed In | Note |
+|--------|------------|------|
+| `session-mcp-server/` | POO-53 | The session MCP sidecar was removed from the product. Build-time staging prunes any leftover from both `resources/` and `dist/resources/`, and the final artifact validators fail if it reappears. Never re-add it. |
 
 ## Single Source of Truth
 

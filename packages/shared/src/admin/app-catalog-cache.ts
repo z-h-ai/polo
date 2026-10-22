@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { CONFIG_DIR } from '../config/paths.ts'
@@ -343,6 +343,25 @@ export function denyCachedAppCatalogAuthorizationForAccount(
 export function listCachedAppCatalogs(accountId: string): AppCatalogCacheEntry[] {
   return Object.values(readCache().entries)
     .filter(entry => entry.accountId === accountId)
+}
+
+/**
+ * One-shot direct-switch cleanup: removes every cached Organization Catalog
+ * entry (memory + disk). Catalog caches are authorization state, never a
+ * ProductSpace fallback, so a failed purge must be reported to the caller.
+ */
+export function purgeAppCatalogCache(): boolean {
+  try {
+    const path = cachePath()
+    if (existsSync(path)) {
+      unlinkSync(path)
+    }
+    validatedProcessCache = null
+    cacheDiskReadCount = 0
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function getAppCatalogCachePath(): string {

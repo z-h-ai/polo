@@ -1,12 +1,24 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { TabBar } from './TabBar'
+import { useEffect, type ReactNode } from 'react'
+import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { TabContent } from './TabContent'
-import { AddAppDialog } from './AddAppDialog'
+import { TopBar } from '@/components/app-shell/TopBar'
 import { useTabShell } from '@/context/TabShellContext'
-import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
+import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
+import { useClientMaterialScope } from '@/lib/client-workbench-style'
+import { NAVIGATE_EVENT } from '@/lib/navigate'
+import { shouldSurfaceAssistantForNavigate } from './settings-navigate'
+import { HOME_TAB_ID, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
+import { useWorkbenchReady } from '@/hooks/useWorkbenchReady'
 
 interface TabShellProps {
   renderPolo: () => ReactNode
+  /**
+   * POO-100 C8 (P2-2, integration-owner authorized): the App-threaded A1
+   * re-login entry for the circle-return account-mismatch recovery,
+   * forwarded verbatim to TabContent → ClientHomeRouter → CircleDetailPage.
+   * Strictly optional; unset keeps the panel's honest manual-recovery note.
+   */
+  onReauthenticateRequest?: (target: CircleReturnTargetIds | null) => void
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -16,28 +28,70 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === 'input' || tag === 'textarea' || tag === 'select'
 }
 
-export function TabShell({ renderPolo }: TabShellProps) {
-  const { activeTab, openTabs, activeTabId, activateHome, activateTab, closeTab } = useTabShell()
-  const [addAppOpen, setAddAppOpen] = useState(false)
+export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps) {
+  const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab, openApp } = useTabShell()
+  // POO-105 默认浅色微透材质（Spec §13.14）：宿主根承载材质标记与派生令牌，
+  // 深色/未标记宿主保持既有不透明样式。放在窄窗判定之前，hook 顺序不受早退影响。
+  useClientMaterialScope()
+  // Frozen narrow-window boundary (Review R38, restores the POO-41 contract):
+  // at/below the frozen 640px line EVERY route fails closed to the frozen
+  // WindowWidthGuard — the POO-41 authoritative 390x844 result is the guard
+  // screen, not a narrow work surface. Hook order is untouched: the hook is
+  // read before every early return and the decision renders after all hooks.
+  const narrowViewport = useNarrowViewport()
+  useWorkbenchReady(isReady && !narrowViewport)
 
   useEffect(() => {
     const root = document.documentElement
+    // Scope-neutral pre-hydration (Review R33/R34): the process-global tab
+    // atoms still hold the PREVIOUS scope's route until hydration completes —
+    // never publish a stale route marker; leave the root marker neutral.
+    if (!isReady) {
+      delete root.dataset.activeTab
+      return () => {
+        delete root.dataset.activeTab
+      }
+    }
     root.dataset.activeTab = activeTab.type
     return () => {
       delete root.dataset.activeTab
     }
-  }, [activeTab.type])
+  }, [isReady, activeTab.type])
 
   useEffect(() => {
+    // Scope-neutral pre-hydration (Review R33/R34): do not register the
+    // deep-link handler with closures over the previous scope's tabs.
+    if (!isReady) return
     return window.electronAPI.onDeepLinkNavigate((nav) => {
       if (nav.view || nav.action || nav.joinToken || nav.tabType === 'polo') {
         const poloTab = openTabs.find((tab) => tab.type === 'polo')
         if (poloTab) activateTab(poloTab.id)
       }
     })
-  }, [activateTab, openTabs])
+  }, [isReady, activateTab, openTabs])
 
   useEffect(() => {
+    // POO-103: the account menu, the Polo app menu, Cmd+, and the native
+    // Settings menu all dispatch the global navigate event from ABOVE
+    // NavigationProvider (the TopBar sits inside TabShell). The route changes
+    // inside the Polo tab — mounted but hidden while the Home tab is active —
+    // so the user saw no visible change. Surface the Polo tab for settings
+    // routes, same contract as the deep-link handler above (openApp also
+    // restores a closed Polo tab).
+    if (!isReady) return
+    const handleNavigate = (event: Event) => {
+      const route = (event as CustomEvent<{ route?: unknown }>).detail?.route
+      if (!shouldSurfaceAssistantForNavigate(route)) return
+      openApp(POLO_APP_DEFINITION)
+    }
+    window.addEventListener(NAVIGATE_EVENT, handleNavigate)
+    return () => window.removeEventListener(NAVIGATE_EVENT, handleNavigate)
+  }, [isReady, openApp])
+
+  useEffect(() => {
+    // Scope-neutral pre-hydration (Review R33/R34): keyboard shortcuts stay
+    // unregistered until the keyed provider establishes the new scope.
+    if (!isReady) return
     const handleKeyDown = (event: KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey
       if (!mod || event.altKey || isEditableTarget(event.target)) return
@@ -81,13 +135,43 @@ export function TabShell({ renderPolo }: TabShellProps) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activateHome, activateTab, activeTabId, closeTab, openTabs])
+  }, [isReady, activateHome, activateTab, activeTabId, closeTab, openTabs])
+
+  // PRE-HYDRATION FAIL-CLOSED boundary (Review R33 security finding):
+  // `openTabsAtom`/`activeTabAtom` are process-global and still hold the
+  // PREVIOUS account/ProductSpace scope's tab titles, URLs and active route
+  // until this keyed provider's hydration establishes the NEW scope. The
+  // hook-order-safe early return renders a scope-neutral boundary on EVERY
+  // width — the stale TabBar/TabContent/webview/active route can never be
+  // mounted or displayed, and it must not resurface on scope switches.
+  if (!isReady) {
+    return (
+      <div
+        className="h-full min-h-0 bg-background"
+        data-testid="shell-scope-loading"
+      />
+    )
+  }
+
+  // Narrow-route guard decision lives AFTER every hook in this component:
+  // rendering the frozen guard must not change the hook count between
+  // renders (React "fewer hooks" crash on route transitions).
+  if (narrowViewport) {
+    return <WindowWidthGuard />
+  }
 
   return (
-    <div className="h-full min-h-0 bg-background">
-      <TabBar />
-      <TabContent onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
-      <AddAppDialog open={addAppOpen} onOpenChange={setAddAppOpen} />
+    // 材质作用域内 shell 根是唯一画布板：页面画布不再自绘不透明背景，
+    // 93% 底板直接承在窗口原生材质上；未标记宿主保持 bg-background。
+    <div className="h-full min-h-0 bg-background client-material-canvas">
+      {/* The unified workbench bar (brand + tabs + space/account actions).
+          Rendered inside the hydration gate: pre-hydration the boundary above
+          returns first, so a stale previous-scope bar never surfaces. */}
+      <TopBar />
+      <TabContent
+        renderPolo={renderPolo}
+        onReauthenticateRequest={onReauthenticateRequest}
+      />
     </div>
   )
 }

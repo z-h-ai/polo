@@ -1,0 +1,9 @@
+{
+  "source": "skill-terminology-review-r11",
+  "item": "zh-skill-terminology",
+  "revision": "poo70-desktop-ux-r11-zh-skill-terminology",
+  "current": "中文界面的部分入口、状态和提示仍显示 Skill。",
+  "target": "面向用户的中文文案统一显示「技能」，保留技术标识和历史原文。",
+  "reason": "2026-09-23 用户明确要求更新原型及相关文档。",
+  "question": "中文界面的入口、技能列表、来源说明和反馈是否都统一使用「技能」？"
+}

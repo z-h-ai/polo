@@ -1,0 +1,51 @@
+[
+  {
+    "case": "confirmation-automatic-completion",
+    "viewport": 1440,
+    "expected": "P-M03-HOME-PERSONAL",
+    "actual": "P-M03-HOME-PERSONAL",
+    "passed": true
+  },
+  {
+    "case": "direct-review-progress-stays-static",
+    "viewport": 1440,
+    "expected": "P-M02-STOPPING",
+    "actual": "P-M02-STOPPING",
+    "passed": true
+  },
+  {
+    "case": "leave-and-reenter-progress-cancels-old-callback",
+    "viewport": 1440,
+    "expected": "P-M02-STOPPING",
+    "actual": "P-M02-STOPPING",
+    "passed": true
+  },
+  {
+    "case": "reset-progress-cancels-old-callback",
+    "viewport": 1440,
+    "expected": "P-M02-STOPPING",
+    "actual": "P-M02-STOPPING",
+    "passed": true
+  },
+  {
+    "case": "cancel-progress-keeps-original-space",
+    "viewport": 1440,
+    "expected": "P-M02-STOP-CANCEL",
+    "actual": "P-M02-STOP-CANCEL",
+    "passed": true
+  },
+  {
+    "case": "review-navigation-away-cancels",
+    "viewport": 1440,
+    "expected": "P-M02-CONFIRM",
+    "actual": "P-M02-CONFIRM",
+    "passed": true
+  },
+  {
+    "case": "surface-suspend-cancels",
+    "viewport": 1440,
+    "expected": "P-M02-STOPPING",
+    "actual": "P-M03-HOME-PERSONAL",
+    "passed": false
+  }
+]

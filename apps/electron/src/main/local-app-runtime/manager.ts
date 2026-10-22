@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'crypto'
-import { constants as fsConstants, createReadStream, existsSync } from 'fs'
+import { accessSync, constants as fsConstants, createReadStream, existsSync, statSync } from 'fs'
 import {
   access,
+  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -24,6 +25,7 @@ import { arch as hostArch, platform as hostPlatform } from 'os'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
 import { spawn, type ChildProcess } from 'child_process'
 import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
+import { normalizeCatalogSemVer } from '@polo-ai/shared/admin/semver'
 import { LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS } from '@polo-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
@@ -35,6 +37,7 @@ import type {
   LocalAppLifecycleStatus,
   LocalAppLogsOptions,
   LocalAppPlatform,
+  LocalAppRuntimeKind,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
   LocalAppUninstallOptions,
@@ -81,6 +84,7 @@ const RUNTIME_ENV_ALLOWLIST = [
 ] as const
 
 interface InstalledVersionRecord {
+  nativeInstallationAdmissionId?: string
   manifest: PoloAppManifest
   installedAt: number
   checksum: string
@@ -114,6 +118,126 @@ interface ManagedRuntime {
   exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
   spawnError?: Error
   healthToken: string
+  runtimeGeneration?: number
+  sensitiveValues?: string[]
+  runtimeKey?: string
+}
+
+export interface ExactVersionStartHooks {
+  /**
+   * Called ONLY for trusted python/js runtimes, right before spawn. The
+   * returned environment additions (per-launch capability) and sensitive
+   * values (secret redaction) bind one process generation to one token.
+   */
+  processEnvironment?(input: {
+    runtimeKind: 'python' | 'js'
+    runtimeGeneration: number
+  }): { env: NodeJS.ProcessEnv; sensitiveValues: string[] }
+  /**
+   * Immutable coordinator identity key echoed on the unexpected-exit event,
+   * so the coordinator matches BOTH the key and the (manager-local)
+   * runtime generation before tearing anything down.
+   */
+  runtimeKey?: string
+  /**
+   * Process/lifecycle/log namespace for the exact-version runtime. Defaults
+   * to the install appId; the scoped registry passes the full runtime
+   * identity namespace so different versions never collide.
+   */
+  processAppId?: string
+}
+
+export interface ExactVersionStartResult extends LocalAppStartResult {
+  runtimeKind: LocalAppRuntimeKind
+  runtimeGeneration: number
+}
+
+export interface UnexpectedExitEvent {
+  appId: string
+  version: string
+  runtimeKind: LocalAppRuntimeKind
+  runtimeGeneration: number
+  runtimeKey?: string
+}
+
+export const RUNTIME_SECRET_REDACTED = '[REDACTED_RUNTIME_SECRET]'
+
+/**
+ * Token-aware streaming redactor. Raw text is withheld until every secret
+ * occurrence that could straddle the emit cut is fully contained: the cut is
+ * pushed back to the earliest straddling occurrence start, so a partial
+ * secret can never be emitted (across any chunk boundary), and flush always
+ * passes through this same path.
+ */
+export class StreamingSecretRedactor {
+  private pending = ''
+  private readonly maxSecretLength: number
+
+  constructor(private readonly secrets: string[]) {
+    this.maxSecretLength = secrets.reduce((max, secret) => Math.max(max, secret.length), 0)
+  }
+
+  push(chunk: string): string {
+    if (this.maxSecretLength === 0) {
+      const text = this.pending + chunk
+      this.pending = ''
+      return this.redact(text)
+    }
+    this.pending += chunk
+    return this.drain()
+  }
+
+  flush(): string {
+    return this.take(this.pending.length)
+  }
+
+  /**
+   * Emits everything up to a safe cut: the base withhold keeps a possible
+   * tail partial secret buffered, complete occurrences straddling the cut
+   * are emitted whole (redacted), and an incomplete tail occurrence pushes
+   * the cut back before its start.
+   */
+  private drain(): string {
+    const pending = this.pending
+    let cut = pending.length - (this.maxSecretLength - 1)
+    if (cut <= 0) return ''
+    const intervals: Array<[number, number]> = []
+    for (const secret of this.secrets) {
+      let index = pending.indexOf(secret)
+      while (index !== -1 && index < cut) {
+        intervals.push([index, index + secret.length])
+        index = pending.indexOf(secret, index + 1)
+      }
+    }
+    intervals.sort((left, right) => left[0] - right[0])
+    for (const [start, end] of intervals) {
+      if (end <= cut) continue
+      if (start >= cut) break
+      if (end <= pending.length) {
+        cut = end
+      } else {
+        cut = start
+        break
+      }
+    }
+    return this.take(cut)
+  }
+
+  private take(emitCut: number): string {
+    if (emitCut <= 0) return ''
+    const emitted = this.redact(this.pending.slice(0, emitCut))
+    this.pending = this.pending.slice(emitCut)
+    return emitted
+  }
+
+  private redact(text: string): string {
+    let output = text
+    for (const secret of this.secrets) {
+      if (secret.length === 0) continue
+      output = output.split(secret).join(RUNTIME_SECRET_REDACTED)
+    }
+    return output
+  }
 }
 
 type ActiveReleaseIdentity = Pick<
@@ -194,6 +318,18 @@ export interface LocalAppRuntimeLogger {
   error(message: string, details?: unknown): void
 }
 
+/** Main-owned, per-install authority. Never serialized into renderer IPC or metadata. */
+export interface LocalAppDownloadTransport {
+  assertCurrent(): void
+  fetch(request: LocalAppInstallRequest, signal: AbortSignal): Promise<Response>
+}
+
+export interface LocalAppInstallOptions {
+  signal?: AbortSignal
+  nativeInstallationAdmissionId?: string
+  downloadTransport?: LocalAppDownloadTransport
+}
+
 export interface LocalAppRuntimeManagerOptions {
   rootDir: string
   platform?: LocalAppPlatform
@@ -223,6 +359,8 @@ export interface LocalAppRuntimeManagerOptions {
     kind: 'dependency-preparation' | 'runtime',
     pid: number | undefined,
   ) => void
+  /** Per-start observer fired when a runtime process exits unexpectedly. */
+  onUnexpectedExit?: (event: UnexpectedExitEvent) => void
 }
 
 const noopLogger: LocalAppRuntimeLogger = {
@@ -331,6 +469,8 @@ export class LocalAppRuntimeManager {
   private readonly onInstallProgress?: LocalAppRuntimeManagerOptions['onInstallProgress']
   private readonly onManagedProcessStarted?:
     LocalAppRuntimeManagerOptions['onManagedProcessStarted']
+  private readonly onUnexpectedExit?: LocalAppRuntimeManagerOptions['onUnexpectedExit']
+  private runtimeGenerationCounter = 0
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
   private readonly managedProcesses = new Map<string, ManagedProcessOperation>()
@@ -374,6 +514,7 @@ export class LocalAppRuntimeManager {
       ?? createWindowsProcessTreeOwner
     this.onInstallProgress = options.onInstallProgress
     this.onManagedProcessStarted = options.onManagedProcessStarted
+    this.onUnexpectedExit = options.onUnexpectedExit
   }
 
   initialize(): Promise<void> {
@@ -395,7 +536,7 @@ export class LocalAppRuntimeManager {
 
   install(
     request: LocalAppInstallRequest,
-    options: { signal?: AbortSignal } = {},
+    options: LocalAppInstallOptions = {},
   ): Promise<LocalAppInstalledApp> {
     const validated = this.validateInstallRequest(request)
     if (this.shuttingDown) {
@@ -444,7 +585,7 @@ export class LocalAppRuntimeManager {
     )
     if (options.signal?.aborted) abortFromCaller()
     else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
-    const promise = this.performInstall(validated, controller.signal)
+    const promise = this.performInstall(validated, controller.signal, options.nativeInstallationAdmissionId, options.downloadTransport)
       .finally(() => {
         clearTimeout(timeout)
         options.signal?.removeEventListener('abort', abortFromCaller)
@@ -484,6 +625,98 @@ export class LocalAppRuntimeManager {
       safeAppId,
       signal => this.performStart(safeAppId, signal),
     )
+  }
+
+  /**
+   * Exact-version ProductSpace start. The requested version MUST be installed
+   * and valid — currentVersion fallback and rollback are forbidden on this
+   * path, so a launched runtime can never silently become another version.
+   */
+  startExactVersion(
+    appId: string,
+    version: string,
+    hooks: ExactVersionStartHooks = {},
+  ): Promise<ExactVersionStartResult> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    const safeVersion = validateRequestIdentifier(version, 'version')
+    // The install stays in the artifact-scoped storage namespace, but the
+    // process, lifecycle queue and logs live under the FULL runtime identity
+    // (including versionId via `processAppId`): different versions of one
+    // artifact are different runtimes and must never share — or stop — each
+    // other's process namespace.
+    const processAppId = hooks.processAppId ?? safeAppId
+    if (this.shuttingDown) {
+      return Promise.reject(new LocalAppRuntimeError('START_FAILED', 'Polo is shutting down'))
+    }
+    const existing = this.startPromises.get(processAppId)
+    if (existing) {
+      return Promise.reject(new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        `${processAppId} already has a start operation in progress`,
+      ))
+    }
+    return this.trackStartOperation(processAppId, async (signal) => {
+      // A previous runtime generation of the SAME runtime identity never
+      // survives an exact start; a DIFFERENT version's namespace is untouched.
+      const running = this.runtimes.get(processAppId)
+      if (running) {
+        await this.stopRuntime(running)
+        if (this.runtimes.get(processAppId) === running) this.runtimes.delete(processAppId)
+      }
+      this.throwIfStartCancelled(signal, processAppId)
+      const metadata = await this.readMetadata(safeAppId)
+      const record = metadata?.versions[safeVersion]
+      if (!metadata || !record) {
+        throw new LocalAppRuntimeError(
+          'NOT_INSTALLED',
+          `Exact version ${safeVersion} of ${safeAppId} is not installed`,
+        )
+      }
+      const runtimeGeneration = ++this.runtimeGenerationCounter
+      const handle = await this.startVersion(metadata, safeVersion, signal, {
+        runtimeGeneration,
+        runtimeAppId: processAppId,
+        hooks,
+        ...(hooks.runtimeKey ? { runtimeKey: hooks.runtimeKey } : {}),
+      })
+      return {
+        appId: processAppId,
+        version: safeVersion,
+        url: handle.url,
+        port: handle.port,
+        runtimeKind: record.manifest.runtime,
+        runtimeGeneration,
+      }
+    })
+  }
+
+  /**
+   * Generation-CAS stop: a stop for a stale runtime generation is rejected
+   * before touching the registry, so a late A-side stop can never kill the
+   * replacement B runtime.
+   */
+  async stopExact(appId: string, expectedRuntimeGeneration: number): Promise<LocalAppRuntimeStatus> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    this.cancelStart(safeAppId, `Start of ${safeAppId} was cancelled by stopExact`)
+    return this.enqueueLifecycle(safeAppId, async () => {
+      const handle = this.runtimes.get(safeAppId)
+      if (
+        !handle
+        || handle.runtimeGeneration === undefined
+        || handle.runtimeGeneration !== expectedRuntimeGeneration
+      ) {
+        throw new LocalAppRuntimeError(
+          'STALE_RUNTIME_GENERATION',
+          `Runtime generation ${expectedRuntimeGeneration} of ${safeAppId} is no longer current`,
+        )
+      }
+      await this.stopRuntime(handle)
+      return {
+        appId: safeAppId,
+        status: 'stopped',
+        currentVersion: handle.version,
+      }
+    })
   }
 
   stop(appId: string): Promise<LocalAppRuntimeStatus> {
@@ -960,10 +1193,10 @@ export class LocalAppRuntimeManager {
     }
   }
 
-  private trackStartOperation(
+  private trackStartOperation<T extends LocalAppStartResult>(
     appId: string,
-    operation: (signal: AbortSignal) => Promise<LocalAppStartResult>,
-  ): Promise<LocalAppStartResult> {
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
     const controller = new AbortController()
     const promise = this.enqueueLifecycle(appId, () => operation(controller.signal))
       .finally(() => {
@@ -1175,8 +1408,12 @@ export class LocalAppRuntimeManager {
   private async performInstall(
     request: LocalAppInstallRequest,
     signal: AbortSignal,
+    nativeInstallationAdmissionId?: string,
+    downloadTransport?: LocalAppDownloadTransport,
   ): Promise<LocalAppInstalledApp> {
+    downloadTransport?.assertCurrent()
     await this.initialize()
+    downloadTransport?.assertCurrent()
     const existingMetadata = await this.readMetadata(request.appId)
     const existingVersion = existingMetadata?.versions[request.version]
     if (existingVersion && existingVersion.checksum !== request.checksum) {
@@ -1194,10 +1431,20 @@ export class LocalAppRuntimeManager {
       request.version,
       request.expectedManifestAppId,
     )) {
+      if (nativeInstallationAdmissionId) {
+        await this.enqueueLifecycle(request.appId, async () => {
+          const metadata = await this.readMetadata(request.appId)
+          const retained = metadata?.versions[request.version]
+          if (!metadata || !retained || retained.checksum !== request.checksum) throw new LocalAppRuntimeError('NOT_INSTALLED','Native installation witness changed')
+          retained.nativeInstallationAdmissionId = nativeInstallationAdmissionId
+          await this.writeMetadata(metadata)
+        })
+      }
       const installed = (await this.getInstalledApps()).find(app => app.appId === request.appId)
       if (!installed) {
         throw new LocalAppRuntimeError('NOT_INSTALLED', `Metadata for ${request.appId} is incomplete`)
       }
+      downloadTransport?.assertCurrent()
       return installed
     }
 
@@ -1206,7 +1453,8 @@ export class LocalAppRuntimeManager {
     const extractedPath = join(stagingRoot, 'bundle')
     try {
       this.setInstallProgress(request, 'downloading', 0)
-      await this.downloadBundle(request, archivePath, signal)
+      await this.downloadBundle(request, archivePath, signal, downloadTransport)
+      downloadTransport?.assertCurrent()
       this.throwIfCancelled(signal)
 
       this.setInstallProgress(request, 'verifying', request.sizeBytes)
@@ -1238,6 +1486,7 @@ export class LocalAppRuntimeManager {
 
       const nextMetadata = await this.enqueueLifecycle(request.appId, async () => {
         this.throwIfCancelled(signal)
+        downloadTransport?.assertCurrent()
         const appDir = this.getAppDir(request.appId)
         const versionsDir = join(appDir, 'versions')
         const targetDir = this.getVersionDir(request.appId, request.version)
@@ -1251,6 +1500,7 @@ export class LocalAppRuntimeManager {
         const metadata = await this.readMetadata(request.appId)
         const versions = metadata?.versions ?? {}
         versions[request.version] = {
+          ...(nativeInstallationAdmissionId ? { nativeInstallationAdmissionId } : {}),
           manifest,
           installedAt: this.now(),
           checksum: request.checksum,
@@ -1274,6 +1524,7 @@ export class LocalAppRuntimeManager {
             ? { availableRelease: metadata.availableRelease }
             : {}),
         }
+        downloadTransport?.assertCurrent()
         await this.writeMetadata(committedMetadata)
         return committedMetadata
       })
@@ -1323,13 +1574,14 @@ export class LocalAppRuntimeManager {
     request: LocalAppInstallRequest,
     destination: string,
     signal: AbortSignal,
+    downloadTransport?: LocalAppDownloadTransport,
   ): Promise<void> {
     let response: Response
     try {
-      response = await this.fetchImpl(request.downloadUrl, {
-        signal,
-        redirect: 'follow',
-      })
+      downloadTransport?.assertCurrent()
+      response = downloadTransport
+        ? await downloadTransport.fetch(request, signal)
+        : await this.fetchImpl(request.downloadUrl, { signal, redirect: 'follow' })
     } catch (error) {
       if (signal.aborted) {
         throw this.getAbortError(
@@ -1362,6 +1614,7 @@ export class LocalAppRuntimeManager {
     try {
       for await (const rawChunk of response.body as unknown as AsyncIterable<Uint8Array>) {
         this.throwIfCancelled(signal)
+        downloadTransport?.assertCurrent()
         const chunk = Buffer.from(rawChunk)
         downloaded += chunk.length
         if (downloaded > request.sizeBytes) {
@@ -1731,19 +1984,29 @@ export class LocalAppRuntimeManager {
     metadata: AppMetadata,
     version: string,
     signal: AbortSignal,
+    options: {
+      runtimeGeneration?: number
+      runtimeKey?: string
+      runtimeAppId?: string
+      hooks?: ExactVersionStartHooks
+    } = {},
   ): Promise<LocalAppStartResult> {
+    // Install storage stays under the install appId; the RUNNING runtime
+    // namespace (statuses/runtimes/logs/process env) is the full runtime
+    // identity namespace.
+    const runtimeAppId = options.runtimeAppId ?? metadata.appId
     if (this.shuttingDown) {
-      throw new LocalAppRuntimeError('START_FAILED', `Start of ${metadata.appId} was cancelled during shutdown`)
+      throw new LocalAppRuntimeError('START_FAILED', `Start of ${runtimeAppId} was cancelled during shutdown`)
     }
-    this.throwIfStartCancelled(signal, metadata.appId)
+    this.throwIfStartCancelled(signal, runtimeAppId)
     const record = metadata.versions[version]
     if (!record) throw new LocalAppRuntimeError('NOT_INSTALLED', `Version ${version} is not installed`)
     const { manifest } = record
     const versionDir = this.getVersionDir(metadata.appId, version)
     await this.validateRequiredFiles(versionDir, manifest)
     await mkdir(this.getDataDir(metadata.appId), { recursive: true })
-    this.statuses.set(metadata.appId, {
-      appId: metadata.appId,
+    this.statuses.set(runtimeAppId, {
+      appId: runtimeAppId,
       status: 'starting',
       currentVersion: metadata.currentVersion,
       runningVersion: version,
@@ -1751,11 +2014,30 @@ export class LocalAppRuntimeManager {
 
     let handle: ManagedRuntime
     if (manifest.runtime === 'static') {
-      handle = await this.startStaticRuntime(metadata.appId, version, versionDir, manifest)
+      // Static runtimes never receive a capability or platform environment.
+      handle = await this.startStaticRuntime(runtimeAppId, version, versionDir, manifest)
     } else {
-      handle = await this.startProcessRuntime(metadata.appId, version, versionDir, manifest)
+      const runtimeGeneration = options.runtimeGeneration
+      let hookEnvironment: { env: NodeJS.ProcessEnv; sensitiveValues: string[] } | undefined
+      if (options.hooks?.processEnvironment && runtimeGeneration !== undefined) {
+        hookEnvironment = options.hooks.processEnvironment({
+          runtimeKind: manifest.runtime,
+          runtimeGeneration,
+        })
+      }
+      handle = await this.startProcessRuntime(
+        runtimeAppId,
+        version,
+        versionDir,
+        manifest,
+        hookEnvironment,
+        runtimeGeneration,
+        options.runtimeKey,
+      )
     }
-    this.runtimes.set(metadata.appId, handle)
+    handle.runtimeGeneration = options.runtimeGeneration
+    handle.runtimeKey = options.runtimeKey
+    this.runtimes.set(runtimeAppId, handle)
     try {
       await this.waitForHealthcheck(
         handle,
@@ -1784,8 +2066,8 @@ export class LocalAppRuntimeManager {
       throw error
     }
     this.assertRuntimeHandleCurrentAndLive(handle)
-    this.statuses.set(metadata.appId, {
-      appId: metadata.appId,
+    this.statuses.set(runtimeAppId, {
+      appId: runtimeAppId,
       status: 'running',
       currentVersion: metadata.currentVersion,
       runningVersion: version,
@@ -1793,9 +2075,9 @@ export class LocalAppRuntimeManager {
       port: handle.port,
       ...(handle.child?.pid ? { pid: handle.child.pid } : {}),
     })
-    this.appendLog(metadata.appId, 'system', `Healthy at ${handle.url}`)
+    this.appendLog(runtimeAppId, 'system', `Healthy at ${handle.url}`)
     return {
-      appId: metadata.appId,
+      appId: runtimeAppId,
       version,
       url: handle.url,
       port: handle.port,
@@ -1831,6 +2113,9 @@ export class LocalAppRuntimeManager {
     version: string,
     versionDir: string,
     manifest: PoloAppManifest,
+    hookEnvironment?: { env: NodeJS.ProcessEnv; sensitiveValues: string[] },
+    runtimeGeneration?: number,
+    runtimeKey?: string,
   ): Promise<ManagedRuntime> {
     const port = await this.allocatePort()
     await this.assertPortAvailable(port)
@@ -1858,10 +2143,13 @@ export class LocalAppRuntimeManager {
       executable,
       args,
       versionDir,
-      this.buildRuntimeEnvironment(appId, version, versionDir, port, healthToken),
+      {
+        ...this.buildRuntimeEnvironment(appId, version, versionDir, port, healthToken),
+        ...(hookEnvironment?.env ?? {}),
+      },
     )
     const { child, processTreeOwner } = managedProcess
-    this.captureChildOutput(appId, child)
+    this.captureChildOutput(appId, child, hookEnvironment?.sensitiveValues ?? [])
 
     let resolveExit!: (outcome: { code: number | null; signal: NodeJS.Signals | null }) => void
     const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise) => {
@@ -1880,6 +2168,11 @@ export class LocalAppRuntimeManager {
       stopRequested: false,
       exitPromise,
       healthToken,
+      ...(runtimeGeneration !== undefined ? { runtimeGeneration } : {}),
+      ...(runtimeKey ? { runtimeKey } : {}),
+      ...(hookEnvironment?.sensitiveValues?.length
+        ? { sensitiveValues: hookEnvironment.sensitiveValues }
+        : {}),
     }
     child.once('error', (error) => {
       handle.spawnError = error
@@ -1887,6 +2180,15 @@ export class LocalAppRuntimeManager {
     child.once('exit', (code, signal) => {
       resolveExit({ code, signal })
       if (handle.stopRequested) return
+      if (runtimeGeneration !== undefined) {
+        this.onUnexpectedExit?.({
+          appId,
+          version,
+          runtimeKind: manifest.runtime,
+          runtimeGeneration,
+          ...(runtimeKey ? { runtimeKey } : {}),
+        })
+      }
       handle.cleanupPromise = this.cleanupManagedProcess(managedProcess)
         .then(() => {
           if (this.runtimes.get(appId) === handle) this.runtimes.delete(appId)
@@ -2767,14 +3069,37 @@ export class LocalAppRuntimeManager {
     })
   }
 
-  private captureChildOutput(appId: string, child: ChildProcess): void {
-    const capture = (source: 'stdout' | 'stderr', chunk: Buffer | string) => {
-      for (const line of String(chunk).split(/\r?\n/)) {
-        if (line) this.appendLog(appId, source, line)
+  private captureChildOutput(appId: string, child: ChildProcess, sensitiveValues: string[] = []): void {
+    const attach = (source: 'stdout' | 'stderr', stream: ChildProcess['stdout']) => {
+      if (!stream) return
+      // Each stream owns its own redactor and carry state: a shared instance
+      // would let one stream consume or flush the other's withheld tail and
+      // leak a secret prefix on interleaved output.
+      const redactor = new StreamingSecretRedactor(sensitiveValues)
+      let lineCarry = ''
+      let flushed = false
+      const emit = (text: string) => {
+        for (const line of text.split(/\r?\n/)) {
+          if (line) this.appendLog(appId, source, line)
+        }
       }
+      stream.on('data', (chunk: Buffer | string) => {
+        lineCarry += redactor.push(String(chunk))
+        const lines = lineCarry.split(/\r?\n/)
+        lineCarry = lines.pop() ?? ''
+        for (const line of lines) if (line) this.appendLog(appId, source, line)
+      })
+      const flush = () => {
+        if (flushed) return
+        flushed = true
+        emit(lineCarry + redactor.flush())
+        lineCarry = ''
+      }
+      stream.once('end', flush)
+      stream.once('close', flush)
     }
-    child.stdout?.on('data', chunk => capture('stdout', chunk))
-    child.stderr?.on('data', chunk => capture('stderr', chunk))
+    attach('stdout', child.stdout)
+    attach('stderr', child.stderr)
   }
 
   private appendLog(
@@ -2877,6 +3202,17 @@ export class LocalAppRuntimeManager {
       const value = this.readBaseEnvironmentValue(key)
       if (value !== undefined) environment[key] = value
     }
+    // Only advertise the Host-configured absolute executable, never an app's env value.
+    if (this.bunPath && isAbsolute(this.bunPath)) {
+      try {
+        if (statSync(this.bunPath).isFile()) {
+          accessSync(this.bunPath, fsConstants.X_OK)
+          environment.POLO_APP_BUN_PATH = this.bunPath
+        }
+      } catch {
+        // Bun is optional for Python apps; a missing runtime must not block startup.
+      }
+    }
     return {
       ...environment,
       PORT: String(port),
@@ -2966,6 +3302,29 @@ export class LocalAppRuntimeManager {
     }
     await this.writeMetadata(metadata)
     this.appendLog(metadata.appId, 'system', `${error.code}: ${error.message}`)
+  }
+
+  async readNativeInstallationEvidence(appId: string): Promise<{ presence: 'absent'|'installed'; versions: Array<{ version: string; checksum: string; admissionId: string|null }> }|null> {
+    const safeAppId = validateRequestIdentifier(appId,'appId')
+    let raw: AppMetadata
+    try { raw = JSON.parse(await readFile(this.getMetadataPath(safeAppId),'utf8')) as AppMetadata }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null
+      try { await stat(join(this.getAppDir(safeAppId),'versions')); return null }
+      catch (probe) { return (probe as NodeJS.ErrnoException).code === 'ENOENT' ? { presence: 'absent', versions: [] } : null }
+    }
+    if (raw.schemaVersion !== METADATA_SCHEMA_VERSION || raw.appId !== safeAppId || !raw.versions
+      || Array.isArray(raw.versions) || !raw.versions[raw.currentVersion]) return null
+    const versions: Array<{ version: string; checksum: string; admissionId: string|null }> = []
+    for (const [version,row] of Object.entries(raw.versions)) {
+      if (!normalizeCatalogSemVer(version) || !row || typeof row.checksum !== 'string') return null
+      let checksum: string
+      try { checksum = normalizeChecksum(row.checksum) } catch { return null }
+      if (row.nativeInstallationAdmissionId && !/^[a-f0-9-]{36}$/i.test(row.nativeInstallationAdmissionId)) return null
+      try { const directory = await lstat(this.getVersionDir(safeAppId,version)); if (!directory.isDirectory() || directory.isSymbolicLink()) return null } catch { return null }
+      versions.push({version,checksum,admissionId: row.nativeInstallationAdmissionId ?? null})
+    }
+    return {presence: 'installed',versions}
   }
 
   private async readMetadata(appId: string): Promise<AppMetadata | null> {

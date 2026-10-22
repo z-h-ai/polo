@@ -11,6 +11,7 @@ import type {
 import type { HandlerDeps } from '../handler-deps'
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'creator-skill-rpc-'))
+process.env.POLO_AI_CONFIG_DIR = join(temporaryRoot, 'private-config')
 const workspaceOne: Workspace = {
   id: '11111111-1111-4111-8111-111111111111',
   name: '22222222-2222-4222-8222-22222222abcd',
@@ -35,6 +36,9 @@ const workspaceCaseCollision: Workspace = {
 await mkdir(workspaceOne.rootPath)
 await mkdir(workspaceTwo.rootPath)
 await mkdir(workspaceCaseCollision.rootPath)
+await mkdir(process.env.POLO_AI_CONFIG_DIR, {recursive:true})
+await writeFile(join(process.env.POLO_AI_CONFIG_DIR,'config.json'),JSON.stringify({workspaces:[workspaceOne,workspaceTwo,workspaceCaseCollision],activeWorkspaceId:workspaceOne.id,activeSessionId:null,authType:'api_key',adminUrl:'https://admin.example.com'}))
+await writeFile(join(process.env.POLO_AI_CONFIG_DIR,'config-defaults.json'),JSON.stringify({defaults:{adminUrl:'https://admin.example.com'}}))
 let workspaceOrder = [workspaceOne, workspaceTwo, workspaceCaseCollision]
 const sessionId = 'session-one'
 const secondSessionId = 'session-two'
@@ -79,6 +83,8 @@ const server: RpcServer = {
     return []
   },
 }
+const skillsBoundarySpace = 'skills-boundary-space'
+
 const deps = {
   sessionManager: {
     getWorkspaces: () => workspaceOrder,
@@ -88,15 +94,23 @@ const deps = {
             id: sessionId,
             workspaceId: sessionWorkspaceId,
             workingDirectory: sessionWorkingDirectory,
+            productSpaceId: skillsBoundarySpace,
+            accountId: trustedBoundaryAccountId,
           }
         : requestedSessionId === secondSessionId
           ? {
               id: secondSessionId,
               workspaceId: workspaceOne.id,
               workingDirectory: secondSessionWorkingDirectory,
+              productSpaceId: skillsBoundarySpace,
+              accountId: trustedBoundaryAccountId,
             }
         : null
     ),
+    getSessions: () => [
+      { id: sessionId, workspaceId: workspaceOne.id, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
+      { id: secondSessionId, workspaceId: workspaceOne.id, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
+    ],
     setActiveViewingSession() {},
   },
   oauthFlowStore: {},
@@ -155,7 +169,20 @@ const installInput = {
   },
 }
 
+const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount, setRuntimeOfflineReadOnly } = await import('../../runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvider } = await import('./trusted-product-space-account')
+
+const trustedBoundaryAccountId = 'boundary-account'
+
 beforeEach(async () => {
+  const {bindCanonicalSkillContextResolver}=await import('../../runtime/canonical-skills')
+  bindCanonicalSkillContextResolver(async scope=>({id:scope.productSpaceId,kind:'personal',accessMode:'active'} as any))
+  setTrustedProductSpaceAccountProvider(async () => trustedBoundaryAccountId)
+  // R32-2: the session fence reads the SYNCHRONOUS trusted account mirror.
+  setSyncTrustedProductSpaceAccountId(trustedBoundaryAccountId)
+  setRuntimeActiveProductSpaceAccount(trustedBoundaryAccountId)
+  setRuntimeActiveProductSpace(skillsBoundarySpace)
+  setRuntimeOfflineReadOnly(false)
   clearClientActiveSession(ctx.clientId)
   sessionWorkspaceId = workspaceOne.id
   sessionWorkingDirectory = undefined
@@ -480,4 +507,134 @@ describe('Creator Skill workspace RPC boundary', () => {
     expect(await access(workspaceOne.rootPath).then(() => true, () => false)).toBe(true)
     expect(await access(sentinel).then(() => true, () => false)).toBe(true)
   })
+})
+
+describe('Creator Skill ProductSpace scope gate', () => {
+  it('closes every Skills entry without a trusted Admin session', async () => {
+    setTrustedProductSpaceAccountProvider(async () => null)
+    const getSkills = handlers.get(RPC_CHANNELS.skills.GET)!
+    const getFiles = handlers.get(RPC_CHANNELS.skills.GET_FILES)!
+    const install = handlers.get(RPC_CHANNELS.creatorSkills.INSTALL)!
+    const refused = { code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
+    await expect(getSkills(ctx, workspaceOne.id)).rejects.toMatchObject(refused)
+    await expect(getFiles(ctx, workspaceOne.id, 'safe-skill')).rejects.toMatchObject(refused)
+    await expect(install(ctx, installInput)).rejects.toMatchObject(refused)
+  })
+
+  it('rejects a Skills scope whose fence belongs to another account', async () => {
+    setTrustedProductSpaceAccountProvider(async () => 'account-other')
+    const getSkills = handlers.get(RPC_CHANNELS.skills.GET)!
+    const uninstall = handlers.get(RPC_CHANNELS.creatorSkills.UNINSTALL)!
+    const refused = { code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
+    await expect(getSkills(ctx, workspaceOne.id)).rejects.toMatchObject(refused)
+    await expect(uninstall(ctx, {
+      workspaceId: workspaceOne.id,
+      operationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      slug: 'safe-skill',
+    })).rejects.toMatchObject(refused)
+  })
+
+  it('rejects Skills entry without a committed fence', async () => {
+    setRuntimeActiveProductSpace(null)
+    const getSkills = handlers.get(RPC_CHANNELS.skills.GET)!
+    const getTarget = handlers.get(RPC_CHANNELS.creatorSkills.GET_TARGET)!
+    const refused = { code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
+    await expect(getSkills(ctx, workspaceOne.id)).rejects.toMatchObject(refused)
+    await expect(getTarget(ctx, { workspaceId: workspaceOne.id })).rejects.toMatchObject(refused)
+  })
+
+  it('keeps offline reads but refuses every offline skill mutation', async () => {
+    setRuntimeOfflineReadOnly(true)
+    const getSkills = handlers.get(RPC_CHANNELS.skills.GET)!
+    const deleteSkill = handlers.get(RPC_CHANNELS.skills.DELETE)!
+    const install = handlers.get(RPC_CHANNELS.creatorSkills.INSTALL)!
+    const uninstall = handlers.get(RPC_CHANNELS.creatorSkills.UNINSTALL)!
+    const deleteBackups = handlers.get(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS)!
+    const ignoreVersion = handlers.get(RPC_CHANNELS.creatorSkills.IGNORE_VERSION)!
+
+    // Reads stay available in the offline read-only view.
+    expect(Array.isArray(await getSkills(ctx, workspaceOne.id))).toBe(true)
+
+    const offlineRejected = { code: 'OFFLINE_READ_ONLY' }
+    await expect(deleteSkill(ctx, {
+      workspaceId: workspaceOne.id,
+      skillSlug: 'safe-skill',
+    })).rejects.toMatchObject(offlineRejected)
+    await expect(install(ctx, installInput)).rejects.toMatchObject(offlineRejected)
+    await expect(uninstall(ctx, {
+      workspaceId: workspaceOne.id,
+      operationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      slug: 'safe-skill',
+    })).rejects.toMatchObject(offlineRejected)
+    await expect(deleteBackups(ctx, {
+      workspaceId: workspaceOne.id,
+      backup: { slug: 'safe-skill', backupId: '2026-07-30T00-00-00-000Z' },
+    })).rejects.toMatchObject(offlineRejected)
+    await expect(ignoreVersion(ctx, {
+      workspaceId: workspaceOne.id,
+      artifactId: 'artifact-one',
+      version: '1.0.0',
+      archiveChecksum: 'a'.repeat(64),
+      ignoredVersion: '0.9.0',
+    })).rejects.toMatchObject(offlineRejected)
+  })
+})
+
+describe('Canonical Skill native production RPC', () => {
+  it('install→real ledger→exact native uninstall uses scoped canonical identity and one network grant', async () => {
+    const { createHash, randomUUID } = await import('node:crypto')
+    const { zipSync, strToU8 } = await import('fflate')
+    const { bindCanonicalSkillResolver } = await import('../../runtime/canonical-skills')
+    const { readCanonicalSkillInstallations } = await import('@polo-ai/shared/creator-skills')
+    const bundle = zipSync({ 'canonical-helper/SKILL.md': strToU8('---\nname: canonical-helper\ndescription: Production native RPC fixture.\n---\nOriginal bytes.\n') })
+    let reads = 0, resolves = 0
+    bindCanonicalSkillResolver(async (scope, selector) => {
+      resolves++
+      expect(scope.accountId).toBe(trustedBoundaryAccountId)
+      expect(scope.productSpaceId).toBe(skillsBoundarySpace)
+      return {
+        context: { id: skillsBoundarySpace, kind: 'personal', accessMode: 'active' } as any,
+        launch: { contractVersion: 1, productSpaceId: skillsBoundarySpace, catalogEntryId: 'canonical-entry', expiresAt: '2030-01-01T00:00:00.000Z', subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'canonical-work', versionId: 'canonical-version', version: '1.0.0' }, delivery: { kind: 'bundle', downloadUrl: 'https://authority.example/download', checksum: createHash('sha256').update(bundle).digest('hex'), sizeBytes: bundle.byteLength, runtime: 'static' } } as any,
+        fetch: (async () => { reads++; return new Response(bundle) }) as unknown as typeof fetch,
+        assertCurrent: async () => {},
+      }
+    })
+    const install = handlers.get(RPC_CHANNELS.productSpace.INSTALL_SKILL)!
+    const result = await install(ctx, { workspaceId: workspaceOne.id, catalogEntryId: 'canonical-entry', operationId: randomUUID() }) as any
+    expect(result.success).toBe(true); expect(reads).toBe(1); expect(resolves).toBe(3)
+    expect(result.installed.canonicalSource).toEqual({ accountId: trustedBoundaryAccountId, productSpaceId: skillsBoundarySpace, subjectKind: 'personal_artifact', subjectId: 'canonical-work', versionId: 'canonical-version' })
+    expect(result.installed.organizationId).toBeUndefined()
+    expect(await readCanonicalSkillInstallations(workspaceOne.rootPath, { accountId: trustedBoundaryAccountId, productSpaceId: skillsBoundarySpace })).toHaveLength(1)
+    const uninstall = handlers.get(RPC_CHANNELS.productSpace.UNINSTALL_SKILL)!
+    const removed = await uninstall(ctx, { workspaceId: workspaceOne.id, subjectKind: 'personal_artifact', subjectId: 'canonical-work', versionId: 'canonical-version', operationId: randomUUID() }) as any
+    expect(removed.success).toBe(true)
+    expect(await readCanonicalSkillInstallations(workspaceOne.rootPath, { accountId: trustedBoundaryAccountId, productSpaceId: skillsBoundarySpace })).toHaveLength(0)
+  })
+  it('renderer cannot provide organization, account, grant, native path or a foreign workspace', async () => {
+    const install = handlers.get(RPC_CHANNELS.productSpace.INSTALL_SKILL)!
+    for (const extra of [{ accountId: 'foreign' }, { organizationId: 'fake' }, { grant: installInput.grant }, { path: '/foreign' }]) expect(await install(ctx, { workspaceId: workspaceOne.id, catalogEntryId: 'entry', operationId: crypto.randomUUID(), ...extra })).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' })
+    expect(await install(ctx, { workspaceId: workspaceTwo.id, catalogEntryId: 'entry', operationId: crypto.randomUUID() })).toMatchObject({ success: false, errorCode: 'workspace_context_mismatch' })
+  })
+})
+
+it('enterprise Skill enumeration excludes every inherited workspace Skill',async()=>{
+  const {bindCanonicalSkillContextResolver}=await import('../../runtime/canonical-skills')
+  bindCanonicalSkillContextResolver(async scope=>({id:scope.productSpaceId,kind:'enterprise',accessMode:'active'} as any))
+  await mkdir(join(workspaceOne.rootPath,'skills/personal-helper'),{recursive:true})
+  await writeFile(join(workspaceOne.rootPath,'skills/personal-helper/SKILL.md'),'---\nname: personal-helper\ndescription: Personal only.\n---\nPrivate instructions.')
+  const rows=await handlers.get(RPC_CHANNELS.skills.GET)!(ctx,workspaceOne.id) as any[]
+  expect(rows.some(row=>row.slug==='personal-helper')).toBe(false)
+})
+
+it('Skill files and host-open RPCs refuse traversal and enterprise inherited personal rows',async()=>{
+  const {bindCanonicalSkillContextResolver}=await import('../../runtime/canonical-skills')
+  bindCanonicalSkillContextResolver(async scope=>({id:scope.productSpaceId,kind:'enterprise',accessMode:'active'} as any))
+  const foreign=join(workspaceOne.rootPath,'.polo/canonical-skills','f'.repeat(64),'skills/other-space')
+  await mkdir(foreign,{recursive:true});await writeFile(join(foreign,'private-source.txt'),'other space private')
+  const files=handlers.get(RPC_CHANNELS.skills.GET_FILES)!
+  expect(await files(ctx,workspaceOne.id,`../.polo/canonical-skills/${'f'.repeat(64)}/skills/other-space`)).toEqual([])
+  expect(await files(ctx,workspaceOne.id,'personal-helper')).toEqual([])
+  expect(await handlers.get(RPC_CHANNELS.skills.GET)!(ctx,workspaceTwo.id)).toEqual([])
+  await expect(handlers.get(RPC_CHANNELS.skills.OPEN_EDITOR)!(ctx,workspaceOne.id,'../foreign')).rejects.toThrow()
+  await expect(handlers.get(RPC_CHANNELS.skills.OPEN_FINDER)!(ctx,workspaceOne.id,'personal-helper')).rejects.toThrow()
 })

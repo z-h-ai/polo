@@ -7,6 +7,7 @@ export { StructuredInput } from './StructuredInput'
 
 // Structured input components
 export { PermissionRequest } from './structured/PermissionRequest'
+export { QuestionRequest } from './structured/QuestionRequest'
 
 // Hooks
 export { useAutoGrow } from './useAutoGrow'
@@ -20,4 +21,6 @@ export type {
   StructuredResponse,
   PermissionResponse,
   AdminApprovalResponse,
+  QuestionInputResponse,
+  QuestionCancelResponse,
 } from './structured/types'

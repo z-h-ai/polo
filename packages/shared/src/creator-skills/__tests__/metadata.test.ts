@@ -197,7 +197,7 @@ Follow the repository conventions.
   })
 
   it('counts description limits by Unicode code point', () => {
-    const acceptedDescription = '😀'.repeat(1_024)
+    const acceptedDescription = '😀'.repeat(8_192)
     expect(parseCreatorSkillMetadata([{
       path: 'polo-test/SKILL.md',
       content: skill.replace(
@@ -210,13 +210,13 @@ Follow the repository conventions.
       path: 'polo-test/SKILL.md',
       content: skill.replace(
         'description: Verifies a Creator Skill package.',
-        `description: ${JSON.stringify('😀'.repeat(1_025))}`,
+        `description: ${JSON.stringify('😀'.repeat(8_193))}`,
       ),
     }])).toEqual({
       code: 'invalid_skill_content',
       path: 'polo-test/SKILL.md',
       field: 'description',
-      message: 'Creator Skill description must be at most 1024 characters',
+      message: 'Creator Skill description must be at most 8192 characters',
     })
   })
 

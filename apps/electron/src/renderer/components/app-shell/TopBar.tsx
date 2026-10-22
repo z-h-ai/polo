@@ -1,291 +1,359 @@
+import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchMenuClassName } from '@/components/ui/client-workbench'
 /**
- * TopBar - Persistent top bar above all panels (Slack-style)
+ * TopBar - The single global workbench bar (frozen POO-41 `.workbench-bar`
+ * semantics, unified with the tab strip per the POO-70 hifi prototype).
  *
- * Layout: [Sidebar] [Menu] [Back] [Forward] [Workspace selector] ... [Browser strip] [+] [Help]
+ * Layout: [traffic-light inset] [Polo brand mark (static, POO-117)] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
  *
- * Fixed below the tab browser bar, 48px tall.
+ * POO-117: the logo no longer hosts a menu — the former AppMenu entries moved
+ * into the avatar dropdown (`WorkbenchAccountMenu`), and the in-app quit item
+ * was dropped. The brand mark is decorative and its corner stays drag region.
+ *
+ * P70-NAV-01: this bar is the ONLY top navigation — the opened app tabs, the
+ * current ProductSpace identity and the account menu live here, and there is no
+ * second app/skill/circle row. Circles are reached from the personal home
+ * content area (ClientPageContext routes), never from a bar tab.
+ *
+ * P70-NAV-03: the bottom hairline is not unconditional — it responds only to
+ * the current page's registered MAIN scroll container and starts hidden
+ * (ClientPageContext). Web app tabs keep the frozen POO-41 always-on border.
+ *
+ * Fixed to the top of the window, 64px tall, always visible across shell
+ * surfaces (Home view and web app tabs included). Rendered by TabShell inside
+ * the hydration gate so a stale previous-scope bar can never surface before
+ * the new scope's own tabs hydrate (Review R33 fail-closed boundary).
  */
 
+import { useInsertionEffect, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import * as Icons from "lucide-react"
-import { Tooltip, TooltipTrigger, TooltipContent } from "@polo-ai/ui"
-import { PanelLeftRounded } from "../icons/PanelLeftRounded"
-import { TopBarButton } from "../ui/TopBarButton"
+import { useAtomValue } from "jotai"
+import { sessionMetaMapAtom } from "@/atoms/sessions"
+import { useOptionalAppShellContext } from "@/context/AppShellContext"
+import { useOptionalClientPage } from "@/context/ClientPageContext"
+import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
+import { useTabShell } from "@/context/TabShellContext"
+import { navigate, routes } from "@/lib/navigate"
 import { cn } from "@/lib/utils"
-import { useActionLabel } from "@/actions"
+import { isMac, isWebUI } from "@/lib/platform"
+import { requestNewMainWindow } from "@/lib/new-window-request"
+import { getSessionTitle } from "@/utils/session"
+import { ChevronRight, UserRound } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
-  StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
-import type { SettingsMenuItem } from "../../../shared/menu-schema"
-import { SquarePenRounded } from "../icons/SquarePenRounded"
-import { useEffect, useRef, useState } from "react"
-import { BrowserTabStrip } from "../browser/BrowserTabStrip"
-import type { Workspace } from "../../../shared/types"
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
-import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
-import { getDocUrl } from "@polo-ai/shared/docs/doc-links"
-import { AppMenu } from "../AppMenu"
-import { OrganizationSwitcher } from "@/components/organization/OrganizationSwitcher"
+import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
+import { PoloAiSymbol } from "../icons/PoloAiSymbol"
+import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
+import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
+import poloAppIcon from "../../../../resources/icon.png"
 
-const RIGHT_SLOT_FULL_BADGES_THRESHOLD = 420
-const RIGHT_SLOT_TWO_BADGES_THRESHOLD = 300
+const MAX_NOTIFICATION_ITEMS = 6
 
-interface TopBarProps {
-  workspaces: Workspace[]
-  activeWorkspaceId: string | null
-  onSelectWorkspace: (workspaceId: string, openInNewWindow?: boolean) => void | Promise<void>
-  workspaceUnreadMap?: Record<string, boolean>
-  onWorkspaceCreated?: (workspace: Workspace) => void
-  onWorkspaceRemoved?: () => void
-  activeSessionId?: string | null
-  onNewChat: () => void
-  onNewWindow?: () => void
-  onOpenSettings: () => void
-  onOpenSettingsSubpage: (subpage: SettingsMenuItem['id']) => void
-  onOpenKeyboardShortcuts: () => void
-  onOpenStoredUserPreferences: () => void
-  onBack: () => void
-  onForward: () => void
-  canGoBack: boolean
-  canGoForward: boolean
-  onToggleSidebar: () => void
-  onToggleFocusMode: () => void
-  onAddSessionPanel: () => void
-  onAddBrowserPanel: () => void
-  /** When true, hides controls that don't apply in compact/mobile layout */
-  isCompact?: boolean
+function TabIcon({ tab }: { tab: TabInstance }) {
+  if (tab.isLoading) {
+    return <Icons.Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/65" strokeWidth={1.5} />
+  }
+  if (tab.favicon) {
+    return <img src={tab.favicon} alt="" className="h-3.5 w-3.5 shrink-0" />
+  }
+  if (tab.type === "polo") {
+    return <img src={poloAppIcon} alt="" className="h-3.5 w-3.5 shrink-0 object-contain" />
+  }
+  if (tab.type === "knowledge-base") {
+    return <Icons.Library className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
+  }
+  return <Icons.Globe2 className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
 }
 
-export function TopBar({
-  workspaces,
-  activeWorkspaceId,
-  onSelectWorkspace,
-  workspaceUnreadMap,
-  onWorkspaceCreated,
-  onWorkspaceRemoved,
-  activeSessionId,
-  onNewChat,
-  onNewWindow,
-  onOpenSettings,
-  onOpenSettingsSubpage,
-  onOpenKeyboardShortcuts,
-  onOpenStoredUserPreferences,
-  onBack,
-  onForward,
-  canGoBack,
-  canGoForward,
-  onToggleSidebar,
-  onToggleFocusMode,
-  onAddSessionPanel,
-  onAddBrowserPanel,
-  isCompact,
-}: TopBarProps) {
+export function TopBar() {
   const { t } = useTranslation()
-  const [maxVisibleBrowserBadges, setMaxVisibleBrowserBadges] = useState(3)
-  const rightSlotRef = useRef<HTMLDivElement | null>(null)
+  const workbenchStyle = useClientWorkbenchStyle()
+  const appShell = useOptionalAppShellContext()
+  const productSpace = useOptionalProductSpaceContext()
+  const {
+    activeTab,
+    activeTabId,
+    activeWebAppNavigation,
+    openTabs,
+    activateHome,
+    activateTab,
+    closeTab,
+    reorderTabs,
+  } = useTabShell()
+  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
 
-  const goBackHotkey = useActionLabel('nav.goBackAlt').hotkey
-  const goForwardHotkey = useActionLabel('nav.goForwardAlt').hotkey
+  // POO107-01: the TopBar runtime count and its execution dialog are removed.
+  // The active-execution registry itself stays — space switching (PC-F06) and
+  // the App close confirmation still consume it.
+  // Payment handoff state lives HERE, not in the dropdown content: the bar is
+  // mounted for the whole app lifetime while Radix unmounts the menu on close,
+  // and both the one-handoff-at-a-time guard and the visible-scope mirror must
+  // survive close/reopen (a remount would drop delayed handoffs and re-mint
+  // tickets).
+  const paymentScope = useRef(productSpace)
+  useInsertionEffect(() => {
+    paymentScope.current = productSpace
+    return () => { paymentScope.current = null }
+  }, [productSpace])
+  const canOpenPayment = productSpace && !productSpace.pendingSwitch && (
+    productSpace.activeProductSpace.kind === 'personal' || productSpace.activeProductSpace.role === 'owner'
+  )
+  // One handoff at a time: every click would otherwise mint another ticket,
+  // superseding the one the user is about to redeem. Re-entry is dropped
+  // silently — the first click still owns the outcome.
+  const paymentHandoffInFlight = useRef(false)
+  const openPayment = async () => {
+    const scope = paymentScope.current
+    if (!scope || scope.pendingSwitch || paymentHandoffInFlight.current) return
+    paymentHandoffInFlight.current = true
+    try {
+      const result = await window.electronAPI.adminPaymentHandoff()
+      const current = paymentScope.current
+      if (!current || current.accountId !== scope.accountId || current.activeProductSpaceId !== scope.activeProductSpaceId
+        || current.contextVersion !== scope.contextVersion || current.pendingSwitch) return
+      if (!result.success || result.accountId !== current.accountId || result.productSpaceId !== current.activeProductSpaceId) {
+        toast.error(t("topbar.account.paymentError")); return
+      }
+      await window.electronAPI.openUrl(result.url)
+    } catch { if (paymentScope.current === scope) toast.error(t("topbar.account.paymentError")) }
+    finally { paymentHandoffInFlight.current = false }
+  }
 
-  useEffect(() => {
-    const slotEl = rightSlotRef.current
-    if (!slotEl) return
+  const isHome = activeTab.type === "home"
+  const showNavigation = activeTab.type === "webapp"
+  const trafficLightInset = isMac && !isWebUI ? 86 : 8
 
-    let frame = 0
+  // P70-NAV-03 header hairline: the bar's bottom border responds ONLY to the
+  // current page's registered MAIN scroll container (ClientPageContext) and
+  // starts hidden. Assistant-internal scrollers never register, so opening
+  // the Polo tab can never show the hairline. Web app tabs keep the frozen
+  // POO-41 always-on border (their scroller lives inside the webview and is
+  // out of this contract's scope); the narrow-window guard below the shell
+  // replaces the whole bar, so mobile stays out of scope as well.
+  const clientPage = useOptionalClientPage()
+  const showHeaderLine = showNavigation
+    ? true
+    : (clientPage?.isHeaderLineVisible ?? false)
 
-    const updateBadgeDensity = () => {
-      const slotWidth = slotEl.getBoundingClientRect().width
-      const nextMaxVisibleBadges = slotWidth >= RIGHT_SLOT_FULL_BADGES_THRESHOLD
-        ? 3
-        : slotWidth >= RIGHT_SLOT_TWO_BADGES_THRESHOLD
-          ? 2
-          : 1
+  const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
 
-      setMaxVisibleBrowserBadges((prev) => (prev === nextMaxVisibleBadges ? prev : nextMaxVisibleBadges))
-    }
+  const unreadSessions = useMemo(() => (
+    sessionMetas
+      .filter((meta) => meta.hasUnread)
+      .sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0))
+  ), [sessionMetas])
+  const visibleUnreadSessions = unreadSessions.slice(0, MAX_NOTIFICATION_ITEMS)
 
-    const schedule = () => {
-      if (frame) cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(updateBadgeDensity)
-    }
+  const user = appShell?.currentAdminUser ?? null
+  const userLabel = user?.displayName || user?.username || ""
+  const userInitial = userLabel.trim().charAt(0)
 
-    const observer = new ResizeObserver(schedule)
-    observer.observe(slotEl)
-    updateBadgeDensity()
+  const openPoloTab = openTabs.find((tab) => tab.type === "polo")
 
-    return () => {
-      if (frame) cancelAnimationFrame(frame)
-      observer.disconnect()
-    }
-  }, [workspaces.length, activeWorkspaceId])
+  const openSessionFromNotification = (sessionId: string) => {
+    if (openPoloTab) activateTab(openPoloTab.id)
+    // The bar lives above NavigationProvider (inside TabShell), so the click
+    // routes through the global navigate event the NavigationContext listens
+    // for instead of the hook.
+    navigate(routes.view.allSessions(sessionId))
+  }
 
   return (
     <div
-      className="fixed left-0 right-0 z-panel titlebar-drag-region"
-      style={{ top: 'var(--tabbar-height)', height: 'var(--topbar-height)' }}
-    >
-      <div className="flex h-full w-full items-center justify-between gap-2">
-      {/* === LEFT: Sidebar + Menu + Navigation + Workspace === */}
-      {/* Keep this container draggable. Only individual interactive controls should use titlebar-no-drag. */}
-      {/* In compact mode the right slot is hidden, so we add right padding here
-          so the workspace pill doesn't run flush against the viewport edge. */}
-      <div
-        className="pointer-events-auto flex min-w-0 flex-1 items-center gap-0.5"
-        style={{ paddingLeft: 12, paddingRight: isCompact ? 12 : 0 }}
-      >
-        <div className="flex items-center gap-0.5">
-        {!isCompact && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <TopBarButton onClick={onToggleSidebar} aria-label={t("menu.toggleSidebar")}>
-              <PanelLeftRounded className="h-[18px] w-[18px] text-foreground/70" />
-            </TopBarButton>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("menu.toggleSidebar")}</TooltipContent>
-        </Tooltip>
-        )}
-
-        <AppMenu
-          onNewChat={onNewChat}
-          onNewWindow={onNewWindow}
-          onOpenSettings={onOpenSettings}
-          onOpenSettingsSubpage={onOpenSettingsSubpage}
-          onOpenKeyboardShortcuts={onOpenKeyboardShortcuts}
-          onOpenStoredUserPreferences={onOpenStoredUserPreferences}
-          onToggleSidebar={onToggleSidebar}
-          onToggleFocusMode={onToggleFocusMode}
-        />
-        <OrganizationSwitcher compact={isCompact} />
-        </div>
-
-        {/* Back / Forward / Workspace selector (moved from center).
-            In compact mode the back/forward buttons are dropped — the iOS-style
-            drill-in chevron in PanelHeader plus the browser's native back gesture
-            cover that affordance, and the freed width lets the workspace pill
-            actually fit on phone-width viewports. */}
-        <div className={cn("ml-1 flex min-w-0 items-center gap-1", isCompact ? "flex-1" : "w-[clamp(220px,42vw,640px)]")}>
-          {!isCompact && (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <TopBarButton onClick={onBack} disabled={!canGoBack} aria-label={t("common.back")}>
-                    <Icons.ChevronLeft className="h-[18px] w-[18px] text-foreground/70" strokeWidth={1.5} />
-                  </TopBarButton>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{t("common.back")} {goBackHotkey}</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <TopBarButton onClick={onForward} disabled={!canGoForward} aria-label={t("common.forward")}>
-                    <Icons.ChevronRight className="h-[18px] w-[18px] text-foreground/70" strokeWidth={1.5} />
-                  </TopBarButton>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{t("common.forward")} {goForwardHotkey}</TooltipContent>
-              </Tooltip>
-            </>
-          )}
-
-          <div className="min-w-0 flex-1">
-            {isCompact ? (
-              <CompactWorkspaceSwitcher
-                workspaces={workspaces}
-                activeWorkspaceId={activeWorkspaceId}
-                onSelect={onSelectWorkspace}
-                onWorkspaceCreated={onWorkspaceCreated}
-                onWorkspaceRemoved={onWorkspaceRemoved}
-                workspaceUnreadMap={workspaceUnreadMap}
-              />
-            ) : (
-              <WorkspaceSwitcher
-                variant="topbar"
-                workspaces={workspaces}
-                activeWorkspaceId={activeWorkspaceId}
-                onSelect={onSelectWorkspace}
-                onWorkspaceCreated={onWorkspaceCreated}
-                onWorkspaceRemoved={onWorkspaceRemoved}
-                workspaceUnreadMap={workspaceUnreadMap}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* === RIGHT: Browser strip + add + help === */}
-      {!isCompact && (
-      <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: 12 }}>
-        <div className="min-w-0">
-          <BrowserTabStrip activeSessionId={activeSessionId} maxVisibleBadges={maxVisibleBrowserBadges} />
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <TopBarButton aria-label={t("menu.addPanelMenu")} className="ml-1 h-[26px] w-[26px] rounded-lg">
-              <Icons.Plus className="h-4 w-4 text-foreground/50" strokeWidth={1.5} />
-            </TopBarButton>
-          </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" minWidth="min-w-56">
-            <StyledDropdownMenuItem onClick={onAddSessionPanel}>
-              <SquarePenRounded className="h-3.5 w-3.5" />
-              {t("session.newSessionInPanel")}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={onAddBrowserPanel}>
-              <Icons.Globe className="h-3.5 w-3.5" />
-              {t("browser.newWindow")}
-            </StyledDropdownMenuItem>
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Help button */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <TopBarButton aria-label={t("menu.helpAndDocs")} className="h-[26px] w-[26px] rounded-lg">
-              <Icons.HelpCircle className="h-4 w-4 text-foreground/50" strokeWidth={1.5} />
-            </TopBarButton>
-          </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" minWidth="min-w-48">
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('sources'))}>
-              <Icons.DatabaseZap className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.sources")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('skills'))}>
-              <Icons.Zap className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.skills")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('statuses'))}>
-              <Icons.CheckCircle2 className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.statuses")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('permissions'))}>
-              <Icons.Settings className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("settings.permissions.title")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('automations'))}>
-              <Icons.Webhook className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.automations")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('messaging'))}>
-              <Icons.MessageSquare className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("settings.messaging.title")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://app.polo.z-h-ai.com/docs')}>
-              <Icons.ExternalLink className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("menu.allDocumentation")}</span>
-            </StyledDropdownMenuItem>
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
-      </div>
+      data-testid="app-topbar"
+      className={cn(
+        clientWorkbenchFocusClassName,
+        // POO-105 材质作用域内 Header 与底板同层同色、任何滚动状态不显示细线
+        // （.client-material-bar 覆盖背景/模糊/边线）；未标记宿主保持原分层。
+        "fixed left-0 right-0 top-0 z-panel flex items-center gap-[12px] bg-background/92 backdrop-blur-[18px] titlebar-drag-region client-material-bar max-md:gap-1.5",
+        // The hairline keeps its 1px slot in both states so the bar never
+        // changes height when the main scroller crosses the top edge.
+        showHeaderLine ? "border-b border-border" : "border-b border-transparent",
       )}
+      style={{ ...workbenchStyle, height: "var(--topbar-height)", paddingLeft: trafficLightInset, paddingRight: 8 }}
+    >
+      {/* === LEFT: static Polo AI brand mark (POO-117 P117-01) ===
+          The logo is decorative — no button semantics, no dropdown. Every
+          former entry now lives in the avatar menu (WorkbenchAccountMenu).
+          pointer-events-none lets the corner stay part of the titlebar drag
+          region owned by the bar container. */}
+      <div aria-hidden data-testid="topbar-brand-mark" className="pointer-events-none flex flex-none select-none items-center pl-[2px]">
+        <PoloAiSymbol className="h-4 text-accent" />
+      </div>
+
+      {/* === Tabs: Home tab + open web tabs === */}
+      <nav
+        aria-label={t("topbar.tabs.ariaLabel")}
+        className="pointer-events-auto flex h-full min-w-0 flex-1 items-center gap-[4px] overflow-x-auto [scrollbar-width:none] max-md:gap-1"
+      >
+        <button
+          type="button"
+          data-testid="topbar-home-tab"
+          onClick={activateHome}
+          aria-label={t("topbar.home")}
+          aria-current={isHome ? "page" : undefined}
+          className={cn(
+            "titlebar-no-drag inline-flex h-[36px] flex-none items-center justify-center gap-[8px] rounded-[9px] px-[12px] text-[12px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:w-9 max-md:px-0",
+            isHome
+              ? "bg-background text-foreground shadow-minimal client-material-card"
+              : "text-muted-foreground hover:bg-foreground/5 client-material-fg-hover hover:text-foreground client-material-fg-secondary",
+          )}
+        >
+          <Icons.House className="size-[17px] flex-none" strokeWidth={1.7} />
+          <span className="max-md:hidden">{t("topbar.home")}</span>
+        </button>
+
+        {openTabs.map((tab) => {
+          const active = tab.id === activeTabId
+          return (
+            <div
+              key={tab.id}
+              className={cn(
+                "titlebar-no-drag inline-flex h-[36px] min-w-[98px] max-w-[190px] flex-none items-center gap-[6px] rounded-[9px] px-[10px] text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring max-md:min-w-[96px] max-md:max-w-[140px]",
+                active
+                  ? "bg-background font-medium text-foreground shadow-minimal client-material-card"
+                  : "text-muted-foreground hover:bg-foreground/5 client-material-fg-hover hover:text-foreground client-material-fg-secondary",
+              )}
+              draggable={tab.id !== POLO_TAB_ID}
+              onClick={() => activateTab(tab.id)}
+              onDragStart={(event) => {
+                if (tab.id === POLO_TAB_ID) return
+                event.dataTransfer.setData("text/plain", tab.id)
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault()
+                const draggedTabId = event.dataTransfer.getData("text/plain")
+                if (draggedTabId) reorderTabs(draggedTabId, tab.id)
+              }}
+            >
+              <TabIcon tab={tab} />
+              <span className="min-w-0 flex-1 truncate whitespace-nowrap">{tab.title}</span>
+              {/* POO-104: the assistant is a permanent entry — no close
+                  control, so a mis-click next door can never yank the
+                  workbench back to Home. Regular webapp tabs keep theirs.
+                  POO-105: close control carries the material fg contract. */}
+              {tab.id !== POLO_TAB_ID && (
+                <button
+                  type="button"
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 client-material-fg-hover hover:text-foreground client-material-fg-muted"
+                  aria-label={t("topbar.tabs.close", { title: tab.title })}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    closeTab(tab.id)
+                  }}
+                >
+                  <Icons.X className="h-3.5 w-3.5" strokeWidth={1.5} />
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </nav>
+
+      {/* === Web app navigation (only while a web app tab is active) === */}
+      {showNavigation && (
+        <div className="pointer-events-auto titlebar-no-drag flex flex-none items-center gap-0.5 rounded-md border border-foreground/8 bg-foreground/3 p-0.5">
+          <button
+            type="button"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40 client-material-fg-secondary client-material-action"
+            disabled={!activeWebAppNavigation?.canGoBack}
+            onClick={() => activeWebAppNavigation?.goBack()}
+            aria-label={t("topbar.nav.back")}
+          >
+            <Icons.ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40 client-material-fg-secondary client-material-action"
+            disabled={!activeWebAppNavigation?.canGoForward}
+            onClick={() => activeWebAppNavigation?.goForward()}
+            aria-label={t("topbar.nav.forward")}
+          >
+            <Icons.ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40 client-material-fg-secondary client-material-action"
+            disabled={!activeWebAppNavigation}
+            onClick={() => activeWebAppNavigation?.reloadOrStop()}
+            aria-label={activeWebAppNavigation?.isLoading ? t("topbar.nav.stop") : t("topbar.nav.reload")}
+          >
+            {activeWebAppNavigation?.isLoading
+              ? <Icons.X className="h-4 w-4" strokeWidth={1.5} />
+              : <Icons.RefreshCw className="h-4 w-4" strokeWidth={1.5} />}
+          </button>
+        </div>
+      )}
+
+      {/* === RIGHT: Space control + Notifications + Account === */}
+      <div className="pointer-events-auto flex flex-none items-center gap-[8px] max-md:gap-1">
+        <CurrentProductSpaceLabel />
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              data-testid="topbar-notifications"
+              aria-label={t("topbar.notifications.label")}
+              className="titlebar-no-drag relative grid size-[32px] place-items-center rounded-[8px] text-foreground/50 outline-none hover:bg-foreground/5 client-material-fg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring client-material-fg-muted"
+            >
+              <Icons.Bell className="size-4" strokeWidth={1.7} />
+              {unreadSessions.length > 0 && (
+                <span className="absolute right-[6px] top-[6px] size-[5px] rounded-full border border-background bg-workbench-info" />
+              )}
+            </button>
+          </DropdownMenuTrigger>
+          <StyledDropdownMenuContent style={workbenchStyle} className={clientWorkbenchMenuClassName + " w-[min(294px,calc(100vw-24px))]"} align="end" minWidth="min-w-0">
+            {visibleUnreadSessions.length === 0 ? (
+              <div className="px-2 py-1.5 text-[12px] text-muted-foreground">
+                {t("topbar.notifications.empty")}
+              </div>
+            ) : (
+              visibleUnreadSessions.map((meta) => (
+                <StyledDropdownMenuItem
+                  key={meta.id}
+                  onClick={() => openSessionFromNotification(meta.id)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{getSessionTitle(meta)}</span>
+                  {visibleUnreadSessions.length > 1 && (
+                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                  )}
+                </StyledDropdownMenuItem>
+              ))
+            )}
+          </StyledDropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              data-testid="topbar-account"
+              aria-label={t("topbar.account.label")}
+              className="titlebar-no-drag ml-[3px] grid size-[28px] place-items-center rounded-full bg-foreground text-[11px] font-semibold text-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {userInitial || <UserRound className="size-3.5" strokeWidth={1.7} />}
+            </button>
+          </DropdownMenuTrigger>
+          <StyledDropdownMenuContent style={workbenchStyle} className={clientWorkbenchMenuClassName + " w-[min(294px,calc(100vw-24px))]"} align="end" minWidth="min-w-0">
+            {/* POO-117 P117-02/P117-03: the single workbench menu — account
+                entries plus the migrated app menu, in one place. The bar sits
+                above NavigationProvider, so new chat routes through the global
+                navigate() event (same contract as openSessionFromNotification). */}
+            <WorkbenchAccountMenu
+              onNewChat={() => navigate(routes.action.newSession())}
+              onNewWindow={() => { void requestNewMainWindow() }}
+              canOpenPayment={canOpenPayment ?? undefined}
+              onOpenPayment={() => { void openPayment() }}
+            />
+          </StyledDropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   )

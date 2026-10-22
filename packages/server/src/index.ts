@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { attachDesktopManagedRuntime } from '@polo-ai/server-core/runtime/cli-managed-client'
 /**
  * @polo-ai/server — standalone headless Polo AI server.
  *
@@ -41,8 +42,6 @@ import {
 import {
   getWorkspaces,
   setInvocationLlmConnections,
-  type LlmConnection,
-  type Workspace,
 } from '@polo-ai/shared/config'
 import { RootedSessionStorage } from '@polo-ai/shared/sessions'
 import { processIdentityMatches } from '@polo-ai/shared/utils'
@@ -54,20 +53,17 @@ if (process.argv.includes('--generate-token')) {
   process.exit(0)
 }
 import type { WsRpcTlsOptions } from '@polo-ai/server-core/transport'
-import { registerCoreRpcHandlers, cleanupSessionFileWatchForClient } from '@polo-ai/server-core/handlers/rpc'
-import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
+import { registerCoreRpcHandlers, registerCliExecutionHandlers, cleanupSessionFileWatchForClient } from '@polo-ai/server-core/handlers/rpc'
+import { CliExecutionAuthority, ownedCliExecutionBroker, type CliExecutionBootstrap, SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
 import { initModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
 import { setSearchPlatform, setImageProcessor } from '@polo-ai/server-core/services'
 import type { HandlerDeps } from '@polo-ai/server-core/handlers'
 
 process.env.POLO_AI_IS_PACKAGED ??= 'false'
 
-interface CliRuntimeConfig {
-  sessionsRoot: string
-  controlledRoot: string
-  workspace: Workspace
-  connection?: LlmConnection
-}
+type CliRuntimeConfig = CliExecutionBootstrap
+let cliAuthority: CliExecutionAuthority | undefined
+let managedRuntimeLink: Awaited<ReturnType<typeof attachDesktopManagedRuntime>> | undefined
 
 const isCliOneShot = process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot'
 if (isCliOneShot && process.platform !== 'win32') {
@@ -131,6 +127,17 @@ if (isCliOneShot) {
     process.exit(1)
   }
   cliRuntimeConfig = runtimeConfig
+  try {
+    if (runtimeConfig.desktopManaged) {
+      managedRuntimeLink = await attachDesktopManagedRuntime(runtimeConfig.desktopManaged)
+      cliAuthority = CliExecutionAuthority.fromDesktopBroker(runtimeConfig, cliOwnerConfig!, managedRuntimeLink)
+      cliInvocationCredential = { value: managedRuntimeLink.descriptor.capability }
+    } else cliAuthority = ownedCliExecutionBroker.admit(runtimeConfig, cliOwnerConfig!)
+    void cliParentDeath?.then(() => cliAuthority?.revoke(), () => cliAuthority?.revoke())
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : 'Invalid CLI authority')
+    process.exit(1)
+  }
   if (runtimeConfig.connection) {
     setInvocationLlmConnections([runtimeConfig.connection], runtimeConfig.connection.slug)
     if (cliInvocationCredential) {
@@ -308,6 +315,7 @@ const instance = await (async () => {
       createSessionManager: () => isCliOneShot
         ? new SessionManager({
             profile: 'cli-one-shot',
+            cliAuthority,
             sessionStorage: new RootedSessionStorage(cliRuntimeConfig!.sessionsRoot, {
               secrets: cliInvocationCredential
                 ? [
@@ -347,7 +355,9 @@ const instance = await (async () => {
           messagingRegistry: messagingHandle?.registry,
         }
       },
-      registerAllRpcHandlers: registerCoreRpcHandlers,
+      registerAllRpcHandlers: isCliOneShot
+        ? (server, deps) => registerCliExecutionHandlers(server, deps, cliAuthority!)
+        : registerCoreRpcHandlers,
       setSessionEventSink: (sessionManager, sink) => {
         if (!messagingHandle) {
           // createHandlerDeps always runs before setSessionEventSink, but be
@@ -462,6 +472,7 @@ if (!isLocalBind && instance.protocol === 'ws') {
 let shutdownPromise: Promise<void> | null = null
 const shutdown = (): Promise<void> => {
   if (shutdownPromise) return shutdownPromise
+  cliAuthority?.revoke()
   shutdownPromise = (async () => {
     webuiHandler?.dispose()
     healthServer?.stop()
@@ -473,6 +484,7 @@ const shutdown = (): Promise<void> => {
       }
     }
     await instance.stop()
+    managedRuntimeLink?.close()
   })()
   return shutdownPromise
 }
@@ -512,6 +524,7 @@ if (isCliOneShot) {
   let ownerLossHandled = false
   const handleOwnerLoss = async () => {
     if (ownerLossHandled) return
+    cliAuthority?.revoke()
     ownerLossHandled = true
     clearInterval(ownerMonitor)
     try {
@@ -525,6 +538,7 @@ if (isCliOneShot) {
   }
 
   const ownerMonitor = setInterval(async () => {
+    try { cliAuthority!.assertActive() } catch { await handleOwnerLoss(); return }
     const ownerAlive = process.ppid === ownerPid
       && processIdentityMatches(ownerPid, ownerProcessIdentity)
 

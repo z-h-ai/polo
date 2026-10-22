@@ -21,6 +21,8 @@ export interface FilterableSelectPopoverProps<T> {
   filterPlaceholder?: string
   emptyState?: React.ReactNode
   noResultsState?: React.ReactNode
+  /** Rendered between the filter input and the list (e.g. a selection summary bar). */
+  headerContent?: React.ReactNode
   closeOnSelect?: boolean
   minWidth?: number
   maxWidth?: number
@@ -46,6 +48,7 @@ export function FilterableSelectPopover<T>({
   filterPlaceholder,
   emptyState,
   noResultsState,
+  headerContent,
   closeOnSelect = false,
   minWidth = 200,
   maxWidth = 320,
@@ -184,6 +187,8 @@ export function FilterableSelectPopover<T>({
                 className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground placeholder:select-none"
               />
             </div>
+
+            {headerContent}
 
             <div ref={listRef} className="max-h-[240px] overflow-y-auto p-1">
               {!hasResults ? (

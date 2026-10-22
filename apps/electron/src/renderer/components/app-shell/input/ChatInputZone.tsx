@@ -58,7 +58,9 @@ export function ChatInputZone({
 }: ChatInputZoneProps) {
   const [autoOpenLabelId, setAutoOpenLabelId] = React.useState<string | null>(null)
   const shouldShowOptionBadges = showOptionBadges ?? !compactMode
-  const inputResetKey = `${sessionId}::${inputProps.structuredInput?.type ?? 'freeform'}`
+  const inputResetKey = `${sessionId}::${inputProps.structuredInput?.type === 'question'
+    ? `question-${(inputProps.structuredInput.data as { requestId?: string }).requestId ?? 'unknown'}`
+    : inputProps.structuredInput?.type ?? 'freeform'}`
 
   const handleClearDraft = React.useCallback(() => {
     inputProps.onInputChange?.('')
@@ -78,12 +80,15 @@ export function ChatInputZone({
   }, [labels, onLabelsChange, sessionLabels])
 
   return (
-    <div className={cn(
-      CHAT_LAYOUT.maxWidth,
-      'mx-auto w-full mt-1',
-      compactMode ? 'px-2 pb-3' : 'px-3 @xs/panel:px-4 pb-4',
-      className,
-    )}>
+    <div
+      data-testid={compactMode ? 'chat-input-compact' : 'chat-input'}
+      className={cn(
+        CHAT_LAYOUT.maxWidth,
+        'mx-auto w-full mt-1',
+        compactMode ? 'px-2 pb-3' : 'px-3 @xs/panel:px-4 pb-4',
+        className,
+      )}
+    >
       {shouldShowOptionBadges && (
         <ActiveOptionBadges
           permissionMode={permissionMode}

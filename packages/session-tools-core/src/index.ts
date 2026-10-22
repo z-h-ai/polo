@@ -2,7 +2,7 @@
  * Session Tools Core
  *
  * Shared utilities for session-scoped tools used by both
- * Claude (in-process) and Codex (subprocess) implementations.
+ * Claude (in-process) and Pi (host-side proxy execution) implementations.
  *
  * @packageDocumentation
  */
@@ -29,7 +29,6 @@ export type {
   AuthResult,
 
   // IPC types
-  CallbackMessage,
 
   // Tool result types
   TextContent,
@@ -111,6 +110,31 @@ export {
   validateSourceConfigBasic,
 } from './validation.ts';
 
+// Question request protocol (request_user_input)
+export {
+  REQUEST_USER_INPUT_OTHER_OPTION_ID,
+  REQUEST_USER_INPUT_ID_PATTERN,
+  REQUEST_USER_INPUT_MAX_QUESTIONS,
+  REQUEST_USER_INPUT_MIN_OPTIONS,
+  REQUEST_USER_INPUT_MAX_OPTIONS,
+  REQUEST_USER_INPUT_MAX_OTHER_TEXT,
+  RequestUserInputOptionSchema,
+  RequestUserInputQuestionSchema,
+  RequestUserInputArgsSchema,
+  validateRequestUserInputArgs,
+  parseRequestUserInputArgs,
+} from './question-types.ts';
+
+export type {
+  RequestUserInputOptionArgs,
+  RequestUserInputQuestionArgs,
+  RequestUserInputArgs,
+} from './question-types.ts';
+
+// Session MCP server spawn spec (dependency-free leaf — see spawn-spec.ts)
+export { buildSessionMcpServerArgs } from './spawn-spec.ts';
+export type { SessionMcpSpawnOptions } from './spawn-spec.ts';
+
 // Context interface
 export type {
   SessionToolContext,
@@ -166,6 +190,8 @@ export {
   handleMicrosoftOAuthTrigger,
   // Credential Prompt
   handleCredentialPrompt,
+  // Request User Input
+  handleRequestUserInput,
   // Update Preferences
   handleUpdatePreferences,
   // Transform Data
@@ -174,6 +200,8 @@ export {
   handleScriptSandbox,
   // Render Template
   handleRenderTemplate,
+  // Render UI (Generative UI inline cards)
+  handleRenderUi,
   // Send Developer Feedback
   handleSendDeveloperFeedback,
 } from './handlers/index.ts';
@@ -193,6 +221,7 @@ export type {
   TransformDataArgs,
   ScriptSandboxArgs,
   RenderTemplateArgs,
+  RenderUiArgs,
   SendDeveloperFeedbackArgs,
 } from './handlers/index.ts';
 
@@ -211,6 +240,16 @@ export {
   TransformDataSchema,
   ScriptSandboxSchema,
   RenderTemplateSchema,
+  // Generative UI (render_ui) schemas
+  GenUIStatCardSchema,
+  GenUIDataTableSchema,
+  GenUIAlertSchema,
+  GenUIProgressSchema,
+  GenUIActionButtonsWithIdSchema,
+  GenUIComponentSchema,
+  RenderUiSchema,
+  RENDER_UI_MAX_PAYLOAD_BYTES,
+  RENDER_UI_MAX_COMPONENTS,
   // Browser tool schema
   BrowserToolSchema,
   // Developer feedback schema
@@ -237,6 +276,27 @@ export {
   getToolDefsAsJsonSchema,
 } from './tool-defs.ts';
 
+// POO-104 GenUI component catalog seam (§5.7): model-side index, dynamic
+// render_ui union assembly, and replay schemaVersion snapshots.
+export {
+  GENUI_RENDER_UI_SCHEMA_VERSION,
+  GENUI_BUILTIN_COMPONENT_DESCRIPTORS,
+  sanitizeCatalogText,
+  buildRenderUiCatalogSection,
+  buildRenderUiToolDescription,
+} from './genui-catalog.ts';
+export type { GenUiComponentDescriptor } from './genui-catalog.ts';
+export {
+  GENUI_COMPONENT_SCHEMAS,
+  buildRenderUiSchemaForComponentTypes,
+  buildRenderUiJsonSchemaForComponentTypes,
+  getGenUiComponentJsonSchemas,
+  getGenUiComponentSchemasForSnapshot,
+  validateGenUiComponentsForSnapshot,
+  assertBuiltinCatalogConsistency,
+  GenUiSnapshotValidationError,
+} from './genui-schema.ts';
+
 export type {
   SessionToolExecutionMode,
   SessionToolSafeMode,
@@ -247,4 +307,5 @@ export type {
   JsonSchemaToolDef,
   SessionToolFilterOptions,
   SessionToolNameOptions,
+  GenUIComponent,
 } from './tool-defs.ts';

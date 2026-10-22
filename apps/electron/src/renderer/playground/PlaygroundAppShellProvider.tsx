@@ -37,6 +37,7 @@ const playgroundValue: AppShellContextType = {
   refreshLlmConnections: async () => {},
   pendingPermissions: new Map(),
   pendingCredentials: new Map(),
+  pendingQuestions: new Map(),
   getDraft: () => '',
   getDraftAttachmentRefs: () => [],
   hydrateDraftAttachments: async () => [],
@@ -44,7 +45,13 @@ const playgroundValue: AppShellContextType = {
   onCreateSession: (async () => {
     throw new Error('[Playground] onCreateSession is not available')
   }) as AppShellContextType['onCreateSession'],
+  // No real server session exists in the playground — creation/ownership is
+  // unavailable and there is never a popover-origin pending question.
+  onCreateEditPopoverSession: (async () => {
+    throw new Error('[Playground] onCreateEditPopoverSession is not available')
+  }) as AppShellContextType['onCreateEditPopoverSession'],
   onSendMessage: logCall('onSendMessage'),
+  onGetEditPopoverPendingQuestion: async () => ({ outcome: 'empty' }),
   onRenameSession: logCall('onRenameSession'),
   onFlagSession: logCall('onFlagSession'),
   onUnflagSession: logCall('onUnflagSession'),
@@ -63,13 +70,12 @@ const playgroundValue: AppShellContextType = {
   onSelectWorkspace: logCall('onSelectWorkspace'),
   onOpenSettings: logCall('onOpenSettings'),
   onOpenKeyboardShortcuts: logCall('onOpenKeyboardShortcuts'),
-  onOpenStoredUserPreferences: logCall('onOpenStoredUserPreferences'),
   onReset: logCall('onReset'),
   onSessionOptionsChange: logCall('onSessionOptionsChange'),
   onInputChange: logCall('onInputChange'),
   onAttachmentsChange: logCall('onAttachmentsChange'),
-  // The mobile-webui demos rely on this signal to flip `AppMenu` into its
-  // compact layout; harmless for other demos that don't read it.
+  // The mobile-webui demos read the compact flag from the shell context;
+  // harmless for other demos that don't read it.
   isCompactMode: true,
 }
 

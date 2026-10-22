@@ -36,9 +36,18 @@ export async function rollbackFailedBranchCreation(params: RollbackParams): Prom
 
   deleteFromRuntimeSessions(sessionId)
 
+  // The rollback now also covers the Edit Popover orphan cleanup, where a
+  // leftover on-disk session is a REAL hazard: an
+  // unprivileged leftover is fail-closed, but a partially stamped one must
+  // never silently survive. Surface deletion failures instead of swallowing
+  // them — the caller has already rejected the creation, this log is the
+  // operator's only signal that a manual cleanup may be needed.
   try {
-    await deleteStoredSession(workspaceRootPath, sessionId)
-  } catch {
-    // Best-effort rollback: runtime cleanup is the critical path.
+    const deleted = await deleteStoredSession(workspaceRootPath, sessionId)
+    if (deleted === false) {
+      console.warn(`[session-rollback] failed to delete stored session ${sessionId} from ${workspaceRootPath} — a stale session directory may remain and needs manual cleanup`)
+    }
+  } catch (deleteError) {
+    console.warn(`[session-rollback] error deleting stored session ${sessionId} from ${workspaceRootPath}:`, deleteError)
   }
 }

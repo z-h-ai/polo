@@ -1,15 +1,18 @@
 /**
  * SettingsNavigator
  *
- * Navigator panel content for settings. Displays a list of settings sections
- * (App, Workspace, Shortcuts, Preferences) that can be selected to show in the details panel.
+ * Navigator panel content for settings. Displays the settings sections of ONE
+ * scope — the assistant scope (input, tools, workspace, permissions, labels,
+ * messaging, preferences) or the Polo scope (app, account security, appearance,
+ * shortcuts, server) — derived from the selected subpage via the
+ * settings-registry. Selecting a row shows it in the details panel.
  *
  * Styling follows SessionList/SourcesListPanel patterns for visual consistency.
  */
 
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, AppWindow } from 'lucide-react'
+import { MoreHorizontal, AppWindow, Bot } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -21,7 +24,8 @@ import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import type { SettingsSubpage } from '../../../shared/types'
-import { getVisibleSettingsItems } from '../../../shared/menu-schema'
+import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, DEFAULT_SETTINGS_SUBPAGE, getSettingsPageScope } from '../../../shared/settings-registry'
+import { getSettingsItemsForScope } from '../../../shared/menu-schema'
 import { SETTINGS_ICONS } from '@/components/icons/SettingsIcons'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 
@@ -46,6 +50,12 @@ interface SettingsItem {
   label: string
   icon: React.ComponentType<{ className?: string }>
   description: string
+  /**
+   * POO-103: cross-scope shortcut row. The Polo navigator ends with a jump
+   * into the assistant scope so the assistant categories stay reachable while
+   * the assistant sidebar is hidden (Polo settings is a two-column surface).
+   */
+  isAssistantShortcut?: boolean
 }
 
 interface SettingsItemRowProps {
@@ -64,7 +74,8 @@ function SettingsItemRow({ item, isSelected, isFirst, onSelect }: SettingsItemRo
   const [menuOpen, setMenuOpen] = useState(false)
   const Icon = item.icon
 
-  // Open settings page in a new window via deep link
+  // Open settings page in a new window via deep link. The assistant shortcut
+  // row lands on the assistant scope's first category, same as its click.
   const handleOpenInNewWindow = () => {
     window.electronAPI.openUrl(`poloai://settings/${item.id}?window=focused`)
   }
@@ -90,7 +101,7 @@ function SettingsItemRow({ item, isSelected, isFirst, onSelect }: SettingsItemRo
         </div>
         {/* Main content button */}
         <button
-          data-testid={`settings-item-${item.id}`}
+          data-testid={item.isAssistantShortcut ? 'settings-item-assistant-shortcut' : `settings-item-${item.id}`}
           type="button"
           onClick={onSelect}
           className={cn(
@@ -158,15 +169,37 @@ export default function SettingsNavigator({
   const appShell = useOptionalAppShellContext()
   const isAdminLoggedIn = Boolean(appShell?.currentAdminUser?.username)
 
-  const settingsItems: SettingsItem[] = useMemo(() =>
-    getVisibleSettingsItems(isAdminLoggedIn).map((item) => ({
+  // One navigator lists a single scope. The scope follows the selected subpage
+  // (single source: settings-registry). The bare `settings` route falls back
+  // to the same default as MainContentPanel (`app`, Polo scope) so the list
+  // and the content panel never disagree.
+  const scope = useMemo(
+    () => getSettingsPageScope(selectedSubpage ?? DEFAULT_SETTINGS_SUBPAGE),
+    [selectedSubpage]
+  )
+
+  const settingsItems: SettingsItem[] = useMemo(() => {
+    const items: SettingsItem[] = getSettingsItemsForScope(scope, isAdminLoggedIn).map((item) => ({
       id: item.id,
       label: t(item.labelKey),
       icon: SETTINGS_ICONS[item.id],
       description: t(item.descriptionKey),
-    })),
-    [isAdminLoggedIn, t]
-  )
+    }))
+    // POO-103: the Polo navigator ends with a shortcut into the assistant
+    // scope (lands on its first category) so users can reach the assistant
+    // settings directly from the account-menu surface. Clicking navigates to
+    // a real assistant subpage — no new settings page, no registry entry.
+    if (scope === 'polo') {
+      items.push({
+        id: ASSISTANT_SETTINGS_DEFAULT_SUBPAGE,
+        label: t('settings.assistantShortcut.title'),
+        icon: Bot,
+        description: t('settings.assistantShortcut.description'),
+        isAssistantShortcut: true,
+      })
+    }
+    return items
+  }, [scope, isAdminLoggedIn, t])
 
   return (
     <div className="flex flex-col h-full">

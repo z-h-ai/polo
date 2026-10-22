@@ -74,3 +74,122 @@ describe('session tool filtering helpers', () => {
     expect(blockedPrefixed.has('mcp__session__spawn_session')).toBe(true);
   });
 });
+
+describe('render_ui tool gating', () => {
+  it('does not register render_ui by default (fail closed)', () => {
+    const names = getSessionToolNames();
+    expect(names.has('render_ui')).toBe(false);
+  });
+
+  it('does not register render_ui when the toggle flag is off', () => {
+    const defs = getSessionToolDefs({ allowRenderUi: false, allowRequestUserInput: true });
+    const names = defs.map(d => d.name);
+
+    expect(names.includes('render_ui')).toBe(false);
+  });
+
+  it('registers render_ui only when the toggle flag is on', () => {
+    const defs = getSessionToolDefs({ allowRenderUi: true });
+    const def = defs.find(d => d.name === 'render_ui');
+
+    expect(def).toBeDefined();
+    expect(def?.executionMode).toBe('registry');
+    expect(def?.safeMode).toBe('allow');
+    expect(def?.readOnly).toBe(true);
+    expect(def?.handler).toBeDefined();
+  });
+
+  it('json schema conversion respects the allowRenderUi filter', () => {
+    const off = getToolDefsAsJsonSchema({ prefix: 'mcp__session__' }).map(d => d.name);
+    expect(off.includes('mcp__session__render_ui')).toBe(false);
+
+    const on = getToolDefsAsJsonSchema({ prefix: 'mcp__session__', allowRenderUi: true }).map(d => d.name);
+    expect(on.includes('mcp__session__render_ui')).toBe(true);
+  });
+});
+
+describe('generate_app tool gating', () => {
+  it('does not register generate_app by default (fail closed)', () => {
+    const names = getSessionToolNames();
+    expect(names.has('generate_app')).toBe(false);
+  });
+
+  it('does not register generate_app when the toggle flag is off', () => {
+    const defs = getSessionToolDefs({ allowGenerateApp: false, allowRenderUi: true, allowRequestUserInput: true });
+    const names = defs.map(d => d.name);
+
+    expect(names.includes('generate_app')).toBe(false);
+  });
+
+  it('registers generate_app only when the toggle flag is on', () => {
+    const defs = getSessionToolDefs({ allowGenerateApp: true });
+    const def = defs.find(d => d.name === 'generate_app');
+
+    expect(def).toBeDefined();
+    expect(def?.executionMode).toBe('registry');
+    expect(def?.safeMode).toBe('allow');
+    expect(def?.handler).toBeDefined();
+  });
+
+  it('render_ui and generate_app toggle independently', () => {
+    const onlyCanvas = getSessionToolDefs({ allowGenerateApp: true }).map(d => d.name);
+    expect(onlyCanvas.includes('generate_app')).toBe(true);
+    expect(onlyCanvas.includes('render_ui')).toBe(false);
+
+    const onlyInline = getSessionToolDefs({ allowRenderUi: true }).map(d => d.name);
+    expect(onlyInline.includes('render_ui')).toBe(true);
+    expect(onlyInline.includes('generate_app')).toBe(false);
+  });
+
+  it('json schema conversion respects the allowGenerateApp filter', () => {
+    const off = getToolDefsAsJsonSchema({ prefix: 'mcp__session__' }).map(d => d.name);
+    expect(off.includes('mcp__session__generate_app')).toBe(false);
+
+    const on = getToolDefsAsJsonSchema({ prefix: 'mcp__session__', allowGenerateApp: true }).map(d => d.name);
+    expect(on.includes('mcp__session__generate_app')).toBe(true);
+  });
+});
+
+describe('update_app_data tool gating (P1-3 — shares the generate_app gate)', () => {
+  it('does not register update_app_data by default (fail closed)', () => {
+    const names = getSessionToolNames();
+    expect(names.has('update_app_data')).toBe(false);
+  });
+
+  it('does not register update_app_data when the canvas toggle flag is off', () => {
+    const defs = getSessionToolDefs({ allowGenerateApp: false, allowRenderUi: true, allowRequestUserInput: true });
+    expect(defs.map(d => d.name).includes('update_app_data')).toBe(false);
+  });
+
+  it('registers update_app_data only when the canvas toggle flag is on', () => {
+    const def = getSessionToolDefs({ allowGenerateApp: true }).find(d => d.name === 'update_app_data');
+
+    expect(def).toBeDefined();
+    expect(def?.executionMode).toBe('registry');
+    expect(def?.safeMode).toBe('allow');
+    expect(def?.handler).toBeDefined();
+  });
+
+  it('update_app_data and generate_app are always visible together (or not at all)', () => {
+    for (const allowGenerateApp of [false, true]) {
+      const names = getSessionToolDefs({ allowGenerateApp }).map(d => d.name);
+      expect(names.includes('generate_app')).toBe(allowGenerateApp);
+      expect(names.includes('update_app_data')).toBe(allowGenerateApp);
+    }
+  });
+
+  it('json schema conversion respects the shared gate', () => {
+    const off = getToolDefsAsJsonSchema({ prefix: 'mcp__session__' }).map(d => d.name);
+    expect(off.includes('mcp__session__update_app_data')).toBe(false);
+
+    const on = getToolDefsAsJsonSchema({ prefix: 'mcp__session__', allowGenerateApp: true }).map(d => d.name);
+    expect(on.includes('mcp__session__update_app_data')).toBe(true);
+  });
+
+  it('generate_app description carries the data-iteration contract (P1-3 model-side)', () => {
+    const def = SESSION_TOOL_DEFS.find(d => d.name === 'generate_app');
+    expect(def?.description).toContain('polo-app-data');
+    expect(def?.description).toContain('update_app_data');
+    expect(def?.description).toContain('reserve updateOf for structural changes');
+  });
+});

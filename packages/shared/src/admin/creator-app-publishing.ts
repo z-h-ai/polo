@@ -374,6 +374,22 @@ function inspectZipCentralDirectory(archive: Uint8Array): Set<string> {
   return directories
 }
 
+/** Manifest validation shared by upload ingress and the desktop installer.
+ * Additional delivery/display fields stay with the caller's verified record. */
+export function validateCreatorAppManifest(raw: unknown): PoloAppManifest {
+  return validatePoloAppManifestContract(raw)
+}
+
+/** Checks the executable/static index against already verified regular files.
+ * Remaining entry items are literal arguments, not archive paths. */
+export function creatorAppEntryFile(manifest: Pick<PoloAppManifest, 'entry' | 'runtime'>, regularFiles: ReadonlySet<string>): string | null {
+  const entry = safePath(manifest.entry[0] ?? '')
+  if (!entry) return null
+  if (regularFiles.has(entry)) return entry
+  const index = `${entry}/index.html`
+  return manifest.runtime === 'static' && regularFiles.has(index) ? index : null
+}
+
 /** The same manifest/ZIP contract consumed by the desktop installer. */
 export function validateProductionCreatorAppBundle(
   archive: Uint8Array,
@@ -390,12 +406,11 @@ export function validateProductionCreatorAppBundle(
   }
   let manifest: PoloAppManifest
   try {
-    manifest = validatePoloAppManifestContract(rawManifest)
+    manifest = validateCreatorAppManifest(rawManifest)
   } catch {
     throw new Error('The final Bundle does not satisfy the production Manifest contract.')
   }
-  const entry = safePath(manifest.entry[0]!)
-  if (!entry || !entries.some(item => item.path === entry && item.type === 'file')) {
+  if (!creatorAppEntryFile(manifest, new Set(entries.filter(item => item.type === 'file').map(item => item.path)))) {
     throw new Error('The final Bundle does not satisfy the production Manifest contract.')
   }
   if (expected && (manifest.appId !== expected.appId || manifest.version !== expected.version || manifest.runtime !== expected.runtime)) {

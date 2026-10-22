@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
 } from '../ui/StyledDropdown'
 import { tableToMarkdown, tableToCsv, tableToXlsx, type ExportColumn } from './table-export'
 
@@ -21,11 +22,23 @@ export interface TableExportDropdownProps {
   rows: Record<string, unknown>[]
   /** Filename for XLSX download (without extension) */
   filename: string
+  /**
+   * Optional export scope (Wave-1.5 F2 WYSIWYG): visible (filter+sort) row
+   * count vs pre-filter total. When provided, the trigger title states the
+   * scope without opening the menu and the menu header repeats it, so the
+   * exported subset is never a surprise.
+   */
+  shownRows?: number
+  totalRows?: number
 }
 
-export function TableExportDropdown({ columns, rows, filename }: TableExportDropdownProps) {
+export function TableExportDropdown({ columns, rows, filename, shownRows, totalRows }: TableExportDropdownProps) {
   const { t } = useTranslation()
   const [copiedFormat, setCopiedFormat] = useState<string | null>(null)
+
+  const scope = typeof shownRows === 'number' && typeof totalRows === 'number'
+    ? { shown: shownRows, total: totalRows }
+    : null
 
   const handleExport = useCallback(async (format: 'markdown' | 'csv' | 'xlsx') => {
     if (format === 'xlsx') {
@@ -52,13 +65,23 @@ export function TableExportDropdown({ columns, rows, filename }: TableExportDrop
             'opacity-70 hover:opacity-100 transition-opacity',
             'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
           )}
-          title={t('table.exportTable')}
+          title={scope
+            ? t('table.exportScope', { count: scope.shown, shown: scope.shown, total: scope.total })
+            : t('table.exportTable')}
         >
           <Copy className="w-4 h-4" />
           <ChevronDown className="w-3 h-3" />
         </button>
       </DropdownMenuTrigger>
       <StyledDropdownMenuContent sideOffset={6} align="end" style={{ zIndex: 'var(--z-floating-menu, 400)' }}>
+        {scope && (
+          <>
+            <div className="px-2 py-1.5 text-[11px] text-muted-foreground whitespace-nowrap" aria-live="polite">
+              {t('table.exportScopeRows', { count: scope.shown, shown: scope.shown, total: scope.total })}
+            </div>
+            <StyledDropdownMenuSeparator />
+          </>
+        )}
         <StyledDropdownMenuItem onSelect={() => handleExport('markdown')}>
           {copiedFormat === 'markdown' ? <Check className="text-success" /> : <FileText />}
           {t('table.copyAsMarkdown')}

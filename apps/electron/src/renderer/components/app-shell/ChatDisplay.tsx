@@ -39,6 +39,7 @@ import {
   type FileChange,
   type DiffViewerSettings,
 } from "@polo-ai/ui"
+import { clearGenUiToolInputDeltasForSession } from "@polo-ai/ui/chat/genuiToolInputDeltas"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
@@ -63,10 +64,13 @@ import {
   type AuthRequestTurn,
 } from "@polo-ai/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
+import { KbReferenceChips } from "@/components/chat/KbReferenceChips"
+import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { ChatInputZone, type ChatInputStatusBanner, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
+import { useUserMessageRecap } from "@/hooks/useUserMessageRecap"
 import { useNavigation } from "@/contexts/NavigationContext"
 import { useAppShellContext } from "@/context/AppShellContext"
 import { navigate, routes } from "@/lib/navigate"
@@ -74,6 +78,14 @@ import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
+import { UserMessageRecap } from "./UserMessageRecap"
+import {
+  createStickyBottomScrollGate,
+  resolveRecapPreview,
+  selectLatestSentUserTurn,
+  tailwindPaddingTopPx,
+  type StickyBottomScrollGate,
+} from "./user-message-recap"
 
 // ============================================================================
 // CSS Custom Highlight API helper
@@ -130,7 +142,7 @@ function getTurnKey(turn: Turn): string {
 
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   // Current model is read-only in the input; admin-managed settings choose it.
@@ -157,6 +169,13 @@ interface ChatDisplayProps {
   pendingCredential?: CredentialRequest
   /** Callback to respond to credential request */
   onRespondToCredential?: (sessionId: string, requestId: string, response: CredentialResponse) => void
+  /** Pending agent question for this session (request_user_input) */
+  pendingQuestion?: import('../../../shared/types').QuestionRequest
+  /** Callback to resolve a pending question (answer or skip) */
+  onRespondToQuestion?: (
+    sessionId: string,
+    resolution: import('../../../shared/types').QuestionResolution,
+  ) => Promise<import('../../../shared/types').QuestionResolutionResult>
   /** @deprecated Manual thinking-level switching has been removed from the UI. */
   thinkingLevel?: ThinkingLevel
   /** @deprecated Manual thinking-level switching has been removed from the UI. */
@@ -439,10 +458,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   currentModel,
   textareaRef: externalTextareaRef,
   disabled = false,
-  pendingPermission,
-  onRespondToPermission,
-  pendingCredential,
-  onRespondToCredential,
+   pendingPermission,
+   onRespondToPermission,
+   pendingCredential,
+   onRespondToCredential,
+   pendingQuestion,
+   onRespondToQuestion,
   // Advanced options
   permissionMode = 'ask',
   onPermissionModeChange,
@@ -493,6 +514,24 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const appShellContext = useAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
 
+  // POO-108: the knowledge-base composer entry and session scope wiring exist
+  // only in enterprise spaces — the prop presence (not the LLM gate) is what
+  // shows/hides the badge, so a personal space simply never wires it.
+  const productSpace = useOptionalProductSpaceContext()
+  const isEnterpriseSpace = productSpace?.activeProductSpace?.kind === 'enterprise'
+  const handleKbCollectionsChange = React.useCallback((collectionIds: string[]) => {
+    if (!isEnterpriseSpace || !session) return
+    // The save promise is handed back to the composer: it keeps the
+    // optimistic selection only on success and reverts with an explicit
+    // error on failure (reviews #11/#16). The authoritative value still
+    // converges through the `kb_collections_changed` session event.
+    return window.electronAPI.kbSetSessionCollections({
+      workspaceId: session.workspaceId,
+      sessionId: session.id,
+      collectionIds,
+    }).then(() => undefined)
+  }, [isEnterpriseSpace, session])
+
   // Input is only disabled when explicitly disabled (e.g., agent needs activation)
   // User can type during streaming - submitting will stop the stream and send
   const isInputDisabled = disabled
@@ -504,6 +543,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
+  // Debounced bottom-follow with a fire-time sticky re-check, so a Recap click
+  // that unstuck the bottom cannot be yanked back by an already-scheduled
+  // resize scroll (POO-111 race).
+  const stickyBottomScrollGateRef = React.useRef<StickyBottomScrollGate | null>(null)
+  if (!stickyBottomScrollGateRef.current) {
+    stickyBottomScrollGateRef.current = createStickyBottomScrollGate({
+      isSticky: () => isStickToBottomRef.current,
+    })
+  }
   // Mirror isFocusedPanel into a ref so the ResizeObserver closure reads the latest value
   const isFocusedPanelRef = React.useRef(isFocusedPanel)
   isFocusedPanelRef.current = isFocusedPanel
@@ -1117,13 +1165,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
   }, [])
 
-  // Set up scroll event listener
+  // Set up scroll event listener. Re-bound per session id so a null→session
+  // caller attaches after the viewport mounts instead of never (POO-111
+  // RECAP-04); `session?.id` is only a re-bind trigger here.
   React.useEffect(() => {
+    void session?.id
     const viewport = scrollViewportRef.current
     if (!viewport) return
     viewport.addEventListener('scroll', handleScroll)
     return () => viewport.removeEventListener('scroll', handleScroll)
-  }, [handleScroll])
+  }, [handleScroll, session?.id])
 
   // Auto-scroll using ResizeObserver for streaming content
   // Initial scroll is handled by ScrollOnMount (useLayoutEffect, before paint)
@@ -1131,17 +1182,26 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
 
-    const isSessionSwitch = prevSessionIdRef.current !== session?.id
+    const prevSessionId = prevSessionIdRef.current
+    const isSessionSwitch = prevSessionId !== session?.id
     prevSessionIdRef.current = session?.id ?? null
 
     // On session switch: reset UI state (scroll handled by ScrollOnMount)
     if (isSessionSwitch) {
       isStickToBottomRef.current = true
       setVisibleTurnCount(TURNS_PER_PAGE)
+      // P0-2 buffer hygiene: the previous session's ephemeral
+      // tool_input_delta buffers have no live consumer once we switch away —
+      // drop them so a mid-stream switch never leaves stale partials resident
+      // for the session's lifetime (the per-toolUseId cleanup in TurnCard only
+      // runs for the turn currently rendered there).
+      if (prevSessionId) clearGenUiToolInputDeltasForSession(prevSessionId)
     }
 
-    // Debounced scroll for streaming - waits for layout to settle
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    // Debounced scroll for streaming - waits for layout to settle.
+    // The gate re-checks stickiness when the timer fires, so a Recap click
+    // that unstuck the bottom between schedule and fire is respected.
+    const stickyBottomScrollGate = stickyBottomScrollGateRef.current
 
     const resizeObserver = new ResizeObserver(() => {
       // Unfocused panels: always scroll to bottom instantly (user isn't reading them)
@@ -1154,12 +1214,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       if (!isStickToBottomRef.current) return
 
       // Clear pending scroll and wait for layout to settle
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
+      stickyBottomScrollGate?.schedule(() => {
         // Skip smooth scroll if we just did an instant scroll (session switch/lazy load)
         if (Date.now() < skipSmoothScrollUntilRef.current) return
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      }, 200)
+      })
     })
 
     // Observe the scroll content container (first child of viewport)
@@ -1170,7 +1229,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     return () => {
       resizeObserver.disconnect()
-      if (debounceTimer) clearTimeout(debounceTimer)
+      stickyBottomScrollGate?.cancel()
     }
   }, [session?.id])
 
@@ -1204,6 +1263,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     isStickToBottomRef.current = true
 
     requestAnimationFrame(() => {
+      // Re-check before executing: a Recap click may have unstuck the bottom
+      // after this scroll was scheduled.
+      if (!isStickToBottomRef.current) return
       messagesEndRef.current?.scrollIntoView({
         behavior: isFocusedPanelRef.current ? 'smooth' : 'instant',
       })
@@ -1212,7 +1274,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
-  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => {
+  // kbOptions mirrors the FreeFormInput onSubmit 4th parameter shape (POO-108)
+  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }) => {
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
       includeTopSeparator: hasBaseMessage,
@@ -1224,7 +1287,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
-    onSendMessage(normalizedMessage, attachments, skillSlugs)
+    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds)
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
     // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
@@ -1257,8 +1320,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
 
     // Immediately scroll to bottom after sending - use requestAnimationFrame
-    // to ensure the DOM has updated with the new message
+    // to ensure the DOM has updated with the new message. Re-checks sticky so
+    // a Recap click landing in between is not overridden.
     requestAnimationFrame(() => {
+      if (!isStickToBottomRef.current) return
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     })
   }
@@ -1292,6 +1357,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!session?.isProcessing) return
     window.electronAPI.cancelProcessing(session.id, silent).catch(error => {
       console.error('[ChatDisplay] Failed to cancel processing:', error)
+      // Redirect-internal stops stay silent; user-initiated stops surface the
+      // failure so the session is not stuck "generating" with no feedback.
+      // isProcessing stays untouched - it is driven by server events.
+      if (!silent) {
+        toast.error(t('toast.stopResponseFailed'))
+      }
     })
   }
 
@@ -1305,8 +1376,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     viewport.scrollTop += delta
   }, [])
 
-  // Handle structured input responses (permissions and credentials)
-  const handleStructuredResponse = (response: StructuredResponse) => {
+  // Handle structured input responses (permissions, credentials, questions)
+  const handleStructuredResponse = (response: StructuredResponse): void | Promise<void> => {
     if ((response.type === 'permission' || response.type === 'admin_approval') && pendingPermission && onRespondToPermission) {
       if (response.type === 'permission') {
         const permResponse = response as PermissionResponse
@@ -1334,6 +1405,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         pendingCredential.requestId,
         credResponse
       )
+    } else if (response.type === 'question' && pendingQuestion && onRespondToQuestion) {
+      // Awaited by QuestionRequest: a transient_failure rejection keeps the
+      // card's state; terminal results unmount it via the App-level cleanup.
+      return onRespondToQuestion(pendingQuestion.sessionId, { action: 'answer', response: response.response })
+        .then(() => undefined)
+    } else if (response.type === 'question_cancel' && pendingQuestion && onRespondToQuestion) {
+      return onRespondToQuestion(pendingQuestion.sessionId, { action: 'cancel', requestId: response.requestId })
+        .then(() => undefined)
     }
   }
 
@@ -1358,8 +1437,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (pendingCredential) {
       return { type: 'credential', data: pendingCredential }
     }
+    if (pendingQuestion) {
+      return { type: 'question', data: pendingQuestion }
+    }
     return undefined
-  }, [pendingPermission, pendingCredential])
+  }, [pendingPermission, pendingCredential, pendingQuestion])
 
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
   const allTurns = React.useMemo(() => {
@@ -1374,6 +1456,65 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const startIndex = Math.max(0, allTurns.length - visibleTurnCount)
   const turns = allTurns.slice(startIndex)
   const hasMoreAbove = startIndex > 0
+
+  // ============================================================================
+  // Latest-user-message Recap (POO-111)
+  // ============================================================================
+
+  // The latest *sent* user turn — pending/queued sends never replace it, and
+  // interleaved system/error/auth turns don't hide it.
+  const recapTargetInfo = useMemo(() => selectLatestSentUserTurn(allTurns), [allTurns])
+  const recapTarget = useMemo(() => {
+    if (!recapTargetInfo) return null
+    return { turnKey: getTurnKey(recapTargetInfo.turn), turnIndex: recapTargetInfo.index }
+  }, [recapTargetInfo])
+
+  // Reveal offset derived from the same CHAT_LAYOUT spacing the message list
+  // uses (container padding + user-message top padding), so the target lands
+  // just below the fade mask without a second hardcoded constant.
+  const recapTopOffsetPx = compactMode
+    ? tailwindPaddingTopPx('py-4', 'pt-2')
+    : tailwindPaddingTopPx(CHAT_LAYOUT.containerPaddingY, CHAT_LAYOUT.userMessagePadding)
+
+  const ensureRecapTargetRendered = useCallback((turnIndex: number) => {
+    if (turnIndex < 0) return
+    setVisibleTurnCount(prev => Math.max(prev, allTurns.length - turnIndex))
+  }, [allTurns.length])
+
+  const recap = useUserMessageRecap({
+    sessionId: session?.id ?? null,
+    target: recapTarget,
+    startIndex,
+    scrollViewportRef,
+    turnRefs,
+    topOffsetPx: recapTopOffsetPx,
+    paused: messagesLoading,
+    ensureTargetRendered: ensureRecapTargetRendered,
+  })
+
+  // Single-line visible-text preview; single attachments show their file name,
+  // everything blank falls back to a localized "your latest message" label.
+  const recapPreview = useMemo(() => {
+    if (!recapTargetInfo) return ''
+    const resolved = resolveRecapPreview(recapTargetInfo.turn.message)
+    if (resolved.kind === 'text') return resolved.text
+    if (resolved.kind === 'attachments') {
+      return resolved.names.length === 1 && resolved.names[0]
+        ? resolved.names[0]
+        : t('chat.recap.attachmentsOnly', { count: resolved.names.length })
+    }
+    return t('chat.recap.latestMessage')
+  }, [recapTargetInfo, t])
+
+  // Stop bottom-follow *synchronously* on click. The browser only dispatches
+  // the scroll event for the reveal's scrollTo after the next rendering step,
+  // so a streaming chunk's already-pending 200ms gate timer could still fire
+  // with stickiness true and yank the user back down before that event lands.
+  const handleRecapClick = useCallback(() => {
+    isStickToBottomRef.current = false
+    stickyBottomScrollGateRef.current?.cancel()
+    recap.reveal()
+  }, [recap])
 
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
@@ -1473,6 +1614,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <div className="flex flex-1 flex-col min-h-0 min-w-0 relative z-10">
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className="relative flex-1 min-h-0">
+            {/* Latest-user-message Recap — a sibling OUTSIDE the fade mask so the mask never dims it */}
+            {recap.visible && recapTarget && (
+              <UserMessageRecap
+                preview={recapPreview}
+                ariaLabel={t('chat.recap.jumpToMessage')}
+                onClick={handleRecapClick}
+                compactMode={compactMode}
+              />
+            )}
             {/* Mask wrapper - fades content at top and bottom over transparent/image backgrounds */}
             <div
               className="h-full"
@@ -1550,6 +1700,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={compactMode ? { duration: 0 } : { duration: 0.1, ease: 'easeOut' }}
+                      data-recap-session={session.id}
                     >
                   {/* Scroll to bottom before paint - fires via useLayoutEffect */}
                   {/* Skip when search is active on session switch - scroll to first match instead */}
@@ -1595,6 +1746,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         <div
                           key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                          // Programmatic focus target for the Recap reveal
+                          // (not tabbable; keeps focus when the button unmounts).
+                          tabIndex={-1}
                           className={cn(
                             compactMode ? "pt-2 pb-1" : CHAT_LAYOUT.userMessagePadding,
                             "rounded-lg transition-all duration-200",
@@ -1607,6 +1761,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
                             sessionId={session?.id}
+                            workspaceId={session?.workspaceId}
                             compactMode={compactMode}
                           />
                         </div>
@@ -1926,6 +2081,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
               onSourcesChange,
+              enabledKbCollectionIds: isEnterpriseSpace ? session.kbCollectionIds : undefined,
+              onKbCollectionsChange: isEnterpriseSpace ? handleKbCollectionsChange : undefined,
               skills,
               workspaceId,
               workingDirectory,
@@ -2101,6 +2258,8 @@ interface MessageBubbleProps {
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   sessionId?: string
+  /** POO-108: KB chip previews resolve documents against the session workspace */
+  workspaceId?: string
   /**
    * Markdown render mode for assistant messages
    * @default 'minimal'
@@ -2197,6 +2356,7 @@ function MessageBubble({
   onOpenFile,
   onOpenUrl,
   sessionId,
+  workspaceId,
   renderMode = 'minimal',
   onPopOut,
   compactMode,
@@ -2207,16 +2367,21 @@ function MessageBubble({
   // === USER MESSAGE: Right-aligned bubble with attachments above ===
   if (message.role === 'user') {
     return (
-      <UserMessageBubble
-        content={message.content}
-        attachments={message.attachments}
-        badges={message.badges}
-        isPending={message.isPending}
-        isQueued={message.isQueued}
-        onUrlClick={onOpenUrl}
-        onFileClick={onOpenFile}
-        compactMode={compactMode}
-      />
+      <div>
+        <UserMessageBubble
+          content={message.content}
+          attachments={message.attachments}
+          badges={message.badges}
+          isPending={message.isPending}
+          isQueued={message.isQueued}
+          onUrlClick={onOpenUrl}
+          onFileClick={onOpenFile}
+          compactMode={compactMode}
+        />
+        {message.kbReferences && message.kbReferences.length > 0 && (
+          <KbReferenceChips references={message.kbReferences} workspaceId={workspaceId} />
+        )}
+      </div>
     )
   }
 
@@ -2352,6 +2517,8 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.content === next.message.content &&
     prev.message.role === next.message.role &&
     prev.sessionId === next.sessionId &&
+    prev.workspaceId === next.workspaceId &&
+    prev.message.kbReferences === next.message.kbReferences &&
     prev.compactMode === next.compactMode
   )
 })

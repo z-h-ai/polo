@@ -102,6 +102,12 @@ export declare function validateProductionCreatorAppBundle(
   expected?: Pick<CreatorAppManifest, 'appId' | 'version' | 'runtime'>,
 ): CreatorAppManifest
 
+export declare function validateCreatorAppManifest(raw: unknown): CreatorAppManifest
+export declare function creatorAppEntryFile(
+  manifest: Pick<CreatorAppManifest, 'entry' | 'runtime'>,
+  regularFiles: ReadonlySet<string>,
+): string | null
+
 export declare function buildCreatorAppPublishingUrl(
   adminUrl: string,
   input: { organizationId: string; mode: CreatorAppPublishMode },

@@ -193,9 +193,15 @@ export interface CreateSessionOptions {
     llmConnection?: string;
     hidden?: boolean;
     origin?: 'cli-run' | 'cli-exec';
+    popoverOwner?: string;
+    systemPromptPreset?: string;
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];
     isFlagged?: boolean;
+    /** Immutable ProductSpace binding assigned at creation time */
+    productSpaceId?: string;
+    /** Immutable trusted Admin account binding assigned at creation time (R32-2) */
+    accountId?: string;
 }
 
 export async function createSessionWithStorage(
@@ -240,9 +246,12 @@ export async function createSessionWithStorage(
     llmConnection: options?.llmConnection,
     hidden: options?.hidden,
     origin: options?.origin,
+    systemPromptPreset: options?.systemPromptPreset,
     sessionStatus: options?.sessionStatus,
     labels: options?.labels,
     isFlagged: options?.isFlagged,
+    productSpaceId: options?.productSpaceId,
+    accountId: options?.accountId,
   };
 
   // Save empty session
@@ -457,7 +466,10 @@ function headerToMetadata(
     const workingDir = header.workingDirectory ? expandPath(header.workingDirectory) : undefined;
     const sdkCwd = header.sdkCwd ? expandPath(header.sdkCwd) : workingDir;
 
-    // Destructure fields that don't exist on SessionMetadata or need overrides
+    // Destructure fields that don't exist on SessionMetadata or need overrides.
+    // NOTE: pendingQuestion is intentionally KEPT — restart hydration needs the
+    // full payload in metadata so getSessions can restore the waiting-for-answer
+    // badge and the renderer card without loading messages.
     const {
       enabledSourceSlugs: _es, pendingPlanExecution: _pp,
       sessionStatus: _ss, workingDirectory: _wd, sdkCwd: _sc,
@@ -597,6 +609,7 @@ export async function updateSessionMetadata(
     | 'lastReadMessageId'
     | 'hasUnread'
     | 'enabledSourceSlugs'
+    | 'kbCollectionIds'
     | 'workingDirectory'
     | 'sdkCwd'
     | 'permissionMode'
@@ -618,6 +631,7 @@ export async function updateSessionMetadata(
   if (updates.sessionStatus !== undefined) session.sessionStatus = updates.sessionStatus;
   if (updates.labels !== undefined) session.labels = updates.labels;
   if (updates.enabledSourceSlugs !== undefined) session.enabledSourceSlugs = updates.enabledSourceSlugs;
+  if (updates.kbCollectionIds !== undefined) session.kbCollectionIds = updates.kbCollectionIds;
   if (updates.workingDirectory !== undefined) session.workingDirectory = updates.workingDirectory;
   if (updates.sdkCwd !== undefined) session.sdkCwd = updates.sdkCwd;
   if (updates.permissionMode !== undefined) session.permissionMode = updates.permissionMode;

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 /**
  * BaseAgent Abstract Class
  *
@@ -13,8 +14,9 @@
  * Provider-specific behavior (chat, abort, capabilities) is implemented in subclasses.
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { join, dirname, basename, resolve, sep } from 'node:path';
+import { parseReadCommand } from './backend/read-patterns.ts';
 
 import type { AgentEvent } from '@polo-ai/core/types';
 import type { FileAttachment } from '../utils/files.ts';
@@ -45,6 +47,7 @@ import type {
 } from './backend/types.ts';
 import { AbortReason } from './backend/types.ts';
 import type { AuthRequest } from './session-scoped-tools.ts';
+import { parseRequestUserInputArgs, type RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import type { Workspace } from '../config/storage.ts';
 
 // Core modules
@@ -65,7 +68,8 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
-import { loadAllSkills } from '../skills/storage.ts';
+import { formatCanonicalSkillDiscovery } from './canonical-skill-discovery.ts';
+import { loadAllSkills, loadBundledSkills, loadEffectiveBundledSkills, GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../skills/storage.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -252,6 +256,68 @@ export abstract class BaseAgent implements AgentBackend {
   onPermissionRequest: PermissionCallback | null = null;
   onPlanSubmitted: PlanCallback | null = null;
   onAuthRequest: AuthCallback | null = null;
+  /**
+   * Question request callback. `generationAtRequest` is the processing
+   * generation of the turn that issued the request_user_input tool call —
+   * snapshotted by THIS agent at tool-completion handling time (synchronous
+   * with the issuing turn's event stream, via {@link sessionTurnGeneration})
+   * and carried through the closure, so the SessionManager can reject a
+   * callback whose turn was stopped/superseded before it executed.
+   */
+  onQuestionRequested: ((questions: RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>) | null = null;
+  /**
+   * Per-turn capability flag: whether the request_user_input tool is visible.
+   * Set by the SessionManager before each turn (desktop interactive sessions
+   * only — messaging/automation/headless/internal turns fail closed).
+   */
+  allowRequestUserInput = false;
+  /**
+   * Per-turn capability flag: whether the render_ui tool (Generative UI
+   * inline cards) is visible. Set by the SessionManager before each turn —
+   * desktop interactive sessions with the generativeUI.inline toggle on;
+   * every other combination fails closed.
+   */
+  allowRenderUi = false;
+  /**
+   * Per-turn capability flag: whether the generate_app tool (Generative UI
+   * canvas apps) is visible. Set by the SessionManager before each turn —
+   * desktop interactive sessions with the generativeUI.canvas toggle on;
+   * every other combination fails closed.
+   */
+  allowGenerateApp = false;
+  /**
+   * The processing generation of the turn whose events this agent is
+   * currently processing. Injected by the SessionManager at every turn start
+   * (and after agent creation) so tool-call callbacks can carry their
+   * issuing turn's generation instead of reading the CURRENT one at late
+   * execution time.
+   */
+  protected sessionTurnGeneration = 0;
+
+  /** Called by the SessionManager when a turn claims a new generation. */
+  setSessionTurnGeneration(generation: number): void {
+    this.sessionTurnGeneration = generation;
+  }
+
+  /**
+   * LIVE-TURN SIGNAL (chat-start reservation): the SessionManager arms this
+   * right before the query is entered; the backend fires it at the exact
+   * point its per-turn abort state is installed (Claude: the query's
+   * AbortController; Pi: the subprocess turn handle after the state reset).
+   * A deletion declaration waits on this signal — forceAbort must never hit
+   * a not-yet-created/already-reset abort state.
+   */
+  private turnQueryLiveSignal: (() => void) | null = null;
+
+  setTurnQueryLiveSignal(signal: () => void): void {
+    this.turnQueryLiveSignal = signal;
+  }
+
+  protected signalTurnQueryLive(): void {
+    const signal = this.turnQueryLiveSignal;
+    this.turnQueryLiveSignal = null;
+    signal?.();
+  }
   onSourceChange: SourceChangeCallback | null = null;
   onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
   onConfigValidationError: ((file: string, errors: string[]) => void) | null = null;
@@ -398,80 +464,6 @@ export abstract class BaseAgent implements AgentBackend {
       await this.automationSystem?.executeAgentEvent(event, input, signal);
     } catch (err) {
       this.debug(`Automation event ${event} failed: ${err}`);
-    }
-  }
-
-  // ============================================================
-  // Session MCP Tool Completion Handling
-  // ============================================================
-
-  /**
-   * Handle successful completion of a session MCP tool (SubmitPlan, auth tools).
-   *
-   * WHY THIS IS ON BaseAgent:
-   * -------------------------
-   * Session-scoped tools (SubmitPlan, source_oauth_trigger, etc.) run in an
-   * EXTERNAL MCP server subprocess (packages/session-mcp-server). That subprocess
-   * has its own process memory, so when it calls getSessionScopedToolCallbacks(),
-   * the callback registry is empty — it was populated in THIS process, not the subprocess.
-   *
-   * Instead, PiAgent detects session MCP tool completions from its own event
-   * stream and calls THIS shared method to fire the appropriate callback.
-   *
-   * ClaudeAgent doesn't need this — its session-scoped tools run in-process
-   * via Claude Agent SDK, so the callback registry works directly.
-   *
-   * CALLBACKS FIRED:
-   * - SubmitPlan → this.onPlanSubmitted(planPath)
-   *   → Electron reads plan file, shows plan card, calls interruptForHandoff(PlanSubmitted)
-   * - Auth tools → this.onAuthRequest(authRequest)
-   *   → Electron shows auth dialog, calls interruptForHandoff(AuthRequest)
-   */
-  protected handleSessionMcpToolCompletion(
-    toolName: string,
-    args: Record<string, unknown>
-  ): void {
-    // SubmitPlan — trigger plan view in the UI.
-    // The Electron SessionManager's onPlanSubmitted callback will:
-    //   1. Read the plan file content
-    //   2. Create a plan message (role: 'plan')
-    //   3. Send plan_submitted event to renderer
-    //   4. Call interruptForHandoff(AbortReason.PlanSubmitted) → turn terminates
-    if (toolName === 'SubmitPlan' && args.planPath) {
-      this.debug(`SubmitPlan completed: ${args.planPath}`);
-      this.onPlanSubmitted?.(args.planPath as string);
-      return;
-    }
-
-    // Auth tools — trigger auth request in the UI.
-    // Maps MCP tool names to auth request types.
-    const authToolTypes: Record<string, string> = {
-      'source_oauth_trigger': 'oauth',
-      'source_google_oauth_trigger': 'oauth-google',
-      'source_slack_oauth_trigger': 'oauth-slack',
-      'source_microsoft_oauth_trigger': 'oauth-microsoft',
-      'source_credential_prompt': 'credential',
-    };
-
-    const authType = authToolTypes[toolName];
-    if (authType && args.sourceSlug && this.onAuthRequest) {
-      const sourceSlug = args.sourceSlug as string;
-      const source = this.sourceManager.getAllSources().find(s => s.config.slug === sourceSlug);
-      const sourceName = source?.config.name || sourceSlug;
-      this.debug(`Auth tool completed: ${toolName} for ${sourceSlug}`);
-      this.onAuthRequest({
-        type: authType,
-        requestId: `${Date.now()}-auth`,
-        sessionId: this.config.session?.id || '',
-        sourceSlug,
-        sourceName,
-        ...(authType === 'credential' && {
-          mode: (args.mode as string) || 'bearer',
-          labels: args.labels as Record<string, string> | undefined,
-          description: args.description as string | undefined,
-          hint: args.hint as string | undefined,
-        }),
-      } as AuthRequest);
     }
   }
 
@@ -932,14 +924,97 @@ ${formattedMessages}
    *   - cleanMessage: Message with mentions stripped, or default directive
    *   - missingSkills: Array of skill slugs that were mentioned but not found
    */
-  protected extractSkillPaths(message: string): {
+  private canonicalSkillPaths: string[] = [];
+  private localSkillsAllowed = true;
+  private activeCanonicalSkillPaths: string[] = [];
+  private canonicalTurnId: string | null = null;
+
+  /** Capture at the request producer, never after an asynchronous tool wait. */
+  protected getCanonicalTurnId(): string | null { return this.canonicalTurnId; }
+
+  /** Runs in both SDK tool hooks, including direct Read/Bash/Skill input. */
+  protected async checkCanonicalSkillUse(toolName: string, input: Record<string, unknown>, expectedTurnId: string | null = this.canonicalTurnId): Promise<string | null> {
+    try { this.config.assertExecutionCurrent?.(); } catch { return 'CLI_EXECUTION_OWNER_REVOKED'; }
+    const stale = () => !!this.config.canonicalSkills && (!expectedTurnId || this.canonicalTurnId !== expectedTurnId);
+    if (stale()) return 'Canonical Skill files have no current native authority: the original tool turn is no longer active';
+    const paths = new Set(this.activeCanonicalSkillPaths);
+    const workingDirectory = this.config.session?.workingDirectory ?? this.workingDirectory;
+    const canonicalize = (raw: string): string => {
+      let candidate = expandPath(raw, workingDirectory), suffix: string[] = [];
+      while (!existsSync(candidate) && dirname(candidate) !== candidate) {
+        suffix.unshift(basename(candidate)); candidate = dirname(candidate);
+      }
+      try { return resolve(realpathSync(candidate), ...suffix); }
+      catch { return resolve(candidate, ...suffix); }
+    };
+    const workspace = canonicalize(this.config.workspace.rootPath);
+    const protectedRoot = join(workspace, '.polo', 'canonical-skills');
+    const lexicalProtectedRoot = join(resolve(this.config.workspace.rootPath), '.polo', 'canonical-skills');
+    const candidates: string[] = [];
+    for (const key of ['file_path', 'filePath', 'path']) if (typeof input[key] === 'string') candidates.push(input[key] as string);
+    if (Array.isArray(input.paths)) for (const path of input.paths) if (typeof path === 'string') candidates.push(path);
+    if (typeof input.command === 'string') {
+      const read = parseReadCommand(input.command);
+      if (read) candidates.push(read.filePath);
+      // Literal paths are normalized too; this is not a shell sandbox or a
+      // claim to resolve arbitrary variable/command substitution programs.
+      for (const token of input.command.match(/"[^"\n]*"|'[^'\n]*'|[^\s;|&]+/g) ?? []) candidates.push(token.replace(/^['"]|['"]$/g, ''));
+    }
+    const personalRoots = [join(this.config.workspace.rootPath, 'skills'), this.config.localGlobalSkillsRoot ?? GLOBAL_AGENT_SKILLS_DIR,
+      join(workingDirectory, PROJECT_AGENT_SKILLS_DIR)];
+    const privateRoots = personalRoots.flatMap(root => [resolve(root), canonicalize(root)]);
+    for (const candidate of candidates) {
+      const path = canonicalize(candidate);
+      const lexical = resolve(expandPath(candidate, workingDirectory));
+      if (!this.localSkillsAllowed && privateRoots.some(root => [path, lexical].some(value => value === root || value.startsWith(`${root}${sep}`)))) return 'Personal and global Skill instructions are unavailable in this ProductSpace';
+      const inside = (value: string) => [protectedRoot, lexicalProtectedRoot].some(root => value === root || value.startsWith(`${root}${sep}`));
+      if (!inside(path) && !inside(lexical)) continue;
+      if (/^(?:Write|Edit|MultiEdit)$/.test(toolName)) return 'Canonical Skill native instruction files are managed and cannot be edited through a model tool';
+      const exact = this.canonicalSkillPaths.find(skillPath => {
+        const skill = canonicalize(skillPath), directory = dirname(skill);
+        return path === skill || path === directory || path.startsWith(`${directory}${sep}`);
+      });
+      if (!exact) return 'Canonical Skill files have no current native authority';
+      paths.add(exact);
+    }
+    let canonicalPluginRequest = false;
+    if (toolName === 'Skill') {
+      const slug = typeof input.skill === 'string' ? input.skill : typeof input.name === 'string' ? input.name : '';
+      if (slug && !this.localSkillsAllowed && !slug.includes('canonical-')) return 'Personal and global Skills are unavailable in this ProductSpace';
+      if (slug.includes('canonical-')) {
+        canonicalPluginRequest = true;
+        const path = this.canonicalSkillPaths.find(path => path.includes(slug.split(':').pop()!.replace(/^canonical-/, '')));
+        if (!path) return 'Canonical Skill has no current native authority';
+        paths.add(path);
+      }
+    }
+    if (paths.size === 0) return null;
+    if (!this.config.canonicalSkills || !this.canonicalTurnId) return 'Canonical Skill permission authority is unavailable outside an active turn';
+    try {
+      await this.config.canonicalSkills.authorize([...paths], expectedTurnId!);
+      if (stale()) return 'The original tool turn is no longer active';
+      // A model can discover and Read instructions without an explicit user
+      // mention. Once admitted, that Skill participates in this original
+      // turn and must be reauthorized before every subsequent tool action.
+      this.activeCanonicalSkillPaths = [...new Set([...this.activeCanonicalSkillPaths, ...paths])];
+      return canonicalPluginRequest ? `Canonical Skills use the existing Read-before-execute path. Read ${[...paths].join(', ')} instead of the SDK plugin Skill tool.` : null;
+    }
+    catch { return 'Canonical Skill is unavailable for this account, ProductSpace or current version'; }
+  }
+
+  protected extractSkillPaths(message: string, canonical: import('../skills/types.ts').LoadedSkill[] = [], allowLocal = true, bundledSkills?: import('../skills/types.ts').LoadedSkill[]): {
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
   } {
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
-    const skills = loadAllSkills(workspaceRoot, projectRoot);
+    // Bundled app skills stay discoverable in every ProductSpace; allowLocal
+    // keeps hiding only the personal global/workspace/project legacy roots.
+    // loadAllSkills already contains the bundled tier when local skills are
+    // allowed, so only the restricted branch loads it separately here (the
+    // caller may hand in an already-loaded list so a turn reads it once).
+    const skills = [...(allowLocal ? loadAllSkills(workspaceRoot, projectRoot, this.config.localGlobalSkillsRoot) : bundledSkills ?? loadBundledSkills()), ...canonical];
     const skillSlugs = skills.map(s => s.slug);
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);
@@ -1015,7 +1090,22 @@ ${formattedMessages}
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message);
+    if (this.canonicalTurnId) { yield { type: 'error', message: 'An existing turn is still active' }; yield { type: 'complete' }; return; }
+    const turnId = randomUUID();
+    this.canonicalTurnId = turnId;
+    try {
+    const canonical = await this.config.canonicalSkills?.load().catch(() => []) ?? [];
+    this.canonicalSkillPaths = canonical.map(skill => join(skill.path, 'SKILL.md'));
+    const allowLocal = this.config.canonicalSkills ? await this.config.canonicalSkills.allowLocalSkills?.().catch(() => false) ?? false : true;
+    this.localSkillsAllowed = allowLocal;
+    // One bundled read per turn, shared by mention resolution and discovery.
+    const bundledSkills = allowLocal ? undefined : loadBundledSkills();
+    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, canonical, allowLocal, bundledSkills);
+    this.activeCanonicalSkillPaths = [...skillPaths.values()].filter(path => this.canonicalSkillPaths.includes(path));
+    if (this.activeCanonicalSkillPaths.length) {
+      const denied = await this.checkCanonicalSkillUse('Skill', {});
+      if (denied) { yield { type: 'error', message: denied }; yield { type: 'complete' }; return; }
+    }
     if (missingSkills.length > 0) {
       yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
       yield { type: 'complete' };
@@ -1043,7 +1133,18 @@ ${formattedMessages}
 
     // Prepend read directive to the message so the model reads SKILL.md first.
     const directive = this.formatSkillDirective(skillPaths);
-    const messageParts = [branchSeedContext, transferredSessionContext, directive, cleanMessage].filter(Boolean);
+    // Bundled app Skills are advertised for natural-language discovery in every
+    // ProductSpace; canonicalSkillPaths stays canonical-only so bundled reads
+    // never consume SkillTurn authorization. In a personal space a same-slug
+    // user skill is the reachable version of the bundled concept — advertise
+    // that effective entry (and only it, no other global skills) so the
+    // discovery readPath never disagrees with mentions and the list RPC. An
+    // enterprise space reads the bundled tier directly and inherits nothing.
+    const discoverableBundled = allowLocal
+      ? loadEffectiveBundledSkills(this.config.workspace?.rootPath ?? this.workingDirectory, this.config.session?.workingDirectory, this.config.localGlobalSkillsRoot)
+      : bundledSkills!;
+    const discovery = formatCanonicalSkillDiscovery([...discoverableBundled, ...canonical],message,(attachments ?? []).map(file=>file.name),allowLocal);
+    const messageParts = [branchSeedContext, transferredSessionContext, discovery, directive, cleanMessage].filter(Boolean);
     const effectiveMessage = messageParts.join('\n\n');
 
     // Capture the raw user message for source-activation auto-retry. `cleanMessage`
@@ -1054,6 +1155,11 @@ ${formattedMessages}
       yield* this.chatImpl(effectiveMessage, attachments, options);
     } finally {
       this.setCurrentTurnUserMessage(null);
+    }
+    } finally {
+      try { await this.config.canonicalSkills?.finish(turnId); }
+      catch { /* The server's bounded expiry remains authoritative after an unavailable finish. */ }
+      finally { this.canonicalTurnId = null; this.activeCanonicalSkillPaths = []; this.canonicalSkillPaths = []; }
     }
   }
 

@@ -1,18 +1,23 @@
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
+import { registerCliManagedHandlers } from '../../runtime/cli-managed-broker'
 import { registerAdminHandlers } from './admin'
 import { registerAuthHandlers } from './auth'
 import { registerAutomationsHandlers } from './automations'
+import { registerKnowledgeBaseHandlers } from './knowledge-base'
 import { registerFilesHandlers } from './files'
 import { registerLabelsHandlers } from './labels'
 import { registerLlmConnectionsHandlers } from './llm-connections'
+import { registerMemberCircleHandlers } from './member-circles'
 import { registerOAuthHandlers } from './oauth'
 import { registerResourcesHandlers } from './resources'
 import { registerOnboardingHandlers } from './onboarding'
 import { registerSessionsHandlers } from './sessions'
+import { registerProductSpaceHandlers } from './product-space'
 export { registerSessionsHandlers, cleanupSessionFileWatchForClient } from './sessions'
 export { clearClientActiveSession } from './client-active-session'
+export { whenInitialSyncTrustedProductSpaceAccountRestored } from './admin'
 import { registerServerHandlers } from './server'
 import type { ServerHandlerContext } from '../../bootstrap/headless-start'
 export type { ServerHandlerContext } from '../../bootstrap/headless-start'
@@ -32,15 +37,19 @@ export function registerCoreRpcHandlers(
   serverCtx?: ServerHandlerContext,
 ): void {
   const adminSessions = registerAdminHandlers(server, deps)
+  if (deps.desktopManagedCli) registerCliManagedHandlers(server)
   registerAuthHandlers(server, deps, adminSessions)
   registerAutomationsHandlers(server, deps)
   registerFilesHandlers(server, deps)
   registerLabelsHandlers(server, deps)
   registerLlmConnectionsHandlers(server, deps)
+  registerKnowledgeBaseHandlers(server, deps)
+  registerMemberCircleHandlers(server, deps)
   registerOAuthHandlers(server, deps)
   registerOnboardingHandlers(server, deps)
   registerResourcesHandlers(server, deps)
   registerSessionsHandlers(server, deps)
+  registerProductSpaceHandlers(server, deps)
   if (serverCtx) registerServerHandlers(server, deps, serverCtx)
   registerSettingsHandlers(server, deps)
   registerSkillsHandlers(server, deps)
@@ -51,3 +60,5 @@ export function registerCoreRpcHandlers(
   registerWorkspaceCoreHandlers(server, deps)
   registerMessagingHandlers(server, deps)
 }
+
+export { registerCliExecutionHandlers } from './cli-execution'

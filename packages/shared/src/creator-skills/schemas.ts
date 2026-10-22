@@ -3,7 +3,7 @@ import {
   CreatorSkillMetadataError,
   validateCreatorSkillMetadata,
 } from './metadata.ts'
-import { HARD_SKILL_ARCHIVE_POLICY } from './types.ts'
+import { HARD_SKILL_ARCHIVE_POLICY, HARD_WEBAPP_BUNDLE_POLICY } from './types.ts'
 
 const entityId = z.string().trim().min(1).max(512)
 const isoDate = z.string().datetime({ offset: true })
@@ -47,6 +47,39 @@ export const SkillArchivePolicySchema = z.object({
   maxExpandedBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxExpandedBytes),
 })
 
+/**
+ * Server-issued policy for web_app (Generative UI canvas) artifacts. The max
+ * bounds ARE the client hard caps: a server response that exceeds
+ * HARD_WEBAPP_BUNDLE_POLICY fails validation instead of loosening it, so the
+ * installer can never be talked above the local ceiling.
+ */
+export const WebAppArtifactPolicySchema = z.object({
+  enabled: z.boolean(),
+  maxBundleBytes: z.number().int().positive().max(HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes),
+  maxFileCount: z.number().int().positive().max(HARD_WEBAPP_BUNDLE_POLICY.maxFileCount),
+})
+
+/**
+ * HARD clamp for the installer side: intersect a server policy with the local
+ * hard caps so every effective limit is ≤ HARD_WEBAPP_BUNDLE_POLICY, and an
+ * `enabled: true` from the server can never bypass a local disable.
+ */
+export function clampWebAppArtifactPolicy(policy: {
+  enabled: boolean
+  maxBundleBytes: number
+  maxFileCount: number
+}): { enabled: boolean; maxBundleBytes: number; maxFileCount: number } {
+  const parsed = WebAppArtifactPolicySchema.safeParse(policy)
+  if (!parsed.success) {
+    return { enabled: false, maxBundleBytes: 0, maxFileCount: 0 }
+  }
+  return {
+    enabled: parsed.data.enabled,
+    maxBundleBytes: Math.min(parsed.data.maxBundleBytes, HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes),
+    maxFileCount: Math.min(parsed.data.maxFileCount, HARD_WEBAPP_BUNDLE_POLICY.maxFileCount),
+  }
+}
+
 export const SkillValidationIssueSchema = z.object({
   code: z.string().min(1).max(128),
   severity: z.enum(['error', 'warning']),
@@ -77,7 +110,7 @@ const creatorArtifactBaseSchema = z.object({
   id: entityId,
   organizationId: entityId,
   name: nullableOptional(z.string().max(512)),
-  summary: nullableOptional(z.string().max(8_192)),
+  summary: nullableOptional(z.string().refine(value => Array.from(value).length <= 8_192, 'Summary must be at most 8192 characters')),
   displayIcon: nullableOptional(z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('emoji'), value: z.string().min(1).max(64) }),
     z.object({ kind: z.literal('image'), url: z.string().url().max(8_192) }),
@@ -240,17 +273,35 @@ export const CreatorSkillSafetyStatusBatchSchema = z.object({
   statuses: z.array(CreatorSkillSafetyStatusSchema).max(1_000),
 })
 
+export const CanonicalSkillSourceSchema = z.object({
+  accountId: entityId,
+  productSpaceId: entityId,
+  subjectKind: z.enum(['personal_artifact', 'enterprise_instance']),
+  subjectId: entityId,
+  versionId: entityId,
+}).strict()
+
 export const InstalledCreatorSkillSchema = z.object({
+  nativeInstallationAdmissionId: z.string().uuid().optional(),
   artifactId: entityId,
-  organizationId: entityId,
+  organizationId: entityId.optional(),
+  canonicalSource: CanonicalSkillSourceSchema.optional(),
   slug: skillSlug,
-  version: stableSemver,
+  version: z.string().trim().min(1).max(64),
   archiveChecksum: checksum,
   contentDigest: checksum,
   installedAt: isoDate,
   lastKnownStatus: z.enum(['active', 'revoked', 'archived']).optional(),
   lastCheckedAt: isoDate.optional(),
-  ignoredVersion: stableSemver.optional(),
+  ignoredVersion: z.string().trim().min(1).max(64).optional(),
+}).superRefine((row, ctx) => {
+  if (row.canonicalSource?.subjectKind !== 'enterprise_instance' && (!stableSemver.safeParse(row.version).success || (row.ignoredVersion !== undefined && !stableSemver.safeParse(row.ignoredVersion).success))) {
+    ctx.addIssue({code:z.ZodIssueCode.custom,message:'Legacy Creator Skill versions require stable semver'})
+  }
+
+  if (row.canonicalSource ? (row.organizationId !== undefined || row.artifactId !== row.canonicalSource.subjectId) : !row.organizationId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Managed Skill provenance must be canonical or legacy, never ambiguous' })
+  }
 })
 
 export const CreatorSkillsLedgerSchema = z.object({

@@ -1,0 +1,58 @@
+{
+  "reviewer": "/root/classic_style_review",
+  "operation": "independent scoped semantic and browser review",
+  "input_policy": "Only assigned product spec sections, project Design System and actual styles/runtime, final four artifacts, own browser evidence, git b82fa1e5 visual blobs. No author verdicts, previous semantic reports, quality-report or generated self-assessment README read.",
+  "actions": [
+    {
+      "tool": "exec_command",
+      "action": "Read spec sections 13.9/13.10, Design System and shared stylesheet/header behavior."
+    },
+    {
+      "tool": "exec_command",
+      "action": "Read current manifest scene and story inventory plus actual runtime and Assistant source; extracted historical HTML via git show solely for visual baseline."
+    },
+    {
+      "tool": "python playwright.sync_api",
+      "script": "review_browser.py",
+      "action": "17 representative scenes at 3 viewports plus 7 historical 1440 comparisons. Reran after parent final freeze."
+    },
+    {
+      "tool": "view_image",
+      "action": "Inspected listed screenshots for hierarchy, controls, surfaces, cards, dialogs and failure state visibility.",
+      "files": [
+        "current-P-M03-HOME-PERSONAL-1440.png",
+        "baseline-P-M03-HOME-PERSONAL.png",
+        "current-A-personal-skills-800.png",
+        "current-A-personal-new-800.png",
+        "current-A-personal-skills-1024.png",
+        "current-A-personal-detail-800.png",
+        "current-P-M02-CONFIRM-800.png",
+        "current-P-M10-SETTINGS-DEVICE-800.png",
+        "current-A-personal-preferences-800.png",
+        "skill-detail-open-personal-800.png",
+        "current-P-M07-LIST-800.png",
+        "current-A-personal-updatefailed-1440.png",
+        "baseline-A-personal-detail.png",
+        "current-A-personal-remove-1440.png",
+        "current-P-M04-CLOSE-ACTIVE-800.png"
+      ]
+    },
+    {
+      "tool": "python playwright.sync_api",
+      "script": "interactions.py",
+      "action": "39 interaction observations. Responsive detail route investigated; list selection exposes detail at 800 and nested scrolling leaves header unmarked."
+    },
+    {
+      "tool": "python playwright.sync_api",
+      "script": "availability.py",
+      "action": "All 361 current scenes rendered nonempty through supported postMessage; opened 17 story last-step links."
+    },
+    {
+      "tool": "exec_command",
+      "action": "Compared actual first MVP style block and all seven assistant base CSS files to git b82fa1e5; all byte-identical."
+    }
+  ],
+  "harness_issue": {
+    "detail": "One ad-hoc probe used .active for assistant, which uses a visible scene without that class; timed out. Replaced with [data-prototype-scene]:visible and completed interactions. This was a reviewer selector issue, not a product finding."
+  }
+}

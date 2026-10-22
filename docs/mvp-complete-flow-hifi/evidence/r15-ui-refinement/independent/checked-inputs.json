@@ -1,0 +1,15 @@
+{
+  "docs/mvp-complete-flow-hifi/prototype-manifest.json": "9c5381ff52821c786d030687e8dabffa67782e769ed4b27c42359b421c2bd052",
+  "docs/mvp-complete-flow-hifi/prototype.html": "4b2be3cd45d0dd11fbb55b79417b2928992f6e2935a3dbbb3fb08c5ecc81e5f7",
+  "docs/mvp-complete-flow-hifi/review.html": "88c92786394920d38212a7c5d22bd8a83ba90fb3bc9179344c8a647bd0ab6113",
+  "design-demos/polo-client-source-baseline/prototype.html": "d7d6308be42cb50eff4a803079a359b3bb2653916414d10163b32df094f0397a",
+  "docs/client-journey-review/spec.md": "b38dc87c997a4b4994e39783acac3049bed69b090cdcba35e3d57b1a7054ab44",
+  ".agents/skills/polo-ai-design-system/SKILL.md": "549d8c2a127566359ce9f5ae13dd487e48ee4469328c037b6a00b1ccdb0e0d79",
+  ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+  ".agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js": "128ba7cfc35744b80356a793ad18426ecbf3373828febfa3af08f47dbf1f7c27",
+  ".agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js": "e8cd682fba9afde0e81130587232535bb465f7fde8de674b657758c472156cfc",
+  ".agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js": "68f73e50f7105a578fcd765610d13e6cdafdb830c38e590db600639d70f234c5",
+  "docs/mvp-complete-flow-hifi/tools/review-shell.html": "7a3decbaaed6f2cc5e87ed810ad77fdb6c21aab43a73b4e0ebef7a83e4b4cade",
+  "docs/mvp-complete-flow-hifi/tools/build_review.py": "25ab8bf58c5155ca41198a488585d7e1b078292a4160995f1749be7fa7a6b4ea",
+  "design-demos/polo-client-source-baseline/src/mvp/Assistant.jsx": "6a92ec18911dab84d7cc5b88aef75b7ea4060443f1412e401ce2e21c20bd081c"
+}

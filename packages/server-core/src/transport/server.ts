@@ -44,6 +44,7 @@ interface ClientConnection {
   ws: WebSocket
   workspaceId: string | null
   webContentsId: number | null
+  localSocket: boolean
   capabilities: Set<string>
   missedPongs: number
   alive: boolean
@@ -336,7 +337,7 @@ export class WsRpcServer implements RpcServer {
       }
 
       this.wss.on('connection', (ws, req) => {
-        this.onConnection(ws, req.headers.cookie ?? null)
+        this.onConnection(ws, req.headers.cookie ?? null, req.headers.origin === undefined && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? ''))
       })
     })
   }
@@ -375,7 +376,7 @@ export class WsRpcServer implements RpcServer {
   // Connection handling
   // -------------------------------------------------------------------------
 
-  private onConnection(ws: WebSocket, upgradeRequestCookie: string | null): void {
+  private onConnection(ws: WebSocket, upgradeRequestCookie: string | null, loopbackWithoutOrigin: boolean): void {
     // Reject if at capacity
     if (this.maxClients > 0 && this.clients.size >= this.maxClients) {
       transportLog.warn('Connection rejected: at capacity', {
@@ -386,6 +387,7 @@ export class WsRpcServer implements RpcServer {
       return
     }
 
+    let bearerAuthenticated = false
     let handshakeCompleted = false
     let handshakeTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -442,6 +444,8 @@ export class WsRpcServer implements RpcServer {
             authenticated = await this.validateToken(envelope.token)
           }
 
+          bearerAuthenticated = authenticated
+
           // 2. Fallback: try session cookie from HTTP upgrade request (web UI path)
           if (!authenticated && this.validateSessionCookie && upgradeRequestCookie) {
             authenticated = await this.validateSessionCookie(upgradeRequestCookie)
@@ -465,6 +469,7 @@ export class WsRpcServer implements RpcServer {
             const identityMatch =
               prevClient.workspaceId === (envelope.workspaceId ?? null) &&
               prevClient.webContentsId === (envelope.webContentsId ?? null)
+              && prevClient.localSocket === (loopbackWithoutOrigin && bearerAuthenticated)
 
             if (identityMatch) {
               // Valid reconnect — prepare client state but do NOT add to
@@ -568,6 +573,7 @@ export class WsRpcServer implements RpcServer {
           ws,
           workspaceId: envelope.workspaceId ?? null,
           webContentsId: envelope.webContentsId ?? null,
+          localSocket: loopbackWithoutOrigin && bearerAuthenticated,
           capabilities: new Set(envelope.clientCapabilities ?? []),
           missedPongs: 0,
           alive: true,
@@ -662,6 +668,7 @@ export class WsRpcServer implements RpcServer {
       clientId: client.id,
       workspaceId: client.workspaceId,
       webContentsId: client.webContentsId,
+      localSocket: client.localSocket,
       signal: handlerAbortController.signal,
     }
 

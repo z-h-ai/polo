@@ -1,3 +1,4 @@
+import { SkillTurnBeginSchema, SkillTurnOperationSchema, SkillTurnReceiptSchema, type SkillTurnBegin, type SkillTurnReceipt } from './skill-turn-contract.ts';
 import {
   AdminError,
   type AdminAuthConfig,
@@ -44,13 +45,36 @@ import {
   type AdminPlatformRelease,
   type AdminSignedUpload,
   type AdminPlatformReleaseInput,
+  type AdminGetAppRequestResponse,
+  type AdminAdmitAppRequestInput,
+  type AdminAdmitAppRequestResponse,
+  type AdminStartAppRunInput,
+  type AdminStartAppRunResponse,
+  type AdminRecordAppUsageInput,
+  type AdminRecordAppUsageResponse,
+  type AdminFinishAppRunInput,
+  type AdminFinishAppRunResponse,
 } from './types.ts';
 import { z, type ZodType } from 'zod';
+import {
+  GenerativeUiCapabilitySchema,
+  type GenerativeUiCapability,
+} from '../config/generative-ui.ts';
+import {
+  NativeInstallationAdmissionRequestSchema, NativeInstallationAdmissionSchema,
+  NativeInstallationReportSchema, NativeInstallationReceiptSchema,
+  type NativeInstallationAdmissionRequest, type NativeInstallationAdmission,
+  type NativeInstallationReport, type NativeInstallationReceipt,
+} from './native-installations-contract.ts';
 import {
   AdminLoginResponseSchema,
   AdminPhoneAuthResponseSchema,
   AdminRefreshResponseSchema,
   AdminValidateResponseSchema,
+  AdminKbCredentialSchema,
+  type AdminKbCredential,
+  PaymentHandoffTicketSchema,
+  type PaymentHandoffTicket,
   SendPhoneAuthCodeResponseSchema,
   SetAdminPasswordResponseSchema,
   AcceptOrganizationJoinResponseSchema,
@@ -76,12 +100,62 @@ import {
   CreatorSkillSafetyStatusBatchSchema,
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
+  WebAppArtifactPolicySchema,
   AppCatalogResponseSchema,
   AppReleaseDownloadSchema,
   AdminPlatformAppSchema,
   AdminPlatformReleaseSchema,
   AdminPlatformReleaseCreatedResponseSchema,
+  AdminGetAppRequestResponseSchema,
+  AdminAdmitAppRequestResponseSchema,
+  AdminStartAppRunResponseSchema,
+  AdminRecordAppUsageResponseSchema,
+  AdminFinishAppRunResponseSchema,
 } from './schemas.ts';
+import {
+  createResolveLaunchPath,
+  createProductSpaceCatalogPath,
+  createSkillEnablementPath,
+  UpdateSkillEnablementResponseSchema,
+  ListProductSpacesResponseSchema,
+  parseResolveLaunchResponseForProductSpace,
+  parseProductSpaceCatalogResponseForProductSpace,
+  PRODUCT_SPACE_CONTRACT_VERSION,
+  ProductSpaceResponsePathError,
+  ProductSpaceResponseScopeError,
+} from '../product-spaces/index.ts';
+import type {
+  ListProductSpacesResponse,
+  ResolveLaunchRequest,
+  ResolveLaunchResponse,
+} from '../product-spaces/types.ts';
+import type { ArtifactInstanceId, CatalogEntryId } from '../product-spaces/ids.ts';
+import type {
+  TrustedProductSpaceCatalog,
+  TrustedProductSpaceSummary,
+} from '../product-spaces/schemas.ts';
+import {
+  MEMBER_CIRCLE_LEAVE_COMMAND,
+  MemberCircleInvalidResponseError,
+  parseSupportConfiguration,
+  hasSupportImageSignature,
+  SUPPORT_CONFIGURATION_PATH,
+  SUPPORT_IMAGE_PATH,
+  SUPPORT_MAX_IMAGE_BYTES,
+  type SupportConfigurationReceipt,
+  parseMemberCirclesResponse,
+  parseMemberCheckoutResultResponse,
+  parseMemberLeaveResponse,
+  parseMemberMembershipsResponse,
+  parseMemberOriginalOrderResponse,
+  parseMemberRenewalPreviewResponse,
+  type MemberCircleCheckoutResult,
+  type MemberCircleLeaveMembership,
+  type MemberCircleListResponse,
+  type MemberCircleRenewalPreviewPayload,
+  type MemberMembershipListResponse,
+  type OriginalCircleOrder,
+} from './member-circles.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -136,6 +210,10 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'upload_expired',
   'checksum_mismatch',
   'content_digest_mismatch',
+  'insufficient_credit',
+  'quota_exhausted',
+  'budget_exhausted',
+  'run_finalized',
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -153,6 +231,7 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
 };
 
 const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
+  product_space_contract_unsupported: 'ProductSpace contract is not supported by this client',
   INVALID_CREDENTIALS: 'Invalid username or password',
   ACCOUNT_DISABLED: 'Admin account is disabled',
   TOKEN_REVOKED: 'Admin session is no longer valid',
@@ -205,10 +284,35 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   upload_expired: 'The upload address has expired',
   checksum_mismatch: 'The downloaded ZIP failed its checksum check',
   content_digest_mismatch: 'The extracted Skill content failed its integrity check',
+  account_transition_pending: 'The previous account is still shutting down. Retry the sign-in.',
+  insufficient_credit: 'Insufficient credit for this request',
+  quota_exhausted: 'Compute quota blocks this request',
+  budget_exhausted: 'Budget limit blocks this request',
+  run_finalized: 'This App run is already finalized',
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;
 export const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Login consumption boundary declared to Polo Admin via the `x-client`
+ * header. POO-77 V1 acceptance (API-AUTH-01a / API-AUTH-01a-CLIENT-BOUNDARY):
+ * the provider normalizes a MISSING x-client to `admin-console`
+ * (polo-admin dev@83acdeca `src/app/api/auth/login/handler.ts`
+ * normalizeLoginClient), and the admin-console boundary admits ONLY staff
+ * platform_admins — a business member's password login therefore fails 403
+ * before any token is signed.
+ *
+ * The Electron desktop is a business member consumption surface, so it
+ * declares `polo-webui`: the existing business-only provider boundary that
+ * returns body tokens for the desktop credential store. The management
+ * organization-console password boundary remains cookie-only. Phone auth
+ * retains its separate provider contract. The value must stay inside
+ * the provider's six-value SessionClient set (`src/lib/auth.ts`); unknown
+ * values are rejected with 400 before credential checks.
+ */
+export const ADMIN_LOGIN_CLIENT_HEADER_NAME = 'x-client' as const;
+export const ADMIN_LOGIN_CLIENT = 'polo-webui' as const;
 
 export function getSafeAdminErrorMessage(
   errorCode: AdminErrorCode,
@@ -257,6 +361,9 @@ export class AdminClient {
   async login(identifier: string, password: string): Promise<AdminLoginResponse> {
     const response = await this.request<unknown>('/api/auth/login', {
       method: 'POST',
+      headers: {
+        [ADMIN_LOGIN_CLIENT_HEADER_NAME]: ADMIN_LOGIN_CLIENT,
+      },
       body: { identifier, password },
     });
     return this.readSuccessResponse(response, AdminLoginResponseSchema);
@@ -325,10 +432,14 @@ export class AdminClient {
     return this.readSuccessResponse(response, SetAdminPasswordResponseSchema);
   }
 
-  async refresh(refreshToken: string): Promise<AdminRefreshResponse> {
+  async refresh(refreshToken: string, requestContext?: {
+    deadlineAt: number; signal?: AbortSignal; redirect: 'manual';
+  }): Promise<AdminRefreshResponse> {
     const response = await this.request<unknown>('/api/auth/refresh', {
       method: 'POST',
       body: { refreshToken },
+      ...requestContext,
+      ...(requestContext ? { readResponse: this.readBoundedSupportJson } : {}),
     });
     return this.readSuccessResponse(response, AdminRefreshResponseSchema);
   }
@@ -348,11 +459,28 @@ export class AdminClient {
     });
   }
 
-  getLlmConnections(accessToken: string): Promise<AdminLlmConnectionsResponse> {
-    return this.request('/api/llm-connections', {
+  getLlmConnections(accessToken: string, productSpaceId?: string): Promise<AdminLlmConnectionsResponse> {
+    const suffix = productSpaceId ? `?productSpaceId=${encodeURIComponent(productSpaceId)}` : '';
+    return this.request(`/api/llm-connections${suffix}`, {
       method: 'GET',
       accessToken,
     });
+  }
+
+  /**
+   * POO-108 v5: reads the caller's enterprise space cloud-managed OpenViking
+   * library credential against the admin session's own Bearer. Only a READY
+   * library the caller's account belongs to answers 200; a space that is not
+   * provisioned (or is foreign / personal) answers 404 and a library that is
+   * still provisioning answers 409 — all three surface as thrown AdminErrors
+   * so the caller can degrade without learning which one it was.
+   */
+  async getKbCredential(accessToken: string, productSpaceId: string): Promise<AdminKbCredential> {
+    const data = await this.request<unknown>(
+      `/api/kb/credential?productSpaceId=${encodeURIComponent(productSpaceId)}`,
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(data, AdminKbCredentialSchema);
   }
 
   async listOrganizations(accessToken: string): Promise<ListOrganizationsResponse> {
@@ -361,6 +489,223 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, ListOrganizationsResponseSchema);
+  }
+
+  /**
+   * POO-112: exchanges the current business Bearer for a single-use browser
+   * payment handoff ticket bound to this session and one ProductSpace. The
+   * response is parsed against the strict four-field ticket DTO — a server
+   * that answers with a URL, a token, or any extra field fails closed. The
+   * request itself is sent with `redirect: 'manual'`: a handoff endpoint has
+   * no reason to redirect, and following one could leak the Bearer onwards.
+   */
+  async issuePaymentHandoff(accessToken: string, productSpaceId: string): Promise<PaymentHandoffTicket> {
+    const data = await this.request<unknown>('/api/auth/payment-handoff/issue', {
+      method: 'POST',
+      accessToken,
+      body: { productSpaceId },
+      redirect: 'manual',
+    });
+    const parsed = PaymentHandoffTicketSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new AdminError('Admin payment handoff response is invalid', 'SERVER_ERROR');
+    }
+    return parsed.data;
+  }
+
+  /**
+   * Reads the ProductSpace v1 contract list. A response written for a
+   * different contractVersion fails closed with a dedicated error code so the
+   * client can block business surfaces instead of guessing.
+   */
+  async listProductSpaces(accessToken: string): Promise<ListProductSpacesResponse> {
+    const response = await this.request<unknown>(
+      '/api/me/product-spaces',
+      { method: 'GET', accessToken },
+    );
+    const parsed = ListProductSpacesResponseSchema.safeParse(response);
+    if (parsed.success) return parsed.data;
+    const rawVersion = response
+      && typeof response === 'object'
+      && !Array.isArray(response)
+      ? (response as Record<string, unknown>).contractVersion
+      : undefined;
+    if (
+      rawVersion !== undefined
+      && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+    ) {
+      throw new AdminError(
+        'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+        'product_space_contract_unsupported',
+      );
+    }
+    throw new AdminError('ProductSpace list response is invalid', 'SERVER_ERROR');
+  }
+
+  /**
+   * Reads the unified ProductSpace Catalog and validates it against the
+   * trusted space summary at the client boundary. A valid DTO for another
+   * ProductSpace is rejected, never hydrated.
+   */
+  async getProductSpaceCatalog(
+    accessToken: string,
+    context: TrustedProductSpaceSummary,
+    knownRevision?: string,
+  ): Promise<TrustedProductSpaceCatalog | { notModified: true }> {
+    const query = new URLSearchParams();
+    if (knownRevision) query.set('revision', knownRevision);
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    const response = await this.request<unknown>(
+      `${createProductSpaceCatalogPath(context.id)}${suffix}`,
+      { method: 'GET', accessToken, allowNotModified: true },
+    );
+    if (response === undefined) return { notModified: true };
+    try {
+      return parseProductSpaceCatalogResponseForProductSpace(response, context);
+    } catch (error) {
+      if (error instanceof ProductSpaceResponseScopeError || error instanceof ProductSpaceResponsePathError) {
+        throw new AdminError(
+          'ProductSpace catalog response failed the space boundary check',
+          'SERVER_ERROR',
+          { cause: error },
+        );
+      }
+      const rawVersion = response
+        && typeof response === 'object'
+        && !Array.isArray(response)
+        ? (response as Record<string, unknown>).contractVersion
+        : undefined;
+      if (
+        rawVersion !== undefined
+        && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+      ) {
+        throw new AdminError(
+          'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+          'product_space_contract_unsupported',
+        );
+      }
+      throw new AdminError('ProductSpace catalog response is invalid', 'SERVER_ERROR', { cause: error });
+    }
+  }
+
+  /**
+   * Changes the current member's opt-in, then reads the complete authoritative
+   * Catalog. A mutation revision never certifies the pre-mutation entry set.
+   * Main owns the previously trusted tuple set, including withdrawn Skills
+   * whose disable command must still converge to off.
+   */
+  async setProductSpaceSkillEnablement(
+    accessToken: string,
+    context: TrustedProductSpaceSummary,
+    catalog: TrustedProductSpaceCatalog | undefined,
+    artifactInstanceId: ArtifactInstanceId,
+    enabled: boolean,
+    trustedArtifactInstanceIds: ReadonlySet<string>,
+  ) {
+    if (!trustedArtifactInstanceIds.has(artifactInstanceId)) {
+      throw new AdminError('Skill enablement requires a previously trusted tuple', 'FORBIDDEN');
+    }
+    if (enabled) {
+      const trustedCatalog = catalog
+        ? parseProductSpaceCatalogResponseForProductSpace(catalog, context)
+        : undefined;
+      const entry = trustedCatalog?.entries.find(candidate => (
+        candidate.kind === 'skill' && candidate.artifactInstanceId === artifactInstanceId
+      ));
+      if (context.accessMode !== 'active' || !entry || entry.availability !== 'available') {
+        throw new AdminError('A current available Skill is required for enablement', 'FORBIDDEN');
+      }
+    }
+    const response = await this.request<unknown>(
+      createSkillEnablementPath(context.id, artifactInstanceId),
+      { method: 'PUT', accessToken, body: { enabled } },
+    );
+    let mutation;
+    try {
+      mutation = UpdateSkillEnablementResponseSchema.parse(response);
+      if (mutation.productSpaceId !== context.id || mutation.artifactInstanceId !== artifactInstanceId) {
+        throw new Error('Skill enablement response tuple changed');
+      }
+    } catch (error) {
+      throw new AdminError('Skill enablement response failed its scope boundary', 'SERVER_ERROR', { cause: error });
+    }
+    // A concurrent opposite write may already have won. The backend reports
+    // that fact; do not echo the requested boolean or patch cached entries.
+    const freshCatalog = await this.getProductSpaceCatalog(accessToken, context);
+    if ('notModified' in freshCatalog) {
+      throw new AdminError('A full Catalog is required after Skill enablement', 'SERVER_ERROR');
+    }
+    return { mutation, catalog: freshCatalog };
+  }
+
+  /**
+   * Resolves one exact Catalog entry for launch. The response is checked
+   * against both the trusted ProductSpace summary and the fresh Catalog used
+   * for this request, so an old id or a cross-space response fails closed.
+   */
+  async resolveProductSpaceLaunch(
+    accessToken: string,
+    context: TrustedProductSpaceSummary,
+    catalog: TrustedProductSpaceCatalog,
+    catalogEntryId: CatalogEntryId,
+    input: ResolveLaunchRequest,
+  ): Promise<ResolveLaunchResponse> {
+    const response = await this.request<unknown>(
+      createResolveLaunchPath(context.id, catalogEntryId),
+      { method: 'POST', accessToken, body: input },
+    );
+    try {
+      return parseResolveLaunchResponseForProductSpace(
+        response,
+        context,
+        catalog,
+        catalogEntryId,
+      );
+    } catch (error) {
+      const rawVersion = response
+        && typeof response === 'object'
+        && !Array.isArray(response)
+        ? (response as Record<string, unknown>).contractVersion
+        : undefined;
+      if (
+        rawVersion !== undefined
+        && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+      ) {
+        throw new AdminError(
+          'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+          'product_space_contract_unsupported',
+        );
+      }
+      throw new AdminError(
+        'ProductSpace launch response failed the Catalog boundary check',
+        'SERVER_ERROR',
+        { cause: error },
+      );
+    }
+  }
+
+  /** Original Main-owned actor/space/turn tuple; no renderer account selector. */
+  async beginSkillTurn(accessToken: string, accountId: string, productSpaceId: string, input: SkillTurnBegin): Promise<SkillTurnReceipt> {
+    const request = SkillTurnBeginSchema.parse(input);
+    const raw = await this.request<unknown>(`/api/product-spaces/${encodeURIComponent(productSpaceId)}/skills/turns`, { method: 'POST', accessToken, body: request });
+    return this.parseSkillTurnReceipt(raw, accountId, productSpaceId, request, 'active');
+  }
+
+  async operateSkillTurn(accessToken: string, original: SkillTurnReceipt, operation: 'authorize' | 'finish'): Promise<SkillTurnReceipt> {
+    const receipt = SkillTurnReceiptSchema.parse(original);
+    const input = SkillTurnOperationSchema.parse({ contractVersion: receipt.contractVersion, turnId: receipt.turnId });
+    const raw = await this.request<unknown>(`/api/product-spaces/${encodeURIComponent(receipt.productSpaceId)}/skills/turns/${encodeURIComponent(receipt.receiptId)}/${operation}`, { method: 'POST', accessToken, body: input });
+    const result = this.parseSkillTurnReceipt(raw, receipt.accountId, receipt.productSpaceId, receipt, operation === 'finish' ? 'finished' : 'active');
+    if (result.receiptId !== receipt.receiptId || result.version !== receipt.version || result.issuedAt !== receipt.issuedAt || result.expiresAt !== receipt.expiresAt) throw new AdminError('Skill turn receipt identity changed', 'SERVER_ERROR');
+    return result;
+  }
+
+  private parseSkillTurnReceipt(raw: unknown, accountId: string, productSpaceId: string, expected: SkillTurnBegin, state: SkillTurnReceipt['state']): SkillTurnReceipt {
+    try {
+      const receipt = SkillTurnReceiptSchema.parse(raw);
+      if (receipt.accountId !== accountId || receipt.productSpaceId !== productSpaceId || receipt.turnId !== expected.turnId || receipt.subjectKind !== expected.subjectKind || receipt.subjectId !== expected.subjectId || receipt.versionId !== expected.versionId || receipt.checksum !== expected.checksum || receipt.state !== state || (state === 'active' && Date.parse(receipt.expiresAt) <= Date.now())) throw new Error('Skill turn scope or lifetime changed');
+      return receipt;
+    } catch (cause) { throw new AdminError('Skill turn response failed its immutable boundary', 'SERVER_ERROR', { cause }); }
   }
 
   async getAppCatalog(
@@ -603,6 +948,22 @@ export class AdminClient {
     return this.readSuccessResponse(response, CreatorArtifactCapabilitySchema);
   }
 
+  /**
+   * Read the generativeUI section of /api/capabilities. The section and its
+   * `inline` field are both optional — absent means enabled (backward
+   * compatible with servers predating the flag). Callers should feed the
+   * result into setGenerativeUiRemoteCapability to refresh the toggle cache.
+   */
+  async getGenerativeUiCapability(
+    accessToken: string,
+  ): Promise<GenerativeUiCapability> {
+    const response = await this.request<unknown>('/api/capabilities', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, GenerativeUiCapabilitySchema);
+  }
+
   async listCreatorArtifacts(
     accessToken: string,
     input: {
@@ -709,6 +1070,22 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, SkillArchivePolicySchema);
+  }
+
+  /**
+   * Server-issued web_app artifact policy. The schema's max bounds are the
+   * client hard caps — a response above HARD_WEBAPP_BUNDLE_POLICY fails
+   * validation here rather than loosening the installer's ceiling (callers
+   * further clamp through clampWebAppArtifactPolicy).
+   */
+  async getWebAppArtifactPolicy(
+    accessToken: string,
+  ): Promise<{ enabled: boolean; maxBundleBytes: number; maxFileCount: number }> {
+    const response = await this.request<unknown>('/api/artifact-policies/web_app', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, WebAppArtifactPolicySchema);
   }
 
   async createCreatorSkillUploadGrant(
@@ -918,14 +1295,283 @@ export class AdminClient {
     return status;
   }
 
+  /**
+   * POL-102: starts one trusted App Run. Identity fields are
+   * capability-re-derived by the caller; payer/price stay server-side.
+   */
+  async startAppRun(
+    accessToken: string,
+    input: AdminStartAppRunInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminStartAppRunResponse> {
+    return this.startBillingRun(accessToken, input, options);
+  }
+
+  async startAssistantRun(
+    accessToken: string,
+    input: { runId: string; productSpaceId: string; subjectKind: 'polo_assistant' },
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminStartAppRunResponse> {
+    return this.startBillingRun(accessToken, input, options);
+  }
+
+  private async startBillingRun(
+    accessToken: string,
+    input: AdminStartAppRunInput | { runId: string; productSpaceId: string; subjectKind: 'polo_assistant' },
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminStartAppRunResponse> {
+    const response = await this.request<unknown>('/api/billing/runs', {
+      method: 'POST',
+      accessToken,
+      body: input,
+      signal: options?.signal,
+    });
+    const result = this.readSuccessResponse(response, AdminStartAppRunResponseSchema);
+    if (result.run.runId !== input.runId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    if (result.run.status !== 'running') throw new AdminError('This App run is already finalized', 'run_finalized');
+    return { run: { runId: result.run.runId, status: result.run.status } };
+  }
+
+  /** Read an original admission without creating it or returning transport secrets. */
+  async getAppRequest(accessToken: string, runId: string, requestId: string, options?: { signal?: AbortSignal }): Promise<AdminGetAppRequestResponse> {
+    const response = await this.request<unknown>(`/api/billing/runs/${encodeURIComponent(runId)}/requests/${encodeURIComponent(requestId)}`, { method: 'GET', accessToken, signal: options?.signal });
+    const result = this.readSuccessResponse(response, AdminGetAppRequestResponseSchema);
+    if (result.request.requestId !== requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return result;
+  }
+
+  /** Private Host-only admission. Never forward this response to an App. */
+  async admitAppRequest(accessToken: string, runId: string, input: AdminAdmitAppRequestInput, options?: { signal?: AbortSignal }): Promise<AdminAdmitAppRequestResponse> {
+    const response = await this.request<unknown>(`/api/billing/runs/${encodeURIComponent(runId)}/requests`, { method: 'POST', accessToken, body: input, signal: options?.signal });
+    const result = this.readSuccessResponse(response, AdminAdmitAppRequestResponseSchema);
+    if (result.request.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return result;
+  }
+
+  /** POL-102: records one idempotent (runId, requestId) usage receipt. */
+  async recordAppUsage(
+    accessToken: string,
+    input: AdminRecordAppUsageInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminRecordAppUsageResponse> {
+    const response = await this.request<unknown>('/api/billing/usage', {
+      method: 'POST',
+      accessToken,
+      body: input,
+      signal: options?.signal,
+    });
+    const result = this.readSuccessResponse(response, AdminRecordAppUsageResponseSchema);
+    if ((input.providerObservation !== undefined || input.outputDisposition !== undefined) && result.settlement === undefined) throw new AdminError('Canonical settlement acknowledgement is missing', 'SERVER_ERROR');
+    if (result.settlement === 'pending') {
+      if (result.request?.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+      return { runId: input.runId, requestId: input.requestId, recorded: result.recorded, settlement: 'pending' };
+    }
+    if (result.receipt === null) throw new AdminError('requestId belongs to legacy usage', 'idempotency_conflict');
+    if (result.receipt.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return { runId: input.runId, requestId: result.receipt.requestId, recorded: result.recorded, ...(result.settlement ? { settlement: result.settlement } : {}) };
+  }
+
+  /** POL-102: finishes an App Run with an idempotent terminal status. */
+  async finishAppRun(
+    accessToken: string,
+    runId: string,
+    input: AdminFinishAppRunInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminFinishAppRunResponse> {
+    const response = await this.request<unknown>(
+      `/api/billing/runs/${encodeURIComponent(runId)}`,
+      { method: 'PATCH', accessToken, body: input, signal: options?.signal },
+    );
+    const result = this.readSuccessResponse(response, AdminFinishAppRunResponseSchema);
+    if (result.run.runId !== runId || result.run.status !== input.status) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return { runId: result.run.runId, status: result.run.status, ...(result.settlement ? { settlement: result.settlement } : {}) };
+  }
+
+  // -------------------------------------------------------------------------
+  // Member circle reads (POO-70 C1) — F1-verified member-side endpoints only.
+  // There is deliberately NO purchase/create-order/grant method here: the
+  // client never creates circle payment orders (contract
+  // me-membership-create-renewal-order is verified_not_consumed_by_client).
+  // -------------------------------------------------------------------------
+
+  /** GET /api/me/circles — "My circles" snapshots with entitlements. */
+  async listMemberCircles(accessToken: string): Promise<MemberCircleListResponse> {
+    const response = await this.request<unknown>('/api/me/circles', {
+      method: 'GET',
+      accessToken,
+    });
+    return parseMemberCirclesResponse(response);
+  }
+
+  /** GET /api/me/circle-memberships — memberships with payment projections. */
+  async listMemberCircleMemberships(accessToken: string): Promise<MemberMembershipListResponse> {
+    const response = await this.request<unknown>('/api/me/circle-memberships', {
+      method: 'GET',
+      accessToken,
+    });
+    return parseMemberMembershipsResponse(response);
+  }
+
+  /**
+   * GET /api/me/circle-memberships/{membershipId} — authoritative renewal
+   * preview (priceMinor may legitimately be null) plus the raw purchaseUrl.
+   */
+  async previewMemberCircleRenewal(
+    accessToken: string,
+    membershipId: string,
+  ): Promise<MemberCircleRenewalPreviewPayload> {
+    const response = await this.request<unknown>(
+      `/api/me/circle-memberships/${encodeURIComponent(membershipId)}`,
+      { method: 'GET', accessToken },
+    );
+    return parseMemberRenewalPreviewResponse(response);
+  }
+
+  /**
+   * PATCH /api/me/circle-memberships/{membershipId} — the ONLY member write
+   * on this surface: leave_now on the caller's own membership. The provider
+   * filters by the authenticated actor, and the serialized body is the strict
+   * single-field leave command.
+   */
+  async leaveMemberCircle(
+    accessToken: string,
+    membershipId: string,
+  ): Promise<MemberCircleLeaveMembership> {
+    const response = await this.request<unknown>(
+      `/api/me/circle-memberships/${encodeURIComponent(membershipId)}`,
+      { method: 'PATCH', accessToken, body: { ...MEMBER_CIRCLE_LEAVE_COMMAND } },
+    );
+    return parseMemberLeaveResponse(response);
+  }
+
+  /**
+   * GET /api/me/circle-payment-orders/{orderId} — original order receipt.
+   * Read-only: never triggers a payment query or order creation, and the
+   * stored status is display history, not an entitlement judgment.
+   */
+  async getMemberCircleOriginalOrder(
+    accessToken: string,
+    orderId: string,
+  ): Promise<OriginalCircleOrder> {
+    const response = await this.request<unknown>(
+      `/api/me/circle-payment-orders/${encodeURIComponent(orderId)}`,
+      { method: 'GET', accessToken },
+    );
+    return parseMemberOriginalOrderResponse(response);
+  }
+
+  /** GET /api/circle-checkout/{orderId} — authoritative checkout/cycle read. */
+  async getMemberCircleCheckoutResult(
+    accessToken: string,
+    orderId: string,
+  ): Promise<MemberCircleCheckoutResult> {
+    const response = await this.request<unknown>(
+      `/api/circle-checkout/${encodeURIComponent(orderId)}`,
+      { method: 'GET', accessToken },
+    );
+    return parseMemberCheckoutResultResponse(response);
+  }
+
+  /** Fixed authenticated origin/path, one deadline for metadata, refresh and bytes. */
+  async getSupportConfiguration(accessToken: string): Promise<SupportConfigurationReceipt> {
+    let origin: URL;
+    try { origin = new URL(this.adminUrl); } catch { throw new MemberCircleInvalidResponseError(); }
+    if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password
+      || origin.pathname !== '/' || origin.search || origin.hash) throw new MemberCircleInvalidResponseError();
+    const deadlineAt = Date.now() + this.requestTimeoutMs;
+    let currentAccessToken = accessToken;
+    const context = { method: 'GET' as const, accessToken, deadlineAt, redirect: 'manual' as const,
+      onAccessTokenRefreshed: (token: string) => { currentAccessToken = token; } };
+    const configuration = parseSupportConfiguration(await this.request<unknown>(SUPPORT_CONFIGURATION_PATH, {
+      ...context, readResponse: this.readBoundedSupportJson,
+    }));
+    if (!configuration.configured) return configuration;
+    const bytes = await this.request<Uint8Array>(SUPPORT_IMAGE_PATH, {
+      ...context, accessToken: currentAccessToken, headers: { Accept: configuration.qrContentType },
+      readResponse: async (response, signal) => {
+        if (!response.ok) return this.readBoundedSupportJson(response, signal);
+        if (response.headers.get('content-type') !== configuration.qrContentType
+          || response.headers.get('content-sha256') !== configuration.qrSha256) throw new MemberCircleInvalidResponseError();
+        const bytes = await this.readSupportBytes(response, signal);
+        if (!hasSupportImageSignature(bytes, configuration.qrContentType)) throw new MemberCircleInvalidResponseError();
+        const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes).buffer);
+        const actual = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+        if (signal.aborted) throw signal.reason;
+        if (actual !== configuration.qrSha256) throw new MemberCircleInvalidResponseError();
+        return bytes;
+      },
+    });
+    return { ...configuration, bytes };
+  }
+
+  private readBoundedSupportJson = async (response: Response, signal: AbortSignal): Promise<unknown> => {
+    const bytes = await this.readSupportBytes(response, signal);
+    try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+    catch { throw new MemberCircleInvalidResponseError(); }
+  };
+
+  /** Bounds actual chunks, not Content-Length; abort always cancels the reader. */
+  private async readSupportBytes(response: Response, signal: AbortSignal): Promise<Uint8Array> {
+    const reader = response.body?.getReader();
+    if (!reader) throw new MemberCircleInvalidResponseError();
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    signal.addEventListener('abort', cancel, { once: true });
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      if (signal.aborted) throw signal.reason;
+      while (true) {
+        const chunk = await reader.read();
+        if (signal.aborted) throw signal.reason;
+        if (chunk.done) break;
+        length += chunk.value.byteLength;
+        if (length > SUPPORT_MAX_IMAGE_BYTES) throw new MemberCircleInvalidResponseError();
+        chunks.push(chunk.value);
+      }
+      if (!length) throw new MemberCircleInvalidResponseError();
+      const bytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      return bytes;
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      // Do not await a hostile source's cancellation promise.
+      void reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+
+  async admitNativeInstallation(accessToken: string, input: NativeInstallationAdmissionRequest): Promise<NativeInstallationAdmission> {
+    return NativeInstallationAdmissionSchema.parse(await this.request<unknown>('/api/me/installation-admissions', {
+      method: 'POST', accessToken, body: NativeInstallationAdmissionRequestSchema.parse(input), retryingAfterRefresh: true,
+    }));
+  }
+
+  async reportNativeInstallation(accessToken: string, input: NativeInstallationReport): Promise<NativeInstallationReceipt> {
+    const checked = NativeInstallationReportSchema.parse(input);
+    // The trusted session owner supplies this immutable token snapshot. Never
+    // refresh through a mutable credential manager after an account switch.
+    return NativeInstallationReceiptSchema.parse(await this.request<unknown>(`/api/me/devices/${checked.deviceId}/installations`, {
+      method: 'POST', accessToken, body: checked, retryingAfterRefresh: true,
+    }));
+  }
+
   private async request<T>(path: string, options: {
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
     accessToken?: string;
     body?: unknown;
     headers?: Record<string, string>;
     retryingAfterRefresh?: boolean;
     allowNotModified?: boolean;
+    signal?: AbortSignal;
+    deadlineAt?: number;
+    redirect?: 'manual';
+    readResponse?: (response: Response, signal: AbortSignal) => Promise<unknown>;
+    onAccessTokenRefreshed?: (token: string) => void;
   }): Promise<T> {
+    if (options.deadlineAt !== undefined && options.deadlineAt <= Date.now()) {
+      throw new AdminError('Admin request timed out', 'TIMEOUT');
+    }
     const headers: Record<string, string> = {
       Accept: 'application/json',
       ...options.headers,
@@ -938,6 +1584,11 @@ export class AdminClient {
     }
 
     const controller = new AbortController();
+    const callerSignal = options.signal;
+    const abortFromCaller = () =>
+      controller.abort(new AdminError('Admin request was aborted', 'NETWORK_ERROR'));
+    if (callerSignal?.aborted) abortFromCaller();
+    else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
     let timedOut = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const timeoutError = new AdminError(
@@ -949,7 +1600,7 @@ export class AdminClient {
         timedOut = true;
         controller.abort(timeoutError);
         reject(timeoutError);
-      }, this.requestTimeoutMs);
+      }, options.deadlineAt === undefined ? this.requestTimeoutMs : Math.max(1, options.deadlineAt - Date.now()));
     });
 
     let response: Response | undefined;
@@ -962,27 +1613,36 @@ export class AdminClient {
             headers,
             body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
             signal: controller.signal,
+            ...(options.redirect ? { redirect: options.redirect } : {}),
           });
           // Preserve a definitive authorization status as soon as the response
           // headers arrive. The body remains deadline-bounded, but a half-open
           // 401/403 body must not be reclassified as a transport timeout.
           response = fetchedResponse;
+          if (options.redirect && (fetchedResponse.redirected || (fetchedResponse.status >= 300 && fetchedResponse.status < 400))) {
+            void fetchedResponse.body?.cancel().catch(() => {});
+            throw new MemberCircleInvalidResponseError();
+          }
           return {
             response: fetchedResponse,
-            data: await this.readJson(fetchedResponse),
+            data: options.readResponse ? await options.readResponse(fetchedResponse, controller.signal) : await this.readJson(fetchedResponse),
           };
         })(),
         timeoutPromise,
       ]));
     } catch (error) {
-      if (response?.status === 401 || response?.status === 403) {
+      if (response?.status === 401 || response?.status === 403
+        || (options.readResponse && response && response.status >= 400)) {
         data = undefined;
       } else {
         if (timedOut || error === timeoutError) throw timeoutError;
+        if (error instanceof MemberCircleInvalidResponseError) throw error;
         throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
       }
     } finally {
       if (timeout) clearTimeout(timeout);
+      if (options.readResponse && response?.body && !response.body.locked) void response.body.cancel().catch(() => {});
+      callerSignal?.removeEventListener('abort', abortFromCaller);
     }
 
     if (!response) {
@@ -1000,24 +1660,20 @@ export class AdminClient {
       path !== '/api/auth/refresh' &&
       this.tokenStore
     ) {
-      const refreshToken = await this.tokenStore.getRefreshToken();
-      if (refreshToken) {
-        const originalAuthenticationError = this.createError(response, data);
-        let refreshed: AdminRefreshResponse;
-        try {
-          refreshed = await this.refresh(refreshToken);
-          await this.tokenStore.onTokensRefreshed?.(refreshed);
-        } catch {
-          // A protected endpoint has already provided a definitive
-          // authentication result. A refresh transport/service failure must
-          // not overwrite that 401 and turn it into restricted offline access.
-          throw originalAuthenticationError;
+      const originalAuthenticationError = this.createError(response, data);
+      try {
+        const refreshToken = await this.withRequestDeadline(Promise.resolve(this.tokenStore.getRefreshToken()), options.deadlineAt);
+        if (refreshToken) {
+          const refreshed = await this.refresh(refreshToken, options.deadlineAt !== undefined ? {
+            deadlineAt: options.deadlineAt, signal: options.signal, redirect: 'manual',
+          } : undefined);
+          await this.withRequestDeadline(Promise.resolve(this.tokenStore.onTokensRefreshed?.(refreshed)), options.deadlineAt);
+          options.onAccessTokenRefreshed?.(refreshed.accessToken);
+          return this.request<T>(path, { ...options, accessToken: refreshed.accessToken, retryingAfterRefresh: true });
         }
-        return this.request<T>(path, {
-          ...options,
-          accessToken: refreshed.accessToken,
-          retryingAfterRefresh: true,
-        });
+      } catch {
+        // Never downgrade an observed 401 because refresh/storage later failed.
+        throw originalAuthenticationError;
       }
     }
 
@@ -1026,6 +1682,16 @@ export class AdminClient {
     }
 
     return data as T;
+  }
+
+  private async withRequestDeadline<T>(promise: Promise<T>, deadlineAt?: number): Promise<T> {
+    if (deadlineAt === undefined) return promise;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([promise, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new AdminError('Admin request timed out', 'TIMEOUT')), Math.max(0, deadlineAt - Date.now()));
+      })]);
+    } finally { if (timer) clearTimeout(timer); }
   }
 
   private async readJson(response: Response): Promise<unknown> {

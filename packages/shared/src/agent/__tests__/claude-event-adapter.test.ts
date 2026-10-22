@@ -898,3 +898,150 @@ describe('buildWindowsSkillsDirError', () => {
     expect(buildWindowsSkillsDirError('ENOENT: no such file, /tmp/other')).toBeNull();
   });
 });
+
+// ============================================================
+// P0-2 render_ui skeleton streaming (tool_input_delta)
+// ============================================================
+
+describe('ClaudeEventAdapter tool_input_delta emission (P0-2)', () => {
+  function streamMessage(event: Record<string, unknown>) {
+    return {
+      type: 'stream_event',
+      event,
+      parent_tool_use_id: null,
+      session_id: 'sess-1',
+    } as any;
+  }
+
+  function toolUseStart(index: number, id: string, name: string) {
+    return streamMessage({
+      type: 'content_block_start',
+      index,
+      content_block: { type: 'tool_use', id, name, input: {} },
+    });
+  }
+
+  function inputDelta(index: number, partialJson: string) {
+    return streamMessage({
+      type: 'content_block_delta',
+      index,
+      delta: { type: 'input_json_delta', partial_json: partialJson },
+    });
+  }
+
+  function blockStop(index: number) {
+    return streamMessage({ type: 'content_block_stop', index });
+  }
+
+  it('recognizes both render_ui name forms', async () => {
+    const { isRenderUiToolName } = await import('../backend/claude/event-adapter.ts');
+    expect(isRenderUiToolName('render_ui')).toBe(true);
+    expect(isRenderUiToolName('mcp__session__render_ui')).toBe(true);
+    expect(isRenderUiToolName('Bash')).toBe(false);
+    expect(isRenderUiToolName('generate_app')).toBe(false);
+    expect(isRenderUiToolName(undefined)).toBe(false);
+  });
+
+  it('throttles emissions to one per FLUSH_MS and flushes the tail at block stop', async () => {
+    let clock = 10_000;
+    const adapter = new ClaudeEventAdapter(createCallbacks({ now: () => clock }));
+    adapter.startTurn();
+
+    await adapter.adapt(toolUseStart(0, 'toolu_1', 'mcp__session__render_ui'));
+
+    // Chunks inside the 250ms window accumulate silently
+    let events = await adapter.adapt(inputDelta(0, '{"components":[{"id":"a",'));
+    expect(events).toHaveLength(0);
+    clock += 100;
+    events = await adapter.adapt(inputDelta(0, '"type":"stat-card",'));
+    expect(events).toHaveLength(0);
+
+    // 250ms elapsed → one merged emission: buffered prefix + current chunk
+    clock += 200; // total 300ms since tracker start
+    events = await adapter.adapt(inputDelta(0, '"title":"Rev"'));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'tool_input_delta',
+      toolUseId: 'toolu_1',
+      toolName: 'mcp__session__render_ui',
+      delta: '{"components":[{"id":"a","type":"stat-card","title":"Rev"',
+      seq: 1,
+    });
+
+    // Post-emission chunk waits for the next window…
+    clock += 50;
+    events = await adapter.adapt(inputDelta(0, '"label":"x"}]}'));
+    expect(events).toHaveLength(0);
+
+    // …and is flushed (with seq increment) when the content block stops
+    events = await adapter.adapt(blockStop(0));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'tool_input_delta',
+      toolUseId: 'toolu_1',
+      delta: '"label":"x"}]}',
+      seq: 2,
+    });
+  });
+
+  it('never emits for non-render_ui tools', async () => {
+    const adapter = new ClaudeEventAdapter(createCallbacks({ now: () => 0 }));
+    adapter.startTurn();
+
+    await adapter.adapt(toolUseStart(0, 'toolu_b', 'Bash'));
+    const events = [
+      ...(await adapter.adapt(inputDelta(0, '{"command":"ls'))),
+      ...(await adapter.adapt(blockStop(0))),
+    ];
+    expect(events.filter(e => e.type === 'tool_input_delta')).toHaveLength(0);
+  });
+
+  it('stops emitting after the total-char cap and ignores the tail', async () => {
+    let clock = 0;
+    const adapter = new ClaudeEventAdapter(createCallbacks({ now: () => clock }));
+    adapter.startTurn();
+
+    await adapter.adapt(toolUseStart(0, 'toolu_cap', 'render_ui'));
+
+    // First window passes → emit the buffered ~8KB prefix
+    clock = 1_000;
+    const bigChunk = 'x'.repeat(8_000);
+    let events = await adapter.adapt(inputDelta(0, bigChunk));
+    expect(events).toHaveLength(1);
+    expect((events[0] as any).seq).toBe(1);
+
+    // Push past the 8192 cap → immediate final emission, then capped
+    events = await adapter.adapt(inputDelta(0, 'y'.repeat(500)));
+    expect(events).toHaveLength(1);
+    expect((events[0] as any).delta).toBe('y'.repeat(500));
+    expect((events[0] as any).seq).toBe(2);
+
+    // Everything after the cap is silent, including the stop flush
+    events = [
+      ...(await adapter.adapt(inputDelta(0, 'zzz'))),
+      ...(await adapter.adapt(blockStop(0))),
+    ];
+    expect(events).toHaveLength(0);
+  });
+
+  it('resets trackers between turns', async () => {
+    const adapter = new ClaudeEventAdapter(createCallbacks({ now: () => 0 }));
+    adapter.startTurn();
+    await adapter.adapt(toolUseStart(0, 'toolu_t1', 'render_ui'));
+
+    adapter.startTurn();
+    // Same stream index, new turn: the stale tracker must be gone.
+    const events = [
+      ...(await adapter.adapt(inputDelta(0, '{"components":'))),
+      ...(await adapter.adapt(blockStop(0))),
+    ];
+    expect(events.filter(e => e.type === 'tool_input_delta')).toHaveLength(0);
+  });
+
+  it('ignores input_json_delta for an untracked stream index', async () => {
+    const adapter = new ClaudeEventAdapter(createCallbacks({ now: () => 0 }));
+    adapter.startTurn();
+    const events = await adapter.adapt(inputDelta(7, '{"components":'));
+    expect(events).toHaveLength(0);
+  });
+});

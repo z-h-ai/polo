@@ -1,3 +1,4 @@
+import { MANAGED_TOOL_UNSUPPORTED, isManagedFileTool } from './tool-execution-policy';
 /**
  * Pi Backend (Subprocess RPC Client)
  *
@@ -121,14 +122,13 @@ import { refreshChatGptTokens } from '../auth/chatgpt-oauth.ts';
 import {
   registerSessionScopedToolCallbacks,
   mergeSessionScopedToolCallbacks,
-  unregisterSessionScopedToolCallbacks,
   setLastPlanFilePath,
   getSessionScopedToolCallbacks,
 } from './session-scoped-tools.ts';
 import { attachSessionSelfManagementBindings } from './session-self-management-bindings.ts';
 
 // Session tool proxy definitions (for registering with subprocess)
-import { getSessionToolProxyDefs, SESSION_TOOL_NAMES } from './backend/pi/session-tool-defs.ts';
+import { getSessionToolProxyDefs, SESSION_TOOL_NAMES, type SessionToolProxyDef } from './backend/pi/session-tool-defs.ts';
 
 // Session tool registry (for executing proxy tool calls)
 import {
@@ -233,9 +233,6 @@ export class PiAgent extends BaseAgent {
 
   // Pi session ID (managed by subprocess, reported back)
   private piSessionId: string | null = null;
-
-  // Callback server port (managed by subprocess)
-  private callbackPort: number = 0;
 
   // State
   private _isProcessing: boolean = false;
@@ -354,6 +351,18 @@ export class PiAgent extends BaseAgent {
   // Cached session tool context (lazy-created on first session tool call)
   private _sessionToolContext: SessionToolContext | null = null;
 
+  // Last allowRequestUserInput value sent to the subprocess — used to detect
+  // capability drift between turns (desktop ↔ messaging switches).
+  private _lastRegisteredAllowRequestUserInput: boolean = false;
+
+  // Last allowRenderUi value sent to the subprocess — same drift detection
+  // for the render_ui tool (Generative UI inline cards).
+  private _lastRegisteredAllowRenderUi: boolean = false;
+
+  // Last allowGenerateApp value sent to the subprocess — same drift detection
+  // for the generate_app tool (Generative UI canvas apps).
+  private _lastRegisteredAllowGenerateApp: boolean = false;
+
   // RPC request counter for unique IDs
   private rpcIdCounter: number = 0;
 
@@ -378,10 +387,13 @@ export class PiAgent extends BaseAgent {
   // Constructor
   // ============================================================
 
+  private readonly managedFileOnly: boolean;
+
   constructor(config: BackendConfig) {
     const resolvedModel = config.model || '';
     const modelDef = getModelById(resolvedModel);
     super(config, resolvedModel, modelDef?.contextWindow);
+    this.managedFileOnly = config.toolExecutionPolicy === 'managed-file-only';
 
     this._supportsBranching = true;
 
@@ -525,7 +537,7 @@ export class PiAgent extends BaseAgent {
       awsEnv,
       sessionDir,
       debug: debugEnv === '1',
-      stripCredentialEnv: isCustomEndpointMode,
+      stripCredentialEnv: isCustomEndpointMode || !!this.config.managedBilling,
     });
 
     // Spawn the subprocess
@@ -596,6 +608,7 @@ export class PiAgent extends BaseAgent {
       piAuth: proxyAuth.piAuth,
       credentialProxy: proxyAuth.credentialProxy,
       credentialIsolation: this.sessionStorage.owner === 'cli',
+      toolExecutionPolicy: this.managedFileOnly ? 'managed-file-only' : undefined,
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
@@ -622,7 +635,44 @@ export class PiAgent extends BaseAgent {
     // These tools (SubmitPlan, config_validate, source auth, call_llm, etc.)
     // are executed in the main process when the LLM calls them.
     this.assertBackendSessionToolParity();
-    let sessionToolDefs = getSessionToolProxyDefs();
+    this.sendSessionToolRegistration();
+
+    // If pool has source tools, register them with the subprocess.
+    this.registerPoolToolsWithSubprocess();
+  }
+
+  /**
+   * Send pool's proxy tool defs to subprocess for model visibility.
+   */
+  private registerPoolToolsWithSubprocess(): void {
+    if (this.managedFileOnly || !this.mcpPool) return;
+    const proxyDefs = this.mcpPool.getProxyToolDefs();
+    if (proxyDefs.length > 0) {
+      this.send({
+        type: 'register_tools',
+        tools: proxyDefs,
+        scope: 'pool',
+      });
+      this.debug(`Registered ${proxyDefs.length} MCP source tools from pool with subprocess`);
+    }
+  }
+
+  /**
+   * Build the session-scoped proxy tool defs for the subprocess.
+   *
+   * Visibility mirrors the Claude adapter:
+   * - `request_user_input` / `render_ui` only register when their capability
+   *   flags are set (desktop interactive main-session turns; render_ui also
+   *   requires the generativeUI.inline toggle).
+   * - `browser_tool` is hidden when the built-in browser tool is disabled.
+   */
+  private buildSessionToolDefs(): SessionToolProxyDef[] {
+    if (this.managedFileOnly) return [];
+    let sessionToolDefs = getSessionToolProxyDefs({
+      allowRequestUserInput: this.allowRequestUserInput,
+      allowRenderUi: this.allowRenderUi,
+      allowGenerateApp: this.allowGenerateApp,
+    });
 
     // Mirror Claude's gate: hide `browser_tool` when the user has disabled
     // the built-in browser tool. Without this filter, Pi would still advertise
@@ -640,29 +690,44 @@ export class PiAgent extends BaseAgent {
       }
     }
 
-    this.send({
-      type: 'register_tools',
-      tools: sessionToolDefs,
-    });
-    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess`);
-
-    // If pool has source tools, register them with the subprocess.
-    this.registerPoolToolsWithSubprocess();
+    return sessionToolDefs;
   }
 
   /**
-   * Send pool's proxy tool defs to subprocess for model visibility.
+   * Send the current session tool registration to the subprocess.
+   *
+   * Uses scope 'session' — the subprocess REPLACES its session-tool set with
+   * this exact list, so a tool omitted here (request_user_input on
+   * non-desktop turns) is removed instead of lingering from a previous
+   * desktop registration.
    */
-  private registerPoolToolsWithSubprocess(): void {
-    if (!this.mcpPool) return;
-    const proxyDefs = this.mcpPool.getProxyToolDefs();
-    if (proxyDefs.length > 0) {
-      this.send({
-        type: 'register_tools',
-        tools: proxyDefs,
-      });
-      this.debug(`Registered ${proxyDefs.length} MCP source tools from pool with subprocess`);
+  private sendSessionToolRegistration(): void {
+    const sessionToolDefs = this.buildSessionToolDefs();
+    this.send({
+      type: 'register_tools',
+      tools: sessionToolDefs,
+      scope: 'session',
+    });
+    this._lastRegisteredAllowRequestUserInput = this.allowRequestUserInput;
+    this._lastRegisteredAllowRenderUi = this.allowRenderUi;
+    this._lastRegisteredAllowGenerateApp = this.allowGenerateApp;
+    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp})`);
+  }
+
+  /**
+   * Re-register proxy tools only when a capability flag drifted from what the
+   * subprocess currently knows. The subprocess sets toolsChanged and recreates
+   * its session on the next prompt.
+   */
+  private syncSessionToolRegistration(): void {
+    const ruiDrifted = this._lastRegisteredAllowRequestUserInput !== this.allowRequestUserInput;
+    const guiDrifted = this._lastRegisteredAllowRenderUi !== this.allowRenderUi;
+    const gapDrifted = this._lastRegisteredAllowGenerateApp !== this.allowGenerateApp;
+    if (!ruiDrifted && !guiDrifted && !gapDrifted) {
+      return;
     }
+    this.debug(`session tool visibility changed (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}) — re-registering session tools`);
+    this.sendSessionToolRegistration();
   }
 
   /**
@@ -806,7 +871,7 @@ export class PiAgent extends BaseAgent {
     piAuth: Awaited<ReturnType<PiAgent['getPiAuth']>>;
     credentialProxy?: { baseUrl: string; capability: string };
   }> {
-    if (this.sessionStorage.owner !== 'cli') {
+    if (this.sessionStorage.owner !== 'cli' && !this.config.managedBilling) {
       return { apiKey: legacyApiKey || '', piAuth };
     }
     if (piAuth?.credential.type === 'iam') {
@@ -843,6 +908,8 @@ export class PiAgent extends BaseAgent {
         credentialHeaders,
       }, {
         capability: this.createInvocationCapability(provider, credential),
+        billing: this.config.managedBilling,
+        assertExecutionCurrent: this.config.assertExecutionCurrent,
       });
     }
     const capability = this.invocationCredentialProxy.capability;
@@ -1078,8 +1145,6 @@ export class PiAgent extends BaseAgent {
 
     switch (type) {
       case 'ready':
-        // Subprocess initialized, callback server listening
-        this.callbackPort = (msg.callbackPort as number) || 0;
         if (msg.sessionId) {
           this.piSessionId = msg.sessionId as string;
           this.config.onSdkSessionIdUpdate?.(this.piSessionId!);
@@ -1088,6 +1153,7 @@ export class PiAgent extends BaseAgent {
         break;
 
       case 'event':
+        if (typeof msg.canonicalTurnId === 'string' && msg.canonicalTurnId !== this.getCanonicalTurnId()) break;
         // Pi SDK event -- forward through PiEventAdapter
         this.handleSubprocessEvent(msg.event as Record<string, unknown>);
         break;
@@ -1096,6 +1162,7 @@ export class PiAgent extends BaseAgent {
         // Subprocess needs permission check + transforms before tool execution
         this.handlePreToolUseRequest(msg as {
           requestId: string;
+          canonicalTurnId?: string;
           toolName: string;
           toolCallId?: string;
           input: Record<string, unknown>;
@@ -1106,14 +1173,10 @@ export class PiAgent extends BaseAgent {
         // Subprocess wants main process to execute a proxy tool (MCP/API/session)
         this.handleToolExecuteRequest(msg as {
           requestId: string;
+          canonicalTurnId?: string;
           toolName: string;
           args: Record<string, unknown>;
         });
-        break;
-
-      case 'session_tool_completed':
-        // Session MCP tool completed -- fire callbacks (SubmitPlan, auth, etc.)
-        this.handleSessionToolCompleted(msg);
         break;
 
       case 'mini_completion_result':
@@ -1167,6 +1230,7 @@ export class PiAgent extends BaseAgent {
         break;
 
       case 'error': {
+        if (typeof msg.canonicalTurnId === 'string' && msg.canonicalTurnId !== this.getCanonicalTurnId()) break;
         const errorCode = typeof msg.code === 'string' ? msg.code : undefined;
         const rawMessage = String(msg.message || 'Unknown subprocess error');
 
@@ -1272,17 +1336,10 @@ export class PiAgent extends BaseAgent {
     // The subprocess sends Pi SDK AgentSessionEvent objects serialized as JSON.
     // Feed them through PiEventAdapter to convert to Polo AIEvents.
 
-    // Detect session MCP tool completions (same pattern as in-process version)
     const eventType = event.type as string;
     let adaptedEvent = event;
 
     if (eventType === 'tool_execution_start') {
-      const toolName = event.toolName as string;
-      if (toolName?.startsWith('session__') || toolName?.startsWith('mcp__session__')) {
-        // Session tool tracking is handled by the subprocess; it sends
-        // session_tool_completed events when appropriate.
-      }
-
       // Deterministic metadata bridge: if subprocess event lacks toolMetadata,
       // inject metadata captured from pre_tool_use_request before stripping.
       const toolCallId = event.toolCallId as string | undefined;
@@ -1298,7 +1355,7 @@ export class PiAgent extends BaseAgent {
               source: 'interceptor',
             },
           };
-          this.debug(`Injected pre-tool metadata for ${toolName} (${toolCallId}) from bridge cache`);
+          this.debug(`Injected pre-tool metadata for ${toolCallId} from bridge cache`);
         }
       }
     }
@@ -1356,11 +1413,34 @@ export class PiAgent extends BaseAgent {
    */
   private async handlePreToolUseRequest(req: {
     requestId: string;
+    canonicalTurnId?: string;
     toolName: string;
     toolCallId?: string;
     input: Record<string, unknown>;
   }): Promise<void> {
     const { requestId, toolName, toolCallId, input } = req;
+    if (this.managedFileOnly && !isManagedFileTool(toolName)) {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: MANAGED_TOOL_UNSUPPORTED });
+      return;
+    }
+    try { this.config.assertExecutionCurrent?.(); } catch {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'CLI_EXECUTION_OWNER_REVOKED' });
+      return;
+    }
+    const originalTurnId = req.canonicalTurnId ?? null;
+    const respond = async (response: Record<string, unknown>) => {
+      if (response.action === 'allow' || response.action === 'modify') {
+        const denied = await this.checkCanonicalSkillUse(toolName, (response.input as Record<string, unknown> | undefined) ?? input, originalTurnId);
+        if (denied) { this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: denied }); return; }
+      }
+      try { this.config.assertExecutionCurrent?.(); } catch {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'CLI_EXECUTION_OWNER_REVOKED' });
+        return;
+      }
+      this.send(response);
+    };
+    const admissionDenied = await this.checkCanonicalSkillUse(toolName, input, originalTurnId);
+    if (admissionDenied) { await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: admissionDenied }); return; }
     const debugSessionId = this.config.session?.id || this._sessionId;
     this.debug(`PreToolUse request from subprocess: ${toolName} (${requestId}, sessionId=${debugSessionId})`);
 
@@ -1400,6 +1480,11 @@ export class PiAgent extends BaseAgent {
       ? { enabled: true, path: getRtkPath(), exclude: [] }
       : undefined;
 
+    const canonicalDenied = await this.checkCanonicalSkillUse(toolName, input, originalTurnId);
+    if (canonicalDenied) {
+      await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: canonicalDenied });
+      return;
+    }
     const checkResult = runPreToolUseChecks({
       toolName,
       input,
@@ -1421,11 +1506,11 @@ export class PiAgent extends BaseAgent {
 
     switch (checkResult.type) {
       case 'allow':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+        await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
       case 'modify':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
+        await respond({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
         return;
 
       case 'block': {
@@ -1439,7 +1524,7 @@ export class PiAgent extends BaseAgent {
           changedAt: diagnostics.lastChangedAt,
           reason: checkResult.reason,
         })}`);
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
+        await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
         return;
       }
 
@@ -1454,9 +1539,11 @@ export class PiAgent extends BaseAgent {
               const reason = sourceExists
                 ? `Source "${sourceSlug}" is not active. Activate it by @mentioning it in your message or via the source icon at the bottom of the input field.`
                 : `Source "${sourceSlug}" is not available yet. It needs to be created and configured first.`;
-              this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+              await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
               return;
             }
+            const originalAfterActivation = await this.checkCanonicalSkillUse(toolName, input, originalTurnId);
+            if (originalAfterActivation) { await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: originalAfterActivation }); return; }
             this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlug}" activated successfully`);
             this.eventQueue.enqueue({
               type: 'source_activated' as const,
@@ -1467,11 +1554,16 @@ export class PiAgent extends BaseAgent {
             const reason = sourceExists
               ? `Source "${sourceSlug}" could not be activated: ${err}`
               : `Source "${sourceSlug}" is not available yet. It needs to be created and configured first.`;
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+            await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
             return;
           }
         }
 
+        const canonicalAfterActivation = await this.checkCanonicalSkillUse(toolName, input, originalTurnId);
+        if (canonicalAfterActivation) {
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: canonicalAfterActivation });
+          return;
+        }
         // Re-run pipeline after activation
         const postResult = runPreToolUseChecks({
           toolName,
@@ -1493,11 +1585,11 @@ export class PiAgent extends BaseAgent {
         });
 
         if (postResult.type === 'modify') {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: postResult.input });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'modify', input: postResult.input });
         } else if (postResult.type === 'block') {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: postResult.reason });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: postResult.reason });
         } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         }
         return;
       }
@@ -1505,16 +1597,16 @@ export class PiAgent extends BaseAgent {
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+        await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
       case 'prompt': {
         if (!this.onPermissionRequest) {
           // No permission handler — allow
           if (checkResult.modifiedInput) {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
+            await respond({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
           } else {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+            await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
           }
           return;
         }
@@ -1549,14 +1641,14 @@ export class PiAgent extends BaseAgent {
         this.pendingPermissions.delete(permRequestId);
 
         if (!allowed) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
           return;
         }
 
         if (checkResult.modifiedInput) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
         } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         }
         return;
       }
@@ -1572,9 +1664,16 @@ export class PiAgent extends BaseAgent {
    */
   private async handleToolExecuteRequest(request: {
     requestId: string;
+    canonicalTurnId?: string;
     toolName: string;
     args: Record<string, unknown>;
   }): Promise<void> {
+    if (this.managedFileOnly) {
+      this.send({ type: 'tool_execute_response', requestId: request.requestId, result: { content: MANAGED_TOOL_UNSUPPORTED, isError: true } });
+      return;
+    }
+    const denied = await this.checkCanonicalSkillUse(request.toolName, request.args, request.canonicalTurnId ?? null);
+    if (denied) { this.send({ type: 'tool_execute_response', requestId: request.requestId, result: { content: denied, isError: true } }); return; }
     // Prerequisite check: block source tools until guide.md is read
     const prereqResult = this.prerequisiteManager.checkPrerequisites(request.toolName);
     if (!prereqResult.allowed) {
@@ -1619,6 +1718,7 @@ export class PiAgent extends BaseAgent {
     toolName: string,
     args: Record<string, unknown>
   ): Promise<{ content: string; isError: boolean }> {
+    if (this.managedFileOnly) return { content: MANAGED_TOOL_UNSUPPORTED, isError: true };
     // Session-scoped tools — strip mcp__session__ prefix added by the Pi SDK
     // registration (tools are registered as mcp__session__SubmitPlan, etc.)
     const strippedName = toolName.startsWith('mcp__session__')
@@ -1658,12 +1758,24 @@ export class PiAgent extends BaseAgent {
       workspaceId,
       sessionStorage: this.sessionStorage,
       workingDirectory: this.workingDirectory,
+      // Tool-call-time generation reader:
+      // the handler invokes this SYNCHRONOUSLY at initiation and binds the
+      // returned value immutably into the callback chain. The ctx itself is
+      // cached across turns — the reader always reflects the CURRENT turn,
+      // which is correct because the read happens at initiation of THAT
+      // turn's tool call.
+      getTurnGeneration: () => this.sessionTurnGeneration,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         this.onPlanSubmitted?.(planPath);
       },
       onAuthRequest: (request: unknown) => {
         this.onAuthRequest?.(request as any);
+      },
+      onQuestionRequested: (questions, generationAtRequest) => {
+        this.onDebug?.(`[PiAgent] onQuestionRequested received: ${questions.length} question(s)`);
+        // FORWARD the immutable handler snapshot — never re-read the field.
+        return this.onQuestionRequested?.(questions, generationAtRequest);
       },
     });
 
@@ -1682,6 +1794,36 @@ export class PiAgent extends BaseAgent {
     args: Record<string, unknown>,
   ): Promise<{ content: string; isError: boolean }> {
     try {
+      // Server-side capability re-check (defense in depth): the subprocess
+      // tool list is advisory — this gate enforces the per-turn invocation
+      // source even if a stale registration still advertises the tool.
+      if (toolName === 'request_user_input' && !this.allowRequestUserInput) {
+        return {
+          content: 'request_user_input is not available in this session. Ask the user your question as plain text instead.',
+          isError: true,
+        };
+      }
+      if (toolName === 'render_ui' && !this.allowRenderUi) {
+        return {
+          content: 'render_ui is not available in this session. Present the same information as markdown or a datatable block instead.',
+          isError: true,
+        };
+      }
+      if (toolName === 'generate_app' && !this.allowGenerateApp) {
+        return {
+          content: 'generate_app is not available in this session. Present the same result as markdown, a datatable block, or a render_ui card instead.',
+          isError: true,
+        };
+      }
+      // P1-3: canvas app data iteration shares generate_app's gate — a
+      // session without canvas apps has nothing to update data for.
+      if (toolName === 'update_app_data' && !this.allowGenerateApp) {
+        return {
+          content: 'update_app_data is not available in this session. Create a canvas app with generate_app first, or present the data as markdown, a datatable block, or a render_ui card instead.',
+          isError: true,
+        };
+      }
+
       // call_llm uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'call_llm') {
         try {
@@ -1780,23 +1922,6 @@ export class PiAgent extends BaseAgent {
     }
   }
 
-
-
-  /**
-   * Handle session_tool_completed from subprocess.
-   *
-   * NOTE: For proxy-executed session tools, callbacks (onPlanSubmitted, etc.)
-   * are already fired by executeSessionTool() via the SessionToolContext.
-   * The subprocess sends this event because handleSessionEvent() detects the
-   * mcp__session__ prefix, but we intentionally skip handleSessionMcpToolCompletion()
-   * here to avoid double-firing callbacks.
-   */
-  private handleSessionToolCompleted(msg: Record<string, unknown>): void {
-    const toolName = msg.toolName as string;
-    const isError = msg.isError as boolean;
-    this.debug(`Session tool completed: ${toolName} (isError=${isError})`);
-    // Callbacks already handled by executeSessionTool() — no-op.
-  }
 
   /**
    * Handle mini_completion_result from subprocess.
@@ -2128,6 +2253,7 @@ export class PiAgent extends BaseAgent {
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
+    const originalCanonicalTurnId = this.getCanonicalTurnId();
     let message = messageParam;
     // Reset state for new turn
     this._isProcessing = true;
@@ -2147,13 +2273,36 @@ export class PiAgent extends BaseAgent {
     // survives across turns.
     const sessionId = this.config.session?.id;
     if (sessionId) {
-      mergeSessionScopedToolCallbacks(sessionId, {
-        onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
-        onAuthRequest: (request) => this.onAuthRequest?.(request),
-        queryFn: (request) => this.queryLlm(request),
-      });
+      // GENERATION BINDING: this merge runs
+      // PER TURN — capture THIS turn's generation into the closure now. Any
+      // proxy-forwarded question callback of this turn carries the captured
+      // value immutably, even if a newer turn re-stamps the field before the
+      // callback executes.
+      const generationAtRegistration = this.sessionTurnGeneration
+      // R51: the per-turn merge REPLACES the session's callback lease — the
+      // returned lease is handed back to the SessionManager so the OWNER's
+      // disposal cleanup stays bound to the CURRENT record/guard pair.
+      // R52-B/R53: owner-verified merge — a stale runtime arriving after a
+      // same-id successor published its lease is REJECTED here instead of
+      // silently merging into the successor's record. FAIL CLOSED: no
+      // token-less merge path exists.
+      const ownerToken = this.config.sessionCallbackOwnerToken
+      if (!ownerToken) {
+        throw new Error(`SESSION_CALLBACK_OWNER_TOKEN_REQUIRED (session ${sessionId}: per-turn merge must carry the runtime owner token)`)
+      }
+      const lease = mergeSessionScopedToolCallbacks(
+        sessionId,
+        {
+          onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
+          onAuthRequest: (request) => this.onAuthRequest?.(request),
+          onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, generationAtRegistration),
+          getTurnGeneration: () => this.sessionTurnGeneration,
+          queryFn: (request) => this.queryLlm(request),
+        },
+        ownerToken,
+      );
+      this.config.onSessionCallbackLeaseChanged?.(lease);
     }
-
     try {
       // Ensure subprocess is spawned and ready
       try {
@@ -2179,6 +2328,13 @@ export class PiAgent extends BaseAgent {
           throw subprocessError;
         }
       }
+
+      // Re-register proxy tools when the request_user_input capability flag
+      // changed since the last registration (desktop ↔ messaging turn switch).
+      // The subprocess marks toolsChanged and recreates its session on next
+      // prompt. Must run after ensureSubprocess — `send` drops silently while
+      // the subprocess is down (a cold start registers at startup instead).
+      this.syncSessionToolRegistration();
 
       const trimmedMessage = message.trim();
       const compactMatch = trimmedMessage.match(/^\/compact(?:\s+([\s\S]+))?$/i);
@@ -2267,10 +2423,15 @@ export class PiAgent extends BaseAgent {
       this.send({
         type: 'prompt',
         id: turnId,
+        canonicalTurnId: originalCanonicalTurnId,
         message: userMessage,
         systemPrompt: fullSystemPrompt,
         images: images.length > 0 ? images : undefined,
       });
+      // The subprocess turn handle is live (state reset done, prompt sent) —
+      // the turn is genuinely abortable from here (chat-start reservation
+      // signal).
+      this.signalTurnQueryLive();
 
       // Yield events as they arrive. The source-activation drain controller
       // captures a pending restart on the first triggering tool_result and
@@ -2427,6 +2588,7 @@ export class PiAgent extends BaseAgent {
     apiServers: Record<string, unknown>,
     intendedSlugs?: string[]
   ): Promise<void> {
+    if (this.managedFileOnly) return;
     // BaseAgent.setSourceServers() handles:
     //   1. SourceManager state tracking (active slugs)
     //   2. McpClientPool sync (connecting/disconnecting MCP + API sources)
@@ -2455,7 +2617,7 @@ export class PiAgent extends BaseAgent {
     this.pendingPermissions.clear();
 
     // Send abort to subprocess
-    this.send({ type: 'abort' });
+    this.send({ type: 'abort', canonicalTurnId: this.getCanonicalTurnId() });
     this.eventQueue.complete();
 
     // Clear bridge cache for this interrupted turn.
@@ -2493,7 +2655,7 @@ export class PiAgent extends BaseAgent {
     }
 
     // For other reasons, send abort to subprocess
-    this.send({ type: 'abort' });
+    this.send({ type: 'abort', canonicalTurnId: this.getCanonicalTurnId() });
   }
 
   /**
@@ -2542,10 +2704,11 @@ export class PiAgent extends BaseAgent {
   destroy(): void {
     this.stopConfigWatcher();
 
-    // Unregister session-scoped tool callbacks
-    if (this.config.session?.id) {
-      unregisterSessionScopedToolCallbacks(this.config.session.id);
-    }
+    // R48: session-scoped callback/guard registration is ID-WIDE state owned
+    // by the SessionManager's lifecycle coordination — a backend disposal
+    // must never unconditionally delete it. Same-id successors (replacement
+    // owners) register their own guarded record; the SessionManager removes
+    // registrations via its owner-aware compare-and-unregister.
 
     this._sessionToolContext = null;
     // Pool clients are owned by the main process — don't close them here.
@@ -2559,10 +2722,6 @@ export class PiAgent extends BaseAgent {
 
   async disposeForRestart(): Promise<void> {
     this.stopConfigWatcher();
-
-    if (this.config.session?.id) {
-      unregisterSessionScopedToolCallbacks(this.config.session.id);
-    }
 
     this._sessionToolContext = null;
     await this.killSubprocessGracefully();
@@ -2631,7 +2790,6 @@ export class PiAgent extends BaseAgent {
     }
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
-    this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
     this.adapter.resetOverflowState();
 
@@ -2664,7 +2822,6 @@ export class PiAgent extends BaseAgent {
 
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
-    this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
 
     // Clear any in-flight overflow-recovery state so a stale fallback timer

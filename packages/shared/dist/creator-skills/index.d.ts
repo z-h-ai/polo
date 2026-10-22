@@ -6,3 +6,4 @@ export * from './archive.ts';
 export * from './ledger.ts';
 export * from './installer.ts';
 export * from './fixtures.ts';
+export * from "./canonical.ts";

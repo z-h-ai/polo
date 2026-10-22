@@ -280,17 +280,17 @@ describe('Creator Skill boundary schemas', () => {
     }
     expect(SkillVersionMetadataSchema.safeParse({
       name: 'review-helper',
-      description: '😀'.repeat(1_024),
+      description: '😀'.repeat(8_192),
     }).success).toBe(true)
     const oversizedDescription = SkillVersionMetadataSchema.safeParse({
       name: 'review-helper',
-      description: '😀'.repeat(1_025),
+      description: '😀'.repeat(8_193),
     })
     expect(oversizedDescription.success).toBe(false)
     if (!oversizedDescription.success) {
       expect(oversizedDescription.error.issues).toContainEqual(expect.objectContaining({
         path: ['description'],
-        message: 'Creator Skill description must be at most 1024 characters',
+        message: 'Creator Skill description must be at most 8192 characters',
       }))
     }
   })

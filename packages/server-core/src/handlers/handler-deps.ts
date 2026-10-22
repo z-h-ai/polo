@@ -38,6 +38,8 @@ export interface HandlerDeps<
   sessionManager: TSessionManager
   /** Runtime-owned path resolver for every session artifact. */
   sessionStorage?: SessionStorage
+  /** Enabled only by the running desktop host, never by a renderer. */
+  desktopManagedCli?: boolean
   platform: PlatformServices
   windowManager?: TWindowManager
   browserPaneManager?: TBrowserPaneManager
@@ -51,6 +53,11 @@ export interface HandlerDeps<
   sessionFileWatchFactory?: SessionFileWatchFactory
   /** Durable local Creator App publication store; tests may inject an isolated root. */
   creatorAppPublicationRoot?: string
+  /**
+   * Durable managed-skill enablement store root (POO-106 S1); the desktop host
+   * injects its userData dir, headless hosts and tests fall back to CONFIG_DIR.
+   */
+  managedSkillsRoot?: string
   /**
    * Host-owned session-ending hook invoked inside the trusted transition lock.
    * It must synchronously fence new and in-flight lifecycle result commits,

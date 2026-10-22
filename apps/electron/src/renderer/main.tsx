@@ -8,13 +8,24 @@ import App from './App'
 import { ThemeProvider } from './context/ThemeContext'
 import { windowWorkspaceIdAtom } from './atoms/sessions'
 import { Toaster } from '@/components/ui/sonner'
-import { setupI18n } from '@polo-ai/shared/i18n'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import { initReactI18next } from 'react-i18next'
-import LanguageDetector from 'i18next-browser-languagedetector'
 import './index.css'
 
-// Initialize i18n before any React rendering
-setupI18n([LanguageDetector, initReactI18next])
+// Initialize i18n before any React rendering. No LanguageDetector: navigator
+// probing would auto-cache an OS-derived language and mask the product
+// default. Resolution is explicit — stored user choice first, then the
+// POO-41 frozen product default (zh-Hans).
+setupI18n([initReactI18next])
+
+const STORED_LANGUAGE_KEY = 'i18nextLng'
+// eslint-disable-next-line polo-ai/no-localstorage -- i18next language cache key; also written by AppearanceSettingsPage on explicit change
+const storedLanguage = window.localStorage.getItem(STORED_LANGUAGE_KEY)
+if (!storedLanguage) {
+  // eslint-disable-next-line polo-ai/no-localstorage -- persist the resolved default so restarts stay stable
+  window.localStorage.setItem(STORED_LANGUAGE_KEY, 'zh-Hans')
+}
+void i18n.changeLanguage(storedLanguage ?? 'zh-Hans')
 
 // Known-harmless console messages that should NOT be sent to Sentry.
 // These are dev-mode noise or expected warnings that aren't actionable.

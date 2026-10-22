@@ -1,11 +1,29 @@
 import { app } from 'electron'
 import { join } from 'path'
+import { AdminClient } from '@polo-ai/shared/admin'
+import {
+  getDefaultLlmConnection,
+  getAdminUrl,
+  getWorkspaceByNameOrId,
+} from '@polo-ai/shared/config'
+import { loadWorkspaceConfig } from '@polo-ai/shared/workspaces'
+import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { createElectronAppLlmExecutor } from './host-executor'
+import { resolveProductSpaceAppConnection } from '@polo-ai/server-core/handlers/rpc/admin'
 import { mainLog } from '../logger'
+import { AppBillingOutbox } from './app-billing-outbox'
 import { LocalAppRuntimeManager } from './manager'
 import { ScopedLocalAppRuntimeRegistry } from './scoped-registry'
+import { shutdownLocalAppRuntimeOwners } from './shutdown-orchestration'
+import {
+  catalogRuntimeScopeTupleKey,
+  LocalAppRuntimeCoordinator,
+  type RuntimeCoordinatorAdapters,
+} from './runtime-coordinator'
 
 let manager: LocalAppRuntimeManager | null = null
 let scopedRegistry: ScopedLocalAppRuntimeRegistry | null = null
+let coordinator: LocalAppRuntimeCoordinator | null = null
 
 const runtimeLogger = {
   info: (message: string, details?: unknown) => mainLog.info(message, details),
@@ -36,9 +54,154 @@ export function getScopedLocalAppRuntimeRegistry(): ScopedLocalAppRuntimeRegistr
       uvPath: process.env.POLO_AI_UV,
       bunPath: process.env.POLO_AI_BUN,
       logger: runtimeLogger,
+      onUnexpectedExit: event => {
+        void getLocalAppRuntimeCoordinator().handleUnexpectedExit(event)
+          .catch(error => mainLog.error('[local-apps] unexpected exit teardown failed', error))
+      },
     })
   }
   return scopedRegistry
+}
+
+/**
+ * Production runtime coordinator: wires the trusted POL-102 AdminClient
+ * boundary, the sessionless Host LLM executor factory and the workspace
+ * root/connection resolution into the shared coordinator. The stopRuntime
+ * adapter routes teardown process stops through the scoped registry's
+ * exact-generation CAS so every stop entry keeps the unified
+ * revoke→abort→cleanup→stop→CAS-clear order.
+ */
+export function getLocalAppRuntimeCoordinator(): LocalAppRuntimeCoordinator {
+  if (!coordinator) {
+    const adapters: RuntimeCoordinatorAdapters = {
+      billingOutbox: new AppBillingOutbox(join(localAppsRoot(), 'billing-outbox')),
+      getAdminOrigin: () => getAdminUrl() ?? '',
+      getBillingSession: async () => {
+        const tokens = await getCredentialManager().getAdminTokens()
+        const adminOrigin = getAdminUrl()
+        return tokens && adminOrigin ? { accountId: tokens.userId, adminOrigin } : null
+      },
+      isScopeCurrent: async identity => (await getCredentialManager().getAdminTokens())?.userId === identity.accountId,
+      admin: {
+        admitAppRequest: async (runId, input, options) => {
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.admitAppRequest(await trustedAccessToken(options?.accountId, options?.adminOrigin), runId, input, options)
+        },
+        getAppRequest: async (runId, requestId, options) => {
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.getAppRequest(await trustedAccessToken(options?.accountId, options?.adminOrigin), runId, requestId, options)
+        },
+        startAppRun: async (input, options) => {
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.startAppRun(await trustedAccessToken(options?.accountId, options?.adminOrigin), input, options)
+        },
+        recordAppUsage: async (input, options) => {
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.recordAppUsage(await trustedAccessToken(options?.accountId, options?.adminOrigin), input, options)
+        },
+        finishAppRun: async (runId, input, options) => {
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.finishAppRun(await trustedAccessToken(options?.accountId, options?.adminOrigin), runId, input, options)
+        },
+      },
+      resolveRuntimeConnection: identity => resolveProductSpaceAppConnection(identity),
+      createExecutor: ({ connectionSlug, model, beforeSend }) => createElectronAppLlmExecutor({
+        connectionSlug,
+        ...(beforeSend ? { beforeSend } : {}),
+        ...(model ? { model } : {}),
+      }),
+      resolveWorkspaceRoot: workspaceId =>
+        getWorkspaceByNameOrId(workspaceId)?.rootPath ?? null,
+      loadWorkspaceConfig: rootPath => loadWorkspaceConfig(rootPath),
+      getDefaultLlmConnection: () => getDefaultLlmConnection(),
+      stopRuntime: async runtime => {
+        await getScopedLocalAppRuntimeRegistry().stopExact(
+          {
+            kind: 'catalog',
+            accountId: runtime.identity.accountId,
+            organizationId: runtime.identity.productSpaceId,
+            catalogAppId: runtime.identity.artifactInstanceId,
+          },
+          runtime.runtimeGeneration,
+        )
+      },
+    }
+    coordinator = new LocalAppRuntimeCoordinator(adapters)
+  }
+  return coordinator
+}
+
+export function hasLocalAppRuntimeCoordinator(): boolean {
+  return coordinator !== null
+}
+
+const runtimeScopeKey = (accountId: string, productSpaceId: string, artifactInstanceId: string): string =>
+  catalogRuntimeScopeTupleKey({ accountId, productSpaceId, artifactInstanceId })
+
+/**
+ * Unified coordinator-aware teardown for scope withdrawals: revokes the
+ * capability, aborts in-flight work, runs the bounded cleanup lane, stops
+ * the exact process generation, clears the projection and releases state —
+ * before any registry-level stop runs.
+ */
+export function teardownCoordinatorRuntimesForCatalogScopes(
+  scopes: ReadonlyArray<{
+    accountId: string
+    organizationId: string
+    catalogAppId: string
+  }>,
+  finalStatus: 'cancelled' | 'failed' | 'unknown' = 'cancelled',
+): Promise<void> {
+  if (!hasLocalAppRuntimeCoordinator()) return Promise.resolve()
+  const keys = new Set(scopes.map(scope =>
+    runtimeScopeKey(scope.accountId, scope.organizationId, scope.catalogAppId)))
+  return getLocalAppRuntimeCoordinator().teardownRuntimesFor(
+    runtime => keys.has(runtimeScopeKey(
+      runtime.identity.accountId,
+      runtime.identity.productSpaceId,
+      runtime.identity.artifactInstanceId,
+    )),
+    finalStatus,
+  )
+}
+
+export function teardownCoordinatorRuntimesForOrganization(
+  accountId: string,
+  organizationId: string,
+  finalStatus: 'cancelled' | 'failed' | 'unknown' = 'cancelled',
+): Promise<void> {
+  if (!hasLocalAppRuntimeCoordinator()) return Promise.resolve()
+  return getLocalAppRuntimeCoordinator().teardownRuntimesFor(
+    runtime => runtime.identity.accountId === accountId
+      && runtime.identity.productSpaceId === organizationId,
+    finalStatus,
+  )
+}
+
+export function teardownCoordinatorRuntimesForAccount(
+  accountId: string,
+  finalStatus: 'cancelled' | 'failed' | 'unknown' = 'cancelled',
+): Promise<void> {
+  if (!hasLocalAppRuntimeCoordinator()) return Promise.resolve()
+  return getLocalAppRuntimeCoordinator().teardownRuntimesFor(
+    runtime => runtime.identity.accountId === accountId,
+    finalStatus,
+  )
+}
+
+async function trustedAccessToken(accountId?: string, adminOrigin?: string): Promise<string> {
+  if (!accountId || !adminOrigin || getAdminUrl() !== adminOrigin) throw new Error('Original billing context is unavailable')
+  const tokens = await getCredentialManager().getAdminTokens()
+  if (!tokens || tokens.userId !== accountId || getAdminUrl() !== adminOrigin) throw new Error('Original billing session was withdrawn')
+  const current = await getCredentialManager().getAdminTokens()
+  if (!current || current.userId !== accountId || current.accessToken !== tokens.accessToken || getAdminUrl() !== adminOrigin) throw new Error('Original billing session changed')
+  return tokens.accessToken
+}
+
+async function createTrustedAdminClient(expectedOrigin?: string): Promise<AdminClient> {
+  const adminUrl = getAdminUrl()
+  if (!adminUrl || !expectedOrigin || adminUrl !== expectedOrigin) throw new Error('Original Polo Admin is not configured')
+  return new AdminClient(adminUrl)
 }
 
 export function hasLocalAppRuntimeManager(): boolean {
@@ -46,14 +209,17 @@ export function hasLocalAppRuntimeManager(): boolean {
 }
 
 export async function shutdownLocalAppRuntime(): Promise<void> {
-  const results = await Promise.allSettled([
-    manager?.shutdown(),
-    scopedRegistry?.shutdown(),
-  ])
-  const failure = results.find(
-    (result): result is PromiseRejectedResult => result.status === 'rejected',
-  )
-  if (failure) throw failure.reason
+  // Strict order: the coordinator first revokes every capability, aborts
+  // App-owned work, runs the bounded cleanup lane and stops the exact
+  // process generations; the manager/registry forced cleanup then ALWAYS
+  // runs — a coordinator exact-stop failure is captured and aggregated, it
+  // must never skip the SIGKILL/managed-process retry paths or poison a
+  // before-quit retry (see shutdownLocalAppRuntimeOwners).
+  await shutdownLocalAppRuntimeOwners({
+    ...(coordinator ? { coordinator } : {}),
+    ...(manager ? { manager } : {}),
+    ...(scopedRegistry ? { scopedRegistry } : {}),
+  })
 }
 
 export { LocalAppRuntimeManager } from './manager'
@@ -67,3 +233,9 @@ export {
   ScopedLocalAppRuntimeRegistry,
   validateCatalogLocalAppScope,
 } from './scoped-registry'
+export { catalogRuntimeScopeTupleKey } from './runtime-coordinator'
+export { LocalAppRuntimeCoordinator } from './runtime-coordinator'
+export type { RuntimeCoordinatorAdapters } from './runtime-coordinator'
+export { AppApiCapabilityRegistry } from './app-api-capabilities'
+export { AppApiRunState } from './app-api-run-state'
+export { AppApiGateway } from './app-api-gateway'

@@ -1,3 +1,5 @@
+import type { z } from 'zod';
+import type { AppRuntimeStartInput, BillingRuntimeUsageInput, BillingRuntimeFinishInput, BillingRuntimeAdmissionInput, billingRuntimeAdmissionResponseSchema, billingRuntimeRequestResponseSchema } from './billing-runtime-contract';
 import type { LlmConnection } from '../config/llm-connections.ts';
 export type {
   CreatorArtifact,
@@ -107,6 +109,8 @@ export interface AdminTransitEncryptedApiKey {
 }
 
 export interface AdminLlmConnectionsResponse {
+  /** Server-authorized space owning these dedicated compute credentials. */
+  productSpaceId?: string;
   configVersion: string;
   connections: AdminLlmConnection[];
   defaultConnection: string | null;
@@ -200,7 +204,7 @@ export interface ListOrganizationsResponse {
   organizations: OrganizationSummary[];
 }
 
-export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle';
+export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle' | 'resolve_launch';
 
 export interface AppReleaseSummary {
   id?: string;
@@ -227,6 +231,17 @@ export interface AppReleaseDownload {
 
 export interface CatalogApp {
   id: string;
+  /** ProductSpace Catalog identity. Present for the unified member Catalog. */
+  catalogEntryId?: string;
+  artifactInstanceId?: string;
+  catalogVersion?: {
+    versionId: string;
+    version: string;
+    checksum?: string;
+  };
+  /** All authoritative distribution sources; never inferred from the name. */
+  sourceNames?: string[];
+  unavailableReason?: string;
   organizationId: string;
   name: string;
   description: string;
@@ -243,6 +258,20 @@ export interface CatalogApp {
    * no longer be launched without silently deleting it.
    */
   availability?: 'available' | 'withdrawn' | 'unavailable';
+  /**
+   * Normalized RAW authoritative sources of the Catalog entry this app was
+   * projected from. The UI-facing `sourceNames` above is a display
+   * projection (deduped names); operation identities seal THESE sources so
+   * Main can prove them against its captured authority binding.
+   */
+  catalogSources?: ReadonlyArray<{ kind: string; name?: string; circleId?: string }>;
+  /**
+   * RAW Catalog availability of the authoritative entry (including
+   * 'withdrawn' for retained tombstones). The effective `availability` above
+   * is intentionally lossy ('blocked' collapses into 'unavailable'), so
+   * operation identities seal THIS value instead.
+   */
+  rawAvailability?: 'available' | 'unavailable' | 'blocked' | 'withdrawn';
 }
 
 export interface AppCatalogResponse {
@@ -286,6 +315,12 @@ export interface DeniedCatalogApp extends Pick<
   | 'creatorName'
   | 'deliveryMode'
   | 'sortOrder'
+  // Non-secret stable UI identity: retained so the frozen restricted view
+  // can key/address rows (live vs withdrawn) without exposing any delivery
+  // capability.
+  | 'catalogEntryId'
+  | 'artifactInstanceId'
+  | 'sourceNames'
 > {
   availability: 'unavailable';
 }
@@ -453,6 +488,7 @@ export type AdminErrorCode =
   | 'last_owner_required'
   | 'duplicate_request'
   | 'creator_skill_feature_disabled'
+  | 'product_space_contract_unsupported'
   | 'creator_skill_upload_cancelled'
   | 'artifact_type_not_allowed'
   | 'artifact_not_found'
@@ -469,6 +505,11 @@ export type AdminErrorCode =
   | 'upload_expired'
   | 'checksum_mismatch'
   | 'content_digest_mismatch'
+  | 'insufficient_credit'
+  | 'quota_exhausted'
+  | 'budget_exhausted'
+  | 'run_finalized'
+  | 'account_transition_pending'
   | PhoneAuthErrorCode;
 
 export interface AdminErrorDetails {
@@ -491,4 +532,32 @@ export class AdminError extends Error {
     this.status = options?.status;
     this.details = options?.details;
   }
+}
+
+/** POL-102 minimal App billing contract. Payer/price are server-derived and never appear here. */
+export type AdminStartAppRunInput = AppRuntimeStartInput;
+
+export interface AdminStartAppRunResponse {
+  run: { runId: string; status: 'running' };
+}
+
+export type AdminGetAppRequestResponse = z.infer<typeof billingRuntimeRequestResponseSchema>;
+export type AdminAdmitAppRequestInput = BillingRuntimeAdmissionInput;
+export type AdminAdmitAppRequestResponse = z.infer<typeof billingRuntimeAdmissionResponseSchema>;
+
+export type AdminRecordAppUsageInput = BillingRuntimeUsageInput;
+
+export interface AdminRecordAppUsageResponse {
+  runId: string;
+  requestId: string;
+  recorded: boolean;
+  settlement?: 'pending' | 'confirmed' | 'no_charge';
+}
+
+export type AdminFinishAppRunInput = BillingRuntimeFinishInput;
+
+export interface AdminFinishAppRunResponse {
+  runId: string;
+  status: AdminFinishAppRunInput['status'];
+  settlement?: 'pending' | 'confirmed' | 'no_charge';
 }

@@ -417,25 +417,25 @@ Review the selected change carefully.
       const accepted = await writeZip(root, {
         'review-helper/SKILL.md': VALID_SKILL.replace(
           'description: Reviews changes against a checklist.',
-          `description: ${JSON.stringify('😀'.repeat(1_024))}`,
+          `description: ${JSON.stringify('😀'.repeat(8_192))}`,
         ),
       }, 'description-at-limit.zip')
       await expect(validateCreatorSkillArchive({
         archivePath: accepted,
         slug: 'review-helper',
-      })).resolves.toMatchObject({ metadata: { description: '😀'.repeat(1_024) } })
+      })).resolves.toMatchObject({ metadata: { description: '😀'.repeat(8_192) } })
 
       const rejected = await writeZip(root, {
         'review-helper/SKILL.md': VALID_SKILL.replace(
           'description: Reviews changes against a checklist.',
-          `description: ${JSON.stringify('😀'.repeat(1_025))}`,
+          `description: ${JSON.stringify('😀'.repeat(8_193))}`,
         ),
       }, 'description-over-limit.zip')
       expect(await archiveIssue(rejected)).toEqual(expect.objectContaining({
         code: 'invalid_skill_content',
         path: 'review-helper/SKILL.md',
         field: 'description',
-        message: 'Creator Skill description must be at most 1024 characters',
+        message: 'Creator Skill description must be at most 8192 characters',
       }))
     })
   })

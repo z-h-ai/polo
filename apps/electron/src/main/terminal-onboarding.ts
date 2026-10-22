@@ -32,8 +32,8 @@ export interface TerminalSetupCopy {
 }
 
 interface TerminalOnboardingDependencies {
-  getStatus?: (options: TerminalIntegrationOptions) => TerminalIntegrationStatus
-  install?: (options: TerminalIntegrationOptions) => TerminalIntegrationStatus
+  getStatus?: (options: TerminalIntegrationOptions) => TerminalIntegrationStatus | Promise<TerminalIntegrationStatus>
+  install?: (options: TerminalIntegrationOptions) => TerminalIntegrationStatus | Promise<TerminalIntegrationStatus>
   wasDismissed?: (options: TerminalIntegrationOptions) => boolean
   setDismissed?: (options: TerminalIntegrationOptions, dismissed: boolean) => void
 }
@@ -101,7 +101,7 @@ export async function runTerminalOnboarding({
   let status: TerminalIntegrationStatus | null = null
   while (status === null) {
     try {
-      status = getStatus(terminalOptions)
+      status = await getStatus(terminalOptions)
     } catch (error) {
       logError(error)
       const action = await showFailure({
@@ -165,12 +165,12 @@ export async function runTerminalOnboarding({
   while (true) {
     let failure: TerminalIntegrationErrorPayload | undefined
     try {
-      status = install(terminalOptions)
+      status = await install(terminalOptions)
     } catch (error) {
       logError(error)
       failure = toTerminalIntegrationErrorPayload(error, 'install')
       try {
-        status = getStatus(terminalOptions)
+        status = await getStatus(terminalOptions)
       } catch (refreshError) {
         logError(refreshError)
         failure = {

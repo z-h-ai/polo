@@ -30,10 +30,10 @@ import {
   Bot,
   Info,
   MailOpen,
+  Settings2,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
-import { TopBar } from "./TopBar"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { McpIcon } from "../icons/McpIcon"
 import { cn } from "@/lib/utils"
@@ -82,12 +82,14 @@ import { getResizeGradientStyle } from "@/hooks/useResizeGradient"
 import { useAction, useActionLabel } from "@/actions"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useFocusContext } from "@/context/FocusContext"
+import { useTabShell } from "@/context/TabShellContext"
 import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
+import { reportTargetProjectionFailure } from '@/lib/target-projection'
 import {
   creatorSkillSafetyCheckStatesAtom,
   creatorSkillSafetyIdentityKey,
@@ -107,6 +109,8 @@ import { resolveEntityColor } from "@polo-ai/shared/colors"
 import * as storage from "@/lib/local-storage"
 import { toast } from "sonner"
 import { navigate, routes } from "@/lib/navigate"
+import { requestNewMainWindow } from "@/lib/new-window-request"
+import { useAssistantViewActions } from '@/hooks/useAssistantViewActions'
 import {
   useNavigation,
   useNavigationState,
@@ -118,6 +122,7 @@ import {
   type NavigationState,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
+import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, DEFAULT_SETTINGS_SUBPAGE, getSettingsPageScope } from "../../../shared/settings-registry"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
@@ -525,13 +530,11 @@ function AppShellContent({
     onRenameSession,
     onOpenSettings,
     onOpenKeyboardShortcuts,
-    onOpenStoredUserPreferences,
     onReset,
     onSendMessage,
     openNewChat,
     pendingPermissions,
-    currentAdminUser,
-    onAdminLogout,
+    pendingQuestions,
   } = contextValue
 
   const { t } = useTranslation()
@@ -581,6 +584,16 @@ function AppShellContent({
   // UNIFIED NAVIGATION STATE - single source of truth from NavigationContext
   // Derived from focused panel's route — all panels are peers
   const navState = useNavigationState()
+
+  // POO-103: Polo-scope settings (the TopBar account-menu / Cmd+, entry) is an
+  // independent two-column surface — settings navigator + details — and does
+  // NOT show the assistant sidebar. The assistant scope (sidebar Settings row)
+  // keeps the main sidebar. Scope comes from settings-registry only.
+  const isPoloSettingsRoute =
+    isSettingsNavigation(navState) &&
+    getSettingsPageScope(navState.subpage ?? DEFAULT_SETTINGS_SUBPAGE) === 'polo'
+  const isAssistantSidebarVisible =
+    isSidebarVisible && !effectiveSidebarAndNavigatorHidden && !isPoloSettingsRoute
 
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
@@ -919,6 +932,7 @@ function AppShellContent({
       setSources(loaded || [])
     }).catch(err => {
       console.error('[Chat] Failed to load sources:', err)
+      reportTargetProjectionFailure({ source: 'sources', message: String(err) })
     })
   }, [activeWorkspaceId])
 
@@ -1075,10 +1089,17 @@ function AppShellContent({
   useAction('nav.focusNavigator', () => focusZone('navigator', { intent: 'keyboard' }))
   useAction('nav.focusChat', () => focusZone('chat', { intent: 'keyboard' }))
 
-  // Tab navigation between zones
+  // Tab navigation between zones. The capture is keyboard-active ONLY while
+  // this workbench shell is the VISIBLE surface (the active tab is Polo):
+  // on the POO-43 Home/Catalog surfaces the shell layer is display-hidden,
+  // and plain Tab must fall through to native traversal so the launcher
+  // controls (management entry, All Apps, every App action) stay reachable
+  // and the dedicated launcher scroll owner advances with focus (R42).
+  const { activeTab: shellActiveTab } = useTabShell()
+  const isWorkbenchSurfaceActive = shellActiveTab.type === 'polo'
   useAction('nav.nextZone', () => {
     focusNextZone()
-  }, { enabled: () => !document.querySelector('[role="dialog"]') })
+  }, { enabled: () => !document.querySelector('[role="dialog"]') && isWorkbenchSurfaceActive })
 
   // Shift+Tab cycles permission mode through enabled modes (textarea handles its own, this handles when focus is elsewhere)
   // In multi-panel, targets the focused panel's session
@@ -1112,11 +1133,8 @@ function AppShellContent({
     setIsSidebarVisible(v => !v)
   }, [isSidebarAndNavigatorHidden])
 
-  // Sidebar toggle (CMD+B)
-  useAction('view.toggleSidebar', handleToggleSidebar)
-
-  // Focus mode toggle (CMD+.) - hides both sidebars
-  useAction('view.toggleFocusMode', () => setIsSidebarAndNavigatorHidden(v => !v))
+  const handleToggleFocusMode = useCallback(() => setIsSidebarAndNavigatorHidden(v => !v), [])
+  useAssistantViewActions(handleToggleSidebar, handleToggleFocusMode)
 
   // Panel focus navigation (CMD+SHIFT+[ / ])
   const focusNextPanel = useSetAtom(focusNextPanelAtom)
@@ -1134,8 +1152,9 @@ function AppShellContent({
   // Keyboard shortcuts
   useAction('app.keyboardShortcuts', onOpenKeyboardShortcuts)
 
-  // New window
-  useAction('app.newWindow', () => window.electronAPI.menuNewWindow())
+  // New window — POO-117: shared helper owns the in-flight guard and the
+  // failure toast, same outcome as the avatar-menu entry.
+  useAction('app.newWindow', () => { void requestNewMainWindow() })
 
   // Quit (note: also handled by native menu on macOS)
   useAction('app.quit', () => window.electronAPI.menuQuit())
@@ -1238,7 +1257,7 @@ function AppShellContent({
           setSidebarHandleY(e.clientY - rect.top)
         }
       } else if (isResizing === 'session-list') {
-        const offset = isSidebarVisible ? sidebarWidth : 0
+        const offset = isAssistantSidebarVisible ? sidebarWidth : 0
         const newWidth = Math.min(Math.max(e.clientX - offset, 240), 480)
         setSessionListWidth(newWidth)
         if (sessionListHandleRef.current) {
@@ -1270,7 +1289,7 @@ function AppShellContent({
     isResizing,
     sidebarWidth,
     sessionListWidth,
-    isSidebarVisible,
+    isAssistantSidebarVisible,
   ])
 
   // Spring transition config - shared between sidebar and header
@@ -1288,7 +1307,13 @@ function AppShellContent({
 
   const hasPendingPrompt = React.useCallback((sessionId: string) => {
     return (pendingPermissions.get(sessionId)?.length ?? 0) > 0
-  }, [pendingPermissions])
+      || pendingQuestions.has(sessionId)
+  }, [pendingPermissions, pendingQuestions])
+
+  // Session list "waiting for answer" marker (request_user_input)
+  const hasPendingQuestion = React.useCallback((sessionId: string) => {
+    return pendingQuestions.has(sessionId)
+  }, [pendingQuestions])
 
   // Workspace-level unread indicators (needed for workspace selectors across all workspaces)
   const [workspaceUnreadMap, setWorkspaceUnreadMap] = useState<Record<string, boolean>>({})
@@ -1320,6 +1345,7 @@ function AppShellContent({
       setSkills(loaded || [])
     }).catch(err => {
       console.error('[Chat] Failed to load skills:', err)
+      reportTargetProjectionFailure({ source: 'skills', message: String(err) })
     })
   }, [activeWorkspaceId, activeSessionWorkingDirectory])
 
@@ -1633,22 +1659,6 @@ function AppShellContent({
     storage.set(storage.KEYS.focusModeEnabled, isSidebarAndNavigatorHidden)
   }, [isSidebarAndNavigatorHidden])
 
-  // Listen for focus mode toggle from menu (View → Focus Mode)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onMenuToggleFocusMode?.(() => {
-      setIsSidebarAndNavigatorHidden(v => !v)
-    })
-    return cleanup
-  }, [])
-
-  // Listen for sidebar toggle from menu (View → Toggle Sidebar)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onMenuToggleSidebar?.(() => {
-      handleToggleSidebar()
-    })
-    return cleanup
-  }, [handleToggleSidebar])
-
   // Persist per-view filter map to localStorage (workspace-scoped)
   React.useEffect(() => {
     if (!activeWorkspaceId) return
@@ -1740,6 +1750,13 @@ function AppShellContent({
   const handleSettingsClick = useCallback((subpage?: SettingsSubpage) => {
     navigate(routes.view.settings(subpage))
   }, [])
+
+  // Assistant-scope settings entry (sidebar, below Automations). Lands on the
+  // first assistant category — the navigator derives the assistant scope from
+  // the subpage via settings-registry.
+  const handleAssistantSettingsClick = useCallback(() => {
+    handleSettingsClick(ASSISTANT_SETTINGS_DEFAULT_SUBPAGE)
+  }, [handleSettingsClick])
 
   // ============================================================================
   // EDIT POPOVER STATE
@@ -1869,7 +1886,12 @@ function AppShellContent({
 
   // Create a new chat and select it
   const handleNewChat = useCallback((newPanel: boolean = false) => {
-    if (!activeWorkspace) return
+    if (!activeWorkspace) {
+      // POO-117 P117-06: the scope is not ready (e.g. mid space switch) — the
+      // request must not die silently, the user is told to wait and retry.
+      toast.error(t('toast.newChatNotReady'))
+      return
+    }
 
     // Exit search mode and switch to All Sessions
     setSearchActive(false)
@@ -1883,7 +1905,7 @@ function AppShellContent({
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, navigate])
+  }, [activeWorkspace, focusZone, navigate, t])
 
   // Create a brand new dedicated browser window and focus it.
   // Intentionally unbound: this action should always create a NEW window.
@@ -1982,13 +2004,14 @@ function AppShellContent({
     }
     flattenTree(labelTree)
 
-    // 3. Sources, Skills, Automations
+    // 3. Sources, Skills, Automations, Settings
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
+    result.push({ id: 'nav:settings', type: 'nav', action: handleAssistantSettingsClick })
 
     return result
-  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelTree, handleSourcesClick, handleSkillsClick, handleAutomationsClick])
+  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelTree, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAssistantSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2198,31 +2221,12 @@ function AppShellContent({
 
   return (
     <AppShellProvider value={appShellContextValue}>
-        {/* === TOP BAR === */}
-        <TopBar
-          workspaces={workspaces}
-          activeWorkspaceId={activeWorkspaceId}
-          onSelectWorkspace={onSelectWorkspace}
-          workspaceUnreadMap={workspaceUnreadMap}
-          onWorkspaceCreated={() => onRefreshWorkspaces?.()}
-          onWorkspaceRemoved={() => onRefreshWorkspaces?.()}
-          activeSessionId={effectiveSessionId}
-          onNewChat={() => handleNewChat()}
-          onNewWindow={() => window.electronAPI.menuNewWindow()}
-          onOpenSettings={onOpenSettings}
-          onOpenSettingsSubpage={handleSettingsClick}
-          onOpenKeyboardShortcuts={onOpenKeyboardShortcuts}
-          onOpenStoredUserPreferences={onOpenStoredUserPreferences}
-          onBack={goBack}
-          onForward={goForward}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-          onToggleSidebar={handleToggleSidebar}
-          onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          onAddSessionPanel={() => handleNewChat(true)}
-          onAddBrowserPanel={() => { void handleNewBrowserWindow() }}
-          isCompact={isAutoCompact}
-        />
+      {/* === WORKBENCH BAR === */}
+      {/* The unified workbench bar (brand + tabs + space/account actions) is
+          rendered by TabShell inside the hydration gate — see
+          tab-browser/TabShell.tsx. Rendering it there keeps the bar absent
+          while a new ProductSpace scope hydrates (Review R33 fail-closed
+          boundary) and visible on every shell surface, Home included. */}
 
       {/* === OUTER LAYOUT: Unified Panel Stack | Right Sidebar === */}
       <div
@@ -2283,15 +2287,9 @@ function AppShellContent({
                   isCollapsed={false}
                   getItemProps={getSidebarItemProps}
                   focusedItemId={focusedSidebarItemId}
-                  userMenu={currentAdminUser?.username ? {
-                    user: {
-                      username: currentAdminUser.username,
-                      displayName: currentAdminUser.displayName || currentAdminUser.username,
-                    },
-                    onProfile: () => handleSettingsClick('preferences'),
-                    onSettings: () => handleSettingsClick(),
-                    onLogout: onAdminLogout ?? (async () => {}),
-                  } : null}
+                  // POO-103: no bottom-left avatar/user menu. Assistant settings
+                  // live in the "Settings" row below Automations; account actions
+                  // (logout, spaces) stay in the TopBar account menu.
                   links={[
                     // --- Sessions Section ---
                     // All Sessions: expandable with status children (sortable) + Flagged & Archived as trailing items
@@ -2499,6 +2497,17 @@ function AppShellContent({
                         },
                       ],
                     },
+                    // --- Assistant Settings (one click, below Automations) ---
+                    {
+                      id: "nav:settings",
+                      title: t("sidebar.settings"),
+                      icon: Settings2,
+                      // Highlighted only while an assistant-scope category is open;
+                      // Polo-scope pages (app/account/appearance/shortcuts) belong to
+                      // the account menu entry, not this sidebar row.
+                      variant: (isSettingsNavigation(navState) && navState.subpage !== null && getSettingsPageScope(navState.subpage) === 'assistant') ? "default" : "ghost",
+                      onClick: handleAssistantSettingsClick,
+                    },
                   ]}
                 />
                 {/* Agent Tree: Hierarchical list of agents */}
@@ -2509,15 +2518,15 @@ function AppShellContent({
             </div>
           </div>
           }
-          sidebarWidth={effectiveSidebarAndNavigatorHidden ? 0 : (isSidebarVisible ? sidebarWidth : 0)}
+          sidebarWidth={isAssistantSidebarVisible ? sidebarWidth : 0}
           navigatorSlot={
             <div
               style={{ width: isAutoCompact ? '100%' : sessionListWidth }}
               className="h-full flex flex-col min-w-0 relative z-panel"
             >
             <PanelHeader
-              title={isSidebarVisible ? listTitle : undefined}
-              compensateForStoplight={!isSidebarVisible}
+              title={isAssistantSidebarVisible ? listTitle : undefined}
+              compensateForStoplight={!isAssistantSidebarVisible}
               badge={automationFilter?.automationType === 'scheduled' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -3259,6 +3268,7 @@ function AppShellContent({
                   focusedSessionId={panelCount === 0 ? null : panelCount > 1 ? focusedSessionId : undefined}
                   onNavigateToSession={panelCount > 1 ? navigateToSessionInPanel : undefined}
                   hasPendingPrompt={hasPendingPrompt}
+                  hasPendingQuestion={hasPendingQuestion}
                   activeChatMatchInfo={chatMatchInfo}
                 />
               </>
@@ -3295,7 +3305,7 @@ function AppShellContent({
             width: PANEL_SASH_HIT_WIDTH,
             top: PANEL_STACK_VERTICAL_OVERFLOW,
             bottom: PANEL_STACK_VERTICAL_OVERFLOW,
-            left: isSidebarVisible
+            left: isAssistantSidebarVisible
               ? sidebarWidth + (PANEL_GAP / 2) - PANEL_SASH_HALF_HIT_WIDTH
               : -PANEL_GAP,
             transition: isResizing === 'sidebar' ? undefined : 'left 0.15s ease-out',
@@ -3329,7 +3339,7 @@ function AppShellContent({
             top: PANEL_STACK_VERTICAL_OVERFLOW,
             bottom: PANEL_STACK_VERTICAL_OVERFLOW,
             left:
-              (isSidebarVisible ? sidebarWidth + PANEL_GAP : PANEL_EDGE_INSET) +
+              (isAssistantSidebarVisible ? sidebarWidth + PANEL_GAP : PANEL_EDGE_INSET) +
               sessionListWidth +
               (PANEL_GAP / 2) -
               PANEL_SASH_HALF_HIT_WIDTH,

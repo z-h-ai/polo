@@ -79,6 +79,9 @@ export interface StoredConfig {
   // Tools
   browserToolEnabled?: boolean;  // Enable built-in browser tool (default: true). Disable for Playwright/Puppeteer.
   allowRemoteEvaluate?: boolean;  // Allow remote agents to call `browser_tool evaluate` on local browser (default: true).
+  // Generative UI
+  generativeUiInlineEnabled?: boolean;  // Enable render_ui Generative UI inline cards (shipped default: true). User-level kill switch.
+  generativeUiCanvasEnabled?: boolean;  // Enable generate_app Generative UI canvas apps (shipped default: true). User-level kill switch.
   // Prompt caching & context
   extendedPromptCache?: boolean;  // Use 1h prompt cache TTL instead of 5m (default: false)
   enable1MContext?: boolean;  // Enable 1M context window for supported models (default: false — opt-in; requires Anthropic Tier 4+)
@@ -106,6 +109,17 @@ export interface StoredConfig {
       createdAt: number;
       order: number;
     }>;
+    // Account+ProductSpace scoped partitions (key = ProductSpace context
+    // key). Scoped windows never read the legacy global list above.
+    installedAppsByScope?: Record<string, Array<{
+      id: string;
+      name: string;
+      url: string;
+      iconUrl?: string;
+      type: 'builtin' | 'webapp';
+      createdAt: number;
+      order: number;
+    }>>;
   };
   // One-shot migration markers. Used by migrations that should run at most
   // once per user (e.g. restoring a previously-removed model to connection
@@ -143,6 +157,8 @@ const FALLBACK_CONFIG_DEFAULTS: ConfigDefaults = {
     browserToolEnabled: true,
     adminUrl: 'https://polo-admin.z-h-ai.com/',
     allowRemoteEvaluate: true,
+    generativeUiInlineEnabled: true,
+    generativeUiCanvasEnabled: true,
   },
   workspaceDefaults: {
     thinkingLevel: 'medium',
@@ -550,6 +566,64 @@ export function getBrowserToolEnabled(): boolean {
 export function setBrowserToolEnabled(enabled: boolean): void {
   updateStoredConfig(config => {
     config.browserToolEnabled = enabled;
+  });
+
+  // Clear session tool caches so all sessions pick up the change immediately.
+  // Lazy import to avoid circular dependency (storage ← session-scoped-tools ← storage).
+  import('../agent/session-scoped-tools.ts').then(m => m.invalidateAllSessionToolsCaches()).catch(() => {});
+}
+
+/**
+ * Get whether Generative UI inline cards (render_ui) are enabled locally.
+ * User-level kill switch; combined with the remote `generativeUI.inline`
+ * capability via isGenerativeUiInlineEnabled(). Shipped default is on via the
+ * bundled config-defaults.json (re-synced on every launch); an absent key from
+ * an older bundled file still reads as enabled until the next sync.
+ */
+export function getGenerativeUiInlineEnabled(): boolean {
+  const config = loadStoredConfig();
+  if (config?.generativeUiInlineEnabled !== undefined) {
+    return config.generativeUiInlineEnabled;
+  }
+  const defaults = loadConfigDefaults();
+  return defaults.defaults.generativeUiInlineEnabled !== false;
+}
+
+/**
+ * Set whether Generative UI inline cards (render_ui) are enabled locally.
+ */
+export function setGenerativeUiInlineEnabled(enabled: boolean): void {
+  updateStoredConfig(config => {
+    config.generativeUiInlineEnabled = enabled;
+  });
+
+  // Clear session tool caches so all sessions pick up the change immediately.
+  // Lazy import to avoid circular dependency (storage ← session-scoped-tools ← storage).
+  import('../agent/session-scoped-tools.ts').then(m => m.invalidateAllSessionToolsCaches()).catch(() => {});
+}
+
+/**
+ * Get whether Generative UI canvas apps (generate_app) are enabled locally.
+ * User-level kill switch; combined with the remote `generativeUI.canvas`
+ * capability via isGenerativeUiCanvasEnabled(). Shipped default is on via the
+ * bundled config-defaults.json (re-synced on every launch); an absent key from
+ * an older bundled file still reads as enabled until the next sync.
+ */
+export function getGenerativeUiCanvasEnabled(): boolean {
+  const config = loadStoredConfig();
+  if (config?.generativeUiCanvasEnabled !== undefined) {
+    return config.generativeUiCanvasEnabled;
+  }
+  const defaults = loadConfigDefaults();
+  return defaults.defaults.generativeUiCanvasEnabled !== false;
+}
+
+/**
+ * Set whether Generative UI canvas apps (generate_app) are enabled locally.
+ */
+export function setGenerativeUiCanvasEnabled(enabled: boolean): void {
+  updateStoredConfig(config => {
+    config.generativeUiCanvasEnabled = enabled;
   });
 
   // Clear session tool caches so all sessions pick up the change immediately.

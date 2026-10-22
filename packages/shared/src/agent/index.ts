@@ -21,6 +21,7 @@ export {
   registerSessionScopedToolCallbacks,
   unregisterSessionScopedToolCallbacks,
   mergeSessionScopedToolCallbacks,
+  installSessionScopedToolCallbackGuard,
   // Types
   type SessionScopedToolCallbacks,
   type BrowserPaneFns,
@@ -123,6 +124,8 @@ export {
   type MiniAgentConfig,
   MINI_AGENT_TOOLS,
   MINI_AGENT_MCP_KEYS,
+  type SpawnSessionRequest,
+  type SpawnSessionResult,
 } from './base-agent.ts';
 
 // Export backend abstraction - unified interface for AI agents

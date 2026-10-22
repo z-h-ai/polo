@@ -30,6 +30,7 @@ export type {
   MessageAttachment,
   StoredAttachment,
   ContentBadge,
+  KbReference,
   AnnotationAuthor,
   AnnotationBody,
   AnnotationIntent,
@@ -51,6 +52,9 @@ export type {
   CredentialInputMode,
   AuthRequestType,
   AuthStatus,
+  // Question request metadata types
+  QuestionResponseMetadata,
+  QuestionResolutionMetadata,
 } from './message.ts';
 export { generateMessageId } from './message.ts';
 

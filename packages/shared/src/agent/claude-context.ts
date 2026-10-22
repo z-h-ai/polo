@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'fs';
 import { join, basename } from 'path';
 import { CONFIG_DIR } from '../config/paths.ts';
+import { isGenerativeUiInlineEnabled, isGenerativeUiCanvasEnabled } from '../config/generative-ui.ts';
 import type {
   SessionToolContext,
   SessionToolCallbacks,
@@ -79,6 +80,13 @@ export interface ClaudeContextOptions {
   workspaceId: string;
   onPlanSubmitted: (planPath: string) => void;
   onAuthRequest: (request: unknown) => void;
+  onQuestionRequested?: (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>;
+  /**
+   * Tool-call-time generation reader: the
+   * request_user_input handler invokes this synchronously at initiation and
+   * binds the value immutably into the callback chain.
+   */
+  getTurnGeneration?: () => number;
   sessionStorage?: SessionStorage;
   workingDirectory?: string;
 }
@@ -94,7 +102,7 @@ export interface ClaudeContextOptions {
  * - Icon management
  */
 export function createClaudeContext(options: ClaudeContextOptions): SessionToolContext {
-  const { sessionId, workspacePath, workspaceId, onPlanSubmitted, onAuthRequest } = options;
+  const { sessionId, workspacePath, workspaceId, onPlanSubmitted, onAuthRequest, onQuestionRequested, getTurnGeneration } = options;
   const sessionStorage = options.sessionStorage ?? defaultWorkspaceSessionStorage;
 
   // File system implementation
@@ -118,6 +126,7 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
   const callbacks: SessionToolCallbacks = {
     onPlanSubmitted,
     onAuthRequest: (request) => onAuthRequest(request),
+    ...(onQuestionRequested ? { onQuestionRequested } : {}),
   };
 
   // Validators implementation
@@ -221,11 +230,17 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
   const context: SessionToolContext = {
     sessionId,
     workspacePath,
+    getTurnGeneration,
     get sourcesPath() { return join(workspacePath, 'sources'); },
     get skillsPath() { return join(workspacePath, 'skills'); },
     plansFolderPath: sessionStorage.getPlansPath(workspacePath, sessionId),
     sessionPath: sessionStorage.getSessionPath(workspacePath, sessionId),
     dataPath: sessionStorage.getDataPath(workspacePath, sessionId),
+    // Live generativeUI.inline state for the render_ui handler's call-time
+    // re-check (mid-session disable takes effect on the next tool call).
+    isRenderUiEnabled: () => isGenerativeUiInlineEnabled(),
+    // Same for the generativeUI.canvas state and the generate_app handler.
+    isGenerateAppEnabled: () => isGenerativeUiCanvasEnabled(),
     credentialIsolation: sessionStorage.owner === 'cli',
     workingDirectory: options.workingDirectory,
     callbacks,

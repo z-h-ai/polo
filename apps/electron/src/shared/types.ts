@@ -127,6 +127,33 @@ export interface BrowserEmptyStateLaunchResult {
   reason?: string
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POO-117 P117-05/P117-07 — new-main-window outcome
+//
+// The request must never silently no-op: every terminal state carries a reason
+// plus stage diagnostics (request source, workspace resolution, creation,
+// visibility). Diagnostics never include credentials or chat content.
+// NewWindowRequestSource/NewWindowFailureReason live in the shared protocol DTOs
+// (re-exported above) so the broadcast channel can type its payload.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Observable outcome of a new-main-window request (renderer ↔ main contract). */
+export interface NewWindowResult {
+  ok: boolean
+  /** BrowserWindow id — present once construction succeeded. */
+  windowId?: number
+  webContentsId?: number
+  reason?: NewWindowFailureReason
+  diagnostics: {
+    source: NewWindowRequestSource
+    /** Requested or caller-resolved workspace; null when none could be resolved. */
+    workspaceId: string | null
+    workspaceResolved: boolean
+    created: boolean
+    visible: boolean
+  }
+}
+
 export type TransportMode = 'local' | 'remote'
 
 export type TransportConnectionStatus =
@@ -223,6 +250,17 @@ import type {
   LocalAppStartResult,
   LocalAppLogsOptions,
   LocalAppUninstallOptions,
+  ProductSpaceAppIdentity,
+  ProductSpaceAppInstallState,
+  ProductSpaceBundleInstallRequest,
+  LocalAppLifecycleRequest,
+  ProductSpaceAppRuntimeStartResult,
+  CircleReturnAckResult,
+  CircleReturnCancelResult,
+  CircleReturnCandidate,
+  CircleReturnPendingState,
+  NewWindowRequestSource,
+  NewWindowFailureReason,
 } from '@polo-ai/shared/protocol'
 import type {
   AcceptOrganizationJoinResponse,
@@ -242,6 +280,28 @@ import type {
   AppCatalogSyncResult,
   UpdateOrganizationMemberInput,
 } from '@polo-ai/shared/admin/types'
+
+// Member circle DTOs (POO-70 C1) — member-side contract from the F1 snapshot.
+import type {
+  MemberCircleCheckoutResult,
+  MemberCircleLeaveMembership,
+  MemberCircleRenewalPreview,
+  MemberCircleSnapshot,
+  MemberCircleSupportState,
+  MemberCircleUpstreamPendingState,
+  MemberMembership,
+  OriginalCircleOrder,
+} from '@polo-ai/shared/admin/member-circles'
+export type {
+  MemberCircleCheckoutResult,
+  MemberCircleLeaveMembership,
+  MemberCircleRenewalPreview,
+  MemberCircleSnapshot,
+  MemberCircleSupportState,
+  MemberCircleUpstreamPendingState,
+  MemberMembership,
+  OriginalCircleOrder,
+}
 import type {
   CreatorArtifact,
   CreatorArtifactCapability,
@@ -292,6 +352,93 @@ export type {
   OrganizationType,
 } from '@polo-ai/shared/admin/types'
 import type { AppDefinition } from './tab-browser-types'
+
+/**
+ * Audit record for pinning a generate_app canvas app into the tab browser
+ * (POO-102). The renderer supplies ids/metadata only; Main derives the session
+ * directory from the workspace mapping and validates that `indexPath` points
+ * inside `genui-apps/<appId>/` before anything is written.
+ */
+/**
+ * Tab-browser app id namespace for pinned canvas apps: `gen-ui-app-<appId>`.
+ * Both the pin bridge (renderer) and the audit gate (Main) derive the id with
+ * this prefix, and Main rejects a request whose pinnedAppId is not exactly
+ * this derivation of its appId.
+ */
+export const GENUI_PINNED_APP_ID_PREFIX = 'gen-ui-app-'
+
+export interface GenUiAppPinAuditRequest {
+  sessionId: string
+  appId: string
+  title: string
+  indexPath: string
+  version?: number
+  /** Tab-browser app id the canvas app was pinned under. */
+  pinnedAppId: string
+}
+
+export interface GenUiAppPinAuditResult {
+  ok: boolean
+  error?: string
+}
+
+/**
+ * POO-103 ui-card registration. The renderer reports the ids of a mounted
+ * canvas webview; Main only honors it against its own attach observations
+ * (webview-security) and derives the host window id from the RPC context —
+ * the renderer never names the host.
+ */
+export interface GenUiCardRegisterRequest {
+  sessionId: string
+  cardId: string
+  guestWebContentsId: number
+}
+
+export interface GenUiCardRegisterResult {
+  ok: boolean
+  error?: string
+}
+
+export interface GenUiCardUnregisterRequest {
+  sessionId: string
+  cardId: string
+}
+
+export interface GenUiCardUnregisterResult {
+  ok: boolean
+  /** Set when a card exists but belongs to a different window. */
+  error?: string
+}
+
+/**
+ * POO-104 publish chain, packaging leg. The renderer names ONLY ids — Main
+ * derives the app directory from the calling window's workspace mapping
+ * (never from the request), packages the bundle into the upload ZIP, and
+ * returns the payload once. The renderer then submits it through the existing
+ * admin.PUBLISH_CREATOR_APP chain; the payload crosses this channel in the
+ * Main→renderer direction only.
+ */
+export interface GenUiAppPublishPackageRequest {
+  sessionId: string
+  appId: string
+  /** Display name for the artifact (audit + suggested artifact name). */
+  title: string
+}
+
+export interface GenUiAppPublishPackageResult {
+  ok: boolean
+  error?: string
+  /** Upload ZIP, base64. Present only on success. */
+  payloadBase64?: string
+  /** The analyzed static entry for the admin publish chain. */
+  entry?: { runtime: 'static'; path: string }
+  /** sha256 over the ZIP bytes (hex) — mirrors the upload-chain checksum. */
+  checksum?: string
+  sizeBytes?: number
+  fileCount?: number
+  /** Publish policy copy (SDK bridge requirement, catalog read-only note). */
+  policyNotice?: string
+}
 
 export interface AdminRpcErrorPayload {
   errorCode?: string
@@ -362,6 +509,18 @@ export type OrganizationRpcResult<T extends object> =
   | ({ success: true } & T)
   | ({ success: false } & AdminRpcErrorPayload)
 
+/**
+ * Member circle RPC result (POO-70 C1). errorCode uses the member-circle
+ * contract vocabulary: validation_error / unauthorized / forbidden /
+ * not_found / conflict / rate_limited / service_unavailable / timeout /
+ * network_error / invalid_response / unknown, plus the trusted-gate codes
+ * session_changed (stale identity/space — refetch) and session_unavailable
+ * (trusted session not settled yet).
+ */
+export type MemberCircleRpcResult<T extends object> =
+  | ({ success: true } & T)
+  | ({ success: false } & AdminRpcErrorPayload)
+
 export interface TerminalIntegrationStatus {
   supported: boolean
   installed: boolean
@@ -420,6 +579,15 @@ export interface ElectronAPI {
   markAllSessionsRead(workspaceId: string): Promise<void>
   getSessionMessages(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
+  /**
+   * Dedicated, trusted creation path for the Edit Popover session. The server
+   * stamps the 'edit-popover' origin + owner identity here — the generic
+   * createSession can never grant that origin.
+   */
+  createEditPopoverSession(
+    workspaceId: string,
+    options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
+  ): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
@@ -427,6 +595,14 @@ export interface ElectronAPI {
   getTaskOutput(taskId: string): Promise<string | null>
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
+  respondToQuestion(sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution): Promise<import('@polo-ai/shared/protocol').QuestionResolutionResult>
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question for the given workspace + popover owner (hidden session, not
+   * reachable via the session list). Exact match only; returns null when no
+   * scoped popover session is waiting for an answer.
+   */
+  getEditPopoverPendingQuestion(workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
 
   // Consolidated session command handler
   sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number }>
@@ -453,6 +629,9 @@ export interface ElectronAPI {
 
   // Session export/import (cross-workspace transfer)
   exportSession(sessionId: string): Promise<unknown>
+  /** Export a session bundle to a user-chosen JSON file (OS save dialog, main-process orchestrated).
+   *  Resolves to the written file path, or null when the user cancelled the save dialog. */
+  exportSessionToFile(sessionId: string): Promise<string | null>
   importSession(targetWorkspaceId: string, bundle: unknown, mode: 'move' | 'fork'): Promise<{ sessionId: string; warnings?: string[] }>
   exportRemoteSessionTransfer(sessionId: string): Promise<RemoteSessionTransferPayload>
   importRemoteSessionTransfer(targetWorkspaceId: string, payload: RemoteSessionTransferPayload): Promise<ImportRemoteSessionTransferResult>
@@ -484,6 +663,8 @@ export interface ElectronAPI {
 
   // Window management
   getWindowWorkspace(): Promise<string | null>
+  getWindowLaunchContext(): Promise<import('@polo-ai/shared/protocol').WorkbenchWindowContext | null>
+  reportWorkbenchReady(context: import('@polo-ai/shared/protocol').WorkbenchWindowContext | null): Promise<boolean>
   getWindowMode(): Promise<string | null>
   openWorkspace(workspaceId: string): Promise<void>
   openSessionInNewWindow(workspaceId: string, sessionId: string): Promise<void>
@@ -574,6 +755,8 @@ export interface ElectronAPI {
   onMenuNewChat(callback: () => void): () => void
   onMenuOpenSettings(callback: () => void): () => void
   onMenuKeyboardShortcuts(callback: () => void): () => void
+  /** POO-117 P117-07: a main-process-initiated new-window request (native menu / webview shortcut) failed. */
+  onMenuNewWindowFailed(callback: (reason: NewWindowFailureReason) => void): () => void
   onMenuToggleFocusMode(callback: () => void): () => void
   onMenuToggleSidebar(callback: () => void): () => void
 
@@ -585,6 +768,20 @@ export interface ElectronAPI {
   getTabBrowserApps(): Promise<AppDefinition[]>
   saveTabBrowserApps(apps: AppDefinition[]): Promise<void>
 
+  // Generative UI canvas apps — append a pin record to the session's audit log.
+  // Main derives the session directory itself and validates the bundle path.
+  appendGenUiAudit(request: GenUiAppPinAuditRequest): Promise<GenUiAppPinAuditResult>
+
+  // Generative UI canvas cards (POO-103) — register/unregister a mounted
+  // canvas webview with the Main-owned UiCardRegistry. Main verifies the
+  // claimed guest against its own attach observations.
+  registerGenUiCard(request: GenUiCardRegisterRequest): Promise<GenUiCardRegisterResult>
+  unregisterGenUiCard(request: GenUiCardUnregisterRequest): Promise<GenUiCardUnregisterResult>
+
+  // Generative UI canvas app publish chain (POO-104) — package the
+  // session-local bundle into the upload payload behind Main's trust anchors.
+  packageGenUiAppArtifact(request: GenUiAppPublishPackageRequest): Promise<GenUiAppPublishPackageResult>
+
   // Local App Bundle installation and runtime
   localApps: {
     getHostInfo(): Promise<{
@@ -592,10 +789,20 @@ export interface ElectronAPI {
       arch: 'arm64' | 'x64'
     }>
     install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
+    installProductSpaceBundle(request: ProductSpaceBundleInstallRequest): Promise<LocalAppInstalledApp>
+    getProductSpaceInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
+    getProductSpaceWithdrawnInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
+    uninstallProductSpaceBundle(
+      app: ProductSpaceAppIdentity,
+      options?: LocalAppUninstallOptions,
+    ): Promise<void>
     cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
-    start(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    start(request: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    start(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
     stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
+    stop(request: LocalAppLifecycleRequest): Promise<LocalAppRuntimeStatus>
     restart(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    restart(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
     uninstall(app: CatalogLocalAppScope, options?: LocalAppUninstallOptions): Promise<void>
     setAvailableRelease(
       app: CatalogLocalAppScope,
@@ -626,6 +833,7 @@ export interface ElectronAPI {
   adminValidate(): Promise<AdminValidateResult>
   adminLogout(): Promise<SessionLogoutResult>
   adminGetStatus(): Promise<AdminStatusResult>
+  adminPaymentHandoff(): Promise<{ success: true; url: string; accountId: string; productSpaceId: string } | { success: false; errorCode: string; message: string }>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
   adminSyncAppCatalog(
     organizationId: string,
@@ -817,6 +1025,66 @@ export interface ElectronAPI {
     callback: (progress: CreatorSkillOperationProgress) => void,
   ): () => void
 
+  // Member circles (POO-70 C1): trusted-session member reads/writes. The
+  // Main process derives the permission subject from the Admin session —
+  // resource ids only address a request. Deliberately NO purchase /
+  // createOrder / grant method: the client never creates circle orders.
+  memberCircles: {
+    /** GET /api/me/circles — "My circles" snapshots (empty is a valid result). */
+    list(): Promise<MemberCircleRpcResult<{ circles: MemberCircleSnapshot[] }>>
+    /** GET /api/me/circle-memberships — memberships with payment projections. */
+    listMemberships(): Promise<MemberCircleRpcResult<{ memberships: MemberMembership[] }>>
+    /**
+     * Authoritative renewal preview. preview.priceMinor may be null (price
+     * unavailable upstream) — never substitute an amount. resolvedPurchaseUrl
+     * is the raw purchaseUrl resolved against the confirmed Admin origin, or
+     * null when that fails closed.
+     */
+    previewRenewal(membershipId: string): Promise<MemberCircleRpcResult<{
+      purchaseUrl: string
+      resolvedPurchaseUrl: string | null
+      purchaseUrlResolutionError: 'invalid_purchase_url' | 'untrusted_purchase_url_origin' | null
+      preview: MemberCircleRenewalPreview
+    }>>
+    /** leave_now on the caller's own membership (the only member write). */
+    leave(membershipId: string): Promise<MemberCircleRpcResult<{ membership: MemberCircleLeaveMembership }>>
+    /** Original order receipt; storedStatus is display history, never an entitlement. */
+    getOrder(orderId: string): Promise<MemberCircleRpcResult<{ order: OriginalCircleOrder }>>
+    /** Authoritative checkout/cycle read — the entitlement judgment source (G5). */
+    getCheckoutResult(orderId: string): Promise<MemberCircleRpcResult<{ checkout: MemberCircleCheckoutResult }>>
+    /** Circle updates list: upstream_pending (G2) until the provider lands it. */
+    getUpdates(circleId: string): Promise<MemberCircleRpcResult<{ updates: MemberCircleUpstreamPendingState }>>
+    /** Public profile by circleId: upstream_pending (G3) — no circleId→shareId bridge. */
+    getProfile(circleId: string): Promise<MemberCircleRpcResult<{ profile: MemberCircleUpstreamPendingState }>>
+    /** Support config: upstream_pending (G4) until the member-side endpoint exists. */
+    getSupport(): Promise<MemberCircleRpcResult<{ support: MemberCircleSupportState }>>
+  }
+
+  // Circle web→desktop return bridge (POO-70 B1). The Main candidate store
+  // holds ONE pending navigation candidate (ids only, never an authorization);
+  // consumption is event-or-read exactly once via candidateId dedup. B1 does
+  // not navigate routes itself — C8/C9 consume the candidate.
+  circleReturn: {
+    /**
+     * Read the pending candidate. Delivery is gated on the trusted account
+     * mirror: `unavailable` (startup not settled / account transition in
+     * flight) delivers nothing and mutates nothing; a signed-out caller gets
+     * `none` (an account-bound candidate is cleared — logout cleanup — while
+     * a pre-login candidate is retained for delivery after login).
+     */
+    getPending(): Promise<CircleReturnPendingState>
+    /** Consumption confirmation; clears the candidate. Idempotent. */
+    ack(candidateId: string): Promise<CircleReturnAckResult>
+    /** Renderer-declined navigation; clears the candidate. Idempotent. */
+    cancel(candidateId: string): Promise<CircleReturnCancelResult>
+  }
+  /**
+   * Main→renderer push of a pending circle-return candidate (P70-RETURN-BRIDGE-03).
+   * Register BEFORE reading getPending (event-first), dedup by candidateId;
+   * any event/read interleaving must consume exactly once.
+   */
+  onCircleReturnCandidate(callback: (candidate: CircleReturnCandidate) => void): () => void
+
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>
 
@@ -875,6 +1143,13 @@ export interface ElectronAPI {
     contextKey: string,
     apps: import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[],
   ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  getHomeQuickAccess(
+    contextKey: string,
+  ): Promise<import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[]>
+  setHomeQuickAccess(
+    contextKey: string,
+    apps: import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[],
+  ): Promise<import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[]>
   getOrganizationContextStorage(
     accountId: string,
   ): Promise<
@@ -890,6 +1165,182 @@ export interface ElectronAPI {
     import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
     | null
   >
+  getProductSpaceContextStorage(
+    accountId: string,
+  ): Promise<
+    import('@polo-ai/shared/config/product-space-context').ProductSpaceContextStorage
+    | null
+  >
+  updateProductSpaceContextStorage(
+    accountId: string,
+    patch: import(
+      '@polo-ai/shared/config/product-space-context'
+    ).ProductSpaceContextStoragePatch,
+  ): Promise<
+    import('@polo-ai/shared/config/product-space-context').ProductSpaceContextStorage
+    | null
+  >
+
+  // ProductSpace consumption (member spaces and the local runtime gate)
+  productSpaceList(): Promise<
+    | { success: true; contractVersion: number; personalProductSpaceId: string; productSpaces: import('@polo-ai/shared/product-spaces').ProductSpaceSummary[] }
+    | { success: false; errorCode: string; message: string; contractUnsupported?: boolean }
+  >
+  productSpaceListActiveExecutions(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; executions: import('@polo-ai/shared/product-spaces').ExecutionSummary[] }
+    | { success: false; errorCode: string; message: string }
+  >
+  productSpaceStopAllExecutions(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; result: import('@polo-ai/shared/product-spaces').StopAllExecutionsResult }
+    | { success: false; errorCode: string; message: string }
+  >
+  productSpaceListSkills(productSpaceId:string):Promise<
+    | {success:true;productSpaceId:string;accessMode:string;entries:ReadonlyArray<Record<string,unknown>>;withdrawnEntries:ReadonlyArray<Record<string,unknown>>}
+    | {success:false;errorCode:string;message:string}
+  >
+  productSpaceGetCatalog(
+    productSpaceId: string,
+    knownRevision?: string,
+  ): Promise<
+    | {
+      success: true
+      notModified: boolean
+      contractVersion?: number
+      productSpaceId?: string
+      catalogRevision?: string
+      accessMode?: 'online' | 'offline'
+      warningCode?: string | null
+      entries: ReadonlyArray<Record<string, unknown>>
+      /** Credential-stripped tombstones emitted from the Main catalog authority. */
+      withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
+    }
+    | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
+      accessMode?: 'denied'
+      catalog?: import('@polo-ai/shared/admin').AppCatalogCacheEntry
+    }
+  >
+  productSpaceResolveLaunch(
+    productSpaceId: string,
+    catalogEntryId: string,
+  ): Promise<
+    | {
+      success: true
+      launch: import('@polo-ai/shared/product-spaces').ResolveLaunchResponse
+    }
+    | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
+    }
+  >
+  productSpaceInstallSkill(input: { workspaceId: string; catalogEntryId: string; operationId: string; replaceExisting?: boolean; backupLocalChanges?: boolean }): Promise<import('@polo-ai/shared/creator-skills').CreatorSkillOperationResult>
+  productSpaceUninstallSkill(input: { workspaceId: string; subjectKind: 'personal_artifact' | 'enterprise_instance'; subjectId: string; versionId: string; operationId: string }): Promise<import('@polo-ai/shared/creator-skills').CreatorSkillOperationResult>
+  productSpaceSetSkillEnablement(
+    productSpaceId: string,
+    artifactInstanceId: string,
+    enabled: boolean,
+  ): Promise<
+    | { success: true; mutation: import('@polo-ai/shared/product-spaces').UpdateSkillEnablementResponse; catalog: import('@polo-ai/shared/product-spaces').ProductSpaceCatalogResponse }
+    | { success: false; errorCode: string; message: string; status?: number }
+  >
+  productSpacePrepareSwitch(
+    targetProductSpaceId: string,
+  ): Promise<
+    | {
+      success: true
+      token: string
+      from: string | null
+      to: string
+      executions: Array<{ executionId: string; name: string; status: 'running' | 'stopped' | 'failed'; errorCode?: string }>
+    }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      executions?: Array<{ executionId: string; name: string; status: 'running' | 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceStopSwitchExecutions(
+    token: string,
+  ): Promise<
+    | { success: true; executions: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }> }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceCommitSwitch(
+    token: string,
+    targetProductSpaceId: string,
+  ): Promise<
+    | { success: true; from: string | null; to: string }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceStopExecution(
+    token: string,
+    executionId: string,
+  ): Promise<
+    | { success: true; executionId: string; status: 'stopped' }
+    | { success: false; errorCode: string; message?: string; status?: 'stopping' | 'failed' }
+  >
+  productSpaceRestrictActiveSpace(
+    accountId: string,
+    productSpaceId: string,
+    restricted: boolean,
+  ): Promise<
+    | { success: true; restricted?: boolean }
+    | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[]; restricted?: boolean }
+  >
+  /** R34-2: Main's authoritative restriction state for one space. */
+  productSpaceGetRestrictionState(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; restricted: boolean }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceCancelSwitch(token: string): Promise<
+    | { success: false; errorCode: string; message?: string }
+    | {
+      success: true
+      /** Authoritative linearization verdict for the cancelled switch. */
+      outcome: 'cancelled' | 'already_committed' | 'no_transaction'
+      /** Present only for `already_committed`: the committed target space. */
+      committedTargetProductSpaceId?: string
+      /** Present only for `already_committed`: the CURRENT authoritative fence. */
+      activeProductSpaceId?: string | null
+    }
+  >
+  productSpaceRestoreOfflineView(): Promise<
+    | {
+      success: true
+      snapshot: {
+        contractVersion: number
+        personalProductSpaceId: string
+        productSpaces: import('@polo-ai/shared/product-spaces').ProductSpaceSummary[]
+        activeProductSpaceId: string
+      }
+    }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceRevokeActiveContext(): Promise<{ success: boolean }>
+  productSpaceCleanupLegacyState(): Promise<{
+    success: boolean
+    results: Record<string, boolean>
+  }>
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>
@@ -931,6 +1382,9 @@ export interface ElectronAPI {
 
   // Skills
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
+  // Same discovery without the enablement filter; only the management list
+  // consumes it — the composer keeps getSkills (POO-106 S1, SM-09).
+  getSkillsUnfiltered(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
   deleteSkill(input: {
     workspaceId: string
@@ -939,12 +1393,30 @@ export interface ElectronAPI {
     managed: boolean
     detached: boolean
     forceDeleteCredential?: string
-  }>
+  } | false>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
+  // Managed local-skill enablement (POO-106 S1)
+  listManagedSkills(input: { workspaceId: string }): Promise<import('@polo-ai/shared/skills').ListManagedSkillsResponse | { ok: false; errorCode: string }>
+  setManagedSkillEnablement(input: import('@polo-ai/shared/skills').SetManagedSkillEnablementRequest): Promise<import('@polo-ai/shared/skills').SetManagedSkillEnablementResponse | { ok: false; errorCode: string; revision?: number }>
 
   // Skills change listener (live updates when skills are added/removed/modified)
   onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void
+
+  // Enterprise Knowledge Base (POO-108)
+  kbListCollections(input: import('@polo-ai/shared/protocol').KbListCollectionsInput): Promise<import('@polo-ai/shared/protocol').KbCollectionList>
+  kbCreateCollection(input: import('@polo-ai/shared/protocol').KbCreateCollectionInput): Promise<import('@polo-ai/shared/protocol').KbCollection>
+  kbListDocuments(input: import('@polo-ai/shared/protocol').KbListDocumentsInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary[]>
+  kbUploadDocument(input: import('@polo-ai/shared/protocol').KbUploadDocumentInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbSubmitForReview(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbPublishDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbRejectDocument(input: import('@polo-ai/shared/protocol').KbRejectDocumentInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbRevertToDraft(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbDeleteDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<{ ok: true }>
+  kbGetDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocument | null>
+  kbSearch(input: import('@polo-ai/shared/protocol').KbSearchInput): Promise<import('@polo-ai/shared/protocol').KbSearchHit[]>
+  kbSetSessionCollections(input: import('@polo-ai/shared/protocol').KbSessionCollectionsInput): Promise<{ ok: true; collectionIds: string[] }>
+  kbGetSessionCollections(input: import('@polo-ai/shared/protocol').KbGetSessionCollectionsInput): Promise<{ collectionIds: string[] }>
 
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@polo-ai/shared/statuses').StatusConfig[]>
@@ -1007,6 +1479,10 @@ export interface ElectronAPI {
   // Tools settings
   getBrowserToolEnabled(): Promise<boolean>
   setBrowserToolEnabled(enabled: boolean): Promise<void>
+  getGenerativeUiInlineEnabled(): Promise<boolean>
+  setGenerativeUiInlineEnabled(enabled: boolean): Promise<void>
+  getGenerativeUiCanvasEnabled(): Promise<boolean>
+  setGenerativeUiCanvasEnabled(enabled: boolean): Promise<void>
 
   // Appearance settings
   getRichToolDescriptions(): Promise<boolean>
@@ -1054,7 +1530,8 @@ export interface ElectronAPI {
 
   // Menu actions (from renderer to main)
   menuQuit(): Promise<void>
-  menuNewWindow(): Promise<void>
+  /** POO-117 P117-05/07: creates a managed main window and reports the observable outcome. */
+  menuNewWindow(): Promise<NewWindowResult>
   menuMinimize(): Promise<void>
   menuMaximize(): Promise<void>
   menuZoomIn(): Promise<void>

@@ -17,6 +17,7 @@ async function main(): Promise<void> {
       join(srcRoot, 'creator-skills', 'index.ts'),
       join(srcRoot, 'creator-skills', 'fixtures.ts'),
       join(srcRoot, 'admin', 'creator-app-publishing.ts'),
+      join(srcRoot, 'product-spaces', 'index.ts'),
     ],
     outdir: distRoot,
     outbase: srcRoot,
@@ -35,6 +36,18 @@ async function main(): Promise<void> {
     outfile: join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
     bundle: true,
     format: 'cjs',
+    platform: 'browser',
+    target: 'es2022',
+    logLevel: 'silent',
+    sourcemap: false,
+    legalComments: 'none',
+  })
+
+  await build({
+    entryPoints: [join(srcRoot, 'product-spaces', 'index.ts')],
+    outfile: join(distRoot, 'product-spaces', 'index.browser.mjs'),
+    bundle: true,
+    format: 'esm',
     platform: 'browser',
     target: 'es2022',
     logLevel: 'silent',
@@ -73,6 +86,8 @@ async function main(): Promise<void> {
     join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
     join(distRoot, 'creator-skills', 'metadata.browser.cjs'),
     join(distRoot, 'creator-skills', 'metadata.browser.mjs'),
+    join(distRoot, 'product-spaces', 'index.cjs'),
+    join(distRoot, 'product-spaces', 'index.browser.mjs'),
   ]) {
     const normalized = (await readFile(output, 'utf8')).replace(/[ \t]+$/gm, '').trimEnd()
     await writeFile(output, `${normalized}\n`)
@@ -103,6 +118,9 @@ async function main(): Promise<void> {
     join(distRoot, 'admin', 'creator-app-publishing.cjs'),
     join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
     join(distRoot, 'admin', 'creator-app-publishing.d.ts'),
+    join(distRoot, 'product-spaces', 'index.cjs'),
+    join(distRoot, 'product-spaces', 'index.d.ts'),
+    join(distRoot, 'product-spaces', 'index.browser.mjs'),
   ]) {
     await access(output)
   }

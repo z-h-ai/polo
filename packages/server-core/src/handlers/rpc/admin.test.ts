@@ -7,12 +7,31 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import * as realNativeInstallationContract from '../../../../shared/src/admin/native-installations-contract'
 import {
   analyzeCreatorAppPayload as realAnalyzeCreatorAppPayload,
   createCanonicalCreatorAppBundle as realCreateCanonicalCreatorAppBundle,
   createPlatformOwnedManifest as realCreatePlatformOwnedManifest,
   decodeCreatorAppPayloadZip as realDecodeCreatorAppPayloadZip,
+  CREATOR_APP_CANONICAL_ENTRIES as realCreatorAppCanonicalEntries,
+  CREATOR_APP_PAYLOAD_LIMITS as realCreatorAppPayloadLimits,
+  CREATOR_APP_PAYLOAD_MAX_BYTES as realCreatorAppPayloadMaxBytes,
 } from '../../../../shared/src/admin/creator-app-publishing'
+// Member-circle contract helpers: re-exported VERBATIM through the barrel
+// stub below (review P2-2, authorized by the integration owner) so modules
+// that consume '@polo-ai/shared/admin' in the same non-isolated bun process
+// keep the real contract behavior instead of undefined bindings.
+import {
+  mapMemberCircleApiError as realMapMemberCircleApiError,
+  resolveMemberCirclePurchaseUrl as realResolveMemberCirclePurchaseUrl,
+  MemberCircleUuidSchema as realMemberCircleUuidSchema,
+} from '../../../../shared/src/admin/member-circles'
+// Canonical-skill turn contract constant: consumed through the barrel by
+// server-core/runtime/canonical-skills.ts, which admin.ts binds at import
+// time — the barrel stub below must carry it or the file fails to load.
+import {
+  SKILL_TURN_CONTRACT_VERSION as realSkillTurnContractVersion,
+} from '../../../../shared/src/admin/skill-turn-contract'
 
 type StoredTokens = {
   accessToken: string
@@ -101,6 +120,10 @@ const adminClientBehavior = {
     defaultConnection: null,
   }),
   listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
+  getGenerativeUiCapability: async (_accessToken: string): Promise<any> => ({}),
+  getWebAppArtifactPolicy: async (_accessToken: string): Promise<any> => ({
+    enabled: true, maxBundleBytes: 512 * 1024, maxFileCount: 1,
+  }),
   createCreatorAppPublicationDraft: async (_accessToken: string, _input: unknown): Promise<any> => ({
     appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
   }),
@@ -220,6 +243,12 @@ class MockAdminClient {
     return adminClientBehavior.refresh(refreshToken)
   }
 
+  async admitNativeInstallation(accessToken: string, input: any) {
+    adminClientCalls.push({method: 'admitNativeInstallation',args: [input],accessToken})
+    return {contractVersion: 1,admissionId: '399d872f-9a2b-472c-862e-7369f09e97d4',accountId: managerState.tokens!.userId,
+      productSpaceId: input.productSpaceId,subjectKind: input.subjectKind,subjectId: input.subjectId,versionId: input.versionId,version: input.version,checksum: input.checksum}
+  }
+
   async validate(accessToken: string) {
     adminClientCalls.push({ method: 'validate', args: [accessToken], accessToken })
     return adminClientBehavior.validate(accessToken)
@@ -238,6 +267,16 @@ class MockAdminClient {
   async listOrganizations(accessToken: string) {
     adminClientCalls.push({ method: 'listOrganizations', args: [], accessToken })
     return adminClientBehavior.listOrganizations(accessToken)
+  }
+
+  async getGenerativeUiCapability(accessToken: string) {
+    adminClientCalls.push({ method: 'getGenerativeUiCapability', args: [], accessToken })
+    return adminClientBehavior.getGenerativeUiCapability(accessToken)
+  }
+
+  async getWebAppArtifactPolicy(accessToken: string) {
+    adminClientCalls.push({ method: 'getWebAppArtifactPolicy', args: [], accessToken })
+    return adminClientBehavior.getWebAppArtifactPolicy(accessToken)
   }
 
   async listCreatorArtifacts(accessToken: string, input: unknown) {
@@ -369,11 +408,15 @@ const configState: {
   adminConfigVersion?: string
   connections: TestConnection[]
   defaultConnection: string | null
+  generativeUiRemoteCapability?: unknown
+  webAppArtifactPolicy?: unknown
 } = {
   adminUrl: 'https://admin.example.com',
   adminConfigVersion: undefined,
   connections: [],
   defaultConnection: null,
+  generativeUiRemoteCapability: undefined,
+  webAppArtifactPolicy: undefined,
 }
 
 const managerState: {
@@ -413,7 +456,19 @@ const mockCredentialManager = {
 }
 
 mock.module('@polo-ai/shared/admin', () => ({
+  ...realNativeInstallationContract,
   AdminClient: MockAdminClient,
+  // Re-exported constants must survive the mock — later test files in the same
+  // bun process (e.g. manager.test.ts) import them through this module path.
+  CREATOR_APP_CANONICAL_ENTRIES: realCreatorAppCanonicalEntries,
+  SKILL_TURN_CONTRACT_VERSION: realSkillTurnContractVersion,
+  CREATOR_APP_PAYLOAD_LIMITS: realCreatorAppPayloadLimits,
+  CREATOR_APP_PAYLOAD_MAX_BYTES: realCreatorAppPayloadMaxBytes,
+  // Shared test stub authorization (reviewer P2-2, POO-70 orchestration):
+  // member-circle contract helpers pass through verbatim.
+  MemberCircleUuidSchema: realMemberCircleUuidSchema,
+  mapMemberCircleApiError: realMapMemberCircleApiError,
+  resolveMemberCirclePurchaseUrl: realResolveMemberCirclePurchaseUrl,
   AdminError: TestAdminError,
   analyzeCreatorAppPayload: realAnalyzeCreatorAppPayload,
   createCanonicalCreatorAppBundle: realCreateCanonicalCreatorAppBundle,
@@ -470,6 +525,7 @@ mock.module('@polo-ai/shared/admin', () => ({
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
+  CONFIG_DIR: join(tmpdir(), `polo-native-admin-session-test-${process.pid}`),
   getWorkspaceByNameOrId: () => null,
   setSetupDeferred: () => {},
   getAdminUrl: () => configState.adminUrl,
@@ -501,6 +557,16 @@ mock.module('@polo-ai/shared/config', () => ({
     if (!configState.connections.some(item => item.slug === slug)) return false
     configState.defaultConnection = slug
     return true
+  },
+  // Captured so tests can assert the Generative UI toggle-cache refresh
+  // wiring without coupling to the real module's state.
+  setGenerativeUiRemoteCapability: (capability: unknown) => {
+    configState.generativeUiRemoteCapability = capability ?? undefined
+  },
+  // Captured so tests can assert the web_app artifact-policy refresh wiring
+  // (POO-102) the same way.
+  setWebAppArtifactPolicy: (policy: unknown) => {
+    configState.webAppArtifactPolicy = policy ?? undefined
   },
 }))
 
@@ -655,6 +721,7 @@ beforeEach(() => {
   configState.adminConfigVersion = undefined
   configState.connections = []
   configState.defaultConnection = null
+  configState.generativeUiRemoteCapability = undefined
   managerState.tokens = null
   managerState.llmApiKeys = new Map()
   managerState.deletedCredentialSlugs = []
@@ -718,6 +785,12 @@ beforeEach(() => {
     defaultConnection: 'admin-anthropic',
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
+  // Absent generativeUI section = enabled; keeps every existing test's
+  // validate() path on the fail-open default.
+  adminClientBehavior.getGenerativeUiCapability = async () => ({})
+  adminClientBehavior.getWebAppArtifactPolicy = async () => ({
+    enabled: true, maxBundleBytes: 512 * 1024, maxFileCount: 1,
+  })
   adminClientBehavior.createCreatorAppPublicationDraft = async () => ({
     appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
   })
@@ -1828,7 +1901,9 @@ describe('registerAdminHandlers', () => {
       loggedIn: true,
       configVersion: 'config-v1',
     })
-    expect(adminClientCalls.map(call => call.method)).toEqual(['refresh', 'validate', 'getLlmConnections'])
+    expect(adminClientCalls.map(call => call.method)).toEqual([
+      'refresh', 'validate', 'getGenerativeUiCapability', 'getWebAppArtifactPolicy', 'getLlmConnections',
+    ])
     expect(adminClientCalls.find(call => call.method === 'validate')?.accessToken).toBe('fresh-access-token')
     expect(managerState.tokens).toMatchObject({
       accessToken: 'fresh-access-token',
@@ -1862,6 +1937,95 @@ describe('registerAdminHandlers', () => {
       status: 401,
     })
     expect(managerState.tokens).toBeNull()
+  })
+
+  it('validate refreshes the Generative UI remote capability cache', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getGenerativeUiCapability = async () => ({
+      generativeUI: { inline: false },
+    })
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ loggedIn: true })
+    expect(configState.generativeUiRemoteCapability).toEqual({
+      generativeUI: { inline: false },
+    })
+  })
+
+  it('a failed Generative UI capability read keeps the previous cache value', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    configState.generativeUiRemoteCapability = { generativeUI: { inline: true } }
+    adminClientBehavior.getGenerativeUiCapability = async () => {
+      throw new Error('temporary capabilities outage')
+    }
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ loggedIn: true })
+    expect(configState.generativeUiRemoteCapability).toEqual({ generativeUI: { inline: true } })
+  })
+
+  it('validate refreshes the web_app artifact policy cache alongside the capability', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getWebAppArtifactPolicy = async () => ({
+      enabled: false, maxBundleBytes: 64 * 1024, maxFileCount: 1,
+    })
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ loggedIn: true })
+    // The mock captures the raw server policy — the wiring contract is that
+    // the fetch result reaches the cache setter on the VALIDATE path.
+    expect(configState.webAppArtifactPolicy).toEqual({
+      enabled: false, maxBundleBytes: 64 * 1024, maxFileCount: 1,
+    })
+  })
+
+  it('a failed web_app policy read keeps the previous cache value', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    const previous = { enabled: true, maxBundleBytes: 128 * 1024, maxFileCount: 1 }
+    configState.webAppArtifactPolicy = previous
+    adminClientBehavior.getWebAppArtifactPolicy = async () => {
+      throw new Error('temporary policy outage')
+    }
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ loggedIn: true })
+    expect(configState.webAppArtifactPolicy).toEqual(previous)
   })
 
   it('syncs admin connections by upserting incoming config and removing admin-deleted connections', async () => {
@@ -2034,5 +2198,34 @@ describe('registerAdminHandlers', () => {
     })
     expect(managerState.tokens).toBeNull()
     expect(loggerWarn).toHaveBeenCalled()
+  })
+})
+
+describe('original native installation session transport', () => {
+  const accountId = '4cfc3c67-7291-4b28-a9b6-c0ebcd193b28'
+  const input = {contractVersion: 1 as const,productSpaceId: 'e28016e4-e0a9-40f9-934e-cec7c750a03e',subjectKind: 'personal_artifact' as const,
+    subjectId: '824558a4-1a14-4ba2-a58d-833dc641495d',versionId: '97367039-20b8-493c-855d-eebba7fd2a91',version: '1.0.0',checksum: `sha256:${'a'.repeat(64)}`}
+  it('refreshes an expired original session before transmitting its immutable work', async () => {
+    createHarness()
+    managerState.tokens = {userId: accountId,username: 'native-a',accessToken: 'expired-native-a',refreshToken: 'refresh-native-a',expiresAt: Date.now()-1}
+    const {admitTrustedNativeInstallation} = await import('../../runtime/native-installations')
+    expect((await admitTrustedNativeInstallation(accountId,input)).accountId).toBe(accountId)
+    expect(adminClientCalls.map(call=>call.method)).toEqual(['refresh','admitNativeInstallation'])
+    expect(adminClientCalls[1]!.accessToken).toBe('fresh-access-token')
+  })
+  it('does not transmit account A work when account B replaces A during refresh', async () => {
+    createHarness()
+    managerState.tokens = {userId: accountId,username: 'native-a',accessToken: 'expired-native-a',refreshToken: 'refresh-native-a',expiresAt: Date.now()-1}
+    let started!: () => void, release!: () => void
+    const ready = new Promise<void>(resolve=>{started=resolve}), blocked = new Promise<void>(resolve=>{release=resolve})
+    adminClientBehavior.refresh = async () => {started();await blocked;return {accessToken: 'new-a',refreshToken: 'new-refresh-a',expiresIn: 3600}}
+    const {admitTrustedNativeInstallation} = await import('../../runtime/native-installations')
+    const pending = admitTrustedNativeInstallation(accountId,input)
+    const result = pending.then(value => ({value,error: null as Error|null}),error => ({value: null,error: error as Error}))
+    await ready
+    managerState.tokens = {userId: 'fc578cce-c646-44a0-9f6c-1bca1b98b8b4',username: 'native-b',accessToken: 'b',refreshToken: 'refresh-b',expiresAt: Date.now()+3600000}
+    release();expect((await result).error?.message).toContain('Original installation session changed')
+    expect(adminClientCalls.map(call=>call.method)).toEqual(['refresh'])
+    expect(managerState.tokens.accessToken).toBe('b')
   })
 })

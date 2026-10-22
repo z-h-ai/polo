@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement } from 'react'
+import { createContext, createElement, useContext, type ReactElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type {
@@ -11,41 +11,34 @@ import type {
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
 import {
   BUILTIN_APP_DEFINITIONS,
+  POLO_APP_DEFINITION,
 } from '../../../../shared/tab-browser-types'
-import {
-  KEYS,
-  set as setLocalStorage,
-} from '@/lib/local-storage'
-import { createOrganizationContextKey } from '@/lib/organization-storage'
+import { createProductSpaceContextKey } from '@/lib/product-space-storage'
+import { ProductSpaceProvider } from '@/context/ProductSpaceContext'
+
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
 
 GlobalRegistrator.register()
 setupI18n()
 
+const toastErrorSpy = jest.fn()
+const toastSuccessSpy = jest.fn()
 const openApp = jest.fn()
-const removeApp = jest.fn(async () => {})
+const storePublish = jest.fn((_live: unknown, _lease: number, accountId: string, launch: unknown) => ({
+  handoffId: 'test-handoff',
+  context: { accountId, launch },
+}))
+// Launch/deep-link paths in the page tree still surface through electronAPI
+// (pre-existing failures unrelated to this file's assertions use it too).
+const openUrl = jest.fn()
 let appCatalogHook: any
 let installedApps = [...BUILTIN_APP_DEFINITIONS]
-const homeRecentAppsByContext = new Map<string, any[]>()
-const getHomeRecentApps = jest.fn(async (contextKey: string) =>
-  homeRecentAppsByContext.get(contextKey) ?? [])
-const setHomeRecentApps = jest.fn(async (contextKey: string, apps: any[]) => {
-  homeRecentAppsByContext.set(contextKey, apps)
-  return apps
-})
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
-  })
-  return { promise, resolve, reject }
-}
 
 function signedOutCatalogHook() {
   return {
-    organization: null,
+    productSpace: null,
     state: {
       catalog: null,
       loading: false,
@@ -57,7 +50,9 @@ function signedOutCatalogHook() {
       statusLoadingScopeKeys: {},
       accessMode: null,
       statuses: {},
+      creatorCircles: [],
       host: null,
+      installStates: {},
     },
     sync: async () => {},
     install: async () => {},
@@ -71,10 +66,20 @@ function signedOutCatalogHook() {
     uninstall: async () => {},
     cancelInstall: async () => {},
     getLogs: async () => '',
+    resolveLaunch: async () => {
+      throw new Error('resolveLaunch behavior not configured')
+    },
     resolveRemoteUrl: async () => 'https://trusted.example.com',
-    getStatus: () => undefined,
+    getInstallState: () => undefined,
+    installProductSpaceBundle: async () => {},
+    uninstallProductSpaceBundle: async () => {},
     scopeKeyForApp: () => 'unused',
     refreshRuntimeStatuses: async () => {},
+    refreshProductSpaceInstallStates: async () => {},
+    // The REAL useAppCatalog returns the circles surface at the TOP level
+    // (mirroring state.creatorCircles); HomeSpaceContext consumes it from
+    // there.
+    creatorCircles: [],
   }
 }
 
@@ -84,12 +89,32 @@ mock.module('@/context/TabShellContext', () => ({
   useTabShell: () => ({
     installedApps,
     openApp,
-    removeApp,
+    removeApp: async () => {},
   }),
 }))
 
+// Per-tree hook override: lets one test mount HomePages on DIFFERENT
+// contexts simultaneously without the module-global leaking between them.
+const hookOverrideContext = createContext<any>(null)
 mock.module('@/hooks/useAppCatalog', () => ({
-  useAppCatalog: () => appCatalogHook,
+  useAppCatalog: () => useContext(hookOverrideContext) ?? appCatalogHook,
+}))
+
+mock.module('@/lib/product-space-app-launch-handoff', () => ({
+  createProductSpaceLaunchHandoffStore: () => ({
+    publish: storePublish,
+    take: jest.fn(() => null),
+    onLaunch: () => () => {},
+    commitContext: jest.fn(),
+    dispose: jest.fn(),
+  }),
+}))
+
+mock.module('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => toastErrorSpy(...args),
+    success: (...args: unknown[]) => toastSuccessSpy(...args),
+  },
 }))
 
 const {
@@ -102,6 +127,10 @@ const {
   within,
 } = await import('@testing-library/react')
 const { formatBytes, HomePage } = await import('../HomePage')
+const { loadHomeAppUsage, __resetHomeAppUsageForTests } = await import('@/lib/home-app-usage')
+const { loadHomeHiddenApps, __resetHomeHiddenAppsForTests } = await import('@/lib/home-app-hidden')
+const { MemberCatalogProvider } = await import('@/context/MemberCatalogContext')
+const { markAppCatalogAccessDenied } = await import('@polo-ai/shared/admin/authorization-failure')
 const {
   catalogStateMessage,
   homeAppOperationErrorText,
@@ -109,18 +138,19 @@ const {
 
 beforeEach(async () => {
   localStorage.clear()
+  toastErrorSpy.mockClear()
+  toastSuccessSpy.mockClear()
   openApp.mockClear()
-  removeApp.mockClear()
+  storePublish.mockClear()
+  openUrl.mockReset()
   appCatalogHook = signedOutCatalogHook()
   installedApps = [...BUILTIN_APP_DEFINITIONS]
-  homeRecentAppsByContext.clear()
-  getHomeRecentApps.mockClear()
-  setHomeRecentApps.mockClear()
+  __resetHomeAppUsageForTests()
+  __resetHomeHiddenAppsForTests()
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      getHomeRecentApps,
-      setHomeRecentApps,
+      openUrl,
     },
   })
   await i18n.changeLanguage('en')
@@ -130,132 +160,1036 @@ afterEach(() => {
   cleanup()
 })
 
-describe('HomePage round-two regressions', () => {
-  it('shows a labeled built-in launcher for a signed-out fresh or cleared profile', () => {
-    localStorage.setItem('polo-home-recent-apps', JSON.stringify([{
-      id: 'old-app',
-      kind: 'external',
-      openedAt: 1,
-    }]))
-    localStorage.clear()
-
-    render(createElement(
+function homeTree(hookOverride?: any) {
+  // H3 mount contract: the App-level MemberCatalogProvider owns the single
+  // catalog instance and HomePage consumes it through useMemberCatalog. The
+  // provider here runs its OWN-instance branch over the SAME mocked
+  // useAppCatalog hook, so the page consumes the catalog exactly the way
+  // production does.
+  const hookInstance = hookOverride ?? appCatalogHook
+  const ps = hookInstance.productSpace
+  const value = {
+    accountId: ps?.accountId ?? 'account-a',
+    activeProductSpaceId: ps?.activeProductSpaceId ?? 'organization-a',
+    activeProductSpace: ps?.activeProductSpace
+      ?? { id: 'organization-a', kind: 'enterprise', name: 'Organization A' },
+    productSpaces: [],
+    allProductSpaces: [],
+    personalProductSpaceId: ps?.activeProductSpaceId ?? 'organization-a',
+    productSpaceContextKey: ps?.productSpaceContextKey ?? 'account-a|organization-a',
+    contextVersion: 7,
+    pendingSwitch: null,
+    onSelectProductSpace: () => {},
+    onRefreshProductSpaces: () => {},
+    onConfirmStopAndSwitch: () => {},
+    onRetryFailedStops: () => {},
+    onRetryTargetLoad: () => {},
+    onCancelSwitch: () => {},
+    onDismissTargetAccessLost: () => {},
+    onStopSwitchExecution: () => {},
+  }
+  const tree = createElement(ProductSpaceProvider, {
+    value: value as never,
+    children: createElement(
       I18nextProvider,
       { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
+      createElement(MemberCatalogProvider, null, createElement(HomePage)),
+    ),
+  })
+  if (!hookOverride) return tree
+  return createElement(hookOverrideContext.Provider, { value: hookOverride }, tree)
+}
 
-    expect(screen.getByTestId('builtin-app-launcher')).toBeTruthy()
-    expect(screen.getByText('Built-in apps')).toBeTruthy()
-    expect(screen.getByText('Polo 助手')).toBeTruthy()
-    expect(screen.queryByText('Kanban')).toBeNull()
-    expect(screen.queryByText('AirDrop')).toBeNull()
+let homeRerender: (tree: ReactElement) => void = () => {}
+function renderHome() {
+  const view = render(homeTree())
+  homeRerender = tree => view.rerender(tree)
+  return view
+}
+function viewRerender() {
+  homeRerender(homeTree())
+}
 
-    fireEvent.click(screen.getByText('Polo 助手'))
-    expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
+function enterpriseCatalogWith(
+  apps: CatalogApp[],
+  overrides: Partial<AppCatalogCacheEntry> = {},
+): AppCatalogCacheEntry {
+  return {
+    accountId: 'account-a',
+    organizationId: 'organization-a',
+    appConfigVersion: 'v1',
+    authorizationStatus: 'authorized',
+    apps,
+    syncedAt: 1,
+    ...overrides,
+  }
+}
+
+function resolvedLaunch(app: CatalogApp, url = 'https://fresh.example.com') {
+  return {
+    contractVersion: 1,
+    productSpaceId: app.organizationId,
+    catalogEntryId: app.catalogEntryId ?? app.id,
+    resolvedAt: '2099-01-01T00:00:00.000Z',
+    expiresAt: '2099-01-01T00:10:00.000Z',
+    subject: {
+      kind: 'artifact_instance' as const,
+      artifactType: 'app' as const,
+      artifactInstanceId: app.artifactInstanceId ?? `artifact-${app.id}`,
+      versionId: app.catalogVersion?.versionId ?? 'version-1',
+      version: app.catalogVersion?.version ?? '1.0.0',
+    },
+    payer: { kind: 'personal' as const, accountId: 'account-a' },
+    delivery: { kind: 'web_url' as const, url, launchToken: 'launch-token-value' },
+  }
+}
+
+function resolvedBundleLaunch(app: CatalogApp) {
+  const base = resolvedLaunch(app)
+  return {
+    ...base,
+    delivery: {
+      kind: 'bundle' as const,
+      downloadUrl: 'https://fresh.example.com/app.zip',
+      expiresAt: base.expiresAt,
+      checksum: 'a'.repeat(64),
+      sizeBytes: 1_024,
+    },
+  }
+}
+
+const uiKeyFor = (app: CatalogApp) => JSON.stringify([
+  'product-space-ui',
+  'account-a',
+  app.organizationId ?? 'organization-a',
+  app.catalogEntryId ?? app.id,
+  app.artifactInstanceId ?? null,
+])
+
+/**
+ * The DIRECTORY row identity comes from the H1 projection
+ * (`getCatalogAppIdentityKey`), NOT the mock hook's uiIdentityKeyForApp —
+ * the two tuples are intentionally distinct layers.
+ */
+const dirKeyFor = (app: CatalogApp) => JSON.stringify([
+  'catalog-app-identity',
+  'account-a',
+  app.organizationId ?? 'organization-a',
+  app.catalogEntryId ?? app.id,
+  app.artifactInstanceId ?? null,
+])
+
+function hookWithCatalog(
+  catalog: AppCatalogCacheEntry | DeniedAppCatalogSnapshot,
+  hookOverrides: Record<string, unknown> = {},
+  stateOverrides: Record<string, unknown> = {},
+) {
+  const scopeKeyForApp = (target: CatalogApp) => createLocalAppScopeKey({
+    kind: 'catalog',
+    accountId: catalog.accountId,
+    organizationId: catalog.organizationId,
+    catalogAppId: target.id,
+  })
+  // Mirrors the production uiIdentityKeyForApp format.
+  const uiIdentityKeyForApp = (target: CatalogApp) => JSON.stringify([
+    'product-space-ui',
+    catalog.accountId,
+    catalog.organizationId,
+    target.catalogEntryId ?? target.id,
+    target.artifactInstanceId ?? null,
+  ])
+  return {
+    ...signedOutCatalogHook(),
+    productSpace: {
+      accountId: catalog.accountId,
+      activeProductSpaceId: catalog.organizationId,
+      productSpaceContextKey: createProductSpaceContextKey(
+        catalog.accountId,
+        catalog.organizationId,
+      ),
+      // Monotonic lease used by the enterprise-workflow re-verification;
+      // defaults to a stable value, tests override to simulate transitions.
+      contextVersion: 0,
+      activeProductSpace: {
+        id: catalog.organizationId,
+        kind: 'enterprise',
+        name: 'Organization A',
+      },
+    },
+    state: {
+      ...signedOutCatalogHook().state,
+      catalog,
+      accessMode: 'online',
+      ...stateOverrides,
+    },
+    scopeKeyForApp,
+    uiIdentityKeyForApp,
+    ...hookOverrides,
+  }
+}
+
+function workApp(
+  id: string,
+  name: string,
+  index: number,
+  overrides: Partial<CatalogApp> = {},
+): CatalogApp {
+  return {
+    id,
+    catalogEntryId: id,
+    artifactInstanceId: `artifact-${id}`,
+    organizationId: 'organization-a',
+    name,
+    description: `${name} description`,
+    deliveryMode: 'remote_url',
+    remoteUrl: `https://${id}.example.com`,
+    sortOrder: index,
+    availability: 'available',
+    catalogSources: [{ kind: 'enterprise_import', name: `${name} Source` }],
+    ...overrides,
+  }
+}
+
+/**
+ * One directory card by its stable UI identity. The shared MemberAppCard
+ * renders data-testid="home-directory-app" plus data-identity-key — the
+ * identity tuple is never folded into the test id.
+ */
+function directoryCard(identityKey: string): HTMLElement {
+  const card = screen.getAllByTestId('home-directory-app')
+    .find(candidate => candidate.getAttribute('data-identity-key') === identityKey)
+  if (!card) {
+    throw new Error(`directory card not found for identity: ${identityKey}`)
+  }
+  return card
+}
+
+/** The row-level uninstall entry of one directory card (page-level UI). */
+function directoryUninstallButton(identityKey: string): HTMLElement {
+  const wrapper = directoryCard(identityKey).parentElement
+  const button = wrapper?.querySelector('[data-testid^="home-directory-uninstall-"]')
+  if (!button) {
+    throw new Error(`directory uninstall entry not found for identity: ${identityKey}`)
+  }
+  return button as HTMLElement
+}
+
+describe('HomePage complete directory (POO-70 H3)', () => {
+  it('always shows the fixed Polo assistant and opens the Polo tab', async () => {
+    renderHome()
+    await act(async () => {})
+
+    const poloEntry = screen.getByTestId('home-quick-entry-polo')
+    expect(within(poloEntry).getByText('Polo Assistant')).toBeTruthy()
+    fireEvent.click(poloEntry)
+    expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
   })
 
-  it('migrates recents to preferences while keeping Polo 助手 discoverable', async () => {
-    installedApps = [
-      ...BUILTIN_APP_DEFINITIONS,
-      {
-        id: 'external-recent',
-        name: 'External Recent',
-        url: 'https://external.example.com',
-        type: 'webapp',
-        createdAt: 1,
-        order: 3,
-      },
+  it('P70-HOME-01: renders the COMPLETE authorized directory with no pinning — more than five work Apps and same-named works all get their own card', async () => {
+    // No persisted home configuration exists anywhere anymore: every
+    // authorized App of the space is displayed, beyond the old five-slot cap,
+    // and two works sharing a NAME stay distinct rows (identity, not name).
+    const apps = [
+      workApp('dir-1', 'Alpha App', 0),
+      workApp('dir-2', 'Alpha App', 1, { artifactInstanceId: 'artifact-other' }),
+      workApp('dir-3', 'Beta App', 2),
+      workApp('dir-4', 'Gamma App', 3),
+      workApp('dir-5', 'Delta App', 4),
+      workApp('dir-6', 'Epsilon App', 5),
+      workApp('dir-7', 'Zeta App', 6),
     ]
-    setLocalStorage(KEYS.homeRecentApps, [
-      {
-        id: 'external-recent',
-        kind: 'external',
-        openedAt: 1,
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(7)
+    })
+
+    // Same name, two identities: both render.
+    expect(screen.getAllByText('Alpha App')).toHaveLength(2)
+    // Names order unused works; equal names retain their distinct identities.
+    const identities = screen.getAllByTestId('home-directory-app')
+      .map(card => card.getAttribute('data-identity-key'))
+    expect(identities).toEqual([0, 1, 2, 4, 5, 3, 6].map(index => dirKeyFor(apps[index]!)))
+    // The retired quick-access surface is gone from the page.
+    expect(screen.queryByTestId('home-all-apps-open')).toBeNull()
+    expect(screen.queryByTestId('home-manage-quick-access')).toBeNull()
+  })
+
+  it('P70-HOME-01: search narrows the directory and the explicit clear restores it', async () => {
+    const apps = [
+      workApp('search-1', 'Report Builder', 0),
+      workApp('search-2', 'Contract Review', 1),
+    ]
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+
+    fireEvent.change(screen.getByTestId('home-directory-search'), {
+      target: { value: 'contract' },
+    })
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    })
+    expect(screen.getByText('Contract Review')).toBeTruthy()
+    expect(screen.queryByText('Report Builder')).toBeNull()
+
+    // The filter vacuum is its own state with the explicit clear action.
+    fireEvent.change(screen.getByTestId('home-directory-search'), {
+      target: { value: 'zzz-nothing' },
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-no-match')).toBeTruthy()
+    })
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    fireEvent.click(within(screen.getByTestId('home-directory-no-match')).getByText('Clear filters'))
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+    expect((screen.getByTestId('home-directory-search') as HTMLInputElement).value).toBe('')
+  })
+
+  it('P70-HOME-01: source filter offers exactly the directory sources and narrows by them', async () => {
+    const apps = [
+      workApp('src-1', 'Growth App', 0),
+      workApp('src-2', 'Design App', 1, {
+        catalogSources: [{ kind: 'enterprise_import', name: 'Design Circle' }],
+      }),
+      workApp('src-3', 'Studio App', 2, {
+        catalogSources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      }),
+    ]
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(3)
+    })
+
+    const sourceSelect = screen.getByTestId('home-directory-source') as HTMLSelectElement
+    const options = Array.from(sourceSelect.options).map(option => option.value)
+    // Include the real built-in assistant alongside catalog-derived sources.
+    expect(options).toEqual(['all', 'builtin:polo-assistant', 'catalog:Growth App Source', 'catalog:Design Circle', 'catalog:Organization A'])
+
+    fireEvent.change(sourceSelect, { target: { value: 'catalog:Design Circle' } })
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    })
+    expect(screen.getByText('Design App')).toBeTruthy()
+  })
+
+  it('P70-HOME-01: recent sort refreshes on return and unused works sort by name', async () => {
+    const apps = [
+      workApp('sort-a', 'Charlie App', 0),
+      workApp('sort-b', 'alpha App', 1),
+      workApp('sort-c', 'Bravo App', 2),
+    ]
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(apps[2]!))
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps), { resolveLaunch })
+    const visit = renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(3)
+    })
+
+    // Default (recent) WITHOUT any history: stable name fallback.
+    expect(screen.getAllByTestId('home-directory-app').map(card => card.textContent))
+      .toEqual([
+        expect.stringContaining('alpha App'),
+        expect.stringContaining('Bravo App'),
+        expect.stringContaining('Charlie App'),
+      ])
+
+    // A successful open records use but keeps cards still during this visit.
+    fireEvent.click(directoryCard(dirKeyFor(apps[2]!)))
+    await waitFor(() => {
+      expect(storePublish).toHaveBeenCalled()
+    })
+    expect(screen.getAllByTestId('home-directory-app')[0]?.textContent).toContain('alpha App')
+    visit.unmount()
+    renderHome()
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('home-directory-app')
+      if (!cards[0]?.textContent?.includes('Bravo App')) {
+        throw new Error('recent re-rank pending')
+      }
+    })
+
+    // Name sort is locale-ordered regardless of usage or Catalog order.
+    fireEvent.change(screen.getByTestId('home-directory-sort'), {
+      target: { value: 'name' },
+    })
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('home-directory-app')
+      if (!cards[0]?.textContent?.includes('alpha App')) throw new Error('name sort pending')
+    })
+    expect(screen.getAllByTestId('home-directory-app').map(card => card.textContent))
+      .toEqual([
+        expect.stringContaining('alpha App'),
+        expect.stringContaining('Bravo App'),
+        expect.stringContaining('Charlie App'),
+      ])
+
+    // The usage record is bound to the ProductSpace context key and
+    // persisted for the NEXT session's sort.
+    // The usage key derives from the MOCK hook's productSpaceContextKey —
+    // the same tuple format createHomeQuickAccessContextKey wraps.
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const records = loadHomeAppUsage(contextKey)
+    expect(records.get(dirKeyFor(apps[2]!))?.openCount).toBe(1)
+  })
+
+  it('P70-HOME-02: the personal home shows the circles entry and the enterprise home never mixes it in', async () => {
+    // Enterprise (default harness space kind): no circles entry.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
+    const enterpriseView = renderHome()
+    await act(async () => {})
+    expect(screen.queryByTestId('home-circles-link')).toBeNull()
+    enterpriseView.unmount()
+
+    // Personal: the circles entry renders and navigates the client-page
+    // route (asserted with a probe provider in complete-directory tests —
+    // here without the provider it falls back to the local circles card
+    // instead of a silent no-op).
+    const personalHook = hookWithCatalog(enterpriseCatalogWith([]))
+    personalHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      kind: 'personal',
+      name: 'My Space',
+    }
+    appCatalogHook = personalHook
+    renderHome()
+    await act(async () => {})
+    const circles = screen.getByTestId('home-circles-link')
+    fireEvent.click(circles)
+    await waitFor(() => {
+      expect(screen.getByTestId('home-space-context')).toBeTruthy()
+    })
+  })
+
+  it('P70-HOME-03: keeps Polo visible while the current Catalog is loading or failed, retry stays explicit', async () => {
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([]),
+      {},
+      { catalog: null, loading: true },
+    )
+    const loading = renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getByTestId('home-directory-loading')).toBeTruthy()
+    loading.unmount()
+
+    const sync = jest.fn(async () => {})
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([]),
+      { sync },
+      { catalog: null, loading: false, errorCode: 'NETWORK_ERROR' },
+    )
+    renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getByTestId('home-directory-load-failed')).toBeTruthy()
+    expect(screen.getByText('Could not load the Apps of this space')).toBeTruthy()
+
+    // The retry is a click, never an auto-execution.
+    expect(sync).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByTestId('home-directory-load-failed')).getByText('Try again'))
+    expect(sync).toHaveBeenCalledWith(true)
+  })
+
+  it('P70-HOME-03: an honest personal vacuum and an explicit enterprise no-distribution vacuum', async () => {
+    const personalHook = hookWithCatalog(enterpriseCatalogWith([]))
+    personalHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      kind: 'personal',
+      name: 'My Space',
+    }
+    appCatalogHook = personalHook
+    const personalView = renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-directory-empty-personal')).toBeTruthy()
+    expect(screen.queryByTestId('home-directory-empty-enterprise')).toBeNull()
+    personalView.unmount()
+
+    // Enterprise vacuum: "not distributed yet" — never the personal copy.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
+    renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-directory-empty-enterprise')).toBeTruthy()
+    expect(screen.queryByTestId('home-directory-empty-personal')).toBeNull()
+  })
+
+  it('P70-HOME-03: a fully-rejected directory is NOT a vacuum — the rejection feedback shows with an explicit retry', async () => {
+    // All rows refused consumer-side: a PERSONAL space whose only entry
+    // carries an enterprise_import source (space-kind mismatch) is refused
+    // wholesale — the entries stay empty while the rejection is recorded.
+    const refusedApp = workApp('rej-1', 'Refused App', 0, {
+      catalogSources: [{ kind: 'enterprise_import', name: 'Foreign Org' }],
+    })
+    const personalHook = hookWithCatalog(enterpriseCatalogWith([refusedApp]))
+    personalHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      kind: 'personal',
+      name: 'My Space',
+    }
+    appCatalogHook = personalHook
+    renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-directory-rejected')).toBeTruthy()
+    expect(screen.queryByTestId('home-directory-empty-personal')).toBeNull()
+    expect(screen.queryByTestId('home-directory-empty-enterprise')).toBeNull()
+    expect(screen.queryByText('Refused App')).toBeNull()
+  })
+
+  it('P70-HOME-03: offline keeps the cached rows visible but NOTHING launchable, with the offline banner', async () => {
+    const app = workApp('offline-1', 'Offline App', 0)
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([app]),
+      { resolveLaunch },
+      { accessMode: 'offline' },
+    )
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-offline-banner')).toBeTruthy()
+    })
+    // The cached row stays visible (facts preserved)...
+    expect(screen.getByText('Offline App')).toBeTruthy()
+    // ...but opening it fails closed BEFORE any launch authority is asked.
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalled()
+    })
+    expect(resolveLaunch).not.toHaveBeenCalled()
+    expect(storePublish).not.toHaveBeenCalled()
+    expect(openApp).not.toHaveBeenCalled()
+  })
+
+  it('P70-HOME-03: a failed REFRESH keeps the cached directory visible under an explicit stale banner, with opens fail-closed and explicit retry', async () => {
+    // Regression guard (review P1-1): a NON-denied refresh failure keeps
+    // state.catalog and sets errorCode — phase 'error' OVER a retained
+    // cache. The directory must never silently blank: the cached rows stay
+    // visible (never launchable), the stale banner explains the state, and
+    // the retry is an explicit click.
+    const app = workApp('stale-1', 'Stale App', 0)
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    const sync = jest.fn(async () => {})
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([app]),
+      { resolveLaunch, sync },
+      { errorCode: 'NETWORK_ERROR' },
+    )
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-stale-banner')).toBeTruthy()
+    })
+    // The cached directory is STILL rendered...
+    expect(screen.getByText('Stale App')).toBeTruthy()
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    // ...but opening a cached row fails closed BEFORE any launch authority.
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalled()
+    })
+    expect(resolveLaunch).not.toHaveBeenCalled()
+    expect(storePublish).not.toHaveBeenCalled()
+    expect(openApp).not.toHaveBeenCalled()
+    // The retry is a click, never an auto-execution.
+    expect(sync).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('home-directory-stale-retry'))
+    expect(sync).toHaveBeenCalledWith(true)
+  })
+
+  it('R39/R41: the dedicated wrapper owns viewport-bounded scrolling and rows below the fold stay reachable in the full directory', async () => {
+    // More than a viewport of directory rows: every row renders inside the
+    // home-app-hub, the dedicated PARENT wrapper is the viewport-bounded
+    // scroll owner (h-full min-h-0 overflow-y-auto), and the hub region
+    // itself stays content-sized.
+    const apps = [
+      workApp('scroll-1', 'Scroll App A', 0),
+      workApp('scroll-2', 'Scroll App B', 1),
+      workApp('scroll-3', 'Scroll App C', 2),
+      workApp('scroll-4', 'Scroll App D', 3),
+      workApp('scroll-5', 'Scroll App E', 4),
+      workApp('scroll-6', 'Scroll App F', 5),
+      workApp('scroll-7', 'Scroll App G', 6),
+    ]
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(7)
+    })
+
+    const hub = screen.getByTestId('home-app-hub')
+    const scrollOwner = hub.parentElement
+    if (!scrollOwner) {
+      throw new Error('dedicated scroll-owner wrapper is missing: home-app-hub has no parent element in the committed tree')
+    }
+    expect(scrollOwner.className).toContain('h-full')
+    expect(scrollOwner.className).toContain('min-h-0')
+    expect(scrollOwner.className).toContain('overflow-y-auto')
+    expect(hub.className).not.toContain('h-full')
+
+    // Every row — including the LAST, below any realistic fold — renders
+    // inside the hub.
+    expect(screen.getByText('Scroll App G')).toBeTruthy()
+    expect(within(hub).getAllByText(/Scroll App G Source/).length).toBeGreaterThan(0)
+  })
+
+  it('F082: searching a work App hides the nonmatching assistant, while assistant-only results have no false empty state', async () => {
+    const app = workApp('f082-report', 'Report Builder', 0)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
+    const search = screen.getByTestId('home-directory-search')
+    fireEvent.change(search, { target: { value: 'Report Builder' } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    fireEvent.change(search, { target: { value: i18n.t('homeApps.home.poloTitle') } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    expect(screen.queryByTestId('home-directory-no-match') === null).toBe(true)
+    fireEvent.change(search, { target: { value: 'no-such-application-f082' } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getByTestId('home-directory-no-match')).toBeTruthy()
+    fireEvent.change(search, { target: { value: '' } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('F082: the built-in source selects only the assistant and keeps its original launch action', async () => {
+    const app = workApp('f082-source', 'Source-filtered App', 0)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
+    const source = screen.getByTestId('home-directory-source')
+    const builtin = within(source).getByRole('option', { name: i18n.t('homeApps.home.poloSource') }) as HTMLOptionElement
+    fireEvent.change(source, { target: { value: builtin.value } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    expect(screen.queryByTestId('home-directory-no-match') === null).toBe(true)
+    expect(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button', { name: i18n.t('productSpaceSkills.title') })).toBeTruthy()
+    fireEvent.click(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button', { name: i18n.t('homeApps.home.openAssistant') }))
+    expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
+    const workSource = Array.from(source.querySelectorAll('option')).find(option => option.value !== 'all' && option.value !== builtin.value)!
+    fireEvent.change(source, { target: { value: workSource.value } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('F082: a legitimate catalog source named like the built-in key cannot collide with the assistant filter', async () => {
+    const app = workApp('f082-collision', 'Named Source App', 0, { catalogSources: [{ kind: 'enterprise_import', name: 'builtin:polo-assistant' }] })
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
+    const source = screen.getByTestId('home-directory-source')
+    fireEvent.change(source, { target: { value: 'builtin:polo-assistant' } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    fireEvent.change(source, { target: { value: 'catalog:builtin:polo-assistant' } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('F082: a literal source named all selects that source without activating the all-sources sentinel', async () => {
+    const app = workApp('f082-all-source', 'Literal All App', 0, { catalogSources: [{ kind: 'enterprise_import', name: 'all' }] })
+    const otherApp = workApp('f082-other-source', 'Other Source App', 1)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app, otherApp]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2))
+    const source = screen.getByTestId('home-directory-source')
+    fireEvent.change(source, { target: { value: 'catalog:all' } })
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    expect(screen.getByText('Literal All App')).toBeTruthy()
+    expect(screen.queryByText('Other Source App') === null).toBe(true)
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    fireEvent.change(source, { target: { value: 'all' } })
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+  })
+
+  it('P70-HOME-01 保留本机隐藏恢复: hide moves a work to the hidden section, restore brings it back, and the preference is device-local per context', async () => {
+    const appA = workApp('hide-a', 'Hideable App A', 0)
+    const appB = workApp('hide-b', 'Hideable App B', 1)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+    expect(screen.queryByTestId('home-directory-hidden-section')).toBeNull()
+
+    // Hide App A: it leaves the grid and appears in the hidden section with
+    // an explicit restore action.
+    fireEvent.click(screen.getByTestId(`home-directory-hide-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-hidden-section')).toBeTruthy()
+    })
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(1)
+    expect(screen.getByText('Hideable App B')).toBeTruthy()
+    // The hidden section lists A by name (with its restore action); A has no
+    // grid card anymore (the grid holds exactly B, asserted above).
+    const item = screen.getByTestId(`home-directory-hidden-item-${dirKeyFor(appA)}`)
+    expect(within(item).getByText('Hideable App A')).toBeTruthy()
+
+    // Restore: back into the grid, section gone.
+    fireEvent.click(screen.getByTestId(`home-directory-hidden-restore-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+    expect(screen.queryByTestId('home-directory-hidden-section')).toBeNull()
+
+    // The preference is device-local, bounded to the SAME account+space
+    // context — after a REAL remount it still holds (persisted), and the
+    // restored state is clean again.
+    fireEvent.click(screen.getByTestId(`home-directory-hide-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-hidden-section')).toBeTruthy()
+    })
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    expect(loadHomeHiddenApps(contextKey).size).toBe(1)
+    viewRerender()
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('P70-HOME-03: a denied snapshot hides its refused rows behind the restricted banner with no open/install capability', async () => {
+    const app = workApp('denied-1', 'Denied App', 0)
+    const deniedSnapshot = markAppCatalogAccessDenied(enterpriseCatalogWith([app]))
+    expect(deniedSnapshot.apps[0]).toMatchObject({
+      catalogEntryId: 'denied-1',
+      availability: 'unavailable',
+    })
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    appCatalogHook = {
+      ...hookWithCatalog(deniedSnapshot as unknown as AppCatalogCacheEntry),
+      state: {
+        ...signedOutCatalogHook().state,
+        catalog: deniedSnapshot as unknown as AppCatalogCacheEntry,
+        accessMode: 'denied' as const,
+        errorCode: 'FORBIDDEN',
       },
-    ])
+      resolveLaunch,
+    }
+    renderHome()
 
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
+    await waitFor(() => {
+      expect(screen.getByTestId('home-restricted-banner')).toBeTruthy()
+    })
+    // H1 projection semantics: the denied tombstone STRIPS catalogSources,
+    // so the consumer-side projection refuses those rows fail-closed — the
+    // restricted banner explains the state and NO cached row renders as a
+    // pseudo-launchable card.
+    expect(screen.queryByText('Denied App')).toBeNull()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    expect(resolveLaunch).not.toHaveBeenCalled()
+    expect(storePublish).not.toHaveBeenCalled()
+    expect(openApp).not.toHaveBeenCalled()
+    expect(screen.queryByTestId(/^home-directory-uninstall-/)).toBeNull()
+  })
+
+  it('opens directory Apps through the authorized catalog flow and publishes the resolved launch', async () => {
+    const app = workApp('open-1', 'Open App', 0)
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]), { resolveLaunch })
+
+    renderHome()
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+
+    await waitFor(() => {
+      expect(resolveLaunch).toHaveBeenCalledWith(app)
+      expect(storePublish).toHaveBeenCalledWith(
+        { accountId: 'account-a', productSpaceId: 'organization-a' },
+        7,
+        'account-a',
+        resolvedLaunch(app),
+      )
+    })
+    expect(openApp).not.toHaveBeenCalled()
+  })
+
+  it('prepares a resolved bundle through the install dialog and publishes the re-resolved launch', async () => {
+    const app = workApp('bundle-1', 'Bundle App', 0, { deliveryMode: 'resolve_launch' })
+    delete (app as Partial<CatalogApp>).remoteUrl
+    const launch = resolvedBundleLaunch(app)
+    const resolveLaunch = jest.fn(async () => launch)
+    const installProductSpaceBundle = jest.fn(async () => {})
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([app]),
+      { resolveLaunch, installProductSpaceBundle },
+    )
+
+    renderHome()
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+    await waitFor(() => expect(screen.getByText('Install Bundle App')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    await waitFor(() => {
+      expect(installProductSpaceBundle).toHaveBeenCalledWith(app)
+      expect(resolveLaunch).toHaveBeenCalledTimes(2)
+      expect(storePublish).toHaveBeenCalledWith(
+        { accountId: 'account-a', productSpaceId: 'organization-a' },
+        7,
+        'account-a',
+        launch,
+      )
+    })
+    expect(openApp).not.toHaveBeenCalled()
+  })
+
+  it('keeps a withdrawn tombstone visible and non-launchable, with the uninstall entry while installed locally', async () => {
+    const live = workApp('tomb-live', 'Live App', 1)
+    const installedTombstone = workApp('tomb-gone', 'Removed App', 0, {
+      availability: 'withdrawn',
+    })
+    const uninstallProductSpaceBundle = jest.fn(async () => {})
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(live))
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([live, installedTombstone]),
+      {
+        resolveLaunch,
+        uninstallProductSpaceBundle,
+        getInstallState: (target: CatalogApp) => target.id === 'tomb-gone'
+          ? {
+              app: {
+                accountId: 'account-a',
+                productSpaceId: 'organization-a',
+                catalogRevision: 'rev-1',
+                catalogEntryId: installedTombstone.catalogEntryId!,
+                artifactInstanceId: installedTombstone.artifactInstanceId!,
+                versionId: installedTombstone.catalogVersion?.versionId ?? 'version-1',
+                version: installedTombstone.catalogVersion?.version ?? '1.0.0',
+              },
+              state: 'installed' as const,
+              currentVersion: '1.0.0',
+            }
+          : undefined,
+      },
+    )
+
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getByText('Removed App')).toBeTruthy()
+    })
+    expect(screen.getByText('Live App')).toBeTruthy()
+
+    // The tombstone is NOT launchable: the open gate refuses per-row facts.
+    fireEvent.click(directoryCard(dirKeyFor(installedTombstone)))
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalled()
+    })
+    expect(resolveLaunch).not.toHaveBeenCalled()
+
+    // The retained local installation keeps its uninstall entry, through the
+    // SAME uninstall dialog as before.
+    fireEvent.click(directoryUninstallButton(dirKeyFor(installedTombstone)))
+    await waitFor(() => {
+      expect(screen.getByText('Uninstall Removed App?')).toBeTruthy()
+    })
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Uninstall' }))
+    await waitFor(() => {
+      expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(installedTombstone, true)
+    })
+  })
+
+  it('hides the toolbar, circles entry and workspace entries when no ProductSpace context exists', async () => {
+    renderHome()
+    await act(async () => {})
+
+    expect(screen.queryByTestId('home-directory-toolbar')).toBeNull()
+    expect(screen.queryByTestId('home-circles-link')).toBeNull()
+    expect(screen.queryByTestId('home-all-apps-open')).toBeNull()
+    expect(screen.queryByTestId('home-manage-quick-access')).toBeNull()
+  })
+
+  it('POO-70 visual review R1 F2: a work whose LAST circle source was lost renders UNAVAILABLE (disabled open + reason), dual-source rows stay normal', async () => {
+    // Personal space: the leave/revocation projection lives in creator circles.
+    const onlyCircleApp = workApp('only-circle-app', '乙独占看板', 0, {
+      catalogSources: [{ kind: 'creator_circle', circleId: 'circle-b', name: '乙圈' }],
+    })
+    const dualSourceApp = workApp('dual-source-app', '双源样例', 1, {
+      catalogSources: [
+        { kind: 'creator_circle', circleId: 'circle-b', name: '乙圈' },
+        { kind: 'polo', name: 'Polo' },
+      ],
+    })
+    const personalHook = hookWithCatalog(enterpriseCatalogWith([onlyCircleApp, dualSourceApp]))
+    personalHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      kind: 'personal',
+      name: 'My Space',
+    }
+    appCatalogHook = personalHook
+
+    // C2 relations: circle-b is LEFT (expired) — its authorization is lost.
+    const { MemberCircleResourceProvider } = await import('@/context/MemberCircleResourceContext')
+    const circlesResource = {
+      circles: [{
+        membershipId: 'ms-b',
+        status: 'expired',
+        billingKind: 'paid',
+        modeTransitionEndsAt: null,
+        currentPeriodEnd: '2026-10-25T00:00:00.000Z',
+        joinSource: 'share_link',
+        joinedAt: '2026-09-01T00:00:00.000Z',
+        circle: {
+          circleId: 'circle-b',
+          name: '乙圈',
+          purpose: '',
+          status: 'active',
+          ownerUserId: '00000000-0000-4000-8000-0000000000aa',
+        },
+        entitlements: [],
+      }],
+      memberships: [],
+    }
+    const view = render(createElement(
+      ProductSpaceProvider,
+      {
+        value: {
+          accountId: 'account-a',
+          activeProductSpaceId: 'organization-a',
+          activeProductSpace: personalHook.productSpace.activeProductSpace,
+          productSpaces: [],
+          allProductSpaces: [],
+          personalProductSpaceId: 'organization-a',
+          productSpaceContextKey: 'account-a|organization-a',
+          contextVersion: 7,
+          pendingSwitch: null,
+        } as never,
+        children: createElement(
+          I18nextProvider,
+          { i18n },
+          createElement(
+            MemberCatalogProvider,
+            null,
+            createElement(MemberCircleResourceProvider, {
+              resource: circlesResource as never,
+              children: createElement(HomePage),
+            }),
+          ),
+        ),
+      },
     ))
 
     await waitFor(() => {
-      expect(setHomeRecentApps).toHaveBeenCalledTimes(1)
+      expect(screen.getByText('乙独占看板')).toBeTruthy()
     })
-    expect(localStorage.getItem('craft-home-recent-apps')).toBeNull()
-    const launcher = screen.getByTestId('builtin-app-launcher')
-    expect(within(launcher).getByText('Polo 助手')).toBeTruthy()
-    expect(screen.queryByText('Kanban')).toBeNull()
-    expect(screen.queryByText('AirDrop')).toBeNull()
+    // The lost-source row renders UNAVAILABLE: disabled open + the reason.
+    const lostCard = directoryCard(dirKeyFor(onlyCircleApp))
+    expect(lostCard.getAttribute('data-open-disabled')).toBe('true')
+    const lostOpen = lostCard.querySelector('button')
+    expect((lostOpen as HTMLButtonElement | null)?.disabled).toBe(true)
+    expect(screen.getByTestId(`home-directory-app-unavailable-${dirKeyFor(onlyCircleApp)}`).textContent)
+      .toBe('Authorization was withdrawn. Rejoin the circle to restore it.')
+    // The dual-source row keeps a NORMAL, openable card (no reason line).
+    const dualCard = directoryCard(dirKeyFor(dualSourceApp))
+    expect(dualCard.getAttribute('data-open-disabled')).toBe('false')
+    expect(screen.queryByTestId(`home-directory-app-unavailable-${dirKeyFor(dualSourceApp)}`)).toBeNull()
+    view.unmount()
+  })
+})
 
-    fireEvent.click(within(launcher).getByText('Polo 助手'))
-    expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
+describe('HomePage A→B ProductSpace isolation (R39)', () => {
+  it('A→B ProductSpace transition: the first committed target Home layout exposes no prior-scope Apps, sources, or Skill metadata', async () => {
+    const appA = workApp('ctx-a-app', 'Scope A App', 0)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const view = renderHome()
+    await waitFor(() => expect(screen.getByText('Scope A App')).toBeTruthy())
+    expect(screen.getByTestId('home-app-hub').textContent).toContain('Scope A App Source')
+
+    // A→B: the committed ProductSpace context transitions to a different
+    // account + ProductSpace (a different owner epoch).
+    const appB: CatalogApp = {
+      id: 'ctx-b-app',
+      organizationId: 'organization-b',
+      name: 'Scope B App',
+      description: 'Scope B description',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://b.example.com',
+      sortOrder: 0,
+      availability: 'available',
+      catalogSources: [{ kind: 'enterprise_import', name: 'Scope B Source' }],
+    }
+    const catalogB = {
+      ...enterpriseCatalogWith([appB]),
+      accountId: 'account-b',
+      organizationId: 'organization-b',
+    }
+    const hookB = hookWithCatalog(catalogB)
+    act(() => {
+      // Stable root: mutate ONLY the hook value; the rendered root shape is
+      // untouched, so React updates the SAME mounted tree instead of
+      // remounting.
+      appCatalogHook = hookB
+      viewRerender()
+    })
+
+    // FIRST committed target Home layout: no prior-scope App identity,
+    // sources, or Skill metadata may appear.
+    const hub = screen.getByTestId('home-app-hub')
+    const firstCommitText = hub.textContent ?? ''
+    expect(firstCommitText).not.toContain('Scope A App')
+    expect(firstCommitText).not.toContain('Scope A Source')
+    expect(firstCommitText).not.toContain('Skill 已启用')
+    expect(firstCommitText).not.toContain('skills enabled')
+    expect(firstCommitText).toContain('Built into Polo')
+
+    // Context B's own data lands afterwards: the hydrated B state carries B
+    // identity only.
+    await waitFor(() => expect(screen.getByText('Scope B App')).toBeTruthy())
+    const hydratedText = screen.getByTestId('home-app-hub').textContent ?? ''
+    expect(hydratedText).toContain('Scope B Source')
+    expect(hydratedText).not.toContain('Scope A App')
+    expect(hydratedText).not.toContain('Scope A Source')
+    view.unmount()
   })
 
-  it('does not let delayed hydration overwrite newer same-context recents', async () => {
-    const externalA = {
-      id: 'external-a',
-      name: 'External A',
-      url: 'https://external-a.example.com',
-      type: 'webapp' as const,
-      createdAt: 1,
-      order: 1,
+  it('usage records never cross the ProductSpace context: A usage is invisible to B and back', async () => {
+    const appA = workApp('usage-a', 'Usage A App', 0)
+    const appB: CatalogApp = {
+      ...workApp('usage-b', 'Usage B App', 0),
+      organizationId: 'organization-b',
     }
-    const externalB = {
-      id: 'external-b',
-      name: 'External B',
-      url: 'https://external-b.example.com',
-      type: 'webapp' as const,
-      createdAt: 2,
-      order: 2,
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(appA))
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]), { resolveLaunch })
+    const view = renderHome()
+    await waitFor(() => expect(screen.getByText('Usage A App')).toBeTruthy())
+
+    // Open A's app: the record lands in A's context store only.
+    fireEvent.click(directoryCard(dirKeyFor(appA)))
+    await waitFor(() => expect(storePublish).toHaveBeenCalled())
+
+    const keyA = `v1:${createProductSpaceContextKey('account-a', 'organization-a')}`
+    expect(loadHomeAppUsage(keyA).size).toBe(1)
+
+    // Switch to B (different organization): no A record may leak into B.
+    const catalogB = {
+      ...enterpriseCatalogWith([appB]),
+      organizationId: 'organization-b',
     }
-    installedApps = [...BUILTIN_APP_DEFINITIONS, externalA, externalB]
-    const hydration = createDeferred<any[]>()
-    getHomeRecentApps.mockImplementationOnce(() => hydration.promise)
+    appCatalogHook = hookWithCatalog(catalogB)
+    act(() => { viewRerender() })
+    await waitFor(() => expect(screen.getByText('Usage B App')).toBeTruthy())
 
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-    await waitFor(() => {
-      expect(getHomeRecentApps).toHaveBeenCalledTimes(1)
-    })
+    const keyB = `v1:${createProductSpaceContextKey('account-a', 'organization-b')}`
+    expect(loadHomeAppUsage(keyB).size).toBe(0)
 
-    fireEvent.click(screen.getByText('Polo 助手'))
-    fireEvent.click(screen.getByText('External A'))
-    await waitFor(() => {
-      expect(setHomeRecentApps).toHaveBeenCalledTimes(2)
-    })
-
-    await act(async () => {
-      hydration.resolve([{
-        id: externalB.id,
-        kind: 'external',
-        openedAt: 1,
-      }])
-      await hydration.promise
-    })
-
-    expect(screen.queryByTestId('builtin-app-launcher')).toBeNull()
-    expect(screen.getByText('Polo 助手')).toBeTruthy()
-    expect(screen.queryByText('Kanban')).toBeNull()
-    expect(screen.queryByText('AirDrop')).toBeNull()
-    fireEvent.click(screen.getByText('External B'))
-
-    await waitFor(() => {
-      expect(setHomeRecentApps).toHaveBeenCalledTimes(3)
-    })
-    const persisted = [...homeRecentAppsByContext.values()][0]!
-    expect(persisted.map(app => app.id)).toEqual([
-      externalB.id,
-      externalA.id,
-      BUILTIN_APP_DEFINITIONS[0]!.id,
-    ])
+    // Back to A: A's record is still A's only.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    act(() => { viewRerender() })
+    await waitFor(() => expect(screen.getByText('Usage A App')).toBeTruthy())
+    expect(loadHomeAppUsage(keyB).size).toBe(0)
+    expect(loadHomeAppUsage(keyA).size).toBe(1)
+    view.unmount()
   })
+})
 
+
+describe('HomePage copy and formatting', () => {
   it('maps operation and catalog codes through the active non-English locale', async () => {
     await i18n.changeLanguage('zh-Hans')
     const secret = 'backend stack detail must stay hidden'
@@ -264,17 +1198,17 @@ describe('HomePage round-two regressions', () => {
       i18n.t.bind(i18n),
       { code: 'START_FAILED', message: secret },
       'open',
-    )).toBe('无法打开应用。')
+    )).toBe('无法打开 App。')
     expect(homeAppOperationErrorText(
       i18n.t.bind(i18n),
       { code: 'UNINSTALL_FAILED', message: secret },
       'uninstall',
-    )).toBe('无法卸载应用。')
+    )).toBe('无法卸载 App。')
     expect(homeAppOperationErrorText(
       i18n.t.bind(i18n),
       { code: 'RELEASE_CHANGED', message: secret },
       'install',
-    )).toBe('应用发布版本已变更，请确认更新后的版本再安装。')
+    )).toBe('App 发布版本已变更，请确认更新后的版本再安装。')
     expect(catalogStateMessage(
       i18n.t.bind(i18n),
       'NETWORK_ERROR',
@@ -285,6 +1219,37 @@ describe('HomePage round-two regressions', () => {
       'INVALID_SEMVER',
       'warning',
     )).not.toContain(secret)
+    // Space-aware failure copy: personal spaces never read as "organization".
+    expect(homeAppOperationErrorText(
+      i18n.t.bind(i18n),
+      { code: 'NOT_AUTHORIZED', message: secret },
+      'open',
+      'personal',
+    )).toBe('此 App 的授权已结束')
+    expect(homeAppOperationErrorText(
+      i18n.t.bind(i18n),
+      { code: 'NOT_AUTHORIZED', message: secret },
+      'open',
+      'enterprise',
+    )).toBe('你的组织已不再提供此 App。')
+    expect(catalogStateMessage(
+      i18n.t.bind(i18n),
+      'NETWORK_ERROR',
+      'error',
+      'personal',
+    )).toBe('Polo 无法连接服务器，暂时无法加载当前空间的 App。')
+    expect(catalogStateMessage(
+      i18n.t.bind(i18n),
+      'NETWORK_ERROR',
+      'error',
+      'enterprise',
+    )).toBe('Polo 无法连接服务器，暂时无法加载组织 App。')
+    expect(catalogStateMessage(
+      i18n.t.bind(i18n),
+      'MEMBERSHIP_REMOVED',
+      'error',
+      'personal',
+    )).toBe('你已无法访问此空间的 App')
   })
 
   it('formats install sizes through locale unit keys', async () => {
@@ -298,794 +1263,5 @@ describe('HomePage round-two regressions', () => {
 
     await i18n.changeLanguage('de')
     expect(formatBytes(i18n.t.bind(i18n), 1)).toBe('1 Byte')
-  })
-
-  it('revalidates a stale remote URL through main before opening a WebView', async () => {
-    const remoteApp: CatalogApp = {
-      id: 'remote-app',
-      organizationId: 'organization-a',
-      name: 'Remote App',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://stale.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const catalog: AppCatalogCacheEntry = {
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      appConfigVersion: 'v1',
-      authorizationStatus: 'authorized',
-      apps: [remoteApp],
-      syncedAt: 1,
-    }
-    const resolveRemoteUrl = jest.fn(async () => {
-      throw new Error('NOT_AUTHORIZED')
-    })
-    appCatalogHook = {
-      ...signedOutCatalogHook(),
-      organization: {
-        accountId: 'account-a',
-        activeOrganizationId: 'organization-a',
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: 'organization-a',
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
-      state: {
-        ...signedOutCatalogHook().state,
-        catalog,
-        accessMode: 'online',
-      },
-      resolveRemoteUrl,
-      scopeKeyForApp: () => createLocalAppScopeKey({
-        kind: 'catalog',
-        accountId: 'account-a',
-        organizationId: 'organization-a',
-        catalogAppId: remoteApp.id,
-      }),
-    }
-
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-    fireEvent.click(screen.getByTestId('organization-app-action-remote-app'))
-
-    await waitFor(() => {
-      expect(resolveRemoteUrl).toHaveBeenCalledWith(remoteApp)
-    })
-    expect(openApp).not.toHaveBeenCalled()
-  })
-
-  it('shows a retry action when a runtime-status batch cannot be read', () => {
-    const localApp: CatalogApp = {
-      id: 'unknown-status-app',
-      organizationId: 'organization-a',
-      name: 'Unknown Status App',
-      description: '',
-      deliveryMode: 'local_bundle',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const catalog: AppCatalogCacheEntry = {
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      appConfigVersion: 'v1',
-      authorizationStatus: 'authorized',
-      apps: [localApp],
-      syncedAt: 1,
-    }
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: localApp.id,
-    })
-    const refreshRuntimeStatuses = jest.fn(async () => {})
-    appCatalogHook = {
-      ...signedOutCatalogHook(),
-      organization: {
-        accountId: 'account-a',
-        activeOrganizationId: 'organization-a',
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: 'organization-a',
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
-      state: {
-        ...signedOutCatalogHook().state,
-        catalog,
-        accessMode: 'online',
-        statusErrorCode: 'status_read_failed',
-        statusErrorScopeKeys: { [scopeKey]: true },
-      },
-      refreshRuntimeStatuses,
-      scopeKeyForApp: () => scopeKey,
-    }
-
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-
-    expect(screen.getByText('Some app statuses could not be refreshed.')).toBeTruthy()
-    expect(screen.getByText('Status unavailable')).toBeTruthy()
-    expect(screen.getByTestId('organization-app-action-unknown-status-app')
-      .hasAttribute('disabled')).toBe(true)
-    fireEvent.click(screen.getByText('Try again'))
-    expect(refreshRuntimeStatuses).toHaveBeenCalledTimes(1)
-  })
-
-  it('disables install while the initial runtime status is loading', () => {
-    const localApp: CatalogApp = {
-      id: 'loading-status-app',
-      organizationId: 'organization-a',
-      name: 'Loading Status App',
-      description: '',
-      deliveryMode: 'local_bundle',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const catalog: AppCatalogCacheEntry = {
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      appConfigVersion: 'v1',
-      authorizationStatus: 'authorized',
-      apps: [localApp],
-      syncedAt: 1,
-    }
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: localApp.id,
-    })
-    appCatalogHook = {
-      ...signedOutCatalogHook(),
-      organization: {
-        accountId: catalog.accountId,
-        activeOrganizationId: catalog.organizationId,
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: catalog.organizationId,
-          type: 'enterprise_workspace',
-          name: 'Organization A',
-          purpose: '',
-          status: 'suspended',
-          membership: {
-            id: 'membership-denied',
-            role: 'member',
-            status: 'removed',
-          },
-          memberCount: 1,
-        }],
-      },
-      state: {
-        ...signedOutCatalogHook().state,
-        catalog,
-        accessMode: 'online',
-        statusLoadingScopeKeys: { [scopeKey]: true },
-      },
-      scopeKeyForApp: () => scopeKey,
-    }
-
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-
-    expect(screen.getAllByText('Loading status…')).toHaveLength(2)
-    expect(screen.getByTestId('organization-app-action-loading-status-app')
-      .hasAttribute('disabled')).toBe(true)
-  })
-
-  it('keeps a retained withdrawn app manageable when its first status batch fails', async () => {
-    const withdrawnApp: CatalogApp = {
-      id: 'retained-withdrawn',
-      organizationId: 'organization-a',
-      name: 'Retained Withdrawn',
-      description: '',
-      deliveryMode: 'local_bundle',
-      sortOrder: 0,
-      availability: 'withdrawn',
-    }
-    const catalog: AppCatalogCacheEntry = {
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      appConfigVersion: 'v1',
-      authorizationStatus: 'authorized',
-      apps: [],
-      withdrawnApps: [withdrawnApp],
-      syncedAt: 1,
-    }
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: withdrawnApp.id,
-    })
-    appCatalogHook = {
-      ...signedOutCatalogHook(),
-      organization: {
-        accountId: 'account-a',
-        activeOrganizationId: 'organization-a',
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: 'organization-a',
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
-      state: {
-        ...signedOutCatalogHook().state,
-        catalog,
-        accessMode: 'online',
-        statusErrorCode: 'status_read_failed',
-        statusErrorScopeKeys: { [scopeKey]: true },
-      },
-      scopeKeyForApp: () => scopeKey,
-    }
-
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-
-    expect(screen.getByTestId('organization-app-retained-withdrawn')).toBeTruthy()
-    expect(screen.getByText('Status unavailable')).toBeTruthy()
-    expect(screen.getByTestId('organization-app-action-retained-withdrawn')
-      .hasAttribute('disabled')).toBe(true)
-    const management = screen.getByLabelText(
-      'More actions for Retained Withdrawn',
-    )
-    expect(management).toBeTruthy()
-    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
-    await waitFor(() => {
-      expect(screen.getByText('Uninstall')).toBeTruthy()
-      expect(screen.getByText('Stop')).toBeTruthy()
-      expect(screen.queryByText('View logs')).toBeNull()
-    })
-  })
-
-  it('keeps an installed app manageable from a denied NETWORK_ERROR cold snapshot', async () => {
-    const deniedApp = {
-      id: 'denied-installed',
-      organizationId: 'organization-a',
-      name: 'Denied Installed',
-      description: '',
-      deliveryMode: 'local_bundle' as const,
-      sortOrder: 0,
-      availability: 'unavailable' as const,
-    }
-    const catalog: DeniedAppCatalogSnapshot = {
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      appConfigVersion: 'denied',
-      authorizationStatus: 'denied',
-      apps: [deniedApp],
-      syncedAt: 1,
-    }
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: deniedApp.id,
-    })
-    const status = {
-      appId: deniedApp.id,
-      scope: {
-        kind: 'catalog' as const,
-        accountId: catalog.accountId,
-        organizationId: catalog.organizationId,
-        catalogAppId: deniedApp.id,
-      },
-      status: 'running' as const,
-      currentVersion: '1.0.0',
-      runningVersion: '1.0.0',
-    }
-    const stop = jest.fn(async () => {})
-    const uninstall = jest.fn(async () => {})
-    const getLogs = jest.fn(async () => 'retained log output')
-    appCatalogHook = {
-      ...signedOutCatalogHook(),
-      organization: {
-        accountId: catalog.accountId,
-        activeOrganizationId: catalog.organizationId,
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: catalog.organizationId,
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
-      state: {
-        ...signedOutCatalogHook().state,
-        catalog,
-        accessMode: 'denied',
-        errorCode: 'NETWORK_ERROR',
-        statuses: { [scopeKey]: status },
-      },
-      getStatus: () => status,
-      scopeKeyForApp: () => scopeKey,
-      stop,
-      uninstall,
-      getLogs,
-    }
-
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-
-    expect(screen.getByText('Denied Installed')).toBeTruthy()
-    expect(screen.getByText('Access removed by your organization')).toBeTruthy()
-    expect(screen.getByTestId('organization-app-action-denied-installed')
-      .hasAttribute('disabled')).toBe(true)
-
-    const management = screen.getByLabelText('More actions for Denied Installed')
-    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
-    await waitFor(() => {
-      expect(screen.getByText('Stop')).toBeTruthy()
-      expect(screen.getByText('Uninstall')).toBeTruthy()
-      expect(screen.getByText('View logs')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByText('View logs'))
-    await waitFor(() => {
-      expect(screen.getByText('retained log output')).toBeTruthy()
-    })
-    expect(getLogs).toHaveBeenCalledWith(deniedApp)
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-
-    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
-    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
-    fireEvent.click(screen.getByText('Stop'))
-    await waitFor(() => {
-      expect(stop).toHaveBeenCalledWith(deniedApp)
-    })
-  })
-
-  it('shows retained log management for denied and withdrawn installed-like states', async () => {
-    for (const availability of ['unavailable', 'withdrawn'] as const) {
-      for (
-        const runtimeStatus of [
-          'installed',
-          'running',
-          'stopped',
-          'broken',
-          'update_available',
-        ] as const
-      ) {
-        const retainedApp: CatalogApp = {
-          id: `${availability}-${runtimeStatus}`,
-          organizationId: 'organization-a',
-          name: `${availability} ${runtimeStatus}`,
-          description: '',
-          deliveryMode: 'local_bundle',
-          sortOrder: 0,
-          availability,
-        }
-        const catalog: AppCatalogCacheEntry = {
-          accountId: 'account-a',
-          organizationId: 'organization-a',
-          appConfigVersion: 'retained-logs',
-          authorizationStatus: availability === 'unavailable'
-            ? 'denied'
-            : 'authorized',
-          apps: availability === 'unavailable' ? [retainedApp] : [],
-          withdrawnApps: availability === 'withdrawn' ? [retainedApp] : [],
-          syncedAt: 1,
-        }
-        const status = {
-          appId: retainedApp.id,
-          scope: {
-            kind: 'catalog' as const,
-            accountId: catalog.accountId,
-            organizationId: catalog.organizationId,
-            catalogAppId: retainedApp.id,
-          },
-          status: runtimeStatus,
-          currentVersion: '1.0.0',
-        }
-        const scopeKey = createLocalAppScopeKey(status.scope)
-        appCatalogHook = {
-          ...signedOutCatalogHook(),
-          organization: {
-            accountId: catalog.accountId,
-            activeOrganizationId: catalog.organizationId,
-            organizationContextKey: createOrganizationContextKey(
-              catalog.accountId,
-              catalog.organizationId,
-            ),
-            organizationSummaries: [{
-              id: catalog.organizationId,
-              type: 'enterprise',
-              name: 'Organization A',
-            }],
-          },
-          state: {
-            ...signedOutCatalogHook().state,
-            catalog,
-            accessMode: availability === 'unavailable' ? 'denied' : 'online',
-            statuses: { [scopeKey]: status },
-          },
-          getStatus: () => status,
-          scopeKeyForApp: () => scopeKey,
-          getLogs: jest.fn(async () => 'retained logs'),
-        }
-
-        render(createElement(
-          I18nextProvider,
-          { i18n },
-          createElement(HomePage, { onAddApp: () => {} }),
-        ))
-        const management = screen.getByLabelText(
-          `More actions for ${retainedApp.name}`,
-        )
-        fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
-        await waitFor(() => {
-          expect(screen.getByText('View logs')).toBeTruthy()
-        })
-        cleanup()
-      }
-    }
-  })
-
-  it('keeps deferred log results isolated by full App scope and request generation', async () => {
-    const appA: CatalogApp = {
-      id: 'broken-app-a',
-      organizationId: 'organization-a',
-      name: 'Broken App A',
-      description: '',
-      deliveryMode: 'local_bundle',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const appB: CatalogApp = {
-      ...appA,
-      id: 'broken-app-b',
-      name: 'Broken App B',
-      sortOrder: 1,
-    }
-    const catalog: AppCatalogCacheEntry = {
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      appConfigVersion: 'logs-race',
-      authorizationStatus: 'authorized',
-      apps: [appA, appB],
-      syncedAt: 1,
-    }
-    const scopeKeyForApp = (app: CatalogApp) => createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: app.id,
-    })
-    const statuses = Object.fromEntries([appA, appB].map(app => [
-      scopeKeyForApp(app),
-      {
-        appId: app.id,
-        scope: {
-          kind: 'catalog' as const,
-          accountId: catalog.accountId,
-          organizationId: catalog.organizationId,
-          catalogAppId: app.id,
-        },
-        status: 'broken' as const,
-        currentVersion: '1.0.0',
-        error: {
-          code: 'START_FAILED',
-          message: 'health check failed',
-        },
-      },
-    ]))
-    const appALogs = createDeferred<string>()
-    const appBLogs = createDeferred<string>()
-    const getLogs = jest.fn((app: CatalogApp) => (
-      app.id === appA.id ? appALogs.promise : appBLogs.promise
-    ))
-    appCatalogHook = {
-      ...signedOutCatalogHook(),
-      organization: {
-        accountId: catalog.accountId,
-        activeOrganizationId: catalog.organizationId,
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: catalog.organizationId,
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
-      state: {
-        ...signedOutCatalogHook().state,
-        catalog,
-        accessMode: 'online',
-        statuses,
-      },
-      getStatus: (app: CatalogApp) => statuses[scopeKeyForApp(app)],
-      scopeKeyForApp,
-      getLogs,
-    }
-
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-
-    fireEvent.pointerDown(
-      screen.getByLabelText('More actions for Broken App A'),
-      { button: 0, ctrlKey: false },
-    )
-    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
-    fireEvent.click(screen.getByText('View logs'))
-    expect(screen.getByText('Broken App A logs')).toBeTruthy()
-    expect(screen.getByText('Loading logs…')).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    await waitFor(() => {
-      expect(screen.queryByText('Broken App A logs')).toBeNull()
-    })
-    fireEvent.pointerDown(
-      screen.getByLabelText('More actions for Broken App B'),
-      { button: 0, ctrlKey: false },
-    )
-    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
-    fireEvent.click(screen.getByText('View logs'))
-    expect(screen.getByText('Broken App B logs')).toBeTruthy()
-    expect(screen.getByText('Loading logs…')).toBeTruthy()
-
-    await act(async () => {
-      appALogs.resolve('stale App A logs')
-      await appALogs.promise
-    })
-    expect(screen.queryByText('stale App A logs')).toBeNull()
-    expect(screen.getByText('Loading logs…')).toBeTruthy()
-
-    await act(async () => {
-      appBLogs.resolve('current App B logs')
-      await appBLogs.promise
-    })
-    await waitFor(() => {
-      expect(screen.getByText('current App B logs')).toBeTruthy()
-    })
-    expect(screen.queryByText('stale App A logs')).toBeNull()
-    expect(getLogs).toHaveBeenNthCalledWith(1, appA)
-    expect(getLogs).toHaveBeenNthCalledWith(2, appB)
-  })
-
-  it('closes deferred logs when switching between legacy-colliding contexts', async () => {
-    const accountA = 'account:west'
-    const organizationAId = '组织'
-    const accountB = 'account'
-    const organizationBId = 'west:组织'
-    expect(`${accountA}:${organizationAId}`)
-      .toBe(`${accountB}:${organizationBId}`)
-
-    const pendingLogs = createDeferred<string>()
-    const brokenApp = (
-      accountId: string,
-      organizationId: string,
-    ): {
-      app: CatalogApp
-      hook: any
-    } => {
-      const app: CatalogApp = {
-        id: 'shared-broken-app',
-        organizationId,
-        name: `Broken ${accountId}`,
-        description: '',
-        deliveryMode: 'local_bundle',
-        sortOrder: 0,
-        availability: 'available',
-      }
-      const catalog: AppCatalogCacheEntry = {
-        accountId,
-        organizationId,
-        appConfigVersion: `catalog-${accountId}`,
-        authorizationStatus: 'authorized',
-        apps: [app],
-        syncedAt: 1,
-      }
-      const scopeKey = createLocalAppScopeKey({
-        kind: 'catalog',
-        accountId,
-        organizationId,
-        catalogAppId: app.id,
-      })
-      const status = {
-        appId: app.id,
-        scope: {
-          kind: 'catalog' as const,
-          accountId,
-          organizationId,
-          catalogAppId: app.id,
-        },
-        status: 'broken' as const,
-        currentVersion: '1.0.0',
-        error: {
-          code: 'START_FAILED',
-          message: 'health check failed',
-        },
-      }
-      return {
-        app,
-        hook: {
-          ...signedOutCatalogHook(),
-          organization: {
-            accountId,
-            activeOrganizationId: organizationId,
-            organizationContextKey: createOrganizationContextKey(
-              accountId,
-              organizationId,
-            ),
-            organizationSummaries: [{
-              id: organizationId,
-              type: 'enterprise',
-              name: organizationId,
-            }],
-          },
-          state: {
-            ...signedOutCatalogHook().state,
-            catalog,
-            accessMode: 'online',
-            statuses: { [scopeKey]: status },
-          },
-          getStatus: () => status,
-          scopeKeyForApp: () => scopeKey,
-          getLogs: () => pendingLogs.promise,
-        },
-      }
-    }
-    const contextA = brokenApp(accountA, organizationAId)
-    const contextB = brokenApp(accountB, organizationBId)
-    expect(contextA.hook.organization.organizationContextKey)
-      .not.toBe(contextB.hook.organization.organizationContextKey)
-
-    appCatalogHook = contextA.hook
-    const view = render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-    fireEvent.pointerDown(
-      screen.getByLabelText(`More actions for ${contextA.app.name}`),
-      { button: 0, ctrlKey: false },
-    )
-    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
-    fireEvent.click(screen.getByText('View logs'))
-    expect(screen.getByText(`${contextA.app.name} logs`)).toBeTruthy()
-
-    appCatalogHook = contextB.hook
-    view.rerender(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-    await waitFor(() => {
-      expect(screen.queryByText(`${contextA.app.name} logs`)).toBeNull()
-    })
-
-    await act(async () => {
-      pendingLogs.resolve('stale account A logs')
-      await pendingLogs.promise
-    })
-    expect(screen.queryByText('stale account A logs')).toBeNull()
-    expect(screen.getByText(contextB.app.name)).toBeTruthy()
-  })
-
-  it('segments a maximum catalog and excludes withdrawn apps without local data', () => {
-    const visibleApps: CatalogApp[] = Array.from(
-      { length: 10_000 },
-      (_, index) => ({
-        id: `visible-${index}`,
-        organizationId: 'organization-a',
-        name: `Visible ${index}`,
-        description: '',
-        deliveryMode: 'remote_url' as const,
-        remoteUrl: `https://example.com/${index}`,
-        sortOrder: index,
-        availability: 'available' as const,
-      }),
-    )
-    const withdrawnApps: CatalogApp[] = Array.from(
-      { length: 10_000 },
-      (_, index) => ({
-        id: `withdrawn-${index}`,
-        organizationId: 'organization-a',
-        name: `Withdrawn ${index}`,
-        description: '',
-        deliveryMode: 'local_bundle' as const,
-        sortOrder: index + 20_000,
-        availability: 'withdrawn' as const,
-      }),
-    )
-    withdrawnApps[9_999] = {
-      ...withdrawnApps[9_999]!,
-      name: 'Installed Withdrawn',
-      sortOrder: -1,
-    }
-    const catalog: AppCatalogCacheEntry = {
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      appConfigVersion: 'maximum',
-      authorizationStatus: 'authorized',
-      apps: visibleApps,
-      withdrawnApps,
-      syncedAt: 1,
-    }
-    const installedWithdrawn = withdrawnApps[9_999]!
-    const installedScopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: installedWithdrawn.id,
-    })
-    const statuses = {
-      [installedScopeKey]: {
-        appId: installedWithdrawn.id,
-        scope: {
-          kind: 'catalog' as const,
-          accountId: 'account-a',
-          organizationId: 'organization-a',
-          catalogAppId: installedWithdrawn.id,
-        },
-        status: 'installed' as const,
-        currentVersion: '1.0.0',
-      },
-    }
-    const scopeKeyForApp = (target: CatalogApp) => createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: target.id,
-    })
-    appCatalogHook = {
-      ...signedOutCatalogHook(),
-      organization: {
-        accountId: 'account-a',
-        activeOrganizationId: 'organization-a',
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: 'organization-a',
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
-      state: {
-        ...signedOutCatalogHook().state,
-        catalog,
-        accessMode: 'online',
-        statuses,
-      },
-      getStatus: (target: CatalogApp) => statuses[scopeKeyForApp(target)],
-      scopeKeyForApp,
-    }
-
-    render(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage, { onAddApp: () => {} }),
-    ))
-
-    expect(document.querySelectorAll(
-      'article[data-testid^="organization-app-"]',
-    )).toHaveLength(60)
-    expect(screen.getByText('Installed Withdrawn')).toBeTruthy()
-    expect(screen.queryByText('Withdrawn 0')).toBeNull()
-
-    fireEvent.click(screen.getByText('Load more'))
-    expect(document.querySelectorAll(
-      'article[data-testid^="organization-app-"]',
-    )).toHaveLength(120)
   })
 })

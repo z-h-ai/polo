@@ -1,0 +1,36 @@
+{
+ "description": "independent fresh browser document recheck of suspicious states against census captures",
+ "results": [
+  {
+   "scene": "P-M11-BLOCKED-EXPIRED",
+   "fresh_matches_census": true,
+   "len": 190
+  },
+  {
+   "scene": "P-M02-STOP-CANCEL",
+   "fresh_matches_census": true,
+   "len": 346
+  },
+  {
+   "scene": "P-M07-RENEW-LIMIT",
+   "fresh_matches_census": true,
+   "len": 109
+  },
+  {
+   "scene": "P-M09-BROWSER-MENU-ENT",
+   "fresh_matches_census": true,
+   "len": 114
+  },
+  {
+   "scene": "P-M01-INVITE-PENDING",
+   "fresh_matches_census": true,
+   "len": 90
+  },
+  {
+   "scene": "P-M11-CONTRACT-FAIL",
+   "fresh_matches_census": true,
+   "len": 92
+  }
+ ],
+ "page_errors": []
+}

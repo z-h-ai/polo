@@ -2,14 +2,17 @@ import { resolve } from 'path'
 import { join } from 'path'
 import { homedir } from 'os'
 import { execSync } from 'child_process'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS, isValidPoloUuid } from '@polo-ai/shared/protocol'
 import { getGitBashPath, setGitBashPath, clearGitBashPath } from '@polo-ai/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
 import { isUsableGitBashPath, validateGitBashPath } from '@polo-ai/server-core/services'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
+import { createMainWindowWithOutcome } from '../new-window-launch'
+import { mainLog } from '../logger'
 import { describeDeepLinkForLog } from '../deep-link-log'
+import { captureCircleReturnAccountView, getCircleReturnCandidateStore } from '../circle-return-candidate-store'
 import {
   requestClientOpenExternal,
   requestClientOpenPath,
@@ -48,6 +51,8 @@ export const GUI_HANDLED_CHANNELS = [
   RPC_CHANNELS.notification.SET_ENABLED,
   RPC_CHANNELS.menu.QUIT,
   RPC_CHANNELS.menu.NEW_WINDOW,
+  RPC_CHANNELS.window.GET_LAUNCH_CONTEXT,
+  RPC_CHANNELS.window.REPORT_WORKBENCH_READY,
   RPC_CHANNELS.menu.MINIMIZE,
   RPC_CHANNELS.menu.MAXIMIZE,
   RPC_CHANNELS.menu.ZOOM_IN,
@@ -60,6 +65,11 @@ export const GUI_HANDLED_CHANNELS = [
   RPC_CHANNELS.menu.COPY,
   RPC_CHANNELS.menu.PASTE,
   RPC_CHANNELS.menu.SELECT_ALL,
+  // Circle web→desktop return bridge (POO-70 B1): pending-candidate reads
+  // consume/cancel on the Main-process store; never workspace-proxied.
+  RPC_CHANNELS.circleReturn.GET_PENDING,
+  RPC_CHANNELS.circleReturn.ACK,
+  RPC_CHANNELS.circleReturn.CANCEL,
 ] as const
 
 export const HANDLED_CHANNELS = [
@@ -309,13 +319,16 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
     deps.platform.quit?.()
   })
 
+  // POO-117 P117-05/P117-07: the request reports an observable outcome instead
+  // of silently returning when the window manager or the caller's workspace
+  // mapping is missing — the renderer surfaces failures to the user.
   server.handle(RPC_CHANNELS.menu.NEW_WINDOW, async (ctx) => {
-    if (!windowManager) return
-    const workspaceId = ctx.workspaceId ?? windowManager.getWorkspaceForWindow(ctx.webContentsId!)
-    if (workspaceId) {
-      windowManager.createWindow({ workspaceId })
-    }
+    if (windowManager) return windowManager.createNewMainWindow(ctx.webContentsId ?? -1, 'renderer')
+    return createMainWindowWithOutcome({ createWindow: null, waitForWorkbenchReady: async () => false, log: mainLog }, { source: 'renderer' })
   })
+
+  server.handle(RPC_CHANNELS.window.GET_LAUNCH_CONTEXT, ctx => windowManager?.getWindowLaunchContext(ctx.webContentsId ?? -1) ?? null)
+  server.handle(RPC_CHANNELS.window.REPORT_WORKBENCH_READY, (ctx, context) => windowManager?.reportWorkbenchReady(ctx.webContentsId ?? -1, context) ?? false)
 
   server.handle(RPC_CHANNELS.menu.MINIMIZE, async (ctx) => {
     if (!windowManager) return
@@ -440,6 +453,33 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
   server.handle(RPC_CHANNELS.window.GET_FOCUS_STATE, async () => {
     const { isAnyWindowFocused } = require('../notifications')
     return isAnyWindowFocused()
+  })
+
+  // ── Circle web→desktop return bridge (POO-70 B1, P70-RETURN-BRIDGE-02/03) ─
+  // The Main-process candidate store is the single pending holder. Delivery is
+  // gated by the trusted account mirror (A4 anchors) and NEVER consumes: the
+  // candidate stays readable until ack/cancel/logout so a late subscriber can
+  // still fetch the original target after an event/read race. The ids only
+  // ADDRESS a page — object/permission re-verification happens through the C1
+  // memberCircles trusted bridge; there is no join/pay/auth action here.
+  server.handle(RPC_CHANNELS.circleReturn.GET_PENDING, async () => {
+    const accountView = captureCircleReturnAccountView()
+    if (accountView.status === 'transition') {
+      // Fail closed during an in-flight account transition (logout/replacement):
+      // deliver and mutate nothing — same boundary as the C1 request fence.
+      return { status: 'unavailable', reason: 'session_unavailable' } as const
+    }
+    return getCircleReturnCandidateStore().getPending(accountView)
+  })
+
+  server.handle(RPC_CHANNELS.circleReturn.ACK, async (_ctx, candidateId: string) => {
+    if (!isValidPoloUuid(candidateId)) return { status: 'not_found' } as const
+    return getCircleReturnCandidateStore().ack(candidateId)
+  })
+
+  server.handle(RPC_CHANNELS.circleReturn.CANCEL, async (_ctx, candidateId: string) => {
+    if (!isValidPoloUuid(candidateId)) return { status: 'not_found' } as const
+    return getCircleReturnCandidateStore().cancel(candidateId)
   })
 }
 

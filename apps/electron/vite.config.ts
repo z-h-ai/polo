@@ -39,6 +39,9 @@ export default defineConfig({
     outDir: resolve(__dirname, 'dist/renderer'),
     emptyDirBeforeWrite: true,
     sourcemap: true,  // Source maps generated for debugging. Not uploaded to Sentry (see CLAUDE.md).
+    // Emit .vite/manifest.json so tests can pin assertions to the exact
+    // manifest-selected renderer CSS asset (Review R32 minor finding).
+    manifest: true,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/renderer/index.html'),
@@ -53,6 +56,10 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, 'src/renderer'),
       '@config': resolve(__dirname, '../../packages/shared/src/config'),
+      // POO-108: the product-spaces export map routes `browser` builds to
+      // dist/ artifacts that are not part of this repo; resolve the sources
+      // directly, like every other src-backed @polo-ai/shared subpath here.
+      '@polo-ai/shared/product-spaces': resolve(__dirname, '../../packages/shared/src/product-spaces/index.ts'),
       // Force all React imports to use the root node_modules React
       // Bun hoists deps to root. This prevents "multiple React copies" error from @polo-ai/ui
       'react': resolve(__dirname, '../../node_modules/react'),

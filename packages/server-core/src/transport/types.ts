@@ -8,6 +8,8 @@ export interface RequestContext {
   clientId: string
   workspaceId: string | null
   webContentsId: number | null
+  /** Authenticated bearer on a loopback socket with no browser Origin. */
+  localSocket?: boolean
   /** Aborted when the server-side handler deadline is reached. */
   signal?: AbortSignal
 }

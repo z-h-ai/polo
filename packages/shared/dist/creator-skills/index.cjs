@@ -3978,10 +3978,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep3, value } = collItem;
+        const { start, key, sep: sep4, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep3?.[0],
+          next: key ?? sep4?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -3995,7 +3995,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep3) {
+          if (!keyProps.anchor && !keyProps.tag && !sep4) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map2.comment)
@@ -4019,7 +4019,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep3 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep4 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4035,7 +4035,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep3, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep4, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4126,7 +4126,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep3 = "";
+        let sep4 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4140,13 +4140,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep3 + cb;
-              sep3 = "";
+                comment += sep4 + cb;
+              sep4 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep3 += source;
+                sep4 += source;
               hasSpace = true;
               break;
             default:
@@ -4189,18 +4189,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep3, value } = collItem;
+        const { start, key, sep: sep4, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep3?.[0],
+          next: key ?? sep4?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep3 && !value) {
+          if (!props.anchor && !props.tag && !sep4 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4254,8 +4254,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep3 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep3, null, props, onError);
+        if (!isMap && !sep4 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep4, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4267,7 +4267,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep3 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep4 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4278,8 +4278,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep3)
-                for (const st of sep3) {
+              if (sep4)
+                for (const st of sep4) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4296,7 +4296,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep3, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep4, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4476,7 +4476,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep3 = "";
+      let sep4 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4493,24 +4493,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep3 + indent.slice(trimIndent) + content;
-          sep3 = "\n";
+          value += sep4 + indent.slice(trimIndent) + content;
+          sep4 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep3 === " ")
-            sep3 = "\n";
-          else if (!prevMoreIndented && sep3 === "\n")
-            sep3 = "\n\n";
-          value += sep3 + indent.slice(trimIndent) + content;
-          sep3 = "\n";
+          if (sep4 === " ")
+            sep4 = "\n";
+          else if (!prevMoreIndented && sep4 === "\n")
+            sep4 = "\n\n";
+          value += sep4 + indent.slice(trimIndent) + content;
+          sep4 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep3 === "\n")
+          if (sep4 === "\n")
             value += "\n";
           else
-            sep3 = "\n";
+            sep4 = "\n";
         } else {
-          value += sep3 + content;
-          sep3 = " ";
+          value += sep4 + content;
+          sep4 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4692,25 +4692,25 @@ var require_resolve_flow_scalar = __commonJS({
       if (!match)
         return source;
       let res = match[1];
-      let sep3 = " ";
+      let sep4 = " ";
       let pos = first.lastIndex;
       line.lastIndex = pos;
       while (match = line.exec(source)) {
         if (match[1] === "") {
-          if (sep3 === "\n")
-            res += sep3;
+          if (sep4 === "\n")
+            res += sep4;
           else
-            sep3 = "\n";
+            sep4 = "\n";
         } else {
-          res += sep3 + match[1];
-          sep3 = " ";
+          res += sep4 + match[1];
+          sep4 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep3 + (match?.[1] ?? "");
+      return res + sep4 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5512,14 +5512,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep3, value }) {
+    function stringifyItem({ start, key, sep: sep4, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep3)
-        for (const st of sep3)
+      if (sep4)
+        for (const st of sep4)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6669,18 +6669,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep3;
+          let sep4;
           if (scalar.end) {
-            sep3 = scalar.end;
-            sep3.push(this.sourceToken);
+            sep4 = scalar.end;
+            sep4.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep3 = [this.sourceToken];
+            sep4 = [this.sourceToken];
           const map2 = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep3 }]
+            items: [{ start, key: scalar, sep: sep4 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map2;
@@ -6833,15 +6833,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep3 = it.sep;
-                  sep3.push(this.sourceToken);
+                  const sep4 = it.sep;
+                  sep4.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep3 }]
+                    items: [{ start: start2, key, sep: sep4 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7035,13 +7035,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep3 = fc.end.splice(1, fc.end.length);
-            sep3.push(this.sourceToken);
+            const sep4 = fc.end.splice(1, fc.end.length);
+            sep4.push(this.sourceToken);
             const map2 = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep3 }]
+              items: [{ start, key: fc, sep: sep4 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map2;
@@ -10621,11 +10621,11 @@ var require_excerpt = __commonJS({
       if (typeof opts.excerpt === "function") {
         return opts.excerpt(file2, opts);
       }
-      const sep3 = file2.data.excerpt_separator || opts.excerpt_separator;
-      if (sep3 == null && (opts.excerpt === false || opts.excerpt == null)) {
+      const sep4 = file2.data.excerpt_separator || opts.excerpt_separator;
+      if (sep4 == null && (opts.excerpt === false || opts.excerpt == null)) {
         return file2;
       }
-      const delimiter = typeof opts.excerpt === "string" ? opts.excerpt : sep3 || opts.delimiters[0];
+      const delimiter = typeof opts.excerpt === "string" ? opts.excerpt : sep4 || opts.delimiters[0];
       const idx = file2.content.indexOf(delimiter);
       if (idx !== -1) {
         file2.excerpt = file2.content.slice(0, idx);
@@ -12055,6 +12055,7 @@ var require_yauzl = __commonJS({
 // src/creator-skills/index.ts
 var creator_skills_exports = {};
 __export(creator_skills_exports, {
+  CANONICAL_SKILLS_DIRECTORY: () => CANONICAL_SKILLS_DIRECTORY,
   CANONICAL_SKILL_FILE_MESSAGE: () => CANONICAL_SKILL_FILE_MESSAGE,
   CREATOR_SKILLS_LEDGER_FILE: () => CREATOR_SKILLS_LEDGER_FILE,
   CREATOR_SKILL_DESCRIPTION_MAX_LENGTH: () => CREATOR_SKILL_DESCRIPTION_MAX_LENGTH,
@@ -12071,6 +12072,7 @@ __export(creator_skills_exports, {
   CREATOR_SKILL_NAME_PATTERN: () => CREATOR_SKILL_NAME_PATTERN,
   CREATOR_SKILL_PERMISSION_MAX_LENGTH: () => CREATOR_SKILL_PERMISSION_MAX_LENGTH,
   CREATOR_SKILL_ROOT_ERROR_MESSAGE: () => CREATOR_SKILL_ROOT_ERROR_MESSAGE,
+  CanonicalSkillSourceSchema: () => CanonicalSkillSourceSchema,
   CreateCreatorArtifactRpcInputSchema: () => CreateCreatorArtifactRpcInputSchema,
   CreateCreatorArtifactVersionRpcInputSchema: () => CreateCreatorArtifactVersionRpcInputSchema,
   CreatorArtifactArchiveRpcInputSchema: () => CreatorArtifactArchiveRpcInputSchema,
@@ -12112,6 +12114,7 @@ __export(creator_skills_exports, {
   EMPTY_SKILL_CONTENT_MESSAGE: () => EMPTY_SKILL_CONTENT_MESSAGE,
   EMPTY_SKILL_CONTENT_SUGGESTION: () => EMPTY_SKILL_CONTENT_SUGGESTION,
   HARD_SKILL_ARCHIVE_POLICY: () => HARD_SKILL_ARCHIVE_POLICY,
+  HARD_WEBAPP_BUNDLE_POLICY: () => HARD_WEBAPP_BUNDLE_POLICY,
   INVALID_YAML_FRONTMATTER_MESSAGE: () => INVALID_YAML_FRONTMATTER_MESSAGE,
   InstalledCreatorSkillSchema: () => InstalledCreatorSkillSchema,
   PortableSkillMetadataSchema: () => PortableSkillMetadataSchema,
@@ -12120,29 +12123,39 @@ __export(creator_skills_exports, {
   SkillValidationIssueSchema: () => SkillValidationIssueSchema,
   SkillVersionMetadataSchema: () => SkillVersionMetadataSchema,
   StableSemverSchema: () => StableSemverSchema,
+  WebAppArtifactPolicySchema: () => WebAppArtifactPolicySchema,
   calculateContentDigest: () => calculateContentDigest,
   cancelCreatorSkillOperation: () => cancelCreatorSkillOperation,
   canonicalManifestJson: () => canonicalManifestJson,
+  canonicalSkillIdentity: () => canonicalSkillIdentity,
+  canonicalSkillRoot: () => canonicalSkillRoot,
+  clampWebAppArtifactPolicy: () => clampWebAppArtifactPolicy,
   copyCreatorSkillBackupForTesting: () => copyCreatorSkillBackupForTesting,
   creatorSkillBackupTimestamp: () => creatorSkillBackupTimestamp,
   deleteCreatorSkillBackups: () => deleteCreatorSkillBackups,
   directorySize: () => directorySize,
+  downloadCreatorSkillArchive: () => downloadCreatorSkillArchive,
   emptyCreatorSkillsLedger: () => emptyCreatorSkillsLedger,
+  ensureCanonicalSkillRoot: () => ensureCanonicalSkillRoot,
   hasArchiveLikeExtension: () => hasArchiveLikeExtension,
   hasPendingCreatorSkillForceDelete: () => hasPendingCreatorSkillForceDelete,
   inferBackupCreatedAt: () => inferBackupCreatedAt,
+  installCanonicalSkill: () => installCanonicalSkill,
   installCreatorSkill: () => installCreatorSkill,
   isCreatorSkillEmojiIcon: () => isCreatorSkillEmojiIcon,
   isCreatorSkillPackagingNoise: () => isCreatorSkillPackagingNoise,
   isValidCreatorSkillSlug: () => isValidCreatorSkillSlug,
   isValidSkillSlug: () => isValidSkillSlug,
+  listCanonicalSkillRoots: () => listCanonicalSkillRoots,
   listCreatorSkillBackups: () => listCreatorSkillBackups,
   parseCreatorSkillDocument: () => parseCreatorSkillDocument,
   parseCreatorSkillMetadata: () => parseCreatorSkillMetadata,
   parseCreatorSkillsLedger: () => parseCreatorSkillsLedger,
   preflightCreatorSkillArchive: () => preflightCreatorSkillArchive,
+  readCanonicalSkillInstallations: () => readCanonicalSkillInstallations,
   readCreatorSkillsLedger: () => readCreatorSkillsLedger,
   readValidatedSkillMetadata: () => readValidatedSkillMetadata,
+  recoverCanonicalSkillOperations: () => recoverCanonicalSkillOperations,
   recoverCreatorSkillOperations: () => recoverCreatorSkillOperations,
   removeLedgerInstallation: () => removeLedgerInstallation,
   replaceLedgerInstallation: () => replaceLedgerInstallation,
@@ -12173,6 +12186,11 @@ var HARD_SKILL_ARCHIVE_POLICY = {
   maxFileCount: 1e3,
   maxFileBytes: 25 * 1024 * 1024,
   maxExpandedBytes: 250 * 1024 * 1024
+};
+var HARD_WEBAPP_BUNDLE_POLICY = {
+  version: "hard-1",
+  maxBundleBytes: 512 * 1024,
+  maxFileCount: 1
 };
 
 // ../../node_modules/zod/v4/classic/external.js
@@ -25947,7 +25965,7 @@ config(en_default());
 var import_yaml = __toESM(require_dist(), 1);
 var CREATOR_SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 var CREATOR_SKILL_NAME_MAX_LENGTH = 64;
-var CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+var CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 8192;
 var CREATOR_SKILL_MAX_METADATA_ITEMS = 1e3;
 var CREATOR_SKILL_ICON_MAX_LENGTH = 64;
 var CREATOR_SKILL_GLOB_MAX_LENGTH = 2048;
@@ -26105,7 +26123,7 @@ function validateCreatorSkillMetadata(value, path, rootDirectory) {
     issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill name must use strict kebab-case (for example, polo-test)", "name"));
   }
   if (unicodeCodePointLength(description) > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
-    issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill description must be at most 1024 characters", "description"));
+    issues.push(metadataIssue("invalid_skill_content", path, `Creator Skill description must be at most ${CREATOR_SKILL_DESCRIPTION_MAX_LENGTH} characters`, "description"));
   }
   if (rootDirectory !== void 0 && validName && name !== rootDirectory) {
     issues.push(metadataIssue("invalid_skill_content", path, `Creator Skill name '${name}' must match root directory '${rootDirectory}'`, "name", `Use 'name: ${rootDirectory}' or rename the root directory`));
@@ -26201,6 +26219,22 @@ var SkillArchivePolicySchema = external_exports.object({
   maxFileBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxFileBytes),
   maxExpandedBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxExpandedBytes)
 });
+var WebAppArtifactPolicySchema = external_exports.object({
+  enabled: external_exports.boolean(),
+  maxBundleBytes: external_exports.number().int().positive().max(HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes),
+  maxFileCount: external_exports.number().int().positive().max(HARD_WEBAPP_BUNDLE_POLICY.maxFileCount)
+});
+function clampWebAppArtifactPolicy(policy) {
+  const parsed = WebAppArtifactPolicySchema.safeParse(policy);
+  if (!parsed.success) {
+    return { enabled: false, maxBundleBytes: 0, maxFileCount: 0 };
+  }
+  return {
+    enabled: parsed.data.enabled,
+    maxBundleBytes: Math.min(parsed.data.maxBundleBytes, HARD_WEBAPP_BUNDLE_POLICY.maxBundleBytes),
+    maxFileCount: Math.min(parsed.data.maxFileCount, HARD_WEBAPP_BUNDLE_POLICY.maxFileCount)
+  };
+}
 var SkillValidationIssueSchema = external_exports.object({
   code: external_exports.string().min(1).max(128),
   severity: external_exports.enum(["error", "warning"]),
@@ -26228,7 +26262,7 @@ var creatorArtifactBaseSchema = external_exports.object({
   id: entityId,
   organizationId: entityId,
   name: nullableOptional(external_exports.string().max(512)),
-  summary: nullableOptional(external_exports.string().max(8192)),
+  summary: nullableOptional(external_exports.string().refine((value) => Array.from(value).length <= 8192, "Summary must be at most 8192 characters")),
   displayIcon: nullableOptional(external_exports.discriminatedUnion("kind", [
     external_exports.object({ kind: external_exports.literal("emoji"), value: external_exports.string().min(1).max(64) }),
     external_exports.object({ kind: external_exports.literal("image"), url: external_exports.string().url().max(8192) })
@@ -26369,17 +26403,33 @@ var CreatorSkillSafetyStatusSchema = external_exports.object({
 var CreatorSkillSafetyStatusBatchSchema = external_exports.object({
   statuses: external_exports.array(CreatorSkillSafetyStatusSchema).max(1e3)
 });
+var CanonicalSkillSourceSchema = external_exports.object({
+  accountId: entityId,
+  productSpaceId: entityId,
+  subjectKind: external_exports.enum(["personal_artifact", "enterprise_instance"]),
+  subjectId: entityId,
+  versionId: entityId
+}).strict();
 var InstalledCreatorSkillSchema = external_exports.object({
+  nativeInstallationAdmissionId: external_exports.string().uuid().optional(),
   artifactId: entityId,
-  organizationId: entityId,
+  organizationId: entityId.optional(),
+  canonicalSource: CanonicalSkillSourceSchema.optional(),
   slug: skillSlug,
-  version: stableSemver,
+  version: external_exports.string().trim().min(1).max(64),
   archiveChecksum: checksum,
   contentDigest: checksum,
   installedAt: isoDate,
   lastKnownStatus: external_exports.enum(["active", "revoked", "archived"]).optional(),
   lastCheckedAt: isoDate.optional(),
-  ignoredVersion: stableSemver.optional()
+  ignoredVersion: external_exports.string().trim().min(1).max(64).optional()
+}).superRefine((row, ctx) => {
+  if (row.canonicalSource?.subjectKind !== "enterprise_instance" && (!stableSemver.safeParse(row.version).success || row.ignoredVersion !== void 0 && !stableSemver.safeParse(row.ignoredVersion).success)) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Legacy Creator Skill versions require stable semver" });
+  }
+  if (row.canonicalSource ? row.organizationId !== void 0 || row.artifactId !== row.canonicalSource.subjectId : !row.organizationId) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Managed Skill provenance must be canonical or legacy, never ambiguous" });
+  }
 });
 var CreatorSkillsLedgerSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
@@ -26922,7 +26972,7 @@ function inspectArchiveDirectory(rawEntries, policy, slug) {
   }
   const businessEntries = normalizedEntries.filter((entry) => !entry.ignored);
   try {
-    resolveCreatorSkillRoot(businessEntries.map((entry) => ({
+    slug = resolveCreatorSkillRoot(businessEntries.map((entry) => ({
       path: entry.normalizedPath,
       directory: entry.directory
     })), slug);
@@ -27327,6 +27377,7 @@ async function validateCreatorSkillArchive(args) {
       policy,
       args.slug
     );
+    const slug = resolveCreatorSkillRoot(normalizedEntries.map((entry) => ({ path: entry.normalizedPath, directory: entry.directory })), args.slug);
     const businessEntries = normalizedEntries.filter((entry) => !entry.ignored);
     const manifest = [];
     let metadata;
@@ -27382,13 +27433,13 @@ async function validateCreatorSkillArchive(args) {
           [issue2("executable_binary", archiveEntry.normalizedPath, "ELF, PE, and Mach-O binaries are rejected")]
         );
       }
-      if (archiveEntry.normalizedPath === `${args.slug}/icon.png`) {
+      if (archiveEntry.normalizedPath === `${slug}/icon.png`) {
         validatePngIcon(data, archiveEntry.normalizedPath);
       }
-      if (archiveEntry.normalizedPath === `${args.slug}/SKILL.md`) {
+      if (archiveEntry.normalizedPath === `${slug}/SKILL.md`) {
         skillContent = data;
       }
-      const relativePath = archiveEntry.normalizedPath.slice(args.slug.length + 1);
+      const relativePath = archiveEntry.normalizedPath.slice(slug.length + 1);
       manifest.push({
         path: relativePath,
         size: data.length,
@@ -27420,8 +27471,8 @@ async function validateCreatorSkillArchive(args) {
       const parsed = parseCreatorSkillMetadata(businessEntries.map((archiveEntry) => ({
         path: archiveEntry.normalizedPath,
         directory: archiveEntry.directory,
-        ...archiveEntry.normalizedPath === `${args.slug}/SKILL.md` && skillContent !== void 0 ? { content: skillContent } : {}
-      })), args.slug);
+        ...archiveEntry.normalizedPath === `${slug}/SKILL.md` && skillContent !== void 0 ? { content: skillContent } : {}
+      })), slug);
       metadata = parsed.metadata;
     } catch (error48) {
       if (!(error48 instanceof CreatorSkillMetadataError)) throw error48;
@@ -27454,6 +27505,7 @@ async function validateCreatorSkillArchive(args) {
       );
     }
     return {
+      slug,
       archiveChecksum,
       contentDigest,
       manifest,
@@ -27658,6 +27710,13 @@ function validForceDeleteConfirmation(value) {
   if (!value || typeof value !== "object") return false;
   const confirmation = value;
   return typeof confirmation.artifactId === "string" && confirmation.artifactId.length > 0 && confirmation.artifactId.length <= 512 && typeof confirmation.archiveChecksum === "string" && /^[a-f0-9]{64}$/.test(confirmation.archiveChecksum) && typeof confirmation.directoryIdentity === "string" && /^[0-9]+:[0-9]+:[0-9]+$/.test(confirmation.directoryIdentity) && typeof confirmation.contentFingerprint === "string" && /^[a-f0-9]{64}$/.test(confirmation.contentFingerprint);
+}
+async function notifyNativeCommit(result, dependencies) {
+  try {
+    await dependencies.onNativeCommitted?.(result);
+  } catch {
+  }
+  return result;
 }
 function errorResult(args) {
   return {
@@ -27899,7 +27958,7 @@ function parseBackupMetadata(raw, expected) {
     throw invalidBackupPath("Creator Skill backup metadata is invalid");
   }
   const metadata = raw;
-  if (metadata.schemaVersion !== 1 || metadata.slug !== expected.slug || metadata.backupId !== expected.backupId || !isBackupOperation(metadata.operation) || typeof metadata.createdAt !== "string" || Number.isNaN(Date.parse(metadata.createdAt)) || metadata.version !== void 0 && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(metadata.version)) {
+  if (metadata.schemaVersion !== 1 || metadata.slug !== expected.slug || metadata.backupId !== expected.backupId || !isBackupOperation(metadata.operation) || typeof metadata.createdAt !== "string" || Number.isNaN(Date.parse(metadata.createdAt)) || metadata.version !== void 0 && (typeof metadata.version !== "string" || metadata.version.trim().length === 0 || metadata.version.length > 64)) {
     throw invalidBackupPath("Creator Skill backup metadata is invalid");
   }
   return metadata;
@@ -28034,7 +28093,7 @@ function validateJournalShape(journal, expectedOperationId) {
     "ledger_committed",
     "detaching",
     "committed"
-  ].includes(journal.state) || journal.oldLedger !== null && typeof journal.oldLedger !== "string" || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES || journal.promotedDirectoryIdentity !== void 0 && !/^[0-9]+:[0-9]+:[0-9]+$/.test(journal.promotedDirectoryIdentity) || !hasValidForceDeleteConfirmation || forceDeleteConfirmation !== void 0 && (journal.action !== "uninstall" || journal.preserveBackupPath !== void 0) || hasAnyBackupMetadata && (!isBackupOperation(journal.backupOperation) || typeof journal.backupCreatedAt !== "string" || Number.isNaN(Date.parse(journal.backupCreatedAt)) || journal.backupVersion !== void 0 && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(journal.backupVersion))) {
+  ].includes(journal.state) || journal.oldLedger !== null && typeof journal.oldLedger !== "string" || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES || journal.promotedDirectoryIdentity !== void 0 && !/^[0-9]+:[0-9]+:[0-9]+$/.test(journal.promotedDirectoryIdentity) || !hasValidForceDeleteConfirmation || forceDeleteConfirmation !== void 0 && (journal.action !== "uninstall" || journal.preserveBackupPath !== void 0) || hasAnyBackupMetadata && (!isBackupOperation(journal.backupOperation) || typeof journal.backupCreatedAt !== "string" || Number.isNaN(Date.parse(journal.backupCreatedAt)) || journal.backupVersion !== void 0 && (typeof journal.backupVersion !== "string" || journal.backupVersion.trim().length === 0 || journal.backupVersion.length > 64))) {
     throw invalidOperationPath("Creator Skill recovery journal is invalid");
   }
 }
@@ -28294,9 +28353,9 @@ async function acquireLedgerMutationLock(workspaceRoot, onContended) {
     throw error48;
   }
 }
-async function downloadArchive(args) {
+async function downloadCreatorSkillArchive(args) {
   const response = await args.fetchImpl(args.url, {
-    method: "GET",
+    method: args.method ?? "GET",
     redirect: "error",
     signal: args.signal
   });
@@ -28367,7 +28426,7 @@ async function inspectConflicts(workspaceRoot, input) {
     });
   }
   if (localModified) conflicts.push("local_changes");
-  if (await exists((0, import_node_path3.join)((0, import_node_os.homedir)(), ".agents", "skills", slug))) {
+  if (!("canonicalSource" in input.grant) && await exists((0, import_node_path3.join)((0, import_node_os.homedir)(), ".agents", "skills", slug))) {
     conflicts.push("global_skill");
     existingIdentities.push({
       source: "global",
@@ -28723,7 +28782,9 @@ async function installCreatorSkill(workspaceRoot, input, dependencies = {}) {
         input.grant.validationPolicy.maxArchiveBytes,
         HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes
       );
-      await downloadArchive({
+      if (dependencies.preparedArchivePath) {
+        await (0, import_promises3.copyFile)(dependencies.preparedArchivePath, archivePath, 1);
+      } else await downloadCreatorSkillArchive({
         url: input.grant.url,
         outputPath: archivePath,
         maxBytes: policyMax,
@@ -28769,11 +28830,20 @@ async function installCreatorSkill(workspaceRoot, input, dependencies = {}) {
       );
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace);
       await dependencies.onLedgerMutationLocked?.();
+      if ("canonicalSource" in input.grant) {
+        await dependencies.assertCommitAllowed?.({ artifactId: input.grant.artifactId, version: input.grant.version, archiveChecksum: input.grant.archiveChecksum });
+        if (controller.signal.aborted) throw Object.assign(new Error("Installation cancelled"), { code: "creator_skill_cancelled" });
+        const source = input.grant.canonicalSource;
+        if (ledger.installed.some((row) => !row.canonicalSource || ["accountId", "productSpaceId", "subjectKind", "subjectId", "versionId"].some((key2) => row.canonicalSource[key2] !== source[key2]) || row.archiveChecksum.replace(/^sha256:/, "") !== input.grant.archiveChecksum.replace(/^sha256:/, "") || row.version !== input.grant.version)) {
+          throw new CreatorSkillArchiveError("checksum_mismatch", "Canonical version identity cannot be replaced by different bytes");
+        }
+      }
       const previous = conflictState.existing;
-      const ignoredVersion = previous && previous.artifactId === input.grant.artifactId && compareStableSemver(input.grant.version, previous.version) < 0 ? previous.version : void 0;
+      const ignoredVersion = previous && !("canonicalSource" in input.grant) && previous.artifactId === input.grant.artifactId && compareStableSemver(input.grant.version, previous.version) < 0 ? previous.version : void 0;
       const installation = {
+        ...dependencies.nativeInstallationAdmissionId ? { nativeInstallationAdmissionId: dependencies.nativeInstallationAdmissionId } : {},
         artifactId: input.grant.artifactId,
-        organizationId: input.grant.organizationId,
+        ..."canonicalSource" in input.grant ? { canonicalSource: input.grant.canonicalSource } : { organizationId: input.grant.organizationId },
         slug: input.grant.slug,
         version: input.grant.version,
         archiveChecksum: input.grant.archiveChecksum,
@@ -28878,7 +28948,7 @@ async function installCreatorSkill(workspaceRoot, input, dependencies = {}) {
       await dependencies.onJournalPersisted?.(journal.state);
       if (!committedJournalDurable) {
         report(dependencies, input, "refresh", 100, false);
-        return committedResult;
+        return await notifyNativeCommit(committedResult, dependencies);
       }
       const backupPath = await publishCommittedBackup(
         canonicalWorkspace,
@@ -28892,12 +28962,12 @@ async function installCreatorSkill(workspaceRoot, input, dependencies = {}) {
       await (0, import_promises3.rm)(operationPath, { recursive: true, force: true });
       await dependencies.onCleanupStep?.("operation_removed");
       report(dependencies, input, "refresh", 100, false);
-      return committedResult;
+      return await notifyNativeCommit(committedResult, dependencies);
     } catch (error48) {
       dependencies.onError?.(error48);
       if (journal?.state === "committed" && committedResult) {
         report(dependencies, input, "refresh", 100, false);
-        return committedResult;
+        return await notifyNativeCommit(committedResult, dependencies);
       }
       if (commitStarted && operationPath && journal) {
         try {
@@ -28969,6 +29039,7 @@ async function uninstallCreatorSkill(args, dependencies = {}) {
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace);
       await dependencies.onLedgerMutationLocked?.();
       const installed = ledger.installed.find((item) => item.slug === args.slug);
+      await dependencies.beforeNativeMutation?.(installed);
       const pendingCredential = installed ? void 0 : await pendingForceDeleteCredential(canonicalWorkspace, args.slug);
       if (!installed && !pendingCredential) {
         return errorResult({
@@ -29008,10 +29079,10 @@ async function uninstallCreatorSkill(args, dependencies = {}) {
         if (pendingCredential) {
           await removeForceDeleteCredential(canonicalWorkspace, args.slug);
         }
-        return {
+        return await notifyNativeCommit({
           success: true,
           operationId: args.operationId
-        };
+        }, dependencies);
       }
       if (!args.forceDeleteModified && (installed && isTargetLocallyModified(targetIdentity, installed) || !installed && pendingCredential)) {
         await writeCreatorSkillsLedger(
@@ -29038,12 +29109,12 @@ async function uninstallCreatorSkill(args, dependencies = {}) {
           }
           throw error48;
         }
-        return {
+        return await notifyNativeCommit({
           success: true,
           operationId: args.operationId,
           detached: true,
           forceDeleteCredential
-        };
+        }, dependencies);
       }
       const reservedOperation = await reserveOperationPath(
         canonicalWorkspace,
@@ -29136,7 +29207,7 @@ async function uninstallCreatorSkill(args, dependencies = {}) {
         operationId: args.operationId
       };
       await dependencies.onJournalPersisted?.(journal.state);
-      if (!committedJournalDurable) return committedResult;
+      if (!committedJournalDurable) return await notifyNativeCommit(committedResult, dependencies);
       if (!args.forceDeleteModified) {
         await preserveConcurrentRecreation({
           workspaceRoot: canonicalWorkspace,
@@ -29165,7 +29236,7 @@ async function uninstallCreatorSkill(args, dependencies = {}) {
       await dependencies.onCleanupStep?.("transaction_backup_removed");
       await (0, import_promises3.rm)(operationPath, { recursive: true, force: true });
       await dependencies.onCleanupStep?.("operation_removed");
-      return committedResult;
+      return await notifyNativeCommit(committedResult, dependencies);
     } catch (error48) {
       dependencies.onError?.(error48);
       const record2 = error48 && typeof error48 === "object" ? error48 : {};
@@ -29201,7 +29272,7 @@ async function uninstallCreatorSkill(args, dependencies = {}) {
             });
           }
         }
-        return committedResult;
+        return await notifyNativeCommit(committedResult, dependencies);
       }
       if (journal && operationPath) {
         await rollbackJournal(args.workspaceRoot, operationPath, journal).catch(() => {
@@ -29467,8 +29538,171 @@ var CREATOR_SKILL_FIXTURE_MANIFEST = [{
   sha256: "a063d3f9bd112e6e1d816cb2c771ccf9fb8602b942e8e82a173af9c5001c91b9"
 }];
 var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "b5326fb33894331f09a1b0e80650435c8c2cd70ba45b691cf513ba9de5f9da80";
+
+// src/creator-skills/canonical.ts
+var import_node_crypto3 = require("node:crypto");
+var import_promises4 = require("node:fs/promises");
+var import_node_path4 = require("node:path");
+var CANONICAL_SKILLS_DIRECTORY = ".polo/canonical-skills";
+var recoveryByRoot = /* @__PURE__ */ new Map();
+function ensureCanonicalRecovery(root) {
+  const existing = recoveryByRoot.get(root);
+  if (existing) return existing;
+  const pending = recoverCreatorSkillOperations(root).catch((error48) => {
+    recoveryByRoot.delete(root);
+    throw error48;
+  });
+  recoveryByRoot.set(root, pending);
+  return pending;
+}
+function canonicalSkillIdentity(source) {
+  const checked = CanonicalSkillSourceSchema.parse(source);
+  return (0, import_node_crypto3.createHash)("sha256").update(JSON.stringify([checked.accountId, checked.productSpaceId, checked.subjectKind, checked.subjectId, checked.versionId])).digest("hex");
+}
+function canonicalSkillRoot(workspaceRoot, source) {
+  return (0, import_node_path4.join)(workspaceRoot, CANONICAL_SKILLS_DIRECTORY, canonicalSkillIdentity(source));
+}
+async function ensureCanonicalSkillRoot(workspaceRoot, source) {
+  const workspace = await (0, import_promises4.realpath)(workspaceRoot);
+  let current = workspace;
+  for (const segment of [".polo", "canonical-skills", canonicalSkillIdentity(source)]) {
+    current = (0, import_node_path4.join)(current, segment);
+    try {
+      await (0, import_promises4.mkdir)(current, { mode: 448 });
+    } catch (error48) {
+      if (error48.code !== "EEXIST") throw error48;
+    }
+    const info = await (0, import_promises4.lstat)(current);
+    if (!info.isDirectory() || info.isSymbolicLink() || await (0, import_promises4.realpath)(current) !== current) throw new Error("Canonical Skill directory is not a local directory");
+  }
+  return current;
+}
+async function installCanonicalSkill(workspaceRoot, input, dependencies = {}) {
+  const root = await ensureCanonicalSkillRoot(workspaceRoot, input.source);
+  const incoming = (0, import_node_path4.join)(root, `.incoming-${(0, import_node_crypto3.randomUUID)()}`);
+  const checksum2 = input.checksum.replace(/^sha256:/, "").toLowerCase();
+  if (!Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.now()) throw new Error("Canonical Skill download grant expired");
+  if (!/^[a-f0-9]{64}$/.test(checksum2) || !Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes) throw new Error("Canonical Skill bundle is invalid");
+  const ledgerFile = await (0, import_promises4.readFile)((0, import_node_path4.join)(root, "creator-skills.json"), "utf8").catch((error48) => {
+    if (error48.code === "ENOENT") return null;
+    throw error48;
+  });
+  if (ledgerFile) {
+    const ledger = CreatorSkillsLedgerSchema.parse(JSON.parse(ledgerFile));
+    if (ledger.installed.some((row) => !row.canonicalSource || canonicalSkillIdentity(row.canonicalSource) !== canonicalSkillIdentity(input.source) || row.archiveChecksum.replace(/^sha256:/, "") !== checksum2 || row.version !== input.version)) throw new Error("Canonical version identity cannot be replaced by different bytes");
+  }
+  await (0, import_promises4.mkdir)(incoming, { mode: 448 });
+  try {
+    const archive = (0, import_node_path4.join)(incoming, "archive.zip");
+    await downloadCreatorSkillArchive({
+      url: input.downloadUrl,
+      method: "POST",
+      outputPath: archive,
+      maxBytes: input.sizeBytes,
+      signal: dependencies.signal ?? new AbortController().signal,
+      fetchImpl: dependencies.fetch ?? fetch,
+      onChunk: () => {
+      }
+    });
+    if ((await (0, import_promises4.stat)(archive)).size !== input.sizeBytes) throw new Error("Canonical Skill bundle size differs from the grant");
+    const validated = await validateCreatorSkillArchive({ archivePath: archive, expectedArchiveChecksum: checksum2, policy: HARD_SKILL_ARCHIVE_POLICY });
+    const witnessRoot = (0, import_node_path4.join)(root, ".archives");
+    try {
+      await (0, import_promises4.mkdir)(witnessRoot, { mode: 448 });
+    } catch (error48) {
+      if (error48.code !== "EEXIST") throw error48;
+    }
+    const witnessInfo = await (0, import_promises4.lstat)(witnessRoot);
+    if (!witnessInfo.isDirectory() || witnessInfo.isSymbolicLink() || await (0, import_promises4.realpath)(witnessRoot) !== witnessRoot) throw new Error("Canonical Skill witness root is unsafe");
+    const witness = (0, import_node_path4.join)(witnessRoot, `${checksum2}.zip`);
+    try {
+      await (0, import_promises4.copyFile)(archive, witness, 1);
+    } catch (error48) {
+      if (error48.code !== "EEXIST") throw error48;
+    }
+    const witnessFile = await (0, import_promises4.lstat)(witness);
+    if (!witnessFile.isFile() || witnessFile.isSymbolicLink() || await (0, import_promises4.realpath)(witness) !== witness) throw new Error("Canonical Skill witness is unsafe");
+    await validateCreatorSkillArchive({ archivePath: witness, slug: validated.slug, expectedArchiveChecksum: checksum2, expectedContentDigest: validated.contentDigest, policy: HARD_SKILL_ARCHIVE_POLICY });
+    await ensureCanonicalRecovery(root);
+    const hooks = await dependencies.onValidated?.(root, validated.slug);
+    return await installCreatorSkill(root, {
+      workspaceId: input.workspaceId,
+      operationId: input.operationId,
+      replaceExisting: input.replaceExisting,
+      backupLocalChanges: input.backupLocalChanges,
+      // This typed branch deliberately has no organizationId. A derived local
+      // manifest proves the already SHA-bound ZIP, not a new server contract.
+      grant: {
+        canonicalSource: input.source,
+        artifactId: input.source.subjectId,
+        slug: validated.slug,
+        version: input.version,
+        url: input.downloadUrl,
+        expiresAt: input.expiresAt,
+        archiveChecksum: checksum2,
+        contentDigest: validated.contentDigest,
+        manifest: validated.manifest,
+        validationPolicy: HARD_SKILL_ARCHIVE_POLICY
+      }
+    }, { ...dependencies, ...hooks, preparedArchivePath: archive });
+  } finally {
+    await (0, import_promises4.rm)(incoming, { recursive: true, force: true });
+  }
+}
+async function listCanonicalSkillRoots(workspaceRoot) {
+  const root = (0, import_node_path4.join)(await (0, import_promises4.realpath)(workspaceRoot), CANONICAL_SKILLS_DIRECTORY);
+  const info = await (0, import_promises4.lstat)(root).catch(() => null);
+  if (!info?.isDirectory() || info.isSymbolicLink() || await (0, import_promises4.realpath)(root) !== root) return [];
+  const roots = [];
+  for (const name of (await (0, import_promises4.readdir)(root)).filter((name2) => /^[a-f0-9]{64}$/.test(name2))) {
+    const path = (0, import_node_path4.join)(root, name), entry = await (0, import_promises4.lstat)(path).catch(() => null);
+    if (entry?.isDirectory() && !entry.isSymbolicLink() && await (0, import_promises4.realpath)(path) === path) roots.push(path);
+  }
+  return roots;
+}
+async function recoverCanonicalSkillOperations(workspaceRoot) {
+  for (const root of await listCanonicalSkillRoots(workspaceRoot)) await ensureCanonicalRecovery(root);
+}
+async function readCanonicalSkillInstallations(workspaceRoot, scope, options2 = {}) {
+  const canonicalWorkspace = await (0, import_promises4.realpath)(workspaceRoot);
+  const root = (0, import_node_path4.join)(canonicalWorkspace, CANONICAL_SKILLS_DIRECTORY);
+  const directory = await (0, import_promises4.lstat)(root).catch(() => null);
+  if (!directory?.isDirectory() || directory.isSymbolicLink() || await (0, import_promises4.realpath)(root) !== root) return [];
+  const found = [];
+  for (const name of (await (0, import_promises4.readdir)(root)).filter((name2) => /^[a-f0-9]{64}$/.test(name2))) {
+    const isolated = (0, import_node_path4.join)(root, name);
+    try {
+      const info = await (0, import_promises4.lstat)(isolated);
+      if (!info.isDirectory() || info.isSymbolicLink() || await (0, import_promises4.realpath)(isolated) !== isolated) continue;
+      const ledger = CreatorSkillsLedgerSchema.parse(JSON.parse(await (0, import_promises4.readFile)((0, import_node_path4.join)(isolated, "creator-skills.json"), "utf8")));
+      for (const row of ledger.installed) {
+        const source = row.canonicalSource;
+        if (!source || source.accountId !== scope.accountId || source.productSpaceId !== scope.productSpaceId || canonicalSkillIdentity(source) !== name) continue;
+        const path = (0, import_node_path4.join)(isolated, "skills", row.slug);
+        const target = await (0, import_promises4.lstat)(path).catch((error48) => {
+          if (error48.code === "ENOENT") return null;
+          throw error48;
+        });
+        if (target && (!target.isDirectory() || target.isSymbolicLink() || !(await (0, import_promises4.realpath)(path)).startsWith(`${isolated}${import_node_path4.sep}`))) continue;
+        if (!options2.nativeMutationFacts) {
+          if (!target) continue;
+          const witness = (0, import_node_path4.join)(isolated, ".archives", `${row.archiveChecksum}.zip`);
+          const witnessFile = await (0, import_promises4.lstat)(witness);
+          if (!witnessFile.isFile() || witnessFile.isSymbolicLink() || await (0, import_promises4.realpath)(witness) !== witness) continue;
+          const original = await validateCreatorSkillArchive({ archivePath: witness, slug: row.slug, expectedArchiveChecksum: row.archiveChecksum, policy: HARD_SKILL_ARCHIVE_POLICY });
+          const bytes = await scanCreatorSkillDirectory(path);
+          if (bytes.contentDigest !== original.contentDigest || row.contentDigest !== original.contentDigest) continue;
+        }
+        found.push({ workspaceRoot: canonicalWorkspace, root: isolated, path, installation: { ...row, organizationId: void 0, canonicalSource: source } });
+      }
+    } catch {
+    }
+  }
+  return found;
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  CANONICAL_SKILLS_DIRECTORY,
   CANONICAL_SKILL_FILE_MESSAGE,
   CREATOR_SKILLS_LEDGER_FILE,
   CREATOR_SKILL_DESCRIPTION_MAX_LENGTH,
@@ -29485,6 +29719,7 @@ var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "b5326fb33894331f09a1b0e80650435c8c2c
   CREATOR_SKILL_NAME_PATTERN,
   CREATOR_SKILL_PERMISSION_MAX_LENGTH,
   CREATOR_SKILL_ROOT_ERROR_MESSAGE,
+  CanonicalSkillSourceSchema,
   CreateCreatorArtifactRpcInputSchema,
   CreateCreatorArtifactVersionRpcInputSchema,
   CreatorArtifactArchiveRpcInputSchema,
@@ -29526,6 +29761,7 @@ var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "b5326fb33894331f09a1b0e80650435c8c2c
   EMPTY_SKILL_CONTENT_MESSAGE,
   EMPTY_SKILL_CONTENT_SUGGESTION,
   HARD_SKILL_ARCHIVE_POLICY,
+  HARD_WEBAPP_BUNDLE_POLICY,
   INVALID_YAML_FRONTMATTER_MESSAGE,
   InstalledCreatorSkillSchema,
   PortableSkillMetadataSchema,
@@ -29534,29 +29770,39 @@ var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "b5326fb33894331f09a1b0e80650435c8c2c
   SkillValidationIssueSchema,
   SkillVersionMetadataSchema,
   StableSemverSchema,
+  WebAppArtifactPolicySchema,
   calculateContentDigest,
   cancelCreatorSkillOperation,
   canonicalManifestJson,
+  canonicalSkillIdentity,
+  canonicalSkillRoot,
+  clampWebAppArtifactPolicy,
   copyCreatorSkillBackupForTesting,
   creatorSkillBackupTimestamp,
   deleteCreatorSkillBackups,
   directorySize,
+  downloadCreatorSkillArchive,
   emptyCreatorSkillsLedger,
+  ensureCanonicalSkillRoot,
   hasArchiveLikeExtension,
   hasPendingCreatorSkillForceDelete,
   inferBackupCreatedAt,
+  installCanonicalSkill,
   installCreatorSkill,
   isCreatorSkillEmojiIcon,
   isCreatorSkillPackagingNoise,
   isValidCreatorSkillSlug,
   isValidSkillSlug,
+  listCanonicalSkillRoots,
   listCreatorSkillBackups,
   parseCreatorSkillDocument,
   parseCreatorSkillMetadata,
   parseCreatorSkillsLedger,
   preflightCreatorSkillArchive,
+  readCanonicalSkillInstallations,
   readCreatorSkillsLedger,
   readValidatedSkillMetadata,
+  recoverCanonicalSkillOperations,
   recoverCreatorSkillOperations,
   removeLedgerInstallation,
   replaceLedgerInstallation,

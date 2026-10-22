@@ -29,6 +29,11 @@ import {
   MAX_HOME_RECENT_CONTEXT_KEY_LENGTH,
 } from './home-recent.ts';
 import {
+  MAX_HOME_QUICK_ACCESS_APPS,
+  MAX_HOME_QUICK_ACCESS_APP_ID_LENGTH,
+  MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH,
+} from './home-quick-access.ts';
+import {
   AdminEntityIdSchema,
   OrganizationMembershipSchema,
   OrganizationSchema,
@@ -165,6 +170,27 @@ const HomeRecentAppsByContextSchema = z.record(
   }
 });
 
+const HomeQuickAccessByContextSchema = z.record(
+  z.string(),
+  z.array(z.object({
+    id: z.string().min(1).max(MAX_HOME_QUICK_ACCESS_APP_ID_LENGTH),
+    addedAt: z.number().finite().min(0),
+  })).max(MAX_HOME_QUICK_ACCESS_APPS),
+).superRefine((contexts, context) => {
+  for (const contextKey of Object.keys(contexts)) {
+    if (
+      contextKey.length === 0
+      || contextKey.length > MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Home quick-access context key is invalid',
+        path: [contextKey],
+      });
+    }
+  }
+});
+
 const OrganizationSummaryPreferenceSchema = OrganizationSchema.extend({
   membership: OrganizationMembershipSchema,
   memberCount: z.number().int().min(0),
@@ -207,6 +233,7 @@ export const UserPreferencesSchema = z.object({
   language: z.string().optional(),
   notes: z.string().optional(),
   homeRecentApps: HomeRecentAppsByContextSchema.optional(),
+  homeQuickAccess: HomeQuickAccessByContextSchema.optional(),
   organizationContextStorage: OrganizationContextStorageByAccountSchema.optional(),
   updatedAt: z.number().int().min(0).optional(),
 });

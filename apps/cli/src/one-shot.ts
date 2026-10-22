@@ -1,3 +1,6 @@
+import { MANAGED_TOOL_UNSUPPORTED } from '../../../packages/shared/src/agent/tool-execution-policy'
+import { beginManagedExecution, assertManagedThreadAccess, currentManagedOwner } from './managed-broker-client'
+import { desktopManagedConnection, sameDesktopManagedOwner } from '@polo-ai/shared/config'
 import {
   chmod,
   cp,
@@ -17,6 +20,8 @@ import { constants as osConstants, homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import {
   loadStoredConfigReadonly,
+  hasManagedCliMarkers,
+  assertOwnedCliConnection,
   type LlmConnection,
   type Workspace,
 } from '@polo-ai/shared/config'
@@ -210,6 +215,7 @@ async function makePrivateTree(path: string): Promise<void> {
 export async function createConfigurationSnapshot(
   record: CliThreadRecord,
   scope: ConfigurationScope,
+  managed = false,
 ): Promise<string> {
   const snapshotRoot = join(record.directory, 'config-snapshot')
   await rm(snapshotRoot, { recursive: true, force: true })
@@ -225,6 +231,7 @@ export async function createConfigurationSnapshot(
       // the agent runtime. Copying arbitrary workspace state would persist
       // unrelated automation, messaging, history, or retry-queue secrets.
       if (!CONFIGURATION_SNAPSHOT_ENTRIES.has(entry.name)) continue
+      if (managed && ['sources', 'skills', 'automations.json'].includes(entry.name)) continue
       // Global config.json contains application state and connection metadata;
       // the CLI runtime receives its selected connection through the invocation
       // bootstrap and gets a minimal global workspace manifest below.
@@ -449,6 +456,12 @@ export async function resolveConnection(
     : undefined
   const selectedConnection = explicitIdentity
     ?? (!hasExplicitIdentity ? savedIdentity ?? defaultConnection : undefined)
+  // Validate ORIGINAL identities before reading any stored credential or rebuilding a synthetic route.
+  if (!hasExplicitIdentity) {
+    assertOwnedCliConnection(saved, saved?.provenance)
+    if (!saved && defaultSlug?.startsWith('polo-space-')) assertOwnedCliConnection({ slug: defaultSlug })
+  }
+  assertOwnedCliConnection(selectedConnection)
   const provider = args.provider
     ?? (!hasExplicitIdentity ? saved?.provider : undefined)
     ?? selectedConnection?.piAuthProvider
@@ -479,7 +492,7 @@ export async function resolveConnection(
       args,
       connection.piAuthProvider ?? connection.providerType,
       selectedConnection,
-      hasExplicitIdentity,
+      true,
     )
     return {
       connection,
@@ -491,13 +504,22 @@ export async function resolveConnection(
   if (!needsSyntheticConnection) return { model }
 
   const effectiveProvider = provider || 'anthropic'
-  const slug = saved?.slug || `cli-${record.metadata.threadId}`
+  const slug = (!hasExplicitConnectionOverride ? saved?.slug : undefined) || `cli-${record.metadata.threadId}`
   const retainSavedConnectionShape = !!saved && !hasExplicitConnectionOverride
+  // A saved slug identifies a credential only while its configured route and
+  // auth type still match the immutable Thread snapshot. An unmatched explicit
+  // endpoint must never borrow the previous connection's secret.
+  const savedCredentialIdentity = retainSavedConnectionShape && savedIdentity
+    && savedIdentity.authType === saved.authType
+    && connectionMatchesInvocationIdentity(savedIdentity, { provider: effectiveProvider })
+    && canonicalConnectionBaseUrl(savedIdentity.baseUrl) === canonicalConnectionBaseUrl(baseUrl)
+    ? savedIdentity
+    : undefined
   const credential = await resolveInvocationCredential(
     args,
     effectiveProvider,
-    savedIdentity,
-    hasExplicitIdentity,
+    savedCredentialIdentity,
+    !!savedCredentialIdentity,
   )
   return {
     connection: makeInvocationConnection({
@@ -594,6 +616,7 @@ export async function waitForTurn(
   let finalMessage = ''
   let pendingText = ''
   let sawFinalTextComplete = false
+  const successfulTools = new Set<string>()
   let settled = false
   let settle!: (result: TurnResult) => void
   const resultPromise = new Promise<TurnResult>(resolveResult => {
@@ -638,6 +661,7 @@ export async function waitForTurn(
       ))
       return
     }
+    if (event.type === 'tool_result' && event.isError === false && event.toolUseId) successfulTools.add(event.toolUseId)
     if (event.type === 'tool_result' && args.kind === 'run' && args.outputFormat !== 'stream-json') {
       const output = stripAnsi(String(event.result ?? ''))
       if (output) {
@@ -646,6 +670,11 @@ export async function waitForTurn(
       return
     }
     if (event.type === 'complete') {
+      const answer = sawFinalTextComplete ? finalMessage : pendingText
+      if (!answer.trim() && successfulTools.size === 0) {
+        finish({ status: 'failed', finalMessage: '', error: new Error('CLI_EMPTY_RESULT: no final answer or successful tool outcome') })
+        return
+      }
       finish({
         status: 'completed',
         finalMessage: sawFinalTextComplete ? finalMessage : pendingText,
@@ -687,7 +716,8 @@ export async function waitForTurn(
   turnTimeout?.unref()
 
   try {
-    await client.invoke('sessions:sendMessage', sessionId, prompt)
+    // headless turns never register request_user_input (fail-closed contract)
+    await client.invoke('sessions:sendMessage', sessionId, prompt, undefined, undefined, { invocationSource: 'headless' })
     const failed = (error: Error): TurnResult => {
       void client.invoke('sessions:cancel', sessionId, true).catch(() => {})
       return { status: 'failed', finalMessage: '', error }
@@ -752,6 +782,7 @@ async function createOrResolveExecution(
 ): Promise<{ record: CliThreadRecord; scope: ConfigurationScope; workingDirectory: string }> {
   if (args.kind === 'resume') {
     const original = await resolveResumeRecord(args)
+    await assertManagedThreadAccess(original, args)
     // Validate every user/config-derived path before creating an ephemeral
     // clone. A failed workspace or -C override must not leave an ownerless
     // temporary Thread behind.
@@ -834,6 +865,8 @@ export async function executeTurn(
   let adapter: ExecEventAdapter | undefined
   let server: SpawnedServer | undefined
   let client: CliRpcClient | undefined
+  let managedBroker: Awaited<ReturnType<typeof beginManagedExecution>> | undefined
+  let managedHeartbeat: ReturnType<typeof setInterval> | undefined
   let currentSessionId: string | undefined
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined
   let result: TurnResult = { status: 'failed', finalMessage: '', error: new Error('execution did not start') }
@@ -931,6 +964,12 @@ export async function executeTurn(
         }
       }
       client?.destroy()
+      if (managedHeartbeat) clearInterval(managedHeartbeat)
+      if (managedBroker) {
+        try { if (managedBroker.client.isConnected) await managedBroker.client.invoke('cliManaged.finish', { leaseId: managedBroker.descriptor.leaseId }) }
+        catch (error) { cleanupError ??= error instanceof Error ? error : new Error(String(error)) }
+        managedBroker.client.destroy()
+      }
 
       if (cleanupError) {
         result = { status: 'failed', finalMessage: '', error: cleanupError }
@@ -1029,7 +1068,40 @@ export async function executeTurn(
     lifecycleState = 'leased'
     await throwIfInterrupted()
 
-    const resolvedConnection = await resolveConnection(args, record, scope)
+    const configured = loadStoredConfigReadonly()
+    const selectedSlug = await loadWorkspaceConnectionDefault(scope) || configured?.defaultLlmConnection
+    const selected = configured?.llmConnections?.find(c => c.slug === selectedSlug) ?? configured?.llmConnections?.[0]
+    const managed = !!record.metadata.managedOwner || args.provider === 'polo'
+      || hasManagedCliMarkers(record.metadata.connection)
+      || !args.provider && !args.baseUrl && (args.kind !== 'resume' || !record.metadata.connection)
+        && (hasManagedCliMarkers(selected) || hasManagedCliMarkers({ slug: selectedSlug }))
+    if (args.space && !managed) throw new UsageError('--space requires Polo compute')
+    const snapshotRoot = await createConfigurationSnapshot(record, scope, managed)
+    await completeStage('snapshot')
+    const workspace = { ...runtimeWorkspace(scope), rootPath: snapshotRoot }
+    let resolvedConnection: Awaited<ReturnType<typeof resolveConnection>>
+    if (managed) {
+      managedBroker = await beginManagedExecution(record, lease, args)
+      const descriptor = managedBroker.descriptor
+      resolvedConnection = { connection: desktopManagedConnection(descriptor), model: descriptor.model, credential: { value: descriptor.capability } }
+      await updateCliThread(record, { managedOwner: descriptor.owner })
+      const revoked = () => {
+        if (lifecycleState === 'cleaning' || lifecycleState === 'cleaned') return
+        reportLifecycleFailure(new Error('POLO_MANAGED_REVOKED: desktop lease ended; execution stopped'))
+        void cancelActiveSession()
+      }
+      managedBroker.client.on('cliManaged.revoked', revoked)
+      managedBroker.client.on('cliManaged.failed', (value: any) => {
+        if (value?.leaseId !== descriptor.leaseId || lifecycleState === 'cleaning' || lifecycleState === 'cleaned') return
+        reportLifecycleFailure(new Error(typeof value.code === 'string' ? value.code : 'POLO_BILLING_UNAVAILABLE'))
+        void cancelActiveSession()
+      })
+      void managedBroker.client.waitForDisconnect().then(revoked)
+      const broker = managedBroker
+      managedHeartbeat = setInterval(() => { void broker.client.invoke('cliManaged.heartbeat', { leaseId: descriptor.leaseId }).catch(revoked) }, 2000)
+      managedHeartbeat.unref()
+      process.stderr.write(`Polo compute · ${descriptor.spaceName} · ${descriptor.model}\n${MANAGED_TOOL_UNSUPPORTED}\n`)
+    } else resolvedConnection = await resolveConnection(args, record, scope)
     await throwIfInterrupted()
     // A normal resume borrows the original Thread and its saved connection.
     // Explicit invocation overrides configure only this runtime; persisting
@@ -1039,10 +1111,11 @@ export async function executeTurn(
     if (resolvedConnection.connection && ownsNewThread) {
       await updateCliThread(record, {
         connection: {
+          provenance: { kind: managedBroker ? 'managed' : 'owned', originalSlug: resolvedConnection.connection.slug },
           slug: resolvedConnection.connection.slug,
           provider: resolvedConnection.connection.piAuthProvider || 'anthropic',
           model: resolvedConnection.model,
-          baseUrl: resolvedConnection.connection.baseUrl,
+          baseUrl: managedBroker ? undefined : resolvedConnection.connection.baseUrl,
           connectionType: resolvedConnection.connection.providerType,
           authType: resolvedConnection.connection.authType,
           customEndpoint: resolvedConnection.connection.customEndpoint,
@@ -1054,30 +1127,40 @@ export async function executeTurn(
       json: args.kind !== 'run' && args.json,
       secrets: [
         args.apiKey,
+        managedBroker?.discovery.token,
+        managedBroker?.descriptor.leaseId,
         ...credentialSecretValues(resolvedConnection.credential),
       ],
     })
 
-    const snapshotRoot = await createConfigurationSnapshot(record, scope)
-    await completeStage('snapshot')
-    const workspace = { ...runtimeWorkspace(scope), rootPath: snapshotRoot }
     server = await spawnServer({
+      detached: !!managedBroker,
       serverEntry: args.serverEntry,
       startupTimeout: args.startupTimeout,
       quiet: !args.verbose,
       env: {
         POLO_AI_RUNTIME_PROFILE: 'cli-one-shot',
         POLO_AI_CONFIG_DIR: snapshotRoot,
-        POLO_AI_SHARED_CREDENTIALS_DIR: configRoot(),
+        // Only the selected credential travels in the private stdin bootstrap.
+        POLO_AI_SHARED_CREDENTIALS_DIR: snapshotRoot,
         HOME: snapshotRoot,
         USERPROFILE: snapshotRoot,
       },
       secrets: [
         args.apiKey,
+        managedBroker?.discovery.token,
+        managedBroker?.descriptor.leaseId,
         ...credentialSecretValues(resolvedConnection.credential),
       ],
       bootstrapPayload: {
         runtimeConfig: {
+          threadId: record.metadata.threadId,
+          desktopManaged: managedBroker ? { discovery: managedBroker.discovery, discoveryFile: managedBroker.discoveryFile, leaseId: managedBroker.descriptor.leaseId } : undefined,
+          globalSkillsRoot: managedBroker ? undefined : join(homedir(), '.agents', 'skills'),
+          threadRoot: record.directory,
+          expectedSessionId: record.metadata.mainSessionId,
+          origin: record.metadata.origin,
+          connectionProvenance: { kind: managedBroker ? 'managed' : 'owned', originalSlug: resolvedConnection.connection?.slug },
           sessionsRoot: record.sessionsRoot,
           controlledRoot: getCliSessionsRoot(),
           workspace,
@@ -1159,7 +1242,7 @@ export async function executeTurn(
     }
 
     if (args.kind !== 'run') {
-      adapter.start(record.metadata.threadId)
+      adapter.start(record.metadata.threadId, managedBroker ? 'desktop-managed' : 'local-owned')
       protocolStarted = true
     }
     result = await waitForTurn(client, sessionId, prompt, args, adapter, {
@@ -1250,6 +1333,10 @@ Options:
   --send-timeout <ms>    Legacy run turn timeout (default: 300000)
   --stdin                Read stdin even when a prompt is present
   --provider/--model/--api-key/--base-url
+  --space <id>          Assert the current Polo ProductSpace
+
+Polo compute: --provider polo requires a running, signed-in App; API-key and
+base-URL overrides are forbidden. The Agent and Thread remain independent.
   -h, --help             Show help
   -V, --version          Show version
 `)
@@ -1269,7 +1356,8 @@ Options:
   --dangerously-bypass-approvals-and-sandbox
   --json                  Emit stable JSONL events
   -m, --model <id>        Invocation-only model override
-  --provider <name>       Invocation-only provider override
+  --provider <name>       Invocation-only provider (polo uses the current App space)
+  --space <id>            Assert the current Polo ProductSpace
   --api-key <key>         Invocation-only credential override
   --base-url <url>        Invocation-only endpoint override
   --ephemeral             Resume from a temporary copy
@@ -1323,7 +1411,8 @@ Options:
   --dangerously-bypass-approvals-and-sandbox
   --json                  Emit stable JSONL events
   -m, --model <id>        Invocation-only model
-  --provider <name>       Invocation-only provider
+  --provider <name>       Invocation-only provider (polo uses the current App space)
+  --space <id>            Assert the current Polo ProductSpace
   --api-key <key>         Invocation-only credential
   --base-url <url>        Invocation-only endpoint
   --ephemeral             Delete the temporary Thread after cleanup
@@ -1411,8 +1500,12 @@ async function listSessionsCommand(args: ExecutionArgs): Promise<number> {
     args.workingDirectory || process.cwd(),
     { throwUsageError: !!args.workingDirectory },
   )
+  const managedOwner = await currentManagedOwner()
   const records = (await listCliThreads()).filter(record =>
-    record.metadata.origin === 'cli-exec'
+    (!record.metadata.managedOwner
+      ? !hasManagedCliMarkers(record.metadata.connection)
+      : !!managedOwner && sameDesktopManagedOwner(record.metadata.managedOwner, managedOwner))
+    && record.metadata.origin === 'cli-exec'
     && record.metadata.persistence === 'persistent'
     && record.metadata.configurationScopeId === scope.id
     && record.metadata.workingDirectory === workingDirectory

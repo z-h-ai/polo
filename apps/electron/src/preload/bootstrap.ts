@@ -227,6 +227,12 @@ client.handleCapability(CLIENT_CREATOR_SKILL_COMMIT_CHECK, async (identity: {
 // ---------------------------------------------------------------------------
 
 const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailable(ch))
+// Thin clients have no local GUI RPC server or managed-window launch context.
+// Their authentication/bootstrap must not depend on these local-only hooks.
+if (isClientOnly) {
+  api.getWindowLaunchContext = async () => null
+  api.reportWorkbenchReady = async () => false
+}
 
 ;(api as any).getRuntimeEnvironment = (): 'electron' | 'web' => 'electron'
 
@@ -302,6 +308,21 @@ client.onConnectionStateChanged((state) => {
 }
 ;(api as ElectronAPI).sendDeepLinkActionResult = (result) => {
   ipcRenderer.send(RPC_CHANNELS.deeplink.ACTION_RESULT, result)
+}
+
+// ── Circle web→desktop return bridge (POO-70 B1) ─────────────────────────────
+// Typed Main→preload→renderer surface for the pending circle-return
+// navigation candidate. LOCAL_ONLY: the candidate lives in the Electron Main
+// process next to the deep-link parser and the trusted account mirror, so it
+// is intentionally absent from a thin-client remote server — consumers must
+// treat a failing invoke as "no candidate" (fail closed).
+;(api as ElectronAPI).circleReturn = {
+  getPending: () => client.invoke(RPC_CHANNELS.circleReturn.GET_PENDING),
+  ack: candidateId => client.invoke(RPC_CHANNELS.circleReturn.ACK, candidateId),
+  cancel: candidateId => client.invoke(RPC_CHANNELS.circleReturn.CANCEL, candidateId),
+}
+;(api as ElectronAPI).onCircleReturnCandidate = callback => {
+  return client.on(RPC_CHANNELS.circleReturn.CANDIDATE, callback)
 }
 
 // Admin auth — explicit, testable preload surface for admin-managed deployments.
@@ -482,6 +503,12 @@ Object.assign(api, buildAdminPreloadApi(client, {
   ipcRenderer.on('transfer:progress', handler)
   return () => { ipcRenderer.removeListener('transfer:progress', handler) }
 }
+
+// Export a session bundle to a local JSON file — main-process orchestrated
+// (bundle export + OS save dialog + write) since the renderer has no generic
+// save-dialog / writeFile capability. Returns null when the user cancels.
+;(api as ElectronAPI).exportSessionToFile = (sessionId: string) =>
+  ipcRenderer.invoke('__session:exportToFile', sessionId)
 
 // System warnings — expose env-based flags set during main process startup
 // (preload-only: reads env var directly, no IPC round-trip needed)

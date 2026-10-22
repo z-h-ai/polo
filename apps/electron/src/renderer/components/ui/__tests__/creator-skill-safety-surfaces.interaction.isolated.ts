@@ -71,6 +71,19 @@ const skill = {
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
+  // SkillsListPanel reads the managed-skill enablement inventory (POO-106 S1).
+  Object.defineProperty(window, 'electronAPI', {
+    configurable: true,
+    value: {
+      listManagedSkills: async () => ({
+        ok: true as const,
+        workspaceId: 'workspace-one',
+        revision: 0,
+        items: [],
+      }),
+      onSkillsChanged: () => () => {},
+    },
+  })
 })
 
 afterEach(() => {

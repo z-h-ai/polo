@@ -1,0 +1,23 @@
+/* Inherits the renderer's real token + Tailwind setup wholesale; the extra
+   @source pulls this directory's entry/fixture wrappers into the Tailwind
+   scan so layout classNames used only here are generated too. */
+@import '@/index.css';
+@source './baseline.tsx';
+@source './fixtures.tsx';
+/* Scene registry and the layer-2 component gallery add their own layout
+   classNames; without these two lines their utilities are never generated
+   (renderer/index.css is source(none) + an explicit production scan list). */
+@source './scenes.tsx';
+@source './gallery.tsx';
+
+/* Browsing-shell override, scoped to this baseline document only.
+   The renderer ships `overflow: hidden` on html/body because the Electron
+   host owns scrolling; this standalone document scrolls as a normal page so
+   every section is reachable with an ordinary mouse wheel. Component styles
+   themselves are untouched. */
+html, body, #root {
+  overflow: visible !important;
+  overflow-x: hidden !important;
+  height: auto !important;
+  min-height: 100%;
+}

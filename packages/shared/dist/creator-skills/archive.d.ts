@@ -4,6 +4,7 @@ export interface CreatorSkillArchiveValidation {
     contentDigest: string;
     manifest: CreatorSkillManifestEntry[];
     metadata: SkillVersionMetadata;
+    slug: string;
     warnings: SkillValidationIssue[];
     expandedBytes: number;
 }
@@ -29,7 +30,7 @@ export declare function preflightCreatorSkillArchive(args: {
 }>;
 export declare function validateCreatorSkillArchive(args: {
     archivePath: string;
-    slug: string;
+    slug?: string;
     destinationRoot?: string;
     policy?: SkillArchivePolicy;
     expectedArchiveChecksum?: string;

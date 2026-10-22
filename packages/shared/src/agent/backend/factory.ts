@@ -57,6 +57,10 @@ import {
   resolveBackendHostTooling as resolveHostToolingPaths,
   resolveBackendRuntimePaths,
 } from './internal/runtime-resolver.ts';
+
+// PRODUCTION re-export: the runtime path resolution is part of the backend's
+// public surface (host runtimes resolve packaged server + binary paths).
+export { resolveBackendRuntimePaths } from './internal/runtime-resolver.ts';
 import { anthropicDriver } from './internal/drivers/anthropic.ts';
 import { piDriver } from './internal/drivers/pi.ts';
 
@@ -130,6 +134,7 @@ export function detectProvider(authType: string): AgentProvider {
  * ```
  */
 export function createBackend(config: BackendConfig): AgentBackend {
+  if (config.managedBilling && config.provider !== 'pi') throw new Error('Managed Polo billing requires the Pi backend');
   switch (config.provider) {
     case 'anthropic':
       // ClaudeAgent implements AgentBackend directly

@@ -7,6 +7,7 @@ import {
 import {
   access,
   cp,
+  copyFile,
   lstat,
   mkdir,
   open,
@@ -42,6 +43,7 @@ import {
   type CreatorSkillBackupOperation,
   type CreatorSkillConflictDetails,
   type CreatorSkillDownloadGrant,
+  type ManagedSkillDownloadGrant,
   type CreatorSkillInstallConflict,
   type CreatorSkillInstallInput,
   type CreatorSkillOperationProgress,
@@ -139,6 +141,12 @@ function validForceDeleteConfirmation(
 }
 
 export interface CreatorSkillInstallerDependencies {
+  /** Main-owned archive already downloaded once; full validation runs again in the transaction. */
+  preparedArchivePath?: string
+  nativeInstallationAdmissionId?: string
+  /** Trusted native evidence hooks run under the existing workspace/slug locks. */
+  beforeNativeMutation?: (installed: InstalledCreatorSkill | undefined) => Promise<void>
+  onNativeCommitted?: (result: CreatorSkillOperationResult) => Promise<void>
   fetch?: typeof fetch
   onProgress?: (progress: CreatorSkillOperationProgress) => void
   assertCommitAllowed?: (input: {
@@ -170,6 +178,8 @@ export interface CreatorSkillInstallerDependencies {
 
 export type CreatorSkillUninstallerDependencies = Pick<
   CreatorSkillInstallerDependencies,
+  | 'beforeNativeMutation'
+  | 'onNativeCommitted'
   | 'beforeCommitSnapshot'
   | 'onJournalPersisted'
   | 'syncJournalDirectory'
@@ -186,6 +196,13 @@ export type CreatorSkillMetadataUpdateDependencies = Pick<
   | 'onLedgerMutationLockContended'
   | 'ledgerWriteDependencies'
 >
+
+async function notifyNativeCommit<T extends CreatorSkillOperationResult>(result: T, dependencies: Pick<CreatorSkillInstallerDependencies, 'onNativeCommitted'>): Promise<T> {
+  // A reporting failure after the native commit cannot roll back or reclassify
+  // its completed result. Its pre-mutation intent remains for healthy recovery.
+  try { await dependencies.onNativeCommitted?.(result) } catch { /* Retain the native intent. */ }
+  return result
+}
 
 function errorResult(args: {
   operationId: string
@@ -534,7 +551,7 @@ function parseBackupMetadata(
     || typeof metadata.createdAt !== 'string'
     || Number.isNaN(Date.parse(metadata.createdAt))
     || (metadata.version !== undefined
-      && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(metadata.version))
+      && (typeof metadata.version !== 'string' || metadata.version.trim().length === 0 || metadata.version.length > 64))
   ) {
     throw invalidBackupPath('Creator Skill backup metadata is invalid')
   }
@@ -745,7 +762,7 @@ function validateJournalShape(
       || typeof journal.backupCreatedAt !== 'string'
       || Number.isNaN(Date.parse(journal.backupCreatedAt))
       || (journal.backupVersion !== undefined
-        && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(journal.backupVersion))
+        && (typeof journal.backupVersion !== 'string' || journal.backupVersion.trim().length === 0 || journal.backupVersion.length > 64))
     ))
   ) {
     throw invalidOperationPath('Creator Skill recovery journal is invalid')
@@ -1076,8 +1093,10 @@ async function acquireLedgerMutationLock(
   }
 }
 
-async function downloadArchive(args: {
+export async function downloadCreatorSkillArchive(args: {
   url: string
+  /** Canonical resolve-launch bundles use bodyless POST; legacy grants stay GET. */
+  method?: 'GET' | 'POST'
   outputPath: string
   maxBytes: number
   signal: AbortSignal
@@ -1085,7 +1104,7 @@ async function downloadArchive(args: {
   onChunk: (downloaded: number, total?: number) => void
 }): Promise<void> {
   const response = await args.fetchImpl(args.url, {
-    method: 'GET',
+    method: args.method ?? 'GET',
     redirect: 'error',
     signal: args.signal,
   })
@@ -1169,7 +1188,7 @@ async function inspectConflicts(
     })
   }
   if (localModified) conflicts.push('local_changes')
-  if (await exists(join(homedir(), '.agents', 'skills', slug))) {
+  if (!('canonicalSource' in input.grant) && await exists(join(homedir(), '.agents', 'skills', slug))) {
     conflicts.push('global_skill')
     existingIdentities.push({
       source: 'global',
@@ -1459,7 +1478,7 @@ async function assertPromotedTargetIdentity(
 
 async function assertDirectoryMatchesPublishedGrant(
   directory: string,
-  grant: CreatorSkillDownloadGrant,
+  grant: ManagedSkillDownloadGrant,
 ): Promise<void> {
   const scanned = await scanCreatorSkillDirectory(directory)
   const expected = grant.manifest
@@ -1676,7 +1695,9 @@ export async function installCreatorSkill(
         input.grant.validationPolicy.maxArchiveBytes,
         HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes,
       )
-      await downloadArchive({
+      if (dependencies.preparedArchivePath) {
+        await copyFile(dependencies.preparedArchivePath, archivePath, 1)
+      } else await downloadCreatorSkillArchive({
         url: input.grant.url,
         outputPath: archivePath,
         maxBytes: policyMax,
@@ -1725,15 +1746,34 @@ export async function installCreatorSkill(
       )
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
       await dependencies.onLedgerMutationLocked?.()
+      if ('canonicalSource' in input.grant) {
+        // The shared native lock can have waited since the first authority
+        // check. Revalidate the original canonical scope at this boundary.
+        await dependencies.assertCommitAllowed?.({ artifactId: input.grant.artifactId, version: input.grant.version, archiveChecksum: input.grant.archiveChecksum })
+        if (controller.signal.aborted) throw Object.assign(new Error('Installation cancelled'), { code: 'creator_skill_cancelled' })
+        const source = input.grant.canonicalSource
+        // Recheck under the actual native ledger lock. Concurrent downloads
+        // cannot overwrite one immutable canonical version after the initial
+        // adapter check observed an empty directory.
+        if (ledger.installed.some(row => !row.canonicalSource ||
+          ['accountId', 'productSpaceId', 'subjectKind', 'subjectId', 'versionId'].some(key => row.canonicalSource![key as keyof typeof source] !== source[key as keyof typeof source]) ||
+          row.archiveChecksum.replace(/^sha256:/, '') !== input.grant.archiveChecksum.replace(/^sha256:/, '') || row.version !== input.grant.version)) {
+          throw new CreatorSkillArchiveError('checksum_mismatch', 'Canonical version identity cannot be replaced by different bytes')
+        }
+      }
       const previous = conflictState.existing
       const ignoredVersion = (
         previous
+        && !('canonicalSource' in input.grant)
         && previous.artifactId === input.grant.artifactId
         && compareStableSemver(input.grant.version, previous.version) < 0
       ) ? previous.version : undefined
       const installation: InstalledCreatorSkill = {
+        ...(dependencies.nativeInstallationAdmissionId ? { nativeInstallationAdmissionId: dependencies.nativeInstallationAdmissionId } : {}),
         artifactId: input.grant.artifactId,
-        organizationId: input.grant.organizationId,
+        ...('canonicalSource' in input.grant
+          ? { canonicalSource: input.grant.canonicalSource }
+          : { organizationId: input.grant.organizationId }),
         slug: input.grant.slug,
         version: input.grant.version,
         archiveChecksum: input.grant.archiveChecksum,
@@ -1881,7 +1921,7 @@ export async function installCreatorSkill(
         // it can safely finalize a visible committed journal or roll back an
         // older checkpoint after a crash.
         report(dependencies, input, 'refresh', 100, false)
-        return committedResult
+        return await notifyNativeCommit(committedResult, dependencies)
       }
       const backupPath = await publishCommittedBackup(
         canonicalWorkspace,
@@ -1896,7 +1936,7 @@ export async function installCreatorSkill(
       await dependencies.onCleanupStep?.('operation_removed')
 
       report(dependencies, input, 'refresh', 100, false)
-      return committedResult
+      return await notifyNativeCommit(committedResult, dependencies)
     } catch (error) {
       dependencies.onError?.(error)
       if (journal?.state === 'committed' && committedResult) {
@@ -1904,7 +1944,7 @@ export async function installCreatorSkill(
         // cleanup to startup recovery rather than attempting an unsafe rollback
         // after the point of no return.
         report(dependencies, input, 'refresh', 100, false)
-        return committedResult
+        return await notifyNativeCommit(committedResult, dependencies)
       }
       if (commitStarted && operationPath && journal) {
         try {
@@ -2015,6 +2055,7 @@ export async function uninstallCreatorSkill(args: {
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
       await dependencies.onLedgerMutationLocked?.()
       const installed = ledger.installed.find(item => item.slug === args.slug)
+      await dependencies.beforeNativeMutation?.(installed)
       const pendingCredential = installed
         ? undefined
         : await pendingForceDeleteCredential(canonicalWorkspace, args.slug)
@@ -2058,10 +2099,10 @@ export async function uninstallCreatorSkill(args: {
         if (pendingCredential) {
           await removeForceDeleteCredential(canonicalWorkspace, args.slug)
         }
-        return {
+        return await notifyNativeCommit({
           success: true,
           operationId: args.operationId,
-        }
+        }, dependencies)
       }
 
       // A normal uninstall only detaches content that was already modified at
@@ -2101,12 +2142,12 @@ export async function uninstallCreatorSkill(args: {
           }
           throw error
         }
-        return {
+        return await notifyNativeCommit({
           success: true,
           operationId: args.operationId,
           detached: true,
           forceDeleteCredential,
-        }
+        }, dependencies)
       }
 
       const reservedOperation = await reserveOperationPath(
@@ -2203,7 +2244,7 @@ export async function uninstallCreatorSkill(args: {
         operationId: args.operationId,
       }
       await dependencies.onJournalPersisted?.(journal.state)
-      if (!committedJournalDurable) return committedResult
+      if (!committedJournalDurable) return await notifyNativeCommit(committedResult, dependencies)
       if (!args.forceDeleteModified) {
         await preserveConcurrentRecreation({
           workspaceRoot: canonicalWorkspace,
@@ -2235,7 +2276,7 @@ export async function uninstallCreatorSkill(args: {
       await dependencies.onCleanupStep?.('transaction_backup_removed')
       await rm(operationPath, { recursive: true, force: true })
       await dependencies.onCleanupStep?.('operation_removed')
-      return committedResult
+      return await notifyNativeCommit(committedResult, dependencies)
     } catch (error) {
       dependencies.onError?.(error)
       const record = error && typeof error === 'object'
@@ -2275,7 +2316,7 @@ export async function uninstallCreatorSkill(args: {
             })
           }
         }
-        return committedResult
+        return await notifyNativeCommit(committedResult, dependencies)
       }
       if (journal && operationPath) {
         await rollbackJournal(args.workspaceRoot, operationPath, journal).catch(() => {})

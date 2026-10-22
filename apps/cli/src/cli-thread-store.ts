@@ -20,7 +20,7 @@ import {
   getProcessBirthIdentity,
   processIdentityMatches,
 } from '@polo-ai/shared/utils'
-import type { LlmConnection } from '@polo-ai/shared/config'
+import type { DesktopManagedOwner, CliConnectionProvenance, LlmConnection } from '@polo-ai/shared/config'
 
 export { getProcessBirthIdentity, processIdentityMatches } from '@polo-ai/shared/utils'
 
@@ -41,7 +41,9 @@ export interface CliThreadMetadata {
   lastUsedAt: number
   persistence: CliThreadPersistence
   status?: CliThreadStatus
+  managedOwner?: DesktopManagedOwner
   connection?: {
+    provenance?: CliConnectionProvenance
     slug?: string
     provider?: string
     model?: string
@@ -513,7 +515,7 @@ export async function createCliThread(input: {
 
 export async function updateCliThread(
   record: CliThreadRecord,
-  updates: Partial<Pick<CliThreadMetadata, 'mainSessionId' | 'status' | 'lastUsedAt' | 'workingDirectory' | 'configurationWorkspaceId' | 'configurationWorkspacePath' | 'connection'>>,
+  updates: Partial<Pick<CliThreadMetadata, 'mainSessionId' | 'status' | 'lastUsedAt' | 'workingDirectory' | 'configurationWorkspaceId' | 'configurationWorkspacePath' | 'connection' | 'managedOwner'>>,
 ): Promise<void> {
   await assertCanonicalControlledPath(getCliSessionsRoot(), record.directory)
   const metadata = await readJson<CliThreadMetadata>(join(record.directory, 'thread.json'))
@@ -759,6 +761,7 @@ export async function cloneCliThreadEphemeral(source: CliThreadRecord): Promise<
     await assertCanonicalControlledPath(root, source.sessionsRoot)
     await assertCanonicalControlledPath(root, clone.sessionsRoot)
     await rm(clone.sessionsRoot, { recursive: true, force: true })
+    if (source.metadata.managedOwner) await updateCliThread(clone, { managedOwner: source.metadata.managedOwner })
     await cp(source.sessionsRoot, clone.sessionsRoot, {
       recursive: true,
       force: false,

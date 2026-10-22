@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
+import { toast } from 'sonner'
 import { Command as CommandPrimitive } from 'cmdk'
 import { AnimatePresence, motion } from 'motion/react'
 import {
@@ -10,6 +11,7 @@ import {
   DatabaseZap,
   ChevronUp,
   X,
+  Library,
 } from 'lucide-react'
 import { Icon_Home, Icon_Folder } from '@polo-ai/ui'
 
@@ -55,7 +57,10 @@ import { SourceSelectorPopover } from '@/components/ui/SourceSelectorPopover'
 import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
 import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingDirectorySelector'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
+import { KnowledgeBaseSelectorPopover } from './KnowledgeBaseSelectorPopover'
+import { useKbSelectionSave } from './use-kb-selection-save'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
+import type { KbCollection } from '@polo-ai/shared/protocol'
 import type { PermissionMode } from '@polo-ai/shared/agent/modes'
 import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
@@ -118,7 +123,13 @@ export interface FreeFormInputProps {
   /** Whether the session is currently processing */
   isProcessing?: boolean
   /** Callback when message is submitted (skillSlugs from @mentions) */
-  onSubmit: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSubmit: (
+    message: string,
+    attachments?: FileAttachment[],
+    skillSlugs?: string[],
+    /** POO-108: the composer's KB scope, committed server-side on the first send. */
+    kbOptions?: { kbCollectionIds?: string[] },
+  ) => void
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
   onStop?: (silent?: boolean) => void
   /** External ref for the input */
@@ -158,6 +169,19 @@ export interface FreeFormInputProps {
   enabledSourceSlugs?: string[]
   /** Callback when source selection changes */
   onSourcesChange?: (slugs: string[]) => void
+  // Knowledge-base scope (POO-108). Provided only in enterprise spaces: the
+  // badge — and the whole read side — stays hidden elsewhere. Absent handler
+  // = local draft only (isolated mounts without a session to persist to).
+  /** Enterprise KB collections currently scoped to this session */
+  enabledKbCollectionIds?: string[]
+  /**
+   * Callback when the KB scope changes. May return the save promise: the
+   * composer keeps the optimistic selection only while the server-side save
+   * succeeds, and reverts with an explicit error when it fails (reviews
+   * #11/#16 — a silent failure must never leave the UI claiming a scope the
+   * server does not hold).
+   */
+  onKbCollectionsChange?: (collectionIds: string[]) => void | Promise<void>
   // Skill selection (for @mentions)
   /** Available skills for @mention autocomplete */
   skills?: LoadedSkill[]
@@ -255,6 +279,8 @@ export function FreeFormInput({
   sources = [],
   enabledSourceSlugs = [],
   onSourcesChange,
+  enabledKbCollectionIds,
+  onKbCollectionsChange,
   skills = [],
   labels = [],
   sessionLabels = [],
@@ -505,6 +531,98 @@ export function FreeFormInput({
   const [sourceDropdownOpen, setSourceDropdownOpen] = React.useState(false)
   const [isFocused, setIsFocused] = React.useState(false)
   const [inputMaxHeight, setInputMaxHeight] = React.useState(540)
+
+  // POO-108 knowledge-base scope. The selection mirrors the session's
+  // persisted scope; toggling calls the parent handler which saves through
+  // the kb RPC. Without a handler the local state is a plain draft.
+  const [kbDropdownOpen, setKbDropdownOpen] = React.useState(false)
+  const [kbCollections, setKbCollections] = React.useState<KbCollection[] | null>(null)
+  const [kbLoading, setKbLoading] = React.useState(false)
+  const [kbLoadFailed, setKbLoadFailed] = React.useState(false)
+  const [kbSelection, setKbSelection] = React.useState<string[]>([])
+  const kbButtonRef = React.useRef<HTMLButtonElement>(null)
+
+  // POO-108 review #11: the draft scope is per-session. The effect keys on
+  // the session identity as well as the scope ids, so switching sessions can
+  // never leave session A's selection behind in session B's composer.
+  const kbScopeKey = (enabledKbCollectionIds ?? []).join('\n')
+  React.useEffect(() => {
+    setKbSelection(kbScopeKey.length > 0 ? kbScopeKey.split('\n') : [])
+    setKbDropdownOpen(false)
+  }, [sessionId, kbScopeKey])
+
+  const loadKbCollections = React.useCallback(async () => {
+    if (!workspaceId) return
+    setKbLoading(true)
+    setKbLoadFailed(false)
+    try {
+      // publishedOnly: the composer offers collections that can actually
+      // back a session scope, so a selection can never silently resolve to
+      // zero references (review #16).
+      const list = await window.electronAPI.kbListCollections({ workspaceId, publishedOnly: true })
+      setKbCollections(list.collections)
+    } catch {
+      setKbCollections(null)
+      setKbLoadFailed(true)
+    } finally {
+      setKbLoading(false)
+    }
+  }, [workspaceId])
+
+  // A workspace switch invalidates the cached collection list.
+  React.useEffect(() => {
+    setKbCollections(null)
+    setKbLoadFailed(false)
+    setKbLoading(false)
+  }, [workspaceId])
+
+  const handleKbDropdownToggle = React.useCallback(() => {
+    setKbDropdownOpen(open => {
+      const next = !open
+      if (next && kbCollections === null && !kbLoading) void loadKbCollections()
+      return next
+    })
+  }, [kbCollections, kbLoading, loadKbCollections])
+
+  // Optimistic selection with an explicit save contract: a failed persist
+  // reverts the toggle to the last CONFIRMED server snapshot and surfaces the
+  // error, instead of leaving a row the server never stored (reviews
+  // #11/#16). The rollback is guarded by useKbSelectionSave — only the latest
+  // request of the CURRENT session AND session generation may move the
+  // selection, so a stale failure can never restore session A's choice into
+  // session B, nor survive an A→B→A round trip (review N2 — this component is
+  // reused across sessions). `enabledKbCollectionIds` is the server-pushed
+  // scope, i.e. the confirmed truth the rollback lands on.
+  const persistKbSelection = useKbSelectionSave({
+    sessionId,
+    serverValue: enabledKbCollectionIds ?? [],
+    save: React.useCallback((ids: string[]) => {
+      if (!onKbCollectionsChange) return undefined
+      return onKbCollectionsChange(ids)
+    }, [onKbCollectionsChange]),
+    rollback: setKbSelection,
+    notifyFailure: React.useCallback(() => {
+      toast.error(t('chat.knowledgeBase.saveFailed'))
+    }, [t]),
+  })
+
+  const handleKbToggleCollection = React.useCallback((collectionId: string) => {
+    setKbSelection(current => {
+      const next = current.includes(collectionId)
+        ? current.filter(id => id !== collectionId)
+        : [...current, collectionId]
+      void persistKbSelection(next)
+      return next
+    })
+  }, [persistKbSelection])
+
+  const handleKbClearSelection = React.useCallback(() => {
+    setKbSelection(current => {
+      if (current.length === 0) return current
+      void persistKbSelection([])
+      return []
+    })
+  }, [persistKbSelection])
 
   // Input settings (loaded from config)
   const [autoCapitalisation, setAutoCapitalisation] = React.useState(true)
@@ -841,9 +959,13 @@ export function FreeFormInput({
           const attachment = await readFileAsAttachment(files[i], fileNames[i])
           if (attachment) {
             setAttachments(prev => [...prev, attachment])
+          } else {
+            // readFileAsAttachment resolves null when the FileReader fails
+            toast.error(t('toast.attachmentFailed', { name: fileNames[i] }))
           }
         } catch (error) {
           console.error('[FreeFormInput] Failed to process pasted file:', error)
+          toast.error(t('toast.attachmentFailed', { name: fileNames[i] }))
         }
         setLoadingCount(prev => prev - 1)
       }
@@ -854,7 +976,7 @@ export function FreeFormInput({
 
     window.addEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
     return () => window.removeEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
-  }, [disabled, sessionId, isFocusedPanel, richInputRef])
+  }, [disabled, sessionId, isFocusedPanel, richInputRef, t])
 
   // Build active commands list for slash command menu
   const activeCommands = React.useMemo(() => {
@@ -1002,13 +1124,18 @@ export function FreeFormInput({
 
   // Shared helper: read a File, add as attachment, decrement loading count
   const processFileAttachment = async (file: File, overrideName?: string) => {
+    const displayName = overrideName || file.name
     try {
       const attachment = await readFileAsAttachment(file, overrideName)
       if (attachment) {
         setAttachments(prev => [...prev, attachment])
+      } else {
+        // readFileAsAttachment resolves null when the FileReader fails
+        toast.error(t('toast.attachmentFailed', { name: displayName }))
       }
     } catch (error) {
       console.error('[FreeFormInput] Failed to read file:', error)
+      toast.error(t('toast.attachmentFailed', { name: displayName }))
     }
     setLoadingCount(prev => prev - 1)
   }
@@ -1208,10 +1335,22 @@ export function FreeFormInput({
 
     const attachmentSnapshot = attachments
 
+    // POO-108: commit the composer's KB scope with the send. The selection
+    // is carried EXPLICITLY — including an empty array, which commits "no
+    // collections" in the same operation as the message. Converting `[]` to
+    // an omission would let a failed clear-save fall back to the server's
+    // stale scope and silently attach it to this message (review #12). The
+    // SEND_MESSAGE handler filters against the published store and persists;
+    // an unchanged scope is a no-op server-side.
+    const kbDraft = onKbCollectionsChange
+      ? { kbCollectionIds: [...kbSelection] }
+      : undefined
+
     onSubmit(
       input.trim(),
       attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
-      mentions.skills.length > 0 ? mentions.skills : undefined
+      mentions.skills.length > 0 ? mentions.skills : undefined,
+      kbDraft
     )
     setInput('')
     setAttachments([])
@@ -1227,7 +1366,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir])
+  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1610,7 +1749,7 @@ export function FreeFormInput({
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.98 }}
                           transition={{ duration: 0.16, ease: [0.2, 0, 0.2, 1] }}
-                          className="inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[6px] bg-foreground/2 pl-1.5 pr-2 py-1 text-[13px] text-foreground/80 select-none transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          className="inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[6px] bg-foreground/2 pl-1.5 pr-2 py-1 text-[13px] text-foreground/80 select-none transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring client-material-fg-secondary"
                           onClick={(event) => {
                             const rect = event.currentTarget.getBoundingClientRect()
                             onFollowUpClick?.(item, {
@@ -1650,8 +1789,8 @@ export function FreeFormInput({
                             </TooltipContent>
                           </Tooltip>
                           <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap pr-0.5 text-left">
-                            <span className="italic text-foreground/60">{selectedExcerpt}</span>
-                            <span className="mx-1 text-foreground/40">·</span>
+                            <span className="italic text-foreground/60 client-material-fg-muted">{selectedExcerpt}</span>
+                            <span className="mx-1 text-foreground/40 client-material-fg-muted">·</span>
                             <span>{noteExcerpt}</span>
                           </span>
                         </motion.button>
@@ -1809,6 +1948,40 @@ export function FreeFormInput({
               />
             </div>
           )}
+          {/* POO-108: knowledge-base scope badge (enterprise spaces only —
+              the parent wires onKbCollectionsChange there). Independent of the
+              LLM availability gating: a KB scope is a session setting. */}
+          {onKbCollectionsChange && (
+            <div className="relative shrink min-w-0">
+              <FreeFormInputContextBadge
+                buttonRef={kbButtonRef}
+                icon={<Library className="h-4 w-4" />}
+                label={kbSelection.length === 0
+                  ? t("chat.knowledgeBase.button")
+                  : t("chat.knowledgeBase.selectedCount", { count: kbSelection.length })
+                }
+                isExpanded={false}
+                hasSelection={kbSelection.length > 0}
+                showChevron={false}
+                isOpen={kbDropdownOpen}
+                disabled={disabled}
+                onClick={handleKbDropdownToggle}
+                tooltip={t("chat.knowledgeBase.tooltip")}
+              />
+              <KnowledgeBaseSelectorPopover
+                open={kbDropdownOpen}
+                onOpenChange={setKbDropdownOpen}
+                anchorRef={kbButtonRef}
+                collections={kbCollections}
+                loading={kbLoading}
+                loadFailed={kbLoadFailed}
+                selectedIds={kbSelection}
+                onToggleId={handleKbToggleCollection}
+                onRetry={() => void loadKbCollections()}
+                onClear={handleKbClearSelection}
+              />
+            </div>
+          )}
           {onWorkingDirectoryChange && (
             <CompactWorkingDirectorySelector
               workingDirectory={workingDirectory}
@@ -1916,6 +2089,41 @@ export function FreeFormInput({
             </div>
           )}
 
+          {/* 2.5 Knowledge-Base Scope Badge (POO-108) — enterprise spaces
+              only; independent of the LLM availability gating. */}
+          {onKbCollectionsChange && (
+            <div className="relative shrink min-w-0 overflow-hidden">
+              <FreeFormInputContextBadge
+                buttonRef={kbButtonRef}
+                icon={<Library className="h-4 w-4" />}
+                label={kbSelection.length === 0
+                  ? t("chat.knowledgeBase.button")
+                  : t("chat.knowledgeBase.selectedCount", { count: kbSelection.length })
+                }
+                isExpanded={isEmptySession}
+                hasSelection={kbSelection.length > 0}
+                showChevron={true}
+                isOpen={kbDropdownOpen}
+                disabled={disabled}
+                data-tutorial="knowledge-base-selector-button"
+                onClick={handleKbDropdownToggle}
+                tooltip={t("chat.knowledgeBase.tooltip")}
+              />
+              <KnowledgeBaseSelectorPopover
+                open={kbDropdownOpen}
+                onOpenChange={setKbDropdownOpen}
+                anchorRef={kbButtonRef}
+                collections={kbCollections}
+                loading={kbLoading}
+                loadFailed={kbLoadFailed}
+                selectedIds={kbSelection}
+                onToggleId={handleKbToggleCollection}
+                onRetry={() => void loadKbCollections()}
+                onClear={handleKbClearSelection}
+              />
+            </div>
+          )}
+
           {/* 3. Working Directory Selector Badge */}
           {onWorkingDirectoryChange && (
             <WorkingDirectoryBadge
@@ -1938,7 +2146,7 @@ export function FreeFormInput({
               onClick={onRequestExpand}
               onMouseEnter={onRequestExpand}
               aria-label={t('chat.tapToType')}
-              className="flex-1 h-7 mx-1 flex items-center justify-center text-foreground/30 hover:text-foreground/60 transition-colors cursor-pointer rounded-[6px] hover:bg-foreground/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex-1 h-7 mx-1 flex items-center justify-center text-foreground/30 hover:text-foreground/60 transition-colors cursor-pointer rounded-[6px] hover:bg-foreground/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring client-material-fg-muted client-material-fg-hover"
             >
               <ChevronUp className="h-4 w-4" />
             </button>
@@ -2131,8 +2339,8 @@ function WorkingDirectoryBadge({
               hasFolder ? (
                 <span className="flex flex-col gap-0.5">
                   <span className="font-medium">{t("chat.workingDirectory")}</span>
-                  <span className="text-xs opacity-70">{formatPathForDisplay(workingDirectory, homeDir)}</span>
-                  {gitBranch && <span className="text-xs opacity-70">{t("chat.onBranch", { branch: gitBranch })}</span>}
+                  <span className="text-xs opacity-70 client-material-fg-muted">{formatPathForDisplay(workingDirectory, homeDir)}</span>
+                  {gitBranch && <span className="text-xs opacity-70 client-material-fg-muted">{t("chat.onBranch", { branch: gitBranch })}</span>}
                 </span>
               ) : t("chat.chooseWorkingDirectory")
             }

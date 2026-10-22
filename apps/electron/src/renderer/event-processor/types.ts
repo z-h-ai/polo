@@ -5,7 +5,7 @@
  * All agent events flow through a single pure function for consistent state transitions.
  */
 
-import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
+import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta, QuestionRequest } from '../../shared/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
@@ -138,6 +138,17 @@ export interface LabelsChangedEvent {
   type: 'labels_changed'
   sessionId: string
   labels: string[]
+}
+
+/**
+ * Knowledge-base scope changed event (POO-108): the server's authoritative
+ * per-session collection scope, broadcast after every persisted write
+ * (explicit save or first-send draft commit) so every window converges.
+ */
+export interface KbCollectionsChangedEvent {
+  type: 'kb_collections_changed'
+  sessionId: string
+  collectionIds: string[]
 }
 
 /**
@@ -457,6 +468,27 @@ export interface SourceActivatedEvent {
 }
 
 /**
+ * Question request event - the agent requested structured user input.
+ * The App layer owns the pendingQuestions map (input-area takeover).
+ */
+export interface QuestionRequestEvent {
+  type: 'question_request'
+  sessionId: string
+  request: QuestionRequest
+}
+
+/**
+ * Question resolved event - a pending question was answered, skipped,
+ * or cleared by a lifecycle transition (stop/archive/delete/replace).
+ */
+export interface QuestionResolvedEvent {
+  type: 'question_resolved'
+  sessionId: string
+  requestId: string
+  action: 'answer' | 'cancel'
+}
+
+/**
  * Usage update event - real-time context usage during processing
  * Allows UI to show growing context as agent processes, not just on complete
  */
@@ -484,6 +516,7 @@ export type AgentEvent =
   | CredentialRequestEvent
   | SourcesChangedEvent
   | LabelsChangedEvent
+  | KbCollectionsChangedEvent
   | SessionStatusChangedEvent
   | SessionFlaggedEvent
   | SessionUnflaggedEvent
@@ -513,6 +546,8 @@ export type AgentEvent =
   | AuthRequestEvent
   | AuthCompletedEvent
   | SourceActivatedEvent
+  | QuestionRequestEvent
+  | QuestionResolvedEvent
   | UsageUpdateEvent
 
 /**
@@ -521,6 +556,8 @@ export type AgentEvent =
 export type Effect =
   | { type: 'permission_request'; request: PermissionRequest }
   | { type: 'credential_request'; request: CredentialRequest }
+  | { type: 'question_request'; request: QuestionRequest }
+  | { type: 'question_resolved'; requestId: string; action: 'answer' | 'cancel' }
   | { type: 'generate_title'; sessionId: string; userMessage: string }
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: 'user' | 'system' | 'restore' | 'automation' | 'unknown' }
   | { type: 'restore_input'; text: string }

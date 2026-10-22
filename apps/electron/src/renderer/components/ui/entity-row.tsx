@@ -61,6 +61,9 @@ export interface EntityRowProps {
   titleSuffix?: React.ReactNode
   /** Optional subtitle line beneath the title */
   subtitle?: React.ReactNode
+  /** Stable test anchor on the subtitle container (e.g. the compact/mobile
+   *  expanded row preview) */
+  subtitleTestId?: string
   /** Badge/subtitle row beneath the title */
   badges?: React.ReactNode
   /** Right-aligned content in the badge row (timestamp, child toggle) */
@@ -122,6 +125,7 @@ export function EntityRow({
   titleTrailing,
   titleSuffix,
   subtitle,
+  subtitleTestId,
   badges,
   trailing,
   children,
@@ -273,7 +277,8 @@ export function EntityRow({
           "entity-row-btn flex w-full items-start gap-2 pl-2 pr-4 py-3 text-left text-sm outline-none rounded-[8px]",
           "transition-[background-color] duration-75",
           (isSelected || isInMultiSelect)
-            ? "bg-foreground/3"
+            // POO-105：材质作用域内选中行取强调色 9% 背景（Spec §13.14）。
+            ? "bg-foreground/3 client-material-selected"
             : "hover:bg-foreground/2",
           (buttonProps as Record<string, unknown>)?.className as string | undefined,
         )}
@@ -365,7 +370,10 @@ export function EntityRow({
 
           {/* Subtitle line */}
           {subtitle && (
-            <div className="flex items-start gap-[10px] w-full text-[12px] text-foreground/55 min-w-0 -mt-1">
+            <div
+              data-testid={subtitleTestId}
+              className="flex items-start gap-[10px] w-full text-[12px] text-foreground/55 min-w-0 -mt-1"
+            >
               {icon && (
                 <div className="shrink-0 flex items-center gap-[10px] [&>*]:w-3 [&>*]:h-3 invisible" aria-hidden="true">
                   {icon}

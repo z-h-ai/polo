@@ -13,6 +13,7 @@ import type {
   TypedErrorEvent,
   SourcesChangedEvent,
   LabelsChangedEvent,
+  KbCollectionsChangedEvent,
   SessionStatusChangedEvent,
   SessionFlaggedEvent,
   SessionUnflaggedEvent,
@@ -38,6 +39,8 @@ import type {
   SessionUnsharedEvent,
   AuthRequestEvent,
   AuthCompletedEvent,
+  QuestionRequestEvent,
+  QuestionResolvedEvent,
   UsageUpdateEvent,
   Effect,
 } from '../types'
@@ -556,6 +559,11 @@ export function handleUserMessage(
           ...m,
           isPending: false,
           isQueued: status === 'queued',
+          // POO-108 review #8: the optimistic message was created before the
+          // server resolved the KB references — merge the canonical snapshot
+          // in (keeping the optimistic id) instead of dropping it, so the
+          // chips render immediately without a reload.
+          kbReferences: m.kbReferences ?? message.kbReferences,
         }
       }
       return m
@@ -646,6 +654,31 @@ export function handleLabelsChanged(
       session: {
         ...session,
         labels: event.labels,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle kb_collections_changed - converge the session's KB scope on the
+ * server's authoritative value (POO-108). Every persisted write (explicit
+ * save or first-send draft commit) broadcasts it, so other windows — and the
+ * saving window itself after a race — re-sync instead of keeping a stale
+ * draft selection.
+ */
+export function handleKbCollectionsChanged(
+  state: SessionState,
+  event: KbCollectionsChangedEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  return {
+    state: {
+      session: {
+        ...session,
+        kbCollectionIds: event.collectionIds,
       },
       streaming,
     },
@@ -783,6 +816,45 @@ export function handleCredentialRequest(
     effects: [{
       type: 'credential_request',
       request: event.request,
+    }]
+  }
+}
+
+/**
+ * Handle question_request - return effect for parent to handle.
+ * The pending question replaces any previous one for this session.
+ */
+export function handleQuestionRequest(
+  state: SessionState,
+  event: QuestionRequestEvent
+): ProcessResult {
+  // Always return a NEW state reference (apps/electron/CLAUDE.md — the event
+  // processor contract; Jotai depends on reference changes to propagate).
+  return {
+    state: { ...state },
+    effects: [{
+      type: 'question_request',
+      request: event.request,
+    }]
+  }
+}
+
+/**
+ * Handle question_resolved - return effect for parent to handle.
+ * Clears the pending question card in every renderer.
+ */
+export function handleQuestionResolved(
+  state: SessionState,
+  event: QuestionResolvedEvent
+): ProcessResult {
+  // Always return a NEW state reference (apps/electron/CLAUDE.md — the event
+  // processor contract; Jotai depends on reference changes to propagate).
+  return {
+    state: { ...state },
+    effects: [{
+      type: 'question_resolved',
+      requestId: event.requestId,
+      action: event.action,
     }]
   }
 }

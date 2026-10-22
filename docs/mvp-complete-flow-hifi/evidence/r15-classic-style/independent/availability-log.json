@@ -1,0 +1,2270 @@
+[
+  {
+    "scene": "P-M01-LOGIN-PASSWORD",
+    "actual": "P-M01-LOGIN-PASSWORD",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-LOGIN-PHONE",
+    "actual": "P-M01-LOGIN-PHONE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-LOGIN-CODE",
+    "actual": "P-M01-LOGIN-CODE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-LOGIN-CANCEL",
+    "actual": "P-M01-LOGIN-CANCEL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-PERSONAL-PREP",
+    "actual": "P-M01-PERSONAL-PREP",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-PERSONAL-PREP-FAIL",
+    "actual": "P-M01-PERSONAL-PREP-FAIL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-REOPEN",
+    "actual": "P-M01-REOPEN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-INVITE-BROWSER",
+    "actual": "P-M01-INVITE-BROWSER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-INVITE-MISMATCH",
+    "actual": "P-M01-INVITE-MISMATCH",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-INVITE-PENDING",
+    "actual": "P-M01-INVITE-PENDING",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-REFRESH-FAIL",
+    "actual": "P-M01-REFRESH-FAIL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-NOT-INSTALLED",
+    "actual": "P-M01-NOT-INSTALLED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-CREATE-ENT",
+    "actual": "P-M01-CREATE-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-COLD-START",
+    "actual": "P-M01-COLD-START",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-SWITCHER",
+    "actual": "P-M02-SWITCHER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-SWITCHER-PERSONAL",
+    "actual": "P-M02-SWITCHER-PERSONAL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-CONFIRM",
+    "actual": "P-M02-CONFIRM",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-CONFIRM-PERSONAL",
+    "actual": "P-M02-CONFIRM-PERSONAL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-STOPPING",
+    "actual": "P-M02-STOPPING",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-STOP-FAILED",
+    "actual": "P-M02-STOP-FAILED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-STOP-CANCEL",
+    "actual": "P-M02-STOP-CANCEL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-TARGET-LOADING",
+    "actual": "P-M02-TARGET-LOADING",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-TARGET-FAILED",
+    "actual": "P-M02-TARGET-FAILED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-ACCESS-LOST",
+    "actual": "P-M02-ACCESS-LOST",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-HOME-PERSONAL",
+    "actual": "P-M03-HOME-PERSONAL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-HOME-ZERO",
+    "actual": "P-M03-HOME-ZERO",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-HOME-EMPTY-DIR",
+    "actual": "P-M03-HOME-EMPTY-DIR",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-HOME-LOAD-FAIL",
+    "actual": "P-M03-HOME-LOAD-FAIL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-HOME-OFFLINE",
+    "actual": "P-M03-HOME-OFFLINE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-HOME-ENT",
+    "actual": "P-M03-HOME-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-HOME-ENT-AFTER-CANCEL",
+    "actual": "P-M03-HOME-ENT-AFTER-CANCEL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-HOME-ENT-AFTER-CLOSE",
+    "actual": "P-M03-HOME-ENT-AFTER-CLOSE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS",
+    "actual": "P-M03-ALL-APPS",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "actual": "P-M03-ALL-APPS-ZERO",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "actual": "P-M07-SOURCE-FALLBACK",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ENT-EMPTY",
+    "actual": "P-M03-ALL-APPS-ENT-EMPTY",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-INSPECTOR",
+    "actual": "P-M03-INSPECTOR",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-MANAGE-HOME",
+    "actual": "P-M03-MANAGE-HOME",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-CONTROLS",
+    "actual": "P-M03-CONTROLS",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-APP-VIEW",
+    "actual": "P-M04-APP-VIEW",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-APP-VIEW-PERSONAL",
+    "actual": "P-M04-APP-VIEW-PERSONAL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-PREPARE",
+    "actual": "P-M04-PREPARE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-PREP-FAILED",
+    "actual": "P-M04-PREP-FAILED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-CLOSE-ACTIVE",
+    "actual": "P-M04-CLOSE-ACTIVE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-TERM-FAILED",
+    "actual": "P-M04-TERM-FAILED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-BACKGROUND",
+    "actual": "P-M04-BACKGROUND",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-RUNTIME",
+    "actual": "P-M04-RUNTIME",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-NOTIFY-ENT",
+    "actual": "P-M04-NOTIFY-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-RUNTIME-PERSONAL",
+    "actual": "P-M04-RUNTIME-PERSONAL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-NOTIFY-PERSONAL",
+    "actual": "P-M04-NOTIFY-PERSONAL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-PERM-DENIED",
+    "actual": "P-M04-PERM-DENIED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-LIST",
+    "actual": "P-M07-LIST",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-EMPTY",
+    "actual": "P-M07-EMPTY",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-DETAIL-FOCUS",
+    "actual": "P-M07-DETAIL-FOCUS",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-JOIN-FREE",
+    "actual": "P-M07-JOIN-FREE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID",
+    "actual": "P-M07-DETAIL-PAID",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+    "actual": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-PAY-BROWSER",
+    "actual": "P-M07-PAY-BROWSER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-PAY-RETURN-FAIL",
+    "actual": "P-M07-PAY-RETURN-FAIL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RENEW",
+    "actual": "P-M07-RENEW",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RENEW-EXPIRED",
+    "actual": "P-M07-RENEW-EXPIRED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-EXPIRED",
+    "actual": "P-M07-EXPIRED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-LEAVE",
+    "actual": "P-M07-LEAVE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-LEAVE-PAID",
+    "actual": "P-M07-LEAVE-PAID",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M09-APP-BANNER",
+    "actual": "P-M09-APP-BANNER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M09-BROWSER",
+    "actual": "P-M09-BROWSER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-MENU",
+    "actual": "P-M10-MENU",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-MENU-ENT",
+    "actual": "P-M10-MENU-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-MENU-NOPRIV",
+    "actual": "P-M10-MENU-NOPRIV",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS",
+    "actual": "P-M10-SETTINGS",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-ENT",
+    "actual": "P-M10-SETTINGS-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-APPEARANCE",
+    "actual": "P-M10-SETTINGS-APPEARANCE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-APPEARANCE-ENT",
+    "actual": "P-M10-SETTINGS-APPEARANCE-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-ADMIN-BROWSER",
+    "actual": "P-M10-ADMIN-BROWSER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-ADMIN-RETURN",
+    "actual": "P-M10-ADMIN-RETURN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-REAUTH",
+    "actual": "P-M11-REAUTH",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-REVOKE",
+    "actual": "P-M11-REVOKE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-PERSONAL-RESTRICTED",
+    "actual": "P-M11-PERSONAL-RESTRICTED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-BLOCKED-WITHDRAWN",
+    "actual": "P-M11-BLOCKED-WITHDRAWN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-BLOCKED-EXPIRED",
+    "actual": "P-M11-BLOCKED-EXPIRED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-BLOCKED-VERSION",
+    "actual": "P-M11-BLOCKED-VERSION",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-OFFLINE-HOME",
+    "actual": "P-M11-OFFLINE-HOME",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-OFFLINE-RUNNING",
+    "actual": "P-M11-OFFLINE-RUNNING",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-CONTRACT",
+    "actual": "P-M11-CONTRACT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-CONTRACT-DL",
+    "actual": "P-M11-CONTRACT-DL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-CONTRACT-FAIL",
+    "actual": "P-M11-CONTRACT-FAIL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-SPACE-ERROR",
+    "actual": "P-M11-SPACE-ERROR",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-REOPEN-RECOVERY",
+    "actual": "P-M11-REOPEN-RECOVERY",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-SUPPORT-BROWSER",
+    "actual": "P-M11-SUPPORT-BROWSER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-INSPECTOR-PERSONAL",
+    "actual": "P-M03-INSPECTOR-PERSONAL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M02-ACCESS-LOST-ENT",
+    "actual": "P-M02-ACCESS-LOST-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M09-BROWSER-STREAM",
+    "actual": "P-M09-BROWSER-STREAM",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M09-BROWSER-MENU",
+    "actual": "P-M09-BROWSER-MENU",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M09-BROWSER-MENU-ENT",
+    "actual": "P-M09-BROWSER-MENU-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-PAY-BROWSER-EXPIRED",
+    "actual": "P-M07-PAY-BROWSER-EXPIRED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ENT",
+    "actual": "P-M03-ALL-APPS-ENT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-APP-CONTRACT",
+    "actual": "P-M04-APP-CONTRACT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-APP-GROWTH",
+    "actual": "P-M04-APP-GROWTH",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-APP-REPORT",
+    "actual": "P-M04-APP-REPORT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-APP-BRAND",
+    "actual": "P-M04-APP-BRAND",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-APP-ACTIVE",
+    "actual": "P-M04-APP-ACTIVE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M04-REPORT-STOPPED",
+    "actual": "P-M04-REPORT-STOPPED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M09-BROWSER-OWNER",
+    "actual": "P-M09-BROWSER-OWNER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M09-BROWSER-BUDGET",
+    "actual": "P-M09-BROWSER-BUDGET",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-PUBLIC-WEB",
+    "actual": "P-M07-PUBLIC-WEB",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RETURN",
+    "actual": "P-M07-RETURN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RETURN-FAIL",
+    "actual": "P-M07-RETURN-FAIL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-ACCOUNT-MISMATCH",
+    "actual": "P-M07-ACCOUNT-MISMATCH",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-LOGIN",
+    "actual": "P-M07-LOGIN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-RETURN",
+    "actual": "P-M01-RETURN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M01-ENTERPRISE-READY",
+    "actual": "P-M01-ENTERPRISE-READY",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-PAY-RETURN",
+    "actual": "P-M07-PAY-RETURN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-SUPPORT",
+    "actual": "P-M07-SUPPORT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-SUPPORT-LOAD-FAIL",
+    "actual": "P-M07-SUPPORT-LOAD-FAIL",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-SUPPORT-MEMBER",
+    "actual": "P-M11-SUPPORT-MEMBER",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RENEW-YEAR",
+    "actual": "P-M07-RENEW-YEAR",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-YEAR-WEB",
+    "actual": "P-M07-YEAR-WEB",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-YEAR-RETURN",
+    "actual": "P-M07-YEAR-RETURN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-YEAR-RESULT",
+    "actual": "P-M07-YEAR-RESULT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RENEW-LIMIT",
+    "actual": "P-M07-RENEW-LIMIT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-LOGIN-PHONE",
+    "actual": "P-M07-LOGIN-PHONE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-LOGIN-CODE",
+    "actual": "P-M07-LOGIN-CODE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M11-SUPPORT-ACCOUNT-ADMIN",
+    "actual": "P-M11-SUPPORT-ACCOUNT-ADMIN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RENEW-WEB",
+    "actual": "P-M07-RENEW-WEB",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RENEW-RETURN",
+    "actual": "P-M07-RENEW-RETURN",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-RENEW-RESULT",
+    "actual": "P-M07-RENEW-RESULT",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-LIST-RENEWED",
+    "actual": "P-M07-LIST-RENEWED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-DETAIL-FOCUS-UPDATES",
+    "actual": "P-M07-DETAIL-FOCUS-UPDATES",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "actual": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID-UPDATES",
+    "actual": "P-M07-DETAIL-PAID-UPDATES",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "actual": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "actual": "P-M10-SETTINGS-DEVICE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-PERMISSIONS",
+    "actual": "P-M10-SETTINGS-PERMISSIONS",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-SHORTCUTS",
+    "actual": "P-M10-SETTINGS-SHORTCUTS",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-ENT-DEVICE",
+    "actual": "P-M10-SETTINGS-ENT-DEVICE",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-ENT-PERMISSIONS",
+    "actual": "P-M10-SETTINGS-ENT-PERMISSIONS",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-ENT-SHORTCUTS",
+    "actual": "P-M10-SETTINGS-ENT-SHORTCUTS",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-DEVICE-FAILED",
+    "actual": "P-M10-SETTINGS-DEVICE-FAILED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "P-M10-SETTINGS-ENT-DEVICE-FAILED",
+    "actual": "P-M10-SETTINGS-ENT-DEVICE-FAILED",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-new",
+    "actual": "A-personal-new",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-conversation",
+    "actual": "A-personal-conversation",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-generating",
+    "actual": "A-personal-generating",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-stopped",
+    "actual": "A-personal-stopped",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-question",
+    "actual": "A-personal-question",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-reopen",
+    "actual": "A-personal-reopen",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-answered",
+    "actual": "A-personal-answered",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-deferred",
+    "actual": "A-personal-deferred",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-expired",
+    "actual": "A-personal-expired",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-deleted",
+    "actual": "A-personal-deleted",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-answerfailed",
+    "actual": "A-personal-answerfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-offline",
+    "actual": "A-personal-offline",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-service",
+    "actual": "A-personal-service",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-restored",
+    "actual": "A-personal-restored",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-completezero",
+    "actual": "A-personal-completezero",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-files",
+    "actual": "A-personal-files",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-viewer",
+    "actual": "A-personal-viewer",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-attachment",
+    "actual": "A-personal-attachment",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-missing",
+    "actual": "A-personal-missing",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-reselected",
+    "actual": "A-personal-reselected",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-sources",
+    "actual": "A-personal-sources",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-sourceauth",
+    "actual": "A-personal-sourceauth",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-sourcefailed",
+    "actual": "A-personal-sourcefailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-sourcedenied",
+    "actual": "A-personal-sourcedenied",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-automations",
+    "actual": "A-personal-automations",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-browser",
+    "actual": "A-personal-browser",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-return",
+    "actual": "A-personal-return",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-preblock",
+    "actual": "A-personal-preblock",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-cut",
+    "actual": "A-personal-cut",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-checking",
+    "actual": "A-personal-checking",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-notyet",
+    "actual": "A-personal-notyet",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-queryfailed",
+    "actual": "A-personal-queryfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-resumed",
+    "actual": "A-personal-resumed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-skills",
+    "actual": "A-personal-skills",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-discover",
+    "actual": "A-personal-discover",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-acquire",
+    "actual": "A-personal-acquire",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-enabledpending",
+    "actual": "A-personal-enabledpending",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-installing",
+    "actual": "A-personal-installing",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-installfailed",
+    "actual": "A-personal-installfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-installed",
+    "actual": "A-personal-installed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-enabled",
+    "actual": "A-personal-enabled",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-detail",
+    "actual": "A-personal-detail",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-updated",
+    "actual": "A-personal-updated",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-updatefailed",
+    "actual": "A-personal-updatefailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-remove",
+    "actual": "A-personal-remove",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled",
+    "actual": "A-personal-uninstalled",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-denied",
+    "actual": "A-personal-denied",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-restricted",
+    "actual": "A-personal-restricted",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-fallback",
+    "actual": "A-personal-fallback",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-reauthorized",
+    "actual": "A-personal-reauthorized",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-builtinoff",
+    "actual": "A-personal-builtinoff",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-builtinon",
+    "actual": "A-personal-builtinon",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-new",
+    "actual": "A-enterprise-new",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-conversation",
+    "actual": "A-enterprise-conversation",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-generating",
+    "actual": "A-enterprise-generating",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-stopped",
+    "actual": "A-enterprise-stopped",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-question",
+    "actual": "A-enterprise-question",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-reopen",
+    "actual": "A-enterprise-reopen",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-answered",
+    "actual": "A-enterprise-answered",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-deferred",
+    "actual": "A-enterprise-deferred",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-expired",
+    "actual": "A-enterprise-expired",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-deleted",
+    "actual": "A-enterprise-deleted",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-answerfailed",
+    "actual": "A-enterprise-answerfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-offline",
+    "actual": "A-enterprise-offline",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-service",
+    "actual": "A-enterprise-service",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-restored",
+    "actual": "A-enterprise-restored",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-completezero",
+    "actual": "A-enterprise-completezero",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-files",
+    "actual": "A-enterprise-files",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-viewer",
+    "actual": "A-enterprise-viewer",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-attachment",
+    "actual": "A-enterprise-attachment",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-missing",
+    "actual": "A-enterprise-missing",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-reselected",
+    "actual": "A-enterprise-reselected",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-sources",
+    "actual": "A-enterprise-sources",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-sourceauth",
+    "actual": "A-enterprise-sourceauth",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-sourcefailed",
+    "actual": "A-enterprise-sourcefailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-sourcedenied",
+    "actual": "A-enterprise-sourcedenied",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-automations",
+    "actual": "A-enterprise-automations",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-browser",
+    "actual": "A-enterprise-browser",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-return",
+    "actual": "A-enterprise-return",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-ownerreturn",
+    "actual": "A-enterprise-ownerreturn",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-preblock",
+    "actual": "A-enterprise-preblock",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-cut",
+    "actual": "A-enterprise-cut",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-checking",
+    "actual": "A-enterprise-checking",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-notyet",
+    "actual": "A-enterprise-notyet",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-queryfailed",
+    "actual": "A-enterprise-queryfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-resumed",
+    "actual": "A-enterprise-resumed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-notify",
+    "actual": "A-enterprise-notify",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-notified",
+    "actual": "A-enterprise-notified",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budget",
+    "actual": "A-enterprise-budget",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetowner",
+    "actual": "A-enterprise-budgetowner",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-ownerblock",
+    "actual": "A-enterprise-ownerblock",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-ownerresumed",
+    "actual": "A-enterprise-ownerresumed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-skills",
+    "actual": "A-enterprise-skills",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-discover",
+    "actual": "A-enterprise-discover",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-acquire",
+    "actual": "A-enterprise-acquire",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-enabledpending",
+    "actual": "A-enterprise-enabledpending",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-installing",
+    "actual": "A-enterprise-installing",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-installfailed",
+    "actual": "A-enterprise-installfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-installed",
+    "actual": "A-enterprise-installed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-enabled",
+    "actual": "A-enterprise-enabled",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-detail",
+    "actual": "A-enterprise-detail",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-updated",
+    "actual": "A-enterprise-updated",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-updatefailed",
+    "actual": "A-enterprise-updatefailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-remove",
+    "actual": "A-enterprise-remove",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled",
+    "actual": "A-enterprise-uninstalled",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-denied",
+    "actual": "A-enterprise-denied",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-restricted",
+    "actual": "A-enterprise-restricted",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-reauthorized",
+    "actual": "A-enterprise-reauthorized",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-builtinoff",
+    "actual": "A-enterprise-builtinoff",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-builtinon",
+    "actual": "A-enterprise-builtinon",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-local-100-0-0",
+    "actual": "A-personal-legacy-local-100-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-detail-100-0-0",
+    "actual": "A-personal-legacy-detail-100-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-remove-100-0-0",
+    "actual": "A-personal-legacy-remove-100-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-local-100-0-1",
+    "actual": "A-personal-legacy-local-100-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-detail-100-0-1",
+    "actual": "A-personal-legacy-detail-100-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-remove-100-0-1",
+    "actual": "A-personal-legacy-remove-100-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-local-100-1-0",
+    "actual": "A-personal-legacy-local-100-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-detail-100-1-0",
+    "actual": "A-personal-legacy-detail-100-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-remove-100-1-0",
+    "actual": "A-personal-legacy-remove-100-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-local-100-1-1",
+    "actual": "A-personal-legacy-local-100-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-detail-100-1-1",
+    "actual": "A-personal-legacy-detail-100-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-remove-100-1-1",
+    "actual": "A-personal-legacy-remove-100-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-local-110-0-0",
+    "actual": "A-personal-legacy-local-110-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-detail-110-0-0",
+    "actual": "A-personal-legacy-detail-110-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-remove-110-0-0",
+    "actual": "A-personal-legacy-remove-110-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-local-110-0-1",
+    "actual": "A-personal-legacy-local-110-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-detail-110-0-1",
+    "actual": "A-personal-legacy-detail-110-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-remove-110-0-1",
+    "actual": "A-personal-legacy-remove-110-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-local-110-1-0",
+    "actual": "A-personal-legacy-local-110-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-detail-110-1-0",
+    "actual": "A-personal-legacy-detail-110-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-remove-110-1-0",
+    "actual": "A-personal-legacy-remove-110-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-local-110-1-1",
+    "actual": "A-personal-legacy-local-110-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-detail-110-1-1",
+    "actual": "A-personal-legacy-detail-110-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-legacy-remove-110-1-1",
+    "actual": "A-personal-legacy-remove-110-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-local-100-0-0",
+    "actual": "A-enterprise-legacy-local-100-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-detail-100-0-0",
+    "actual": "A-enterprise-legacy-detail-100-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-remove-100-0-0",
+    "actual": "A-enterprise-legacy-remove-100-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-local-100-0-1",
+    "actual": "A-enterprise-legacy-local-100-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-detail-100-0-1",
+    "actual": "A-enterprise-legacy-detail-100-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-remove-100-0-1",
+    "actual": "A-enterprise-legacy-remove-100-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-local-100-1-0",
+    "actual": "A-enterprise-legacy-local-100-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-detail-100-1-0",
+    "actual": "A-enterprise-legacy-detail-100-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-remove-100-1-0",
+    "actual": "A-enterprise-legacy-remove-100-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-local-100-1-1",
+    "actual": "A-enterprise-legacy-local-100-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-detail-100-1-1",
+    "actual": "A-enterprise-legacy-detail-100-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-remove-100-1-1",
+    "actual": "A-enterprise-legacy-remove-100-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-local-110-0-0",
+    "actual": "A-enterprise-legacy-local-110-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-detail-110-0-0",
+    "actual": "A-enterprise-legacy-detail-110-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-remove-110-0-0",
+    "actual": "A-enterprise-legacy-remove-110-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-local-110-0-1",
+    "actual": "A-enterprise-legacy-local-110-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-detail-110-0-1",
+    "actual": "A-enterprise-legacy-detail-110-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-remove-110-0-1",
+    "actual": "A-enterprise-legacy-remove-110-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-local-110-1-0",
+    "actual": "A-enterprise-legacy-local-110-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-detail-110-1-0",
+    "actual": "A-enterprise-legacy-detail-110-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-remove-110-1-0",
+    "actual": "A-enterprise-legacy-remove-110-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-local-110-1-1",
+    "actual": "A-enterprise-legacy-local-110-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-detail-110-1-1",
+    "actual": "A-enterprise-legacy-detail-110-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-legacy-remove-110-1-1",
+    "actual": "A-enterprise-legacy-remove-110-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-restricted-remove",
+    "actual": "A-personal-restricted-remove",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-restricted-uninstalled",
+    "actual": "A-personal-restricted-uninstalled",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled-100-0-0",
+    "actual": "A-personal-uninstalled-100-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled-100-0-1",
+    "actual": "A-personal-uninstalled-100-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled-100-1-0",
+    "actual": "A-personal-uninstalled-100-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled-100-1-1",
+    "actual": "A-personal-uninstalled-100-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled-110-0-0",
+    "actual": "A-personal-uninstalled-110-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled-110-0-1",
+    "actual": "A-personal-uninstalled-110-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled-110-1-0",
+    "actual": "A-personal-uninstalled-110-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-uninstalled-110-1-1",
+    "actual": "A-personal-uninstalled-110-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-restricted-remove",
+    "actual": "A-enterprise-restricted-remove",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-restricted-uninstalled",
+    "actual": "A-enterprise-restricted-uninstalled",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled-100-0-0",
+    "actual": "A-enterprise-uninstalled-100-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled-100-0-1",
+    "actual": "A-enterprise-uninstalled-100-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled-100-1-0",
+    "actual": "A-enterprise-uninstalled-100-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled-100-1-1",
+    "actual": "A-enterprise-uninstalled-100-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled-110-0-0",
+    "actual": "A-enterprise-uninstalled-110-0-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled-110-0-1",
+    "actual": "A-enterprise-uninstalled-110-0-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled-110-1-0",
+    "actual": "A-enterprise-uninstalled-110-1-0",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-uninstalled-110-1-1",
+    "actual": "A-enterprise-uninstalled-110-1-1",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-empty-skills",
+    "actual": "A-personal-empty-skills",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-empty-sources",
+    "actual": "A-personal-empty-sources",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-sourcedisconnected",
+    "actual": "A-personal-sourcedisconnected",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-sourceconnecting",
+    "actual": "A-personal-sourceconnecting",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-permission",
+    "actual": "A-personal-permission",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-permissiondenied",
+    "actual": "A-personal-permissiondenied",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-permissiongranted",
+    "actual": "A-personal-permissiongranted",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-empty-skills",
+    "actual": "A-enterprise-empty-skills",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-empty-sources",
+    "actual": "A-enterprise-empty-sources",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-sourcedisconnected",
+    "actual": "A-enterprise-sourcedisconnected",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-sourceconnecting",
+    "actual": "A-enterprise-sourceconnecting",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-permission",
+    "actual": "A-enterprise-permission",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-permissiondenied",
+    "actual": "A-enterprise-permissiondenied",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-permissiongranted",
+    "actual": "A-enterprise-permissiongranted",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-returnstream",
+    "actual": "A-personal-returnstream",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-checkingstream",
+    "actual": "A-personal-checkingstream",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-notyetstream",
+    "actual": "A-personal-notyetstream",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-failedstream",
+    "actual": "A-personal-failedstream",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-resumedstream",
+    "actual": "A-personal-resumedstream",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-ownerchecking",
+    "actual": "A-enterprise-ownerchecking",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-ownerpending",
+    "actual": "A-enterprise-ownerpending",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-ownerfailed",
+    "actual": "A-enterprise-ownerfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetreturn",
+    "actual": "A-enterprise-budgetreturn",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetchecking",
+    "actual": "A-enterprise-budgetchecking",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetpending",
+    "actual": "A-enterprise-budgetpending",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetfailed",
+    "actual": "A-enterprise-budgetfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetresumed",
+    "actual": "A-enterprise-budgetresumed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-availability",
+    "actual": "A-personal-availability",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-availability",
+    "actual": "A-enterprise-availability",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetnotified",
+    "actual": "A-enterprise-budgetnotified",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetmemberchecking",
+    "actual": "A-enterprise-budgetmemberchecking",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetmemberpending",
+    "actual": "A-enterprise-budgetmemberpending",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetmemberfailed",
+    "actual": "A-enterprise-budgetmemberfailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-budgetmemberresumed",
+    "actual": "A-enterprise-budgetmemberresumed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-activity",
+    "actual": "A-personal-activity",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-preferences",
+    "actual": "A-personal-preferences",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-preferences-savefailed",
+    "actual": "A-personal-preferences-savefailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-close",
+    "actual": "A-personal-close",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-personal-closefailed",
+    "actual": "A-personal-closefailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-activity",
+    "actual": "A-enterprise-activity",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-preferences",
+    "actual": "A-enterprise-preferences",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-preferences-savefailed",
+    "actual": "A-enterprise-preferences-savefailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-close",
+    "actual": "A-enterprise-close",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "scene": "A-enterprise-closefailed",
+    "actual": "A-enterprise-closefailed",
+    "nonempty": true,
+    "passed": true
+  },
+  {
+    "story": "R15-all-ui",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=R15-all-ui&step=R15-all-ui-1&scene=P-M01-LOGIN-PASSWORD",
+    "iframes": 1,
+    "step_count": 18
+  },
+  {
+    "story": "R14-workbench",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=R14-workbench&step=R14-0&scene=P-M03-HOME-PERSONAL",
+    "iframes": 1,
+    "step_count": 10
+  },
+  {
+    "story": "S-DESKTOP",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=S-DESKTOP&step=S-DESKTOP-01&scene=P-M03-HOME-ENT",
+    "iframes": 1,
+    "step_count": 5
+  },
+  {
+    "story": "S-TEAM-SKILLS",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=S-TEAM-SKILLS&step=S-TEAM-SKILLS-01&scene=P-M03-HOME-ENT",
+    "iframes": 1,
+    "step_count": 7
+  },
+  {
+    "story": "S-CAPABILITY",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=S-CAPABILITY&step=S-CAPABILITY-01&scene=P-M04-APP-CONTRACT",
+    "iframes": 1,
+    "step_count": 6
+  },
+  {
+    "story": "S1",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=S1&step=S1-01&scene=P-M01-LOGIN-PASSWORD",
+    "iframes": 1,
+    "step_count": 14
+  },
+  {
+    "story": "S2",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=S2&step=S2-01&scene=P-M03-HOME-ENT",
+    "iframes": 1,
+    "step_count": 15
+  },
+  {
+    "story": "S3",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=S3&step=S3-01&scene=A-personal-generating",
+    "iframes": 2,
+    "step_count": 7
+  },
+  {
+    "story": "S4",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=S4&step=S4-01&scene=P-M03-ALL-APPS",
+    "iframes": 2,
+    "step_count": 7
+  },
+  {
+    "story": "R13-circle-handoff",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=R13-circle-handoff&step=R13-circle-handoff-1&scene=P-M07-JOIN-FREE",
+    "iframes": 2,
+    "step_count": 4
+  },
+  {
+    "story": "R13-enterprise-handoff",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=R13-enterprise-handoff&step=R13-enterprise-handoff-1&scene=P-M01-INVITE-BROWSER",
+    "iframes": 2,
+    "step_count": 4
+  },
+  {
+    "story": "R13-support",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=R13-support&step=R13-support-1&scene=P-M07-PAY-RETURN-FAIL",
+    "iframes": 2,
+    "step_count": 4
+  },
+  {
+    "story": "AS-personal",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=AS-personal&step=AS-personal-1&scene=P-M03-HOME-PERSONAL",
+    "iframes": 2,
+    "step_count": 11
+  },
+  {
+    "story": "AS-enterprise",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=AS-enterprise&step=AS-enterprise-1&scene=P-M03-HOME-ENT",
+    "iframes": 2,
+    "step_count": 11
+  },
+  {
+    "story": "AS-skills-personal",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=AS-skills-personal&step=AS-skills-personal-1&scene=A-personal-discover",
+    "iframes": 2,
+    "step_count": 16
+  },
+  {
+    "story": "AS-skills-enterprise",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=AS-skills-enterprise&step=AS-skills-enterprise-1&scene=A-enterprise-discover",
+    "iframes": 2,
+    "step_count": 16
+  },
+  {
+    "story": "AS-credits",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=AS-credits&step=AS-credits-1&scene=A-personal-preblock",
+    "iframes": 2,
+    "step_count": 11
+  }
+]

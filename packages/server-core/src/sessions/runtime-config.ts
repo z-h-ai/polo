@@ -53,6 +53,7 @@ export function buildRestartRequiredSignature(input: BackendRuntimeSignatureInpu
     provider,
     authType,
     slug: connection?.slug,
+    managedBy: connection?.managedBy,
     providerType: connection?.providerType,
     piAuthProvider: connection?.piAuthProvider,
   }))
@@ -68,6 +69,7 @@ export function buildBackendRuntimeSignature(input: BackendRuntimeSignatureInput
   const connectionShape = connection
     ? definedObject({
         slug: connection.slug,
+        managedBy: connection.managedBy,
         providerType: connection.providerType,
         authType: connection.authType,
         defaultModel: connection.defaultModel,
