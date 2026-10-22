@@ -58,10 +58,12 @@ describe('menu-schema: scope selectors', () => {
     const polo = getSettingsItemsForScope('polo', true).map(item => item.id)
 
     expect(assistant).toEqual([
-      'input', 'tools', 'workspace', 'permissions', 'labels', 'messaging', 'preferences',
+      'input', 'tools', 'workspace', 'permissions', 'labels', 'preferences',
     ])
     // account-security requires the admin gate; server is absent unless the
-    // embedded-server feature flag was on at module load.
+    // embedded-server feature flag was on at module load. messaging stays
+    // registered but hidden from users while the feature iterates (POO-121).
+    expect(assistant).not.toContain('messaging')
     expect(polo).toContain('app')
     expect(polo).toContain('appearance')
     expect(polo).toContain('shortcuts')
@@ -75,7 +77,7 @@ describe('menu-schema: scope selectors', () => {
     expect(polo).not.toContain('account-security')
     // The rest of the scope stays visible.
     expect(polo).toContain('app')
-    expect(getSettingsItemsForScope('assistant', false)).toHaveLength(7)
+    expect(getSettingsItemsForScope('assistant', false)).toHaveLength(6)
   })
 
   it('keeps the full-list selector consistent with the scope selectors', () => {
