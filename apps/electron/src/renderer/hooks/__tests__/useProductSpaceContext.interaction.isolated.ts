@@ -296,6 +296,28 @@ async function boot(
 }
 
 describe('useProductSpaceContextState bootstrap', () => {
+  it('inherits the launching window enterprise space on a fresh renderer', async () => {
+    const { result } = renderHook(useHarness)
+    await act(async () => {
+      expect(await result.current.bootstrap(accountId, { accountId, productSpaceId: 'space-ent' })).toBe('ready')
+    })
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+  })
+
+  it('fails closed rather than substituting personal space for an invalid launch identity', async () => {
+    for (const context of [
+      { accountId: 'another-account', productSpaceId: 'space-ent' },
+      { accountId, productSpaceId: 'no-longer-a-member' },
+    ]) {
+      const { result, unmount } = renderHook(useHarness)
+      await act(async () => {
+        expect(await result.current.bootstrap(accountId, context)).toBe('error')
+      })
+      expect(result.current.activeProductSpaceId).toBeNull()
+      unmount()
+    }
+  })
+
   it('enters the personal space on first login', async () => {
     const { result } = renderHook(useHarness)
     expect(await boot(result)).toBe('ready')

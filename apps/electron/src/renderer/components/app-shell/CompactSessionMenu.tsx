@@ -11,7 +11,7 @@
  *
  * Pattern matches the other compact pickers (`CompactSessionListFilter`,
  * `CompactWorkspaceSwitcher`, `CompactPermissionModeSelector`) and also
- * follows the iOS-style drill-in behaviour established by `MobileAppMenu`.
+ * follows the iOS-style drill-in behaviour of the former `MobileAppMenu`.
  *
  * Side-effect handlers (share / refresh title / copy path / share submenu /
  * label toggle with optimistic state) come from `useSessionMenuActions`,

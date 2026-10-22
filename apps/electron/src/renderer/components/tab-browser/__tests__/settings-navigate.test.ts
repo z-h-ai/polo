@@ -22,7 +22,19 @@ describe('TabShell settings navigate gate (POO-103)', () => {
     expect(shouldSurfaceAssistantForNavigate(routes.view.allSessions())).toBe(false)
     expect(shouldSurfaceAssistantForNavigate(routes.view.allSessions('sess-1'))).toBe(false)
     expect(shouldSurfaceAssistantForNavigate(routes.view.sources())).toBe(false)
-    expect(shouldSurfaceAssistantForNavigate(routes.action.newSession())).toBe(false)
+  })
+
+  it('surfaces the assistant tab for the new-session action (POO-117 P117-04)', () => {
+    // Avatar menu, Cmd+N and the native-menu broadcast all dispatch this route
+    // from above NavigationProvider. Without surfacing, the session is created
+    // inside the hidden Polo tab and the user sees no visible change.
+    expect(shouldSurfaceAssistantForNavigate(routes.action.newSession())).toBe(true)
+    expect(shouldSurfaceAssistantForNavigate('action/new-session?input=hi&send=true')).toBe(true)
+  })
+
+  it('does not surface for other action routes', () => {
+    expect(shouldSurfaceAssistantForNavigate(routes.action.copyToClipboard('x'))).toBe(false)
+    expect(shouldSurfaceAssistantForNavigate('action/oauth/github')).toBe(false)
   })
 
   it('ignores malformed navigate payloads', () => {

@@ -1,9 +1,11 @@
 import { Menu, app, shell, BrowserWindow } from 'electron'
 import { i18n } from '@polo-ai/shared/i18n'
 import { RPC_CHANNELS, type BroadcastEventMap } from '../shared/types'
+import type { NewWindowRequestSource } from '../shared/types'
 import { EDIT_MENU, VIEW_MENU, WINDOW_MENU } from '../shared/menu-schema'
 import type { MenuItem } from '../shared/menu-schema'
 import type { WindowManager } from './window-manager'
+import { createMainWindowWithOutcome } from './new-window-launch'
 import type { EventSink } from '@polo-ai/server-core/transport'
 import { mainLog, isDebugMode } from './logger'
 
@@ -50,11 +52,11 @@ export async function rebuildMenu(): Promise<void> {
   const windowManager = cachedWindowManager
   const isMac = process.platform === 'darwin'
 
-  // On Windows/Linux, hide the native menu entirely: the in-app Polo AI logo
-  // dropdown (AppMenu mounted in the TopBar) is the cross-platform application
-  // menu, so a native menu bar would only duplicate it. macOS keeps the native
-  // menu because Apple guidelines require it; both surfaces run the same
-  // handlers via the menu broadcast channels.
+  // On Windows/Linux, hide the native menu entirely: the TopBar avatar menu
+  // (WorkbenchAccountMenu, POO-117) is the cross-platform application menu, so
+  // a native menu bar would only duplicate it. macOS keeps the native menu
+  // because Apple guidelines require it; both surfaces run the same handlers
+  // via the menu broadcast channels.
   if (!isMac) {
     Menu.setApplicationMenu(null)
     return
@@ -117,15 +119,7 @@ export async function rebuildMenu(): Promise<void> {
           label: i18n.t("menu.newWindow"),
           accelerator: 'CmdOrCtrl+Shift+N',
           registerAccelerator: false,  // Action registry handles the keyboard shortcut
-          click: () => {
-            const focused = BrowserWindow.getFocusedWindow()
-            if (focused) {
-              const workspaceId = windowManager.getWorkspaceForWindow(focused.webContents.id)
-              if (workspaceId) {
-                windowManager.createWindow({ workspaceId })
-              }
-            }
-          }
+          click: () => { void openNewMainWindowFromMain('native_menu') }
         },
         { type: 'separator' as const },
         isMac ? { role: 'close' as const } : { role: 'quit' as const }
@@ -272,6 +266,32 @@ function sendToRenderer(channel: MenuBroadcastChannel): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// New main window (POO-117 P117-05/P117-07)
+//
+// File > New Window and the webview ⌘⇧N forwarder used to no-op silently when
+// the focused window had no workspace mapping. Both now share the outcome-
+// checked launcher; a failure is pushed back to the ORIGINATING window's
+// renderer so the user always gets visible feedback, never a dead click.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function openNewMainWindowFromMain(source: NewWindowRequestSource): Promise<void> {
+  const windowManager = cachedWindowManager
+  const originWindow = BrowserWindow.getFocusedWindow()
+  const originClientId = originWindow && !originWindow.isDestroyed() && cachedClientResolver
+    ? cachedClientResolver(originWindow.webContents.id) ?? null
+    : null
+  const result = windowManager
+    ? await windowManager.createNewMainWindow(originWindow?.webContents.id ?? -1, source)
+    : await createMainWindowWithOutcome({ createWindow: null, waitForWorkbenchReady: async () => false, log: mainLog }, { source })
+  if (result.ok || !originClientId || !cachedEventSink) return
+  cachedEventSink(
+    RPC_CHANNELS.menu.NEW_WINDOW_FAILED,
+    { to: 'client', clientId: originClientId },
+    result.reason ?? 'create_failed',
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Webview menu-shortcut forwarding (F7)
 //
 // The menu accelerators below are declared with `registerAccelerator: false`:
@@ -353,15 +373,9 @@ function installWebviewMenuShortcutForwarding(): void {
       // Swallow the keystroke so the guest page never also reacts to it.
       event.preventDefault()
       if (action === 'newWindow') {
-        // Mirrors the File > New Window click in the native menu template:
-        // focused window's workspace gets a new window; no workspace → no-op.
-        const focused = BrowserWindow.getFocusedWindow()
-        if (cachedWindowManager && focused) {
-          const workspaceId = cachedWindowManager.getWorkspaceForWindow(focused.webContents.id)
-          if (workspaceId) {
-            cachedWindowManager.createWindow({ workspaceId })
-          }
-        }
+        // Same outcome-checked path as the File > New Window click; failures
+        // are surfaced in the originating window instead of dropping silently.
+        void openNewMainWindowFromMain('webview_shortcut')
         return
       }
       sendToRenderer(WEBVIEW_SHORTCUT_CHANNELS[action])

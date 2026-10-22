@@ -227,6 +227,12 @@ client.handleCapability(CLIENT_CREATOR_SKILL_COMMIT_CHECK, async (identity: {
 // ---------------------------------------------------------------------------
 
 const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailable(ch))
+// Thin clients have no local GUI RPC server or managed-window launch context.
+// Their authentication/bootstrap must not depend on these local-only hooks.
+if (isClientOnly) {
+  api.getWindowLaunchContext = async () => null
+  api.reportWorkbenchReady = async () => false
+}
 
 ;(api as any).getRuntimeEnvironment = (): 'electron' | 'web' => 'electron'
 

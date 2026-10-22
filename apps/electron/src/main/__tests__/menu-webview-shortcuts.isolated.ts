@@ -125,10 +125,12 @@ describe('matchWebviewMenuShortcut (pure matcher)', () => {
 
 describe('webview menu-shortcut forwarding wiring', () => {
   const eventSink = mock(() => {})
-  const createWindow = mock(() => {})
-  const windowManager = {
-    getWorkspaceForWindow: mock((_webContentsId: number) => 'ws-1' as string | undefined),
-    createWindow,
+  const createNewMainWindow = mock(async (_id: number, _source: string) => ({ ok: true, reason: undefined as string | undefined }))
+  const windowManager = { createNewMainWindow }
+
+  /** Lets the void-launched async new-window chain settle before asserting. */
+  function flushAsync() {
+    return new Promise((resolve) => setTimeout(resolve, 0))
   }
 
   /** Builds a fake webview contents and returns its before-input-event handler. */
@@ -160,8 +162,8 @@ describe('webview menu-shortcut forwarding wiring', () => {
 
   beforeEach(() => {
     eventSink.mockClear()
-    createWindow.mockClear()
-    windowManager.getWorkspaceForWindow.mockImplementation(() => 'ws-1')
+    createNewMainWindow.mockClear()
+    createNewMainWindow.mockImplementation(async () => ({ ok: true, reason: undefined }))
     focusedWindow = {
       isDestroyed: () => false,
       webContents: { isDestroyed: () => false, id: 5 },
@@ -222,24 +224,33 @@ describe('webview menu-shortcut forwarding wiring', () => {
     }
   })
 
-  it('newWindow replicates the native File > New Window click via WindowManager', () => {
+  it('newWindow replicates the native File > New Window click via WindowManager', async () => {
     initMenu()
     const handler = attachWebview(() => 'webview')
-
     const preventDefault = dispatch(handler, input({ key: 'n', shift: true, ...modForPlatform }))
     expect(preventDefault).toHaveBeenCalledTimes(1)
-    expect(windowManager.getWorkspaceForWindow).toHaveBeenCalledWith(5)
-    expect(createWindow).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
+    await flushAsync()
+    expect(createNewMainWindow).toHaveBeenCalledTimes(1)
+    expect(createNewMainWindow).toHaveBeenCalledWith(5, 'webview_shortcut')
+    // Success: no failure broadcast to the originating window.
     expect(eventSink).not.toHaveBeenCalled()
   })
 
-  it('newWindow is a no-op when the focused window has no workspace (native click parity)', () => {
+  it('newWindow surfaces an observable failure when the focused window has no workspace (POO-117)', async () => {
     initMenu()
     const handler = attachWebview(() => 'webview')
-    windowManager.getWorkspaceForWindow.mockImplementation(() => undefined)
+    createNewMainWindow.mockImplementation(async () => ({ ok: false, reason: 'workspace_unresolved' }))
 
     const preventDefault = dispatch(handler, input({ key: 'n', shift: true, ...modForPlatform }))
     expect(preventDefault).toHaveBeenCalledTimes(1)
-    expect(createWindow).not.toHaveBeenCalled()
+    await flushAsync()
+    expect(createNewMainWindow).toHaveBeenCalledTimes(1)
+    expect(createNewMainWindow).toHaveBeenCalledWith(5, 'webview_shortcut')
+    // The old behavior was a silent no-op; the originating renderer is now told.
+    expect(eventSink).toHaveBeenCalledWith(
+      RPC_CHANNELS.menu.NEW_WINDOW_FAILED,
+      { to: 'client', clientId: 'client-1' },
+      'workspace_unresolved',
+    )
   })
 })

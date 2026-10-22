@@ -66,10 +66,11 @@ const navigateMock = mock(() => {})
 const { routes } = await import('../../../../shared/routes')
 mock.module('@/lib/navigate', () => ({ navigate: navigateMock, routes, NAVIGATE_EVENT: 'polo-ai-navigate' }))
 
-// AppMenu has its own coverage (TopBar.app-menu.isolated.ts); stub it so the
-// real DesktopAppMenu's electronAPI probes stay out of this file's scope.
-mock.module('@/components/AppMenu', () => ({
-  AppMenu: () => createElement('div', { 'data-testid': 'topbar-app-menu' }),
+// The avatar menu (WorkbenchAccountMenu, POO-117) has its own coverage in
+// TopBar.app-menu.isolated.ts; stub it so its electronAPI probes stay out of
+// this file's scope.
+mock.module('@/components/app-menu/WorkbenchAccountMenu', () => ({
+  WorkbenchAccountMenu: () => createElement('div', { 'data-testid': 'topbar-account-menu' }),
 }))
 
 Object.defineProperty(window, 'electronAPI', { configurable: true, value: {} })

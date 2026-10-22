@@ -8,6 +8,7 @@ import { useClientMaterialScope } from '@/lib/client-workbench-style'
 import { NAVIGATE_EVENT } from '@/lib/navigate'
 import { shouldSurfaceAssistantForNavigate } from './settings-navigate'
 import { HOME_TAB_ID, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
+import { useWorkbenchReady } from '@/hooks/useWorkbenchReady'
 
 interface TabShellProps {
   renderPolo: () => ReactNode
@@ -38,6 +39,7 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
   // screen, not a narrow work surface. Hook order is untouched: the hook is
   // read before every early return and the decision renders after all hooks.
   const narrowViewport = useNarrowViewport()
+  useWorkbenchReady(isReady && !narrowViewport)
 
   useEffect(() => {
     const root = document.documentElement

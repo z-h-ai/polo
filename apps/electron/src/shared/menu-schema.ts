@@ -228,12 +228,12 @@ export const MENU_SECTIONS: MenuSection[] = [EDIT_MENU, VIEW_MENU, WINDOW_MENU]
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Root-level leaf actions exposed in the Polo AI logo menu.
+ * Root-level leaf actions.
  *
- * Both DesktopAppMenu (dropdown) and MobileAppMenu (full-screen sheet) read from
- * this collection. Desktop renders all four directly inline. Mobile filters out
- * `quit` (no-op in a browser tab) and inserts navigation rows for Settings/Help/Debug
- * between `newWindow` and `keyboardShortcuts`.
+ * The avatar menu (WorkbenchAccountMenu) and the macOS native menu both read
+ * from this collection. The avatar menu renders `newChat`/`newWindow` and the
+ * shortcut-bearing `keyboardShortcuts`; `quit` is consumed by the native menu
+ * only — the in-app quit entry was dropped in POO-117.
  *
  * Icons here are Lucide names. The `newChat` item maps to the local `SquarePenRounded`
  * component in the renderer; that's the one approved exception.
@@ -362,15 +362,15 @@ export const DEBUG_MENU: MenuSection = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Settings item definition
- * Used by both AppMenu (logo dropdown) and SettingsNavigator (sidebar panel)
+ * Settings item definition — consumed by SettingsNavigator (sidebar panel)
+ * and the scope-filtered settings tests.
  */
 import { SETTINGS_PAGES, type SettingsScope, type SettingsSubpage } from './settings-registry'
 
 export interface SettingsMenuItem {
   id: SettingsSubpage
   labelKey: string    // i18n key - resolve with t() at render time
-  icon: string        // Lucide icon name for AppMenu
+  icon: string        // Lucide icon name
   descriptionKey: string // i18n key - resolve with t() at render time
   requiresAdminLogin: boolean
   /** Which settings surface this item is listed under (from settings-registry) */

@@ -67,6 +67,8 @@ export const CHANNEL_MAP = {
   // Window management
   getWindowWorkspace: invoke(RPC_CHANNELS.window.GET_WORKSPACE),
   getWindowMode: invoke(RPC_CHANNELS.window.GET_MODE),
+  getWindowLaunchContext: invoke(RPC_CHANNELS.window.GET_LAUNCH_CONTEXT),
+  reportWorkbenchReady: invoke(RPC_CHANNELS.window.REPORT_WORKBENCH_READY),
   openWorkspace: invoke(RPC_CHANNELS.window.OPEN_WORKSPACE),
   openSessionInNewWindow: invoke(RPC_CHANNELS.window.OPEN_SESSION_IN_NEW_WINDOW),
   switchWorkspace: invoke(RPC_CHANNELS.window.SWITCH_WORKSPACE),
@@ -120,6 +122,8 @@ export const CHANNEL_MAP = {
   onMenuKeyboardShortcuts: listener(RPC_CHANNELS.menu.KEYBOARD_SHORTCUTS),
   onMenuToggleFocusMode: listener(RPC_CHANNELS.menu.TOGGLE_FOCUS_MODE),
   onMenuToggleSidebar: listener(RPC_CHANNELS.menu.TOGGLE_SIDEBAR),
+  // POO-117 P117-07: main-initiated new-window request failed (native menu / webview shortcut)
+  onMenuNewWindowFailed: listener(RPC_CHANNELS.menu.NEW_WINDOW_FAILED),
 
   // Deep link
   onDeepLinkNavigate: listener(RPC_CHANNELS.deeplink.NAVIGATE),

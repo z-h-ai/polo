@@ -1105,3 +1105,25 @@ export type CircleReturnAckResult =
 export type CircleReturnCancelResult =
   | { status: 'cancelled' }
   | { status: 'not_found' }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POO-117 P117-05/P117-07 — new-main-window outcome
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Product identity inherited by a main window, distinct from its runtime workspace. */
+export interface WorkbenchWindowContext {
+  accountId: string
+  productSpaceId: string
+}
+
+/** Where a new-main-window request originated. */
+export type NewWindowRequestSource = 'renderer' | 'native_menu' | 'webview_shortcut'
+
+/** Why a new-main-window request did not produce a visible window. */
+export type NewWindowFailureReason =
+  | 'window_manager_missing'
+  | 'workspace_unresolved'
+  | 'create_failed'
+  | 'show_timeout'
+  | 'scope_unavailable'
+  | 'show_failed'
