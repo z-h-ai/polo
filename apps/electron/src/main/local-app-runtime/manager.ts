@@ -839,12 +839,10 @@ export class LocalAppRuntimeManager {
       if (options.preserveData ?? true) {
         await Promise.all([
           rm(join(appDir, 'versions'), { recursive: true, force: true }),
+          rm(join(appDir, 'metadata.json'), { force: true }),
           rm(join(appDir, 'logs'), { recursive: true, force: true }),
           rm(join(this.runtimeCacheDir, appId), { recursive: true, force: true }),
         ])
-        // Keep the version/admission provenance until every installation path
-        // was removed. Partial failures can then retry without guessing ownership.
-        await rm(join(appDir, 'metadata.json'), { force: true })
       } else {
         await Promise.all([
           rm(appDir, { recursive: true, force: true }),
@@ -3306,7 +3304,7 @@ export class LocalAppRuntimeManager {
     this.appendLog(metadata.appId, 'system', `${error.code}: ${error.message}`)
   }
 
-  async readNativeInstallationEvidence(appId: string, options: { allowMissingVersions?: boolean } = {}): Promise<{ presence: 'absent'|'installed'; versions: Array<{ version: string; checksum: string; admissionId: string|null }> }|null> {
+  async readNativeInstallationEvidence(appId: string): Promise<{ presence: 'absent'|'installed'; versions: Array<{ version: string; checksum: string; admissionId: string|null }> }|null> {
     const safeAppId = validateRequestIdentifier(appId,'appId')
     let raw: AppMetadata
     try { raw = JSON.parse(await readFile(this.getMetadataPath(safeAppId),'utf8')) as AppMetadata }
@@ -3323,8 +3321,7 @@ export class LocalAppRuntimeManager {
       let checksum: string
       try { checksum = normalizeChecksum(row.checksum) } catch { return null }
       if (row.nativeInstallationAdmissionId && !/^[a-f0-9-]{36}$/i.test(row.nativeInstallationAdmissionId)) return null
-      try { const directory = await lstat(this.getVersionDir(safeAppId,version)); if (!directory.isDirectory() || directory.isSymbolicLink()) return null }
-      catch (error) { if (!options.allowMissingVersions || (error as NodeJS.ErrnoException).code !== 'ENOENT') return null }
+      try { const directory = await lstat(this.getVersionDir(safeAppId,version)); if (!directory.isDirectory() || directory.isSymbolicLink()) return null } catch { return null }
       versions.push({version,checksum,admissionId: row.nativeInstallationAdmissionId ?? null})
     }
     return {presence: 'installed',versions}

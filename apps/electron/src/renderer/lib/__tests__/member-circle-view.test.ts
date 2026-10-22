@@ -343,21 +343,6 @@ describe('isMembershipCurrentlyPaidEntitled (POO77 F1)', () => {
     }), now)).toBe(true)
   })
 
-  for (const status of ['pending', 'cancelled', 'failed']) {
-    it(`P-R2-02: ${status} renewal cannot revoke a current paid source`, () => {
-      const current = membership('c-current-paid', {
-        currentPeriodEnd: futurePeriodEnd,
-        paymentOrders: [
-          paymentOrder({ storedStatus: status, effectivePaymentStatus: status }),
-          paymentOrder({ effectivePaymentStatus: 'paid' }),
-        ],
-      })
-      expect(isMembershipCurrentlyPaidEntitled(current, now)).toBe(true)
-      expect(isMembershipCurrentlyPaidEntitled({ ...current, currentPeriodEnd: pastPeriodEnd }, now)).toBe(false)
-      expect(isMembershipCurrentlyPaidEntitled({ ...current, paymentOrders: [current.paymentOrders[0]!] }, now)).toBe(false)
-    })
-  }
-
   it('keeps partial-refund benefits when the authoritative membership is active for a future period', () => {
     expect(isMembershipCurrentlyPaidEntitled(membership('c-partial-refund', {
       currentPeriodEnd: futurePeriodEnd,

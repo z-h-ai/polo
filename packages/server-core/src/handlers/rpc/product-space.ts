@@ -845,12 +845,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           // Snapshot the origin executions the stop phase will terminate —
           // nothing is stopped in this phase.
           const planned: ExecutionSummary[] = []
-          // R5: a revoked fence has no origin id, but owned executions may
-          // survive the denial. Drain the trusted account before recommit.
-          if (!offlineRevalidation) {
+          if (originProductSpaceId && !offlineRevalidation) {
             for (const execution of listRegisteredProductSpaceExecutions()) {
               if (execution.scope.accountId !== trustedAccountId) continue
-              if (originProductSpaceId && execution.scope.productSpaceId !== originProductSpaceId) continue
+              if (execution.scope.productSpaceId !== originProductSpaceId) continue
               let active: boolean
               try {
                 active = Boolean(await execution.isActive())
@@ -962,7 +960,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       try {
         for (const execution of listRegisteredProductSpaceExecutions()) {
           if (execution.scope.accountId !== trustedAccountId) continue
-          if (originProductSpaceId && execution.scope.productSpaceId !== originProductSpaceId) continue
+          if (execution.scope.productSpaceId !== originProductSpaceId) continue
           let active: boolean
           try {
             active = Boolean(await execution.isActive())
@@ -1024,7 +1022,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           const revisionBefore = registeredExecutionsScopeRevision(trustedAccountId, originProductSpaceId)
           for (const execution of listRegisteredProductSpaceExecutions()) {
             if (execution.scope.accountId !== trustedAccountId) continue
-            if (originProductSpaceId && execution.scope.productSpaceId !== originProductSpaceId) continue
+            if (execution.scope.productSpaceId !== originProductSpaceId) continue
             let active: boolean
             try {
               active = Boolean(await execution.isActive())
@@ -1183,7 +1181,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         if (!revalidation) {
           for (const execution of listRegisteredProductSpaceExecutions()) {
             if (execution.scope.accountId !== trustedAccountId) continue
-            if (originProductSpaceId && execution.scope.productSpaceId !== originProductSpaceId) continue
+            if (execution.scope.productSpaceId !== originProductSpaceId) continue
             let active: boolean
             try {
               active = Boolean(await execution.isActive())
@@ -1234,7 +1232,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         // (re)binds the fence to the committing trusted account.
         setRuntimeOfflineReadOnly(false)
         setRuntimeActiveProductSpaceAccount(trustedAccountId)
-        setRuntimeActiveProductSpace(targetProductSpaceId, target.kind)
+        setRuntimeActiveProductSpace(targetProductSpaceId)
         // Linearization record: a cancellation that is only processed after
         // this point must learn that the commit won, with the authoritative
         // target, instead of receiving a no-op success. The record is bound
@@ -1394,7 +1392,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       // The restored read-only view belongs to the trusted account that owns
       // the verified snapshot — never to a replaced account.
       setRuntimeActiveProductSpaceAccount(trustedAccountId)
-      setRuntimeActiveProductSpace(activeId, list.data.productSpaces.find(space => space.id === activeId)!.kind)
+      setRuntimeActiveProductSpace(activeId)
       return {
         success: true as const,
         snapshot: {
@@ -1439,9 +1437,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
     const localAppCleaner = await runLegacyLocalAppCleaner()
     results.legacyInstallationStateRemoved = localAppCleaner.ok
 
-    // This cache is the exact provenance used by the local-app cleaner. A
-    // failed disk cleanup must retain it across process restarts for retry.
-    results.legacyCatalogCacheRemoved = localAppCleaner.ok && purgeAppCatalogCache()
+    results.legacyCatalogCacheRemoved = purgeAppCatalogCache()
     results.legacySkillCachesRemoved = clearLegacySkillCaches()
     results.legacyAuthorizationCacheRemoved = clearAllOrganizationContextStorage()
 

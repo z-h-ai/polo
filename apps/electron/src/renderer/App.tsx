@@ -2724,11 +2724,7 @@ export default function App() {
     }
     try {
       const result = await window.electronAPI.adminLogout()
-      if (!isCurrentLogout()) return
-      if (!result.success) {
-        toast.error(t('onboarding.adminLogin.localLogoutFailed'))
-        return
-      }
+      if (!result.success || !isCurrentLogout()) return
       invalidateProductSpaceDeepLinkRefresh()
       clearProductSpaceAccount(logoutSnapshot.accountId)
       resetAccountScopedClientState()
@@ -2754,7 +2750,6 @@ export default function App() {
     invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
     resetAccountScopedClientState,
-    t,
   ])
 
   // Handle workspace selection
@@ -2963,7 +2958,6 @@ export default function App() {
       pendingSwitch: productSpace.pendingSwitch,
       onSelectProductSpace: handleSelectProductSpace,
       onRefreshProductSpaces: handleRefreshProductSpaces,
-      onRecoverActiveProductSpace: productSpace.recoverActiveProductSpace,
       onConfirmStopAndSwitch: () => {
         void confirmStopAndSwitch()
       },
@@ -2995,7 +2989,6 @@ export default function App() {
     productSpace.productSpaceContextKey,
     productSpace.productSpaces,
     productSpace.pendingSwitch,
-    productSpace.recoverActiveProductSpace,
     retryFailedStops,
     retryTargetLoad,
   ])
@@ -3161,7 +3154,6 @@ export default function App() {
             onSelectApiSetupMethod={onboarding.handleSelectApiSetupMethod}
             onSubmitCredential={onboarding.handleSubmitCredential}
             onAdminLogin={onboarding.handleAdminLogin}
-            onAdminCancelLogin={onboarding.handleAdminCancelLogin}
             onAdminSendPhoneCode={onboarding.handleAdminSendPhoneCode}
             onAdminVerifyPhoneCode={onboarding.handleAdminVerifyPhoneCode}
             onAdminRelogin={onboarding.handleAdminRelogin}

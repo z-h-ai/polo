@@ -8,7 +8,6 @@
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { ElectronAPI } from '../shared/types'
 import { toBridgeCarriableError } from '../shared/rpc-error-bridge'
-import type { LocalAppAdmissionFailure } from '@polo-ai/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Channel map entry
@@ -41,27 +40,6 @@ export function buildClientApi(
       fn = async (...args: any[]) => t(await client.invoke(entry.channel, ...args))
     } else {
       fn = (...args: any[]) => client.invoke(entry.channel, ...args)
-    }
-
-    // R5A/R6 admission closure: these two channels surface a paid-admission
-    // failure as a STRUCTURED result (the bridge would erase `code`/`data`).
-    // Registered BEFORE the codedErrors wrapper below so it sees the raw
-    // error; non-admission errors still fall through to the bridge carry.
-    if (key === 'localApps.installProductSpaceBundle' || key === 'localApps.start') {
-      const invoke = fn
-      fn = async (...args: any[]) => {
-        try { return await invoke(...args) }
-        catch (error) {
-          const coded = error as { code?: unknown; message?: unknown; data?: { reason?: unknown; recovery?: unknown } }
-          if (coded?.code !== 'CIRCLE_ENTITLEMENT_REQUIRED'
-            || !['unknown', 'not_entitled', 'expired'].includes(String(coded.data?.reason))
-            || coded.data?.recovery !== 'refresh_membership') throw error
-          return { kind: 'circle_entitlement_required', error: {
-            code: coded.code, message: String(coded.message),
-            details: { reason: coded.data.reason as LocalAppAdmissionFailure['error']['details']['reason'], recovery: 'refresh_membership' },
-          } } satisfies LocalAppAdmissionFailure
-        }
-      }
     }
 
     if (entry.type === 'invoke' && entry.codedErrors) {

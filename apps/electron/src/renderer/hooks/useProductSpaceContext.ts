@@ -248,12 +248,11 @@ export function useProductSpaceContextState() {
     list: ProductSpaceSummary[],
     personalId: string,
     productSpaceId: string,
-    onlineVerified = true,
   ) => {
     // The Main fence already moved (trusted transaction committed); now the
     // renderer projection is published as one step.
     setStoredActiveProductSpaceId(accountId, productSpaceId)
-    if (onlineVerified) persistVerifiedContext(accountId, list, personalId, productSpaceId)
+    persistVerifiedContext(accountId, list, personalId, productSpaceId)
     activeProductSpaceIdRef.current = productSpaceId
     setActiveProductSpaceId(productSpaceId)
     setContextVersion(version => version + 1)
@@ -693,7 +692,6 @@ export function useProductSpaceContextState() {
           restored.snapshot.productSpaces,
           restored.snapshot.personalProductSpaceId,
           restored.snapshot.activeProductSpaceId,
-          false, // A cached read is not a new authority verification.
         )
         return 'ready'
       }
@@ -872,63 +870,6 @@ export function useProductSpaceContextState() {
       return null
     }
   }, [applyListResponse, applySpaceSelection, enterContractBlocked, fetchProductSpaces, persistVerifiedContext])
-
-  // A Catalog403 revokes Main's committed scope while the denied renderer
-  // keeps its explanatory snapshot. A later Catalog200 alone cannot restore
-  // that scope: use the existing trusted PREPARE → STOP → COMMIT transaction.
-  const recoverActiveProductSpace = useCallback(async (): Promise<boolean> => {
-    const accountId = accountIdRef.current
-    const activeId = activeProductSpaceIdRef.current
-    if (!accountId || !activeId || pendingTargetRef.current) return false
-    const scope = { accountId, generation: accountScopeGenerationRef.current }
-    const generation = switchGenerationRef.current
-    const current = () => isCurrentAccountScope(scope)
-      && activeProductSpaceIdRef.current === activeId
-      && switchGenerationRef.current === generation
-      && pendingTargetRef.current === null
-    let operation: SwitchOperation | null = null
-    try {
-      const fetched = await fetchProductSpaces(scope, { publishList: false })
-      if (!current() || !fetched) return false
-      if (!fetched.list.some(space => space.id === activeId)) {
-        throw { code: 'product_space_context_unavailable' }
-      }
-      operation = beginSwitchOperation(accountId, activeId)
-      const ownedGeneration = operation.generation
-      pendingTargetRef.current = activeId
-      const live = () => isCurrentAccountScope(scope)
-        && isCurrentSwitchOperation(operation!, ownedGeneration)
-      const prepared = await prepareTrustedSwitch(operation, activeId)
-      if (!live()) return false
-      if (!prepared.ok) throw { code: prepared.errorCode ?? 'runtime_commit_failed' }
-      const stopped = await stopPreparedSwitchExecutions(prepared.token!)
-      if (!live()) return false
-      if (!stopped.ok) throw { code: stopped.errorCode ?? 'runtime_stop_failed' }
-      await commitPreparedSwitch(operation, activeId)
-      if (!live()) return false
-      applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
-      publishCommittedSelection(accountId, fetched.list, fetched.personalId, activeId)
-      return true
-    } catch (caught) {
-      if (isCurrentAccountScope(scope) && activeProductSpaceIdRef.current === activeId
-        && (!operation || activeSwitchOpRef.current === operation)) {
-        const record = (caught ?? {}) as Record<string, unknown>
-        if (record.code === 'product_space_contract_unsupported') {
-          enterContractBlocked(accountId)
-          return false
-        }
-        setError({ code: typeof record.code === 'string' ? record.code : 'runtime_commit_failed' })
-        setFlowState('error') // Existing error page exposes retryBootstrap.
-      }
-      return false
-    } finally {
-      if (operation && activeSwitchOpRef.current === operation) {
-        pendingTargetRef.current = null
-        if (operation.token) void cancelPreparedSwitch(operation)
-      }
-    }
-  }, [applyListResponse, beginSwitchOperation, cancelPreparedSwitch, commitPreparedSwitch, enterContractBlocked, fetchProductSpaces,
-    isCurrentAccountScope, isCurrentSwitchOperation, prepareTrustedSwitch, publishCommittedSelection, stopPreparedSwitchExecutions])
 
   const listActiveExecutions = useCallback(async (): Promise<ExecutionSummary[] | null> => {
     const accountId = accountIdRef.current
@@ -1485,7 +1426,6 @@ export function useProductSpaceContextState() {
     error,
     bootstrap,
     refreshProductSpaces,
-    recoverActiveProductSpace,
     retryBootstrap,
     requestSwitch,
     confirmStopAndSwitch,

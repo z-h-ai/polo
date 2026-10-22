@@ -17,8 +17,7 @@ import {
   selectHomeAppDirectory,
   type HomeAppDirectory,
 } from '@/lib/home-app-directory'
-import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
-import { memberCircleAccessState, isMembershipEndedBeforePeriodEnd, selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
+import { isMembershipCurrentlyPaidEntitled, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import { CircleContentPanel } from './CircleContentPanel'
 import { CircleSubscriptionPanel } from './CircleSubscriptionPanel'
 import { CircleSupportPanel, type CircleSupportTarget } from './CircleSupportPanel'
@@ -116,7 +115,6 @@ export interface CircleDetailHeadingState {
   status: MemberMembership['status'] | MemberCircleSnapshot['status']
   /** True when the entitlement is restricted (lifecycle or G5 projection). */
   restricted: boolean
-  accessState: 'valid' | 'expired' | 'restore'
   appsCount: number
   skillsCount: number
 }
@@ -129,14 +127,14 @@ export interface CircleDetailHeadingState {
 export function deriveCircleDetailHeadingState(
   circle: MemberCircleSnapshot,
   membership: MemberMembership | null,
-  now: number = Date.now(),
 ): CircleDetailHeadingState {
   const status = membership?.status ?? circle.status
-  const accessState = memberCircleAccessState(membership, circle, now)
+  const currentEntitlement = membership
+    ? isMembershipCurrentlyPaidEntitled(membership)
+    : null
   return {
     status,
-    restricted: accessState !== 'valid',
-    accessState,
+    restricted: status !== 'active' || currentEntitlement === false,
     appsCount: circle.entitlements.filter(e => e.artifact.type === 'web_app').length,
     skillsCount: circle.entitlements.filter(e => e.artifact.type === 'skill').length,
   }
@@ -271,20 +269,10 @@ export function CircleDetailPage({
   const detailMainRef = useRef<HTMLElement>(null)
   const detail = resource.getCircle(circleId)
   const relationsPhase = resource.state.phase
-  const now = useMemberCircleClock(resource.memberships ?? resource.circles ?? [])
 
   // ── H1 projection (the SAME directory instances the home consumes) ────────
   const activeProductSpace = catalog.productSpace?.activeProductSpace
   const spaceKind = activeProductSpace?.kind ?? null
-  // New current-period authority also governs content App entries. Legacy
-  // responses retain their established Catalog-only content behavior.
-  const lostCircleIds = useMemo(() => {
-    const memberships = (resource.memberships ?? []).filter(member => member.currentEntitlement !== undefined)
-    const ids = new Set(memberships.map(member => member.circle.circleId))
-    return selectLostCircleAuthorizationIds(
-      (resource.circles ?? []).filter(circle => ids.has(circle.circle.circleId)), memberships, now,
-    )
-  }, [resource.memberships, resource.circles, now])
   const directory = useMemo<HomeAppDirectory>(
     () => selectHomeAppDirectory(catalog.state.catalog, {
       accountId: catalog.productSpace?.accountId ?? null,
@@ -293,7 +281,6 @@ export function CircleDetailPage({
       loading: catalog.state.loading,
       errorCode: catalog.state.errorCode,
       accessMode: catalog.state.accessMode,
-      lostCircleIds,
     }),
     [
       catalog.productSpace?.accountId,
@@ -302,7 +289,6 @@ export function CircleDetailPage({
       catalog.state.catalog,
       catalog.state.errorCode,
       catalog.state.loading,
-      lostCircleIds,
       spaceKind,
     ],
   )
@@ -408,7 +394,7 @@ export function CircleDetailPage({
 
   // ── Heading facts (ready circles only; unknown renders no identity) ───────
   const heading = circleReady
-    ? deriveCircleDetailHeadingState(detail.circle, detail.membership, now)
+    ? deriveCircleDetailHeadingState(detail.circle, detail.membership)
     : null
   const countsLine = useMemo(() => {
     if (!heading) return ''
@@ -430,7 +416,7 @@ export function CircleDetailPage({
       // word (other restricted states keep the restore term).
       return isMembershipEndedBeforePeriodEnd({ status: effectiveStatus, currentPeriodEnd })
         ? t('poo70.c9.heading.endedNote')
-        : t(heading.accessState === 'expired' ? 'poo70.c6.status.expired' : 'poo70.c3.entitlement.restore')
+        : t('poo70.c3.entitlement.restore')
     }
     if (billingKind === 'free') return t('poo70.c3.entitlement.free')
     const parsed = currentPeriodEnd ? Date.parse(currentPeriodEnd) : Number.NaN
@@ -495,7 +481,7 @@ export function CircleDetailPage({
               // adjacent term is suppressed when it would repeat the badge
               // word (the post-leave page showed 待恢复 twice side by side).
               const statusLabel = heading.restricted
-                ? t(heading.accessState === 'expired' ? 'poo70.c6.status.expired' : 'poo70.c3.entitlement.restore')
+                ? t('poo70.c3.entitlement.restore')
                 : t('poo70.c3.filter.valid')
               return (
                 <div
@@ -513,7 +499,7 @@ export function CircleDetailPage({
                   >
                     {statusLabel}
                   </span>
-                  {section !== 'subscription' && termText !== '' && termText !== statusLabel && (
+                  {termText !== '' && termText !== statusLabel && (
                     <small className="text-[12px] text-muted-foreground" data-testid="circle-detail-term">
                       {termText}
                     </small>

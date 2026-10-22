@@ -410,7 +410,6 @@ export function getLastCommittedSwitch(): LastCommittedSwitch | null {
  * The fence is account-scoped: a fence committed for account A is never
  * usable by account B — it must be revoked and re-committed.
  */
-let runtimeActiveProductSpaceKind: 'personal' | 'enterprise' | null = null
 let runtimeActiveProductSpaceId: string | null = null
 let runtimeActiveAccountId: string | null = null
 
@@ -425,9 +424,8 @@ export function getRuntimeFenceGeneration(): number {
   return runtimeFenceGeneration
 }
 
-export function setRuntimeActiveProductSpace(productSpaceId: string | null, kind?: 'personal' | 'enterprise'): void {
+export function setRuntimeActiveProductSpace(productSpaceId: string | null): void {
   runtimeActiveProductSpaceId = productSpaceId
-  runtimeActiveProductSpaceKind = productSpaceId ? kind ?? null : null
   if (productSpaceId === null) {
     // Clearing the fence is a revoke: the account binding dies with it.
     runtimeActiveAccountId = null
@@ -476,11 +474,6 @@ export function isRuntimeFenceBoundToAccount(accountId: string | null): boolean 
     && runtimeActiveProductSpaceId
     && runtimeActiveAccountId === accountId,
   )
-}
-
-/** Kind is committed from Main's verified list, never a renderer argument. */
-export function getRuntimeActiveProductSpaceKind(): 'personal' | 'enterprise' | null {
-  return runtimeActiveProductSpaceKind
 }
 
 export function getRuntimeActiveProductSpace(): string | null {

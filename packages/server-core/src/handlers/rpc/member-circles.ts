@@ -24,7 +24,6 @@
  * uses the authenticated POL-115 global reader and Main-validated image bytes.
  */
 import sharp from 'sharp'
-import { i18n, translateRegistryMessage } from '@polo-ai/shared/i18n'
 import { createHash } from 'node:crypto'
 import {
   AdminClient,
@@ -54,12 +53,11 @@ import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/cr
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { getRuntimeActiveProductSpaceKind, getRuntimeActiveProductSpaceScope, getRuntimeFenceGeneration } from '../../runtime/product-space-executions'
+import { getRuntimeFenceGeneration } from '../../runtime/product-space-executions'
 import {
   getSyncTrustedProductSpaceAccountState,
   getSyncTrustedProductSpaceAccountId,
   getTrustedAccountGeneration,
-  getAccountTransitionEpoch,
   isAccountTransitionInProgress,
 } from './trusted-product-space-account'
 
@@ -91,15 +89,12 @@ export type MemberCircleRpcErrorCode =
   | MemberCircleApiErrorCode
   | 'session_changed'
   | 'session_unavailable'
-  | 'personal_space_required'
-  | 'product_space_context_required'
 
 export interface MemberCircleRpcFailure {
   success: false
   errorCode: MemberCircleRpcErrorCode
   message: string
   status?: number
-  recovery?: 'switch_to_personal_space'
 }
 
 export type MemberCircleListResult =
@@ -168,15 +163,13 @@ interface MemberCircleRequestFence {
   accountId: string
   accountGeneration: number
   fenceGeneration: number
-  transitionEpoch: number
-  productSpaceId: string
 }
 
 type MemberCircleFenceCapture =
   | { ok: true; fence: MemberCircleRequestFence }
   | {
     ok: false
-    errorCode: MemberCircleRpcErrorCode
+    errorCode: 'session_changed' | 'session_unavailable' | 'unauthorized'
   }
 
 /**
@@ -193,19 +186,12 @@ function captureMemberCircleRequestFence(): MemberCircleFenceCapture {
   const state = getSyncTrustedProductSpaceAccountState()
   if (state.status === 'unknown') return { ok: false, errorCode: 'session_unavailable' }
   if (state.status === 'signed_out') return { ok: false, errorCode: 'unauthorized' }
-  const scope = getRuntimeActiveProductSpaceScope()
-  if (!scope || scope.accountId !== state.accountId || getRuntimeActiveProductSpaceKind() === null) {
-    return { ok: false, errorCode: 'product_space_context_required' }
-  }
-  if (getRuntimeActiveProductSpaceKind() !== 'personal') return { ok: false, errorCode: 'personal_space_required' }
   return {
     ok: true,
     fence: {
       accountId: state.accountId,
       accountGeneration: getTrustedAccountGeneration(),
       fenceGeneration: getRuntimeFenceGeneration(),
-      transitionEpoch: getAccountTransitionEpoch(),
-      productSpaceId: scope.productSpaceId,
     },
   }
 }
@@ -216,10 +202,6 @@ function isMemberCircleRequestFenceCurrent(fence: MemberCircleRequestFence): boo
   if (getSyncTrustedProductSpaceAccountId() !== fence.accountId) return false
   if (getTrustedAccountGeneration() !== fence.accountGeneration) return false
   if (getRuntimeFenceGeneration() !== fence.fenceGeneration) return false
-  if (getAccountTransitionEpoch() !== fence.transitionEpoch) return false
-  const scope = getRuntimeActiveProductSpaceScope()
-  if (!scope || scope.accountId !== fence.accountId || scope.productSpaceId !== fence.productSpaceId
-    || getRuntimeActiveProductSpaceKind() !== 'personal') return false
   return true
 }
 
@@ -271,12 +253,8 @@ function createMemberCircleTokenStore(
 }
 
 function memberCircleGateFailure(
-  errorCode: MemberCircleRpcErrorCode,
+  errorCode: 'session_changed' | 'session_unavailable' | 'unauthorized',
 ): MemberCircleRpcFailure {
-  if (errorCode === 'personal_space_required' || errorCode === 'product_space_context_required') {
-    return { success: false, errorCode, message: translateRegistryMessage(i18n.resolvedLanguage ?? i18n.language, 'productSpace.error.circlePersonalRequired'),
-      recovery: 'switch_to_personal_space' }
-  }
   const message = errorCode === 'session_changed'
     ? 'Admin session changed'
     : errorCode === 'session_unavailable'
@@ -440,9 +418,9 @@ export function registerMemberCircleHandlers(
 
   // Upstream-pending capabilities (F1 gaps G2/G3/G4). They validate the
   // addressing id (the re-pinned implementation will need it) and answer with
-  // the explicit capability state — without fetching from Admin and
+  // the explicit capability state — without touching the Admin session and
   // without inventing data. These are static capability facts, not per-user
-  // reads, but the committed personal-scope gate still applies.
+  // reads, so no trusted-session gate is required.
   //
   // RE-PIN OBLIGATION (G2/G3/G4): when the provider lands the real member
   // endpoints, each of these three handlers MUST be re-routed through
@@ -456,8 +434,6 @@ export function registerMemberCircleHandlers(
     async (_ctx, circleId: unknown): Promise<MemberCircleUpdatesResult> => {
       const input = MemberCircleUuidSchema.safeParse(circleId)
       if (!input.success) return memberCircleInputError()
-      const gate = captureMemberCircleRequestFence()
-      if (!gate.ok) return memberCircleGateFailure(gate.errorCode)
       const updates: MemberCircleUpstreamPendingState = {
         availability: 'upstream_pending',
         contractGap: 'G2',
@@ -471,8 +447,6 @@ export function registerMemberCircleHandlers(
     async (_ctx, circleId: unknown): Promise<MemberCircleProfileResult> => {
       const input = MemberCircleUuidSchema.safeParse(circleId)
       if (!input.success) return memberCircleInputError()
-      const gate = captureMemberCircleRequestFence()
-      if (!gate.ok) return memberCircleGateFailure(gate.errorCode)
       const profile: MemberCircleUpstreamPendingState = {
         availability: 'upstream_pending',
         contractGap: 'G3',

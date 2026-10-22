@@ -51,7 +51,6 @@ interface OnboardingWizardProps {
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onFinish: () => void
   onAdminLogin?: (identifier: string, password: string) => void
-  onAdminCancelLogin?: () => void
   onAdminSendPhoneCode?: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
   onAdminVerifyPhoneCode?: (phone: string, code: string) => Promise<boolean>
   onAdminRelogin?: () => void
@@ -106,7 +105,6 @@ export function OnboardingWizard({
   onBack,
   onFinish,
   onAdminLogin,
-  onAdminCancelLogin,
   onAdminSendPhoneCode,
   onAdminVerifyPhoneCode,
   onAdminRelogin,
@@ -129,7 +127,6 @@ export function OnboardingWizard({
             onSendPhoneCode={onAdminSendPhoneCode!}
             onVerifyPhoneCode={onAdminVerifyPhoneCode!}
             onSubmit={onAdminLogin!}
-            onCancel={onAdminCancelLogin}
           />
         )
 

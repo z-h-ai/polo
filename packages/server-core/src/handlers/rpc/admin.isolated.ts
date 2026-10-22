@@ -158,10 +158,7 @@ const adminClientBehavior = {
   },
 }
 
-let nativeAdmissionMemberships: unknown[] = []
-
 class MockAdminClient {
-  async listMemberCircleMemberships(_token: string) { return { memberships: nativeAdmissionMemberships } }
   readonly adminUrl: string
 
   constructor(adminUrl: string) {
@@ -349,12 +346,7 @@ const retainedCatalogAppIds = jest.fn(async (
 const listStoredCredentials = jest.fn(async () => ['admin-tokens', 'local-provider'])
 const deleteStoredCredential = jest.fn(async (_credentialId: string) => true)
 
-let refuseTokenDeletion = false
-
 const mockCredentialManager = {
-  async inspectAdminCredentialPresence() {
-    return { status: managerState.tokens ? 'found' as const : 'absent' as const }
-  },
   async getAdminTokens(): Promise<StoredTokens | null> {
     return managerState.tokens
   },
@@ -362,7 +354,6 @@ const mockCredentialManager = {
     managerState.tokens = { ...tokens }
   },
   async deleteAdminTokens(): Promise<boolean> {
-    if (refuseTokenDeletion) return false
     const hadTokens = managerState.tokens !== null
     managerState.tokens = null
     return hadTokens
@@ -503,8 +494,6 @@ mock.module('@polo-ai/shared/admin', () => ({
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
-  clearAllOrganizationContextStorage: () => {},
-  getProductSpaceContextStorage: () => ({}),
   CONFIG_DIR: join(tmpdir(), `polo-native-admin-skill-test-${process.pid}`),
   getWorkspaceByNameOrId: () => null,
   setSetupDeferred: () => {},
@@ -619,8 +608,7 @@ const {
 } = await import('./admin')
 const { registerAuthHandlers } = await import('./auth')
 
-type HarnessRuntime = { server: RpcServer; deps: HandlerDeps; handlers: Map<string, HandlerFn> }
-function createHarness(observe?: (runtime: HarnessRuntime) => void) {
+function createHarness() {
   const handlers = new Map<string, HandlerFn>()
   const server: RpcServer = {
     handle(channel, handler) {
@@ -665,7 +653,6 @@ function createHarness(observe?: (runtime: HarnessRuntime) => void) {
   const adminSessions = registerAdminHandlers(server, deps)
   registerAuthHandlers(server, deps, adminSessions)
 
-  observe?.({ server, deps, handlers })
   return {
     paymentHandoff: requiredHandler(handlers, RPC_CHANNELS.admin.PAYMENT_HANDOFF),
     login: requiredHandler(handlers, RPC_CHANNELS.admin.LOGIN),
@@ -1806,7 +1793,6 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
     signal: new AbortController().signal,
   }
   let resolveLaunch: HandlerFn
-  let testHarness: HarnessRuntime
 
   const activeList = async () => ({
     productSpaces: [{ id: 'space-a', accessMode: 'active' }],
@@ -1823,37 +1809,9 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
     authorityRevokeCalls.length = 0
     failAuthorityRevoke = false
     setRuntimeActiveProductSpace(null)
-    const harness = createHarness(runtime => { testHarness = runtime })
+    const harness = createHarness()
     resolveLaunch = harness.productSpaceResolveLaunch
     await harness.login(context, 'admin', 'admin-password')
-  })
-
-  it('R7 artifact 404 preserves the fence, execution-list and a subsequent space switch', async () => {
-    adminClientBehavior.listProductSpaces = activeList
-    adminClientBehavior.getProductSpaceCatalog = freshCatalog
-    adminClientBehavior.resolveProductSpaceLaunch = async () => { throw new TestAdminError('artifact missing', 'NOT_FOUND', { status: 404 }) }
-    setRuntimeActiveProductSpace('space-a', 'personal')
-    setRuntimeActiveProductSpaceAccount('user-1')
-    const generation = getRuntimeFenceGeneration()
-    expect(await resolveLaunch(context, 'space-a', 'entry-1')).toMatchObject({ success: false, errorCode: 'NOT_FOUND' })
-    expect(authorityRevokeCalls).toEqual([])
-    expect(getRuntimeActiveProductSpace()).toBe('space-a')
-    expect(getRuntimeFenceGeneration()).toBe(generation)
-    expect(managerState.tokens).not.toBeNull()
-    // Exercise actual Main execution-list and PREPARE -> STOP -> COMMIT.
-    const { registerProductSpaceHandlers } = await import('./product-space')
-    registerProductSpaceHandlers(testHarness.server, testHarness.deps)
-    const invoke = (channel: string, ...args: unknown[]) => requiredHandler(testHarness.handlers, channel)(context, ...args) as Promise<any>
-    expect(await invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, 'user-1', 'space-a')).toMatchObject({ success: true, executions: [] })
-    adminClientBehavior.listProductSpaces = async () => ({ personalProductSpaceId: 'space-a', productSpaces: [
-      { id: 'space-a', kind: 'personal', name: 'Personal', accessMode: 'active' },
-      { id: 'space-next', kind: 'enterprise', name: 'Next', accessMode: 'active' },
-    ] })
-    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, 'space-next')
-    expect(prepared.success).toBe(true)
-    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).toMatchObject({ success: true })
-    expect(await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, 'space-next')).toMatchObject({ success: true })
-    expect(getRuntimeActiveProductSpace()).toBe('space-next')
   })
 
   it('a REMOTE membership 403 keeps the session and synchronously revokes the scope authority and fence', async () => {
@@ -1959,38 +1917,6 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
 })
 
 describe('registerAdminHandlers', () => {
-  for (const cachedVersion of [undefined, 'old-config'] as const) {
-    it(`R8 real 200/null validation enters Main online with cached ${cachedVersion}`, async () => {
-      const context = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
-      const { AdminValidateResponseSchema } = await import('../../../../shared/src/admin/schemas')
-      const seen: Array<{ path: string; token: string | null }> = []
-      const http = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
-        seen.push({ path: new URL(request.url).pathname, token: request.headers.get('authorization') })
-        return Response.json({ valid: true, configVersion: null, user: { id: 'user-1', username: 'admin', displayName: 'Verified online', role: 'admin', groupIds: [] } })
-      } })
-      try {
-        const harness = createHarness()
-        await harness.login(context, 'admin', 'admin-password')
-        configState.adminConfigVersion = cachedVersion
-        adminClientCalls.length = 0
-        adminClientBehavior.validate = async (token: string) => {
-          // The barrel-wide AdminClient mock aliases the implementation export
-          // in Bun. Drive the same canonical response schema from owned HTTP.
-          const response = await fetch(new URL('/api/auth/validate', http.url), { method: 'POST', headers: { authorization: `Bearer ${token}` } })
-          expect(response.status).toBe(200)
-          const parsed = AdminValidateResponseSchema.safeParse(await response.json())
-          if (!parsed.success) throw new TestAdminError('Admin response is invalid', 'SERVER_ERROR')
-          return parsed.data
-        }
-        const response = await harness.validate(context) as any
-        expect(response).toMatchObject({ loggedIn: true, configVersion: null, user: { displayName: 'Verified online' } })
-        expect(response.offline).not.toBe(true)
-        expect(seen).toEqual([{ path: '/api/auth/validate', token: 'Bearer access-token' }])
-        expect(adminClientCalls.filter(call => call.method === 'getLlmConnections')).toEqual([])
-      } finally { await http.stop(true) }
-    })
-  }
-
   it('registers every admin channel', () => {
     const harness = createHarness()
 
@@ -5712,89 +5638,4 @@ it('a delayed read-only response cannot revoke newer current-space App authority
   expect(authorityRevokeCalls).toEqual([])
   expect(authorityRecordCalls).toHaveLength(1)
   expect(isRuntimeProductSpaceRestricted('space-a')).toBe(false)
-})
-
-
-describe('R3FIX native late authentication after explicit logout', () => {
-  for (const method of ['logout', 'authLogout'] as const) {
-    for (const hasSession of [false, true]) {
-      it(`${method} invalidates pending login with old session=${hasSession}`, async () => {
-        const harness = createHarness()
-        const ctx = { clientId: 'r3', workspaceId: null, webContentsId: null }
-        if (hasSession) expect(await harness.login(ctx, 'old', 'secret')).toMatchObject({ success: true })
-        const pending = createDeferred<any>()
-        const response = {
-          accessToken: 'late-access', refreshToken: 'late-refresh', expiresIn: 3600,
-          user: { id: 'late-account', username: 'late', displayName: null, role: 'user', groupIds: [] },
-        }
-        adminClientBehavior.login = async () => pending.promise
-        const late = harness.login(ctx, 'late', 'secret')
-        // Wait until the actual login handler has entered its HTTP dependency.
-        while (!adminClientCalls.some(call => call.method === 'login' && call.args[0] === 'late')) {
-          await new Promise(resolve => setTimeout(resolve, 0))
-        }
-        expect(await harness[method](ctx)).toMatchObject({ success: true })
-        expect(managerState.tokens).toBeNull()
-        pending.resolve(response)
-        expect(await late).toMatchObject({ success: false, errorCode: 'SESSION_CHANGED' })
-        expect(managerState.tokens).toBeNull()
-        expect(adminSessionStarted.mock.calls.some(call => call[0] === 'late-account')).toBe(false)
-      })
-    }
-  }
-})
-
-describe('R5FIX-01 logout credential deletion acknowledgement', () => {
-  it('returns retryable failure while tokens remain and succeeds after recovery', async () => {
-    const { login, logout } = createHarness()
-    const ctx = { clientId: 'r5', workspaceId: null, webContentsId: null }
-    await login(ctx, 'user', 'secret')
-    const original = managerState.tokens
-    refuseTokenDeletion = true
-    try {
-      const failed = await logout(ctx)
-      expect(failed.success).toBe(false)
-      expect(failed.errorCode).toBe('LOCAL_CREDENTIAL_DELETE_FAILED')
-      expect(managerState.tokens).toEqual(original)
-    } finally { refuseTokenDeletion = false }
-    expect(await logout(ctx)).toEqual({ success: true })
-    expect(managerState.tokens).toBeNull()
-  })
-})
-
-it('R5FIX-01 does not acknowledge a concurrent logout while the owned transition still has tokens', async () => {
-  const { login, logout } = createHarness()
-  const ctx = { clientId: 'r5', workspaceId: null, webContentsId: null }
-  await login(ctx, 'user', 'secret')
-  const remote = createDeferred<void>()
-  const entered = createDeferred<void>()
-  adminClientBehavior.logout = async () => { entered.resolve(); await remote.promise }
-  const first = logout(ctx)
-  await entered.promise
-  try {
-    const concurrent = await logout(ctx)
-    expect(concurrent.success).toBe(false)
-    expect(concurrent.errorCode).toBe('LOCAL_CREDENTIAL_DELETE_FAILED')
-  } finally { remote.resolve(); await first }
-  expect(managerState.tokens).toBeNull()
-})
-
-describe('R5A trusted direct launch current entitlement', () => {
-  it('rejects an unknown paid source before minting a launch, without revoking the whole space', async () => {
-    const { parseMemberMembershipsResponse } = await import('@polo-ai/shared/admin/member-circles')
-    const { memberMembershipWireFixture, currentEntitlementFixture, CURRENT_CIRCLE_ID } = await import('../../../../shared/src/admin/__tests__/fixtures/current-entitlement')
-    nativeAdmissionMemberships = parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ state: 'unknown' }) })] }).memberships
-    const harness = createHarness()
-    const ctx = { clientId: 'r5a', workspaceId: null, webContentsId: null }
-    await harness.login(ctx, 'user', 'secret')
-    setRuntimeActiveProductSpaceAccount('user-1')
-    setRuntimeActiveProductSpace('space-a', 'personal')
-    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal', accessMode: 'active' }] })
-    adminClientBehavior.getProductSpaceCatalog = async () => ({ catalogRevision: 'r5a', entries: [{ kind: 'app', catalogEntryId: 'entry-a', sources: [{ kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid' }] }] }) as any
-    adminClientBehavior.resolveProductSpaceLaunch = async () => ({ delivery: { kind: 'web_url', url: 'https://controlled.example', launchToken: 'must-not-mint' } }) as any
-    const result = await harness.productSpaceResolveLaunch(ctx, 'space-a', 'entry-a') as any
-    expect(result).toMatchObject({ success: false, errorCode: 'CIRCLE_ENTITLEMENT_REQUIRED', reason: 'unknown', recovery: 'refresh_membership' })
-    expect(adminClientCalls.some(call => call.method === 'resolveProductSpaceLaunch')).toBe(false)
-    expect(getRuntimeActiveProductSpace()).toBe('space-a')
-  })
 })

@@ -13,8 +13,7 @@ import {
   type MemberCircleRenewalPreviewResultPayload,
 } from '@/hooks/useMemberCircles'
 import { formatSubscriptionPrice } from '@/lib/format-subscription-price'
-import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
-import { memberCircleAccessState, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
+import { isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import {
   selectCirclePurchaseHandoff,
 } from '@/lib/circle-purchase-url'
@@ -98,13 +97,9 @@ export interface CircleSubscriptionPanelProps {
 /** Effective membership lifecycle: the membership row wins, circle falls back. */
 export function resolveSubscriptionStatus(
   membership: MemberMembership | null,
-  circle: Pick<MemberCircleSnapshot, 'status'> & Partial<Pick<MemberCircleSnapshot, 'billingKind' | 'currentPeriodEnd'>>,
-  now: number = Date.now(),
+  circle: Pick<MemberCircleSnapshot, 'status'>,
 ): MemberMembership['status'] | MemberCircleSnapshot['status'] {
-  const status = membership?.status ?? circle.status
-  if (status !== 'active') return status
-  if (memberCircleAccessState(membership, circle, now) !== 'valid') return 'expired'
-  return status
+  return membership?.status ?? circle.status
 }
 
 /** Suspended/expired reason: the membership row is the only authoritative source. */
@@ -174,8 +169,7 @@ export function CircleSubscriptionPanel({
   const { t, i18n } = useTranslation()
   const resource = useMemberCircles()
 
-  const now = useMemberCircleClock([membership ?? circle])
-  const status = resolveSubscriptionStatus(membership, circle, now)
+  const status = resolveSubscriptionStatus(membership, circle)
   const billingKind = membership?.billingKind ?? circle.billingKind
   const isPaid = billingKind === 'paid'
   const membershipId = membership?.membershipId ?? null
@@ -346,12 +340,11 @@ export function CircleSubscriptionPanel({
   const endedBeforePeriodEnd = isMembershipEndedBeforePeriodEnd({
     status,
     currentPeriodEnd: currentPeriodEnd ?? null,
-  }, now)
+  })
 
-  const accessState = memberCircleAccessState(membership, circle, now)
-  const statusLabel = accessState === 'valid'
+  const statusLabel = status === 'active'
     ? t('poo70.c6.status.active')
-    : accessState === 'expired'
+    : status === 'expired' && !endedBeforePeriodEnd
       ? t('poo70.c6.status.expired')
       : t('poo70.c3.entitlement.restore')
 
@@ -562,16 +555,12 @@ export function CircleSubscriptionPanel({
           <p className="m-0 font-medium text-foreground">{t('poo70.c6.cap.title')}</p>
           <p className="m-0 mt-[4px] text-muted-foreground">{t('poo70.c6.cap.body')}</p>
           <ul className="m-0 mt-[8px] list-none p-0 text-muted-foreground">
-            {readyPreview?.preview.capReason !== 'month_prepaid_cap_12_calendar_months' && <li>{t('poo70.c6.cap.ruleMonth')}</li>}
-            {readyPreview?.preview.capReason !== 'year_prepaid_next_period_only' && <li className="mt-[2px]">{t('poo70.c6.cap.ruleYear')}</li>}
+            <li>{t('poo70.c6.cap.ruleMonth')}</li>
+            <li className="mt-[2px]">{t('poo70.c6.cap.ruleYear')}</li>
           </ul>
           {readyPreview?.preview.capReason && (
             <p className="m-0 mt-[8px] text-muted-foreground" data-testid="circle-subscription-cap-reason">
-              {t(readyPreview.preview.capReason === 'month_prepaid_cap_12_calendar_months'
-                ? 'poo70.c6.cap.ruleMonth'
-                : readyPreview.preview.capReason === 'year_prepaid_next_period_only'
-                  ? 'poo70.c6.cap.ruleYear'
-                  : 'poo70.c6.cap.body')}
+              {t('poo70.c6.cap.serverReason', { reason: readyPreview.preview.capReason })}
             </p>
           )}
           {latestOrderSummary && (

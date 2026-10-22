@@ -10,7 +10,6 @@ import {
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
-  getRuntimeActiveProductSpaceKind,
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
@@ -2093,98 +2092,4 @@ describe('STOP_ALL generation stability end-to-end (R38-5)', () => {
     // The newest generation remains registered and active.
     expect(await getRegisteredProductSpaceExecution('exec-churn')!.isActive()).toBe(true)
   })
-})
-
-describe('R5FIX-04 recovery after Catalog revokes the committed fence', () => {
-  it('drains surviving executions of the trusted account before recommitting; other accounts stay untouched', async () => {
-    const { invoke } = createHarness()
-    setRuntimeActiveProductSpace(null)
-    const survivor = fakeExecution({ executionId: 'exec-r5-survivor' })
-    const other = fakeExecution({ executionId: 'exec-r5-other', accountId: 'other-account' })
-    registerProductSpaceExecution(survivor)
-    registerProductSpaceExecution(other)
-    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceA)
-    expect(prepared.success).toBe(true)
-    expect(prepared.executions.map((item: { executionId: string }) => item.executionId)).toEqual(['exec-r5-survivor'])
-    const stopped = await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)
-    expect(stopped.success).toBe(true)
-    expect(await survivor.isActive()).toBe(false)
-    expect(await other.isActive()).toBe(true)
-    expect((await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceA)).success).toBe(true)
-    expect(runtimeActiveSpace()).toBe(spaceA)
-    expect((await invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, trustedAccountId, spaceA)).success).toBe(true)
-  })
-})
-
-it('R5A commits the kind from the trusted list, and a revoke clears it', async () => {
-  const { invoke } = createHarness()
-  const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, personalId, { kind: 'enterprise' })
-  expect(prepared.success).toBe(true)
-  expect((await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).success).toBe(true)
-  expect((await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, personalId)).success).toBe(true)
-  expect(getRuntimeActiveProductSpaceKind()).toBe('personal')
-  await invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT)
-  expect(getRuntimeActiveProductSpaceKind()).toBeNull()
-})
-
-it('R8 cleanup keeps disk provenance after a failure, retries exactly, and preserves 19 native installations and unknown/user files', async () => {
-  const { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises')
-  const { tmpdir } = await import('node:os')
-  const { join } = await import('node:path')
-  const { saveAppCatalog, getCachedAppCatalog, resetAppCatalogMemoryCacheForTests } = await import('@polo-ai/shared/admin/app-catalog-cache')
-  const { setLegacyLocalAppCleaner } = await import('../../../runtime/legacy-state-cleaners')
-  const { ScopedLocalAppRuntimeRegistry, createCatalogRuntimeAppId, createCatalogLocalAppScopeKey } = await import('../../../../../../apps/electron/src/main/local-app-runtime/scoped-registry')
-  const rootDir = await mkdtemp(join(tmpdir(), 'polo-r8-cleanup-'))
-  const legacy = { kind: 'catalog' as const, accountId: 'r8-owner', organizationId: 'r8-legacy-org', catalogAppId: 'legacy-app' }
-  const legacyId = createCatalogRuntimeAppId(legacy)
-  const appDir = (scope: typeof legacy) => join(rootDir, 'catalog-scopes', createCatalogLocalAppScopeKey(scope), 'apps', createCatalogRuntimeAppId(scope))
-  async function seed(scope: typeof legacy, admissionId: string | null) {
-    const base = appDir(scope)
-    await mkdir(join(base, 'versions', '1.0.0'), { recursive: true })
-    await mkdir(join(base, 'data'), { recursive: true })
-    await writeFile(join(base, '..', '..', 'scope.json'), JSON.stringify({ schemaVersion: 1, scope }))
-    await writeFile(join(base, 'metadata.json'), JSON.stringify({ schemaVersion: 1, appId: createCatalogRuntimeAppId(scope), currentVersion: '1.0.0', versions: { '1.0.0': { checksum: 'a'.repeat(64), nativeInstallationAdmissionId: admissionId } } }))
-    await writeFile(join(base, 'versions', '1.0.0', 'index.html'), 'retained version')
-    await writeFile(join(base, 'data', 'user.txt'), 'retained user data')
-  }
-  const native = Array.from({ length: 19 }, (_, index) => ({ ...legacy, catalogAppId: `native-${index}` }))
-  const unknown = { ...legacy, organizationId: 'unknown-org', catalogAppId: 'unknown-app' }
-  let registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
-  try {
-    await seed(legacy, null)
-    for (const scope of native) await seed(scope, '11111111-1111-4111-8111-111111111111')
-    await seed(unknown, null)
-    saveAppCatalog(legacy.accountId, legacy.organizationId, { appConfigVersion: 'r8', apps: [{ id: legacy.catalogAppId, organizationId: legacy.organizationId, name: 'Legacy', description: '', deliveryMode: 'local_bundle', currentRelease: { version: '1.0.0', runtime: 'static', checksum: 'a'.repeat(64), sizeBytes: 1 }, sortOrder: 0 }] })
-    setLegacyLocalAppCleaner(async () => {
-      try {
-        // Same exact Catalog provenance gate as Main; absence must not turn a retry into fictional success.
-        if (getCachedAppCatalog(legacy.accountId, legacy.organizationId)?.apps.some(app => app.id === legacy.catalogAppId && !app.artifactInstanceId)) await registry.removeLegacyInstallationState(legacy)
-        return { ok: true, failedRefs: [] }
-      } catch { return { ok: false, failedRefs: [legacyId] } }
-    })
-    const { invoke } = createHarness()
-    await chmod(join(appDir(legacy), 'versions', '1.0.0'), 0o555)
-    const first = await invoke(RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE)
-    expect(first.success).toBe(false)
-    expect(first.results.legacyInstallationStateRemoved).toBe(false)
-    expect(first.results.legacyCatalogCacheRemoved).toBe(false)
-    resetAppCatalogMemoryCacheForTests()
-    expect(getCachedAppCatalog(legacy.accountId, legacy.organizationId)?.apps[0]?.id).toBe(legacy.catalogAppId)
-    await chmod(join(appDir(legacy), 'versions', '1.0.0'), 0o755)
-    registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
-    const second = await invoke(RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE)
-    expect(second.success).toBe(true)
-    await expect(access(join(appDir(legacy), 'versions'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(access(join(appDir(legacy), 'metadata.json'))).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(await readFile(join(appDir(legacy), 'data', 'user.txt'), 'utf8')).toBe('retained user data')
-    for (const scope of [...native, unknown]) {
-      expect(await readFile(join(appDir(scope), 'versions', '1.0.0', 'index.html'), 'utf8')).toBe('retained version')
-      expect(await readFile(join(appDir(scope), 'data', 'user.txt'), 'utf8')).toBe('retained user data')
-      await access(join(appDir(scope), 'metadata.json'))
-    }
-  } finally {
-    setLegacyLocalAppCleaner(async () => ({ ok: true, failedRefs: [] }))
-    await chmod(join(appDir(legacy), 'versions', '1.0.0'), 0o755).catch(() => {})
-    await rm(rootDir, { recursive: true, force: true })
-  }
 })

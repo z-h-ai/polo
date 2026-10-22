@@ -578,52 +578,6 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
     )
   }
 
-  for (const state of ['entitled', 'not_entitled', 'unknown'] as const) {
-    it(`R4FIX-02 actual Home open button consumes ${state} rather than recent history`, async () => {
-      const { currentEntitlementFixture, memberMembershipWireFixture, CURRENT_CIRCLE_ID } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
-      const { parseMemberMembershipsResponse } = await import('@polo-ai/shared/admin/member-circles')
-      const { MemberCircleResourceProvider } = await import('@/context/MemberCircleResourceContext')
-      const wire = memberMembershipWireFixture({
-        currentEntitlement: currentEntitlementFixture({ state }),
-        paymentOrders: Array.from({ length: 5 }, (_, i) => ({ ...memberMembershipWireFixture().paymentOrders[0]!, id: `44444444-4444-4444-8444-${String(i).padStart(12, '0')}`, effectivePaymentStatus: state === 'entitled' ? 'cancelled' : 'paid' })),
-      })
-      const member = parseMemberMembershipsResponse({ memberships: [wire] }).memberships[0]!
-      const circle = { membershipId: member.membershipId, status: member.status, billingKind: member.billingKind, currentPeriodEnd: member.currentPeriodEnd, modeTransitionEndsAt: null, joinedAt: member.joinedAt, joinSource: 'share_link', circle: { circleId: CURRENT_CIRCLE_ID, name: 'Current Circle', purpose: '', status: 'active' as const, ownerUserId: 'owner' }, entitlements: [] }
-      const resource = {
-        state: { phase: 'ready' as const, scope: { accountId: 'account-a', personalProductSpaceId: 'organization-a', epoch: 7, contextKey: 'account-a|organization-a' }, circles: [circle], memberships: [member], circlesError: null, membershipsError: null, refreshing: false, updatedAt: 1 },
-        circles: [circle], memberships: [member],
-      }
-      stubCatalogEntries = [{ kind: 'app', catalogEntryId: 'r4-current', artifactInstanceId: 'artifact-r4-current', version: { versionId: 'r4-version', version: '1.0.0' }, name: 'Current App', description: '', availability: 'available', deliveryMode: 'remote_url', remoteUrl: 'https://current.example.com', sources: [{ kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Current Circle' }] }]
-      render(createElement(MemberCircleResourceProvider, { resource: resource as unknown as import('@/context/MemberCircleResourceContext').MemberCirclesResource, children: personalHomeTree() }))
-      await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
-      expect((screen.getByRole('button', { name: i18n.t('common.open') }) as HTMLButtonElement).disabled).toBe(state !== 'entitled')
-      expect(openApp).not.toHaveBeenCalled()
-    })
-  }
-
-  it('R3FIX uncached 503 shows load failure and an explicit retry through the real catalog hook', async () => {
-    const rpc = window.electronAPI
-    const getCatalog = rpc.productSpaceGetCatalog
-    let fail = true
-    const calls: Array<unknown[]> = []
-    rpc.productSpaceGetCatalog = (async (...args: Parameters<typeof getCatalog>) => {
-      calls.push(args)
-      if (fail) return { success: false as const, errorCode: 'SERVER_ERROR', status: 503, message: 'unavailable' }
-      return getCatalog(...args)
-    }) as typeof getCatalog
-    render(personalHomeTree())
-    await waitFor(() => expect(screen.getByTestId('home-directory-load-failed')).toBeTruthy())
-    expect(screen.queryByTestId('home-directory-offline-banner')).toBeNull()
-    const retry = screen.getByRole('button', { name: i18n.t('homeApps.actions.tryAgain') })
-    expect((retry as HTMLButtonElement).disabled).toBe(false)
-    fail = false
-    fireEvent.click(retry)
-    await waitFor(() => expect(screen.queryByTestId('home-directory-load-failed')).toBeNull())
-    expect(calls).toHaveLength(2)
-    expect(calls[1]![1]).toBeUndefined()
-    expect(openApp).not.toHaveBeenCalled()
-  })
-
   it('the personal circles entry navigates the client-page route stack to {kind:"circles"}', async () => {
     const view = render(personalHomeTree())
     await waitFor(() => {
@@ -773,9 +727,4 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
         .toEqual(['Usage App', 'Alpha App'])
     })
   })
-})
-
-it('R5FIX-03 uses source-neutral withdrawal explanation in personal and enterprise spaces', () => {
-  expect(i18n.t('homeApps.errors.unavailable', { lng: 'zh-Hans' })).toBe('此 App 的授权已结束或已停止分发。')
-  expect(i18n.t('homeApps.errors.unavailable', { lng: 'en' })).toBe('Authorization for this App has ended or distribution has stopped.')
 })

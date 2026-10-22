@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>Skill 详情 · Polo 组件画廊</title>
+<style>
+/* Translated from apps/electron/src/renderer/index.css :root/.dark plus the
+   shadow utility classes (index.css ~604-652). Values are the source ones;
+   --fg-* aliases kept for the existing prototype stylesheets. */
+
+:root {
+  --background: oklch(0.98 0.003 265);
+  --foreground: oklch(0.185 0.01 270);
+  --foreground-rgb: 38, 36, 42;
+  --accent: oklch(0.62 0.13 293);
+  --accent-rgb: 104, 78, 133;
+  --info: oklch(0.75 0.16 70);
+  --info-rgb: 180, 120, 40;
+  --success: oklch(0.55 0.17 145);
+  --success-rgb: 34, 120, 60;
+  --destructive: oklch(0.58 0.24 28);
+  --destructive-rgb: 180, 60, 50;
+  --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --user-bubble: oklch(from var(--foreground) l c h / 0.05);
+  --border: oklch(from var(--foreground) l c h / 0.05);
+  --input: oklch(from var(--foreground) l c h / 0.1);
+  --ring: oklch(from var(--foreground) l c h / 0.25);
+  --fg-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --fg-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --fg-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --fg-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+  --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+  --fg-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+  --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+  --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+  --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+  --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+  --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  /* Source-named shadcn compatibility tokens (index.css:164-178). */
+  --muted: oklch(from var(--foreground) l c h / 0.05);
+  --muted-foreground: var(--fg-50);
+  --foreground-2: var(--fg-2);
+  --amber-strong: #d97706;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--background));
+  --info-soft: color-mix(in srgb, var(--info) 12%, var(--background));
+  --success-soft: color-mix(in srgb, var(--success) 12%, var(--background));
+  --danger-soft: color-mix(in srgb, var(--destructive) 10%, var(--background));
+  --on-accent: #fff;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --panel-gap: 6px;
+  --panel-inset: 6px;
+  --tabbar-height: 36px;
+  --content-top-offset: 84px;
+  --radius-xs: 2px;
+  --radius-sm: 3.75px;
+  --radius-md: 5.625px;
+  --radius-lg: 11.25px;
+  --radius-edge: 14px;
+  --radius-pill: 999px;
+  --topbar-height: 48px;
+  /* Shadow opacity registry (index.css:113-115) and layered shadows
+     (index.css:118-139, 604-652). The 1px ring is always foreground 6%. */
+  --shadow-border-opacity: 0.08;
+  --shadow-blur-opacity: 0.06;
+  --shadow-minimal:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px;
+  --shadow-middle:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px;
+  --shadow-strong:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 12px 12px -6px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 24px 24px -12px;
+  /* Tinted shadow: set --shadow-color to an "r, g, b" triple before use
+     (index.css:619-628). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-border-opacity) * 1.5)) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-border-opacity)) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-blur-opacity) * 0.67)) 0 6px 6px -3px;
+  --shadow-panel: 0 18px 52px rgba(0,0,0,.18);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .06) 0 0 0 1px,
+    rgba(0,0,0,.04) 0 1px 1px -.5px,
+    rgba(0,0,0,.04) 0 3px 3px 0,
+    rgba(0,0,0,.02) 0 6px 6px 0,
+    rgba(0,0,0,.02) 0 12px 12px 0,
+    rgba(0,0,0,.02) 0 24px 24px 0;
+}
+
+html[data-theme="dark"] {
+  --background: oklch(0.145 0.015 270);
+  --foreground: oklch(0.95 0.01 270);
+  --foreground-rgb: 237, 236, 240;
+  --accent: oklch(0.65 0.22 293);
+  --accent-rgb: 130, 75, 185;
+  --info: oklch(0.78 0.14 70);
+  --info-rgb: 210, 155, 55;
+  --success: oklch(0.60 0.17 145);
+  --success-rgb: 50, 140, 80;
+  --destructive: oklch(0.65 0.22 28);
+  --destructive-rgb: 200, 70, 60;
+  --background-elevated: color-mix(in srgb, var(--foreground) 2.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --border: oklch(from var(--foreground) l c h / 0.09);
+  /* Dark mode uses stronger blur opacity; the ring stays foreground 6%
+     exactly as in the source (index.css:267-269 and utility classes). */
+  --shadow-border-opacity: 0.15;
+  --shadow-blur-opacity: 0.12;
+  /* Dark tinted shadows are outline-only at uniform lightness 0.425
+     (index.css:632-640). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    oklch(from rgb(var(--shadow-color, 0, 0, 0)) 0.425 c h / 0.6) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 6px 6px -3px;
+  --amber-strong: #fbbf24;
+  --shadow-panel: 0 20px 70px rgba(0,0,0,.48);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .12) 0 0 0 1px,
+    rgba(0,0,0,.08) 0 1px 1px -.5px,
+    rgba(0,0,0,.08) 0 3px 3px 0,
+    rgba(0,0,0,.04) 0 6px 6px 0,
+    rgba(0,0,0,.04) 0 12px 12px 0,
+    rgba(0,0,0,.04) 0 24px 24px 0;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html { font-size: 15px; font-optical-sizing: auto; background: var(--background); }
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: color .2s ease, background .2s ease;
+}
+button, input, textarea, select { color: inherit; font: inherit; }
+button { border: 0; cursor: pointer; }
+/* Source buttons use disabled:pointer-events-none disabled:opacity-50. */
+button:disabled { pointer-events: none; opacity: .5; }
+/* Source inputs/buttons focus with a 1px foreground/30 ring, not an accent
+   outline (input.tsx, button.tsx). */
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 30%, transparent);
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+*:hover::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: var(--fg-20); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* SpinKit grid spinner keyframes from packages/ui/src/styles/index.css,
+   used by the source Spinner component (LoadingIndicator.tsx). */
+@keyframes spinner-grid {
+  0%, 70%, 100% { transform: scale3d(0.5, 0.5, 1); }
+  35% { transform: scale3d(0, 0, 1); }
+}
+.icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; flex: 0 0 auto; }
+.icon svg { width: 100%; height: 100%; }
+.muted { color: var(--fg-50); }
+.eyebrow { margin: 0 0 7px; color: var(--fg-50); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.button { min-height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; font-size: 12px; }
+.button:hover { background: var(--fg-5); }
+.button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.button.danger { border-color: var(--destructive); background: var(--destructive); color: var(--on-accent); }
+
+</style>
+<style>
+/* Gallery chrome only — not part of the translated component. */
+html, body { overflow: auto; height: auto; }
+#root { min-height: 100%; }
+.gallery-body { position: relative; min-height: 100vh; background: var(--background); }
+.gallery-note { position: fixed; left: 12px; bottom: 10px; z-index: 999; padding: 4px 10px; border-radius: 6px; background: color-mix(in srgb, var(--foreground) 4%, var(--background)); box-shadow: var(--shadow-minimal); color: var(--fg-50); font-size: 11px; user-select: none; }
+.gallery-dark-toggle { position: fixed; right: 12px; bottom: 10px; z-index: 999; padding: 4px 10px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); background: var(--background); color: var(--foreground); font-size: 11px; box-shadow: var(--shadow-minimal); }
+/* Canvas-embed mode (?embed=1): the gallery index frames components in iframes
+   and provides its own chrome, so hide the per-page note and theme toggle. */
+.gallery-embed .gallery-note, .gallery-embed .gallery-dark-toggle { display: none; }
+</style>
+</head>
+<body>
+<script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
+<div id="root"><div class="gallery-body"><div data-route="resources/skills/detail" style="display:flex;width:100%;height:100%;min-height:0;flex-direction:column;background:var(--background);color:var(--foreground)"><div class="source-navigator__header" style="z-index:50"><span class="source-navigator__header-title">周报生成器</span><span style="display:flex;align-items:center;gap:3.75px;position:relative"><button type="button" class="source-navigator__header-button" aria-label="更多选项"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-ellipsis" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button></span></div><div style="flex:1;min-height:0;overflow-y:auto;-webkit-mask-image:linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%);mask-image:linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)"><div style="max-width:630px;margin:0 auto;box-sizing:border-box;padding:22.5px 18.75px 37.5px;display:flex;flex-direction:column;gap:22.5px"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:7.5px;border-radius:8px;border:1px solid color-mix(in srgb, var(--accent) 20%, transparent);background:color-mix(in srgb, var(--accent) 5%, transparent);padding:7.5px 11.25px;font-size:13.125px"><span style="margin-right:auto">有可用的安全版本 1.2.0</span><button type="button" style="padding:3.75px 9.375px;border-radius:6px;border:0;background:var(--accent);color:var(--accent-foreground);font-weight:500;cursor:pointer">更新</button><button type="button" style="padding:3.75px 9.375px;border-radius:6px;border:0;background:transparent;color:var(--fg-50);cursor:pointer">忽略这个版本</button></div><div style="display:flex;align-items:flex-start;gap:11.25px"><span aria-hidden="true" style="display:flex;width:32px;height:32px;flex-shrink:0;margin-top:2px;align-items:center;justify-content:center;border-radius:4px;background:var(--muted);box-shadow:0 0 0 1px color-mix(in srgb, var(--border) 30%, transparent);font-size:16px;line-height:1">📋</span><div style="flex:1;min-width:0"><h2 style="margin:0;font-size:15px;font-weight:600;line-height:1.35;color:var(--foreground)">周报生成器</h2><p style="margin:0;margin-top:1.875px;color:color-mix(in srgb, var(--foreground) 60%, transparent);font-size:13.125px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">汇总本周会话与提交，生成周报草稿</p></div></div><section style="display:flex;flex-direction:column;gap:11.25px;padding-top:7.5px"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding-left:3.75px"><div style="display:flex;flex-direction:column;gap:1.875px;min-width:0"><h3 style="margin:0;font-size:15px;font-weight:600;line-height:1.35">元数据</h3></div><button type="button" style="display:inline-flex;align-items:center;height:30px;padding:0 11.25px;border-radius:6px;background:var(--background);box-shadow:var(--shadow-minimal);color:color-mix(in srgb, var(--foreground) 70%, transparent);font-size:13.125px;border:0;cursor:pointer">编辑</button></div><div style="overflow:hidden;border-radius:8px;background:var(--background);box-shadow:var(--shadow-minimal)"><div style="padding-top:7.5px;padding-bottom:7.5px"><dl style="margin:0"><div style="display:flex;align-items:baseline;padding:9.375px 15px;font-size:13.125px;border-top:1px solid color-mix(in srgb, var(--border) 30%, transparent)"><dt style="width:120px;flex-shrink:0;color:var(--fg-50)">标识符</dt><dd style="margin:0;min-width:0;color:var(--foreground)">weekly-report</dd></div><div style="display:flex;align-items:baseline;padding:9.375px 15px;font-size:13.125px;border-top:1px solid color-mix(in srgb, var(--border) 30%, transparent)"><dt style="width:120px;flex-shrink:0;color:var(--fg-50)">名称</dt><dd style="margin:0;min-width:0;color:var(--foreground)">周报生成器</dd></div><div style="display:flex;align-items:baseline;padding:9.375px 15px;font-size:13.125px;border-top:1px solid color-mix(in srgb, var(--border) 30%, transparent)"><dt style="width:120px;flex-shrink:0;color:var(--fg-50)">描述</dt><dd style="margin:0;min-width:0;color:var(--foreground)">汇总本周会话与提交，生成周报草稿</dd></div><div style="display:flex;align-items:baseline;padding:9.375px 15px;font-size:13.125px;border-top:1px solid color-mix(in srgb, var(--border) 30%, transparent)"><dt style="width:120px;flex-shrink:0;color:var(--fg-50)">数据源</dt><dd style="margin:0;min-width:0;color:var(--foreground)">Workspace</dd></div><div style="display:flex;align-items:baseline;padding:9.375px 15px;font-size:13.125px;border-top:1px solid color-mix(in srgb, var(--border) 30%, transparent)"><dt style="width:120px;flex-shrink:0;color:var(--fg-50)">位置</dt><dd style="margin:0;min-width:0;color:var(--foreground)"><button type="button" style="border:0;padding:0;background:none;color:var(--foreground);cursor:pointer;text-align:left;font-size:13.125px">skills/weekly-report/</button></dd></div><div style="display:flex;align-items:baseline;padding:9.375px 15px;font-size:13.125px;border-top:1px solid color-mix(in srgb, var(--border) 30%, transparent)"><dt style="width:120px;flex-shrink:0;color:var(--fg-50)">建议的 Source（不会自动启用）</dt><dd style="margin:0;min-width:0;color:var(--foreground)">polaris-mcp</dd></div></dl></div></div></section><section style="display:flex;flex-direction:column;gap:11.25px;padding-top:7.5px"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding-left:3.75px"><div style="display:flex;flex-direction:column;gap:1.875px;min-width:0"><h3 style="margin:0;font-size:15px;font-weight:600;line-height:1.35">Skill 请求使用的工具</h3></div></div><div style="overflow:hidden;border-radius:8px;background:var(--background);box-shadow:var(--shadow-minimal)"><div style="padding:11.25px 15px"><p style="margin:0;margin-bottom:11.25px;font-size:11.25px;color:var(--fg-50)">仅作为建议性元数据展示。工具访问仍由当前权限模式和用户审批决定。</p><div style="display:flex;flex-wrap:wrap;gap:5.625px"><code style="border-radius:4px;background:color-mix(in srgb, var(--foreground) 5%, transparent);padding:3.75px 7.5px;font-size:11.25px;color:color-mix(in srgb, var(--foreground) 80%, transparent);font-family:var(--font-mono)">read_file</code><code style="border-radius:4px;background:color-mix(in srgb, var(--foreground) 5%, transparent);padding:3.75px 7.5px;font-size:11.25px;color:color-mix(in srgb, var(--foreground) 80%, transparent);font-family:var(--font-mono)">run_command</code></div></div></div></section><section style="display:flex;flex-direction:column;gap:11.25px;padding-top:7.5px"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding-left:3.75px"><div style="display:flex;flex-direction:column;gap:1.875px;min-width:0"><h3 style="margin:0;font-size:15px;font-weight:600;line-height:1.35">说明</h3></div><button type="button" style="display:inline-flex;align-items:center;height:30px;padding:0 11.25px;border-radius:6px;background:var(--background);box-shadow:var(--shadow-minimal);color:color-mix(in srgb, var(--foreground) 70%, transparent);font-size:13.125px;border:0;cursor:pointer">编辑</button></div><div style="position:relative;padding:7.5px 15px 3.75px;max-height:540px;overflow-y:auto"><div><h3 style="margin:0;padding-bottom:7.5px;font-size:13.125px;font-weight:600;color:var(--foreground)">用途</h3><p style="margin:0;padding-bottom:7.5px;font-size:13.125px;line-height:1.55;color:var(--foreground)">每周五读取 polaris 仓库的会话记录与 Git 提交，汇总为本周的工作周报草稿，包含进展、变更与待办。</p></div><div><h3 style="margin:0;padding-bottom:7.5px;font-size:13.125px;font-weight:600;color:var(--foreground)">运行方式</h3><p style="margin:0;padding-bottom:7.5px;font-size:13.125px;line-height:1.55;color:var(--foreground)">本技能会被以下场景触发：</p><ul style="margin:0;padding-bottom:7.5px;padding-left:26.25px;font-size:13.125px;line-height:1.65;color:var(--foreground)"><li style="padding-bottom:2.5px">用户在周报发布日请求「生成周报」</li><li style="padding-bottom:2.5px">会话中粘贴了本周的提交摘要</li><li style="padding-bottom:2.5px">用户手动在 /skills 中运行</li></ul></div><div><h3 style="margin:0;padding-bottom:7.5px;font-size:13.125px;font-weight:600;color:var(--foreground)">产出格式</h3><ul style="margin:0;padding-bottom:7.5px;padding-left:26.25px;font-size:13.125px;line-height:1.65;color:var(--foreground)"><li style="padding-bottom:2.5px">本周进展（含会话摘要）</li><li style="padding-bottom:2.5px">仓库变更（提交与 PR 链接）</li><li style="padding-bottom:2.5px">待办清单与建议</li></ul></div><div><p style="margin:0;padding-bottom:7.5px;font-size:13.125px;line-height:1.55;color:var(--foreground)">所有工具调用都应在 workspace 目录内进行，不要越权访问其他目录。</p></div><button type="button" title="全屏查看" style="position:absolute;top:7.5px;right:7.5px;display:none;width:26.25px;height:26.25px;align-items:center;justify-content:center;padding:0;border:0;border-radius:6px;background:color-mix(in srgb, var(--background) 80%, transparent);backdrop-filter:blur(1px);color:color-mix(in srgb, var(--foreground) 50%, transparent);box-shadow:var(--shadow-minimal);cursor:pointer"><svg xmlns="http://www.w3.org/2000/svg" width="13.125" height="13.125" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-maximize2 lucide-maximize-2" aria-hidden="true"><path d="M15 3h6v6"></path><path d="m21 3-7 7"></path><path d="m3 21 7-7"></path><path d="M9 21H3v-6"></path></svg></button></div></section></div></div></div></div></div>
+<div class="gallery-note">资源面板 / Skill 详情 — 静态翻译自 Renderer 源码</div>
+<button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
+</body>
+</html>

@@ -196,9 +196,12 @@ const NETWORK_CLASS_READ_CODES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Same bound current-period authority and local expiry as the list/detail.
- * Absent v1 keeps the existing conservative legacy payment adapter; a present
- * unknown/not_entitled authority never falls back to recent paid history.
+ * Correction-aware membership entitlement display (mirrors the C3 row rule):
+ * lifecycle `active` keeps the row valid UNLESS the correction-aware payment
+ * projection says the latest order is no longer paid (refund/chargeback).
+ * A projection that is MISSING (no orders / provider omitted it) is a fact,
+ * not a failure — the lifecycle stays the authority, and a raw stored `paid`
+ * alone never grants anything (G5).
  */
 export function deriveMembershipEntitlementState(
   membership: MemberMembership | null,

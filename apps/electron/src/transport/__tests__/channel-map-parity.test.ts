@@ -145,13 +145,3 @@ describe('CHANNEL_MAP runtime contract', () => {
     ])
   })
 })
-
-it('R8 preload returns cloneable admission guidance for install/full START without losing successful results', async () => {
-  const failure = { code: 'CIRCLE_ENTITLEMENT_REQUIRED', data: { reason: 'unknown', recovery: 'refresh_membership' } }
-  const client = { invoke: mock(async () => { throw Object.assign(new Error('Refresh memberships'), failure) }), on: mock(() => () => {}) } as unknown as RpcClient
-  const api = buildClientApi(client, CHANNEL_MAP)
-  for (const call of [() => api.localApps.installProductSpaceBundle({} as any), () => api.localApps.start({ kind: 'product_space_runtime_start', app: {} } as any)]) {
-    const clone = JSON.parse(JSON.stringify(await call()))
-    expect(clone).toEqual({ kind: 'circle_entitlement_required', error: { code: failure.code, message: 'Refresh memberships', details: failure.data } })
-  }
-})

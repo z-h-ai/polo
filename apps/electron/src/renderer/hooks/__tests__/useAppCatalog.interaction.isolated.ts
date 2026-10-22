@@ -170,7 +170,6 @@ let uninstallProductSpaceBundle = mock(async (
 
 function productSpaceContext(organizationId: string, accountId = 'account-a') {
   return {
-    onRecoverActiveProductSpace: async () => true,
     accountId,
     activeProductSpaceId: organizationId,
     productSpaceContextKey: createProductSpaceContextKey(
@@ -947,57 +946,6 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
       }),
       { preserveData: true },
     )
-  })
-
-  it('P-R2-05: real persisted authority survives repeated reads, renderer remount, and fresh restoration', async () => {
-    const { mkdtempSync, rmSync } = await import('node:fs')
-    const { tmpdir } = await import('node:os')
-    const { join } = await import('node:path')
-    const { recordProductSpaceCatalogAuthoritativeEntries: record } = await import('../../../../../../packages/server-core/src/runtime/product-space-catalog-authority-commit')
-    const { resetProductSpaceCatalogAuthorityForTests: reset } = await import('../../../../../../packages/server-core/src/runtime/product-space-catalog-authority')
-    const previousConfig = process.env.POLO_AI_CONFIG_DIR
-    const config = mkdtempSync(join(tmpdir(), 'polo-r2-renderer-'))
-    process.env.POLO_AI_CONFIG_DIR = config
-    reset()
-    try {
-      let entries = [strictEntry()]
-      let revision = 0
-      const api = window.electronAPI as any
-      api.productSpaceGetCatalog = async () => {
-        const catalogRevision = `authority-${++revision}`
-        const withdrawn = record('account-a', 'organization-a', catalogRevision, entries)
-        return {
-          success: true, notModified: false, contractVersion: 1, catalogRevision,
-          productSpaceId: 'organization-a', accessMode: 'online', entries,
-          withdrawnEntries: withdrawn.map(row => ({ ...row, version: { versionId: row.versionId, version: row.version } })),
-        }
-      }
-      withdrawnInstallStatesInstalled()
-      const first = renderHook(() => useAppCatalog())
-      await waitFor(() => expect(first.result.current.state.catalog?.apps).toHaveLength(1))
-      entries = []
-      for (let poll = 0; poll < 4; poll++) {
-        await act(async () => { await first.result.current.sync(true) })
-        expect(first.result.current.state.catalog?.withdrawnApps).toHaveLength(1)
-        expect(first.result.current.state.catalog?.apps).toHaveLength(0)
-      }
-      first.unmount()
-      const reopened = renderHook(() => useAppCatalog())
-      await waitFor(() => expect(reopened.result.current.state.catalog?.withdrawnApps).toHaveLength(1))
-      const withdrawn = reopened.result.current.state.catalog!.withdrawnApps![0]!
-      expect(withdrawn.catalogSources).toEqual([{ kind: 'enterprise_import', name: 'Studio A' }])
-      await expect(reopened.result.current.resolveLaunch(withdrawn)).rejects.toThrow()
-      entries = [strictEntry({ versionId: 'version-restored', version: '3.0.0' })]
-      await act(async () => { await reopened.result.current.sync(true) })
-      expect(reopened.result.current.state.catalog?.withdrawnApps).toHaveLength(0)
-      expect(reopened.result.current.state.catalog?.apps[0]?.catalogVersion?.version).toBe('3.0.0')
-      reopened.unmount()
-    } finally {
-      reset()
-      if (previousConfig === undefined) delete process.env.POLO_AI_CONFIG_DIR
-      else process.env.POLO_AI_CONFIG_DIR = previousConfig
-      rmSync(config, { recursive: true, force: true })
-    }
   })
 
   it('does not create tombstones on version upgrades and keeps install states fresh', async () => {
@@ -2065,42 +2013,6 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
     }
   }
 
-  it('R8 renderer consumes cloneable install recovery instead of reporting stale context', async () => {
-    wireElectronApi({ entries: [rawEntry()] })
-    const denial = { kind: 'circle_entitlement_required', error: { code: 'CIRCLE_ENTITLEMENT_REQUIRED', message: 'Refresh memberships', details: { reason: 'unknown', recovery: 'refresh_membership' } } }
-    window.electronAPI.localApps.installProductSpaceBundle = async () => JSON.parse(JSON.stringify(denial))
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => expect(result.current.state.catalog?.apps).toHaveLength(1))
-    await act(async () => { await expect(result.current.installProductSpaceBundle(result.current.state.catalog!.apps[0]!)).rejects.toMatchObject({ code: denial.error.code, details: denial.error.details }) })
-    expect(result.current.state.accessMode).toBe('online')
-  })
-
-  it('R7 artifact404 only marks that entry unavailable, keeps the space online and refresh recovers it', async () => {
-    const entries = [rawEntry(), rawEntry({ catalogEntryId: 'neighbor', artifactInstanceId: 'neighbor-artifact' })]
-    wireElectronApi({ entries, resolveLaunch: () => ({ success: false, errorCode: 'NOT_FOUND', status: 404, message: 'missing artifact' }) })
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => expect(result.current.state.catalog?.apps).toHaveLength(2))
-    const target = result.current.state.catalog!.apps[0]!
-    await act(async () => { await expect(result.current.resolveLaunch(target)).rejects.toMatchObject({ code: 'NOT_FOUND' }) })
-    expect(result.current.state.accessMode).toBe('online')
-    expect(result.current.state.catalog!.apps.map(app => app.availability)).toEqual(['unavailable', 'available'])
-    await act(async () => { await result.current.sync(true) })
-    expect(result.current.state.catalog!.apps.map(app => app.availability)).toEqual(['available', 'available'])
-  })
-
-  it('R7 a late artifact404 cannot poison a newer same-scope successful catalog', async () => {
-    const delayed = deferred<any>()
-    wireElectronApi({ entries: [rawEntry()], resolveLaunch: () => delayed.promise })
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => expect(result.current.state.catalog?.apps).toHaveLength(1))
-    const target = result.current.state.catalog!.apps[0]!
-    let pending!: Promise<unknown>
-    act(() => { pending = result.current.resolveLaunch(target) })
-    await act(async () => { await result.current.sync(true) })
-    await act(async () => { delayed.resolve({ success: false, errorCode: 'NOT_FOUND', message: 'old missing artifact' }); await expect(pending).rejects.toMatchObject({ code: 'NOT_FOUND' }) })
-    expect(result.current.state.catalog!.apps[0]!.availability).toBe('available')
-  })
-
   it('pin, open and uninstall carry the complete identity through the REAL persistence, resolve-launch and uninstall RPCs (both collision directions)', async () => {
     const react = await import('@testing-library/react')
     const { createElement } = await import('react')
@@ -2305,71 +2217,4 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
 
     view.unmount()
   })
-})
-
-
-describe('R3FIX initial Catalog failure classification', () => {
-  for (const thrown of [false, true]) {
-    it(`uncached 503 is a load error, supports explicit retry, and never starts an App (thrown=${thrown})`, async () => {
-      syncCatalog = mock(async () => {
-        if (thrown) throw new Error('service unavailable')
-        return { success: false as const, errorCode: 'SERVER_ERROR', message: 'unavailable', status: 503 }
-      })
-      const { result } = renderHook(() => useAppCatalog())
-      await waitFor(() => expect(result.current.state.loading).toBe(false))
-      expect(result.current.state.catalog).toBeNull()
-      expect(result.current.state.accessMode).toBeNull()
-      expect(result.current.state.errorCode).not.toBeNull()
-      syncCatalog = mock(async id => syncResult(id, 'recovered'))
-      await act(async () => { await result.current.sync(true) })
-      expect(result.current.state.catalog).not.toBeNull()
-      expect(result.current.state.errorCode).toBeNull()
-      expect(startLocalApp).not.toHaveBeenCalled()
-    })
-  }
-})
-
-describe('R5FIX-04 denied Catalog recovery ordering', () => {
-  it('holds denied projection until trusted Main recovery acknowledges the stop and commit', async () => {
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => expect(result.current.state.loading).toBe(false))
-    const api = window.electronAPI
-    const healthy = api.productSpaceGetCatalog
-    api.productSpaceGetCatalog = async () => ({ success: false, errorCode: 'FORBIDDEN', status: 403, message: 'fixture denial' })
-    await act(async () => { await result.current.sync(true) })
-    expect(result.current.state.accessMode).toBe('denied')
-    let release!: (ok: boolean) => void
-    let recoveries = 0
-    productSpaceContextState.onRecoverActiveProductSpace = () => {
-      recoveries++
-      return new Promise<boolean>(resolve => { release = resolve })
-    }
-    api.productSpaceGetCatalog = healthy
-    let pending!: Promise<void>
-    act(() => { pending = result.current.sync(true) })
-    await waitFor(() => expect(recoveries).toBe(1))
-    expect(result.current.state.accessMode).toBe('denied')
-    await act(async () => { release(true); await pending })
-    expect(result.current.state.accessMode).toBe('online')
-  })
-})
-
-it('R5FIX-04 retries a failed recovery after an initial no-cache denial', async () => {
-  const api = window.electronAPI
-  const healthy = api.productSpaceGetCatalog
-  api.productSpaceGetCatalog = async () => ({ success: false, errorCode: 'FORBIDDEN', status: 403, message: 'fixture denial' })
-  const { result } = renderHook(() => useAppCatalog())
-  await waitFor(() => expect(result.current.state.accessMode).toBe('denied'))
-  expect(result.current.state.catalog).toBeNull()
-  let recoveries = 0
-  productSpaceContextState.onRecoverActiveProductSpace = async () => { recoveries++; return false }
-  api.productSpaceGetCatalog = healthy
-  await act(async () => { await result.current.sync(true) })
-  expect(recoveries).toBe(1)
-  expect(result.current.state.accessMode).toBe('denied')
-  expect(result.current.state.errorCode).toBe('PRODUCT_SPACE_CONTEXT_REQUIRED')
-  productSpaceContextState.onRecoverActiveProductSpace = async () => { recoveries++; return true }
-  await act(async () => { await result.current.sync(true) })
-  expect(recoveries).toBe(2)
-  expect(result.current.state.accessMode).toBe('online')
 })

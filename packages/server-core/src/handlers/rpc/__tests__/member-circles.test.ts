@@ -12,7 +12,7 @@ import { AdminError as RealProviderAdminError } from '../../../../../shared/src/
 import { MemberCircleInvalidResponseError } from '../../../../../shared/src/admin/member-circles'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../../handler-deps'
-import { setRuntimeActiveProductSpaceAccount, setRuntimeActiveProductSpace } from '../../../runtime/product-space-executions'
+import { setRuntimeActiveProductSpace } from '../../../runtime/product-space-executions'
 import {
   beginAccountTransition,
   setSyncTrustedProductSpaceAccountState,
@@ -285,8 +285,6 @@ describe('registerMemberCircleHandlers', () => {
   beforeEach(() => {
     harness = createHarness()
     setSyncTrustedProductSpaceAccountId(ACCOUNT_ID)
-    setRuntimeActiveProductSpaceAccount(ACCOUNT_ID)
-    setRuntimeActiveProductSpace('personal-fixture', 'personal')
   })
 
   afterEach(() => {
@@ -616,63 +614,4 @@ describe('registerMemberCircleHandlers', () => {
     })
   })
 
-})
-
-describe('R4FIX-02 current entitlement RPC handoff', () => {
-  beforeEach(() => { setSyncTrustedProductSpaceAccountId(ACCOUNT_ID); setRuntimeActiveProductSpaceAccount(ACCOUNT_ID); setRuntimeActiveProductSpace('personal-fixture', 'personal') })
-  afterEach(() => setSyncTrustedProductSpaceAccountId(null))
-  it('retains parsed current-period authority across the trusted native membership handler', async () => {
-    const { memberMembershipWireFixture } = await import('../../../../../shared/src/admin/__tests__/fixtures/current-entitlement')
-    const { parseMemberMembershipsResponse } = await import('../../../../../shared/src/admin/member-circles')
-    const harness = createHarness()
-    const dto = parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture()] })
-    harness.client.listMemberCircleMemberships = async () => dto
-    const result = await harness.invoke(RPC_CHANNELS.memberCircles.LIST_MEMBERSHIPS)
-    expect(result).toEqual({ success: true, memberships: dto.memberships })
-    expect((result as { memberships: typeof dto.memberships }).memberships[0]!.currentEntitlement?.state).toBe('entitled')
-  })
-})
-
-describe('R5A member RPC committed-scope isolation', () => {
-  afterEach(() => { setRuntimeActiveProductSpace(null); setSyncTrustedProductSpaceAccountId(null) })
-  for (const channel of HANDLED_CHANNELS) {
-    it(`rejects enterprise scope at ${channel} without provider reads or payload`, async () => {
-      const harness = createHarness()
-      setSyncTrustedProductSpaceAccountId(ACCOUNT_ID)
-      setRuntimeActiveProductSpaceAccount(ACCOUNT_ID)
-      setRuntimeActiveProductSpace('enterprise-fixture', 'enterprise')
-      const result = await harness.invoke(channel, MEMBERSHIP_ID) as Record<string, unknown>
-      expect(result).toMatchObject({ success: false, errorCode: 'personal_space_required' })
-      expect(Object.keys(result).some(key => ['circles', 'memberships', 'profile', 'updates', 'support', 'order', 'checkout', 'preview'].includes(key))).toBe(false)
-      expect(harness.client.calls).toEqual([])
-    })
-  }
-  it('rejects absent or unbound committed context instead of falling back to the account', async () => {
-    const harness = createHarness()
-    setSyncTrustedProductSpaceAccountId(ACCOUNT_ID)
-    setRuntimeActiveProductSpace(null)
-    expect(await harness.invoke(RPC_CHANNELS.memberCircles.LIST)).toMatchObject({ success: false, errorCode: 'product_space_context_required' })
-    setRuntimeActiveProductSpaceAccount(OTHER_ACCOUNT_ID)
-    setRuntimeActiveProductSpace('personal-fixture', 'personal')
-    expect(await harness.invoke(RPC_CHANNELS.memberCircles.LIST_MEMBERSHIPS)).toMatchObject({ success: false, errorCode: 'product_space_context_required' })
-    expect(harness.client.calls).toEqual([])
-  })
-})
-
-it('R5A an aborted account transition still invalidates an older in-flight personal request', async () => {
-  const harness = createHarness()
-  setSyncTrustedProductSpaceAccountId(ACCOUNT_ID)
-  setRuntimeActiveProductSpaceAccount(ACCOUNT_ID)
-  setRuntimeActiveProductSpace('personal-fixture', 'personal')
-  let release!: (value: unknown) => void
-  let entered!: () => void
-  const started = new Promise<void>(resolve => { entered = resolve })
-  harness.client.listMemberCirclesGate = () => { entered(); return new Promise(resolve => { release = resolve }) }
-  const request = harness.invoke(RPC_CHANNELS.memberCircles.LIST)
-  await started
-  const epoch = beginAccountTransition()
-  settleAccountTransition(epoch, 'abort')
-  release(validCirclesList())
-  expect(await request).toMatchObject({ success: false, errorCode: 'session_changed' })
-  setRuntimeActiveProductSpace(null)
 })
