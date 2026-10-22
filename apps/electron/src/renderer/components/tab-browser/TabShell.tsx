@@ -5,7 +5,9 @@ import { TopBar } from '@/components/app-shell/TopBar'
 import { useTabShell } from '@/context/TabShellContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { useClientMaterialScope } from '@/lib/client-workbench-style'
-import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
+import { NAVIGATE_EVENT } from '@/lib/navigate'
+import { shouldSurfaceAssistantForNavigate } from './settings-navigate'
+import { HOME_TAB_ID, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 
 interface TabShellProps {
   renderPolo: () => ReactNode
