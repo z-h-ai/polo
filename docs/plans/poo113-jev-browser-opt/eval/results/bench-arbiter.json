@@ -1,0 +1,121 @@
+[
+ {
+  "key": "M003-ground",
+  "cmd": "click @e5",
+  "strict_exact": true,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M011-ground",
+  "cmd": "click @e4",
+  "strict_exact": true,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M051-ground",
+  "cmd": "click @e34",
+  "strict_exact": true,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M113-ground",
+  "cmd": "click @e4",
+  "strict_exact": true,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M115-ground",
+  "cmd": "fill @e13 TEL AVIV",
+  "strict_exact": true,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M001-whole",
+  "cmd": "fill @e70 Metformin 1000mg tablet",
+  "strict_exact": false,
+  "fused_exact": false,
+  "detail": "verb mismatch: fill vs click"
+ },
+ {
+  "key": "M002-whole",
+  "cmd": "click @e1",
+  "strict_exact": true,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M003-whole",
+  "cmd": "fill @e5 New York Knicks",
+  "strict_exact": false,
+  "fused_exact": false,
+  "detail": "verb mismatch: fill vs click"
+ },
+ {
+  "key": "M004-whole",
+  "cmd": "click @e61",
+  "strict_exact": false,
+  "fused_exact": false,
+  "detail": "verb ok, wrong element"
+ },
+ {
+  "key": "M005-whole",
+  "cmd": "select @e11 Price: High - Low",
+  "strict_exact": false,
+  "fused_exact": false,
+  "detail": "value diff: 'Price: High - Low' vs 'Price  High - Low'"
+ },
+ {
+  "key": "M007-whole",
+  "cmd": "点击 @e13",
+  "strict_exact": false,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M008-whole",
+  "cmd": "click @e35",
+  "strict_exact": false,
+  "fused_exact": false,
+  "detail": "verb ok, wrong element"
+ },
+ {
+  "key": "M010-whole",
+  "cmd": "click @e19",
+  "strict_exact": false,
+  "fused_exact": false,
+  "detail": "verb mismatch: click vs fill"
+ },
+ {
+  "key": "M011-whole",
+  "cmd": "点击 @e4",
+  "strict_exact": false,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M012-whole",
+  "cmd": "click @e41",
+  "strict_exact": true,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M021-whole",
+  "cmd": "fill @e3 cough medicine",
+  "strict_exact": true,
+  "fused_exact": true,
+  "detail": ""
+ },
+ {
+  "key": "M022-whole",
+  "cmd": "点击 @e64",
+  "strict_exact": false,
+  "fused_exact": false,
+  "detail": "verb ok, wrong element"
+ }
+]

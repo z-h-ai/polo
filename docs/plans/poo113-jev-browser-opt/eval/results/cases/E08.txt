@@ -1,0 +1,20 @@
+## 页面快照
+URL: https://app.example.com/submit
+Title: 提交材料 - 示例应用
+Elements: 7 (button:1, textbox:2, link:1, heading:1, file-input:1, text:1)
+Focused ref: none, disabled: 0
+
+Elements (7):
+  @e1 [heading] "提交材料"
+  @e2 [textbox] "材料名称"
+  @e3 [file-input] "选择文件"
+  @e4 [button] "提交"
+  @e5 [textbox] "备注"
+  @e6 [text] "支持 PDF，最大 10MB"
+  @e7 [link] "查看历史提交"
+
+## 任务
+把本地文件 /Users/me/report.pdf 上传到当前表单
+
+## 已执行动作
+（空）

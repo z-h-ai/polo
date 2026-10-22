@@ -1,0 +1,52 @@
+{
+ "glm_flash": {
+  "label": "GLM-5.3-Flash(low)（coding plan 子代理通道，含harness开销）",
+  "n": 48,
+  "exact": 39,
+  "exact_rate": 0.8125,
+  "format_ok": 44,
+  "format_rate": 0.9167,
+  "avg_partial": 0.8625,
+  "latency_p50_ms": 2560,
+  "latency_p90_ms": 5613,
+  "latency_min_ms": 1684,
+  "latency_max_ms": 7057
+ },
+ "cross_model_pipeline": {
+  "pathA": "deepseek-flash(关思考) 样本1",
+  "pathB": "GLM-5.3-Flash(low) 样本1",
+  "arbiter": "GLM-5.3 高思考基线答案",
+  "agree_cases": [
+   "E01",
+   "E02",
+   "E04",
+   "E05",
+   "E06",
+   "E07",
+   "H03",
+   "H04",
+   "H05",
+   "H06",
+   "H07",
+   "H08",
+   "M01",
+   "M02",
+   "M03",
+   "M04",
+   "M05",
+   "M06",
+   "M07",
+   "M08"
+  ],
+  "disagree_cases": [
+   "E03",
+   "E08",
+   "H01",
+   "H02"
+  ],
+  "disagree_rate": 0.1667,
+  "pipeline_exact": 22,
+  "pipeline_rate": 0.9167
+ },
+ "glm_flash_self_agreement_sig": 18
+}

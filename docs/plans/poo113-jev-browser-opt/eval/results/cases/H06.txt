@@ -1,0 +1,22 @@
+## 页面快照
+URL: https://news.example.com/post/456
+Title: 行业观察 - 示例资讯
+Elements: 9 (dialog:1, button:2, text:3, heading:1, link:2)
+Focused ref: none, disabled: 0
+
+Elements (9):
+  @e1 [dialog] "会员专享提示"
+  @e2 [text] "开通会员解锁全文与专属栏目"
+  @e3 [button] "立即升级会员"
+  @e4 [button] "暂不，先看看"
+  @e5 [heading] "行业观察：2026 下半年展望"
+  @e6 [text] "…正文预览…"
+  @e7 [link] "评论区"
+  @e8 [link] "相关文章"
+  @e9 [text] "发布于 2026-10-18"
+
+## 任务
+阅读页面正文内容
+
+## 已执行动作
+navigate https://news.example.com/post/456

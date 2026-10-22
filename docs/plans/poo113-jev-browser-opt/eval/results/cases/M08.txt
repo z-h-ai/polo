@@ -1,0 +1,21 @@
+## 页面快照
+URL: https://app.example.com/signup
+Title: 注册 - 示例应用
+Elements: 8 (textbox:2, button:2, text:1, link:2, alert:1)
+Focused ref: none, disabled: 0
+
+Elements (8):
+  @e1 [textbox] "邮箱" value="test@example"
+  @e2 [textbox] "密码"
+  @e3 [alert] "邮箱格式不正确"
+  @e4 [button] "注册"
+  @e5 [button] "返回登录"
+  @e6 [link] "用户协议"
+  @e7 [link] "隐私政策"
+  @e8 [text] "密码需 8 位以上"
+
+## 任务
+表单提示邮箱格式错误，请修正为 test@example.com 后再提交（本次只修正邮箱）
+
+## 已执行动作
+fill @e1 test@example；click @e4

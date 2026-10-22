@@ -1,0 +1,198 @@
+{
+ "deepseek_flash_sample_level": {
+  "label": "deepseek-flash(关思考) 逐样本 n=48",
+  "n": 48,
+  "exact": 44,
+  "exact_rate": 0.9167,
+  "format_ok": 48,
+  "format_rate": 1.0,
+  "avg_partial": 0.9458,
+  "latency_p50_ms": 859,
+  "latency_p90_ms": 931,
+  "latency_min_ms": 617,
+  "latency_max_ms": 1328,
+  "avg_total_tokens": 354
+ },
+ "deepseek_flash_case_level_s1": {
+  "label": "deepseek-flash 单路(每案例样本1) n=24",
+  "n": 24,
+  "exact": 22,
+  "exact_rate": 0.9167,
+  "format_ok": 24,
+  "format_rate": 1.0,
+  "avg_partial": 0.9458,
+  "latency_p50_ms": 863,
+  "latency_p90_ms": 931,
+  "latency_min_ms": 764,
+  "latency_max_ms": 1328,
+  "avg_total_tokens": 354
+ },
+ "glm53_baseline": {
+  "label": "GLM-5.3 高思考基线(子代理,含harness开销) n=24",
+  "n": 24,
+  "exact": 22,
+  "exact_rate": 0.9167,
+  "format_ok": 23,
+  "format_rate": 0.9583,
+  "avg_partial": 0.9458,
+  "latency_p50_ms": 5553,
+  "latency_p90_ms": 9992,
+  "latency_min_ms": 4131,
+  "latency_max_ms": 14484,
+  "avg_total_tokens": 0
+ },
+ "wrong_cases": {
+  "E08": {
+   "glm": {
+    "raw": "上传 @e3 /Users/me/report.pdf",
+    "detail": "unparseable"
+   },
+   "glm_flash": {
+    "raw": "fill @e2 /Users/me/report.pdf",
+    "detail": "动词与元素均错"
+   }
+  },
+  "H08": {
+   "glm": {
+    "raw": "select @e2 CNAME",
+    "detail": "select ok, missing --assert-text"
+   },
+   "deepseek": {
+    "raw": "select @e2 CNAME",
+    "detail": "select ok, missing --assert-text"
+   }
+  },
+  "H02": {
+   "deepseek": {
+    "raw": "fail: 当前页面无用户评论区入口或评论内容，仅有正文与“相关阅读/分享/回到顶部”等元素，无法完成阅读评论任务",
+    "detail": "refused but action expected"
+   },
+   "glm_flash": {
+    "raw": "scroll down 800",
+    "detail": "正确（deepseek 拒绝）——跨模型互补实证"
+   }
+  }
+ },
+ "pipeline_sim_dual_sampling": {
+  "agree_cases": 24,
+  "arbiter_cases": 0
+ },
+ "glm_flash_low": {
+  "label": "GLM-5.3-Flash(low)（coding plan 子代理通道，含harness开销）",
+  "n": 48,
+  "exact": 39,
+  "exact_rate": 0.8125,
+  "format_ok": 44,
+  "format_rate": 0.9167,
+  "avg_partial": 0.8625,
+  "latency_p50_ms": 2560,
+  "latency_p90_ms": 5613,
+  "latency_min_ms": 1684,
+  "latency_max_ms": 7057
+ },
+ "cross_model_pipeline_strict": {
+  "note": "A=deepseek-flash s1, B=glm-5.3-flashx 直连 s1，仲裁=GLM-5.3 高思考基线；无任何输出归一化",
+  "disagree_rate": 0.0833,
+  "disagree_cases": [
+   "H02",
+   "H08"
+  ],
+  "exact": 23,
+  "rate": 0.9583
+ },
+ "cross_model_pipeline_normalized": {
+  "note": "直连 B 路格式合规 100%，归一化不再必要；保留 5 行同义词归一化作为保险丝（仲裁 GLM-5.3 在 E08 仍会输出中文动词「上传」）",
+  "exact": 23,
+  "rate": 0.958,
+  "remaining_wrong": [
+   "H08（全模型漏 --assert-text 断言旗标，属 prompt 规格问题；flashx 样本1 曾误点「保存」按钮，证实危险动作黑名单必要性）"
+  ]
+ },
+ "glm_flash_self_agreement_sig": 18,
+ "glm_flashx_direct": {
+  "label": "glm-5.3-flashx（reasoning_effort=low，bigmodel v4 直连）",
+  "n": 48,
+  "exact": 44,
+  "exact_rate": 0.9167,
+  "format_ok": 48,
+  "format_rate": 1.0,
+  "avg_partial": 0.9313,
+  "latency_p50_ms": 2929,
+  "latency_p90_ms": 3456,
+  "latency_min_ms": 1346,
+  "latency_max_ms": 6232
+ },
+ "flashx_self_agreement_sig": 21,
+ "channel_attribution": "coding plan 子代理通道 B 路 81.3%/格式 91.7%（中文动词 ~10%）vs API 直连 91.7%/格式 100% —— 中文动词滑落来自通道系统提示干扰，非 flashx 模型本身缺陷",
+ "cost": {
+  "file": "cost.json",
+  "ten_step_ratio": "1/11",
+  "fast_layer_per_step_cny": 0.000799
+ },
+ "bench_mind2web": {
+  "source": "osunlp/Mind2Web（HF datasets-server，80 真实任务 135 决策步 + 定位口径子集 60 步）",
+  "whole_task_condition": {
+   "note": "整任务自规划口径：快模型拿全任务+历史自己定下一步（超出方案设计的职责）",
+   "deepseek": {
+    "exact": "54/135 (40.0%)",
+    "latency_p50_ms": 684
+   },
+   "flashx": {
+    "exact": "63/135 (46.7%)",
+    "latency_p50_ms": 1521
+   },
+   "cross_model": {
+    "disagree": "63/135 (46.7%)",
+    "agree_wrong": 33
+   },
+   "arbiter_sample_12": {
+    "strict": "3/12",
+    "fused": "5/12 (41.7%)"
+   }
+  },
+  "grounding_condition": {
+   "note": "方案口径：主模型规划当前子步骤，快层只做定位执行（60 步子集）",
+   "deepseek": "57/60 (95.0%)",
+   "flashx": "53/60 (88.3%)",
+   "cross_model": {
+    "disagree": "5/60 (8.3%)",
+    "agree_wrong": 2
+   },
+   "arbiter_disagree_5": "5/5 全对",
+   "pipeline_end_to_end": "58/60 (96.7%) = 53 auto-ok + 5 arbitrated-ok + 2 agree-wrong 漏网"
+  },
+  "near_miss_audit": "整任务口径 34 个 wrong-element 错例中 8 个为同名重复/父子等价近失（真实浏览器大概率可执行）；26 个真选错",
+  "known_limits": "静态单步数据、ground truth 取标注者单一规划路径（合理替代规划会被判错，低估绝对值）；菜单由 cleaned_html 候选构成（含容器节点），比 polo 真实 a11y 树更嘈杂",
+  "tokens": {
+   "avg_prompt": 1440,
+   "avg_completion": 8
+  },
+  "grounding_condition_full_135": {
+   "deepseek": "128/135 (94.8%)",
+   "flashx": "119/135 (88.1%)",
+   "cross_model": {
+    "disagree": "15/135 (11.1%)",
+    "agree_wrong": 3
+   }
+  },
+  "v2_pipeline": {
+   "mode": "主模型子步骤 + 双路定位 + fuse/可执行校验 + 一致放行 + 危险动词/分歧升级仲裁",
+   "auto_accept": {
+    "n": 113,
+    "correct": 110
+   },
+   "arbitrated": {
+    "n": 22,
+    "correct": 19,
+    "triggers": {
+     "disagree": 15,
+     "agree_danger": 7
+    }
+   },
+   "end_to_end_exact": "129/135",
+   "end_to_end_rate": 0.9556,
+   "arbiter_latency_p50_ms": 10671,
+   "cost_note": "均步成本 ≈ 快层 ¥0.002 + 16.3%×仲裁 ¥0.013 ≈ ¥0.023（vs 主模型逐步 ¥0.134，约 1/6）；83.7% 步骤不触碰主模型"
+  }
+ }
+}

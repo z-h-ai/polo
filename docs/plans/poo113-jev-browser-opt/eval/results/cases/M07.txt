@@ -1,0 +1,21 @@
+## 页面快照
+URL: https://app.example.com/reports/q3
+Title: Q3 数据报表 - 示例后台
+Elements: 8 (button:3, link:3, heading:1, text:1)
+Focused ref: none, disabled: 0
+
+Elements (8):
+  @e1 [heading] "Q3 数据报表"
+  @e2 [button] "下载"
+  @e3 [button] "下载全部（打包 zip）"
+  @e4 [button] "另存为 PDF"
+  @e5 [link] "分享"
+  @e6 [link] "历史版本"
+  @e7 [link] "返回列表"
+  @e8 [text] "更新于 2026-09-30"
+
+## 任务
+下载当前报表文件（不要全部打包）
+
+## 已执行动作
+（空）

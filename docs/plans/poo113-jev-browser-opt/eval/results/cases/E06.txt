@@ -1,0 +1,20 @@
+## 页面快照
+URL: https://www.example.com/
+Title: 示例科技官网
+Elements: 7 (link:6, heading:1)
+Focused ref: none, disabled: 0
+
+Elements (7):
+  @e1 [heading] "示例科技"
+  @e2 [link] "产品介绍"
+  @e3 [link] "新闻动态"
+  @e4 [link] "关于我们"
+  @e5 [link] "招聘"
+  @e6 [link] "联系方式"
+  @e7 [link] "友情链接集散地"
+
+## 任务
+打开文档站首页 https://docs.example.com 阅读入门文档
+
+## 已执行动作
+（空）

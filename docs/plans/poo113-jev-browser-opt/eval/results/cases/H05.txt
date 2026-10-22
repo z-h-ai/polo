@@ -1,0 +1,20 @@
+## 页面快照
+URL: https://shop.example.com/search
+Title: 搜索 - 示例电商
+Elements: 7 (textbox:1, button:1, link:4, text:1)
+Focused ref: @e1, disabled: 0
+
+Elements (7):
+  @e1 [textbox] "搜索商品" value="无线鼠标" (focused)
+  @e2 [button] "搜索"
+  @e3 [link] "首页"
+  @e4 [link] "购物车 (0)"
+  @e5 [link] "我的订单"
+  @e6 [link] "客服中心"
+  @e7 [text] "按回车可直接搜索"
+
+## 任务
+提交当前已填写的搜索（搜索框已聚焦且内容正确）
+
+## 已执行动作
+click @e1；type 无线鼠标

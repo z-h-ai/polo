@@ -1,0 +1,21 @@
+## 页面快照
+URL: https://app.example.com/
+Title: 工作台 - 示例应用
+Elements: 8 (tab:3, link:3, heading:1, button:1)
+Focused ref: none, disabled: 0
+
+Elements (8):
+  @e1 [heading] "工作台"
+  @e2 [tab] "待办 (2)"
+  @e3 [tab] "消息 (5)"
+  @e4 [tab] "公告"
+  @e5 [link] "常用应用"
+  @e6 [link] "最近文档"
+  @e7 [link] "数据报表"
+  @e8 [button] "新建"
+
+## 任务
+查看未读的站内消息
+
+## 已执行动作
+（空）

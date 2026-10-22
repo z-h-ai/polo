@@ -1,0 +1,22 @@
+## 页面快照
+URL: https://shop.example.com/search?q=%E6%97%A0%E7%BA%BF%E9%BC%A0%E6%A0%87
+Title: 无线鼠标 - 搜索结果 - 示例电商
+Elements: 9 (link:5, text:2, button:1, heading:1)
+Focused ref: none, disabled: 0
+
+Elements (9):
+  @e1 [heading] "无线鼠标 - 共 128 件商品"
+  @e2 [link] "罗技 M275 无线鼠标 ¥99"
+  @e3 [link] "雷柏 M300 无线静音鼠标 ¥69"
+  @e4 [link] "双飞燕 G10 无线鼠标 ¥49"
+  @e5 [text] "按销量排序 | 按价格排序"
+  @e6 [button] "筛选"
+  @e7 [link] "下一页"
+  @e8 [link] "购物车 (3)"
+  @e9 [text] "第 1/13 页"
+
+## 任务
+搜索「无线鼠标」并查看搜索结果
+
+## 已执行动作
+fill @e1 无线鼠标；click @e2
