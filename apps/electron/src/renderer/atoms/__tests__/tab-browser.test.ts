@@ -6,7 +6,12 @@ import {
   openAppTabAtom,
   openTabsAtom,
 } from '../tab-browser'
-import { HOME_TAB_ID, POLO_TAB_ID } from '../../../shared/tab-browser-types'
+import {
+  HOME_TAB_ID,
+  KNOWLEDGE_BASE_APP_DEFINITION,
+  KNOWLEDGE_BASE_TAB_ID,
+  POLO_TAB_ID,
+} from '../../../shared/tab-browser-types'
 import type { AppDefinition } from '../../../shared/tab-browser-types'
 
 const app: AppDefinition = {
@@ -75,5 +80,49 @@ describe('tab browser assistant close protection (POO-104)', () => {
     expect(store.get(openTabsAtom).some(tab => tab.id === appTab.id)).toBe(false)
     expect(store.get(activeTabIdAtom)).toBe(POLO_TAB_ID)
     expect(store.get(openTabsAtom).some(tab => tab.id === POLO_TAB_ID)).toBe(true)
+  })
+})
+
+// POO-108: the enterprise knowledge base is a built-in surface with ONE
+// shared tab instance, opened from the Home card and restored from storage —
+// never duplicated per entry point, never re-created on restore.
+describe('tab browser knowledge base tab (POO-108)', () => {
+  it('opens a single knowledge-base tab right after the assistant tab', () => {
+    const store = createStore()
+    store.set(openAppTabAtom, app) // a webapp tab first, so ordering is observable
+
+    store.set(openAppTabAtom, KNOWLEDGE_BASE_APP_DEFINITION)
+
+    const tabs = store.get(openTabsAtom)
+    const kbIndex = tabs.findIndex(tab => tab.id === KNOWLEDGE_BASE_TAB_ID)
+    const poloIndex = tabs.findIndex(tab => tab.id === POLO_TAB_ID)
+    expect(kbIndex).toBeGreaterThan(-1)
+    expect(tabs[kbIndex].type).toBe('knowledge-base')
+    expect(kbIndex).toBe(poloIndex + 1)
+    expect(store.get(activeTabIdAtom)).toBe(KNOWLEDGE_BASE_TAB_ID)
+  })
+
+  it('focuses the existing tab instead of spawning a duplicate', () => {
+    const store = createStore()
+    store.set(openAppTabAtom, KNOWLEDGE_BASE_APP_DEFINITION)
+    store.set(activeTabIdAtom, POLO_TAB_ID)
+
+    store.set(openAppTabAtom, KNOWLEDGE_BASE_APP_DEFINITION)
+
+    expect(store.get(openTabsAtom).filter(tab => tab.id === KNOWLEDGE_BASE_TAB_ID)).toHaveLength(1)
+    expect(store.get(activeTabIdAtom)).toBe(KNOWLEDGE_BASE_TAB_ID)
+  })
+
+  it('keeps the webapp duplicate-collapse rule untouched for non built-in apps', () => {
+    const store = createStore()
+    store.set(openAppTabAtom, KNOWLEDGE_BASE_APP_DEFINITION)
+
+    store.set(openAppTabAtom, app)
+
+    expect(store.get(activeTabIdAtom)).toBe(
+      store.get(openTabsAtom).find(tab => tab.appId === app.id)!.id,
+    )
+    // the KB tab stays open in the background, unchanged
+    expect(store.get(openTabsAtom).some(tab => tab.id === KNOWLEDGE_BASE_TAB_ID)).toBe(true)
   })
 })

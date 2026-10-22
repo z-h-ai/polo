@@ -1370,6 +1370,21 @@ export interface ElectronAPI {
   // Skills change listener (live updates when skills are added/removed/modified)
   onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void
 
+  // Enterprise Knowledge Base (POO-108)
+  kbListCollections(input: import('@polo-ai/shared/protocol').KbListCollectionsInput): Promise<import('@polo-ai/shared/protocol').KbCollectionList>
+  kbCreateCollection(input: import('@polo-ai/shared/protocol').KbCreateCollectionInput): Promise<import('@polo-ai/shared/protocol').KbCollection>
+  kbListDocuments(input: import('@polo-ai/shared/protocol').KbListDocumentsInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary[]>
+  kbUploadDocument(input: import('@polo-ai/shared/protocol').KbUploadDocumentInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbSubmitForReview(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbPublishDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbRejectDocument(input: import('@polo-ai/shared/protocol').KbRejectDocumentInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbRevertToDraft(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
+  kbDeleteDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<{ ok: true }>
+  kbGetDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocument | null>
+  kbSearch(input: import('@polo-ai/shared/protocol').KbSearchInput): Promise<import('@polo-ai/shared/protocol').KbSearchHit[]>
+  kbSetSessionCollections(input: import('@polo-ai/shared/protocol').KbSessionCollectionsInput): Promise<{ ok: true; collectionIds: string[] }>
+  kbGetSessionCollections(input: import('@polo-ai/shared/protocol').KbGetSessionCollectionsInput): Promise<{ collectionIds: string[] }>
+
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@polo-ai/shared/statuses').StatusConfig[]>
   reorderStatuses(workspaceId: string, orderedIds: string[]): Promise<void>

@@ -70,6 +70,23 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // workspaces resolve no local rows and the panel falls back to GET (POO-106 S1).
   RPC_CHANNELS.skills.GET_UNFILTERED,
 
+  // kb — the Enterprise Knowledge Base stores content under the local
+  // workspace's `.polo-kb/` directory (POO-108); a remote server has no
+  // access to this filesystem scope, so every kb channel stays local.
+  RPC_CHANNELS.kb.LIST_COLLECTIONS,
+  RPC_CHANNELS.kb.CREATE_COLLECTION,
+  RPC_CHANNELS.kb.LIST_DOCUMENTS,
+  RPC_CHANNELS.kb.UPLOAD_DOCUMENT,
+  RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW,
+  RPC_CHANNELS.kb.PUBLISH_DOCUMENT,
+  RPC_CHANNELS.kb.REJECT_DOCUMENT,
+  RPC_CHANNELS.kb.REVERT_TO_DRAFT,
+  RPC_CHANNELS.kb.DELETE_DOCUMENT,
+  RPC_CHANNELS.kb.GET_DOCUMENT,
+  RPC_CHANNELS.kb.SEARCH,
+  RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS,
+  RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS,
+
   // system — local OS info
   RPC_CHANNELS.system.VERSIONS,
   RPC_CHANNELS.system.HOME_DIR,

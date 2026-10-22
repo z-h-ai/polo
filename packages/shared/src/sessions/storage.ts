@@ -609,6 +609,7 @@ export async function updateSessionMetadata(
     | 'lastReadMessageId'
     | 'hasUnread'
     | 'enabledSourceSlugs'
+    | 'kbCollectionIds'
     | 'workingDirectory'
     | 'sdkCwd'
     | 'permissionMode'
@@ -630,6 +631,7 @@ export async function updateSessionMetadata(
   if (updates.sessionStatus !== undefined) session.sessionStatus = updates.sessionStatus;
   if (updates.labels !== undefined) session.labels = updates.labels;
   if (updates.enabledSourceSlugs !== undefined) session.enabledSourceSlugs = updates.enabledSourceSlugs;
+  if (updates.kbCollectionIds !== undefined) session.kbCollectionIds = updates.kbCollectionIds;
   if (updates.workingDirectory !== undefined) session.workingDirectory = updates.workingDirectory;
   if (updates.sdkCwd !== undefined) session.sdkCwd = updates.sdkCwd;
   if (updates.permissionMode !== undefined) session.permissionMode = updates.permissionMode;

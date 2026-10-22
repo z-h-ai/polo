@@ -77,6 +77,8 @@ function currentWorkspaceId(ctx: RequestContext, deps: HandlerDeps): string | nu
   return deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
 }
 
+export { currentWorkspaceId }
+
 /**
  * R33-2: an in-flight Creator Skill install/uninstall is a ProductSpace
  * execution like any other. It is registered under its immutable trusted
@@ -157,7 +159,7 @@ function registerSkillOperationExecution(input: {
   }
 }
 
-function getBoundWorkspace(
+export function getBoundWorkspace(
   ctx: RequestContext,
   requestedWorkspaceId: string,
   deps: HandlerDeps,

@@ -71,6 +71,8 @@ import {
   AdminPhoneAuthResponseSchema,
   AdminRefreshResponseSchema,
   AdminValidateResponseSchema,
+  AdminKbCredentialSchema,
+  type AdminKbCredential,
   PaymentHandoffTicketSchema,
   type PaymentHandoffTicket,
   SendPhoneAuthCodeResponseSchema,
@@ -463,6 +465,22 @@ export class AdminClient {
       method: 'GET',
       accessToken,
     });
+  }
+
+  /**
+   * POO-108 v5: reads the caller's enterprise space cloud-managed OpenViking
+   * library credential against the admin session's own Bearer. Only a READY
+   * library the caller's account belongs to answers 200; a space that is not
+   * provisioned (or is foreign / personal) answers 404 and a library that is
+   * still provisioning answers 409 — all three surface as thrown AdminErrors
+   * so the caller can degrade without learning which one it was.
+   */
+  async getKbCredential(accessToken: string, productSpaceId: string): Promise<AdminKbCredential> {
+    const data = await this.request<unknown>(
+      `/api/kb/credential?productSpaceId=${encodeURIComponent(productSpaceId)}`,
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(data, AdminKbCredentialSchema);
   }
 
   async listOrganizations(accessToken: string): Promise<ListOrganizationsResponse> {

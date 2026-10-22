@@ -2026,7 +2026,7 @@ export default function App() {
     runtimeChatAccessIssue,
   ])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[]) => {
     try {
       if (chatAccessStatus) {
         return
@@ -2189,6 +2189,14 @@ export default function App() {
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
+        // POO-108: the composer's KB scope rides the SEND_MESSAGE chain; the
+        // handler filters to published collections and persists the session
+        // snapshot before the turn runs. The array is passed through as-is —
+        // an explicit `[]` commits "no collections" with THIS message, so a
+        // failed clear-save can never fall back to the server's stale scope
+        // (review #12). `undefined` (non-composer callers) keeps the stored
+        // scope untouched.
+        kbCollectionIds,
         optimisticMessageId: userMessage.id,
         invocationSource: 'desktop',
       })

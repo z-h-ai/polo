@@ -56,6 +56,10 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, 'src/renderer'),
       '@config': resolve(__dirname, '../../packages/shared/src/config'),
+      // POO-108: the product-spaces export map routes `browser` builds to
+      // dist/ artifacts that are not part of this repo; resolve the sources
+      // directly, like every other src-backed @polo-ai/shared subpath here.
+      '@polo-ai/shared/product-spaces': resolve(__dirname, '../../packages/shared/src/product-spaces/index.ts'),
       // Force all React imports to use the root node_modules React
       // Bun hoists deps to root. This prevents "multiple React copies" error from @polo-ai/ui
       'react': resolve(__dirname, '../../node_modules/react'),

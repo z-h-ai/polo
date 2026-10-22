@@ -137,7 +137,7 @@ const CatalogEntryBaseSchema = z.object({
   unavailableReason: CatalogEntryUnavailableReasonSchema.optional(),
 }).strict()
 const BuiltInAppCatalogEntrySchema = CatalogEntryBaseSchema.extend({
-  kind: z.literal('built_in_app'), builtInAppId: z.literal('polo_assistant'),
+  kind: z.literal('built_in_app'), builtInAppId: z.enum(['polo_assistant', 'enterprise_knowledge']),
 }).strict()
 const AppCatalogEntrySchema = CatalogEntryBaseSchema.extend({
   kind: z.literal('app'),
@@ -171,6 +171,7 @@ export const ProductSpaceCatalogResponseSchema = z.object({
   const catalogEntryIds = new Set<string>()
   const artifactInstanceIds = new Set<string>()
   let builtInAssistantCount = 0
+  let builtInKnowledgeCount = 0
   for (const [index, entry] of value.entries.entries()) {
     if (catalogEntryIds.has(entry.catalogEntryId)) {
       ctx.addIssue({ code: 'custom', path: ['entries', index, 'catalogEntryId'], message: 'Catalog entry IDs must be unique within the ProductSpace' })
@@ -181,12 +182,17 @@ export const ProductSpaceCatalogResponseSchema = z.object({
         ctx.addIssue({ code: 'custom', path: ['entries', index, 'artifactInstanceId'], message: 'Artifact instance IDs must be unique within the ProductSpace' })
       }
       artifactInstanceIds.add(entry.artifactInstanceId)
-    } else {
+    } else if (entry.builtInAppId === 'polo_assistant') {
       builtInAssistantCount += 1
+    } else if (entry.builtInAppId === 'enterprise_knowledge') {
+      builtInKnowledgeCount += 1
     }
   }
   if (builtInAssistantCount !== 1) {
     ctx.addIssue({ code: 'custom', path: ['entries'], message: 'Catalog must contain exactly one Polo assistant entry' })
+  }
+  if (builtInKnowledgeCount > 1) {
+    ctx.addIssue({ code: 'custom', path: ['entries'], message: 'Catalog must contain at most one enterprise knowledge entry' })
   }
 })
 
@@ -204,7 +210,10 @@ export const ResolveLaunchRequestSchema = z.object({
   arch: z.enum(['arm64', 'x64']),
 }).strict()
 export const ResolvedLaunchSubjectSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('built_in_app'), builtInAppId: z.literal('polo_assistant') }).strict(),
+  z.object({
+    kind: z.literal('built_in_app'),
+    builtInAppId: z.enum(['polo_assistant', 'enterprise_knowledge']),
+  }).strict(),
   z.object({
     kind: z.literal('artifact_instance'),
     artifactType: z.enum(['app', 'skill']),
@@ -238,7 +247,7 @@ export const ResolveLaunchResponseSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['expiresAt'], message: 'expiresAt must be after resolvedAt' })
   }
   if (value.subject.kind === 'built_in_app' && value.delivery.kind !== 'built_in') {
-    ctx.addIssue({ code: 'custom', path: ['delivery'], message: 'Polo assistant uses built_in delivery only' })
+    ctx.addIssue({ code: 'custom', path: ['delivery'], message: 'Built-in apps use built_in delivery only' })
   }
   if (value.subject.kind === 'artifact_instance' && value.delivery.kind === 'built_in') {
     ctx.addIssue({ code: 'custom', path: ['delivery'], message: 'Artifact instances cannot use built_in delivery' })
@@ -387,7 +396,14 @@ function assertCatalogEntrySourcesMatchProductSpace(
   context: TrustedProductSpaceCatalogContext,
 ): void {
   for (const entry of response.entries) {
-    if (entry.kind === 'built_in_app') continue
+    if (entry.kind === 'built_in_app') {
+      // The knowledge base is an enterprise-only built-in app: a catalog for
+      // a personal space that lists it is a scope violation, not an extra row.
+      if (entry.builtInAppId === 'enterprise_knowledge' && context.kind === 'personal') {
+        throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
+      }
+      continue
+    }
 
     const sourceKinds = new Set(entry.sources.map(source => source.kind))
     const hasOnlyPersonalSources = [...sourceKinds].every(

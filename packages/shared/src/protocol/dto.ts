@@ -10,6 +10,7 @@ import type {
   Message,
   TypedError,
   ContentBadge,
+  KbReference,
   ToolDisplayMeta,
   AnnotationV1,
   PermissionRequest as BasePermissionRequest,
@@ -79,6 +80,8 @@ export interface Session {
    */
   hasUnread?: boolean
   enabledSourceSlugs?: string[]
+  /** Per-session Enterprise Knowledge Base scope (POO-108, collection IDs) */
+  kbCollectionIds?: string[]
   workingDirectory?: string
   sessionFolderPath?: string
   sharedUrl?: string
@@ -324,6 +327,10 @@ export type SessionEvent =
   | { type: 'plan_submitted'; sessionId: string; message: Message }
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
   | { type: 'labels_changed'; sessionId: string; labels: string[] }
+  // POO-108: the authoritative per-session KB scope, broadcast after every
+  // server-side write (explicit save or first-send draft commit) so every
+  // window converges on the persisted value instead of its own draft.
+  | { type: 'kb_collections_changed'; sessionId: string; collectionIds: string[] }
   | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean }
   | { type: 'task_backgrounded'; sessionId: string; toolUseId: string; taskId: string; intent?: string; turnId?: string }
   | { type: 'shell_backgrounded'; sessionId: string; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }
@@ -374,6 +381,26 @@ export interface SendMessageOptions {
    * (fail closed).
    */
   invocationSource?: InvocationSource
+  /**
+   * Knowledge Base scope carried by the FIRST send of a new session
+   * (POO-108): the composer's pre-session draft is committed to the session
+   * snapshot before the KB references are resolved. Omitted turns keep the
+   * session's stored scope.
+   */
+  kbCollectionIds?: string[]
+  /**
+   * Resolved KB references for this turn (computed by the SEND_MESSAGE
+   * handler from the session's KB scope) and persisted on the user message.
+   */
+  kbReferences?: KbReference[]
+  /**
+   * POO-108 v4 D-B: the bounded knowledge context assembled server-side from
+   * the SAME send-time retrieval as `kbReferences`, staged by the
+   * SessionManager for a ONE-SHOT injection into this turn's model prompt.
+   * Internal only — never persisted, never part of the message record, and a
+   * client-supplied value is always dropped.
+   */
+  kbModelContext?: { block: string; docs: number; bytes: number }
 }
 
 // ---------------------------------------------------------------------------

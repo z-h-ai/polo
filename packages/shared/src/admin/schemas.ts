@@ -451,6 +451,17 @@ export const PaymentHandoffTicketSchema = z.object({
 }).strict()
 export type PaymentHandoffTicket = z.infer<typeof PaymentHandoffTicketSchema>
 
+// POO-108 v5: the enterprise space's cloud-managed OpenViking library
+// credential. Strictly the three fields a data-plane call needs — only a READY
+// library the caller's account belongs to answers, and a pending/failed one or
+// a non-member caller arrives as an HTTP error, never as a partial credential.
+export const AdminKbCredentialSchema = z.object({
+  baseUrl: httpUrl,
+  resourceId: AdminEntityIdSchema,
+  apiKey: nonBlankString(4096),
+}).strict()
+export type AdminKbCredential = z.infer<typeof AdminKbCredentialSchema>
+
 export {
   billingRuntimeRequestResponseSchema as AdminGetAppRequestResponseSchema,
   billingRuntimeAdmissionResponseSchema as AdminAdmitAppRequestResponseSchema,

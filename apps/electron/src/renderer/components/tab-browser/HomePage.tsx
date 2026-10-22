@@ -24,7 +24,7 @@ import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { ProductSpaceSkillsDialog } from '@/components/product-space/ProductSpaceSkillsDialog'
 import { useTabShell } from '@/context/TabShellContext'
 import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
-import { POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
+import { KNOWLEDGE_BASE_APP_DEFINITION, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
   catalogStateMessage,
   homeAppOperationErrorText,
@@ -268,6 +268,13 @@ export function HomePage() {
   // managed from the existing assistant card in the current ProductSpace.
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
+  }
+
+  // POO-108: the enterprise knowledge base card (enterprise spaces only —
+  // the schema-level invariant keeps the built-in app out of personal
+  // catalogs, and the personal surface has no KB scope).
+  const openKnowledgeBase = () => {
+    openApp(KNOWLEDGE_BASE_APP_DEFINITION)
   }
 
   // H2 shared actions: open / prepare / permission feedback through the SAME
@@ -687,6 +694,36 @@ export function HomePage() {
             </div>
           </article>}
           {skillsOpen && <ProductSpaceSkillsDialog onClose={() => setSkillsOpen(false)} />}
+          {/* POO-108: the enterprise knowledge base ships as a built-in card
+          next to the assistant. Enterprise spaces only — the KB RPC refuses a
+          personal space with an explicit error, so the card never mounts
+          there. */}
+          {spaceKind === 'enterprise' && <article
+            data-testid="home-quick-entry-knowledge-base"
+            onClick={openKnowledgeBase}
+            className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
+          >
+            <span className="mb-[24px] min-[1081px]:mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
+              <Icons.Library className="size-[18px]" aria-hidden="true" />
+            </span>
+            <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('builtinApp.enterpriseKnowledge.name')}</h3>
+            <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('builtinApp.enterpriseKnowledge.source')}</p>
+            <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+              {t('builtinApp.enterpriseKnowledge.description')}
+            </p>
+            <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+              <button
+                type="button"
+                className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  openKnowledgeBase()
+                }}
+              >
+                {t('knowledgeBase.actions.open')}
+              </button>
+            </div>
+          </article>}
           {phase === 'loading' && !catalog.state.catalog ? (
             <div
               className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface client-material-card"

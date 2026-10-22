@@ -11,6 +11,7 @@ import { pushTyped, type RpcServer, type RequestContext } from '@polo-ai/server-
 import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession, unbindClientActiveSession } from './client-active-session'
+import { resolveSessionKbReferences } from './knowledge-base'
 import {
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceScope,
@@ -495,6 +496,45 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // itself registers through the checked reservation protocol before any
     // bootstrap work, so this path can no longer leave an unchecked record.
 
+    // POO-108: resolve the session's KB scope against this message. The
+    // composer's selection rides `kbCollectionIds` and is committed (or
+    // reconciled) with THIS send; hits are persisted on the user message as
+    // its immutable reference snapshot. Any KB failure degrades to "no
+    // references" — never a failed send. The resolution is bounded
+    // (wall-clock + scan budget) so it cannot stall persist/ACK, and it is
+    // bound to THIS caller's complete workspace so a resolution resuming
+    // after its deadline can never commit for a foreign scope (review N1).
+    // The entry token is handed in (review #3): the resolution authorizes
+    // against exactly the token this send was admitted with, never a fresh
+    // capture that a revoke-and-recommit could have re-armed.
+    //
+    // POO-108 v4 D-B: the SAME resolution also returns the bounded
+    // model-context block; it rides `kbModelContext` into the SessionManager,
+    // which stages it for a one-shot injection into THIS turn's prompt.
+    const resolvedKb = await resolveSessionKbReferences(
+      deps,
+      sessionId,
+      message,
+      options?.kbCollectionIds,
+      resolveCallerWorkspaceId(ctx),
+      sendScopeToken,
+    )
+    const kbReferences = resolvedKb?.references
+    // Post-authorization CAS after the awaited KB resolution — the send must
+    // not dispatch for a scope that moved while references were resolved.
+    assertSessionScopeTokenCurrent(sendScopeToken)
+    // Client-supplied `kbReferences` are ALWAYS dropped (review #13): only
+    // the server-computed snapshot may reach the persisted message, so a
+    // forged title/snippet/docId can never render as a KB citation. The
+    // model-context block is server-computed by the same rule — a client
+    // value can never inject content into the model prompt.
+    const { kbReferences: _clientKbReferences, kbModelContext: _clientKbModelContext, ...trustedOptions } = options ?? {}
+    const sendOptions: SendMessageOptions = {
+      ...trustedOptions,
+      ...(kbReferences && kbReferences.length > 0 ? { kbReferences } : {}),
+      ...(resolvedKb?.modelContext ? { kbModelContext: resolvedKb.modelContext } : {}),
+    }
+
     return await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {
       let acked = false
       const onAck = (messageId: string) => {
@@ -505,7 +545,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       }
 
       sessionManager
-        .sendMessage(sessionId, message, attachments, storedAttachments, options, undefined, undefined, onAck, { callerClientId })
+        .sendMessage(sessionId, message, attachments, storedAttachments, sendOptions, undefined, undefined, onAck, { callerClientId })
         .then(async () => {
           if (acked) return
           // SILENT DELETE CONVERGENCE: sendMessage returns without an ack
@@ -766,6 +806,11 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.setSessionSources(sessionId, command.sourceSlugs)
       case 'setLabels':
         return sessionManager.setSessionLabels(sessionId, command.labels)
+      // NOTE: there is deliberately no `setKbCollections` command here. The
+      // KB session scope is a validated, audited enterprise domain write — it
+      // is only reachable through the kb RPC (SET_SESSION_COLLECTIONS or the
+      // send-time draft commit), never through the generic session command
+      // surface (review #9).
       case 'showInFinder': {
         const sessionPath = sessionManager.getSessionPath(sessionId)
         if (sessionPath) {

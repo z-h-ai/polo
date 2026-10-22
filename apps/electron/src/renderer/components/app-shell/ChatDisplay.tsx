@@ -64,6 +64,8 @@ import {
   type AuthRequestTurn,
 } from "@polo-ai/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
+import { KbReferenceChips } from "@/components/chat/KbReferenceChips"
+import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { ChatInputZone, type ChatInputStatusBanner, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
@@ -140,7 +142,7 @@ function getTurnKey(turn: Turn): string {
 
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   // Current model is read-only in the input; admin-managed settings choose it.
@@ -511,6 +513,24 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Panel focus state (for multi-panel auto-scroll behavior)
   const appShellContext = useAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
+
+  // POO-108: the knowledge-base composer entry and session scope wiring exist
+  // only in enterprise spaces — the prop presence (not the LLM gate) is what
+  // shows/hides the badge, so a personal space simply never wires it.
+  const productSpace = useOptionalProductSpaceContext()
+  const isEnterpriseSpace = productSpace?.activeProductSpace?.kind === 'enterprise'
+  const handleKbCollectionsChange = React.useCallback((collectionIds: string[]) => {
+    if (!isEnterpriseSpace || !session) return
+    // The save promise is handed back to the composer: it keeps the
+    // optimistic selection only on success and reverts with an explicit
+    // error on failure (reviews #11/#16). The authoritative value still
+    // converges through the `kb_collections_changed` session event.
+    return window.electronAPI.kbSetSessionCollections({
+      workspaceId: session.workspaceId,
+      sessionId: session.id,
+      collectionIds,
+    }).then(() => undefined)
+  }, [isEnterpriseSpace, session])
 
   // Input is only disabled when explicitly disabled (e.g., agent needs activation)
   // User can type during streaming - submitting will stop the stream and send
@@ -1254,7 +1274,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
-  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => {
+  // kbOptions mirrors the FreeFormInput onSubmit 4th parameter shape (POO-108)
+  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }) => {
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
       includeTopSeparator: hasBaseMessage,
@@ -1266,7 +1287,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
-    onSendMessage(normalizedMessage, attachments, skillSlugs)
+    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds)
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
     // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
@@ -1740,6 +1761,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
                             sessionId={session?.id}
+                            workspaceId={session?.workspaceId}
                             compactMode={compactMode}
                           />
                         </div>
@@ -2059,6 +2081,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
               onSourcesChange,
+              enabledKbCollectionIds: isEnterpriseSpace ? session.kbCollectionIds : undefined,
+              onKbCollectionsChange: isEnterpriseSpace ? handleKbCollectionsChange : undefined,
               skills,
               workspaceId,
               workingDirectory,
@@ -2234,6 +2258,8 @@ interface MessageBubbleProps {
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   sessionId?: string
+  /** POO-108: KB chip previews resolve documents against the session workspace */
+  workspaceId?: string
   /**
    * Markdown render mode for assistant messages
    * @default 'minimal'
@@ -2330,6 +2356,7 @@ function MessageBubble({
   onOpenFile,
   onOpenUrl,
   sessionId,
+  workspaceId,
   renderMode = 'minimal',
   onPopOut,
   compactMode,
@@ -2340,16 +2367,21 @@ function MessageBubble({
   // === USER MESSAGE: Right-aligned bubble with attachments above ===
   if (message.role === 'user') {
     return (
-      <UserMessageBubble
-        content={message.content}
-        attachments={message.attachments}
-        badges={message.badges}
-        isPending={message.isPending}
-        isQueued={message.isQueued}
-        onUrlClick={onOpenUrl}
-        onFileClick={onOpenFile}
-        compactMode={compactMode}
-      />
+      <div>
+        <UserMessageBubble
+          content={message.content}
+          attachments={message.attachments}
+          badges={message.badges}
+          isPending={message.isPending}
+          isQueued={message.isQueued}
+          onUrlClick={onOpenUrl}
+          onFileClick={onOpenFile}
+          compactMode={compactMode}
+        />
+        {message.kbReferences && message.kbReferences.length > 0 && (
+          <KbReferenceChips references={message.kbReferences} workspaceId={workspaceId} />
+        )}
+      </div>
     )
   }
 
@@ -2485,6 +2517,8 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.content === next.message.content &&
     prev.message.role === next.message.role &&
     prev.sessionId === next.sessionId &&
+    prev.workspaceId === next.workspaceId &&
+    prev.message.kbReferences === next.message.kbReferences &&
     prev.compactMode === next.compactMode
   )
 })
