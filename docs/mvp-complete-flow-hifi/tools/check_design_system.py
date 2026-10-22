@@ -6,6 +6,9 @@ This checks provenance and generation, not visual approval or product acceptance
 import hashlib
 import json
 import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -40,6 +43,68 @@ def main():
 
     for source in model['sources']:
         check('source ' + source['path'], digest(ROOT / source['path']) == source['sha256'])
+    # The r1->r2 merge refreshed design-system.json but kept stale hashes inside
+    # the SKILL.md body; the whole-file binding below cannot catch that drift.
+    # Every generated Sources line must mirror the canonical model.
+    skill_text = (DESIGN / 'SKILL.md').read_text()
+    for source in model['sources']:
+        prefix = '- `%s` — %s; ' % (source['path'], source['role'])
+        line = next((l for l in skill_text.splitlines() if l.startswith(prefix)), None)
+        match = re.search(r'SHA-256 `([0-9a-f]{64})`$', line) if line else None
+        check('skill body binding ' + source['path'], bool(match) and match.group(1) == source['sha256'])
+    # token-preview.html is a generated artifact of tools/build-token-preview.py;
+    # regenerating to a temp file must be byte-identical to the maintained copy.
+    preview = DESIGN / 'assets/tokens/token-preview.html'
+    check('token-preview exists', preview.exists())
+    if preview.exists():
+        regenerated = Path(tempfile.mkstemp(suffix='.html')[1])
+        try:
+            subprocess.run([sys.executable, str(DESIGN / 'tools/build-token-preview.py'), str(regenerated)],
+                           check=True, capture_output=True)
+            check('token-preview regeneration', regenerated.read_bytes() == preview.read_bytes())
+        finally:
+            regenerated.unlink(missing_ok=True)
+    # source-baseline (current-implementation baseline): the Skill assets must
+    # be the byte-identical regeneration of tools/source-baseline for the same
+    # real input fingerprint. Currency is judged by input hashes + output
+    # regeneration (--check), NOT by snapshot HEAD equaling the current HEAD:
+    # snapshot.head/head_dirty are the generation-time snapshot that stays
+    # stable across re-commits of unchanged inputs (no commit self-reference).
+    sb_manifest = DESIGN / 'assets/source-baseline/baseline-manifest.json'
+    check('source-baseline manifest exists', sb_manifest.exists())
+    if sb_manifest.exists():
+        sb = json.loads(sb_manifest.read_text())
+        check('source-baseline snapshot shape',
+              isinstance(sb.get('snapshot'), dict)
+              and isinstance(sb['snapshot'].get('head'), str) and bool(sb['snapshot']['head'])
+              and isinstance(sb['snapshot'].get('head_dirty'), list))
+        for rel, sha in sb['files'].items():
+            f = DESIGN / 'assets/source-baseline' / rel
+            check('source-baseline file ' + rel, f.exists() and digest(f) == sha)
+        # Offline usability: the exported entries are single-file inlined — no
+        # external script/stylesheet references, so file:// opens them fully.
+        for rel in ('entries/baseline.html', 'index.html'):
+            html = (DESIGN / 'assets/source-baseline' / rel).read_text()
+            check('source-baseline self-contained ' + rel,
+                  '<script type="module" src=' not in html
+                  and not re.search(r'<link[^>]+rel="stylesheet"[^>]+href="(?!data:)', html))
+        sb_build = subprocess.run([sys.executable, str(DESIGN / 'tools/source-baseline/build.py'), '--check'],
+                                  cwd=str(ROOT), capture_output=True, text=True)
+        check('source-baseline regeneration', sb_build.returncode == 0)
+    # component-usage.md Settings registry ids must match the playground registry.
+    usage = (DESIGN / 'references/component-usage.md').read_text()
+    documented = {x for x in re.findall(r'^- `([a-z0-9-]+)` —', usage, re.M) if x.startswith('settings-')}
+    registered = set()
+    for entry in (ROOT / 'apps/electron/src/renderer/playground/registry').glob('*.tsx'):
+        text = entry.read_text()
+        if "category: 'Settings'" in text:
+            registered |= set(re.findall(r"\bid: '([a-z0-9-]+)'", text))
+    check('component-usage settings ids', documented == registered)
+    # page-baselines scene references must exist in the consumer or unified manifest.
+    baselines = (DESIGN / 'references/page-baselines.md').read_text()
+    referenced = set(re.findall(r'`(P-[A-Z0-9-]+)`', baselines))
+    known = {s['id'] for s in consumer['scenes']} | {s['id'] for s in manifest['scenes']}
+    check('page-baselines scene ids', referenced <= known)
     check('model schema', model['schema_version'] == 2)
     check('compatibility adoption', json.loads((BUNDLE / 'design-system.adoption.json').read_text()) == model)
     check('skill binding', digest(DESIGN / 'SKILL.md') == manifest['design']['sha256'])

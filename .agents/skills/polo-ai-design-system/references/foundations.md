@@ -1,6 +1,6 @@
 # Polo 客户端设计来源与消费规则
 
-版本：`poo105-client-material-r1-20261019`（承 `poo70-client-design-r2-20261004`）。适用 Polo Electron 外层工作台、登录、首页、圈子列表与详情；不适用于 Admin、创作者网页或第三方应用内部。
+版本：`poo105-client-material-r2-20261021`（承 `poo105-client-material-r1-20261019`，承 `poo70-client-design-r2-20261004`）。适用 Polo Electron 外层工作台、登录、首页、圈子列表与详情；不适用于 Admin、创作者网页或第三方应用内部。r2 仅扩充消费素材与入口（token 预览、组件索引、页面基线索引、使用手册），不改变 r1 已确认的设计合同。
 
 ## 来源及优先级
 
@@ -49,8 +49,8 @@ G4 `sources/g4-product.css`、`sources/g4-review-record.md`、固定 Renderer `s
 
 ## 维护与检查
 
-仅维护 canonical `references/design-system.json`、本说明、令牌、组件脚本和 `references/client-workbench.template.html`。原型正文的维护位置提升到本 Skill，文档路径 `docs/mvp-complete-flow-hifi/prototype.html` 继续作为兼容产品出口；不维护两份产品源码。`tools/build_review.py` 生成该出口、review 壳、主 manifest、Skill 所有的消费 manifest，以及兼容 adoption 模型。消费 manifest 只索引本批相关场景并指向同一产品出口，不复制原型或需求。
+仅维护 canonical `references/design-system.json`、本说明、令牌、组件脚本、`references/client-workbench.template.html`，以及 r2 新增的消费入口文档：`references/usage-playbook.md`（实施流程手册）、`references/page-baselines.md`（页面/区域基线索引）、`references/component-usage.md`（组件索引，与 renderer playground `registry/settings.tsx` 注册联动校验）。`assets/tokens/token-preview.html` 是生成产物，唯一维护源是 `tools/build-token-preview.py`（从两份权威 token CSS 确定性再生，输入不变则逐字节不变）；不得手改预览页。原型正文的维护位置提升到本 Skill，文档路径 `docs/mvp-complete-flow-hifi/prototype.html` 继续作为兼容产品出口；不维护两份产品源码。`tools/build_review.py` 生成该出口、review 壳、主 manifest、Skill 所有的消费 manifest，以及兼容 adoption 模型。消费 manifest 只索引本批相关场景并指向同一产品出口，不复制原型或需求。
 
-修改后重新生成 Skill、运行 build_review.py、检查 source hashes/模板合成和 validate_unified.py。派生模型、HTML、manifest、任务正文/index 都须同轮更新。历史 evidence 绑定旧版本，不回写；最新生成检查不替代历史视觉 Review，也不证明真实 Electron/API/支付/安装验收。
+修改后重新生成 Skill、运行 build_review.py、重新生成 token-preview、检查 source hashes/SKILL.md 正文绑定/模板合成/token-preview 再生一致和 validate_unified.py。派生模型、HTML、manifest、任务正文/index 都须同轮更新。历史 evidence 绑定旧版本，不回写；最新生成检查不替代历史视觉 Review，也不证明真实 Electron/API/支付/安装验收。
 
 本轮没有建立完整 `.agents/policy-readiness.json`/政策确认注册，也没有锁定生产 runtime 或 parity receipt。V2 模型完整性不等于 execution_ready；POO-80 开工前仍须核对实际 worktree 继承及政策准备，锁定最新 Plan/来源。任务验收保持原 YAML：实现卡 milestone，集中节点 visual smoke；此次来源更新不升级成逐卡 E2E 或 parity。

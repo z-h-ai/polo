@@ -2,9 +2,9 @@
   "schema_version": 1,
   "kind": "client-entry-consumer-index",
   "revision": "poo70-workbench-r15-closure",
-  "design_revision": "poo105-client-material-r1-20261019",
+  "design_revision": "poo105-client-material-r2-20261021",
   "source_manifest": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
-  "source_manifest_sha256": "2e5fea51ff2ac18b72b740c99cc9ef8e5277c5b03d99a71a1e5a765c8a7e40a9",
+  "source_manifest_sha256": "88dbf3195b1c8f44eb245591f7395bb71c2066874a861be745f8e64c7de2e0af",
   "product_export": "docs/mvp-complete-flow-hifi/prototype.html",
   "target": {
     "languages": [
