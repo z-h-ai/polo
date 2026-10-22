@@ -237,6 +237,15 @@ const electronApiExplicit: Record<string, unknown> = {
   respondToPermission: async () => {},
   respondToCredential: async () => {},
   respondToQuestion: async () => {},
+  // ClientHomeRouter mounts useCircleReturn; its B1 bridge probe reads these
+  // properties off window.electronAPI. Declare the slice so the fail-fast
+  // proxy does not treat the probe itself as unfixed production access.
+  circleReturn: {
+    getPending: async () => ({ status: 'none' }) as const,
+    ack: async () => ({ status: 'not_found' }) as const,
+    cancel: async () => ({ status: 'cancelled' }) as const,
+  },
+  onCircleReturnCandidate: () => UNSUBSCRIBE,
   adminLogout: async () => {},
   adminAcquirePhoneAuthChallenge: async () => ({}),
   debugLog: () => {},

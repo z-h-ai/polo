@@ -266,6 +266,15 @@ const electronApiExplicit: Record<string, unknown> = {
   respondToPermission: async () => {},
   respondToCredential: async () => {},
   respondToQuestion: async () => {},
+  // ClientHomeRouter mounts useCircleReturn; its B1 bridge probe reads these
+  // properties off window.electronAPI. Declare the slice so the fail-fast
+  // proxy does not treat the probe itself as unfixed production access.
+  circleReturn: {
+    getPending: async () => ({ status: 'none' }) as const,
+    ack: async () => ({ status: 'not_found' }) as const,
+    cancel: async () => ({ status: 'cancelled' }) as const,
+  },
+  onCircleReturnCandidate: () => UNSUBSCRIBE,
   adminLogout: async () => {},
   adminAcquirePhoneAuthChallenge: async () => ({}),
   debugLog: () => {},
@@ -464,7 +473,17 @@ describe('App preview scope-seal across A→B keyed switch (Review R34/R35)', ()
     render(createElement(I18nextProvider, { i18n }, createElement(App)))
 
     // Real bootstrap through the production useProductSpaceContextState +
-    // App startup route: the trusted transaction publishes scope A.
+    // App startup route. Since POO-124 the fixture's two memberships stop at
+    // the login-time space-select gate; confirming the bootstrap-committed
+    // space takes the zero-transaction direct path into scope A.
+    await waitFor(() => {
+      if (!screen.getByTestId('product-space-select-screen')) throw new Error('space gate missing')
+    }, { timeout: 20_000 })
+    await waitFor(() => {
+      const confirm = screen.getByTestId('product-space-select-confirm') as HTMLButtonElement
+      if (confirm.disabled) throw new Error('gate confirm not ready')
+    }, { timeout: 10_000 })
+    fireEvent.click(screen.getByTestId('product-space-select-confirm'))
     await waitFor(() => {
       if (!screen.getByTestId('home-app-hub')) throw new Error('app not ready')
     }, { timeout: 20_000 })
