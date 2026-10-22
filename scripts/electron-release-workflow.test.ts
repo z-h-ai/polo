@@ -15,7 +15,7 @@ const rollback = readFileSync(
   "utf8",
 );
 const rollbackAction = readFileSync(
-  ".github/actions/zeabur-rollback-failed/action.yml",
+  ".github/actions/updates-rollback-failed/action.yml",
   "utf8",
 );
 
@@ -95,44 +95,46 @@ describe("Electron release workflow boundaries", () => {
   });
 
   it("pulls the approved Draft Release through the sole PVC writer before public verification", () => {
-    expect(release).toContain("Trigger Zeabur release pull");
-    expect(release).toContain("ZEABUR_TOKEN");
-    expect(release).toContain("ZEABUR_UPDATES_SERVICE_ID");
-    expect(release).toContain(
-      "bash scripts/zeabur-cli-checked.sh service exec",
-    );
+    expect(release).toContain("Trigger updates server release pull");
+    expect(release).toContain("UPDATES_SSH_KEY");
+    expect(release).toContain("UPDATES_SSH_HOST");
+    expect(release).toContain("bash scripts/updates-server-exec.sh");
     expect(release).not.toContain("npx zeabur@latest service exec");
     expect(release).toContain("publish-electron-release.ts prepare");
     expect(release).toContain("/app/polo-release-job start");
     expect(release).toContain("/app/polo-release-job status");
     expect(release).toContain("POLO_RELEASE_JOB_STATUS=success");
-    expect(release).toContain("Zeabur release pull job exceeded 30 minutes");
+    expect(release).toContain(
+      "Updates server release pull job exceeded 30 minutes",
+    );
     expect(release).toContain('--release-id "$DRAFT_RELEASE_ID"');
     expect(release).toContain('--asset-identity "$DRAFT_ASSET_IDENTITY"');
     expect(release).toContain("Snapshot approved immutable Draft identity");
     expect(release).toContain("needs.draft-release.outputs.release_id");
     expect(release).toContain("needs.draft-release.outputs.asset_identity");
-    expect(release).toContain("Verify Zeabur updater bundle");
+    expect(release).toContain("Verify updates server updater bundle");
     expect(release).not.toContain("zeabur deploy");
     expect(release).not.toContain("/app/publisher");
+    expect(release.toLowerCase()).not.toContain("zeabur");
+    expect(rollbackAction.toLowerCase()).not.toContain("zeabur");
   });
 
   it("uses an observable fail-closed compensation state machine before publishing the Draft Release", () => {
-    const pull = release.indexOf("Trigger Zeabur release pull");
+    const pull = release.indexOf("Trigger updates server release pull");
     const pullRollback = release.indexOf(
-      "Compensate failed or uncertain Zeabur release pull",
+      "Compensate failed or uncertain updates server release pull",
     );
-    const verify = release.indexOf("Verify Zeabur updater bundle");
+    const verify = release.indexOf("Verify updates server updater bundle");
     const rollback = release.indexOf("Compensate failed public verification");
     const stop = release.indexOf(
       "Stop release after public verification failure",
     );
     const confirm = release.indexOf(
-      "Confirm Zeabur release after public verification",
+      "Confirm updates server release after public verification",
     );
-    const pointer = release.indexOf("Verify confirmed Zeabur pointer");
+    const pointer = release.indexOf("Verify confirmed updates server pointer");
     const finalizationRollback = release.indexOf(
-      "Compensate failed or uncertain Zeabur finalization",
+      "Compensate failed or uncertain updates server finalization",
     );
     const draftRevalidate = release.indexOf(
       "Revalidate approved immutable Draft before GitHub publication",
@@ -140,7 +142,7 @@ describe("Electron release workflow boundaries", () => {
     const githubPublish = release.indexOf("Publish approved GitHub Release");
     const githubState = release.indexOf("Verify GitHub Release publication");
     const githubFinalize = release.indexOf(
-      "Finalize confirmed Zeabur release after GitHub publication",
+      "Finalize confirmed updates server release after GitHub publication",
     );
     const githubRollback = release.indexOf(
       "Compensate failed or uncertain GitHub finalization",
@@ -152,15 +154,15 @@ describe("Electron release workflow boundaries", () => {
     expect(release).toContain(
       "# State lifecycle: Draft -> pulled (rollback marker) -> publicly verified",
     );
-    expect(release).toContain("id: zeabur-pull");
+    expect(release).toContain("id: updates-pull");
     expect(release).toContain("id: public-verify");
     expect(release).toContain("continue-on-error: true");
-    expect(release).toContain("if: steps.zeabur-pull.outcome == 'failure'");
+    expect(release).toContain("if: steps.updates-pull.outcome == 'failure'");
     expect(release).toContain("if: steps.public-verify.outcome == 'failure'");
     expect(release).toContain("publish-electron-release.ts confirm");
     expect(release).toContain("publish-electron-release.ts assert-confirmed");
     expect(
-      release.match(/uses: \.\/\.github\/actions\/zeabur-rollback-failed/g),
+      release.match(/uses: \.\/\.github\/actions\/updates-rollback-failed/g),
     ).toHaveLength(4);
     expect(rollbackAction).toContain(
       "publish-electron-release.ts rollback-failed",
@@ -169,9 +171,7 @@ describe("Electron release workflow boundaries", () => {
     expect(rollbackAction).toContain(
       "publish-electron-release.ts assert-rollback-target",
     );
-    expect(rollbackAction).toContain(
-      "bash scripts/zeabur-cli-checked.sh service exec",
-    );
+    expect(rollbackAction).toContain("bash scripts/updates-server-exec.sh");
     expect(rollbackAction).not.toContain("npx zeabur@latest service exec");
     expect(rollbackAction).toContain("for attempt in $(seq 1 3); do");
     expect(release).toContain("id: confirm-release");

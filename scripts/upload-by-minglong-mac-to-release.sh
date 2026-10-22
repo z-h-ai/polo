@@ -7,7 +7,7 @@
 #
 # Prereq:
 #   - SSH public key (~/.ssh/id_rsa.pub or id_ed25519.pub) installed at
-#     root@120.25.198.159:~/.ssh/authorized_keys (passwordless ssh works).
+#     ubuntu@111.230.240.195 (Tencent Cloud updates server), key auth required.
 #     See the MEMORY.md note for the install one-liner.
 #
 # Verifies, in order:
@@ -21,8 +21,10 @@
 
 set -euo pipefail
 
-REMOTE_HOST=root@120.25.198.159
-REMOTE_PVC_DIR=/var/lib/rancher/k3s/storage/pvc-15a26fab-5a51-45d5-9610-bf74630e57ce_environment-6a7545fa5f062718bc7b62bb_releases-service-6a755c10e4a69d66638c75df/electron/releases
+REMOTE_HOST=ubuntu@111.230.240.195
+# Releases live in the docker volume mounted at /data/releases inside the
+# updates-static container; on the host:
+REMOTE_PVC_DIR=/var/lib/docker/volumes/polo_updates-releases/_data/electron/releases
 CDN_BASE=https://updates.polo.z-h-ai.com/electron/latest
 EXPECTED_TEAM_ID=ZH2RDLUUAB
 

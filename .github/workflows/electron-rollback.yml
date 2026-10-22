@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version already selected manually in Zeabur, without a leading v
+        description: Version already selected manually on the updates server, without a leading v
         required: true
         type: string
 
