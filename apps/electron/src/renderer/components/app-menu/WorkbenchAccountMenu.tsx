@@ -56,6 +56,14 @@ export interface WorkbenchAccountMenuProps {
    */
   canOpenPayment?: boolean
   onOpenPayment?: () => void
+  /**
+   * POO-119: the enterprise admin console / creator center entries share the
+   * same TopBar-owned lifetime — the visibility gate AND the fail-closed
+   * click-time lease check (admin session + unchanged space context) live in
+   * the TopBar, which survives menu close/reopen.
+   */
+  canOpenEnterpriseWorkflows?: boolean
+  onOpenEnterpriseWorkflow?: (workflow: 'members' | 'publishing') => void
 }
 
 const roleHandlers: Record<string, () => void> = {
@@ -197,7 +205,7 @@ function renderDebugSubmenu(t: (key: string) => string): React.ReactNode {
   )
 }
 
-export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, onOpenPayment }: WorkbenchAccountMenuProps) {
+export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, onOpenPayment, canOpenEnterpriseWorkflows, onOpenEnterpriseWorkflow }: WorkbenchAccountMenuProps) {
   const { t } = useTranslation()
   const appShell = useOptionalAppShellContext()
   const theme = useOptionalTheme()
@@ -252,6 +260,28 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
           <Icons.Coins className="h-4 w-4" />
           {t("topbar.account.payment")}
         </StyledDropdownMenuItem>
+      )}
+      {/* POO-119 ENTMENU-01/02: enterprise-scope console entries. Visibility is
+          TopBar-gated (enterprise space + owner/manager only — ENTMENU-03
+          members and ENTMENU-04 personal spaces see neither); the click goes
+          through the TopBar lease check before any browser handoff. */}
+      {canOpenEnterpriseWorkflows && (
+        <>
+          <StyledDropdownMenuItem
+            data-testid="topbar-enterprise-admin"
+            onClick={() => onOpenEnterpriseWorkflow?.('members')}
+          >
+            <Icons.Building2 className="h-4 w-4" />
+            {t("topbar.account.enterpriseAdmin")}
+          </StyledDropdownMenuItem>
+          <StyledDropdownMenuItem
+            data-testid="topbar-creator-center"
+            onClick={() => onOpenEnterpriseWorkflow?.('publishing')}
+          >
+            <Icons.Palette className="h-4 w-4" />
+            {t("topbar.account.creatorCenter")}
+          </StyledDropdownMenuItem>
+        </>
       )}
       <ProductSpaceSwitcher />
       {theme && (
