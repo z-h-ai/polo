@@ -687,7 +687,7 @@ describe('MyCirclesPage distinct system states (P70-CIRCLE-LIST-02)', () => {
 // -------------------------------------------------------------------------
 
 describe('MyCirclesPage navigation and toolbar restore (P70-CIRCLE-LIST-03)', () => {
-  it('navigates to circle-detail content with the STABLE circleId and returns home via back', async () => {
+  it('navigates with the STABLE circleId and the explicit home action clears all history (P-R2-01)', async () => {
     await renderReadyPage()
     // Set the stack to [home, circles] through the REAL ClientPageContext,
     // exactly like the home circles entry (P70-NAV-01).
@@ -700,11 +700,12 @@ describe('MyCirclesPage navigation and toolbar restore (P70-CIRCLE-LIST-03)', ()
     fireEvent.click(designRow.querySelector('[data-testid="circle-row-open"]')!)
     expect(observedRoute).toEqual({ kind: 'circle-detail', circleId: 'circle-design', section: 'content' })
 
-    // 返回首页 pops ONE stack entry (detail → circles), and the home ROOT is
-    // never popped below.
+    // This isolated harness keeps the list mounted while observing routes.
+    // 返回首页 always selects home, even with a detail in the history.
     fireEvent.click(screen.getByTestId('my-circles-back'))
-    expect(observedRoute).toEqual({ kind: 'circles' })
-    fireEvent.click(screen.getByTestId('my-circles-back'))
+    expect(observedRoute).toEqual({ kind: 'home' })
+    expect(probeClientPage!.canGoBack).toBe(false)
+    await act(async () => probeClientPage!.back())
     expect(observedRoute).toEqual({ kind: 'home' })
   })
 
@@ -763,4 +764,111 @@ describe('MyCirclesPage navigation and toolbar restore (P70-CIRCLE-LIST-03)', ()
     expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('')
     expect(screen.getAllByTestId('circle-row').length).toBe(5)
   })
+})
+
+
+it('R3FIX retains toolbar through route-only unmount with the live relations provider', async () => {
+  const view = render(pageTree({ accountId: 'account-a-fixture' }))
+  await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
+  fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
+  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  view.rerender(pageTree({ accountId: 'account-a-fixture', withPage: false }))
+  expect(screen.queryByTestId('my-circles-page')).toBeNull()
+  view.rerender(pageTree({ accountId: 'account-a-fixture' }))
+  await waitFor(() => expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design'))
+  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+  // A second visit must not have persisted the initial empty render over the saved view.
+  view.rerender(pageTree({ accountId: 'account-a-fixture', withPage: false }))
+  view.rerender(pageTree({ accountId: 'account-a-fixture' }))
+  expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
+})
+
+
+it('R3FIX restores the toolbar on a route remount under production StrictMode', async () => {
+  const { StrictMode } = await import('react')
+  const tree = (withPage: boolean) => createElement(StrictMode, null,
+    pageTree({ accountId: 'account-a-fixture', withPage }))
+  const view = render(tree(true))
+  await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
+  fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
+  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  view.rerender(tree(false))
+  view.rerender(tree(true))
+  expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
+  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+})
+
+
+it('R4FIX restores main scroll after route return under StrictMode, preserving query and filter', async () => {
+  const { StrictMode } = await import('react')
+  const tree = (withPage: boolean) => createElement(StrictMode, null,
+    pageTree({ accountId: 'account-a-fixture', withPage }))
+  const view = render(tree(true))
+  await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
+  fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
+  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  const scroller = screen.getByTestId('my-circles-page').parentElement!
+  scroller.scrollTop = 180
+  fireEvent.scroll(scroller)
+  view.rerender(tree(false))
+  view.rerender(tree(true))
+  expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(180)
+  expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
+  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+  view.rerender(pageTree({ accountId: 'account-b-fixture', contextVersion: 2 }))
+  await waitFor(() => expect(screen.getAllByTestId('circle-row')).toHaveLength(1))
+  expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(0)
+})
+
+it('R4FIX waits for same-scope data before restoring scroll and resets on account, space or epoch changes', async () => {
+  const original = makeInjectedResource({ phase: 'ready', circles: accountACircles(), memberships: accountAMemberships() })
+  const key = original.state.scope!
+  const tree = (resource: MemberCirclesResource, withPage = true) => createElement(I18nextProvider, { i18n },
+    createElement(MemberCircleResourceProvider, { resource, children: withPage ? createElement(MyCirclesPage) : null }))
+  const view = render(tree(original))
+  const scroller = screen.getByTestId('my-circles-page').parentElement!
+  scroller.scrollTop = 180
+  fireEvent.scroll(scroller)
+  view.rerender(tree(original, false))
+  const loading = { ...original, circles: null, memberships: null, state: { ...original.state, phase: 'loading' as const, circles: null, memberships: null } }
+  view.rerender(tree(loading))
+  expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(0)
+  view.rerender(tree(original))
+  expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(180)
+  for (const scope of [{ ...key, accountId: 'another-account' }, { ...key, personalProductSpaceId: 'another-space' }, { ...key, epoch: key.epoch + 1 }]) {
+    view.rerender(tree({ ...original, state: { ...original.state, scope } }))
+    expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(0)
+  }
+})
+
+describe('R5FIX-05 partial receipt recovery', () => {
+  for (const failed of ['circles', 'memberships'] as const) {
+    it(`offers explicit refresh when ${failed} alone failed`, async () => {
+      const resource = makeInjectedResource({ phase: 'partial',
+        ...(failed === 'circles' ? { circles: null, circlesError: { code: 'timeout', retryable: true } }
+          : { memberships: null, membershipsError: { code: 'timeout', retryable: true } }) })
+      let refreshes = 0
+      resource.refresh = async () => { refreshes++; return { skipped: true as const, reason: 'no_scope' as const } }
+      const view = renderInjected(resource)
+      fireEvent.click(screen.getByTestId('my-circles-partial-retry'))
+      await waitFor(() => expect(refreshes).toBe(1))
+      view.unmount()
+    })
+  }
+})
+
+describe('R5FIX-05 real partial receipt refresh', () => {
+  for (const failed of ['circles', 'memberships'] as const) {
+    it(`recovers ${failed} in the same mounted resource after service restoration`, async () => {
+      if (failed === 'circles') listErrorCode = 'service_unavailable'
+      else membershipsErrorCode = 'service_unavailable'
+      render(pageTree({ accountId: 'account-a-fixture' }))
+      await waitFor(() => expect(screen.getByTestId('my-circles-partial-banner')).toBeTruthy())
+      listErrorCode = null
+      membershipsErrorCode = null
+      fireEvent.click(screen.getByTestId('my-circles-partial-retry'))
+      await waitFor(() => expect(screen.queryByTestId('my-circles-partial-banner')).toBeNull())
+      expect(screen.getAllByTestId('circle-row').length).toBe(5)
+    })
+  }
 })

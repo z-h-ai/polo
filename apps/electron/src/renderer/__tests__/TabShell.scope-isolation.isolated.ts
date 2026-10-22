@@ -597,3 +597,31 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     expect(document.documentElement.dataset.activeTab).toBeUndefined()
   }, 30_000)
 })
+
+
+it('R3FIX global Home and brand reset the real ClientPage stack inside TabShell', async () => {
+  const { ModalProvider } = await import('@/context/ModalContext')
+  const { ClientPageProvider, useClientPage } = await import('@/context/ClientPageContext')
+  const { act, fireEvent } = await import('@testing-library/react')
+  let page!: ReturnType<typeof useClientPage>
+  function Probe() { page = useClientPage(); return null }
+  render(createElement(ClientPageProvider, {
+    scope: { accountId: SCOPE_A.accountId, productSpaceId: SCOPE_A.productSpaceId, epoch: 1 },
+    children: createElement(ModalProvider, { children: [buildShellTree(SCOPE_A), createElement(Probe, { key: 'route-probe' })] }),
+  }))
+  await waitFor(() => expect(screen.getByTestId('app-topbar')).toBeTruthy())
+  for (const target of ['home', 'brand']) {
+    act(() => {
+      page.navigate({ kind: 'circles' })
+      page.navigate({ kind: 'circle-detail', circleId: 'circle-r3', section: 'content' })
+    })
+    expect(page.route.kind).toBe('circle-detail')
+    const button = target === 'home' ? screen.getByTestId('topbar-home-tab')
+      : screen.getByTestId('app-topbar').querySelector('button[aria-label="' + i18n.t('topbar.brand.home') + '"]')!
+    fireEvent.click(button)
+    expect(page.route).toEqual({ kind: 'home' })
+    expect(page.canGoBack).toBe(false)
+    act(() => page.back())
+    expect(page.route.kind).toBe('home')
+  }
+})

@@ -1,13 +1,14 @@
 import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MemberCircleSnapshot, MemberMembership } from '@polo-ai/shared/admin'
+import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
 import { useMemberCircles } from '@/context/MemberCircleResourceContext'
 import type { MemberCircleScopeKey } from '@/hooks/useMemberCircles'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import {
   memberCircleCreatorNameField,
-  isMembershipCurrentlyPaidEntitled,
+  memberCircleAccessState,
 } from '@/lib/member-circle-view'
 import {
   MemberCircleRow,
@@ -119,23 +120,21 @@ export function normalizeMemberCircleRow(
   circle: MemberCircleSnapshot,
   memberships: ReadonlyArray<MemberMembership>,
   translate: MyCirclesTranslate,
+  now: number = Date.now(),
 ): MemberCircleRowModel {
   const circleId = circle.circle.circleId
   const membership = memberships.find(
     candidate => candidate.circle.circleId === circleId,
   ) ?? null
-  const status = membership?.status ?? circle.status
   const billingKind = membership?.billingKind ?? circle.billingKind
   const currentPeriodEnd = membership?.currentPeriodEnd ?? circle.currentPeriodEnd
-  const currentEntitlement = membership
-    ? isMembershipCurrentlyPaidEntitled(membership)
-    : null
-  const restricted = status !== 'active' || currentEntitlement === false
+  const accessState = memberCircleAccessState(membership, circle, now)
+  const restricted = accessState !== 'valid'
   const entitlementState: MemberCircleEntitlementState = restricted ? 'restore' : 'valid'
 
   let termText: string
   if (restricted) {
-    termText = translate('poo70.c3.entitlement.restore')
+    termText = translate(accessState === 'expired' ? 'poo70.c6.status.expired' : 'poo70.c3.entitlement.restore')
   } else if (billingKind === 'free') {
     termText = translate('poo70.c3.entitlement.free')
   } else {
@@ -176,6 +175,7 @@ export function normalizeMemberCircleRow(
 export interface MyCirclesViewPreferences {
   query: string
   filter: MyCirclesEntitlementFilter
+  scrollTop?: number
 }
 
 const VIEW_PREFERENCES_VERSION = 1
@@ -227,33 +227,36 @@ export function MyCirclesPage() {
   const workbenchStyle = useClientWorkbenchStyle()
   const resource = useMemberCircles()
   const clientPage = useOptionalClientPage()
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const now = useMemberCircleClock(resource.memberships ?? resource.circles ?? [])
 
   const scope = resource.state.scope
   const scopeKey = useMemo(
     () => (scope ? myCirclesViewPreferencesKey(scope) : null),
     [scope],
   )
-  const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<MyCirclesEntitlementFilter>('all')
+  // Initialize and re-seal before effects run. StrictMode replays mount
+  // effects: restoring in one effect and persisting initial defaults in a
+  // second would erase the saved toolbar before the replay can restore it.
+  const readView = () => ({
+    scopeKey,
+    query: loadMyCirclesViewPreferences(scopeKey)?.query ?? '',
+    filter: loadMyCirclesViewPreferences(scopeKey)?.filter ?? 'all' as MyCirclesEntitlementFilter,
+    scrollTop: loadMyCirclesViewPreferences(scopeKey)?.scrollTop ?? 0,
+  })
+  const [view, setView] = useState(readView)
+  if (view.scopeKey !== scopeKey) setView(readView())
+  const { query, filter } = view
+  const setQuery = (query: string) => setView(current => ({ ...current, query }))
+  const setFilter = (filter: MyCirclesEntitlementFilter) => setView(current => ({ ...current, filter }))
 
-  // Restore THIS scope's toolbar state when the fence binds or changes; an
-  // absent scope (idle/denied) resets to the defaults instead of keeping the
-  // previous binding's filters on screen.
   useEffect(() => {
-    const preferences = loadMyCirclesViewPreferences(scopeKey)
-    setQuery(preferences?.query ?? '')
-    setFilter(preferences?.filter ?? 'all')
-  }, [scopeKey])
-
-  // Persist on every change so returning from circle-detail (same live scope)
-  // restores the exact search/filter combination.
-  useEffect(() => {
-    saveMyCirclesViewPreferences(scopeKey, { query, filter })
-  }, [scopeKey, query, filter])
+    saveMyCirclesViewPreferences(view.scopeKey, { query: view.query, filter: view.filter, scrollTop: view.scrollTop })
+  }, [view])
 
   const rows = useMemo(
-    () => (resource.circles ?? []).map(circle => normalizeMemberCircleRow(circle, resource.memberships ?? [], t)),
-    [resource.circles, resource.memberships, t],
+    () => (resource.circles ?? []).map(circle => normalizeMemberCircleRow(circle, resource.memberships ?? [], t, now)),
+    [resource.circles, resource.memberships, t, now],
   )
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleRows = useMemo(
@@ -269,6 +272,9 @@ export function MyCirclesPage() {
   // render (even while the memberships receipt half-failed or a refresh
   // failed over the retained cache).
   const rowsAvailable = resource.circles !== null
+  useLayoutEffect(() => {
+    if (rowsAvailable && scrollerRef.current) scrollerRef.current.scrollTop = view.scrollTop
+  }, [rowsAvailable, view])
   const hasReceiptErrors = resource.state.circlesError !== null
     || resource.state.membershipsError !== null
   const showList = rowsAvailable && rows.length > 0
@@ -287,20 +293,23 @@ export function MyCirclesPage() {
   }, [clientPage])
 
   const handleBack = useCallback(() => {
-    // The route stack root is home; back from circles returns there. Without
-    // the provider (isolated probes) the button does nothing — no fake exit.
-    if (!clientPage) return
-    if (clientPage.canGoBack) {
-      clientPage.back()
-    } else {
-      clientPage.navigate({ kind: 'home' })
-    }
+    // This control promises Home, regardless of the route used to reach the
+    // list. The shared home transition also clears prior detail history.
+    clientPage?.navigate({ kind: 'home' })
   }, [clientPage])
 
   return (
     // Same scroll ownership as the home surface: the DEDICATED wrapper owns
     // viewport-bounded scrolling; C9 (POO-100) registers the main scroller.
-    <div className="h-full min-h-0 overflow-y-auto">
+    <div
+      ref={scrollerRef}
+      className="h-full min-h-0 overflow-y-auto"
+      onScroll={event => {
+        if (!rowsAvailable) return
+        const scrollTop = event.currentTarget.scrollTop
+        setView(current => current.scrollTop === scrollTop ? current : { ...current, scrollTop })
+      }}
+    >
       <main
         style={workbenchStyle}
         className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
@@ -415,7 +424,16 @@ export function MyCirclesPage() {
             className="mt-[24px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text"
             data-testid="my-circles-partial-banner"
           >
-            {t('poo70.c3.state.partial')}
+            <span>{t('poo70.c3.state.partial')}</span>
+            <button
+              type="button"
+              data-testid="my-circles-partial-retry"
+              onClick={handleRetry}
+              disabled={resource.state.refreshing}
+              className="ml-[12px] inline-flex min-h-[28px] items-center rounded-[8px] border border-border px-[12px] font-medium text-foreground hover:bg-foreground-5"
+            >
+              {t('poo70.c3.action.retry')}
+            </button>
           </div>
         )}
 

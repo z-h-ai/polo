@@ -17,6 +17,7 @@ import {
 import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
 import {
   createLocalAppScopeKey,
+  unwrapLocalAppAdmission,
   normalizeLocalAppPermissions,
   type CatalogLocalAppScope,
   type LocalAppRuntimeStatus,
@@ -487,6 +488,8 @@ export function useAppCatalog() {
     host: null,
   })
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
+  const revokedContextRef = useRef<{ key: string } | null>(null)
+  const contextRecoveryRef = useRef<{ revocation: { key: string }; promise: Promise<boolean> } | null>(null)
   const contextKeyRef = useRef<string | null>(catalogContextKey)
   contextKeyRef.current = catalogContextKey
   const knownCatalogRevisionRef = useRef<string | null>(null)
@@ -898,6 +901,7 @@ export function useAppCatalog() {
           && 'catalog' in catalogResult
           && Boolean(catalogResult.catalog)
         if (hasDeniedSnapshot || isCatalogAccessDenied(failureCode, catalogResult.status)) {
+          revokedContextRef.current = { key: contextKey }
           const deniedContextGeneration = ++contextGenerationRef.current
           const deniedSnapshot = catalogResult.accessMode === 'denied'
             && 'catalog' in catalogResult
@@ -940,12 +944,40 @@ export function useAppCatalog() {
           loading: false,
           refreshing: false,
           errorCode: failureCode,
-          accessMode: 'offline',
+          accessMode: catalogRef.current ? 'offline' : null,
           // A failed refresh invalidates stale circle relations (fail-closed):
           // the relation entry must not re-echo the previous Catalog.
           creatorCircles: [],
         }))
         return
+      }
+      const revocation = revokedContextRef.current
+      if (revocation?.key === contextKey) {
+        // A successful data read is not a committed Main context. Keep the
+        // denied projection until its trusted recovery transaction finishes.
+        let recovered = false
+        if ((catalogResult.accessMode ?? 'online') === 'online' && !catalogResult.notModified) {
+          let recovery = contextRecoveryRef.current
+          if (!recovery || recovery.revocation !== revocation) {
+            recovery = { revocation, promise: Promise.resolve()
+              .then(() => productSpace.onRecoverActiveProductSpace?.() ?? false)
+              .catch(() => false) }
+            contextRecoveryRef.current = recovery
+          }
+          recovered = await recovery.promise
+          if (contextRecoveryRef.current === recovery) contextRecoveryRef.current = null
+        }
+        // Recovery can change the provider version and start a fresh sync.
+        // Clear only this scope's marker; the newer sync shares its promise.
+        if (recovered && revokedContextRef.current === revocation) revokedContextRef.current = null
+        if (syncGeneration !== syncGenerationRef.current
+          || contextGeneration !== contextGenerationRef.current
+          || contextKeyRef.current !== contextKey) return
+        if (!recovered) {
+          setState(current => ({ ...current, loading: false, refreshing: false,
+            errorCode: 'PRODUCT_SPACE_CONTEXT_REQUIRED', accessMode: 'denied' }))
+          return
+        }
       }
       if (catalogResult.notModified && catalogRef.current) {
         setState(current => ({
@@ -1028,6 +1060,7 @@ export function useAppCatalog() {
       ) return
       const errorCode = getHomeAppErrorCode(error) ?? 'request_failed'
       if (isCatalogAccessDenied(errorCode)) {
+        revokedContextRef.current = { key: contextKey }
         const deniedContextGeneration = ++contextGenerationRef.current
         const deniedCatalog = catalogRef.current
           ? markCatalogAccessDenied(catalogRef.current)
@@ -1063,7 +1096,7 @@ export function useAppCatalog() {
           loading: false,
           refreshing: false,
           errorCode,
-          accessMode: 'offline',
+          accessMode: catalogRef.current ? 'offline' : null,
           creatorCircles: [],
         }))
       }
@@ -1341,7 +1374,7 @@ export function useAppCatalog() {
       }))
       let result: LocalAppStartResult | undefined
       try {
-        result = await window.electronAPI.localApps.start(scope)
+        result = unwrapLocalAppAdmission(await window.electronAPI.localApps.start(scope))
         requireCurrent(snapshot)
         // STOP/UNINSTALL are newer user intent for this exact scope. A late
         // START may refresh diagnostics, but its URL must not escape to HomePage.
@@ -1487,12 +1520,36 @@ export function useAppCatalog() {
     }
     const snapshot = currentSnapshotForApp(app)
     requireCurrent(snapshot)
+    const launchSyncGeneration = syncGenerationRef.current
     const result = await window.electronAPI.productSpaceResolveLaunch(
       snapshot.catalog.organizationId,
       app.catalogEntryId,
     )
     requireCurrent(snapshot)
     if (!result.success) {
+      if (result.errorCode === 'NOT_FOUND' && syncGenerationRef.current === launchSyncGeneration) {
+        // Entry-level refusal leaves the ProductSpace online. Publish only a
+        // local unavailable projection for this exact version; a fresh Catalog
+        // can restore it. A late denial cannot overwrite a newer sync.
+        const currentCatalog = catalogRef.current
+        if (currentCatalog) {
+          const unavailableCatalog: AppCatalogCacheEntry = {
+            ...currentCatalog,
+            apps: currentCatalog.apps.map(candidate => (
+              candidate.catalogEntryId === app.catalogEntryId
+              && candidate.artifactInstanceId === app.artifactInstanceId
+              && candidate.catalogVersion?.versionId === app.catalogVersion?.versionId
+              && candidate.catalogVersion?.version === app.catalogVersion?.version
+                ? { ...candidate, availability: 'unavailable' }
+                : candidate
+            )),
+          }
+          catalogRef.current = unavailableCatalog
+          setState(current => isCurrentSnapshot(snapshot) && current.catalog === currentCatalog
+            ? { ...current, catalog: unavailableCatalog }
+            : current)
+        }
+      }
       const error = new Error(result.message)
       Object.assign(error, { code: result.errorCode, errorCode: result.errorCode })
       throw error
@@ -1519,7 +1576,7 @@ export function useAppCatalog() {
       throw new Error(i18n.t('homeApps.errors.staleContext'))
     }
     return launch
-  }, [currentSnapshotForApp, requireCurrent, state.accessMode])
+  }, [currentSnapshotForApp, isCurrentSnapshot, requireCurrent, state.accessMode])
 
   const installProductSpaceBundle = useCallback((app: CatalogApp) => {
     const snapshot = currentSnapshotForApp(app)
@@ -1530,9 +1587,9 @@ export function useAppCatalog() {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
       }
       requireCurrent(snapshot)
-      const installed = await window.electronAPI.localApps.installProductSpaceBundle({
+      const installed = unwrapLocalAppAdmission(await window.electronAPI.localApps.installProductSpaceBundle({
         app: identity,
-      })
+      }))
       requireCurrent(snapshot)
       if (
         installed.scope?.kind !== 'catalog'

@@ -459,6 +459,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
                         identityKey={row.entry.identityKey}
                         busy={Boolean(memberActions.operationStates[row.entry.identityKey])}
                         testId="circle-content-app-card"
+                        openDisabled={circle.membership?.currentEntitlement !== undefined && row.entry.launchBlocked}
                         onOpen={() => handleOpenApp(row)}
                       />
                       {/* P70-CIRCLE-CONTENT-01: the detail view keeps the

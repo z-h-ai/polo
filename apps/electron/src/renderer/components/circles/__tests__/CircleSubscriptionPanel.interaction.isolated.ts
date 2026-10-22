@@ -569,7 +569,7 @@ describe('P70-SUBSCRIPTION-02: preview-then-open, fail closed, no payment surfac
     expect(screen.getByTestId('circle-subscription-cap').textContent)
       .toContain('本次没有创建新订单或支付码')
     expect(screen.getByTestId('circle-subscription-cap-reason').textContent)
-      .toContain('next_period_already_purchased')
+      .not.toContain('next_period_already_purchased')
     // 限额不建单仍可查原单.
     fireEvent.click(screen.getByTestId('circle-subscription-view-order'))
     await screen.findByTestId('circle-subscription-order')
@@ -780,4 +780,93 @@ describe('cross-circle isolation: switching circles drops state and invalidates 
     expect((renewB as HTMLButtonElement).disabled).toBe(false)
     expect(screen.getByTestId('circle-subscription-circle-name').textContent).toBe('星河年度圈')
   })
+})
+
+
+describe('R4FIX current entitlement in subscription status', () => {
+  it('expires on the real clock without another receipt, despite stored active and older paid history', async () => {
+    const periodEnd = new Date(Date.now() + 180).toISOString()
+    const current = membershipFixture({
+      currentPeriodEnd: periodEnd,
+      paymentOrders: [membershipFixture().paymentOrders[0]!, {
+        ...membershipFixture().paymentOrders[0]!, orderId: 'older-paid',
+      }],
+    })
+    renderPanel({ membership: current, circle: circleFixture({ currentPeriodEnd: periodEnd }) })
+    expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).toBe('active')
+    await waitFor(() => {
+      expect(Date.now()).toBeGreaterThanOrEqual(Date.parse(periodEnd))
+      expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).not.toBe('active')
+    })
+    expect(screen.getByTestId('circle-subscription-status').className).not.toContain('bg-success')
+    expect(screen.getByTestId('circle-subscription-validity-value').textContent).not.toContain('有效至')
+    expect(current.status).toBe('active')
+  })
+
+  for (const effectivePaymentStatus of ['refunded', 'disputed', 'pending', 'cancelled', 'failed']) {
+    it(`uses correction-aware current entitlement for ${effectivePaymentStatus} ahead of an older paid order`, async () => {
+      renderPanel({ membership: membershipFixture({
+        paymentOrders: [{ ...membershipFixture().paymentOrders[0]!, orderId: 'latest-r4', effectivePaymentStatus },
+          membershipFixture().paymentOrders[0]!],
+      }) })
+      const status = screen.getByTestId('circle-subscription-status')
+      if (effectivePaymentStatus === 'refunded' || effectivePaymentStatus === 'disputed') {
+        expect(status.getAttribute('data-status')).not.toBe('active')
+        expect(status.className).not.toContain('bg-success')
+      } else expect(status.getAttribute('data-status')).toBe('active')
+    })
+  }
+
+  it('does not claim active on an expired paid circle fallback without a membership receipt', () => {
+    renderPanel({ membership: null, circle: circleFixture({ currentPeriodEnd: '2000-01-01T00:00:00.000Z' }) })
+    expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).not.toBe('active')
+  })
+})
+
+// Current-period authority replaces recent-order inference; old tests stay unchanged.
+describe('R4FIX-02 subscription consumes current-period authority', () => {
+  for (const state of ['entitled', 'not_entitled', 'unknown'] as const) {
+    it(`uses ${state} even when recent order history points the other way`, async () => {
+      const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
+      const base = membershipFixture()
+      const member = {
+        ...base,
+        currentEntitlement: currentEntitlementFixture({ membershipId: base.membershipId, state, currentPeriodEnd: base.currentPeriodEnd, validUntil: base.currentPeriodEnd }),
+        paymentOrders: Array.from({ length: 5 }, (_, i) => ({ ...base.paymentOrders[0]!, orderId: `future-${i}`, effectivePaymentStatus: state === 'entitled' ? 'cancelled' : 'paid' })),
+      }
+      renderPanel({ membership: member })
+      expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status') === 'active').toBe(state === 'entitled')
+    })
+  }
+  it('expires a free entitlement at validUntil without another receipt', async () => {
+    const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
+    const until = new Date(Date.now() + 180).toISOString()
+    const member = membershipFixture({ billingKind: 'free', currentPeriodEnd: null })
+    renderPanel({ circle: circleFixture({ billingKind: 'free', currentPeriodEnd: null }), membership: {
+      ...member, currentEntitlement: currentEntitlementFixture({ membershipId: member.membershipId, currentPeriodEnd: null, validUntil: until, source: { ...currentEntitlementFixture().source, billingKind: 'free', orderId: null } }),
+    } })
+    expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).toBe('active')
+    await waitFor(() => expect(screen.getByTestId('circle-subscription-status').getAttribute('data-status')).not.toBe('active'))
+  })
+})
+
+
+describe('R7 renewal cap reasons use maintained locale copy', () => {
+  for (const [reason, key] of [['year_prepaid_next_period_only', 'poo70.c6.cap.ruleYear'], ['month_prepaid_cap_12_calendar_months', 'poo70.c6.cap.ruleMonth']] as const) {
+    it(`renders ${reason} as user copy in all seven locales`, async () => {
+      const { SUPPORTED_LANGUAGE_CODES } = await import('@polo-ai/shared/i18n')
+      previewResponse = successPreviewPayload({ canRenew: false, capReason: reason })
+      renderPanel()
+      await screen.findByTestId('circle-subscription-cap-reason')
+      for (const language of SUPPORTED_LANGUAGE_CODES) {
+        await act(async () => { await i18n.changeLanguage(language) })
+        expect(screen.getByTestId('circle-subscription-cap-reason').textContent).toBe(i18n.t(key))
+        expect(screen.getByTestId('circle-subscription-cap').textContent).not.toContain(reason)
+      }
+    })
+  }
+})
+
+it('R7 absent paid period remains unverified rather than active on a circle fallback', () => {
+  expect(resolveSubscriptionStatus(null, { status: 'active', billingKind: 'paid', currentPeriodEnd: null })).not.toBe('active')
 })
