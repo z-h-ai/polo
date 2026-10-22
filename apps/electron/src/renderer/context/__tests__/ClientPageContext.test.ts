@@ -87,6 +87,43 @@ describe('clientPageStateReducer route stack', () => {
     expect(currentRoute.kind === 'circle-detail' && currentRoute.section).toBe('subscription')
   })
 
+  it('replace swaps the LAST entry in place so back() leaves the page in one step (POO-114)', () => {
+    let state = createInitialClientPageState('scope')
+    state = reducer(state,
+      { type: 'navigate', route: { kind: 'circles' } },
+      { type: 'navigate', route: { kind: 'circle-detail', circleId: 'c1', section: 'content' } },
+    )
+    // Section switches are page-internal: they add NO history depth.
+    state = reducer(state,
+      { type: 'replace', route: { kind: 'circle-detail', circleId: 'c1', section: 'updates' } },
+      { type: 'replace', route: { kind: 'circle-detail', circleId: 'c1', section: 'subscription' } },
+    )
+    expect(current(state)).toEqual({ kind: 'circle-detail', circleId: 'c1', section: 'subscription' })
+    expect(state.stack).toHaveLength(3)
+
+    // One back leaves the detail PAGE (not the previous section)…
+    state = reducer(state, { type: 'back' })
+    expect(current(state)).toEqual({ kind: 'circles' })
+    // …and the next one reaches home (the reported dead-end path).
+    state = reducer(state, { type: 'back' })
+    expect(current(state)).toEqual(HOME_CLIENT_PAGE_ROUTE)
+  })
+
+  it('replace is a no-op at the home root and for the current route', () => {
+    let state = createInitialClientPageState('scope')
+
+    // Nothing above the home root exists to swap.
+    const atRoot = state
+    state = reducer(state, { type: 'replace', route: { kind: 'circles' } })
+    expect(state).toBe(atRoot)
+
+    // Swapping in the current route identity-preserves the state.
+    state = reducer(state, { type: 'navigate', route: { kind: 'circle-detail', circleId: 'c1', section: 'content' } })
+    const before = state
+    state = reducer(state, { type: 'replace', route: { kind: 'circle-detail', circleId: 'c1', section: 'content' } })
+    expect(state).toBe(before)
+  })
+
   it('reset flattens back to home without changing the scope seal', () => {
     let state = createInitialClientPageState('scope')
     state = reducer(state,

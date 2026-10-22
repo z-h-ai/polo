@@ -641,6 +641,35 @@ describe('outer route assembly (P70-CIRCLE-DETAIL-01)', () => {
       expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
     })
   })
+
+  it('POO-114: back POPS the stack — detail → circles → home — and section switches never enter it', async () => {
+    await renderAssembly()
+    await navigateToDetail()
+    // Section switches are page-internal: they must add NO depth above the
+    // ONE detail entry (the reported loop pushed a duplicate route per visit).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-detail-tab-updates'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-detail-tab-subscription'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-subscription-panel')).toBeTruthy()
+    })
+
+    // The FIRST back leaves the detail page for the circles list…
+    fireEvent.click(screen.getByTestId('circle-detail-back'))
+    expect(observedRoute).toEqual({ kind: 'circles' })
+    await waitFor(() => {
+      expect(screen.getByTestId('my-circles-page')).toBeTruthy()
+    })
+    // …and the list's own back reaches HOME again (the reported dead end).
+    fireEvent.click(screen.getByTestId('my-circles-back'))
+    await waitFor(() => {
+      expect(screen.getByTestId('client-home-router').getAttribute('data-route-kind')).toBe('home')
+    })
+    expect(observedRoute).toEqual({ kind: 'home' })
+  })
 })
 
 // -------------------------------------------------------------------------
