@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useEffect } from 'react'
-import { getDefaultStore } from 'jotai'
+import { useStore } from 'jotai'
 import {
   GENUI_APP_CANVAS_CLOSE_EVENT,
   GENUI_APP_CANVAS_OPEN_EVENT,
@@ -33,31 +33,35 @@ import {
 import { canvasPaneAppAtomFamily } from '@/atoms/canvas-pane'
 
 export function GenUiCanvasBridge() {
+  // The ambient jotai store, NOT getDefaultStore(): the app renders inside a
+  // <JotaiProvider> (per-provider scope store), so AppShell's useAtomValue
+  // reads the scoped store — a default-store write would land in a different
+  // store and the pane would never open.
+  const store = useStore()
   const handleOpen = useCallback((request: GenUiAppCanvasOpenRequest) => {
     if (!request.sessionId || !request.appId || !request.indexPath) return
-    getDefaultStore().set(canvasPaneAppAtomFamily(request.sessionId), {
+    store.set(canvasPaneAppAtomFamily(request.sessionId), {
       appId: request.appId,
       title: request.title,
       indexPath: request.indexPath,
       version: request.version,
     })
     dispatchGenUiAppCanvasState({ sessionId: request.sessionId, appId: request.appId })
-  }, [])
+  }, [store])
 
   const handleClose = useCallback((request: GenUiAppCanvasCloseRequest) => {
     if (!request.sessionId || !request.appId) return
-    const store = getDefaultStore()
     const current = store.get(canvasPaneAppAtomFamily(request.sessionId))
     if (!current || current.appId !== request.appId) return
     store.set(canvasPaneAppAtomFamily(request.sessionId), null)
     dispatchGenUiAppCanvasState({ sessionId: request.sessionId, appId: null })
-  }, [])
+  }, [store])
 
   const handleQuery = useCallback((query: GenUiAppCanvasQuery) => {
     if (!query.sessionId) return
-    const current = getDefaultStore().get(canvasPaneAppAtomFamily(query.sessionId))
+    const current = store.get(canvasPaneAppAtomFamily(query.sessionId))
     dispatchGenUiAppCanvasState({ sessionId: query.sessionId, appId: current?.appId ?? null })
-  }, [])
+  }, [store])
 
   useEffect(() => {
     const listen = <T,>(type: string, handler: (detail: T) => void) => {

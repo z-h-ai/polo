@@ -597,6 +597,15 @@ export function useProductSpaceContextState() {
       const persisted = await getProductSpaceContextStorage(accountId)
       if (!isCurrentAccountScope(scope)) return null
       hadPersistedContext = Boolean(persisted.verifiedContext)
+      // The persisted verified context IS the cross-restart memory, but
+      // getStoredActiveProductSpaceId reads the in-process ledger Map, which
+      // only carries selections committed in THIS session — without this
+      // hydration every cold boot fell back to personal, and the login-time
+      // space-select gate misread a returning user as a first login
+      // (POO-124 E2E finding; matches the documented restore rule).
+      if (persisted.verifiedContext?.activeProductSpaceId) {
+        setStoredActiveProductSpaceId(accountId, persisted.verifiedContext.activeProductSpaceId)
+      }
 
       // Direct switch: clear legacy Organization state once, executed by the
       // runtime with verifiable per-step results. Only an all-green run is
