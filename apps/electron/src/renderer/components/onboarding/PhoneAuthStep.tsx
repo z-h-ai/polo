@@ -36,6 +36,8 @@ interface PhoneAuthStepProps {
    */
   formState?: PhoneAuthFormState
   onFormAction?: (action: PhoneAuthFormAction) => void
+  /** Cancels an in-flight send/verify, mirroring the password scene's cancel. */
+  onCancel?: () => void
 }
 
 export function PhoneAuthStep({
@@ -49,6 +51,7 @@ export function PhoneAuthStep({
   errorNode = null,
   formState,
   onFormAction,
+  onCancel,
 }: PhoneAuthStepProps) {
   const { t } = useTranslation()
   const [localForm, dispatchLocal] = useReducer(reducePhoneAuthForm, INITIAL_PHONE_AUTH_FORM_STATE)
@@ -171,6 +174,19 @@ export function PhoneAuthStep({
             )}
           </button>
 
+          {/* Same operational escape hatch as the password scene: a hung
+          send/verify must not hard-lock the phone branch (busy L1). */}
+          {isBusy && onCancel ? (
+            <button
+              type="button"
+              data-testid="phone-auth-cancel"
+              onClick={onCancel}
+              className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+            >
+              {t('common.cancel')}
+            </button>
+          ) : null}
+
           <AdminLoginMethodSwitch
             target="password"
             disabled={isBusy}
@@ -251,6 +267,19 @@ export function PhoneAuthStep({
           disabled={isBusy}
           onSwitch={onUsePassword}
         />
+
+        {/* Same operational escape hatch as the password scene: a hung
+        verify must not hard-lock the code scene (busy L1). */}
+        {isBusy && onCancel ? (
+          <button
+            type="button"
+            data-testid="phone-auth-cancel"
+            onClick={onCancel}
+            className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+          >
+            {t('common.cancel')}
+          </button>
+        ) : null}
 
         {/* Prototype `.button.quiet`: bordered quiet row under the primary.
         Resending is a code send, so it shares the entry consent gate

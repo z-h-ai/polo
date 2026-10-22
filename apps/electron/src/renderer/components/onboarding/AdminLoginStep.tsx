@@ -75,7 +75,7 @@ export function AdminLoginStep({
   }, [phoneAuthEnabled])
 
   useEffect(() => {
-    if (!isLoading || loginMode !== 'password' || !onCancel) return
+    if (!isLoading || !onCancel) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -83,7 +83,7 @@ export function AdminLoginStep({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isLoading, loginMode, onCancel])
+  }, [isLoading, onCancel])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -197,6 +197,7 @@ export function AdminLoginStep({
               onUsePassword={() => switchMode("password")}
               formState={phoneForm}
               onFormAction={dispatchPhoneFormAction}
+              onCancel={onCancel}
             />
           ) : (
             <>
