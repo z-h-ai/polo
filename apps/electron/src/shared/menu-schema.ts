@@ -365,7 +365,7 @@ export const DEBUG_MENU: MenuSection = {
  * Settings item definition — consumed by SettingsNavigator (sidebar panel)
  * and the scope-filtered settings tests.
  */
-import { SETTINGS_PAGES, type SettingsScope, type SettingsSubpage } from './settings-registry'
+import { SETTINGS_PAGES, DEFAULT_SETTINGS_SUBPAGE, type SettingsScope, type SettingsSubpage } from './settings-registry'
 
 export interface SettingsMenuItem {
   id: SettingsSubpage
@@ -428,6 +428,16 @@ export function getVisibleSettingsItems(isAdminLoggedIn: boolean): SettingsMenuI
  */
 export function getSettingsItemsForScope(scope: SettingsScope, isAdminLoggedIn: boolean): SettingsMenuItem[] {
   return getVisibleSettingsItems(isAdminLoggedIn).filter(item => item.scope === scope)
+}
+
+/**
+ * POO-121 fail-closed: the subpage a settings route may RENDER. Pages hidden
+ * from every navigator (messaging is still iterating; server is flag-gated)
+ * must not come back through a direct deep link either — an unlisted subpage
+ * resolves to the bare-settings default.
+ */
+export function resolveRenderableSettingsSubpage(subpage: SettingsSubpage): SettingsSubpage {
+  return SETTINGS_ITEMS.some(item => item.id === subpage) ? subpage : DEFAULT_SETTINGS_SUBPAGE
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
