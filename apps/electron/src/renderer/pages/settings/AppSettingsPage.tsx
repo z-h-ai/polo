@@ -1,15 +1,19 @@
 /**
  * AppSettingsPage
  *
- * Global app-level settings that apply across all workspaces.
+ * Client-shell (Polo scope) app-level settings that apply across all workspaces.
  *
  * Settings:
  * - Notifications
+ * - Power (keep awake while running)
  * - Network (proxy)
+ * - Terminal integration
  * - About (version, updates)
  *
  * Note: AI settings (connections, model, thinking) are admin-managed and not editable here.
  * Note: Appearance settings (theme, font) have been moved to AppearanceSettingsPage.
+ * Note: AI tool capabilities (browser tool, generative UI, rich tool descriptions)
+ *       have been moved to ToolsSettingsPage (assistant scope).
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -110,10 +114,6 @@ export default function AppSettingsPage() {
   // Power state
   const [keepAwakeEnabled, setKeepAwakeEnabled] = useState(false)
 
-  // Tools state
-  const [browserToolEnabled, setBrowserToolEnabled] = useState(true)
-  const [generativeUiInlineEnabled, setGenerativeUiInlineEnabled] = useState(true)
-
   // Proxy state
   const [proxyForm, setProxyForm] = useState<ProxyFormState>(EMPTY_PROXY_FORM)
   const [savedProxyForm, setSavedProxyForm] = useState<ProxyFormState>(EMPTY_PROXY_FORM)
@@ -142,19 +142,13 @@ export default function AppSettingsPage() {
   const loadSettings = useCallback(async () => {
     if (!window.electronAPI) return
     try {
-      const [notificationsOn, keepAwakeOn, browserToolOn, generativeUiOn, generativeUiCanvasOn, proxySettings] = await Promise.all([
+      const [notificationsOn, keepAwakeOn, proxySettings] = await Promise.all([
         window.electronAPI.getNotificationsEnabled(),
         window.electronAPI.getKeepAwakeWhileRunning(),
-        window.electronAPI.getBrowserToolEnabled(),
-        window.electronAPI.getGenerativeUiInlineEnabled(),
-        window.electronAPI.getGenerativeUiCanvasEnabled(),
         window.electronAPI.getNetworkProxySettings(),
       ])
       setNotificationsEnabled(notificationsOn)
       setKeepAwakeEnabled(keepAwakeOn)
-      setBrowserToolEnabled(browserToolOn)
-      setGenerativeUiInlineEnabled(generativeUiOn)
-      setGenerativeUiCanvasEnabled(generativeUiCanvasOn)
       const form = toProxyFormState(proxySettings)
       setProxyForm(form)
       setSavedProxyForm(form)
@@ -235,23 +229,6 @@ export default function AppSettingsPage() {
     await window.electronAPI.setKeepAwakeWhileRunning(enabled)
   }, [])
 
-  const handleBrowserToolEnabledChange = useCallback(async (enabled: boolean) => {
-    setBrowserToolEnabled(enabled)
-    await window.electronAPI.setBrowserToolEnabled(enabled)
-  }, [])
-
-  const handleGenerativeUiInlineEnabledChange = useCallback(async (enabled: boolean) => {
-    setGenerativeUiInlineEnabled(enabled)
-    await window.electronAPI.setGenerativeUiInlineEnabled(enabled)
-  }, [])
-
-  const [generativeUiCanvasEnabled, setGenerativeUiCanvasEnabled] = useState(true)
-
-  const handleGenerativeUiCanvasEnabledChange = useCallback(async (enabled: boolean) => {
-    setGenerativeUiCanvasEnabled(enabled)
-    await window.electronAPI.setGenerativeUiCanvasEnabled(enabled)
-  }, [])
-
   // Proxy handlers
   const isProxyDirty = useMemo(() => {
     return JSON.stringify(proxyForm) !== JSON.stringify(savedProxyForm)
@@ -314,30 +291,6 @@ export default function AppSettingsPage() {
                     description={t("settings.power.keepScreenAwakeDesc")}
                     checked={keepAwakeEnabled}
                     onCheckedChange={handleKeepAwakeEnabledChange}
-                  />
-                </SettingsCard>
-              </SettingsSection>
-
-              {/* Tools */}
-              <SettingsSection title={t("settings.tools.title")}>
-                <SettingsCard>
-                  <SettingsToggle
-                    label={t("settings.tools.builtInBrowser")}
-                    description={t("settings.tools.builtInBrowserDesc")}
-                    checked={browserToolEnabled}
-                    onCheckedChange={handleBrowserToolEnabledChange}
-                  />
-                  <SettingsToggle
-                    label={t("settings.tools.generativeUiInline")}
-                    description={t("settings.tools.generativeUiInlineDesc")}
-                    checked={generativeUiInlineEnabled}
-                    onCheckedChange={handleGenerativeUiInlineEnabledChange}
-                  />
-                  <SettingsToggle
-                    label={t("settings.tools.generativeUiCanvas")}
-                    description={t("settings.tools.generativeUiCanvasDesc")}
-                    checked={generativeUiCanvasEnabled}
-                    onCheckedChange={handleGenerativeUiCanvasEnabledChange}
                   />
                 </SettingsCard>
               </SettingsSection>

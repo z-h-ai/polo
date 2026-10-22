@@ -16,6 +16,7 @@ import {
   Tag,
   ToggleRight,
   UserCircle,
+  Wrench,
 } from 'lucide-react'
 import type { SettingsSubpage } from '../../../shared/types'
 
@@ -25,6 +26,7 @@ export const AppSettingsIcon = ({ className }: IconProps) => <ToggleRight classN
 export const AccountSecurityIcon = ({ className }: IconProps) => <ShieldCheck className={className} />
 export const AppearanceIcon = ({ className }: IconProps) => <Palette className={className} />
 export const InputIcon = ({ className }: IconProps) => <Keyboard className={className} />
+export const ToolsSettingsIcon = ({ className }: IconProps) => <Wrench className={className} />
 export const WorkspaceIcon = ({ className }: IconProps) => <Building2 className={className} />
 export const PermissionsIcon = ({ className }: IconProps) => <ShieldCheck className={className} />
 export const LabelsIcon = ({ className }: IconProps) => <Tag className={className} />
@@ -42,6 +44,7 @@ export const SETTINGS_ICONS: Record<SettingsSubpage, React.ComponentType<IconPro
   'account-security': AccountSecurityIcon,
   appearance: AppearanceIcon,
   input: InputIcon,
+  tools: ToolsSettingsIcon,
   workspace: WorkspaceIcon,
   permissions: PermissionsIcon,
   labels: LabelsIcon,

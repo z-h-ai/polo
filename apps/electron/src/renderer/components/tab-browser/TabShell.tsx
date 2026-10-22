@@ -26,7 +26,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps) {
-  const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab } = useTabShell()
+  const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab, openApp } = useTabShell()
   // POO-105 默认浅色微透材质（Spec §13.14）：宿主根承载材质标记与派生令牌，
   // 深色/未标记宿主保持既有不透明样式。放在窄窗判定之前，hook 顺序不受早退影响。
   useClientMaterialScope()
@@ -65,6 +65,24 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
       }
     })
   }, [isReady, activateTab, openTabs])
+
+  useEffect(() => {
+    // POO-103: the account menu, the Polo app menu, Cmd+, and the native
+    // Settings menu all dispatch the global navigate event from ABOVE
+    // NavigationProvider (the TopBar sits inside TabShell). The route changes
+    // inside the Polo tab — mounted but hidden while the Home tab is active —
+    // so the user saw no visible change. Surface the Polo tab for settings
+    // routes, same contract as the deep-link handler above (openApp also
+    // restores a closed Polo tab).
+    if (!isReady) return
+    const handleNavigate = (event: Event) => {
+      const route = (event as CustomEvent<{ route?: unknown }>).detail?.route
+      if (!shouldSurfaceAssistantForNavigate(route)) return
+      openApp(POLO_APP_DEFINITION)
+    }
+    window.addEventListener(NAVIGATE_EVENT, handleNavigate)
+    return () => window.removeEventListener(NAVIGATE_EVENT, handleNavigate)
+  }, [isReady, openApp])
 
   useEffect(() => {
     // Scope-neutral pre-hydration (Review R33/R34): keyboard shortcuts stay

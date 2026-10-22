@@ -2601,16 +2601,14 @@ export default function App() {
   const handleOpenFile = linkInterceptor.handleOpenFile
   const handleOpenUrl = linkInterceptor.handleOpenUrl
 
+  // Cmd+, / account-menu entry → Polo-scope settings (client shell), landing
+  // on the app category. The assistant sidebar entry is the assistant-scope path.
   const handleOpenSettings = useCallback(() => {
-    navigate(routes.view.settings())
+    navigate(routes.view.settings('app'))
   }, [])
 
   const handleOpenKeyboardShortcuts = useCallback(() => {
     navigate(routes.view.settings('shortcuts'))
-  }, [])
-
-  const handleOpenStoredUserPreferences = useCallback(() => {
-    navigate(routes.view.settings('preferences'))
   }, [])
 
   // Show reset confirmation dialog
@@ -2857,7 +2855,6 @@ export default function App() {
     // App actions
     onOpenSettings: handleOpenSettings,
     onOpenKeyboardShortcuts: handleOpenKeyboardShortcuts,
-    onOpenStoredUserPreferences: handleOpenStoredUserPreferences,
     onReset: handleReset,
     // Session options
     onSessionOptionsChange: handleSessionOptionsChange,
@@ -2906,7 +2903,6 @@ export default function App() {
     handleRefreshWorkspaces,
     handleOpenSettings,
     handleOpenKeyboardShortcuts,
-    handleOpenStoredUserPreferences,
     handleReset,
     handleSessionOptionsChange,
     handleInputChange,

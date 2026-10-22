@@ -365,7 +365,7 @@ export const DEBUG_MENU: MenuSection = {
  * Settings item definition
  * Used by both AppMenu (logo dropdown) and SettingsNavigator (sidebar panel)
  */
-import { SETTINGS_PAGES, type SettingsSubpage } from './settings-registry'
+import { SETTINGS_PAGES, type SettingsScope, type SettingsSubpage } from './settings-registry'
 
 export interface SettingsMenuItem {
   id: SettingsSubpage
@@ -373,6 +373,8 @@ export interface SettingsMenuItem {
   icon: string        // Lucide icon name for AppMenu
   descriptionKey: string // i18n key - resolve with t() at render time
   requiresAdminLogin: boolean
+  /** Which settings surface this item is listed under (from settings-registry) */
+  scope: SettingsScope
 }
 
 /**
@@ -384,6 +386,7 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   'account-security': 'ShieldCheck',
   appearance: 'Palette',
   input: 'Keyboard',
+  tools: 'Wrench',
   workspace: 'Building2',
   permissions: 'ShieldCheck',
   labels: 'Tag',
@@ -405,11 +408,21 @@ export const SETTINGS_ITEMS: SettingsMenuItem[] = SETTINGS_PAGES
     icon: SETTINGS_ICONS[page.id],
     descriptionKey: page.descriptionKey,
     requiresAdminLogin: 'requiresAdminLogin' in page && page.requiresAdminLogin === true,
+    scope: page.scope,
   }))
 
 export function getVisibleSettingsItems(isAdminLoggedIn: boolean): SettingsMenuItem[] {
   return SETTINGS_ITEMS.filter(item =>
     !item.requiresAdminLogin || isAdminLoggedIn)
+}
+
+/**
+ * Settings pages for one scope, in registry order. Applies the same gates as
+ * `getVisibleSettingsItems`: the server page stays behind its feature flag and
+ * account-security stays behind the Admin login gate.
+ */
+export function getSettingsItemsForScope(scope: SettingsScope, isAdminLoggedIn: boolean): SettingsMenuItem[] {
+  return getVisibleSettingsItems(isAdminLoggedIn).filter(item => item.scope === scope)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
