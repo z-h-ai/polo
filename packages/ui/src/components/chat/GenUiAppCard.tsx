@@ -20,11 +20,18 @@
  * UiCardRegistry on attach (CustomEvent bridge, same decoupling), which is
  * what admits its ui-event deep links into the host's six-step validation —
  * only when the generated bundle declared the `ui-event` bridge capability.
+ *
+ * POO-115: the card can hand the app to the host's right-side canvas pane
+ * (`craft:open-genui-canvas`). While the pane holds the app, the card renders
+ * as a placeholder strip — one live webview per app at a time — and the pane
+ * header's close action restores the inline card. The pane state itself lives
+ * Electron-renderer-side; the card only mirrors it through the state/query
+ * events below.
  */
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AppWindow, Globe, Pin } from 'lucide-react'
+import { AppWindow, Globe, PanelRight, Pin } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 // <webview> JSX typing comes from @types/react's WebViewHTMLAttributes
@@ -241,6 +248,76 @@ export function dispatchGenUiCardUnregister(registration: GenUiCardRegistration)
   window.dispatchEvent(new CustomEvent<GenUiCardRegistration>(GENUI_CARD_UNREGISTER_EVENT, { detail: registration }))
 }
 
+// ── Canvas pane bridge (POO-115: right-side expanded canvas) ─────────────────
+//
+// Same CustomEvent decoupling as pin/publish: the Electron renderer owns the
+// pane state (which app a session has expanded, and how wide the pane is);
+// this shared package only emits requests and mirrors the state broadcasts
+// back onto the card. Fire-and-forget by design — the broadcast is the
+// acknowledgment, so card state has exactly one source (the pane).
+
+export const GENUI_APP_CANVAS_OPEN_EVENT = 'craft:open-genui-canvas'
+export const GENUI_APP_CANVAS_CLOSE_EVENT = 'craft:close-genui-canvas'
+export const GENUI_APP_CANVAS_STATE_EVENT = 'craft:genui-canvas-state'
+export const GENUI_APP_CANVAS_QUERY_EVENT = 'craft:query-genui-canvas'
+export const GENUI_APP_CANVAS_FOCUS_EVENT = 'craft:focus-genui-canvas'
+
+export interface GenUiAppCanvasOpenRequest {
+  sessionId: string
+  appId: string
+  title: string
+  indexPath: string
+  version?: number
+}
+
+export interface GenUiAppCanvasCloseRequest {
+  sessionId: string
+  appId: string
+}
+
+/**
+ * Broadcast pane state for one session: the appId currently expanded in the
+ * right-side canvas, or null when the pane is closed. Cards reconcile
+ * against it (placeholder strip vs inline webview); the pane listens for its
+ * own session to flash the focus highlight.
+ */
+export interface GenUiAppCanvasState {
+  sessionId: string
+  appId: string | null
+}
+
+/** A card asking for the current pane state (e.g. after a remount). */
+export interface GenUiAppCanvasQuery {
+  sessionId: string
+}
+
+/** Placeholder → pane: flash the focus highlight, change nothing else. */
+export interface GenUiAppCanvasFocusRequest {
+  sessionId: string
+  appId: string
+}
+
+export function dispatchGenUiAppCanvasOpen(request: GenUiAppCanvasOpenRequest): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppCanvasOpenRequest>(GENUI_APP_CANVAS_OPEN_EVENT, { detail: request }))
+}
+
+export function dispatchGenUiAppCanvasClose(request: GenUiAppCanvasCloseRequest): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppCanvasCloseRequest>(GENUI_APP_CANVAS_CLOSE_EVENT, { detail: request }))
+}
+
+/** Electron-side bridge announces pane state through this. */
+export function dispatchGenUiAppCanvasState(state: GenUiAppCanvasState): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppCanvasState>(GENUI_APP_CANVAS_STATE_EVENT, { detail: state }))
+}
+
+export function dispatchGenUiAppCanvasQuery(query: GenUiAppCanvasQuery): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppCanvasQuery>(GENUI_APP_CANVAS_QUERY_EVENT, { detail: query }))
+}
+
+export function dispatchGenUiAppCanvasFocus(request: GenUiAppCanvasFocusRequest): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppCanvasFocusRequest>(GENUI_APP_CANVAS_FOCUS_EVENT, { detail: request }))
+}
+
 // ── Card ─────────────────────────────────────────────────────────────────────
 
 export interface GenUiAppCardProps {
@@ -259,35 +336,33 @@ interface GenUiWebviewElement extends HTMLElement {
   getWebContentsId?: () => number
 }
 
-function createMountNonce(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID().slice(0, 8)
-  }
-  return Math.random().toString(36).slice(2, 10)
+export interface GenUiGuestWebviewOptions {
+  webviewRef: React.RefObject<HTMLElement | null>
+  src: string
+  partition: string
+  /**
+   * UiCardRegistry registration identity (POO-103); null skips registration
+   * — data:-fallback guests have no verifiable identity to register.
+   */
+  registration: { sessionId: string; cardId: string } | null
+  /** Main-frame load failure signal; drives the carrier's error state. */
+  onLoadFailed: () => void
 }
 
-export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId, className }: GenUiAppCardProps) {
-  const { t } = useTranslation()
-  const webviewRef = React.useRef<HTMLElement | null>(null)
-  const [pinState, setPinState] = React.useState<'idle' | 'pending' | 'pinned' | 'error'>('idle')
-  const [pinError, setPinError] = React.useState<string | null>(null)
-  const [loadFailed, setLoadFailed] = React.useState(false)
-  // Per-mount card id (POO-103): two mounted instances of one app each get
-  // their own UiCardRegistry entry, so both can drive ui-events safely.
-  const cardId = React.useMemo(() => `${appId}-${createMountNonce()}`, [appId])
-  const partition = React.useMemo(() => getGenUiAppPartition(sessionId), [sessionId])
-  // The bridge needs a real bundle file: data: fallback cards get no identity
-  // (and therefore no ui-event loop — their URL would be corrupted by params).
-  const canBridge = Boolean(indexPath && sessionId && GENUI_SESSION_ID_PATTERN.test(sessionId))
-  const src = React.useMemo(() => {
-    const base = buildGenUiAppSrc(indexPath, html)
-    if (!canBridge) return base
-    // Identity injection for file: bundles: the query string never changes
-    // the path Main's validators compare (fileURLToPath uses the pathname),
-    // while the guest reads its own ids to build ui-event deep links.
-    const params = new URLSearchParams({ poloCard: cardId, poloSession: sessionId! })
-    return `${base}?${params.toString()}`
-  }, [indexPath, html, cardId, sessionId, canBridge])
+/**
+ * Shared webview behavior for every GenUI canvas carrier (the inline card and
+ * the right-side pane, POO-115): the guest may never navigate anywhere (Main's
+ * gate is the authority; this is defense in depth), main-frame load failures
+ * surface to the carrier, and — for bridgeable guests — attach/unattach
+ * registers the guest with the Main-owned UiCardRegistry so its ui-event deep
+ * links pass the host's validation. Keeping this in one place is what keeps
+ * the security posture identical across carriers.
+ */
+export function useGenUiGuestWebview({ webviewRef, src, partition, registration, onLoadFailed }: GenUiGuestWebviewOptions): void {
+  // Keep the failure callback out of the effect deps: setters are stable but
+  // callers may pass fresh closures, and re-subscribing on them would churn.
+  const onLoadFailedRef = React.useRef(onLoadFailed)
+  onLoadFailedRef.current = onLoadFailed
 
   // The guest may not navigate anywhere: its one document is the generated
   // bundle. This mirrors Main's hard block (defense in depth) and keeps the
@@ -307,7 +382,7 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
     const failLoad = (event: Event) => {
       const detail = (event as CustomEvent<{ isMainFrame?: boolean }>).detail
       if (detail && detail.isMainFrame === false) return
-      setLoadFailed(true)
+      onLoadFailedRef.current()
     }
     webview.addEventListener('will-navigate', blockNavigation)
     webview.addEventListener('did-fail-load', failLoad)
@@ -315,29 +390,120 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       webview.removeEventListener('will-navigate', blockNavigation)
       webview.removeEventListener('did-fail-load', failLoad)
     }
-  }, [src, partition])
+  }, [src, partition, webviewRef])
 
   // POO-103: register the mounted guest with the Main-owned UiCardRegistry
   // (via the Electron-side bridge) and unregister on unmount. Registration is
   // only honored when Main observed this very guest attach.
   React.useEffect(() => {
-    const webview = webviewRef.current as GenUiWebviewElement | null
-    if (!webview || !canBridge || !sessionId) return
+    const webview = webviewRef.current
+    if (!webview || !registration) return
     let registeredGuestId: number | null = null
     const handleDidAttach = () => {
-      const guestId = webview.getWebContentsId?.()
+      const guestId = (webview as GenUiWebviewElement).getWebContentsId?.()
       if (typeof guestId !== 'number' || guestId <= 0) return
       registeredGuestId = guestId
-      dispatchGenUiCardRegister({ sessionId, cardId, guestWebContentsId: guestId })
+      dispatchGenUiCardRegister({
+        sessionId: registration.sessionId,
+        cardId: registration.cardId,
+        guestWebContentsId: guestId,
+      })
     }
     webview.addEventListener('did-attach', handleDidAttach)
     return () => {
       webview.removeEventListener('did-attach', handleDidAttach)
       if (registeredGuestId != null) {
-        dispatchGenUiCardUnregister({ sessionId, cardId, guestWebContentsId: registeredGuestId })
+        dispatchGenUiCardUnregister({
+          sessionId: registration.sessionId,
+          cardId: registration.cardId,
+          guestWebContentsId: registeredGuestId,
+        })
       }
     }
-  }, [cardId, sessionId, canBridge])
+  }, [registration, webviewRef])
+}
+
+/** Mount-unique suffix for UiCardRegistry card ids (shared with the pane). */
+export function createMountNonce(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().slice(0, 8)
+  }
+  return Math.random().toString(36).slice(2, 10)
+}
+
+export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId, className }: GenUiAppCardProps) {
+  const { t } = useTranslation()
+  const webviewRef = React.useRef<HTMLElement | null>(null)
+  const [pinState, setPinState] = React.useState<'idle' | 'pending' | 'pinned' | 'error'>('idle')
+  const [pinError, setPinError] = React.useState<string | null>(null)
+  const [loadFailed, setLoadFailed] = React.useState(false)
+  // Per-mount card id (POO-103): two mounted instances of one app each get
+  // their own UiCardRegistry entry, so both can drive ui-events safely.
+  const cardId = React.useMemo(() => `${appId}-${createMountNonce()}`, [appId])
+  const partition = React.useMemo(() => getGenUiAppPartition(sessionId), [sessionId])
+  // The bridge needs a real bundle file: data: fallback cards get no identity
+  // (and therefore no ui-event loop — their URL would be corrupted by params).
+  const canBridge = Boolean(indexPath && sessionId && GENUI_SESSION_ID_PATTERN.test(sessionId))
+  const registration = React.useMemo(
+    () => (canBridge && sessionId ? { sessionId, cardId } : null),
+    [canBridge, cardId, sessionId],
+  )
+  const src = React.useMemo(() => {
+    const base = buildGenUiAppSrc(indexPath, html)
+    if (!canBridge) return base
+    // Identity injection for file: bundles: the query string never changes
+    // the path Main's validators compare (fileURLToPath uses the pathname),
+    // while the guest reads its own ids to build ui-event deep links.
+    const params = new URLSearchParams({ poloCard: cardId, poloSession: sessionId! })
+    return `${base}?${params.toString()}`
+  }, [indexPath, html, cardId, sessionId, canBridge])
+
+  useGenUiGuestWebview({
+    webviewRef,
+    src,
+    partition,
+    registration,
+    onLoadFailed: React.useCallback(() => setLoadFailed(true), []),
+  })
+
+  // ── POO-115: right-side canvas pane ────────────────────────────────────────
+  //
+  // The pane state lives Electron-renderer-side (per-session atom); the card
+  // mirrors it. `hasCanvasBridge` keeps the entry out of shells where no
+  // bridge serves the CustomEvents (webui) — same structural probe as the
+  // publish action. Gating matches the pin action: only a real bundle in a
+  // real session can move to the pane, because the pane hosts the same file.
+  const hasCanvasBridge = typeof (window as { electronAPI?: unknown }).electronAPI === 'object'
+    && (window as { electronAPI?: unknown }).electronAPI !== null
+  const canOpenCanvas = canBridge && hasCanvasBridge
+  const [canvasOpen, setCanvasOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!canOpenCanvas || !sessionId) return
+    // Reconcile on mount: a remount (session switch back, transcript
+    // virtualization) must not resurrect the inline webview while the pane
+    // still holds this app — and there is no push targeted at fresh cards.
+    // The state replay must land on a registered listener: the bridge answers
+    // the query synchronously, so subscribe BEFORE dispatching.
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<GenUiAppCanvasState>).detail
+      if (!detail || detail.sessionId !== sessionId) return
+      setCanvasOpen(detail.appId === appId)
+    }
+    window.addEventListener(GENUI_APP_CANVAS_STATE_EVENT, listener)
+    dispatchGenUiAppCanvasQuery({ sessionId })
+    return () => window.removeEventListener(GENUI_APP_CANVAS_STATE_EVENT, listener)
+  }, [appId, canOpenCanvas, sessionId])
+
+  const handleOpenCanvas = React.useCallback(() => {
+    if (!canOpenCanvas || !indexPath || !sessionId) return
+    dispatchGenUiAppCanvasOpen({ sessionId, appId, title, indexPath, version })
+  }, [appId, canOpenCanvas, indexPath, sessionId, title, version])
+
+  const handleFocusCanvas = React.useCallback(() => {
+    if (!canOpenCanvas || !sessionId) return
+    dispatchGenUiAppCanvasFocus({ sessionId, appId })
+  }, [appId, canOpenCanvas, sessionId])
 
   const handlePin = React.useCallback(() => {
     if (!indexPath || pinState === 'pending') return
@@ -431,6 +597,30 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
         : t('genui.app.publishHintTo', { org: publishedOrg })
       : t('genui.app.publishHint')
 
+  // While the pane holds this app the card collapses to a placeholder strip:
+  // no second live webview (one per app, always), the name plus where it went
+  // and a way to find it again. Closing the pane flips this back via the
+  // state broadcast.
+  if (canvasOpen) {
+    return (
+      <div
+        className={cn('rounded-[8px] overflow-hidden border bg-muted/10 px-3 py-2 flex items-center gap-1.5', className)}
+        data-genui-canvas-placeholder={appId}
+      >
+        <AppWindow className="w-3.5 h-3.5 text-muted-foreground/70 shrink-0" />
+        <span className="text-[12px] text-muted-foreground font-medium truncate flex-1 min-w-0">{title}</span>
+        <span className="shrink-0 text-[11px] text-muted-foreground/70">{t('genui.app.openedInCanvas')}</span>
+        <button
+          type="button"
+          onClick={handleFocusCanvas}
+          className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border border-border text-muted-foreground hover:text-accent hover:border-accent/40 transition-colors"
+        >
+          {t('genui.app.showInCanvas')}
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
       <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-1.5">
@@ -440,6 +630,16 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
           <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/80 tabular-nums">
             {t('genui.app.version', { version })}
           </span>
+        )}
+        {canOpenCanvas && (
+          <button
+            type="button"
+            onClick={handleOpenCanvas}
+            className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border border-accent/30 bg-accent/[0.07] text-accent hover:bg-accent/[0.12] hover:border-accent/50 transition-colors"
+          >
+            <PanelRight className="w-3 h-3" />
+            {t('genui.app.openInCanvas')}
+          </button>
         )}
         {indexPath && (
           <button

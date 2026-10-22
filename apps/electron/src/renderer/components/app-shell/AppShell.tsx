@@ -133,6 +133,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { PanelHeader } from "./PanelHeader"
 import { FabNewChat } from "./FabNewChat"
 import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
+import { CanvasPane } from "./CanvasPane"
+import { canvasPaneAppAtomFamily } from "@/atoms/canvas-pane"
 import { MessagingDialogHost } from "@/components/messaging/MessagingDialogHost"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
 import SettingsNavigator from "@/pages/settings/SettingsNavigator"
@@ -573,6 +575,13 @@ function AppShellContent({
   const resizeHandleRef = React.useRef<HTMLDivElement>(null)
   const sessionListHandleRef = React.useRef<HTMLDivElement>(null)
   const [session, setSession] = useSession()
+
+  // POO-115: the selected session's right-side canvas pane. Auto-compact
+  // (single-panel mode) keeps the pane state but renders nothing — the pane
+  // reappears with the desktop layout.
+  const canvasSessionId = session.selected
+  const canvasApp = useAtomValue(canvasPaneAppAtomFamily(canvasSessionId ?? ""))
+  const getCanvasLayoutRect = useCallback(() => shellRef.current?.getBoundingClientRect() ?? null, [])
   const { resolvedMode, isDark, setMode } = useTheme()
   const { canGoBack, canGoForward, goBack, goForward, navigateToSource, navigateToSession } = useNavigation()
 
@@ -3294,10 +3303,23 @@ function AppShellContent({
           }
           navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
-          isRightSidebarVisible={false}
+          isRightSidebarVisible={Boolean(canvasApp) && !isAutoCompact}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />
+
+        {/* POO-115: the selected session's right-side canvas pane, outside the
+            panel stack (right sidebar stays OUTSIDE that container). While a
+            canvas is open the affected card renders as a placeholder strip, so
+            one app never has two live webviews. */}
+        {canvasApp && !isAutoCompact && canvasSessionId && (
+          <CanvasPane
+            key={`${canvasSessionId}:${canvasApp.appId}`}
+            sessionId={canvasSessionId}
+            app={canvasApp}
+            getLayoutRect={getCanvasLayoutRect}
+          />
+        )}
 
         {/* Sidebar Resize Handle (absolute, hidden in focused mode) */}
         {!effectiveSidebarAndNavigatorHidden && (

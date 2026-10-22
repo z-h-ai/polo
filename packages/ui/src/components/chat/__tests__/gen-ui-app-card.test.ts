@@ -1,8 +1,16 @@
 import { describe, it, expect } from 'bun:test'
 import { pathToFileURL } from 'node:url'
 import {
+  GENUI_APP_CANVAS_CLOSE_EVENT,
+  GENUI_APP_CANVAS_OPEN_EVENT,
+  GENUI_APP_CANVAS_QUERY_EVENT,
+  GENUI_APP_CANVAS_STATE_EVENT,
   GENUI_APP_PUBLISH_EVENT,
   buildGenUiAppSrc,
+  dispatchGenUiAppCanvasClose,
+  dispatchGenUiAppCanvasOpen,
+  dispatchGenUiAppCanvasQuery,
+  dispatchGenUiAppCanvasState,
   dispatchGenUiAppPublish,
   dispatchGenUiAppPublishResult,
   getGenUiAppPartition,
@@ -162,6 +170,66 @@ describe('publish bridge events (POO-104)', () => {
       unsubscribe()
       dispatchGenUiAppPublishResult({ requestId: 'r2', ok: false })
       expect(seen).toEqual([true])
+    } finally {
+      restoreWindow()
+    }
+  })
+})
+
+describe('canvas pane bridge events (POO-115)', () => {
+  const globalScope = globalThis as { window?: EventTarget }
+  const originalWindow = globalScope.window
+  let fakeWindow: EventTarget
+
+  function useFakeWindow(): void {
+    fakeWindow = new EventTarget()
+    globalScope.window = fakeWindow
+  }
+
+  function restoreWindow(): void {
+    globalScope.window = originalWindow
+  }
+
+  it('open/close/query requests carry their payloads on distinct events', () => {
+    useFakeWindow()
+    try {
+      const seen: Array<{ event: string; detail: unknown }> = []
+      for (const type of [GENUI_APP_CANVAS_OPEN_EVENT, GENUI_APP_CANVAS_CLOSE_EVENT, GENUI_APP_CANVAS_QUERY_EVENT]) {
+        fakeWindow.addEventListener(type, (event) => {
+          seen.push({ event: type, detail: (event as CustomEvent).detail })
+        })
+      }
+      dispatchGenUiAppCanvasOpen({
+        sessionId: 'sess-1', appId: 'app-1', title: 'Demo',
+        indexPath: '/tmp/data/genui-apps/app-1/index.html', version: 2,
+      })
+      dispatchGenUiAppCanvasClose({ sessionId: 'sess-1', appId: 'app-1' })
+      dispatchGenUiAppCanvasQuery({ sessionId: 'sess-1' })
+      expect(seen.map((s) => s.event)).toEqual([
+        GENUI_APP_CANVAS_OPEN_EVENT,
+        GENUI_APP_CANVAS_CLOSE_EVENT,
+        GENUI_APP_CANVAS_QUERY_EVENT,
+      ])
+      expect(seen[0]!.detail).toEqual({
+        sessionId: 'sess-1', appId: 'app-1', title: 'Demo',
+        indexPath: '/tmp/data/genui-apps/app-1/index.html', version: 2,
+      })
+      expect(seen[1]!.detail).toEqual({ sessionId: 'sess-1', appId: 'app-1' })
+      expect(seen[2]!.detail).toEqual({ sessionId: 'sess-1' })
+    } finally {
+      restoreWindow()
+    }
+  })
+
+  it('the state broadcast carries a null appId when the pane is closed', () => {
+    useFakeWindow()
+    try {
+      let received: unknown = null
+      fakeWindow.addEventListener(GENUI_APP_CANVAS_STATE_EVENT, (event) => {
+        received = (event as CustomEvent).detail
+      })
+      dispatchGenUiAppCanvasState({ sessionId: 'sess-1', appId: null })
+      expect(received).toEqual({ sessionId: 'sess-1', appId: null })
     } finally {
       restoreWindow()
     }
