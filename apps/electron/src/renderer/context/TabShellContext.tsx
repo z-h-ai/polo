@@ -27,6 +27,7 @@ import { ProductSpaceAppLaunchBridge } from '@/components/tab-browser/ProductSpa
 import { GenUiAppPinBridge } from '@/components/tab-browser/GenUiAppPinBridge'
 import { GenUiAppPublishBridge } from '@/components/tab-browser/GenUiAppPublishBridge'
 import { GenUiCardRegistryBridge } from '@/components/tab-browser/GenUiCardRegistryBridge'
+import { GenUiCanvasBridge } from '@/components/tab-browser/GenUiCanvasBridge'
 import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
 
 export interface WebAppNavigationControls {
@@ -298,6 +299,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
       <GenUiAppPinBridge />
       <GenUiAppPublishBridge />
       <GenUiCardRegistryBridge />
+      <GenUiCanvasBridge />
       {children}
     </TabShellContext.Provider>
   )
