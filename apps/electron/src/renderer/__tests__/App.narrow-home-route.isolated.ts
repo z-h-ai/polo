@@ -215,6 +215,7 @@ const electronApiExplicit: Record<string, unknown> = {
   getWindowFocusState: async () => ({ focused: true }),
   // Dock/taskbar badge refresh (render-time registration path).
   refreshBadge: () => {},
+  reportWorkbenchReady: () => {},
   // Session/file operations that must never run in this probe — invoked only
   // by explicit user actions that cannot happen here; fail fast if reached.
   createSession: async () => { throw new Error('electronAPI fixture: createSession is not reachable under the narrow-Home route') },
@@ -237,6 +238,15 @@ const electronApiExplicit: Record<string, unknown> = {
   respondToPermission: async () => {},
   respondToCredential: async () => {},
   respondToQuestion: async () => {},
+  // ClientHomeRouter mounts useCircleReturn; its B1 bridge probe reads these
+  // properties off window.electronAPI. Declare the slice so the fail-fast
+  // proxy does not treat the probe itself as unfixed production access.
+  circleReturn: {
+    getPending: async () => ({ status: 'none' }) as const,
+    ack: async () => ({ status: 'not_found' }) as const,
+    cancel: async () => ({ status: 'cancelled' }) as const,
+  },
+  onCircleReturnCandidate: () => UNSUBSCRIBE,
   adminLogout: async () => {},
   adminAcquirePhoneAuthChallenge: async () => ({}),
   debugLog: () => {},
@@ -265,7 +275,7 @@ const KNOWN_ON = new Set([
   'onAdminReauthRequired', 'onAppThemeChange', 'onAutomationsChanged', 'onBadgeDraw',
   'onBadgeDrawWindows', 'onCloseRequested', 'onCopilotDeviceCode', 'onCreatorSkillProgress',
   'onDeepLinkNavigate', 'onDefaultPermissionsChanged', 'onLabelsChanged', 'onLlmConnectionsChanged',
-  'onMenuKeyboardShortcuts', 'onMenuNewChat', 'onMenuOpenSettings', 'onMenuToggleFocusMode',
+  'onMenuKeyboardShortcuts', 'onMenuNewChat', 'onMenuNewWindowFailed', 'onMenuOpenSettings', 'onMenuToggleFocusMode',
   'onMenuToggleSidebar', 'onMessagingBindingChanged', 'onMessagingPendingChanged',
   'onMessagingPlatformStatus', 'onNotificationNavigate', 'onReconnected', 'onSessionEvent',
   'onSessionFilesChanged', 'onSkillsChanged', 'onSourcesChanged', 'onStatusesChanged',

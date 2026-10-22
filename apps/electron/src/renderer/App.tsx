@@ -1,5 +1,6 @@
 import { ProductSpaceErrorScreen } from '@/components/product-space/ProductSpaceErrorScreen'
 import { ProductSpacePreparationScreen } from '@/components/product-space/ProductSpacePreparationScreen'
+import { ProductSpaceSelectScreen } from '@/components/product-space/ProductSpaceSelectScreen'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18n } from '@polo-ai/shared/i18n'
@@ -120,6 +121,7 @@ type AppState =
   | 'reauth'
   | 'contract-blocked'
   | 'space-error'
+  | 'space-select'
   | 'workspace-picker'
   | 'ready'
 
@@ -1036,9 +1038,92 @@ export default function App() {
     }
   }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh])
 
+  // SCENE-4 (M1): the routing decision must see the list the bootstrap just
+  // committed. bootstrap resolves before its same-batch setState commits, so
+  // a synchronous read here would classify with the pre-bootstrap list; the
+  // effect below decides once flowState is 'ready' (list committed together
+  // with it in publishCommittedSelection).
+  const [spaceRoute, setSpaceRoute] = useState<{ workspaceId: string | null } | null>(null)
+
   const continueAfterProductSpace = useCallback((workspaceId: string | null) => {
-    setAppState(workspaceId ? 'ready' : 'workspace-picker')
+    setSpaceRoute({ workspaceId })
   }, [])
+
+  // M1/SCENE-4: ≥2 available spaces → the space-select gate before Home; a
+  // single available space keeps the existing straight-through path (PC-F01).
+  useEffect(() => {
+    const route = spaceRoute
+    if (!route) return
+    if (productSpace.flowState !== 'ready') return
+    setSpaceRoute(null)
+    if (productSpace.productSpaces.length >= 2) {
+      setAppState('space-select')
+      return
+    }
+    setAppState(route.workspaceId ? 'ready' : 'workspace-picker')
+  }, [productSpace, spaceRoute])
+
+  // SCENE-1 confirmation (M6): the bootstrap-committed selection enters
+  // directly; a different one rides the existing switch transaction whose
+  // progress the switch dialog renders over the gate. The freshly fetched
+  // list is the only authorization basis (C-R03) and the account fence drops
+  // callbacks of a superseded session (P70-BOOT-03 pattern).
+  //
+  // The transaction hand-off is two-phased to stay race-free: the click
+  // records the intent (target) with requestSettled=false, and ONLY the
+  // effect — reading committed state after render — routes on completion.
+  // requestSwitch resolves either after the whole no-execution transaction
+  // committed, or right after parking the dialog on a phase that needs the
+  // user (confirm/failed); pendingSwitch===null && settled is the only
+  // reliable "nothing in flight" signal, because pendingSwitch is set
+  // asynchronously AFTER the click (listActiveExecutions IPC round-trip).
+  const [spaceSelectTarget, setSpaceSelectTarget] = useState<{ accountId: string; spaceId: string } | null>(null)
+  const [spaceSelectRequestSettled, setSpaceSelectRequestSettled] = useState(false)
+
+  const handleSpaceSelectConfirm = useCallback((spaceId: string) => {
+    const accountId = currentAdminUserIdRef.current
+    if (accountId === null) return
+    const current = productSpaceRef.current
+    // Same membership check the switch transaction itself applies (S3: a
+    // restricted space stays enterable with its existing restrictions; only
+    // the default-selection rules refuse to auto-restore it).
+    if (!current.productSpaces.some(space => space.id === spaceId)) return
+    if (spaceSelectTarget) return
+    if (spaceId === current.activeProductSpaceId) {
+      setAppState(windowWorkspaceId ? 'ready' : 'workspace-picker')
+      return
+    }
+    setSpaceSelectRequestSettled(false)
+    setSpaceSelectTarget({ accountId, spaceId })
+    void current.requestSwitch(spaceId)
+      .then(() => { setSpaceSelectRequestSettled(true) })
+      .catch(() => {
+        setSpaceSelectRequestSettled(true)
+        setSpaceSelectTarget(null)
+      })
+  }, [spaceSelectTarget, windowWorkspaceId])
+
+  // Transaction completion: pendingSwitch cleared and the target committed →
+  // enter the shell; cancelled or failed → stay on the select screen to
+  // re-select (M7/A5) — the switch dialog already presented the failure.
+  // The gate-state and account fences keep a late completion after logout,
+  // reauth, or a re-login as another account from dragging the new surface
+  // into the old account's space.
+  useEffect(() => {
+    if (appState !== 'space-select') return
+    const target = spaceSelectTarget
+    if (!target) return
+    if (currentAdminUserIdRef.current !== target.accountId) {
+      setSpaceSelectTarget(null)
+      return
+    }
+    if (!spaceSelectRequestSettled) return
+    if (productSpace.pendingSwitch) return
+    setSpaceSelectTarget(null)
+    if (productSpace.activeProductSpaceId === target.spaceId) {
+      setAppState(windowWorkspaceId ? 'ready' : 'workspace-picker')
+    }
+  }, [appState, productSpace, spaceSelectRequestSettled, spaceSelectTarget, windowWorkspaceId])
 
   const routeThroughProductSpace = useCallback(async (
     accountId: string | null,
@@ -3111,6 +3196,44 @@ export default function App() {
             setAppState('space-error')
             void handleAdminLogout()
           }} />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // SCENE-1 (M1): login-time space confirmation gate. ModalProvider +
+  // WindowCloseHandler keeps the Windows close affordance consistent with the
+  // other lifecycle gates. The gate must sit inside the ProductSpace provider
+  // (like the ready shell): the switch dialog reads the context to render the
+  // transaction phases OVER the gate — without the provider it would render
+  // null and a different-space confirm could never surface its phases.
+  if (appState === 'space-select') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <MaybeProductSpaceProvider value={productSpaceContextValue}>
+            <ProductSpaceSelectScreen
+              spaces={productSpace.productSpaces}
+              activeProductSpaceId={productSpace.activeProductSpaceId}
+              selectionSource={productSpace.spaceSelectionSource ?? 'fresh'}
+              account={currentAdminUser
+                ? { displayName: currentAdminUser.displayName ?? '', username: currentAdminUser.username ?? '' }
+                : null}
+              submitting={productSpace.pendingSwitch !== null}
+              onConfirm={handleSpaceSelectConfirm}
+              onLogout={() => {
+                productSpaceRef.current.cancelSwitch()
+                setSpaceSelectTarget(null)
+                adminAuthCompletion.cancel()
+                onboarding.handleAdminRelogin()
+                // If trusted logout/revocation fails, keep recovery available.
+                setAppState('space-error')
+                void handleAdminLogout()
+              }}
+            />
+            <ProductSpaceSwitchDialog />
+          </MaybeProductSpaceProvider>
         </ModalProvider>
       </DismissibleLayerProvider>
     )

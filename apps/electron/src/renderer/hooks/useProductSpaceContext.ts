@@ -129,6 +129,8 @@ const legacyStateInvalidator = {
   removeLegacyOrganizationSessionIndex: () => {},
 }
 
+export type ProductSpaceSelectionSource = 'stored' | 'memory-invalid' | 'fresh'
+
 export function useProductSpaceContextState() {
   const [flowState, setFlowState] = useState<ProductSpaceFlowState>('idle')
   const [productSpaces, setProductSpaces] = useState<ProductSpaceSummary[]>([])
@@ -138,6 +140,10 @@ export function useProductSpaceContextState() {
   const [error, setError] = useState<{ code: string; message?: string } | null>(null)
   const [pendingSwitch, setPendingSwitch] = useState<PendingSpaceSwitch | null>(null)
   const pendingSwitchRef = useRef<PendingSpaceSwitch | null>(null)
+  /** POO-124: how THIS account's bootstrap chose its committed space — the
+   * login-time select gate reads it instead of re-deriving from the device
+   * ledger, which bootstrap itself overwrites via publishCommittedSelection. */
+  const [spaceSelectionSource, setSpaceSelectionSource] = useState<ProductSpaceSelectionSource | null>(null)
   const [unavailableSpaceIds, setUnavailableSpaceIds] = useState<ReadonlySet<string>>(new Set())
 
   const accountIdRef = useRef<string | null>(null)
@@ -573,6 +579,7 @@ export function useProductSpaceContextState() {
     setActiveProductSpaceId(null)
     setPendingSwitch(null)
     setUnavailableSpaceIds(new Set())
+    setSpaceSelectionSource(null)
     setFlowState('loading')
     setError(null)
     restrictionFenceRef.current.clear()
@@ -589,6 +596,15 @@ export function useProductSpaceContextState() {
       const persisted = await getProductSpaceContextStorage(accountId)
       if (!isCurrentAccountScope(scope)) return null
       hadPersistedContext = Boolean(persisted.verifiedContext)
+      // The persisted verified context IS the cross-restart memory, but
+      // getStoredActiveProductSpaceId reads the in-process ledger Map, which
+      // only carries selections committed in THIS session — without this
+      // hydration every cold boot fell back to personal, and the login-time
+      // space-select gate misread a returning user as a first login
+      // (POO-124 E2E finding; matches the documented restore rule).
+      if (persisted.verifiedContext?.activeProductSpaceId) {
+        setStoredActiveProductSpaceId(accountId, persisted.verifiedContext.activeProductSpaceId)
+      }
 
       // Direct switch: clear legacy Organization state once, executed by the
       // runtime with verifiable per-step results. Only an all-green run is
@@ -621,6 +637,11 @@ export function useProductSpaceContextState() {
         restored && isActiveSpace(restored) ? restored.id : fetched.personalId
       )
       const target = computeTarget()
+      setSpaceSelectionSource(
+        restored && isActiveSpace(restored)
+          ? 'stored'
+          : (storedId ? 'memory-invalid' : 'fresh'),
+      )
       // R34-2/R35-2: reconcile the renderer's ephemeral restriction memory
       // against Main's AUTHORITATIVE fence state. A reload/retryBootstrap
       // erases the local Set but never Main's restriction — without this
@@ -686,6 +707,7 @@ export function useProductSpaceContextState() {
       }
       const restored = await window.electronAPI.productSpaceRestoreOfflineView()
       if (restored.success && isCurrentAccountScope(scope)) {
+        setSpaceSelectionSource('stored')
         applyListResponse(restored.snapshot)
         publishCommittedSelection(
           accountId,
@@ -1423,6 +1445,7 @@ export function useProductSpaceContextState() {
     contextVersion,
     pendingSwitch,
     unavailableSpaceIds,
+    spaceSelectionSource,
     error,
     bootstrap,
     refreshProductSpaces,
