@@ -93,7 +93,7 @@ interface FastDeciderResult {
 |---|---|---|---|---|
 | POO-113-P1（本卡） | 实现完成时（✅ 2026-10-22） | `bun run typecheck:all` + `bun run lint` | 全仓库 | 无（单卡 per_card） |
 | 同上 | 实现完成时（✅） | `bun test .../browser-fast-decider.test.ts .../browser-tools.test.ts` | 快层契约 5 硬约束 + suggest 四态（一致/分歧/危险/未配置） | 同卡 |
-| 同上 | 合并前（⏳ 待人工） | 手动冒烟：`electron:dev` 起真实会话，对内置浏览器执行 `suggest 点击「搜索」`，截图建议输出与耗时 | 真实浏览器端到端（≥1 条） | 同卡 |
+| 同上 | 合并前（✅ 2026-10-22，自动化 E2E） | 真实 Electron E2E：`bun run scripts/electron-browser-suggest-e2e.ts`——真 BrowserPaneManager（真 Chromium/CDP）加载本地 fixture 页，生产 `executeBrowserToolCommand` 路径执行 `suggest`，双快模型真实 key 直连。10/10 断言通过：真实快照含 fixture 元素、双路一致建议 `click @e2`（A 946ms / B 1687ms）且 ref 正确锚定「保存更改」按钮、危险标记触发（黑名单首秀）、只读声明、无 decider 优雅降级、页面状态未变。证据：`e2e/suggest-e2e-evidence.log` | 真实浏览器端到端 | 同卡 |
 | 同上（建议级，✅ 已做） | 合并前 | 生产代码路径（直接 import browser-fast-decider.ts）对 Mind2Web 定位口径抽样 30 例直连跑批 | 回归结果：**28/30 = 93.3% 全对，29/30 双路一致**（与 eval 口径 94.8%/88.1% 吻合） | 同卡 |
 
 **实现完成自检（2026-10-22）**：typecheck:all 0 错误；browser-fast-decider 16/16、browser-tools 91/91（含 suggest 6）、session-tools-core 278/278、browser-tool-detection+names 13/13；shared/agent 套件 1187 例中仅 `base-agent.test.ts > Lifecycle > should track chat calls` 1 例失败（已验证无本次改动亦失败，属分支既有问题）；electron lint 4 个错误位于 onboarding 组件（未触碰，分支既有）；lint:ipc-sends / lint:tool-name-checks 所需 shell 脚本不在仓库（既有环境缺口）。
