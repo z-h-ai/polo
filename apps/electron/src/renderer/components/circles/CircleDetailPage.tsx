@@ -306,12 +306,24 @@ export function CircleDetailPage({
 
   // ── Route navigation (N1): section switch + back ──────────────────────────
   const handleSectionChange = useCallback((next: ClientCircleDetailSection) => {
-    // Navigating to the current route is a no-op inside the N1 reducer.
-    clientPage?.navigate({ kind: 'circle-detail', circleId, section: next })
+    // A section switch is the SAME page's tab state, not a forward navigation:
+    // replace the route in place so the back stack keeps ONE detail entry and
+    // `back()` leaves the page directly (a same-route swap is a reducer no-op).
+    clientPage?.replace({ kind: 'circle-detail', circleId, section: next })
   }, [clientPage, circleId])
 
   const handleBack = useCallback(() => {
-    clientPage?.navigate({ kind: 'circles' })
+    // TRUE back: pop the N1 stack (detail → circles → home). PUSHING another
+    // `circles` entry here duplicated the route — the list page's own back
+    // then popped into an identical route and looked dead, stranding the user
+    // away from home (POO-114). Without the provider (isolated probes) the
+    // button does nothing — no fake exit (MyCirclesPage pattern).
+    if (!clientPage) return
+    if (clientPage.canGoBack) {
+      clientPage.back()
+    } else {
+      clientPage.navigate({ kind: 'circles' })
+    }
   }, [clientPage])
 
   // ── C7 leave flow (subscription section only) ─────────────────────────────

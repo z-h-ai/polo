@@ -116,6 +116,7 @@ export interface ClientPageState {
 
 export type ClientPageAction =
   | { type: 'navigate'; route: ClientPageRoute }
+  | { type: 'replace'; route: ClientPageRoute }
   | { type: 'back' }
   | { type: 'reset' }
   | { type: 'scope-seal'; scopeKey: string }
@@ -139,6 +140,17 @@ export function clientPageStateReducer(state: ClientPageState, action: ClientPag
         stack.splice(1, stack.length - CLIENT_PAGE_MAX_ROUTE_DEPTH)
       }
       return { ...state, stack }
+    }
+    case 'replace': {
+      // Swap the LAST entry in place (a same-page state change such as a
+      // circle-detail section switch): no history depth is added, so `back()`
+      // still leaves the page in ONE step instead of walking every section.
+      // The home root is never replaced — with only the root on the stack
+      // there is nothing above home to swap, so this is a no-op.
+      if (state.stack.length <= 1) return state
+      const current = state.stack[state.stack.length - 1]!
+      if (areClientPageRoutesEqual(current, action.route)) return state
+      return { ...state, stack: [...state.stack.slice(0, -1), action.route] }
     }
     case 'back': {
       if (state.stack.length <= 1) return state
@@ -228,6 +240,12 @@ export interface ClientPageContextValue {
   route: ClientPageRoute
   canGoBack: boolean
   navigate: (route: ClientPageRoute) => void
+  /**
+   * Swaps the CURRENT route in place (no history depth) — the same-page state
+   * change such as a circle-detail section switch, where `back()` must leave
+   * the page rather than walk back through every section.
+   */
+  replace: (route: ClientPageRoute) => void
   back: () => void
   reset: () => void
   /**
@@ -293,6 +311,7 @@ export function ClientPageProvider({
     route: state.stack[state.stack.length - 1]!,
     canGoBack: state.stack.length > 1,
     navigate: (route) => { dispatch({ type: 'navigate', route }) },
+    replace: (route) => { dispatch({ type: 'replace', route }) },
     back: () => { dispatch({ type: 'back' }) },
     reset: () => { dispatch({ type: 'reset' }) },
     registerMainScroller,
