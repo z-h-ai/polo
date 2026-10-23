@@ -520,3 +520,14 @@ RPC 登记该错误码；preload 的 install/full START 把限定的资格拒绝
 - Electron/shared/server-core 类型检查、shared 权威构建、Main/preload/Renderer 构建通过；本轮修改的 Main/Renderer/transport/shared 定向 lint 0 error / 0 warning，i18n coverage 通过。保留既有 Renderer chunk 大小提示。历史范围外全仓基线问题仍按前轮记录保留，本轮没有宣称全仓测试或正式三卡 Acceptance 通过。
 - 浏览器与两个真实 Electron probe 均退出并回收，独立临时 HOME/userData 已清理；自有 preview PID 60175 已停并核对无监听，记录见 `.pipeline/r8fix/cleanup.json`。截图与日志只在自有忽略目录；没有操作 R8 报告服务、用户资源或历史 run_root。
 - 只提交本 worktree 本轮源码、测试及本段；TASK/授权文件保留 untracked，不 push、不合并 dev。完成后保持最终 HEAD，等待下一轮验收。
+
+## POO-125 — 右上角全局设置独立出口与返回闭环（2026-10-23）
+
+**基线**：`dbdeb1ff2d43ab1c039d1f28604de73085142e90`（v0.18.0，与 dev 同点），分支 `POO-125/fix/settings-redirect-back`，改动全部为工作区改动（未提交状态见汇报）。
+
+**根因**：R8FIX-01 把 Polo scope 设置做成「激活 Polo 页签 + 助手内两栏表面」：右上角的全局设置入口会把用户从当前页签拽进 Polo 助手，且设置表面隐藏助手侧栏后唯一出口是页头「完成」——它 `navigate(routes.view.allSessions())`，落点是会话列表而不是进入前的界面，用户「进设置后打不开 Polo AI 助手正常的界面」。
+
+**修复**：全局设置改为 shell 级出口，与助手页签彻底解耦——`lib/navigate.ts` 新增 `GLOBAL_SETTINGS_EVENT` + `openGlobalSettings(subpage?)`（不经路由系统：不切页签、不改助手路由、不产生历史记录）；`TabShell` 在所有页签之上挂载新组件 `GlobalSettingsSurface`（桌面双栏：300px 导航列 + 生产设置页详情列，<768px 单栏 drill-down），页头「← 返回」(`data-testid=global-settings-back`) 关闭表面原样交回界面，重复请求同子页（Cmd+, 再按）同样关闭；`settings-navigate.ts` 新增 `getGlobalSettingsSubpageFromRoute` 并收窄 `shouldSurfaceAssistantForNavigate`——仅 assistant scope 设置路由激活助手页签，Polo scope 设置路由与 `poloai://settings/...` 深链兜底出全局表面（fail-closed：游走的旧调用点必须出可见表面，不会静默改隐藏页签）；assistant 范畴行（如「Polo AI 助手设置」）仍关闭表面并按原路径在助手里打开（其页面依赖 workspace 作用域 provider）。账号菜单/Cmd+,/快捷键菜单/错误消息入口统一改调 `openGlobalSettings()`，删除菜单里的 `openPoloScoped` 激活包装；`AppShell` 删除助手内 Polo 设置分支与「完成」按钮，残留的旧设置路由（历史恢复路由）按普通 navigator 视图渲染、侧栏保留可随时离开。R8FIX-01 的「先激活页签」机制由此被本机制整体替代。
+
+**验证**：三个测试文件 16 用例 0 fail（逐文件分进程：`settings-navigate.test.ts` 9、`TopBar.settings-navigation.isolated.ts` 2、新增 `TabShell.global-settings.interaction.isolated.ts` 5——覆盖入口不激活 Polo 页签、表面打开/返回/子页切换/重复请求关闭、深链兜底、assistant scope 交接；两个 `.isolated.ts` 同进程运行会因 HappyDOM 全局注册冲突报 1 error，属仓库既有约束）；`apps/electron` typecheck 0 error；改动文件 lint 0 error / 26 warnings（dbdeb1ff 同集合 25 条既有，新增 1 条为测试文件 localStorage 装载 warn）。真实渲染证据：临时 harness（真实 TopBar/TabShell/SettingsNavigator/生产设置页 + fixture 助手子树）+ headless Chrome CDP 真实点击驱动，before（dbdeb1ff 复刻 legacy 变体）/after 双侧 1440×900 @2x 各 6 张；`after-4`（点返回后）与 `after-1`（进入前）SHA-256 一致，证明界面逐像素恢复。HTML 前后对照报告：`~/reports/2026-10-23-poo125-settings-surface/index.html`。截图 harness 临时文件（settings-flow.html、settings-flow-main.tsx、settings-flow/、vite.settings-flow.config.ts，两侧 worktree）已在采集后删除，Vite dev server 与 headless Chrome 已停止；未运行全量 `bun run test`（与 dev 同 commit 的既有失败集不属于本改动面）。
+
