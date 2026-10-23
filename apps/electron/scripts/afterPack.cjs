@@ -246,6 +246,33 @@ function validatePackagedCli(context) {
 module.exports = async function afterPack(context) {
   validatePackagedCli(context);
 
+  // POO-130: pack sharp's platform native packages explicitly. The
+  // electron-builder files from/to mapping for @img/* silently skipped on
+  // CI, leaving the packaged server unable to load sharp at startup.
+  // electron-builder skips file entries whose source is absent, but this
+  // hook makes the copy (or its absence) loud and platform-exact.
+  if (context.electronPlatformName === 'linux' || context.electronPlatformName === 'darwin') {
+    const isMac = context.electronPlatformName === 'darwin';
+    const appDir = isMac
+      ? path.join(context.appOutDir, 'Polo AI.app', 'Contents', 'Resources', 'app')
+      : path.join(context.appOutDir, 'resources', 'app');
+    const imgSrc = path.join(context.packager.projectDir, '..', '..', 'node_modules', '@img');
+    const pkgs = isMac
+      ? [`sharp-darwin-${context.arch}`, `sharp-libvips-darwin-${context.arch}`]
+      : ['sharp-linux-x64', 'sharp-libvips-linux-x64'];
+    for (const pkg of pkgs) {
+      const src = path.join(imgSrc, pkg);
+      if (!fs.existsSync(src)) {
+        console.log(`afterPack: skipping @img/${pkg} (not installed on this runner)`);
+        continue;
+      }
+      const dest = path.join(appDir, 'node_modules', '@img', pkg);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.cpSync(src, dest, { recursive: true, dereference: true });
+      console.log(`afterPack: packed @img/${pkg} -> ${dest}`);
+    }
+  }
+
   // Only process macOS builds
   if (context.electronPlatformName !== 'darwin') {
     console.log('Skipping Liquid Glass icon (not macOS)');

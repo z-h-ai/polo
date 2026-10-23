@@ -12,7 +12,7 @@ export const RELEASE_CONTRACT_SCHEMA_VERSION = 2 as const
 // v0.17.0 installers never published, so the online contract still points at
 // a pre-POO-14 artifact containing the removed session-mcp-server sidecar).
 // Re-anchor after the next chained release succeeds.
-export const BOOTSTRAP_VERSION = '0.18.2'
+export const BOOTSTRAP_VERSION = '0.18.6'
 export const DEFAULT_RELEASE_CONTRACT_URL =
   'https://updates.polo.z-h-ai.com/electron/latest/release-contract.json'
 
