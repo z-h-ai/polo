@@ -34,6 +34,23 @@ export function clampCanvasPaneRatio(ratio: number): number {
 }
 
 /**
+ * Width ratio implied by a pointer x during a sash drag. The pane sits at the
+ * right end of the shell row, so the ratio shrinks as the pointer moves right.
+ * `rectRight - inset` is the row's right content-box edge and `innerWidth` is
+ * the row's content-box width — both are the caller's *measured* values, so
+ * the mapping stays exact if the row's styling ever changes.
+ */
+export function canvasPaneRatioFromPointer(
+  rectRight: number,
+  inset: number,
+  innerWidth: number,
+  clientX: number,
+): number {
+  if (!(innerWidth > 0)) return CANVAS_PANE_DEFAULT_RATIO
+  return clampCanvasPaneRatio((rectRight - inset - clientX) / innerWidth)
+}
+
+/**
  * Per-session pane content; null = closed. One app at a time per session:
  * opening another app overwrites this, and the replaced card restores itself
  * from the state broadcast.
