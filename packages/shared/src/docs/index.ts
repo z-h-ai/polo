@@ -119,6 +119,7 @@ export const DOC_REFS = {
   markdownPreview: `${APP_ROOT}/docs/markdown-preview.md`,
   llmTool: `${APP_ROOT}/docs/llm-tool.md`,
   browserTools: `${APP_ROOT}/docs/browser-tools.md`,
+  genUi: `${APP_ROOT}/docs/genui.md`,
   poloAiCli: `${APP_ROOT}/docs/polo-ai.md`,
   docsDir: `${APP_ROOT}/docs/`,
 } as const;

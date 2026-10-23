@@ -65,7 +65,8 @@ describe('PiAgent pre-tool labels guard', () => {
     const response = sent.at(-1)
     expect(response?.type).toBe('pre_tool_use_response')
     expect(response?.action).toBe('block')
-    expect(String(response?.reason ?? '')).toContain('polo-ai label --help')
+    expect(String(response?.reason ?? '')).toContain('no CLI subcommand')
+    expect(String(response?.reason ?? '')).toContain('docs/labels.md')
 
     agent.destroy()
   })

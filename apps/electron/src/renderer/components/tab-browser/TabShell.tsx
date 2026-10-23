@@ -1,12 +1,21 @@
-import { useEffect, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { TabContent } from './TabContent'
 import { TopBar } from '@/components/app-shell/TopBar'
+import { GlobalSettingsSurface } from '@/components/app-shell/GlobalSettingsSurface'
 import { useTabShell } from '@/context/TabShellContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { useClientMaterialScope } from '@/lib/client-workbench-style'
-import { NAVIGATE_EVENT } from '@/lib/navigate'
-import { shouldSurfaceAssistantForNavigate } from './settings-navigate'
+import { GLOBAL_SETTINGS_EVENT, NAVIGATE_EVENT, navigate, routes } from '@/lib/navigate'
+import {
+  getGlobalSettingsSubpageFromRoute,
+  shouldSurfaceAssistantForNavigate,
+} from './settings-navigate'
+import {
+  DEFAULT_SETTINGS_SUBPAGE,
+  getSettingsPageScope,
+  type SettingsSubpage,
+} from '../../../shared/settings-registry'
 import { HOME_TAB_ID, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import { useWorkbenchReady } from '@/hooks/useWorkbenchReady'
 
@@ -30,6 +39,12 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps) {
   const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab, openApp } = useTabShell()
+  // POO-125: the shell-level global (Polo-scope) settings surface. `null` is
+  // closed. Owned HERE — above every tab — so opening it never switches the
+  // active tab and never touches the assistant's route, and the explicit
+  // 返回 hands the previous surface back unchanged. The keyed TabShellProvider
+  // remount drops it on an account/ProductSpace switch.
+  const [globalSettingsSubpage, setGlobalSettingsSubpage] = useState<SettingsSubpage | null>(null)
   // POO-105 默认浅色微透材质（Spec §13.14）：宿主根承载材质标记与派生令牌，
   // 深色/未标记宿主保持既有不透明样式。放在窄窗判定之前，hook 顺序不受早退影响。
   useClientMaterialScope()
@@ -40,6 +55,19 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
   // read before every early return and the decision renders after all hooks.
   const narrowViewport = useNarrowViewport()
   useWorkbenchReady(isReady && !narrowViewport)
+
+  // Assistant-scope categories live in the assistant tab (their pages consume
+  // workspace-scoped providers), so a hand-off from the global surface closes
+  // it and lets the normal assistant-scope navigation take over.
+  const handleGlobalSettingsSubpageSelect = useCallback((subpage: SettingsSubpage) => {
+    if (getSettingsPageScope(subpage) === 'assistant') {
+      setGlobalSettingsSubpage(null)
+      openApp(POLO_APP_DEFINITION)
+      navigate(routes.view.settings(subpage))
+      return
+    }
+    setGlobalSettingsSubpage(subpage)
+  }, [openApp])
 
   useEffect(() => {
     const root = document.documentElement
@@ -63,6 +91,14 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
     // deep-link handler with closures over the previous scope's tabs.
     if (!isReady) return
     return window.electronAPI.onDeepLinkNavigate((nav) => {
+      // POO-125: a Polo-scope settings deep link (poloai://settings/...,
+      // including the "open in new window" entries) shows the shell-level
+      // global surface — it does not activate the assistant tab.
+      const poloSettingsSubpage = getGlobalSettingsSubpageFromRoute(nav.view)
+      if (poloSettingsSubpage) {
+        setGlobalSettingsSubpage(poloSettingsSubpage)
+        return
+      }
       if (nav.view || nav.action || nav.joinToken || nav.tabType === 'polo') {
         const poloTab = openTabs.find((tab) => tab.type === 'polo')
         if (poloTab) activateTab(poloTab.id)
@@ -72,20 +108,40 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
 
   useEffect(() => {
     // POO-103: the account menu, the Polo app menu, Cmd+, and the native
-    // Settings menu all dispatch the global navigate event from ABOVE
-    // NavigationProvider (the TopBar sits inside TabShell). The route changes
-    // inside the Polo tab — mounted but hidden while the Home tab is active —
-    // so the user saw no visible change. Surface the Polo tab for settings
-    // routes, same contract as the deep-link handler above (openApp also
-    // restores a closed Polo tab).
+    // Settings menu all dispatch from ABOVE NavigationProvider (the TopBar
+    // sits inside TabShell). POO-125: global (Polo-scope) settings requests
+    // open the shell-level surface here — same visibility contract as before,
+    // but without dragging the user into the assistant tab. Re-requesting the
+    // open subpage (Cmd+, again) closes it and hands the previous surface
+    // back. Assistant-scope settings and `action/new-session` still surface
+    // the Polo tab (openApp also restores a closed Polo tab).
     if (!isReady) return
+    const openGlobalSettingsSubpage = (requested: SettingsSubpage | null) => {
+      const subpage = requested ?? DEFAULT_SETTINGS_SUBPAGE
+      setGlobalSettingsSubpage((prev) => (prev === subpage ? null : subpage))
+    }
     const handleNavigate = (event: Event) => {
       const route = (event as CustomEvent<{ route?: unknown }>).detail?.route
+      // Fail-closed fallback: a stray Polo-scope settings route (a call site
+      // that still navigate()s instead of openGlobalSettings()) must produce a
+      // visible global surface, not a silent change inside the hidden Polo tab.
+      const poloSettingsSubpage = getGlobalSettingsSubpageFromRoute(route)
+      if (poloSettingsSubpage) {
+        openGlobalSettingsSubpage(poloSettingsSubpage)
+        return
+      }
       if (!shouldSurfaceAssistantForNavigate(route)) return
       openApp(POLO_APP_DEFINITION)
     }
+    const handleGlobalSettings = (event: Event) => {
+      openGlobalSettingsSubpage((event as CustomEvent<{ subpage?: SettingsSubpage | null }>).detail?.subpage ?? null)
+    }
     window.addEventListener(NAVIGATE_EVENT, handleNavigate)
-    return () => window.removeEventListener(NAVIGATE_EVENT, handleNavigate)
+    window.addEventListener(GLOBAL_SETTINGS_EVENT, handleGlobalSettings)
+    return () => {
+      window.removeEventListener(NAVIGATE_EVENT, handleNavigate)
+      window.removeEventListener(GLOBAL_SETTINGS_EVENT, handleGlobalSettings)
+    }
   }, [isReady, openApp])
 
   useEffect(() => {
@@ -163,7 +219,7 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
   return (
     // 材质作用域内 shell 根是唯一画布板：页面画布不再自绘不透明背景，
     // 93% 底板直接承在窗口原生材质上；未标记宿主保持 bg-background。
-    <div className="h-full min-h-0 bg-background client-material-canvas">
+    <div className="relative h-full min-h-0 bg-background client-material-canvas">
       {/* The unified workbench bar (brand + tabs + space/account actions).
           Rendered inside the hydration gate: pre-hydration the boundary above
           returns first, so a stale previous-scope bar never surfaces. */}
@@ -172,6 +228,16 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
         renderPolo={renderPolo}
         onReauthenticateRequest={onReauthenticateRequest}
       />
+      {/* POO-125: the global (Polo-scope) settings surface. Mounted over the
+          active tab's content — the tab keeps its state underneath, and 返回
+          (or Cmd+, again) closes it, handing that surface back unchanged. */}
+      {globalSettingsSubpage !== null && (
+        <GlobalSettingsSurface
+          subpage={globalSettingsSubpage}
+          onSelectSubpage={handleGlobalSettingsSubpageSelect}
+          onClose={() => setGlobalSettingsSubpage(null)}
+        />
+      )}
     </div>
   )
 }

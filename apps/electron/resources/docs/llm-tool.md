@@ -9,38 +9,31 @@ Invoke a secondary LLM for focused subtasks. The tool loads file content automat
 | Summarize large file | haiku | `attachments` |
 | Classify content | haiku | `outputFormat: "classification"` |
 | Extract structured data | haiku | `outputSchema` |
-| Deep analysis | sonnet/opus | `thinking: true` (API key only) |
+| Focused review pass | sonnet | `systemPrompt` + `attachments` |
 | Parallel processing | any | Multiple calls in one message |
 
-## Authentication Paths
+## How It Runs
 
-Features depend on how you authenticate:
+There is one execution path: the call goes through the **agent's own model connection** (the same provider/auth the current session uses) — there is no separate API-key mode and no per-call OAuth distinction. Whatever connection the session is on is what `call_llm` uses, and the `model` parameter selects the model on that connection. If you pass a model the connection cannot serve, the backend falls back to a model it can serve and reports the **effective** model in the result.
 
-| Feature | API Key | OAuth |
-|---------|---------|-------|
-| Text attachments | Yes | Yes |
-| Image attachments | Yes | No |
-| Structured output | Guaranteed (tool_choice) | Prompt-based |
-| Extended thinking | Yes | No |
-| All models | Yes | Yes |
-
-- **API key**: Full features via direct Anthropic SDK
-- **OAuth**: Basic features via agent-native callback
+- Structured output uses the connection's native structured-output support when available, with prompt-based enforcement as fallback.
+- Each call is **read-only** and independent, so multiple calls in one message run in parallel.
+- Each call has a **120-second timeout**.
 
 ## Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `prompt` | string | Instructions for the LLM (required) |
-| `attachments` | array | File/image paths to include |
-| `model` | string | Any model from the model registry. Defaults to Haiku (fastest) |
+| `attachments` | array | Text file paths to include (max 20). **Not for inline text** — put text in `prompt` |
+| `model` | string | Model ID or short name (e.g. `"haiku"`, `"sonnet"`). Defaults to a fast model (Haiku) |
 | `systemPrompt` | string | Optional system prompt |
 | `maxTokens` | number | Max output tokens (1-64000, default 4096) |
-| `temperature` | number | Sampling temperature 0-1 (ignored if thinking=true) |
-| `thinking` | boolean | Enable extended thinking (API key only) |
-| `thinkingBudget` | number | Token budget for thinking (1024-100000, default 10000) |
-| `outputFormat` | enum | Predefined output format |
-| `outputSchema` | object | Custom JSON Schema |
+| `temperature` | number | Sampling temperature 0-1 |
+| `outputFormat` | enum | Predefined output format: `summary`, `classification`, `extraction`, `analysis`, `comparison`, `validation` |
+| `outputSchema` | object | Custom JSON Schema for structured output |
+
+> `thinking` / `thinkingBudget` no longer exist — the model handles its own reasoning. Passing them has no effect.
 
 ## Attachments
 
@@ -50,10 +43,12 @@ attachments: ["/src/auth.ts"]
 
 // Large file - use line range (required for files >2000 lines)
 attachments: [{ path: "/logs/app.log", startLine: 1000, endLine: 1500 }]
-
-// Mix of files and images (API key only for images)
-attachments: ["/src/component.tsx", "/designs/mockup.png"]
 ```
+
+**Text files only.** Image attachments (`.png`, `.jpg`, …) are rejected: `Image attachments are not supported. Use text files only.` Describe images in the chat instead, or have the main session read them with its own image support.
+
+- Paths may be absolute, or **relative to the current session's directory**.
+- Do not pass inline text through `attachments` — it is for files on disk only.
 
 ### Line Ranges
 
@@ -67,8 +62,7 @@ The tool will tell you the file structure if you try to load a file that's too l
 
 ### Supported Formats
 
-- **Text files**: Any UTF-8 encoded file (`.ts`, `.js`, `.py`, `.md`, `.json`, etc.)
-- **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` (max 5MB each, API key only)
+**Text files**: any UTF-8 encoded file (`.ts`, `.js`, `.py`, `.md`, `.json`, etc.). No images, no binaries.
 
 ## Output Formats
 
@@ -80,6 +74,12 @@ The tool will tell you the file structure if you try to load a file that's too l
 | `analysis` | `{ findings[], issues[], recommendations[] }` |
 | `comparison` | `{ similarities[], differences[], verdict }` |
 | `validation` | `{ valid, errors[], warnings[] }` |
+
+Or supply your own `outputSchema` (JSON Schema, `type: "object"`).
+
+## Partial Results
+
+If the subtask is truncated (the backend hits its own turn/step limit before finishing), the tool does not fail silently: the result is prefixed with `[Partial result — …]` and includes a warning. When you see that prefix, either split the task into smaller `call_llm` calls or reduce the input size — don't treat a partial result as complete.
 
 ## Parallel Processing
 
@@ -147,25 +147,15 @@ call_llm({
 // Returns: { category: "billing", confidence: 0.92, reasoning: "..." }
 ```
 
-### Deep Analysis with Thinking (API Key Only)
+### Focused Review with a Custom System Prompt
 
 ```typescript
 call_llm({
-  prompt: "Analyze this algorithm for edge cases and potential bugs",
-  attachments: ["/src/sorting.ts"],
+  prompt: "Review this module for concurrency issues",
+  systemPrompt: "You are a rigorous code reviewer. Report only real, demonstrable issues.",
+  attachments: ["/src/queue.ts"],
   model: "claude-sonnet-4-6",
-  thinking: true,
-  thinkingBudget: 15000
-})
-```
-
-### Analyze Screenshot (API Key Only)
-
-```typescript
-call_llm({
-  prompt: "Describe the UI issues in this screenshot",
-  attachments: ["/screenshots/bug-report.png"],
-  model: "claude-sonnet-4-6"
+  maxTokens: 8192
 })
 ```
 
@@ -174,13 +164,11 @@ call_llm({
 | Constraint | Limit |
 |------------|-------|
 | Max attachments | 20 per call |
-| Max text file size | 2000 lines or 500KB |
-| Max image size | 5MB |
+| Max text file size | 2000 lines or 500KB per attachment |
 | Max total content | 2MB across all attachments |
-| thinking + structured output | Mutually exclusive |
-| thinking + haiku | Not supported (use Sonnet/Opus) |
-| thinking + OAuth | Not supported (use API key) |
-| images + OAuth | Not supported (use API key) |
+| Max output | 64000 tokens (`maxTokens`, default 4096) |
+| Timeout | 120 seconds per call |
+| Attachment types | Text files only — **no images** |
 
 ## Error Handling
 
@@ -190,10 +178,11 @@ The tool provides detailed error messages with recovery suggestions. Common erro
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| File not found | Path doesn't exist | Check path spelling, use absolute paths |
+| File not found | Path doesn't exist | Check path spelling; relative paths resolve against the session directory |
 | File too large | >2000 lines or >500KB | Use line range: `{ path, startLine, endLine }` |
 | Line range too large | Range exceeds 2000 lines | Reduce range or split into multiple calls |
-| Binary file detected | Non-text file without image extension | Use only text files or supported images |
+| Image attachments are not supported. Use text files only. | Image path in `attachments` | Describe the image in the chat, or use the session's own image support |
+| Binary file detected | Non-text file | Use only UTF-8 text files |
 | Permission denied | Cannot read file | Check file permissions |
 | Empty file | File has no content | Skip empty files |
 | Broken symlink | Symlink target missing | Fix or remove symlink |
@@ -202,19 +191,16 @@ The tool provides detailed error messages with recovery suggestions. Common erro
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| thinking + outputFormat | Incompatible modes | Remove one option |
-| thinking + haiku | Haiku doesn't support thinking | Use Sonnet or Opus |
-| thinking + OAuth | OAuth doesn't support thinking | Use API key or remove thinking |
-| images + OAuth | OAuth doesn't support images | Use API key or remove images |
-| thinkingBudget without thinking | Missing thinking=true | Add `thinking: true` |
 | Invalid line range | startLine > endLine | Fix range values |
-| Unknown model | Model not in registry | Check available models in settings |
+| Unknown model | Model not servable on this connection | Omit `model` (use the default) or pick a model from Settings → AI |
+| Timeout after 120s | Input or task too large | Split into smaller calls; trim attachments |
+| `[Partial result — …]` in output | Backend truncated the subtask | Split the task; don't treat partial output as final |
 
-### API Errors (API Key Path)
+### API Errors
 
 | Status | Meaning | Recovery |
 |--------|---------|----------|
-| 401 | Invalid API key | Check/refresh credentials |
+| 401 | Invalid/expired credentials | Re-authenticate in Settings → AI |
 | 403 | Access denied | Verify model access on your plan |
 | 429 | Rate limited | Reduce parallel calls, wait before retry |
 | 500/502/503 | API unavailable | Retry in a few seconds |
@@ -225,3 +211,4 @@ The tool provides detailed error messages with recovery suggestions. Common erro
 - The task requires your conversation context
 - You need tools (Read, Bash, Glob) - use Task tool with subagents instead
 - Simple one-liner responses that don't need isolation
+- The input is an image — images are rejected; handle them in the main session

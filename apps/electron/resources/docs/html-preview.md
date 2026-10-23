@@ -27,6 +27,7 @@ Do NOT use `html-preview` when:
 - Content is structured data — use `datatable` or `spreadsheet` instead
 - Content is a code snippet — use regular code blocks with syntax highlighting
 - The HTML is tiny (< 1KB) — summarize it in markdown instead
+- The HTML needs interactivity or self-contained JavaScript — **script execution is blocked** inside the iframe. Use `generate_app` instead (see [genui.md](./genui.md)).
 
 ## Basic Usage
 
@@ -41,9 +42,9 @@ Do NOT use `html-preview` when:
 ```
 ````
 
-### Multiple Items (Tabs)
+### Multiple Items (Navigator)
 
-When you have multiple related HTML files (e.g., an email thread, multiple reports), use the `items` array. A tab bar appears below the header for switching between items.
+When you have multiple related HTML files (e.g., an email thread, multiple reports), use the `items` array. An item navigator — arrows plus a label that opens a dropdown of all items — appears **in the header row**, next to the expand button.
 
 ````
 ```html-preview
@@ -100,6 +101,33 @@ The `transform_data` tool is the primary way to extract and write HTML files. It
 ### Using Write Tool
 
 For smaller HTML content (generated reports, simple HTML), you can use the `Write` tool directly to write an `.html` file to the session data folder, then reference it.
+
+### Using Source Templates (render_template)
+
+Some sources ship **HTML templates** for consistent, branded rendering of their data. When a template exists, **prefer the `render_template` tool over hand-writing a `transform_data` script** — it shapes and renders the HTML for you.
+
+**Workflow:**
+1. Fetch the data from the source (via MCP tools or API calls) and save the tool result
+2. Call `render_template` with the source slug, template ID, and the shaped data
+3. Output an `html-preview` block with the returned absolute path as `"src"`
+
+**Example:**
+```
+render_template({
+  source: "linear",
+  template: "issue-detail",
+  data: {
+    "identifier": "ENG-123",
+    "title": "Fix navigation crash",
+    "status": "In Progress"
+  }
+})
+// Returns an absolute path → use it as the "src" of an html-preview block
+```
+
+**Discovering templates:** check the source's `guide.md` for a "Templates" section listing available template IDs and their expected data shapes.
+
+**Soft validation:** templates declare required fields. If a required field is missing, the tool still renders but returns warnings — fix the data and re-render.
 
 ## Common Patterns & Recipes
 
@@ -291,7 +319,7 @@ transform_data({
 ### Visual Details
 - **White background** — iframes render with white background (standard for HTML emails/documents)
 - **External images** — load from their original URLs (`https://` supported by CSP)
-- **CSS styling** — all inline and embedded styles work (no external stylesheet restrictions)
+- **CSS styling** — all inline and embedded styles work. External stylesheets are **blocked** by the host content security policy — Google Fonts is the only allowed stylesheet origin
 - **Responsive layouts** — if the HTML has responsive CSS, it adapts to the iframe width
 
 ## Email-Specific Tips
@@ -334,14 +362,15 @@ HTML renders in a **sandboxed iframe** with these restrictions:
 |---------|--------|---------|
 | JavaScript execution | **Blocked** | `sandbox` attr without `allow-scripts` |
 | Form submission | **Blocked** | No `allow-forms` |
-| Link navigation | **Blocked** | Sandbox prevents all navigation |
+| Links | **Clickable** | A `<base target="_top">` is injected into the HTML; clicking a link navigates the top frame and the desktop app opens it in the **system browser** |
 | Popups / new windows | **Blocked** | No `allow-popups` |
 | CSS styling | **Allowed** | Inline, embedded, and `<style>` tags work |
+| External stylesheets | **Blocked** | Host CSP only allows Google Fonts (`https://fonts.googleapis.com`) |
 | Images (`https://`) | **Allowed** | External images load normally |
 | Images (`data:`) | **Allowed** | Base64-encoded images work |
-| Embedded fonts | **Allowed** | Google Fonts and other CDN fonts load |
+| Fonts | **Google Fonts only** | `fonts.googleapis.com` (CSS) and `fonts.gstatic.com` (files) load; other CDN fonts are blocked by the host CSP |
 
-**No HTML sanitization is needed** — the `sandbox` attribute provides complete process-level isolation. Malicious scripts, forms, and navigation are all blocked at the browser engine level.
+**No HTML sanitization is needed** — the `sandbox` attribute provides complete process-level isolation. Malicious scripts and forms are blocked at the browser engine level; link clicks are handed off to the system browser.
 
 ## Best Practices
 

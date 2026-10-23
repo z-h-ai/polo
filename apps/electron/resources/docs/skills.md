@@ -2,16 +2,14 @@
 
 This guide explains how to create and configure skills in Polo AI.
 
-> **CLI-first workflow (recommended):** Use `polo-ai skill ...` commands instead of editing `SKILL.md` files directly.
-> - `polo-ai skill --help`
-> - Canonical command reference: [polo-ai.md](./polo-ai.md)
+> **Editing workflow:** Skills are plain `SKILL.md` files. Edit the file directly, then validate with the assistant's `skill_validate` tool (see [Validating a skill](#4-validate-the-skill)).
 
 ## What Are Skills?
 
 Skills are specialized instructions that extend Claude's capabilities for specific tasks. They use **the exact same SKILL.md format as the Claude Code SDK** - making skills fully compatible between systems.
 
 **Key points:**
-- Skills are invoked via slash commands (e.g., `/commit`, `/review-pr`)
+- Skills are invoked via the `@` mention selector in the message input (UI hint: "Use @ for skills and files"); in the sent message the canonical form is `[skill:slug]` or `[skill:workspaceId:slug]`
 - Skills can be automatically triggered by file patterns (globs)
 - Skills can pre-approve specific tools to run without prompting
 - The SKILL.md format is identical to what Claude Code uses internally
@@ -21,7 +19,7 @@ Skills are specialized instructions that extend Claude's capabilities for specif
 Polo AI uses **the identical SKILL.md format** as the Claude Code SDK. This means:
 
 1. **Format compatibility**: Any skill written for Claude Code works in Polo AI
-2. **Same frontmatter fields**: `name`, `description`, `globs`, `alwaysAllow`, `requiredSources`
+2. **Same frontmatter fields**: `name`, `description`, `globs`, `alwaysAllow`, `requiredSources` (plus `icon`)
 3. **Same content structure**: Markdown body with instructions for Claude
 
 **What Polo AI adds:**
@@ -31,15 +29,26 @@ Polo AI uses **the identical SKILL.md format** as the Claude Code SDK. This mean
 
 ## Skill Precedence
 
-When a skill is invoked (e.g., `/commit`):
+Skills load from four tiers. When the same slug exists in multiple tiers, the higher tier wins:
 
-1. **Workspace skill checked first** - If `~/.polo-ai/workspaces/{id}/skills/commit/SKILL.md` exists, it's used
-2. **SDK skill as fallback** - If no workspace skill exists, the built-in SDK skill is used
+| Priority (low → high) | Tier | Location |
+|-----------------------|------|----------|
+| 1 | **bundled** | Shipped read-only inside the app (currently `polo-upload-app` and `polo-upload-skill`); cannot be edited or deleted |
+| 2 | **global** | `~/.agents/skills/{slug}/` |
+| 3 | **workspace** | `~/.polo-ai/workspaces/{id}/skills/{slug}/` |
+| 4 | **project** | `{project}/.agents/skills/{slug}/` |
 
-This allows you to:
-- **Override SDK skills** - Create a workspace skill with the same slug to replace built-in behavior
-- **Extend SDK skills** - Reference SDK behavior in your custom skill and add workspace-specific instructions
-- **Create new skills** - Add entirely new skills not in the SDK
+So when `[skill:commit]` is invoked:
+
+1. **Project skill checked first** — if `{project}/.agents/skills/commit/SKILL.md` exists, it's used
+2. **Workspace skill next** — then `~/.polo-ai/workspaces/{id}/skills/commit/SKILL.md`
+3. **Global skill next** — then `~/.agents/skills/commit/SKILL.md`
+4. **Bundled skill as fallback** — if no user skill exists, the app-shipped skill is used
+
+A user skill with the same slug always overrides a bundled one. This allows you to:
+- **Override bundled/global skills** - Create a skill with the same slug in a higher tier to replace the built-in behavior
+- **Extend built-in skills** - Reference built-in behavior in your custom skill and add workspace-specific instructions
+- **Create new skills** - Add entirely new skills
 
 ## Skill Storage
 
@@ -103,11 +112,28 @@ the desktop space, authorization, your enable/disable setting and preparing the
 current version on this device are separate states. Open **Manage skills** from
 the Polo assistant card to enable a distributed skill and download or update it.
 
+**Managing distributed (creator/managed) skills** from that card covers the full
+lifecycle: enable or disable a skill, download and install it, receive version
+updates or ignore a specific version, view and change its safety status,
+uninstall it, and list or delete its backups. Install state is tracked in a
+ledger at `~/.polo-ai/creator-skills.json`.
+
 For ordinary requests, the assistant receives the names, descriptions and file
 conditions of eligible skills prepared in the current space. Selected descriptions
 are kept complete; when many skills exceed a turn's discovery budget, the assistant
 prioritizes relevant skills and states that others remain available by explicit
 selection. Discovery alone does not read instructions or authorize execution.
+
+### icon (optional)
+An emoji or a URL. An emoji (e.g. `🔧`) is rendered directly in the UI; a URL is
+auto-downloaded into an `icon.{ext}` file next to the SKILL.md. **Relative paths
+and inline SVG are not supported.**
+
+```yaml
+icon: "🔧"
+```
+
+For a locally bundled icon file, keep using `icon.svg` / `icon.png` in the skill folder (see [Skill Storage](#skill-storage)).
 
 ### globs (optional)
 Array of glob patterns. When a file matching these patterns is being worked on,
@@ -311,16 +337,16 @@ When triaging issues:
 When this skill is invoked, the `linear` source is automatically enabled for the
 session — no manual toggle needed.
 
-## Overriding SDK Skills
+## Overriding Built-in Skills
 
-To customize a built-in SDK skill like `/commit`:
+To customize a built-in skill (bundled or SDK), create a same-slug skill in a higher tier — for example `[skill:commit]`:
 
-1. Create `~/.polo-ai/workspaces/{ws}/skills/commit/SKILL.md`
+1. Create `~/.polo-ai/workspaces/{ws}/skills/commit/SKILL.md` (workspace tier) or `{project}/.agents/skills/commit/SKILL.md` (project tier)
 2. Write your custom instructions
 3. Add an icon
 4. Run `skill_validate({ skillSlug: "commit" })`
 
-Your skill will be used instead of the SDK's built-in version.
+Your skill will be used instead of the built-in version.
 
 This is useful for:
 - Adding team-specific commit message formats

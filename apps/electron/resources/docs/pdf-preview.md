@@ -12,6 +12,7 @@ The `pdf-preview` block renders PDF files inline in chat messages — showing th
 | **`html-preview` block** | Emails, newsletters, styled HTML | Sandboxed iframe with full CSS |
 | **`image-preview` block** | Screenshots, captures, visual diffs | Inline fit-to-container + fullscreen viewer |
 | **`datatable`/`spreadsheet`** | Structured data, tables | Interactive sortable/filterable tables |
+| **`markdown-preview` block** | `.md` files (specs, drafts, READMEs) | Inline rendered markdown |
 
 **Key principle:** Unlike `html-preview` which needs `transform_data` to extract HTML, PDFs are already files on disk. Just reference the file path directly — no extraction step needed.
 
@@ -42,9 +43,9 @@ Do NOT use `pdf-preview` when:
 ```
 ````
 
-### Multiple Items (Tabs)
+### Multiple Items (Navigator)
 
-When you have multiple related PDFs (e.g., quarterly reports, contract versions), use the `items` array. A tab bar appears below the header for switching between items.
+When you have multiple related PDFs (e.g., quarterly reports, contract versions), use the `items` array. An item navigator — arrows plus a label that opens a dropdown of all items — appears **in the header row**, next to the expand button.
 
 ````
 ```pdf-preview

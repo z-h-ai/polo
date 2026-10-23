@@ -2,9 +2,7 @@
 
 This guide explains how to configure automations in Polo AI to automate workflows based on events.
 
-> **CLI-first workflow (recommended):** Use `polo-ai automation ...` commands instead of editing JSON directly.
-> - `polo-ai automation --help`
-> - Canonical command reference: [polo-ai.md](./polo-ai.md)
+> **Primary workflow:** edit `automations.json` directly (schema below), then validate with the `config_validate` tool (`target: "automations"` or `"all"`). See [Validation](#validation).
 
 ## What Are Automations?
 
@@ -22,22 +20,9 @@ Automations are configured in `automations.json` at the root of your workspace:
 ~/.polo-ai/workspaces/{workspaceId}/automations.json
 ```
 
-## Recommended CLI Commands
+## Editing and Validating
 
-```bash
-polo-ai automation list
-polo-ai automation get <id>
-polo-ai automation create --event UserPromptSubmit --prompt "..."
-polo-ai automation update <id> --json '{...}'
-polo-ai automation enable <id>
-polo-ai automation disable <id>
-polo-ai automation duplicate <id>
-polo-ai automation history [<id>] --limit 20
-polo-ai automation last-executed <id>
-polo-ai automation test <id> --match "..."
-polo-ai automation lint
-polo-ai automation validate
-```
+Automations are managed from the **Automations** section in the sidebar, grouped into **Scheduled**, **Event-based**, and **Agentic**. For file-level changes, edit `automations.json` and then run `config_validate` with `target: "automations"` (or `"all"`) — see [Validation](#validation). To turn a single automation on or off without deleting it, set `"enabled": false` on its matcher (the sidebar toggle writes the same field).
 
 ## Basic Structure
 
@@ -69,7 +54,7 @@ polo-ai automation validate
 | `LabelConfigChange` | Label configuration changed | Always matches |
 | `PermissionModeChange` | Permission mode changed | New mode name |
 | `FlagChange` | Session flagged/unflagged | `true` or `false` |
-| `SessionStatusChange` | Session status changed | New status (e.g., `done`, `in_progress`) |
+| `SessionStatusChange` | Session status changed | New status ID (e.g., `done`, `needs-review`) |
 | `SchedulerTick` | Runs every minute | Uses cron matching |
 
 > **Note:** `TodoStateChange` is a deprecated alias for `SessionStatusChange`. Existing configs using the old name will continue to work but will show a deprecation warning during validation.
@@ -111,6 +96,7 @@ Send a prompt to Polo AI (creates a new session for scheduled prompts).
 | `prompt` | string | Required | Prompt text to send |
 | `llmConnection` | string | Workspace default | LLM connection slug (configured in AI Settings) |
 | `model` | string | Workspace default | Model ID for the created session |
+| `thinkingLevel` | string | Workspace default | Thinking level for the created session (falls back to the workspace default) |
 
 **Features:**
 - Use `@mentions` to reference sources or skills
@@ -194,7 +180,7 @@ Instead of manually constructing `Authorization` headers, you can use the `auth`
 
 The `auth` field is applied before custom `headers`, so you can override the generated `Authorization` header if needed. All auth field values support `$VAR` expansion.
 
-**Response capture:** By default, webhook response bodies are discarded after reading (to release connections). Set `captureResponse: true` to capture the response body (truncated to 4KB). The captured body is included in the execution result and recorded in automation history (truncated to 500 chars).
+**Response capture:** By default, webhook response bodies are discarded after reading (to release connections). Set `captureResponse: true` to capture the response body (truncated to 4KB). The captured body is included in the execution result and recorded in automation history. History entries cap `error`, `responseBody`, and `prompt` string fields at **2000 characters** each.
 
 ```json
 {
@@ -225,6 +211,7 @@ These are automatically set by the automation system based on the triggering eve
 | `$POLO_AI_EVENT_DATA` | Full event payload as JSON | All events |
 | `$POLO_AI_SESSION_ID` | Session ID | Events with session context |
 | `$POLO_AI_SESSION_NAME` | Session name | Events with session context |
+| `$POLO_AI_SESSION_METADATA` | Session metadata as JSON (e.g., `{"id":"...","name":"..."}`) | Events with session context |
 | `$POLO_AI_WORKSPACE_ID` | Workspace ID | All events |
 
 **Per-event variables:**
@@ -235,7 +222,9 @@ These are automatically set by the automation system based on the triggering eve
 | `PermissionModeChange` | `$POLO_AI_OLD_MODE`, `$POLO_AI_NEW_MODE` | Previous and new permission mode |
 | `FlagChange` | `$POLO_AI_IS_FLAGGED` | `true` or `false` |
 | `SessionStatusChange` | `$POLO_AI_OLD_STATE`, `$POLO_AI_NEW_STATE` | Previous and new status |
-| `SchedulerTick` | `$POLO_AI_LOCAL_TIME`, `$POLO_AI_LOCAL_DATE` | Current time (`14:30`) and date (`2026-03-09`) |
+| `SchedulerTick` | `$POLO_AI_LOCAL_TIME`, `$POLO_AI_LOCAL_DATE`, `$POLO_AI_UTC_TIME` | Current time (`14:30`), date (`2026-03-09`), and UTC timestamp |
+
+**Derived variables:** any other payload field is exposed as `POLO_AI_<FIELD>` (upper snake_case). For example, `newMode` becomes `$POLO_AI_NEW_MODE` and the `utcTime` payload field becomes `$POLO_AI_UTC_TIME`. Fields already listed in the tables above (`sessionId`, `sessionName`, `workspaceId`, `timestamp`) are excluded.
 
 ### User-Defined Webhook Secrets (POLO_AI_WH_*)
 
@@ -289,6 +278,15 @@ Use the optional `name` field to give an automation a human-readable display nam
   ]
 }
 ```
+
+### Stable ID and Enable Flag
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string? | Stable 6-character hex identifier. Survives config edits and renames; execution history is keyed by it. |
+| `enabled` | boolean | Defaults to `true`. Set to `false` to disable the matcher without deleting it. The sidebar toggle writes this field. |
+
+History retention: up to **20** entries per matcher ID and **1000** entries in total per workspace; the oldest entries are dropped first.
 
 ### Regex Matching (for most events)
 
@@ -498,7 +496,7 @@ forum topic. The topic is created on first use and reused thereafter.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `telegramTopic` | string (1–128 chars) | Topic name. Created on first use, reused thereafter. Multiple matchers using the same value share one topic. |
+| `telegramTopic` | string (1–128 chars) | Topic name. Created on first use, reused thereafter. Multiple matchers using the same value share one topic. The value supports `$VAR` expansion (e.g., `"Label: $POLO_AI_LABEL"`); if it expands to empty, the field is ignored. |
 
 **Activation requirements** (all must hold; otherwise the field is silently ignored):
 
@@ -822,7 +820,7 @@ Webhook actions have two levels of automatic retry:
 
 ### Immediate retry (transient failures)
 
-When a webhook fails with a server error (5xx), timeout, or connection error, it is automatically retried up to **2 times** with exponential backoff (1s → 2s → 4s). Client errors (4xx) are not retried — they indicate a configuration problem.
+When a webhook fails with a server error (5xx), timeout, or connection error, it is retried **2 times** with delays of **1s, then 2s** (3 attempts total). Each delay carries ±10% jitter and is capped at 10s. Client errors (4xx) are not retried — they indicate a configuration problem.
 
 ### Deferred retry (extended outages)
 
