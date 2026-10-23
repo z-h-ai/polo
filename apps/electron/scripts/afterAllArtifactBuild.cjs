@@ -17,17 +17,23 @@ function requireMacNotaryCredentials(env) {
   return credentials;
 }
 
-function runMacNotaryCommand(command, args, run) {
-  const result = run(command, args, {
-    encoding: 'utf8',
-    stdio: 'inherit',
-    timeout: 20 * 60_000,
-  });
-  if (result.error || result.status !== 0) {
-    throw new Error(
-      `macOS DMG notarization command failed: ${result.error?.message || `exit ${result.status}`}`,
-    );
+// Notary submission and stapling hit Apple services from CI runners; the
+// v0.19.0 release runs lost builds to transient notarytool request timeouts
+// (NSURLError -1001) and stapler service errors. Retry before failing the
+// build; the acceptance criteria are unchanged.
+function runMacNotaryCommandWithRetry(command, args, run, { attempts = 3, backoffMs = 30_000 } = {}) {
+  let lastFailure;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = run(command, args, { encoding: 'utf8', stdio: 'inherit', timeout: 20 * 60_000 });
+    if (!result.error && result.status === 0) return;
+    lastFailure = result.error?.message || `exit ${result.status}`;
+    if (attempt < attempts) {
+      console.warn(`macOS notary command attempt ${attempt}/${attempts} failed (${lastFailure}); retrying...`);
+      const sleepResult = run('sleep', [String(backoffMs / 1000)], { encoding: 'utf8', timeout: 60_000 });
+      if (sleepResult.error) throw sleepResult.error;
+    }
   }
+  throw new Error(`macOS notary command failed after ${attempts} attempts: ${lastFailure}`);
 }
 
 function notarizeMacDmgArtifacts(artifactPaths, { env = process.env, run = spawnSync } = {}) {
@@ -40,12 +46,12 @@ function notarizeMacDmgArtifacts(artifactPaths, { env = process.env, run = spawn
     // electron-builder notarizes the enclosed App before it builds the DMG.
     // The release contract also requires an independently notarized/stapled
     // outer installer, which must happen after the DMG exists.
-    runMacNotaryCommand(
+    runMacNotaryCommandWithRetry(
       'xcrun',
       ['notarytool', 'submit', dmgPath, '--apple-id', appleId, '--password', password, '--team-id', teamId, '--wait'],
       run,
     );
-    runMacNotaryCommand('xcrun', ['stapler', 'staple', dmgPath], run);
+    runMacNotaryCommandWithRetry('xcrun', ['stapler', 'staple', dmgPath], run);
     console.log(`Notarized and stapled outer macOS DMG: ${path.basename(dmgPath)}`);
   }
 }
