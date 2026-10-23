@@ -269,11 +269,21 @@ jobs:
             # electron-builder fetched its pinned Electron archive.  Retry
             # only that transport failure from a clean release directory;
             # signing, notarization and artifact-validation errors stay fatal.
-            if [ "$attempt" -eq 2 ] || ! grep -Fq 'lookup github.com: no such host' "$log"; then
+            if [ "$attempt" -eq 2 ]; then
               exit "$status"
             fi
-            rm -rf apps/electron/release
-            sleep 10
+            # Retry transient transport failures only: GitHub DNS outages,
+            # and (POO-130) the notarization staple's NSURLError -1005 loss
+            # talking to api.apple-cloudkit.com on the macos x64 runner.
+            # Signing rejections, notarization policy responses and
+            # artifact-validation errors stay fatal.
+            if grep -Fq 'lookup github.com: no such host' "$log" \
+              || grep -Fq 'The network connection was lost' "$log"; then
+              rm -rf apps/electron/release
+              sleep 30
+              continue
+            fi
+            exit "$status"
           done
 
       - name: Build and validate Linux release
