@@ -2,9 +2,8 @@
 
 Labels are additive tags that can be applied to sessions. Unlike statuses (which are exclusive — one per session), labels are multi-select (many per session). They support hierarchical organization via nested JSON trees.
 
-> **CLI-first workflow (recommended):** Use `polo-ai label ...` commands instead of editing JSON directly.
-> - `polo-ai label --help`
-> - Canonical command reference: [polo-ai.md](./polo-ai.md)
+> **Editing workflow:** Labels are a plain JSON config file. Edit the file directly, then validate with the assistant's `config_validate` tool:
+> - `config_validate({ target: "all" })` — validates labels together with the rest of the workspace config
 
 ## Storage Locations
 
@@ -105,6 +104,8 @@ Same as statuses — see [statuses documentation](./statuses.md#color-format) fo
 
 **Custom colors:** `{ "light": "#EF4444", "dark": "#F87171" }` — supports hex, OKLCH, RGB, HSL formats
 
+**Invalid:** bare HTML color names such as `"purple"`, `"orange"`, `"blue"`, `"green"` are **not** valid — validation rejects them. Use a system color name from the list above, a `light`/`dark` object, or a CSS color value.
+
 ## Session Labels
 
 Sessions store labels as an array of strings. Boolean labels are bare IDs; valued labels use the `::` separator:
@@ -130,27 +131,28 @@ Values are inferred from the raw string at parse time:
 | Type | Format | Example |
 |------|--------|---------|
 | `number` | Finite number | `"priority::3"`, `"effort::0.5"` |
-| `date` | ISO date (YYYY-MM-DD) | `"due::2026-01-30"` |
+| `date` | ISO date `YYYY-MM-DD` or datetime `YYYY-MM-DDTHH:mm` | `"due::2026-01-30"`, `"due::2026-01-30T14:30"` |
 | `string` | Anything else | `"link::https://example.com"` |
 
-**Inference order:** ISO date check → number check → string fallback.
+**Inference order:** ISO datetime check → ISO date check → number check → string fallback. Datetime is checked before date-only because a datetime string also contains a date.
 
-The optional `valueType` in config is a hint only — the parser always infers from the raw value regardless.
+The optional `valueType` in config is a hint for the UI input widget; the parser still infers the type from the raw value. In addition, the declared `valueType` is enforced at read time: a value that does not match its declared type (e.g. `"priority::high"` on a `number` label) is rejected and falls back to being displayed as plain text.
 
 ## Adding Labels
 
-Prefer `polo-ai` commands:
+Labels are created by editing `config.json` directly. Append a label object to the `labels` array:
 
-```bash
-polo-ai label create --name "Bug" --color "destructive"
-polo-ai label create --name "Priority" --color "accent" --value-type number
-polo-ai label create --name "Due Date" --color "info" --value-type date
-polo-ai label create --name "Project" --color "foreground/60"
-polo-ai label create --name "Alpha" --color "info" --parent-id project
-polo-ai label create --name "Beta" --color "success" --parent-id project
+```json
+{
+  "id": "bug",
+  "name": "Bug",
+  "color": "destructive"
+}
 ```
 
-Use direct JSON edits only for bulk/manual operations where CLI is not sufficient.
+To nest under an existing label, push the new object into that label's `children` array (create the array if it is absent). Array position determines display order.
+
+**Always validate after editing** with `config_validate({ target: "all" })` — see [Validation](#validation).
 
 ## Color Conventions
 
@@ -174,8 +176,10 @@ When creating or modifying labels, follow these conventions unless the user expl
 **IMPORTANT**: Always validate after creating or editing labels:
 
 ```
-config_validate({ target: "labels" })
+config_validate({ target: "all" })
 ```
+
+**Do not** pass `target: "labels"` — it is not a valid target and is rejected. Valid targets are `config`, `sources`, `statuses`, `preferences`, `permissions`, `automations`, `tool-icons`, and `all`. Labels are validated as part of the workspace config when you use `all`.
 
 This validates:
 - Valid JSON and recursive schema structure
@@ -195,7 +199,7 @@ Add `autoRules` to any label in `config.json`:
 {
   "id": "linear-issue",
   "name": "Linear Issue",
-  "color": "purple",
+  "color": "accent",
   "valueType": "string",
   "autoRules": [
     {
@@ -273,7 +277,7 @@ A workspace that auto-tags Linear issues, deadlines, contacts, and budgets:
     {
       "id": "linear-issue",
       "name": "Linear Issue",
-      "color": "purple",
+      "color": "accent",
       "valueType": "string",
       "autoRules": [
         { "pattern": "linear\\.app/[\\w-]+/issue/([A-Z]+-\\d+)", "valueTemplate": "$1", "description": "Linear URLs" },
@@ -283,7 +287,7 @@ A workspace that auto-tags Linear issues, deadlines, contacts, and budgets:
     {
       "id": "deadline",
       "name": "Deadline",
-      "color": "orange",
+      "color": "destructive",
       "valueType": "date",
       "autoRules": [
         { "pattern": "(\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2})?)", "valueTemplate": "$1", "description": "ISO dates" }
@@ -292,7 +296,7 @@ A workspace that auto-tags Linear issues, deadlines, contacts, and budgets:
     {
       "id": "contact",
       "name": "Contact",
-      "color": "blue",
+      "color": "info",
       "valueType": "string",
       "autoRules": [
         { "pattern": "([\\w.+-]+@[\\w.-]+\\.[a-zA-Z]{2,})", "valueTemplate": "$1", "description": "Email addresses" }
@@ -301,7 +305,7 @@ A workspace that auto-tags Linear issues, deadlines, contacts, and budgets:
     {
       "id": "budget",
       "name": "Budget",
-      "color": "green",
+      "color": "success",
       "valueType": "number",
       "autoRules": [
         { "pattern": "\\$([\\d,.]+[kKmMbB]?)", "valueTemplate": "$1", "description": "Dollar amounts" }
@@ -316,21 +320,20 @@ A workspace that auto-tags Linear issues, deadlines, contacts, and budgets:
 Labels appear in the left sidebar as a multi-level expandable section:
 
 ```
-All Sessions (flat, total count)
-Flagged      (flat, flagged count)
-States       (expandable → status sub-items)
-Labels       (expandable)
-  ├─ Views       (expandable → view sub-items)
+All Sessions (expandable → status sub-items, drag-to-reorder; trailing Flagged & Archived)
+Labels       (expandable → label tree)
   ├─ Engineering (label)
+  │    └─ Frontend (label)
   └─ Bug         (label)
 ────────────
-Sources      (expandable → API/MCP/Local)
-Skills       (flat)
+Sources      (expandable → APIs / MCPs / Local Folders)
+Skills       (flat, count)
+Automations  (expandable → Scheduled / Event-based / Agentic)
 ────────────
 Settings     (flat)
 ```
 
-Clicking a label filters the session list. Clicking a parent label includes sessions tagged with any descendant.
+Statuses are children of **All Sessions** (expand it to see them), not a separate top-level section. Clicking the **Labels** header itself filters to all labeled sessions; clicking a label filters the session list, and clicking a parent label includes sessions tagged with any descendant.
 
 ## Design Decisions
 
@@ -346,5 +349,5 @@ Clicking a label filters the session list. Clicking a parent label includes sess
 - **Max depth 5**: Prevents excessively deep hierarchies
 - **Hierarchical filtering**: Parent label clicks include all descendant sessions
 - **Values via `::` separator**: Simple, flat string storage — no schema changes to session format
-- **Type inference at parse time**: Parser always infers (date → number → string), `valueType` is just a UI hint
-- **Date-only format**: ISO `YYYY-MM-DD` — no time component, avoids timezone complexity
+- **Type inference at parse time**: Parser always infers (datetime → date → number → string), `valueType` is a UI hint plus a read-time validity check (mismatched values fall back to text)
+- **Date formats**: ISO `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm` (minute precision, no seconds) — stored as plain strings, no timezone complexity

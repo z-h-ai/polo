@@ -557,7 +557,8 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-Skills are stored at three levels (checked in order):
+Skills are stored at four levels (checked in order — the first match wins, so a same-slug skill at a more specific level overrides the built-in one):
+- Built-in: shipped with the app, read-only (e.g. \`polo-upload-app\`, \`polo-upload-skill\`)
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
@@ -586,20 +587,17 @@ Read relevant context files using the Read tool - they contain architecture info
 | PDF Preview | \`${DOC_REFS.pdfPreview}\` | When displaying PDF documents inline |
 | Image Preview | \`${DOC_REFS.imagePreview}\` | When displaying local image files inline |
 | Markdown Preview | \`${DOC_REFS.markdownPreview}\` | When displaying rendered .md files inline |
+| Generative UI | \`${DOC_REFS.genUi}\` | BEFORE using \`render_ui\` or \`generate_app\` |
 | Browser Tools | \`${DOC_REFS.browserTools}\` | When using in-app browser tools (\`browser_tool\`) |
 | LLM Tool | \`${DOC_REFS.llmTool}\` | When using \`call_llm\` for subtasks |${FEATURE_FLAGS.poloAiCli ? `
-| Polo AI CLI | \`${DOC_REFS.poloAiCli}\` | When managing labels/sources/skills/automations via \`polo-ai\` |` : ''}
+| Polo AI CLI | \`${DOC_REFS.poloAiCli}\` | When the user asks to run agent tasks from a terminal or script |` : ''}
 
 **IMPORTANT:** Always read the relevant doc file BEFORE making changes. Do NOT guess schemas - these have specific patterns that differ from standard approaches.${FEATURE_FLAGS.poloAiCli ? `
 
 ## Polo AI CLI
 
-Prefer \`polo-ai\` CLI over direct file edits for labels, sources, skills, and automations.
+The \`polo\` CLI (bundled with the desktop app) runs one-shot agent tasks and drives existing sessions from a terminal — it is **not** a configuration tool. There are no \`polo label\` / \`polo source\` / \`polo skill\` / \`polo automation\` style commands: manage that configuration in the app UI, or edit the workspace JSON directly and validate with \`config_validate\`.
 
-- Labels help: \`polo-ai label --help\`
-- Sources help: \`polo-ai source --help\`
-- Skills help: \`polo-ai skill --help\`
-- Automations help: \`polo-ai automation --help\`
 - Canonical reference: \`${DOC_REFS.poloAiCli}\`` : ''}
 
 ## User preferences
@@ -680,7 +678,7 @@ MCP tools from connected sources follow the naming pattern \`mcp__sources__{slug
 - **\`slug\`** is the source's **slug** from the \`<sources>\` block above (e.g., \`linear\`, \`github\`)
 - Do **NOT** use source IDs, provider names, or config.json \`id\` fields
 - Example: Linear source (slug: \`linear\`) → \`mcp__sources__linear__list_issues\`, \`mcp__sources__linear__create_issue\`
-- Example: Polo AI source (slug: \`craft\`) → \`mcp__sources__craft__search_spaces\`, \`mcp__sources__craft__get_block\`
+- Example: GitHub source (slug: \`github\`) → \`mcp__sources__github__list_issues\`, \`mcp__sources__github__get_file\`
 - The \`session\` MCP server provides workspace tools: \`mcp__session__SubmitPlan\`, \`mcp__session__source_test\`, etc.
 
 **Tool discovery:** Call \`mcp__sources__{slug}__list_tools\` or try calling a specific tool directly — the error response will list available tools.
@@ -834,7 +832,7 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 - **Structured extraction** — Use \`outputSchema\` for guaranteed JSON output (e.g., extract all API endpoints, parse config files into structured data).
 - **Cost optimization** — Use Haiku for simple tasks (summarization, classification) instead of using your main model for everything.
 - **Context isolation** — Process large files without filling up your main context window. Pass file paths via \`attachments\` — the tool loads content for you.
-- **Deep reasoning on a subtask** — Use \`thinking: true\` to get extended thinking on a specific problem without thinking through the entire conversation.
+- **Deep reasoning on a subtask** — Hand a hard, self-contained problem to a stronger model via \`model\` without spending your own context on it.
 
 **When NOT to use \`call_llm\`:**
 - You can reason through it yourself without needing a separate call.
@@ -1098,6 +1096,8 @@ ${isGenerativeUiInlineEnabled() ? `
 ## Interactive UI Cards
 
 You can render interactive UI cards inline with the \`render_ui\` tool. Use it instead of plain text when the answer is actionable or data-dense — the tool description carries the authoritative component catalog and rules.
+
+Full reference (components, payload limits, error codes): \`${DOC_REFS.genUi}\`
 ` : ''}
 ${isGenerativeUiCanvasEnabled() ? `
 ## Canvas Apps
@@ -1110,6 +1110,8 @@ Contract:
 - 512 KB hard limit per bundle.
 - Keep mutable state OUT of the HTML: declare it with \`<meta name="polo-app-data" content="state.json">\` (path relative to the session data/ directory; at most 3 files per app, ≤1MB each). The host hands the file's content to the card on attach and after every data update — the card reads it from the ui_state message, never by fetching the file.
 - Iterate DATA with \`update_app_data\` (a small JSON write; the mounted card re-renders immediately). Reserve \`generate_app\` + \`updateOf\` for STRUCTURAL changes — each one is a full HTML rewrite (version increments).
+
+Full reference (HTML contract, \`polo-app-data\` state, \`ui-event\` bridge, publish): \`${DOC_REFS.genUi}\`
 ` : ''}
 ## Document Tools
 

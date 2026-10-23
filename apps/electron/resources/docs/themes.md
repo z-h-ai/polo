@@ -8,16 +8,18 @@ Polo AI uses a 6-color theme system with support for both app-level defaults and
 
 ### Theme Hierarchy
 
-1. **App default**: Selected in Settings → Appearance → Default Theme
-2. **Workspace override**: Per-workspace theme in Settings → Appearance → Workspace Themes
+1. **App default**: Selected under the TopBar account (avatar) menu → **Settings** → Appearance → Default Theme
+2. **Workspace override**: Per-workspace theme in the same Appearance page → Workspace Themes
 3. **Preset themes**: `~/.polo-ai/themes/{name}.json` - Complete theme packages
 4. **Theme overrides**: `~/.polo-ai/theme.json` - Override specific colors (app-level)
 
 Workspaces without a custom theme inherit the app default. All settings are optional - the app has sensible built-in defaults.
 
+> **Where to find it:** Appearance belongs to the app (`polo`) settings scope, so it opens from the TopBar account menu. The sidebar **Settings** entry lists assistant-scope pages only (Input, Tools, Workspace, Permissions, Labels, Messaging, Preferences).
+
 ## Workspace Themes
 
-Each workspace can have its own color theme that overrides the app default. Configure in Settings → Appearance:
+Each workspace can have its own color theme that overrides the app default. Open **Appearance** from the TopBar account (avatar) menu → **Settings**:
 
 - **Default Theme**: Sets the app-wide default (used by all workspaces without an override)
 - **Workspace Themes**: Per-workspace overrides, choose "Use Default" or select a specific theme
@@ -41,6 +43,8 @@ Workspace theme preferences are stored in the workspace config:
 ```
 
 When `colorTheme` is omitted or undefined, the workspace inherits the app default.
+
+The app-level default is the top-level `colorTheme` field in `~/.polo-ai/config.json` (e.g. `"nord"`). When omitted, it defaults to `"default"`.
 
 ## 6-Color System
 
@@ -128,11 +132,15 @@ Preset themes are complete theme packages stored at `~/.polo-ai/themes/`. Each p
 | `supportedModes` | Array of `"light"`, `"dark"`, or both |
 | `shikiTheme` | Syntax highlighting theme (light/dark variants) |
 
-### Installing Preset Themes
+### Bundled Presets
+
+15 preset themes ship with the app and are synced into `~/.polo-ai/themes/` at startup: `catppuccin`, `dracula`, `ghostty`, `github`, `gruvbox`, `haze`, `night-owl`, `nord`, `one-dark-pro`, `pierre`, `rose-pine`, `solarized`, `tokyo-night`, `vitesse`, and `default`. No download or installation is needed — just select one. Syncing preserves user edits to existing files, re-copies corrupt ones, and never touches user-created theme files.
+
+### Installing Additional Preset Themes
 
 1. Download or create a theme JSON file
 2. Save it to `~/.polo-ai/themes/{name}.json`
-3. Select the theme in Settings → Appearance
+3. Select it in the Appearance page (TopBar account menu → Settings)
 
 ## Scenic Mode
 
@@ -143,7 +151,7 @@ Scenic mode displays a full-window background image with glass-style panels. Thi
 ```json
 {
   "mode": "scenic",
-  "backgroundImage": "mountains.jpg",
+  "backgroundImage": "https://example.com/mountains.jpg",
 
   "background": "oklch(0.15 0.02 270 / 0.8)",
   "paper": "oklch(0.18 0.02 270 / 0.6)",
@@ -157,7 +165,7 @@ Scenic mode displays a full-window background image with glass-style panels. Thi
 | Property | Description |
 |----------|-------------|
 | `mode` | Set to `"scenic"` (default is `"solid"`) |
-| `backgroundImage` | Image filename (relative to theme file) or URL |
+| `backgroundImage` | Image URL (JPEG, PNG, WebP recommended). The value is inserted directly into CSS `url()`. |
 
 ### Surface Colors for Glass Panels
 
@@ -253,8 +261,8 @@ Theme changes are applied immediately - no restart needed. Edit theme.json and t
 
 **Background image not showing:**
 - Ensure `mode` is set to `"scenic"`
-- Check image path is relative to theme file or a valid URL
-- Verify image file exists and is readable
+- Check `backgroundImage` is a valid image URL (it is applied directly as a CSS `url()` value)
+- Verify the image is reachable and is a supported format
 
 ## OKLCH Color Reference
 

@@ -2,9 +2,7 @@
 
 This guide explains how to configure sources (MCP servers, APIs, local filesystems) in Polo AI.
 
-> **CLI-first workflow (recommended):** Use `polo-ai source ...` commands instead of editing source config files directly.
-> - `polo-ai source --help`
-> - Canonical command reference: [polo-ai.md](./polo-ai.md)
+> **Primary workflow:** edit the source's `config.json` directly (schemas below), then validate with the `config_validate` tool (`target: "sources"`, or pass `sourceSlug` for a single source). Finish with `source_test`.
 
 ## Source Setup Process
 
@@ -18,7 +16,7 @@ When a user wants to add a new source, follow this conversational setup process 
 mcp__polo-ai-docs__SearchPoloAi({ query: "{service} source setup" })
 ```
 
-**Available guides:** GitHub, Linear, Slack, Gmail, Google Calendar, Google Drive, Google Docs, Google Sheets, Outlook, Microsoft Calendar, Teams, SharePoint, Polo AI, Filesystem, Brave Search, Memory
+Guides are **not bundled** with the app. The built-in `polo-ai-docs` MCP serves them on demand — query it for per-provider setup guides (GitHub, Linear, Slack, Gmail, Google Calendar, Google Drive, Google Docs, Google Sheets, Outlook, Microsoft Calendar, Teams, SharePoint, Polo AI, Filesystem, Brave Search, Memory, and more). It always returns current content, so a service with no guide today may have one tomorrow.
 
 **If a guide exists for the service:**
 1. **Read the guide content** carefully
@@ -83,7 +81,7 @@ Based on research and user intent, create `config.json` with **ALL required fiel
 - `id` - **REQUIRED**: Unique identifier string. Format: `{slug}_{random}` (e.g., `linear_a1b2c3d4`). Generate the random part with any method (e.g., 8 hex chars).
 - `name`, `slug`, `provider`, `type` - Basic identification
 - `icon` - **RECOMMENDED**: URL to the service's favicon, logo, or app icon. The icon is auto-downloaded and cached locally. Use an emoji as fallback.
-- `tagline` - **RECOMMENDED**: Short description for agent context (e.g., "Issue tracking, sprint planning, and project management")
+- `tagline` - **RECOMMENDED**: Short description for agent context (e.g., "Issue tracking, sprint planning, and project management"). If omitted, it is extracted from the first paragraph of `guide.md`.
 - Type-specific config (`mcp`, `api`, or `local`)
 - Authentication method appropriate for the service
 
@@ -263,12 +261,20 @@ Each source folder contains:
 
   // RECOMMENDED: Icon and tagline for better UI and agent context
   "icon": "https://example.com/favicon.ico",  // URL (auto-downloaded) or emoji
-  "tagline": "Brief description for agent context",
+  "tagline": "Brief description for agent context",  // If omitted, extracted from the first paragraph of guide.md
+
+  // OPTIONAL: Brand theming for this source's UI elements
+  "brand": {
+    "color": "accent"  // EntityColor: system color name or { "light": "#...", "dark": "#..." }; defaults to "accent"
+  },
 
   // For MCP sources:
   "mcp": {
     "url": "https://mcp.example.com",
-    "authType": "oauth" | "bearer" | "none"
+    "authType": "oauth" | "bearer" | "none",
+    "headers": { "X-Custom": "value" },       // Custom headers sent with every MCP request (auth headers merge on top)
+    "headerNames": ["X-API-Key"],              // Credential-store header names; values stored as JSON, same as API multi-header auth
+    "clientId": "your-oauth-client-id"         // OAuth client ID (stored in config, not secret)
   },
 
   // For API sources:
@@ -278,17 +284,20 @@ Each source folder contains:
     "headerName": "X-API-Key",      // For single header auth
     "headerNames": ["X-API-KEY", "X-APP-KEY"],  // For multi-header auth (2+ headers)
     "queryParam": "api_key",         // For query auth
-    "authScheme": "Bearer"           // For bearer auth (default: "Bearer")
+    "authScheme": "Bearer",          // For bearer auth (default: "Bearer")
+    "defaultHeaders": { "X-App": "polo" }  // Headers sent with every request
   },
 
   // For local sources:
   "local": {
-    "path": "/path/to/folder"
+    "path": "/path/to/folder",
+    "format": "obsidian"  // Optional hint: "filesystem" | "obsidian" | "git" | "sqlite" | etc.
   },
 
   // Status (updated by source_test):
   "isAuthenticated": true,
-  "connectionStatus": "connected" | "needs_auth" | "failed" | "untested",
+  "connectionStatus": "connected" | "needs_auth" | "failed" | "untested" | "local_disabled",
+  // local_disabled: a stdio source whose local MCP servers are switched off
   "lastTestedAt": 1704067200000,
 
   // Icon: emoji or URL (auto-downloaded to local icon.* file)
@@ -609,7 +618,8 @@ The `testEndpoint` specifies which endpoint to call when validating credentials:
   "testEndpoint": {
     "method": "GET",           // "GET" or "POST"
     "path": "v1/me",           // Path relative to baseUrl (NO leading slash)
-    "body": { ... }            // Optional: request body for POST
+    "body": { ... },           // Optional: request body for POST
+    "headers": { "X-Test": "1" } // Optional: extra headers for this test request
   }
 }
 ```
@@ -704,6 +714,33 @@ Filesystem access for local folders.
 ## guide.md Format
 
 The guide.md file helps Claude understand how to use the source effectively.
+
+A guide may start with YAML frontmatter and use two optional HTML markers:
+
+```markdown
+---
+domains:
+  - api.example.com
+providers:
+  - example
+---
+
+# Source Name
+
+<!-- KNOWLEDGE: optional marker; everything before the SETUP marker is knowledge -->
+
+Service knowledge, capabilities, and usage guidance.
+
+<!-- SETUP: optional marker; everything after this line is setup guidance -->
+
+Step-by-step setup instructions.
+```
+
+- `domains` / `providers` — match the guide to a source by URL domain or provider name
+- `<!-- SETUP: ... -->` — splits setup hints from the rest of the content
+- `<!-- KNOWLEDGE: ... -->` — stripped from the knowledge section when parsed
+
+Example body:
 
 ```markdown
 # Source Name
@@ -801,6 +838,17 @@ The `config.icon` field controls the source icon. Resolution follows this priori
 ```
 
 **Best practice:** Set `icon` to a URL when creating a source. Run `source_test` to download and cache it locally. The app then uses the local file for fast, offline-capable display.
+
+## Built-in Docs MCP & Source Activation
+
+The `polo-ai-docs` MCP server is built in: it is available in every session and never appears in the Sources UI. Use its `SearchPoloAi` tool to look up product documentation and per-provider source setup guides.
+
+Tools from a source that is **not currently enabled** are intercepted with a `source_activation_needed` result. On such a call, the system attempts to activate the source automatically:
+
+- If the source is usable (enabled and authenticated), it is enabled and activated, and the agent is told the source is now active — its tools become available on the next turn.
+- If activation fails (source disabled or missing credentials), the agent is told to check the source status and authenticate.
+
+Run `source_test` after setup so activation succeeds on first use.
 
 ## Provider Domain Cache
 
@@ -915,6 +963,6 @@ Use `source_test` with the source slug:
 - Check network connectivity
 
 **Icon not showing:**
-- Ensure iconUrl is valid
+- Ensure the `icon` field is valid (emoji, URL, or local path)
 - Run `source_test` to re-download
 - Check file exists in source folder

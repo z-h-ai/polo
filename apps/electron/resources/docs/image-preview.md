@@ -41,9 +41,9 @@ Do NOT use `image-preview` when:
 ```
 ````
 
-### Multiple Items (Tabs)
+### Multiple Items (Card Stack)
 
-Use `items` to show related images with tab navigation.
+Use `items` to show related images as a swipeable card stack.
 
 ````
 ```image-preview
@@ -57,7 +57,7 @@ Use `items` to show related images with tab navigation.
 ```
 ````
 
-Content loads lazily on tab switch and is cached once loaded.
+Images are read from disk and cached per `src`, so switching between items does not re-read the file.
 
 ### Config Fields
 
@@ -67,7 +67,7 @@ Content loads lazily on tab switch and is cached once loaded.
 | `title` | No | string | Header title (defaults to "Image Preview") |
 | `items` | Yes* | array | Array of image items with `src` and optional `label` |
 | `items[].src` | Yes | string | Absolute path to image file |
-| `items[].label` | No | string | Tab label |
+| `items[].label` | No | string | Card label (defaults to "Image 1", "Image 2", …) |
 
 *Either `src` (single) or `items` (multiple) is required. If both are present, `items` takes precedence.
 
@@ -81,13 +81,13 @@ Formats like HEIC/HEIF/TIFF may not render in-app. For those files, use external
 ## Rendering Behavior
 
 ### Inline Preview
-- Fixed 400px preview area
+- Fixed **320px** tall preview area
 - Image is rendered with `object-contain` (no cropping)
 - Expand button opens fullscreen overlay
-- Multi-item blocks show item navigator in the header
+- Multi-item blocks render as a **swipeable card stack** — swipe to switch images, click a side card to bring it forward, **tap the top card to open fullscreen**
 
 ### Fullscreen Overlay
-- Larger fit-to-container image view
+- Larger fit-to-container image view with **zoom controls** (zoom in/out, presets, fit)
 - Item navigation (arrows/dropdown) for multi-item sets
 - Copy path action in header
 - File path badge supports external open/reveal actions
