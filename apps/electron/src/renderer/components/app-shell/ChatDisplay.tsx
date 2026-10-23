@@ -351,8 +351,9 @@ interface ProcessingIndicatorProps {
 /**
  * ProcessingIndicator - Shows cycling status messages with elapsed time
  * Matches TurnCard header layout for visual continuity
+ * Exported so tests/evidence harnesses can render it in isolation.
  */
-function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndicatorProps) {
+export function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndicatorProps) {
   const { t } = useTranslation()
   const [elapsed, setElapsed] = React.useState(0)
   const [messageIndex, setMessageIndex] = React.useState(() =>
