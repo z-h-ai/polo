@@ -9,10 +9,20 @@ Polo AI supports three ways to display tabular data:
 | Format | Best For | Interactivity |
 |--------|----------|---------------|
 | **Markdown table** | Small, simple data (3-4 rows) | None |
-| **`datatable` block** | Query results, comparisons, any data users may sort/filter | Sort, filter, group-by, search |
-| **`spreadsheet` block** | Financial reports, exports, data users may download as .xlsx | Sort, export to Excel/CSV |
+| **`datatable` block** | Query results, comparisons, any data users may sort/group/export | Sort, group-by, export of the current view. **No global search box**, no per-column filters |
+| **`spreadsheet` block** | Financial reports, exports, data users may download as .xlsx | Export to XLSX/CSV/Markdown. **No sorting** |
 
 **Key principle:** For datasets with 20+ rows, use the `transform_data` tool to write data to a JSON file and reference it via `"src"` instead of inlining all rows. This dramatically reduces token usage and cost.
+
+### `datatable` block vs `render_ui` data-table
+
+Both render tables — pick by the interaction the user needs:
+
+| Need | Use |
+|------|-----|
+| Static display with sorting, grouping, and export of the current view | `datatable` block (this guide) |
+| Per-column filters (value chips / numeric ranges) | `render_ui` `data-table` (see [genui.md](./genui.md)) |
+| Row-level actions — each row carries buttons, or a detail template expands the row | `render_ui` `data-table` with `rowAction` / `detailTemplate` (see [genui.md](./genui.md)) |
 
 ## Inline Tables (Small Datasets)
 
@@ -75,6 +85,18 @@ For datasets under 20 rows, inline the data directly in the markdown block:
 - `percent` — Pass as decimal. `0.152` renders as `+15.2%`. Positive values are green, negative are red.
 - `boolean` — Use actual `true`/`false`, not strings.
 
+**Column-level fields (optional):**
+
+| Field | Applies To | Effect |
+|-------|-----------|--------|
+| `semantics` | `percent` columns | `"change"` = signed up/down move, colored; `"rate"` or `"share"` = unsigned, rendered neutral |
+| `badgeColors` | `badge` columns | Object mapping cell value → chip color: `"info"`, `"success"`, `"warning"`, `"error"`. Unmatched values stay neutral |
+| `link` | Any column | `true` renders cell values as external links — either a plain `http(s)` URL value, or an object `{ "value": ..., "link": ... }` |
+
+These fields use the same value semantics as the `render_ui` components (see [genui.md](./genui.md)).
+
+**Exporting:** `datatable` blocks can export too — the header dropdown offers XLSX/CSV/Markdown, and it exports **exactly what the current view shows** (current sort and group-by applied; collapsed groups are included flattened).
+
 ## File-Backed Tables (Large Datasets)
 
 ### When to Use
@@ -104,6 +126,7 @@ Use the `transform_data` tool + `"src"` field when:
   - `long_responses/tool_result_abc.txt` — saved tool results
   - `data/previous_output.json` — output from a prior transform
   - `attachments/data.csv` — user-attached files
+  - **Skill assets are also allowed** — absolute paths inside the skills directory are accepted in addition to the session directory. Paths outside these two scopes are rejected
 - **Output file** is relative to the session `data/` directory. Just provide the filename (e.g., `"transactions.json"`)
 
 **Script argument conventions:**
@@ -334,8 +357,8 @@ fs.writeFileSync(process.argv.at(-1), JSON.stringify({ rows }));
 - **Isolated subprocess:** Scripts run in a child process with no access to API keys, credentials, or sensitive environment variables
 - **30-second timeout:** Scripts that exceed 30 seconds are killed
 - **Path sandboxing:** Input files must be within the session directory. Output files must be within the session `data/` directory. Path traversal attempts (e.g., `../`) are blocked.
-- **No network access:** Scripts inherit the process environment (minus secrets) but should not make network calls — use MCP tools for data fetching, then transform locally
-- **Blocked env vars:** `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `AWS_*`, `GITHUB_TOKEN`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `STRIPE_SECRET_KEY`, `NPM_TOKEN`
+- **No network isolation:** `transform_data` only strips secret environment variables — the subprocess can still reach the network and the filesystem. Do not use it to fetch remote data or run untrusted code; use MCP tools for data fetching, then transform locally. When you need enforced network + filesystem isolation, use the `script_sandbox` tool instead
+- **Blocked env vars:** API keys and provider tokens are stripped from the subprocess environment — roughly 20 names, including `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, the three `AWS_*` credential variables, `GITHUB_TOKEN`/`GH_TOKEN`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `CEREBRAS_API_KEY`, `HUGGINGFACE_API_KEY`, `LLM_API_KEY`, `STRIPE_SECRET_KEY`, `NPM_TOKEN`
 
 ## Best Practices
 
@@ -350,9 +373,9 @@ Is the data already structured JSON?
   → YES: Write a simple extraction script
   → NO: Use Python's csv, json, or string parsing to structure it
 
-Does the user need to export/download?
-  → YES: Use spreadsheet block (supports .xlsx export)
-  → NO: Use datatable block (better sort/filter/group UX)
+Does the user need to export/download the data as a file?
+  → YES: Use spreadsheet block (built for downloads; both blocks export)
+  → NO: Use datatable block (better sort/group UX)
 ```
 
 ### Naming Conventions

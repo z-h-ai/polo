@@ -2,16 +2,18 @@
 
 This guide explains how to configure custom permission rules for Explore mode.
 
-> **CLI-first workflow (recommended):** Use `polo-ai permission ...` commands instead of editing JSON directly.
-> - `polo-ai permission --help`
-> - Canonical command reference: [polo-ai.md](./polo-ai.md)
+> **Editing workflow:** Permissions are plain JSON config files. Edit the file directly, then validate with the assistant's `config_validate` tool:
+> - `config_validate({ target: "permissions" })` — validates the workspace permissions file
 
 ## Overview
 
 Explore mode is a read-only mode that blocks potentially destructive operations.
 Custom permission rules let you allow specific operations that would otherwise be blocked.
 
+**Mode naming:** The three permission modes are shown in the UI as `Explore` (read-only), `Ask to Edit` (badge shows "Ask"), and `Execute`. Both namings are accepted wherever a mode value is needed — the UI names above and their internal keys `safe` (Explore), `ask` (Ask to Edit), and `allow-all` (Execute). "Explore mode" in this guide means the internal `safe` mode.
+
 Permission files are located at:
+- App-level defaults: `~/.polo-ai/permissions/default.json` (shipped with the app; see [App-level defaults](#app-level-defaults))
 - Workspace: `~/.polo-ai/workspaces/{slug}/permissions.json`
 - Source: `~/.polo-ai/workspaces/{slug}/sources/{source}/permissions.json`
 
@@ -44,9 +46,6 @@ The system converts it to `mcp__<sourceSlug>__.*list` internally. This means:
   ],
   "allowedBashPatterns": [
     { "pattern": "^ls\\s", "comment": "Allow ls commands" }
-  ],
-  "blockedTools": [
-    "dangerous_tool"
   ],
   "allowedWritePaths": [
     "/tmp/**",
@@ -126,15 +125,9 @@ Regex patterns for bash commands to allow.
 }
 ```
 
-### blockedTools
+### blockedTools (not configurable)
 
-Additional tools to block (rarely needed).
-
-```json
-{
-  "blockedTools": ["risky_tool_name"]
-}
-```
+The blocked tool set is **not configurable** and is reserved. Write, Edit, MultiEdit, and NotebookEdit are always blocked in Explore mode by the runtime itself. Although the schema still accepts a `blockedTools` array, it is **ignored** — adding entries to it has no effect. Do not add this field to permissions files.
 
 ### allowedWritePaths
 
@@ -189,19 +182,24 @@ Fields:
 
 **Blocked by default:**
 - Bash commands (except read-only commands listed below)
-- Write, Edit, MultiEdit tools
+- Write, Edit, MultiEdit, NotebookEdit tools (fixed set — see [blockedTools](#blockedtools-not-configurable))
 - MCP tools with write semantics (create, update, delete)
 - API POST/PUT/DELETE requests
 
 **Allowed by default:**
 - Read, Glob, Grep
+- Task, TaskOutput
 - WebFetch, WebSearch
-- TodoWrite
-- Browser tools (`browser_*` and `mcp__session__browser_*`)
+- TodoWrite, SubmitPlan
+- LSP
+- The browser tool `browser_tool` (including namespaced forms such as `mcp__session__browser_tool`; legacy split names like `browser_open` or `browser_snapshot` are still accepted as aliases)
 - MCP tools with read semantics (list, get, search)
-- Plans folder writes (session plans only)
+- Session plans folder writes
+- Session data folder writes (the output directory for `transform_data` results)
 
 ### Read-Only Bash Commands
+
+The table below lists **common examples**. The authoritative allowlist ships with the app in `~/.polo-ai/permissions/default.json` (about 206 bash patterns) — read that file for the complete, current list.
 
 These commands are allowed in Explore mode without custom configuration:
 
@@ -210,17 +208,21 @@ These commands are allowed in Explore mode without custom configuration:
 | **File exploration** | `ls`, `tree`, `cat`, `head`, `tail`, `nl`, `file`, `stat`, `wc`, `du`, `df` |
 | **Search** | `find`, `grep`, `rg`, `ag`, `fd`, `locate`, `which` |
 | **Git (read-only)** | `git status`, `git log`, `git diff`, `git show`, `git branch`, `git blame`, `git reflog` |
-| **GitHub CLI** | `gh pr view/list`, `gh issue view/list`, `gh repo view` |
+| **GitHub CLI** | `gh pr view/list`, `gh issue view/list`, `gh repo view`, `gh api` (GET requests) |
 | **Package managers** | `npm ls/list/outdated`, `yarn list`, `pip list`, `cargo tree` |
 | **Quality checks (read-only)** | `bun run typecheck`, `bun run typecheck:all`, `bunx tsc --noEmit`, `tsc --noEmit`, `npm run typecheck`, `yarn typecheck`, `pnpm typecheck` |
 | **Browser helper** | `bun run browser-tool --help`, `bun run browser-tool list`, `bun run browser-tool template ...`, `bun run browser-tool parse-url <url>` |
 | **System info** | `pwd`, `whoami`, `env`, `ps`, `uname`, `hostname`, `date`, `echo` |
-| **Text processing** | `awk`/`gawk`/`mawk`/`nawk` (safe forms), `jq`, `yq`, `sort`, `uniq`, `cut`, `column` |
+| **Text processing** | `awk`/`gawk`/`mawk`/`nawk` (safe forms), `sed -n` (print-only), `jq`, `yq`, `sort`, `uniq`, `cut`, `column`, `tr` |
+| **Pagers / monitoring** | `man`, `less`, `more`, `htop`, `top` |
+| **Containers / clusters (read-only)** | `docker ps|images|logs|inspect|...`, `docker-compose ps|logs|config`, `kubectl get|describe|logs|top|explain|...` |
+| **Document tools** | `pdf-tool extract/info`, `xlsx-tool read/info/export`, `img-tool info`, `docx-tool info/extract`, `pptx-tool info/extract`, `ical-tool read/filter` |
 | **Network diagnostics** | `ping`, `dig`, `nslookup`, `netstat` |
 | **Version checks** | `node --version`, `python --version`, etc. |
+| **Assistant read-only actions** | `polo-ai` read-only subcommands (list/get/validate style queries) |
 
 Notes:
-- `echo` is allowed for literal output formatting (e.g. `echo ---`), but redirects and command substitution are still blocked.
+- `echo` is allowed for literal output formatting (e.g. `echo ---`), but non-safe redirects and command substitution are still blocked.
 - `awk` family commands are allowed for read-only text processing, but dangerous execution primitives (for example `system(...)`, command-pipe `getline`, or `print | "cmd"`) are blocked.
 
 ### Compound Commands
@@ -242,20 +244,44 @@ These constructs are always blocked, even if the base command is allowed:
 | Construct | Examples | Why Blocked |
 |-----------|----------|-------------|
 | **Background execution** | `&` | Runs asynchronously, could hide activity |
-| **Redirects** | `>`, `>>` | Could overwrite files |
+| **File-writing redirects** | `>`, `>>`, `>|`, here-documents | Could overwrite files |
 | **Command substitution** | `$()`, backticks, `<()`, `>()` | Execute embedded commands |
-| **Control characters** | newlines, carriage returns | Act as command separators |
+| **Null byte** | `\0` | Can truncate strings at lower levels |
 
-Example: `git status > file.txt` is blocked because `>` could overwrite files.
+**Allowed redirects:** input redirects (`<`, `<&`), output to `/dev/null` (e.g. `>/dev/null`, `2>/dev/null`), and file-descriptor duplication (`2>&1`) are **allowed** — they do not write to user files.
+
+**Multi-line commands are not blocked as such.** Newlines and carriage returns are parsed as command separators and each command in the sequence is validated individually; only null bytes are rejected outright.
+
+Example: `git status > file.txt` is blocked because `>` could overwrite files, while `git status >/dev/null 2>&1` is allowed.
+
+## App-level defaults
+
+Below every user config sits an app-level defaults file:
+
+```
+~/.polo-ai/permissions/default.json
+```
+
+- **All default bash/MCP allow patterns come from this file** (about 206 bash patterns, 15 MCP patterns, 7 blocked-command hints) — they are no longer hardcoded in the app.
+- It is replaced/merged automatically when the app updates: if the file is missing or corrupt it is reinstalled from the bundled copy; if the bundled version is newer, new patterns are merged in while existing user edits are preserved.
+- **Do not rely on editing it** for custom rules — put those in workspace or source permissions.json so app updates cannot conflict with them.
 
 ## Cascading Rules
 
-Rules cascade from workspace → source → agent:
-1. Workspace rules apply globally
-2. Source rules extend workspace rules for that source
-3. Agent rules extend both for that agent's session
+Rules cascade in this order (later layers extend earlier ones):
+1. **App defaults** (`~/.polo-ai/permissions/default.json`) apply everywhere
+2. **Workspace rules** extend the app defaults globally
+3. **Source rules** extend both for that source (MCP patterns auto-scoped)
 
 Rules are additive - they can only allow more operations, not restrict further.
+
+## Explore Mode Diagnostics
+
+When a tool or command is blocked in Explore mode, the rejection message includes diagnostic context to explain why the agent is in that mode:
+- `Effective mode: <mode>` — the mode actually in effect
+- `Last mode change: <changedBy> at <timestamp> (modeVersion=<n>)` — who/what last switched the mode and which transition it was
+
+On macOS, commands that require administrator privileges are wrapped into an elevated-approval prompt instead of being silently blocked, so the user can approve the privileged execution explicitly.
 
 ## Best Practices
 

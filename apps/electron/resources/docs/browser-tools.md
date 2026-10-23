@@ -65,10 +65,13 @@ browser_tool({ command: "set-clipboard Name\tAge\nAlice\t30" })
 browser_tool({ command: "get-clipboard" })
 browser_tool({ command: "paste Name\tAge\nAlice\t30" })
 browser_tool({ command: "scroll down 800" })
+browser_tool({ command: "back" })
+browser_tool({ command: "forward" })
 browser_tool({ command: "evaluate document.title" })
 browser_tool({ command: "console 50 warn" })
 browser_tool({ command: "screenshot" })
 browser_tool({ command: "screenshot --annotated" })
+browser_tool({ command: "screenshot --png" })
 browser_tool({ command: "screenshot-region --ref @e12 --padding 8" })
 browser_tool({ command: "window-resize 1280 720" })
 browser_tool({ command: "network 50 failed" })
@@ -90,6 +93,8 @@ You can batch commands with semicolons, for example:
 `fill @e1 user@example.com; fill @e2 password123; click @e3`
 
 Batches run left-to-right and stop automatically after navigation commands (`navigate`, `click`, `back`, `forward`) so refs don’t go stale silently.
+
+**Array mode:** `command` also accepts an array of strings — `browser_tool({ command: ["evaluate", "var x = 1; x + 2"] })`. Array arguments are passed through **verbatim, bypassing string parsing**. Use it when a payload contains semicolons, quotes, or whitespace that the command parser would otherwise mangle (typical for `evaluate`).
 
 ### Quoting and escaping
 
@@ -151,7 +156,8 @@ Attach local file(s) to a file input (`<input type="file">`) using a ref from `s
 Notes:
 - Use absolute file paths.
 - Multiple files are supported: `upload @e3 /path/a.pdf /path/b.jpg`
-- Files must exist and pass safety validation (sensitive paths are blocked).
+- Paths are validated against an **allowlist of base directories** — the user's home directory, the system temp directory, and the workspace. Anything else fails with `Access denied: file path is outside allowed directories`
+- Sensitive files are rejected even inside allowed directories (`.ssh/`, `.gnupg/`, `.aws/credentials`, `.env`, `credentials.json`, `secrets.*`, `.pem`, `.key`), with `Access denied: cannot read sensitive files`
 
 ### `type <text>`
 Type text character-by-character into the **currently focused element** without needing a ref. Use this when:
@@ -174,8 +180,8 @@ Read or write the page clipboard programmatically.
 ### `paste <text>`
 Convenience command: writes text to clipboard then triggers Ctrl+V (or Cmd+V on Mac). Equivalent to `set-clipboard <text>` followed by `key v meta`/`key v control`. Escape handling is identical to `set-clipboard`, which makes TSV-style bulk data entry reliable.
 
-### `screenshot` / `screenshot --annotated` / `screenshot-region ...`
-Capture full-window or targeted screenshots. `--annotated` overlays `@eN` labels on interactive elements for easier ref debugging.
+### `screenshot` / `screenshot --annotated` / `screenshot --png` / `screenshot-region ...`
+Capture full-window or targeted screenshots. `--annotated` overlays `@eN` labels on interactive elements for easier ref debugging. Screenshots are **JPEG by default**; pass `--png` for lossless output (`--png` works on both `screenshot` and `screenshot-region`).
 
 ### `console`, `network`, `wait`, `downloads`
 Debug runtime issues, requests, synchronization points, and download progress.
@@ -185,10 +191,13 @@ Debug runtime issues, requests, synchronization points, and download progress.
 ### `focus [windowId]` / `windows`
 Manage and inspect browser window ownership and visibility.
 
+### `back` / `forward`
+Navigate the page history. Output reports the URL and title before → after. Both count as navigation commands, so any batch containing them stops at that point.
+
 ### Lifecycle commands
-- `release` — dismiss agent overlay, keep window visible for user
-- `hide` — hide window but preserve session state
-- `close` — close and destroy window
+- `release [windowId|all]` — dismiss the agent overlay; the window stays visible for the user. `all` releases every window owned by the session
+- `close [windowId]` — close and destroy a window (defaults to the session window)
+- `hide [windowId]` — hide a window but preserve its state; `open` re-shows it
 
 ---
 
@@ -198,6 +207,8 @@ Manage and inspect browser window ownership and visibility.
 - `Unknown browser_tool command ...` → typo/unsupported verb; check help
 - `...requires ...` → required argument is missing for that command
 - `...must be numbers` → numeric argument parse failed
+
+**Legacy tool names:** older sessions may contain split tool names such as `browser_open`, `browser_snapshot`, or `browser_click`. These are recognized as legacy aliases of `browser_tool` for compatibility with old sessions and logs — new tool calls must always use `browser_tool` with a `command`.
 
 ---
 
@@ -218,6 +229,7 @@ Output is deterministic JSON (`href`, `protocol`, `host`, `hostname`, `pathname`
 
 - Browser tools are allowed in **Explore/Safe mode** by default.
 - Before first browser tool usage, the agent must read this guide (`~/.polo-ai/docs/browser-tools.md`).
+- `navigate`, `click`, and `snapshot` run a **security-challenge (CAPTCHA) check** afterwards. When a challenge is detected, the tool automatically releases control back to the user, shows the window, and returns the challenge provider plus detected signals — ask the user to complete the check, then re-run `snapshot`.
 - Closing browser UI via OS controls may hide the window; use `browser_tool close` for explicit teardown.
 
 ---

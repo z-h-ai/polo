@@ -65,7 +65,7 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     path: '/statuses/overview',
     title: 'Statuses',
     summary:
-      'Organize conversations into workflow states like Todo, In Progress, and Done. Open statuses appear in your inbox; closed ones move to the archive.',
+      'Organize conversations into workflow states like Backlog, Todo, Needs Review, and Done. Open statuses appear in your inbox; closed ones move to the archive.',
   },
   permissions: {
     path: '/core-concepts/permissions',
@@ -83,7 +83,7 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     path: '/go-further/workspaces',
     title: 'Workspaces',
     summary:
-      'Separate configurations for different contexts like personal projects or work. Each workspace has its own sources, skills, statuses, and session history.',
+      'Separate configurations for different contexts like personal projects or work. Each workspace has its own sources, skills, statuses, and session history. Workspaces are not ProductSpaces: a ProductSpace is the account-level environment you enter at sign-in, while a workspace is a configuration scope used inside it.',
   },
   themes: {
     path: '/go-further/themes',

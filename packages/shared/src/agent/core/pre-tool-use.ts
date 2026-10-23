@@ -35,6 +35,7 @@ import {
   type CliDomainNamespace,
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
+import { DOC_REFS } from '../../docs/index.ts';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
 import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../../skills/storage.ts';
 import {
@@ -418,16 +419,13 @@ export function validateConfigWrite(
 
 function buildCliDomainBlockMessage(namespace: CliDomainNamespace, context: string): string {
   const policy = CLI_DOMAIN_POLICIES[namespace]
-  const noun = namespace === 'automation' ? 'automation' : namespace
-  const quickExamplesHeading = namespace === 'label' ? 'Quick examples:' : 'Examples:'
+  const docPath = `${DOC_REFS.docsDir}${policy.docFile}`
 
   return [
     `${context}`,
-    `Use \`polo-ai ${namespace} ...\` instead.`,
-    `Run \`${policy.helpCommand}\` for the full ${noun} command reference.`,
-    '',
-    quickExamplesHeading,
-    ...policy.quickExamples.map(example => `  ${example}`),
+    `This file is app-managed configuration. It has no CLI subcommand — do not invent one.`,
+    `Ask the user to make the change in the app UI instead, or propose the exact JSON edit for them to apply.`,
+    `Schema reference: \`${docPath}\`. After any accepted change, validate it with the \`config_validate\` tool.`,
   ].join('\n')
 }
 

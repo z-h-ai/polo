@@ -61,7 +61,7 @@ If `dark` is omitted, it's auto-derived from `light` (brightened ~30%).
 ### Common Mistakes
 
 - Bare color names (`"red"`, `"blue"`) are **not** supported — use hex or system colors
-- Tailwind classes (`"text-red-500"`) are **not** valid — use system color names directly
+- Tailwind classes (`"text-red-500"`) are **not** valid — use system color names directly. Legacy configs that still use them are auto-migrated to the `EntityColor` format the next time the config is loaded.
 - Hex without `#` prefix (`"EF4444"`) is invalid — always include `#`
 - System color opacity must be an integer 0–100 (`"foreground/50"` not `"foreground/0.5"`)
 
@@ -75,6 +75,8 @@ If `dark` is omitted, it's auto-derived from `light` (brightened ~30%).
 
 - **open**: Session appears in inbox/active list
 - **closed**: Session appears in archive/completed list
+
+In the sidebar, statuses appear as draggable sub-items under **All Sessions**. Drag to reorder them — the new order is written back to `config.json`.
 
 ## config.json Schema
 
@@ -103,7 +105,7 @@ If `dark` is omitted, it's auto-derived from `light` (brightened ~30%).
 |----------|------|-------------|
 | `id` | string | Unique slug (lowercase, hyphens) |
 | `label` | string | Display name |
-| `color` | string? | Optional color (hex or Tailwind class). Uses design system default if omitted. |
+| `color` | string? | Optional color: system color name (e.g. `"accent"`) or custom `{ light, dark }` object. Uses design system default if omitted. |
 | `icon` | string? | Optional emoji (e.g., `"🔥"`) or URL. Omit to use auto-discovered file. |
 | `category` | `"open"` \| `"closed"` | Inbox vs archive |
 | `isFixed` | boolean | Cannot delete/rename if true |
@@ -197,7 +199,11 @@ This validates:
 - Required fixed statuses exist (`todo`, `done`, `cancelled`)
 - No duplicate status IDs
 - `defaultStatusId` references an existing status
-- Icon files exist when referenced
-- At least one status in each category (open/closed)
+- At least one status with category `open` — **error** if missing (sessions would not appear in the inbox)
+- At least one status with category `closed` — **warning only** if missing (archiving is unavailable, but the config stays valid)
+
+Icon files are **not** validated: icons are auto-discovered from `statuses/icons/{id}.{ext}` at runtime and are never referenced from config.
 
 Invalid configs will fall back to defaults at runtime, but validation catches issues before they cause problems.
+
+`config_validate` accepts these targets: `config`, `sources`, `statuses`, `preferences`, `permissions`, `automations`, `tool-icons`, `all`.

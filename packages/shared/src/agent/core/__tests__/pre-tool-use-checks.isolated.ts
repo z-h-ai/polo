@@ -467,7 +467,7 @@ describe('runPreToolUseChecks', () => {
       }
     });
 
-    it('blocks direct label folder reads and suggests polo-ai label help when feature is enabled', () => {
+    it('blocks direct label folder reads and points to app-managed config guidance when feature is enabled', () => {
       mockPoloAiCliFlag = true;
 
       const result = runPreToolUseChecks(createInput({
@@ -477,13 +477,13 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('polo-ai label');
-        expect(result.reason).toContain('polo-ai label --help');
+        expect(result.reason).toContain('no CLI subcommand');
+        expect(result.reason).toContain('docs/labels.md');
         expect(result.reason).toContain('labels/');
       }
     });
 
-    it('blocks direct label config writes and suggests polo-ai label help when feature is enabled', () => {
+    it('blocks direct label config writes and points to app-managed config guidance when feature is enabled', () => {
       mockPoloAiCliFlag = true;
       mockDetectConfigFileType.mockImplementation(() => ({ type: 'labels', displayFile: 'labels/config.json' }));
 
@@ -494,8 +494,8 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('polo-ai label');
-        expect(result.reason).toContain('polo-ai label --help');
+        expect(result.reason).toContain('no CLI subcommand');
+        expect(result.reason).toContain('docs/labels.md');
       }
     });
 
@@ -535,7 +535,7 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('allow');
     });
 
-    it('blocks direct automations config edits and suggests polo-ai automation commands when feature is enabled', () => {
+    it('blocks direct automations config edits and points to app-managed config guidance when feature is enabled', () => {
       mockPoloAiCliFlag = true;
       mockDetectConfigFileType.mockImplementation(() => ({ type: 'automations', displayFile: 'automations.json' }));
 
@@ -550,12 +550,13 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('polo-ai automation');
+        expect(result.reason).toContain('no CLI subcommand');
+        expect(result.reason).toContain('docs/automations.md');
         expect(result.reason).toContain('automations.json');
       }
     });
 
-    it('blocks direct source config edits and suggests polo-ai source commands when feature is enabled', () => {
+    it('blocks direct source config edits and points to app-managed config guidance when feature is enabled', () => {
       mockPoloAiCliFlag = true;
       mockDetectConfigFileType.mockImplementation(() => ({
         type: 'source',
@@ -574,12 +575,13 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('polo-ai source');
+        expect(result.reason).toContain('no CLI subcommand');
+        expect(result.reason).toContain('docs/sources.md');
         expect(result.reason).toContain('sources/linear/config.json');
       }
     });
 
-    it('blocks direct skill file edits and suggests polo-ai skill commands when feature is enabled', () => {
+    it('blocks direct skill file edits and points to app-managed config guidance when feature is enabled', () => {
       mockPoloAiCliFlag = true;
       mockDetectConfigFileType.mockImplementation(() => ({
         type: 'skill',
@@ -598,12 +600,13 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('polo-ai skill');
+        expect(result.reason).toContain('no CLI subcommand');
+        expect(result.reason).toContain('docs/skills.md');
         expect(result.reason).toContain('skills/commit-helper/SKILL.md');
       }
     });
 
-    it('blocks bash commands touching labels paths and points to polo-ai label --help when feature is enabled', () => {
+    it('blocks bash commands touching labels paths and points to app-managed config guidance when feature is enabled', () => {
       mockPoloAiCliFlag = true;
 
       const result = runPreToolUseChecks(createInput({
@@ -614,8 +617,8 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('polo-ai label --help');
-        expect(result.reason).toContain('polo-ai label');
+        expect(result.reason).toContain('docs/labels.md');
+        expect(result.reason).toContain('no CLI subcommand');
       }
     });
 
@@ -629,7 +632,7 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('allow');
     });
 
-    it('blocks bash commands touching automations files and points to polo-ai automation --help when feature is enabled', () => {
+    it('blocks bash commands touching automations files and points to app-managed config guidance when feature is enabled', () => {
       mockPoloAiCliFlag = true;
 
       const result = runPreToolUseChecks(createInput({
@@ -640,8 +643,8 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('polo-ai automation --help');
-        expect(result.reason).toContain('polo-ai automation');
+        expect(result.reason).toContain('docs/automations.md');
+        expect(result.reason).toContain('no CLI subcommand');
       }
     });
 

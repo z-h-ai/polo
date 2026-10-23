@@ -2,10 +2,10 @@ export type CliDomainNamespace = 'label' | 'source' | 'skill' | 'automation' | '
 
 export interface CliDomainPolicy {
   namespace: CliDomainNamespace
-  helpCommand: string
+  /** Built-in doc (under ~/.polo-ai/docs/) describing this domain's schema */
+  docFile: string
   workspacePathScopes: string[]
   readActions: string[]
-  quickExamples: string[]
   /** Optional workspace-relative paths guarded for direct Bash operations */
   bashGuardPaths?: string[]
 }
@@ -13,79 +13,42 @@ export interface CliDomainPolicy {
 const POLICIES: Record<CliDomainNamespace, CliDomainPolicy> = {
   label: {
     namespace: 'label',
-    helpCommand: 'polo-ai label --help',
+    docFile: 'labels.md',
     workspacePathScopes: ['labels/**'],
     readActions: ['list', 'get', 'auto-rule-list', 'auto-rule-validate'],
-    quickExamples: [
-      'polo-ai label list',
-      'polo-ai label create --name "Bug" --color "accent"',
-      'polo-ai label update bug --json \'{"name":"Bug Report"}\'',
-    ],
     bashGuardPaths: ['labels/**'],
   },
   source: {
     namespace: 'source',
-    helpCommand: 'polo-ai source --help',
+    docFile: 'sources.md',
     workspacePathScopes: ['sources/**'],
     readActions: ['list', 'get', 'validate', 'test', 'auth-help'],
-    quickExamples: [
-      'polo-ai source list',
-      'polo-ai source get <slug>',
-      'polo-ai source update <slug> --json "{...}"',
-      'polo-ai source validate <slug>',
-    ],
   },
   skill: {
     namespace: 'skill',
-    helpCommand: 'polo-ai skill --help',
+    docFile: 'skills.md',
     workspacePathScopes: ['skills/**'],
     readActions: ['list', 'get', 'validate', 'where'],
-    quickExamples: [
-      'polo-ai skill list',
-      'polo-ai skill get <slug>',
-      'polo-ai skill update <slug> --json "{...}"',
-      'polo-ai skill validate <slug>',
-    ],
   },
   automation: {
     namespace: 'automation',
-    helpCommand: 'polo-ai automation --help',
+    docFile: 'automations.md',
     workspacePathScopes: ['automations.json', 'automations-history.jsonl'],
     readActions: ['list', 'get', 'validate', 'history', 'last-executed', 'test', 'lint'],
-    quickExamples: [
-      'polo-ai automation list',
-      'polo-ai automation create --event UserPromptSubmit --prompt "Summarize this prompt"',
-      'polo-ai automation update <id> --json "{\"enabled\":false}"',
-      'polo-ai automation history <id> --limit 20',
-      'polo-ai automation validate',
-    ],
     bashGuardPaths: ['automations.json', 'automations-history.jsonl'],
   },
   permission: {
     namespace: 'permission',
-    helpCommand: 'polo-ai permission --help',
+    docFile: 'permissions.md',
     workspacePathScopes: ['permissions.json', 'sources/*/permissions.json'],
     readActions: ['list', 'get', 'validate'],
-    quickExamples: [
-      'polo-ai permission list',
-      'polo-ai permission get --source linear',
-      'polo-ai permission add-mcp-pattern "list" --comment "All list ops" --source linear',
-      'polo-ai permission validate',
-    ],
     bashGuardPaths: ['permissions.json', 'sources/*/permissions.json'],
   },
   theme: {
     namespace: 'theme',
-    helpCommand: 'polo-ai theme --help',
+    docFile: 'themes.md',
     workspacePathScopes: ['config.json', 'theme.json', 'themes/*.json'],
     readActions: ['get', 'validate', 'list-presets', 'get-preset'],
-    quickExamples: [
-      'polo-ai theme get',
-      'polo-ai theme list-presets',
-      'polo-ai theme set-color-theme nord',
-      'polo-ai theme set-workspace-color-theme default',
-      'polo-ai theme set-override --json "{\"accent\":\"#3b82f6\"}"',
-    ],
     bashGuardPaths: ['config.json', 'theme.json', 'themes/*.json'],
   },
 }

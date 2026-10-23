@@ -13,6 +13,8 @@ The `markdown-preview` block renders a markdown file inline in chat messages —
 | **`pdf-preview` block** | PDF documents, reports | First page inline, full navigation in fullscreen |
 | **`image-preview` block** | Screenshots, captures | Inline image + fullscreen viewer |
 | **`datatable`/`spreadsheet`** | Structured data | Interactive sortable/filterable tables |
+| **`latex`/`math` block** | Display math, formulas | KaTeX-rendered math |
+| **`diff` block** | Patches, code reviews | Diff rendering with add/remove gutters |
 
 **Key principle:** Like `pdf-preview` and `image-preview`, the file is already on disk — just reference the absolute path. No extraction step needed.
 
@@ -42,9 +44,9 @@ Do NOT use `markdown-preview` when:
 ```
 ````
 
-### Multiple Items (Tabs)
+### Multiple Items (Navigator)
 
-When you have multiple related markdown files (e.g., spec versions, README sections), use the `items` array. A tab bar appears in the header for switching between items.
+When you have multiple related markdown files (e.g., spec versions, README sections), use the `items` array. An item navigator — arrows plus a label that opens a dropdown of all items — appears in the header row, next to the expand button.
 
 ````
 ```markdown-preview
@@ -137,6 +139,8 @@ Is the content a markdown file (.md, .markdown)?
         PDF?  → pdf-preview
         Image? → image-preview
         Data? → datatable/spreadsheet
+        Math? → latex/math block
+        Patch? → diff block
 ```
 
 ## Troubleshooting
@@ -157,4 +161,4 @@ Is the content a markdown file (.md, .markdown)?
 ### Links inside the rendered markdown don't open
 - Plain `https://` URLs open in the system browser.
 - Absolute filesystem paths open via the OS file manager.
-- `file://` URLs are blocked by the in-app URL safety layer (`shell.openExternal` can launch local executables on Windows) — use a plain filesystem path or reference the file through another preview block.
+- `file://` URLs are accepted and resolved as filesystem paths — they route through the same in-app file-open handler as plain paths. Prefer a plain filesystem path for clarity.

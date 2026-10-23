@@ -16,8 +16,8 @@ graph LR
 
 ## Flowcharts
 
-**Header:** `graph LR` (left-right, preferred) or `graph TD` (top-down)
-**Directions:** LR (preferred), RL, TD, TB, BT
+**Header:** `graph LR` (left-right) or `graph TD` (top-down)
+**Directions:** LR, RL, TD, TB, BT — pick by diagram size (see Best Practices)
 
 ### Node Shapes
 
@@ -425,6 +425,8 @@ erDiagram
 
 Use XY charts for metrics, trends, comparisons, and simple bar/line visualizations.
 
+**Routing rule:** for data-driven charts (bar, line, funnel, pie), **prefer the `chart` component of `render_ui`** — it inlines the data and renders a polished chart (see [genui.md](./genui.md)). Reach for `xychart-beta` when the chart belongs inside a mermaid diagram set or the data is tiny. Mermaid itself is for **structure**: flows, states, sequences, classes, ER.
+
 ### Directives
 
 | Syntax | Meaning |
@@ -479,22 +481,23 @@ xychart-beta horizontal
     bar [42, 28, 12, 4]
 ```
 
+## Rendering Behavior
+
+- Wide horizontal diagrams are scaled up to a **minimum readable height** (instead of shrinking to fit), then **scroll horizontally** — faded edges indicate there is more content
+- **Click a diagram** (or use its top-right expand button) to open a **fullscreen overlay with zoom and pan controls**
+- All mermaid blocks render inline. When a diagram is the **first block of a message**, its own expand button is hidden because the message card's fullscreen control occupies the same top-right spot — click the diagram itself to go fullscreen
+
 ## Best Practices
 
-### Prefer Horizontal (Landscape) Orientations
+### Choose Orientation by Diagram Size
 
-**IMPORTANT**: Use horizontal layouts (LR, RL) whenever possible. Horizontal diagrams are much easier to view and navigate in the UI.
+**IMPORTANT**: The user sees a **4:3 aspect ratio**. Choose the orientation from the diagram's size — do not default to horizontal:
 
-- **Flowcharts**: Use `graph LR` (left-right) instead of `graph TD` (top-down)
-- **State Diagrams**: Add `direction LR` after the header
-- **Sequence Diagrams**: Naturally horizontal, no changes needed
-- **Class Diagrams**: For wide hierarchies, consider splitting into multiple horizontal diagrams
-- **ER Diagrams**: Naturally horizontal, no changes needed
+- **Small diagrams** (a handful of nodes): use horizontal layouts — `graph LR`/`RL`, and `direction LR` in state diagrams
+- **Large diagrams** (many nodes, long chains): use vertical layouts — `graph TD`/`BT`. They fit the 4:3 viewport far better than a wide horizontal strip that needs scrolling
+- **Sequence, class, and ER diagrams** are naturally horizontal; keep them focused so they stay readable
 
-**Only use vertical layouts (TD, BT) when**:
-- The diagram is inherently hierarchical (org charts, tree structures)
-- The vertical layout is significantly clearer than horizontal
-- The diagram has very few nodes (3-4 max)
+**If a diagram gets long, split it into multiple focused diagrams** instead of emitting one massive diagram. Several smaller diagrams are easier to read, render more reliably, and the UI handles them better.
 
 ### Keep Diagrams Focused
 
@@ -511,13 +514,15 @@ graph LR
 
 ### Choose the Right Direction
 
-**Horizontal (preferred)**:
-- **LR (left-right)**: DEFAULT - Use for flows, pipelines, state machines, processes, and most diagrams
-- **RL (right-left)**: Reverse flows (when semantically meaningful)
+Pick by how much content the diagram has:
 
-**Vertical (use sparingly)**:
-- **TD (top-down)**: Only for hierarchies, inheritance, org charts where vertical structure is essential
-- **BT (bottom-top)**: Only for dependencies pointing upward
+**Horizontal — small diagrams (few nodes)**:
+- **LR (left-right)**: flows, pipelines, state machines, processes
+- **RL (right-left)**: reverse flows (when semantically meaningful)
+
+**Vertical — large diagrams (many nodes, long chains)**:
+- **TD (top-down)**: hierarchies, inheritance, org charts, and any diagram that outgrows a 4:3 viewport sideways
+- **BT (bottom-top)**: large dependency diagrams that read upward
 
 ### Validate Complex Diagrams
 
