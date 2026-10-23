@@ -8,7 +8,7 @@ import {
   type SettingsScope,
   type SettingsSubpage,
 } from '../settings-registry'
-import { SETTINGS_ITEMS, getVisibleSettingsItems, getSettingsItemsForScope } from '../menu-schema'
+import { SETTINGS_ITEMS, getVisibleSettingsItems, getSettingsItemsForScope, resolveRenderableSettingsSubpage } from '../menu-schema'
 import { parseCompoundRoute, parseRouteToNavigationState } from '../route-parser'
 
 /** Registry order restricted to one scope — what each navigator renders. */
@@ -89,6 +89,23 @@ describe('menu-schema: scope selectors', () => {
     expect(byScopes.sort()).toEqual([...visible].sort())
     // The new tools page is reachable through the registry-derived union.
     expect(SETTINGS_ITEMS.some(item => item.id === 'tools')).toBe(true)
+  })
+})
+
+describe('menu-schema: renderable subpage (POO-121 fail-closed)', () => {
+  it('lets every listed subpage render as itself', () => {
+    for (const item of SETTINGS_ITEMS) {
+      expect(resolveRenderableSettingsSubpage(item.id)).toBe(item.id)
+    }
+  })
+
+  it('falls a hidden-page deep link back to the default App page', () => {
+    // messaging is filtered out of SETTINGS_ITEMS while it iterates — a deep
+    // link naming it must not resurrect the page behind the navigators' back.
+    expect(resolveRenderableSettingsSubpage('messaging')).toBe('app')
+    // Same for the flag-gated server page and anything unregistered.
+    expect(resolveRenderableSettingsSubpage('server')).toBe('app')
+    expect(resolveRenderableSettingsSubpage('nonexistent' as string as SettingsSubpage)).toBe('app')
   })
 })
 

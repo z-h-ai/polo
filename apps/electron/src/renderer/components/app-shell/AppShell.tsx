@@ -604,6 +604,14 @@ function AppShellContent({
   const isAssistantSidebarVisible =
     isSidebarVisible && !effectiveSidebarAndNavigatorHidden && !isPoloSettingsRoute
 
+  // POO-125: the explicit exit from the Polo-scope settings surface. The
+  // surface hides the assistant sidebar entirely, so without this the user
+  // could only leave settings through a notification click or a deep link —
+  // "done" hands the assistant view back (the Polo tab's normal surface).
+  const handleClosePoloSettings = useCallback(() => {
+    navigate(routes.view.allSessions())
+  }, [])
+
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
   const panelCount = useAtomValue(panelCountAtom)
@@ -1155,8 +1163,17 @@ function AppShellContent({
   useAction('app.newChat', () => handleNewChat())
   useAction('app.newChatInPanel', () => handleNewChat(true))
 
-  // Settings
-  useAction('app.settings', onOpenSettings)
+  // Settings — POO-125: the shortcut toggles. The Polo-scope settings surface
+  // replaces the assistant view (the sidebar is hidden there), so pressing
+  // Cmd+, again must close it and hand the assistant view back; otherwise the
+  // only exits would be the notification menu or a deep link.
+  useAction('app.settings', () => {
+    if (isSettingsNavigation(navState)) {
+      navigate(routes.view.allSessions())
+    } else {
+      onOpenSettings()
+    }
+  })
 
   // Keyboard shortcuts
   useAction('app.keyboardShortcuts', onOpenKeyboardShortcuts)
@@ -2534,7 +2551,10 @@ function AppShellContent({
               className="h-full flex flex-col min-w-0 relative z-panel"
             >
             <PanelHeader
-              title={isAssistantSidebarVisible ? listTitle : undefined}
+              // POO-125: the Polo-scope settings surface owns this header (the
+              // assistant sidebar is hidden there) — show the surface title and
+              // the "done" exit instead of an empty traffic-light strip.
+              title={(isAssistantSidebarVisible || isPoloSettingsRoute) ? listTitle : undefined}
               compensateForStoplight={!isAssistantSidebarVisible}
               badge={automationFilter?.automationType === 'scheduled' ? (
                 <Tooltip>
@@ -3173,6 +3193,17 @@ function AppShellContent({
                         />
                       }
                       {...getEditConfig('automation-config', activeWorkspace.rootPath)}
+                    />
+                  )}
+                  {/* POO-125: the Polo-scope settings exit. The surface hides
+                      the assistant sidebar, so "done" is the discoverable way
+                      back to the assistant view (same target as Cmd+, toggle). */}
+                  {isPoloSettingsRoute && (
+                    <HeaderIconButton
+                      icon={<Check className="h-4 w-4" />}
+                      tooltip={t("common.done")}
+                      data-testid="settings-done-button"
+                      onClick={handleClosePoloSettings}
                     />
                   )}
                 </>
