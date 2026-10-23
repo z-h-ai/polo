@@ -159,7 +159,9 @@ describe('ProductSpaceSelectScreen · 列表标记（M5/S3）', () => {
     expect(rows).toHaveLength(3)
     // 推荐置顶后：推荐企业、个人、受限企业（personal-first 只约束其余项）
     expect(rows.map(row => row.getAttribute('data-space-id'))).toEqual(['space-ent', personalId, 'space-ent-restricted'])
-    expect(rows[0]!.textContent).toContain('企业 · Member')
+    // zh-Hans role names are translated since the i18n closure fixes (organization.role.member = 成员);
+    // the recommended tag renders adjacent, hence 成员+推荐 in the row text.
+    expect(rows[0]!.textContent).toContain('企业 · 成员')
     expect(rows[0]!.getAttribute('data-space-kind')).toBe('enterprise')
     expect(rows[1]!.getAttribute('data-space-kind')).toBe('personal')
     expect(rows[1]!.textContent).not.toContain('企业 ·')
