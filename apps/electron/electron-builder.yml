@@ -129,6 +129,12 @@ mac:
       to: app/node_modules/@img/sharp-darwin-${arch}
     - from: ../../node_modules/@img/sharp-libvips-darwin-${arch}
       to: app/node_modules/@img/sharp-libvips-darwin-${arch}
+    # Linux CI installs the linux/x64 optional deps; electron-builder skips
+    # file entries whose source is absent, so these are inert on mac/win.
+    - from: ../../node_modules/@img/sharp-linux-x64
+      to: app/node_modules/@img/sharp-linux-x64
+    - from: ../../node_modules/@img/sharp-libvips-linux-x64
+      to: app/node_modules/@img/sharp-libvips-linux-x64
     - from: vendor/bun/bun
       to: vendor/bun/bun
     # WhatsApp worker subprocess (self-contained; Baileys bundled in).
