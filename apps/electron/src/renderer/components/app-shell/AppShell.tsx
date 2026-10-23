@@ -122,7 +122,7 @@ import {
   type NavigationState,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
-import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, DEFAULT_SETTINGS_SUBPAGE, getSettingsPageScope } from "../../../shared/settings-registry"
+import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, getSettingsPageScope } from "../../../shared/settings-registry"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
@@ -594,23 +594,14 @@ function AppShellContent({
   // Derived from focused panel's route — all panels are peers
   const navState = useNavigationState()
 
-  // POO-103: Polo-scope settings (the TopBar account-menu / Cmd+, entry) is an
-  // independent two-column surface — settings navigator + details — and does
-  // NOT show the assistant sidebar. The assistant scope (sidebar Settings row)
-  // keeps the main sidebar. Scope comes from settings-registry only.
-  const isPoloSettingsRoute =
-    isSettingsNavigation(navState) &&
-    getSettingsPageScope(navState.subpage ?? DEFAULT_SETTINGS_SUBPAGE) === 'polo'
-  const isAssistantSidebarVisible =
-    isSidebarVisible && !effectiveSidebarAndNavigatorHidden && !isPoloSettingsRoute
-
-  // POO-125: the explicit exit from the Polo-scope settings surface. The
-  // surface hides the assistant sidebar entirely, so without this the user
-  // could only leave settings through a notification click or a deep link —
-  // "done" hands the assistant view back (the Polo tab's normal surface).
-  const handleClosePoloSettings = useCallback(() => {
-    navigate(routes.view.allSessions())
-  }, [])
+  // POO-103/POO-125: the assistant scope (sidebar Settings row) keeps the main
+  // sidebar. Polo-scope (global) settings no longer renders INSIDE the Polo
+  // tab at all — it opens the shell-level GlobalSettingsSurface owned by
+  // TabShell, so this tab keeps its own route and its sidebar. A Polo-scope
+  // settings route can only still land here through a restored route/history
+  // entry from an earlier build; it then behaves like any other navigator
+  // view, sidebar included, so the user can always leave.
+  const isAssistantSidebarVisible = isSidebarVisible && !effectiveSidebarAndNavigatorHidden
 
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
@@ -1163,10 +1154,11 @@ function AppShellContent({
   useAction('app.newChat', () => handleNewChat())
   useAction('app.newChatInPanel', () => handleNewChat(true))
 
-  // Settings — POO-125: the shortcut toggles. The Polo-scope settings surface
-  // replaces the assistant view (the sidebar is hidden there), so pressing
-  // Cmd+, again must close it and hand the assistant view back; otherwise the
-  // only exits would be the notification menu or a deep link.
+  // Settings — POO-125: the shortcut toggles. Global settings live in the
+  // TabShell-level surface, which closes again when the same subpage is
+  // re-requested. A settings route still inside THIS tab (a restored route or
+  // history entry from an earlier build) hands the assistant view back first,
+  // so the shortcut never strands the user in a settings view.
   useAction('app.settings', () => {
     if (isSettingsNavigation(navState)) {
       navigate(routes.view.allSessions())
@@ -2551,11 +2543,7 @@ function AppShellContent({
               className="h-full flex flex-col min-w-0 relative z-panel"
             >
             <PanelHeader
-              // POO-125: the Polo-scope settings surface owns this header (the
-              // assistant sidebar is hidden there) — show the surface title and
-              // the "done" exit instead of an empty traffic-light strip.
-              title={(isAssistantSidebarVisible || isPoloSettingsRoute) ? listTitle : undefined}
-              compensateForStoplight={!isAssistantSidebarVisible}
+              title={listTitle}
               badge={automationFilter?.automationType === 'scheduled' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -3193,17 +3181,6 @@ function AppShellContent({
                         />
                       }
                       {...getEditConfig('automation-config', activeWorkspace.rootPath)}
-                    />
-                  )}
-                  {/* POO-125: the Polo-scope settings exit. The surface hides
-                      the assistant sidebar, so "done" is the discoverable way
-                      back to the assistant view (same target as Cmd+, toggle). */}
-                  {isPoloSettingsRoute && (
-                    <HeaderIconButton
-                      icon={<Check className="h-4 w-4" />}
-                      tooltip={t("common.done")}
-                      data-testid="settings-done-button"
-                      onClick={handleClosePoloSettings}
                     />
                   )}
                 </>

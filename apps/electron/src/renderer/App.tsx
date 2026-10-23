@@ -31,7 +31,8 @@ import { useNotifications } from '@/hooks/useNotifications'
 import { useSession } from '@/hooks/useSession'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
-import { navigate, routes } from './lib/navigate'
+import { navigate, openGlobalSettings, routes } from './lib/navigate'
+import { DEFAULT_SETTINGS_SUBPAGE } from '../shared/settings-registry'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import type { EditPopoverRestoreOutcome } from './components/ui/useEditPopoverSessionRestore'
 import { applySnapshotUnderGuard, clearPendingQuestionForDeletedSession, PendingQuestionTerminalGuard, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession } from './lib/pending-questions'
@@ -1941,7 +1942,7 @@ export default function App() {
       handleOpenSettings()
     })
     const unsubShortcuts = window.electronAPI.onMenuKeyboardShortcuts(() => {
-      navigate(routes.view.settings('shortcuts'))
+      openGlobalSettings('shortcuts')
     })
     // POO-117 P117-07: new-window requests initiated in the main process
     // (native menu, webview shortcut) have no renderer caller to await —
@@ -2705,13 +2706,15 @@ export default function App() {
   const handleOpenUrl = linkInterceptor.handleOpenUrl
 
   // Cmd+, / account-menu entry → Polo-scope settings (client shell), landing
-  // on the app category. The assistant sidebar entry is the assistant-scope path.
+  // on the app category. POO-125: a GLOBAL entry — it opens the shell-level
+  // surface without switching tabs or touching the assistant's route. The
+  // assistant sidebar entry is the assistant-scope path.
   const handleOpenSettings = useCallback(() => {
-    navigate(routes.view.settings('app'))
+    openGlobalSettings(DEFAULT_SETTINGS_SUBPAGE)
   }, [])
 
   const handleOpenKeyboardShortcuts = useCallback(() => {
-    navigate(routes.view.settings('shortcuts'))
+    openGlobalSettings('shortcuts')
   }, [])
 
   // Show reset confirmation dialog

@@ -1,4 +1,4 @@
-import { navigate, routes } from '@/lib/navigate'
+import { openGlobalSettings } from '@/lib/navigate'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import type { Message } from '../../../shared/types'
 
@@ -24,7 +24,9 @@ export function handleErrorMessageAction(
   {
     sessionId,
     onOpenUrl,
-    onOpenSettings = () => navigate(routes.view.settings()),
+    // POO-125: a global entry — opens the shell-level surface without
+    // switching tabs or touching the assistant's route.
+    onOpenSettings = () => openGlobalSettings(),
     onRetryFocus = dispatchFocusInputEvent,
     onRetry,
   }: HandleErrorMessageActionOptions = {},
