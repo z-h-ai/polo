@@ -29,3 +29,12 @@
 - 客户端产品规则见 `docs/client-journey-review/spec.md`；UI 任务读取
   `.agents/skills/polo-ai-design-system/SKILL.md` 并核对适用范围与来源绑定。
 - 按改动范围运行检查，分别报告代码检查、实际运行和产品验收结果。
+
+## 基础设施与域名（z-h-ai.com）
+
+涉及子域名、DNS、腾讯轻量服务器（gz-coolify-main，111.230.240.195）、Coolify、部署链路的改动，动手前必读：
+
+- 硬性规则（skill）：`~/.agents/skills/z-h-ai-infra/SKILL.md`。
+- 完整运维手册：`~/zeabur-migration/INFRA-PLAYBOOK.md`。
+
+核心三条：新子域名必须"双登记"（阿里云 alidns 生效解析 + 腾讯 DNSPod 登记，缺一可能被腾讯侧拦截）；CI 部署走 `https://deploy.z-h-ai.com` + token，禁止回退 SSH 传输；禁止给腾讯 CWP 加地区登录白名单（会把真实入侵静音）。
