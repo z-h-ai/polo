@@ -259,7 +259,7 @@ describe('AdminLoginStep password form interactions', () => {
     i18n.changeLanguage('zh-Hans')
     renderLoginHarness({ phoneAuthEnabled: false })
 
-    expect(screen.getByLabelText('Admin 登录')).toBeTruthy()
+    expect(screen.getByLabelText('管理员登录')).toBeTruthy()
     expect(screen.getByLabelText('手机号或用户名')).toBeTruthy()
     expect(screen.getByLabelText('密码')).toBeTruthy()
     expect(
@@ -316,4 +316,95 @@ describe('AdminLoginStep shared rows', () => {
     expect(screen.getByTestId('admin-login-method-phone')).toBeTruthy()
     expect(screen.getByTestId('admin-login-method-phone').textContent).toBe('Verification code')
   })
+})
+
+
+describe('R3FIX busy password cancellation controls', () => {
+  for (const action of ['button', 'escape']) {
+    it(`offers operational ${action} cancellation while password fields remain locked`, async () => {
+      const onCancel = mock(() => {})
+      renderWithI18n(createElement(AdminLoginStep, {
+        isLoading: true, phoneAuthEnabled: false, onCancel,
+        onClearError: () => {}, onSubmit: () => {},
+        onSendPhoneCode: async () => ({ success: false as const, errorCode: 'disabled' }),
+        onVerifyPhoneCode: async () => false,
+      }))
+      const cancel = screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement
+      expect(cancel.disabled).toBe(false)
+      expect((screen.getByLabelText(PASSWORD_LABEL) as HTMLInputElement).disabled).toBe(true)
+      if (action === 'button') fireEvent.click(cancel)
+      else fireEvent.keyDown(window, { key: 'Escape' })
+      expect(onCancel).toHaveBeenCalledTimes(1)
+    })
+  }
+})
+
+it('R5FIX-01 exposes an explicit retry for incomplete local sign-out', async () => {
+  const onCancel = mock(() => {})
+  renderWithI18n(createElement(AdminLoginStep, {
+    errorMessage: i18n.t('onboarding.adminLogin.localLogoutFailed'),
+    isLoading: false, phoneAuthEnabled: false, onCancel,
+    onClearError: () => {}, onSubmit: () => {},
+    onSendPhoneCode: async () => ({ success: false as const, errorCode: 'NETWORK_ERROR' }),
+    onVerifyPhoneCode: async () => false,
+  }))
+  fireEvent.click(screen.getByTestId('admin-logout-retry'))
+  expect(onCancel).toHaveBeenCalledTimes(1)
+})
+
+
+describe('phone scene survives a password-mode round trip and stays cancellable while busy', () => {
+  it('keeps the code scene, typed phone and consent when switching to the password view and back', async () => {
+    const user = userEvent.setup({ document: window.document })
+    renderWithI18n(createElement(AdminLoginStep, {
+      isLoading: false,
+      phoneAuthEnabled: true,
+      onClearError: () => {},
+      onSubmit: () => {},
+      onSendPhoneCode: async () => ({
+        success: true as const,
+        accepted: true as const,
+        expiresIn: 300,
+        resendAfter: 60,
+      }),
+      onVerifyPhoneCode: async () => false,
+    }))
+
+    fireEvent.change(screen.getByLabelText('Phone number'), {
+      target: { value: '13800138000' },
+    })
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByTestId('phone-auth-send-code'))
+    expect(await screen.findByLabelText('Verification code')).toBeTruthy()
+
+    // Round trip through the password view…
+    await user.click(screen.getByTestId('admin-login-method-password'))
+    expect(screen.getByTestId('admin-password-login-form')).toBeTruthy()
+    await user.click(screen.getByTestId('admin-login-method-phone'))
+
+    // …must not reset the login target: the code scene (not the entry ask)
+    // comes back with the same phone and the consent still checked — the
+    // resent deadline the user is now waiting on is for THIS scene.
+    expect(screen.getByLabelText('Verification code')).toBeTruthy()
+    expect(screen.getByText('+86 138 •••• 8000')).toBeTruthy()
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true)
+  })
+
+  for (const action of ['button', 'escape']) {
+    it(`offers operational ${action} cancellation while a phone code request is in flight`, async () => {
+      const onCancel = mock(() => {})
+      renderWithI18n(createElement(AdminLoginStep, {
+        isLoading: true, phoneAuthEnabled: true, onCancel,
+        onClearError: () => {}, onSubmit: () => {},
+        onSendPhoneCode: async () => ({ success: false as const, errorCode: 'disabled' }),
+        onVerifyPhoneCode: async () => false,
+      }))
+      const cancel = screen.getByTestId('phone-auth-cancel') as HTMLButtonElement
+      expect(cancel.disabled).toBe(false)
+      expect((screen.getByLabelText('Phone number') as HTMLInputElement).disabled).toBe(true)
+      if (action === 'button') fireEvent.click(cancel)
+      else fireEvent.keyDown(window, { key: 'Escape' })
+      expect(onCancel).toHaveBeenCalledTimes(1)
+    })
+  }
 })

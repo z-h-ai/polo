@@ -335,3 +335,20 @@ describe('restricted offline App to HomePage start flow', () => {
     expect(openApp).not.toHaveBeenCalled()
   })
 })
+
+// R5FIX-02: recover the mounted cached directory without replaying an open.
+it('revalidates cached offline Home with an explicit retry', async () => {
+  render(createElement(I18nextProvider, { i18n }, createElement(AppHomeHarness)))
+  await waitFor(() => expect(screen.getByTestId('home-directory-offline-banner')).toBeTruthy())
+  let reads = 0
+  window.electronAPI.productSpaceGetCatalog = async () => {
+    reads++
+    return { success: true, notModified: false, catalogRevision: 'recovered',
+      accessMode: 'online', entries: [], productSpaceId: enterpriseSpaceId }
+  }
+  fireEvent.click(screen.getByTestId('home-directory-offline-retry'))
+  await waitFor(() => expect(screen.queryByTestId('home-directory-offline-banner')).toBeNull())
+  expect(reads).toBeGreaterThan(0)
+  expect(start).not.toHaveBeenCalled()
+  expect(openApp).not.toHaveBeenCalled()
+}, 15_000)

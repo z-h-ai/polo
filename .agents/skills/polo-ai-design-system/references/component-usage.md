@@ -1,6 +1,6 @@
 # Polo 组件素材使用索引（可再生展示与生产落点）
 
-版本：`native-materials-r3-20261022`。本文是 Skill 的维护源（登记于 `references/design-system.json` sources），由 `docs/mvp-complete-flow-hifi/tools/check_design_system.py` 校验其与 playground 注册的一致性。
+版本：`native-materials-r4-dev-aligned-20261023`。本文是 Skill 的维护源（登记于 `references/design-system.json` sources），由 `docs/mvp-complete-flow-hifi/tools/check_design_system.py` 校验其与 playground 注册的一致性。
 
 ## 定位与边界
 

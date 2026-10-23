@@ -42,14 +42,14 @@ mock.module('@/context/ThemeContext', () => ({
   useOptionalTheme: () => undefined,
 }))
 
-// The TopBar's AppMenu (Polo logo dropdown) needs the App-level
+// The TopBar's avatar menu (WorkbenchAccountMenu, POO-117) needs the App-level
 // ActionRegistryProvider for its hotkey labels; this reduced tree mounts
 // TabShell without it (adding the provider would add a second live window
 // keydown listener and break the R33 exactly-one-listener assertions), so the
-// menu trigger is stubbed. Its wiring has dedicated coverage in
+// menu content is stubbed. Its wiring has dedicated coverage in
 // TopBar.app-menu.isolated.ts.
-mock.module('@/components/AppMenu', () => ({
-  AppMenu: () => createElement('div', { 'data-testid': 'topbar-app-menu' }),
+mock.module('@/components/app-menu/WorkbenchAccountMenu', () => ({
+  WorkbenchAccountMenu: () => createElement('div', { 'data-testid': 'topbar-account-menu' }),
 }))
 
 // Fail-fast electronAPI for the reduced TabShell tree: subscriptions and the
@@ -596,4 +596,32 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     expect(liveKeydownListeners.size).toBe(0)
     expect(document.documentElement.dataset.activeTab).toBeUndefined()
   }, 30_000)
+})
+
+
+it('R3FIX home tab keeps the real ClientPage stack inside TabShell (POO-100 preserve-depth contract)', async () => {
+  const { ModalProvider } = await import('@/context/ModalContext')
+  const { ClientPageProvider, useClientPage } = await import('@/context/ClientPageContext')
+  const { act, fireEvent } = await import('@testing-library/react')
+  let page!: ReturnType<typeof useClientPage>
+  function Probe() { page = useClientPage(); return null }
+  render(createElement(ClientPageProvider, {
+    scope: { accountId: SCOPE_A.accountId, productSpaceId: SCOPE_A.productSpaceId, epoch: 1 },
+    children: createElement(ModalProvider, { children: [buildShellTree(SCOPE_A), createElement(Probe, { key: 'route-probe' })] }),
+  }))
+  await waitFor(() => expect(screen.getByTestId('app-topbar')).toBeTruthy())
+  act(() => {
+    page.navigate({ kind: 'circles' })
+    page.navigate({ kind: 'circle-detail', circleId: 'circle-r3', section: 'content' })
+  })
+  expect(page.route.kind).toBe('circle-detail')
+  // The R3FIX reset-on-home-entry behavior was superseded by the POO-100
+  // preserve-depth design (the route stack lives OUTSIDE TabShell exactly so
+  // a tab switch never loses the page or its depth) and is NOT reintroduced:
+  // the home tab only activates the shell tab, the stack stays.
+  fireEvent.click(screen.getByTestId('topbar-home-tab'))
+  expect(page.route.kind).toBe('circle-detail')
+  expect(page.canGoBack).toBe(true)
+  // POO-117 P117-01: the brand is a decorative mark — no button to click.
+  expect(screen.getByTestId('app-topbar').querySelector('button[aria-label="' + i18n.t('topbar.brand.home') + '"]')).toBeNull()
 })

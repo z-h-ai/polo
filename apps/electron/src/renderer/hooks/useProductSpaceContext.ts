@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
+import type { WorkbenchWindowContext } from '@polo-ai/shared/protocol'
 import type {
   ExecutionSummary,
   ProductSpaceSummary,
@@ -128,6 +129,8 @@ const legacyStateInvalidator = {
   removeLegacyOrganizationSessionIndex: () => {},
 }
 
+export type ProductSpaceSelectionSource = 'stored' | 'memory-invalid' | 'fresh'
+
 export function useProductSpaceContextState() {
   const [flowState, setFlowState] = useState<ProductSpaceFlowState>('idle')
   const [productSpaces, setProductSpaces] = useState<ProductSpaceSummary[]>([])
@@ -137,6 +140,10 @@ export function useProductSpaceContextState() {
   const [error, setError] = useState<{ code: string; message?: string } | null>(null)
   const [pendingSwitch, setPendingSwitch] = useState<PendingSpaceSwitch | null>(null)
   const pendingSwitchRef = useRef<PendingSpaceSwitch | null>(null)
+  /** POO-124: how THIS account's bootstrap chose its committed space — the
+   * login-time select gate reads it instead of re-deriving from the device
+   * ledger, which bootstrap itself overwrites via publishCommittedSelection. */
+  const [spaceSelectionSource, setSpaceSelectionSource] = useState<ProductSpaceSelectionSource | null>(null)
   const [unavailableSpaceIds, setUnavailableSpaceIds] = useState<ReadonlySet<string>>(new Set())
 
   const accountIdRef = useRef<string | null>(null)
@@ -247,11 +254,12 @@ export function useProductSpaceContextState() {
     list: ProductSpaceSummary[],
     personalId: string,
     productSpaceId: string,
+    onlineVerified = true,
   ) => {
     // The Main fence already moved (trusted transaction committed); now the
     // renderer projection is published as one step.
     setStoredActiveProductSpaceId(accountId, productSpaceId)
-    persistVerifiedContext(accountId, list, personalId, productSpaceId)
+    if (onlineVerified) persistVerifiedContext(accountId, list, personalId, productSpaceId)
     activeProductSpaceIdRef.current = productSpaceId
     setActiveProductSpaceId(productSpaceId)
     setContextVersion(version => version + 1)
@@ -556,7 +564,7 @@ export function useProductSpaceContextState() {
     }
   }, [applyListResponse, isCurrentAccountScope])
 
-  const bootstrap = useCallback(async (accountId: string): Promise<
+  const bootstrap = useCallback(async (accountId: string, launchContext?: WorkbenchWindowContext | null): Promise<
     'ready' | 'contract-blocked' | 'error' | null
   > => {
     const scope = {
@@ -572,6 +580,7 @@ export function useProductSpaceContextState() {
     setActiveProductSpaceId(null)
     setPendingSwitch(null)
     setUnavailableSpaceIds(new Set())
+    setSpaceSelectionSource(null)
     setFlowState('loading')
     setError(null)
     restrictionFenceRef.current.clear()
@@ -584,9 +593,19 @@ export function useProductSpaceContextState() {
     // authoritative result that is already published.
     let membershipFetchSucceeded = false
     try {
+      if (launchContext && launchContext.accountId !== accountId) throw { code: 'launch_account_mismatch' }
       const persisted = await getProductSpaceContextStorage(accountId)
       if (!isCurrentAccountScope(scope)) return null
       hadPersistedContext = Boolean(persisted.verifiedContext)
+      // The persisted verified context IS the cross-restart memory, but
+      // getStoredActiveProductSpaceId reads the in-process ledger Map, which
+      // only carries selections committed in THIS session — without this
+      // hydration every cold boot fell back to personal, and the login-time
+      // space-select gate misread a returning user as a first login
+      // (POO-124 E2E finding; matches the documented restore rule).
+      if (persisted.verifiedContext?.activeProductSpaceId) {
+        setStoredActiveProductSpaceId(accountId, persisted.verifiedContext.activeProductSpaceId)
+      }
 
       // Direct switch: clear legacy Organization state once, executed by the
       // runtime with verifiable per-step results. Only an all-green run is
@@ -612,12 +631,18 @@ export function useProductSpaceContextState() {
 
 
       const availableById = new Map<string, ProductSpaceSummary>(fetched.list.map(space => [space.id as string, space]))
-      const storedId = getStoredActiveProductSpaceId(accountId)
+      const storedId = launchContext?.productSpaceId ?? getStoredActiveProductSpaceId(accountId)
       const restored = storedId ? availableById.get(storedId) : undefined
+      if (launchContext && (!restored || !isActiveSpace(restored))) throw { code: 'launch_space_unavailable' }
       const computeTarget = (): string => (
         restored && isActiveSpace(restored) ? restored.id : fetched.personalId
       )
       const target = computeTarget()
+      setSpaceSelectionSource(
+        restored && isActiveSpace(restored)
+          ? 'stored'
+          : (storedId ? 'memory-invalid' : 'fresh'),
+      )
       // R34-2/R35-2: reconcile the renderer's ephemeral restriction memory
       // against Main's AUTHORITATIVE fence state. A reload/retryBootstrap
       // erases the local Set but never Main's restriction — without this
@@ -677,18 +702,20 @@ export function useProductSpaceContextState() {
       // When the fetch SUCCEEDED but a later stage failed, the offline
       // snapshot must not shadow the already-published authoritative list:
       // fail closed into the safe error state instead.
-      if (membershipFetchSucceeded) {
+      if (membershipFetchSucceeded || launchContext) {
         setFlowState('error')
         return 'error'
       }
       const restored = await window.electronAPI.productSpaceRestoreOfflineView()
       if (restored.success && isCurrentAccountScope(scope)) {
+        setSpaceSelectionSource('stored')
         applyListResponse(restored.snapshot)
         publishCommittedSelection(
           accountId,
           restored.snapshot.productSpaces,
           restored.snapshot.personalProductSpaceId,
           restored.snapshot.activeProductSpaceId,
+          false, // A cached read is not a new authority verification.
         )
         return 'ready'
       }
@@ -867,6 +894,63 @@ export function useProductSpaceContextState() {
       return null
     }
   }, [applyListResponse, applySpaceSelection, enterContractBlocked, fetchProductSpaces, persistVerifiedContext])
+
+  // A Catalog403 revokes Main's committed scope while the denied renderer
+  // keeps its explanatory snapshot. A later Catalog200 alone cannot restore
+  // that scope: use the existing trusted PREPARE → STOP → COMMIT transaction.
+  const recoverActiveProductSpace = useCallback(async (): Promise<boolean> => {
+    const accountId = accountIdRef.current
+    const activeId = activeProductSpaceIdRef.current
+    if (!accountId || !activeId || pendingTargetRef.current) return false
+    const scope = { accountId, generation: accountScopeGenerationRef.current }
+    const generation = switchGenerationRef.current
+    const current = () => isCurrentAccountScope(scope)
+      && activeProductSpaceIdRef.current === activeId
+      && switchGenerationRef.current === generation
+      && pendingTargetRef.current === null
+    let operation: SwitchOperation | null = null
+    try {
+      const fetched = await fetchProductSpaces(scope, { publishList: false })
+      if (!current() || !fetched) return false
+      if (!fetched.list.some(space => space.id === activeId)) {
+        throw { code: 'product_space_context_unavailable' }
+      }
+      operation = beginSwitchOperation(accountId, activeId)
+      const ownedGeneration = operation.generation
+      pendingTargetRef.current = activeId
+      const live = () => isCurrentAccountScope(scope)
+        && isCurrentSwitchOperation(operation!, ownedGeneration)
+      const prepared = await prepareTrustedSwitch(operation, activeId)
+      if (!live()) return false
+      if (!prepared.ok) throw { code: prepared.errorCode ?? 'runtime_commit_failed' }
+      const stopped = await stopPreparedSwitchExecutions(prepared.token!)
+      if (!live()) return false
+      if (!stopped.ok) throw { code: stopped.errorCode ?? 'runtime_stop_failed' }
+      await commitPreparedSwitch(operation, activeId)
+      if (!live()) return false
+      applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
+      publishCommittedSelection(accountId, fetched.list, fetched.personalId, activeId)
+      return true
+    } catch (caught) {
+      if (isCurrentAccountScope(scope) && activeProductSpaceIdRef.current === activeId
+        && (!operation || activeSwitchOpRef.current === operation)) {
+        const record = (caught ?? {}) as Record<string, unknown>
+        if (record.code === 'product_space_contract_unsupported') {
+          enterContractBlocked(accountId)
+          return false
+        }
+        setError({ code: typeof record.code === 'string' ? record.code : 'runtime_commit_failed' })
+        setFlowState('error') // Existing error page exposes retryBootstrap.
+      }
+      return false
+    } finally {
+      if (operation && activeSwitchOpRef.current === operation) {
+        pendingTargetRef.current = null
+        if (operation.token) void cancelPreparedSwitch(operation)
+      }
+    }
+  }, [applyListResponse, beginSwitchOperation, cancelPreparedSwitch, commitPreparedSwitch, enterContractBlocked, fetchProductSpaces,
+    isCurrentAccountScope, isCurrentSwitchOperation, prepareTrustedSwitch, publishCommittedSelection, stopPreparedSwitchExecutions])
 
   const listActiveExecutions = useCallback(async (): Promise<ExecutionSummary[] | null> => {
     const accountId = accountIdRef.current
@@ -1420,9 +1504,11 @@ export function useProductSpaceContextState() {
     contextVersion,
     pendingSwitch,
     unavailableSpaceIds,
+    spaceSelectionSource,
     error,
     bootstrap,
     refreshProductSpaces,
+    recoverActiveProductSpace,
     retryBootstrap,
     requestSwitch,
     confirmStopAndSwitch,

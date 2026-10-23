@@ -1,5 +1,5 @@
 import { clientWorkbenchFocusClassName, useClientWorkbenchStyle, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName, clientWorkbenchPrimaryClassName, clientWorkbenchButtonClassName, clientWorkbenchDestructiveClassName } from '@/components/ui/client-workbench'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { HomeAppUsageRecord } from '@/lib/home-app-usage'
@@ -35,6 +35,7 @@ import {
   type HomeAppDirectory,
   type HomeAppDirectoryEntry,
 } from '@/lib/home-app-directory'
+import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
 import { selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
 import {
   formatBytes,
@@ -83,18 +84,6 @@ export { formatBytes }
  * and hidden works are restored from the in-page section below the grid. The
  * lib contracts are shared so the circle views can record opens too.
  */
-
-export function createEnterpriseWorkflowUrl(
-  adminUrl: string,
-  enterpriseId: string,
-  workflow: 'members' | 'publishing',
-): string {
-  const url = workflow === 'members'
-    ? new URL(`/enterprise/${encodeURIComponent(enterpriseId)}/members`, adminUrl)
-    : new URL('/organization-apps', adminUrl)
-  if (workflow === 'publishing') url.searchParams.set('organizationId', enterpriseId)
-  return url.toString()
-}
 
 // ─── Pure directory search / source-filter / sort (P70-HOME-01) ─────────────
 
@@ -234,12 +223,14 @@ export function HomePage() {
   // restricted-circle ids mark the corresponding creator_circle sources lost
   // (the leave/revocation projection of §13.5: only the LAST valid source
   // failing blocks a work).
+  const entitlementNow = useMemberCircleClock(circlesResource?.memberships ?? circlesResource?.circles ?? [])
   const lostCircleIds = useMemo(
     () => selectLostCircleAuthorizationIds(
       circlesResource?.circles ?? [],
       circlesResource?.memberships ?? [],
+      entitlementNow,
     ),
-    [circlesResource?.circles, circlesResource?.memberships],
+    [circlesResource?.circles, circlesResource?.memberships, entitlementNow],
   )
   const directory = useMemo<HomeAppDirectory>(
     () => selectHomeAppDirectory(catalog.state.catalog, {
@@ -378,79 +369,6 @@ export function HomePage() {
     }
   }
 
-  // Authoritative committed-context lease for enterprise workflow jumps:
-  // account (from the committed ProductSpaceContext authority — present even
-  // while the Catalog snapshot is loading or failed) + enterprise + context
-  // key + the MONOTONIC contextVersion (it increases on every committed
-  // account/space change and never repeats, so an A→B→A round-trip that
-  // restores account/enterprise/contextKey still fails the re-verification).
-  interface EnterpriseWorkflowContextLease {
-    accountId: string | undefined
-    enterpriseId: string | null
-    contextKey: string | undefined
-    contextVersion: number | undefined
-  }
-  const liveLeaseRef = useRef<EnterpriseWorkflowContextLease>({
-    accountId: undefined,
-    enterpriseId: null,
-    contextKey: undefined,
-    contextVersion: undefined,
-  })
-  // The live lease is synced ONLY at the committed boundary (layout effect):
-  // render — including concurrently discarded ProductSpace renders — never
-  // writes the ref, so a committed A continuation always observes the truly
-  // committed lease.
-  useLayoutEffect(() => {
-    liveLeaseRef.current = {
-      accountId: catalog.productSpace?.accountId,
-      enterpriseId: activeProductSpace?.kind === 'enterprise'
-        ? activeProductSpace.enterpriseId
-        : null,
-      contextKey: catalog.productSpace?.productSpaceContextKey,
-      contextVersion: catalog.productSpace?.contextVersion,
-    }
-  })
-
-  // Click-time lease snapshot of the committed context: the adminGetStatus()
-  // await must not outlive it. After the await, the snapshot is compared
-  // against the committed live lease — any change to account, enterprise, or
-  // the monotonic context lease fails closed, even when a round-trip returns
-  // to the click-time identity.
-  const openEnterpriseWorkflow = async (workflow: 'members' | 'publishing') => {
-    if (activeProductSpace?.kind !== 'enterprise') return
-    const clickLease: EnterpriseWorkflowContextLease = {
-      accountId: catalog.productSpace?.accountId,
-      enterpriseId: activeProductSpace.enterpriseId as string,
-      contextKey: catalog.productSpace?.productSpaceContextKey,
-      contextVersion: catalog.productSpace?.contextVersion,
-    }
-    try {
-      const status = await window.electronAPI.adminGetStatus()
-      const live = liveLeaseRef.current
-      if (
-        !status.loggedIn
-        || !status.adminUrl
-        || status.userId !== clickLease.accountId
-        || live.accountId !== clickLease.accountId
-        || live.enterpriseId !== clickLease.enterpriseId
-        || live.contextKey !== clickLease.contextKey
-        || live.contextVersion !== clickLease.contextVersion
-      ) {
-        toast.error(t('homeSpace.workflows.openFailed'), {
-          description: t('homeApps.errors.staleContext'),
-        })
-        return
-      }
-      await window.electronAPI.openUrl(createEnterpriseWorkflowUrl(
-        status.adminUrl,
-        clickLease.enterpriseId ?? '',
-        workflow,
-      ))
-    } catch {
-      toast.error(t('homeSpace.workflows.openFailed'))
-    }
-  }
-
   // Runtime status for a directory card (prototype 运行中 badge): looked up
   // through the runtime scope key, never the UI identity key. A failed scope
   // derivation simply means "no badge".
@@ -560,14 +478,6 @@ export function HomePage() {
           spaceKind="enterprise"
           creatorCircles={catalog.creatorCircles}
           spaceKey={catalog.productSpace.productSpaceContextKey}
-          enterpriseRole={activeProductSpace?.kind === 'enterprise'
-            ? activeProductSpace.role
-            : undefined}
-          enterpriseAccessMode={activeProductSpace?.kind === 'enterprise'
-            ? activeProductSpace.accessMode
-            : undefined}
-          onOpenMemberManagement={() => { void openEnterpriseWorkflow('members') }}
-          onOpenCreatorPublishing={() => { void openEnterpriseWorkflow('publishing') }}
         />
       )}
 
@@ -626,7 +536,16 @@ export function HomePage() {
           className="mt-[24px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
           data-testid="home-restricted-banner"
         >
-          {t('homeApps.organization.accessError')}
+          <span>{t('homeApps.organization.accessError')}</span>
+          <button
+            type="button"
+            data-testid="home-directory-denied-retry"
+            className="ml-[12px] inline-flex min-h-[28px] items-center rounded-[8px] border border-border px-[12px] font-medium text-foreground hover:bg-foreground-5"
+            disabled={catalog.state.refreshing}
+            onClick={() => { void catalog.sync(true) }}
+          >
+            {t('homeApps.actions.tryAgain')}
+          </button>
         </div>
       )}
       {phase === 'offline' && (
@@ -634,7 +553,16 @@ export function HomePage() {
           className="mt-[24px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text"
           data-testid="home-directory-offline-banner"
         >
-          {t('homeApps.organization.offlineWarning')}
+          <span>{t('homeApps.organization.offlineWarning')}</span>
+          <button
+            type="button"
+            data-testid="home-directory-offline-retry"
+            className="ml-[12px] inline-flex min-h-[28px] items-center rounded-[8px] border border-border px-[12px] font-medium text-foreground hover:bg-foreground-5"
+            disabled={catalog.state.refreshing}
+            onClick={() => { void catalog.sync(true) }}
+          >
+            {t('homeApps.actions.tryAgain')}
+          </button>
         </div>
       )}
       {phase === 'error' && hasCachedCatalog && (

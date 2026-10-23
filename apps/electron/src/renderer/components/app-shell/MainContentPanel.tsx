@@ -41,6 +41,7 @@ import type { SessionStatusId } from '@/config/session-status-config'
 import { SourceInfoPage, ChatPage } from '@/pages'
 import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
+import { resolveRenderableSettingsSubpage } from '../../../shared/menu-schema'
 import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import type { ExecutionEntry } from '../automations/types'
 import { automationsAtom } from '@/atoms/automations'
@@ -259,7 +260,11 @@ export function MainContentPanel({
   // mounts, so fall back to the App page so it isn't empty.
   if (isSettingsNavigation(navState)) {
     const subpage = navState.subpage ?? 'app'
-    const SettingsPageComponent = getSettingsPageComponent(subpage)
+    // POO-121 fail-closed: pages hidden from the navigators (messaging is
+    // still being iterated on; server is feature-flag gated) must not come
+    // back through a direct deep link either — unlisted subpages render the
+    // default App page (same single source as the navigator filters).
+    const SettingsPageComponent = getSettingsPageComponent(resolveRenderableSettingsSubpage(subpage))
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
         <SettingsPageComponent />

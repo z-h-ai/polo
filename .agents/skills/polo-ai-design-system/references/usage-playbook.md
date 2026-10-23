@@ -1,6 +1,6 @@
 # Polo 设计系统使用手册（新需求实施流程）
 
-版本：`native-materials-r3-20261022`。目标：让实施 Agent 不经提醒即可发现并复用本 Skill 的三层素材，提高原型还原度。三层素材的优先顺序：**Skill 内当前实现基线（页面/区域）→ 真实组件 → 设计变量**；旧目标设计（docs 原型）按已确认范围另列对照，不覆盖当前实现基线。
+版本：`native-materials-r4-dev-aligned-20261023`。目标：让实施 Agent 不经提醒即可发现并复用本 Skill 的三层素材，提高原型还原度。三层素材的优先顺序：**Skill 内当前实现基线（页面/区域）→ 真实组件 → 设计变量**；旧目标设计（docs 原型）按已确认范围另列对照，不覆盖当前实现基线。
 
 当前实现基线的统一入口：`assets/source-baseline/index.html`（file:// 可直接打开；含第二层组件画廊与页面/区域场景目录）。单个场景直达：`assets/source-baseline/entries/baseline.html?scene=<ID>`（同样 file:// 可开）。场景 ID 以 `assets/source-baseline/baseline-manifest.json` 为准（由 `tools/source-baseline/build.py` 从真实代码机制化提取）。
 

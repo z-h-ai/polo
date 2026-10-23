@@ -69,6 +69,8 @@ export const RPC_CHANNELS = {
   window: {
     GET_WORKSPACE: 'window:getWorkspace',
     GET_MODE: 'window:getMode',
+    GET_LAUNCH_CONTEXT: 'window:getLaunchContext',
+    REPORT_WORKBENCH_READY: 'window:reportWorkbenchReady',
     OPEN_WORKSPACE: 'window:openWorkspace',
     OPEN_SESSION_IN_NEW_WINDOW: 'window:openSessionInNewWindow',
     SWITCH_WORKSPACE: 'window:switchWorkspace',
@@ -137,6 +139,7 @@ export const RPC_CHANNELS = {
   menu: {
     NEW_CHAT: 'menu:newChat',
     NEW_WINDOW: 'menu:newWindow',
+    NEW_WINDOW_FAILED: 'menu:newWindowFailed',
     OPEN_SETTINGS: 'menu:openSettings',
     KEYBOARD_SHORTCUTS: 'menu:keyboardShortcuts',
     TOGGLE_FOCUS_MODE: 'menu:toggleFocusMode',

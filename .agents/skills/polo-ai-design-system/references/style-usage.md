@@ -1,6 +1,6 @@
 # 变量与样式预览
 
-适用 `native-materials-r3-20261022`。不复制第二份 token 值；作用域和设计确认仍见 foundations/Spec。
+适用 `native-materials-r4-dev-aligned-20261023`。不复制第二份 token 值；作用域和设计确认仍见 foundations/Spec。
 
 | 样式体系 | 原生维护源与消费顺序 | 浏览入口 | 适用与缺口 |
 |---|---|---|---|

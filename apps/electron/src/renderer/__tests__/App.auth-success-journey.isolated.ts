@@ -159,6 +159,15 @@ const electronApiExplicit: Record<string, unknown> = {
   adminLogin: mock(async () => { authenticated = true; return { success: true, user: FIXTURE_USER } }),
   adminVerifyPhoneAuthCode: mock(async () => { authenticated = true; return { success: true, user: FIXTURE_USER, isNewUser: true } }),
   productSpaceRevokeActiveContext: async () => ({ success: true }),
+  // ClientHomeRouter mounts useCircleReturn; its B1 bridge probe reads these
+  // properties off window.electronAPI. Declare the slice so the fail-fast
+  // proxy does not treat the probe itself as unfixed production access.
+  circleReturn: {
+    getPending: async () => ({ status: 'none' }) as const,
+    ack: async () => ({ status: 'not_found' }) as const,
+    cancel: async () => ({ status: 'cancelled' }) as const,
+  },
+  onCircleReturnCandidate: () => UNSUBSCRIBE,
   adminLogout: async () => { authenticated = false; return { success: true } },
   clearClaudeOAuthState: async () => {},
   onAdminReauthRequired: (listener: (value: unknown) => void) => { reauthListener = listener; return () => { reauthListener = undefined } },
@@ -198,6 +207,7 @@ const electronApiExplicit: Record<string, unknown> = {
   isChannelAvailable: () => true,
   getWindowFocusState: async () => ({ focused: true }),
   refreshBadge: () => {},
+  reportWorkbenchReady: () => {},
   createSession: async () => { throw new Error('electronAPI fixture: createSession is not reachable in this authentication journey fixture') },
   createEditPopoverSession: async () => { throw new Error('electronAPI fixture: createEditPopoverSession is not reachable') },
   sendMessage: async () => { throw new Error('electronAPI fixture: sendMessage is not reachable') },
@@ -238,7 +248,7 @@ const KNOWN_ON = new Set([
   'onAdminReauthRequired', 'onAppThemeChange', 'onAutomationsChanged', 'onBadgeDraw',
   'onBadgeDrawWindows', 'onCloseRequested', 'onCopilotDeviceCode', 'onCreatorSkillProgress',
   'onDeepLinkNavigate', 'onDefaultPermissionsChanged', 'onLabelsChanged', 'onLlmConnectionsChanged',
-  'onMenuKeyboardShortcuts', 'onMenuNewChat', 'onMenuOpenSettings', 'onMenuToggleFocusMode',
+  'onMenuKeyboardShortcuts', 'onMenuNewChat', 'onMenuNewWindowFailed', 'onMenuOpenSettings', 'onMenuToggleFocusMode',
   'onMenuToggleSidebar', 'onMessagingBindingChanged', 'onMessagingPendingChanged',
   'onMessagingPlatformStatus', 'onNotificationNavigate', 'onReconnected', 'onSessionEvent',
   'onSessionFilesChanged', 'onSkillsChanged', 'onSourcesChanged', 'onStatusesChanged',

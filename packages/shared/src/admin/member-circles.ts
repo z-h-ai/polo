@@ -5,6 +5,8 @@
  * the F1 contract snapshot
  * `docs/client-journey-review/development-plan/member-circle-contract.json`
  * (polo-admin `integration/pol114-creator-r26@17477dbf`).
+ * Additive currentEntitlement v1 follows polo-admin shared-contract.md,
+ * Member Circle current entitlement contract (`d7f28c3f`, 2026-10-19).
  *
  * Ground rules encoded here (P70-CIRCLE-API-01/02/03):
  * - DTOs keep `circleId` / `membershipId` / `artifactId` / `versionId` /
@@ -337,6 +339,32 @@ export interface MemberCirclePaymentOrderSummary {
   correction: MemberCircleCorrection | null;
 }
 
+/** Current-period authority, independent of the five recent order attempts. */
+export const MemberCircleCurrentEntitlementSchema = z.object({
+  version: z.literal(1),
+  membershipId: z.string().min(1),
+  state: z.enum(['entitled', 'not_entitled', 'unknown']),
+  computedAt: isoTimestamp,
+  currentPeriodEnd: isoTimestampNullable,
+  validUntil: isoTimestampNullable,
+  source: z.object({
+    billingKind: z.enum(['free', 'paid']),
+    membershipGeneration: z.number().int().nonnegative(),
+    entitlementEventId: z.string().min(1).nullable(),
+    orderId: z.string().min(1).nullable(),
+    authorityEvidenceId: z.string().min(1).nullable(),
+  }),
+  corrections: z.array(z.object({
+    id: z.string().min(1),
+    orderId: z.string().min(1),
+    kind: z.enum(['refund', 'chargeback']),
+    amountMinor: minorAmount,
+    authorityEvidenceId: z.string().min(1).nullable(),
+  })),
+});
+
+export type MemberCircleCurrentEntitlement = z.infer<typeof MemberCircleCurrentEntitlementSchema>;
+
 export interface MemberMembership {
   membershipId: string;
   status: MemberCircleMembershipStatus;
@@ -346,7 +374,9 @@ export interface MemberMembership {
   suspendedReason: string | null;
   joinedAt: string;
   updatedAt: string;
-  /** Most recent orders (provider take:5, newest first). */
+  /** Absent on legacy responses; a present unknown authority never grants access. */
+  currentEntitlement?: MemberCircleCurrentEntitlement;
+  /** Most recent orders (provider take:5, newest first); display history on v1. */
   paymentOrders: MemberCirclePaymentOrderSummary[];
   circle: {
     circleId: string;
@@ -387,6 +417,7 @@ const MemberMembershipSchema = z.object({
   suspendedReason: z.string().nullable(),
   joinedAt: isoTimestamp,
   updatedAt: isoTimestamp,
+  currentEntitlement: MemberCircleCurrentEntitlementSchema.optional(),
   paymentOrders: z.array(MemberCirclePaymentOrderSchema),
   circle: z.object({
     id: uuidString,
@@ -399,6 +430,17 @@ const MemberMembershipSchema = z.object({
     nextPeriodPriceMinor: minorAmount.nullable(),
     nextPriceEffectiveAt: isoTimestampNullable,
   }),
+}).superRefine((membership, context) => {
+  const authority = membership.currentEntitlement;
+  if (!authority) return;
+  const periodMatches = authority.currentPeriodEnd === null
+    ? membership.currentPeriodEnd === null
+    : membership.currentPeriodEnd !== null
+      && Date.parse(authority.currentPeriodEnd) === Date.parse(membership.currentPeriodEnd);
+  if (authority.membershipId !== membership.id
+    || authority.source.billingKind !== membership.billingKind || !periodMatches) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['currentEntitlement'], message: 'Current entitlement does not match its membership' });
+  }
 });
 
 export interface MemberMembershipListResponse {
@@ -421,6 +463,9 @@ export function parseMemberMembershipsResponse(data: unknown): MemberMembershipL
       suspendedReason: membership.suspendedReason,
       joinedAt: membership.joinedAt,
       updatedAt: membership.updatedAt,
+      ...(membership.currentEntitlement !== undefined
+        ? { currentEntitlement: membership.currentEntitlement }
+        : {}),
       paymentOrders: membership.paymentOrders.map(order => ({
         orderId: order.id,
         storedStatus: order.status,

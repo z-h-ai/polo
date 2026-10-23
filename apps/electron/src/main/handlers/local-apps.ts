@@ -1,3 +1,4 @@
+import { requireMemberCircleAppAdmission, MemberCircleAdmissionError } from '@polo-ai/shared/admin/member-circle-admission'
 import { getAppSdkBridge } from '../app-sdk-service'
 import {
   AdminClient,
@@ -45,6 +46,7 @@ import {
 } from '../local-app-runtime'
 import {
   getRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpaceKind,
   getRuntimeFenceGeneration,
   isSwitchInProgress,
   isRuntimeFenceBoundToAccount,
@@ -873,10 +875,41 @@ async function loadAuthoritativeProductSpaceAppsOutcome(
   }
 }
 
+type PriorAppBinding = NonNullable<ReturnType<typeof getProductSpaceCatalogAuthorityRecord>>['entries'][number]
+
+function capturePriorAppBinding(identity: ProductSpaceAppRuntimeIdentity, catalogEntryId?: string): PriorAppBinding | undefined {
+  const record = getProductSpaceCatalogAuthorityRecord(identity.accountId, identity.productSpaceId)
+  return [...(record?.entries ?? []), ...(record?.tombstones ?? [])].find(entry =>
+    (catalogEntryId === undefined || entry.catalogEntryId === catalogEntryId)
+    && entry.artifactInstanceId === identity.artifactInstanceId
+    && entry.versionId === identity.versionId && entry.version === identity.version)
+}
+
+/** Historical identity supplies explanation only. Fresh member authority must
+ * deny that exact account's circle source; entitled never resurrects a missing
+ * artifact, and renderer-declared sources never participate.
+ */
+async function explainMissingCircleAdmission(
+  client: AdminClient, accessToken: string, identity: ProductSpaceAppRuntimeIdentity, prior: PriorAppBinding | undefined,
+): Promise<void> {
+  if (!prior?.sources.some(source => source.kind === 'creator_circle')) return
+  const generation = getRuntimeFenceGeneration()
+  const app: ProductSpaceAppIdentity = { ...identity, catalogEntryId: prior.catalogEntryId, catalogRevision: '', sources: validateIdentitySources(prior.sources), availability: 'available' }
+  const assertCurrent = async () => {
+    await assertProductSpaceAccountCurrent(app)
+    if (getRuntimeFenceGeneration() !== generation) throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'ProductSpace changed during membership recovery check')
+  }
+  await assertCurrent()
+  try { await requireCircleAppAdmission(client, accessToken, { kind: 'app', sources: prior.sources }) }
+  catch (error) { await assertCurrent(); throw error }
+  await assertCurrent()
+}
+
 async function loadAuthoritativeProductSpaceApps(
   rawApps: unknown,
   options: {
     driftCode?: 'RELEASE_CHANGED' | 'CATALOG_IDENTITY_DRIFT'
+    explainMissingAdmission?: boolean
   } = {},
 ): Promise<{
   apps: ProductSpaceAppIdentity[]
@@ -885,8 +918,11 @@ async function loadAuthoritativeProductSpaceApps(
   context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
   catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
 }> {
+  const requested = options.explainMissingAdmission ? parseProductSpaceAppIdentityBatch(rawApps, 'ProductSpace App identities')[0]! : undefined
+  const prior = requested ? capturePriorAppBinding(requested, requested.catalogEntryId) : undefined
   const outcome = await loadAuthoritativeProductSpaceAppsOutcome(rawApps, options)
   if (outcome.kind === 'missing') {
+    if (requested) await explainMissingCircleAdmission(outcome.client, outcome.accessToken, requested, prior)
     throw new LocalAppRuntimeError(
       'CATALOG_ENTRY_MISSING',
       'The ProductSpace Catalog no longer lists this entry',
@@ -1143,6 +1179,21 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.GET_LOGS,
 ] as const
 
+async function requireCircleAppAdmission(...args: Parameters<typeof requireMemberCircleAppAdmission>): Promise<() => void> {
+  try {
+    const guard = await requireMemberCircleAppAdmission(...args)
+    return () => {
+      try { guard() } catch (error) {
+        if (error instanceof MemberCircleAdmissionError) throw new LocalAppRuntimeError(error.code, error.message, error.details)
+        throw error
+      }
+    }
+  } catch (error) {
+    if (error instanceof MemberCircleAdmissionError) throw new LocalAppRuntimeError(error.code, error.message, error.details)
+    throw error
+  }
+}
+
 export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManager?: HandlerDeps['windowManager'] }): void {
   void recoverNativeAppInstallationEvidence(getScopedLocalAppRuntimeRegistry()).catch(() => {})
   void server
@@ -1155,9 +1206,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   setLegacyLocalAppCleaner(async () => {
     const registry = getScopedLocalAppRuntimeRegistry()
     const failedRefs: string[] = []
-    // Enumerate EVERY persisted scope on this device — not only executions in
-    // the current registry — so stale Organization-era installation/runtime
-    // state cannot survive the direct switch.
+    // The storage tuple is shared by Organization-era and ProductSpace apps.
+    // Enumeration alone cannot classify an installation as legacy. Only an
+    // exact legacy Catalog cache binding may select it for invalidation;
+    // ProductSpace and unclassified installations belong to their accounts.
     let persistedScopes: CatalogLocalAppScope[] = []
     try {
       persistedScopes = await registry.listAllCatalogScopes()
@@ -1166,9 +1218,18 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     for (const scope of persistedScopes) {
       try {
-        await registry.stop(scope)
-        // Invalidate installation/runtime state while preserving user data.
-        await registry.uninstall(scope, { preserveData: true })
+        const cached = getCachedAppCatalog(scope.accountId, scope.organizationId)
+        const legacy = cached?.accountId === scope.accountId
+          && cached.organizationId === scope.organizationId
+          && getAppCatalogApps(cached).some(app => (
+            app.id === scope.catalogAppId
+            && app.deliveryMode === 'local_bundle'
+            && !app.artifactInstanceId
+          ))
+        if (!legacy) continue
+        // A logged-out account remains fenced. This Main-only teardown does
+        // not reauthorize it or use renderer lifecycle RPCs.
+        await registry.removeLegacyInstallationState(scope)
       } catch {
         failedRefs.push(`${scope.organizationId}:${scope.catalogAppId}`)
       }
@@ -1243,7 +1304,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         : null
       const startGate = await captureTrustedStartGate()
       const fenceGeneration = getRuntimeFenceGeneration()
-      const loaded = await loadAuthoritativeProductSpaceApps([rawApp])
+      const loaded = await loadAuthoritativeProductSpaceApps([rawApp], { explainMissingAdmission: true })
       const app = loaded.apps[0]!
       const adminUrl = getAdminUrl()
       const assertDownloadCurrent = () => {
@@ -1263,6 +1324,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'This ProductSpace App is not available for installation',
         )
       }
+      const assertEntitlement = await requireCircleAppAdmission(loaded.client, loaded.accessToken, entry)
+      assertDownloadCurrent()
       const launch = await loaded.client.resolveProductSpaceLaunch(
         loaded.accessToken,
         loaded.context,
@@ -1270,6 +1333,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         entry.catalogEntryId,
         { platform: hostPlatform(), arch: hostArchitecture() },
       )
+      assertEntitlement()
       await assertProductSpaceAccountCurrent(app)
       assertProductSpaceLaunchIdentity(launch, app)
       if (launch.delivery.kind !== 'bundle') {
@@ -1285,7 +1349,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       const downloadTransport = createProductSpaceDownloadTransport({
         app, kind: loaded.context.kind, adminUrl: adminUrl!, downloadUrl: launch.delivery.downloadUrl,
         expectedManifestAppId,
-        assertCurrent: assertDownloadCurrent,
+        assertCurrent: () => { assertDownloadCurrent(); assertEntitlement() },
         readCredentials: () => getCredentialManager().getAdminTokens(),
       })
       // Installation reporting is additional evidence. An unavailable older
@@ -1806,9 +1870,64 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     })
   }
 
+  /** Legacy caches cannot grant ProductSpace execution or reveal cached URLs.
+   * Re-read current scope/catalog even when an older disk schema erased identity.
+   * A recognized artifact uses the same paid admission + server resolve as the
+   * canonical path, then asks the consumer to send its full runtime identity.
+   */
+  const requireLegacyLaunchAdmission = async (scope: CatalogLocalAppScope, app: CatalogApp) => {
+    // Trusted historical identity restricts a row even if an old schema erased
+    // its marker and the fresh Catalog no longer contains the artifact.
+    const record = getProductSpaceCatalogAuthorityRecord(scope.accountId, scope.organizationId)
+    const knownArtifact = [...(record?.entries ?? []), ...(record?.tombstones ?? [])].some(entry =>
+      entry.artifactInstanceId === app.id || entry.catalogEntryId === app.id)
+    const marked = Boolean(knownArtifact || app.artifactInstanceId || app.catalogEntryId || app.catalogVersion || app.deliveryMode === 'resolve_launch')
+    if (getAppCatalogAccessMode(scope.accountId, scope.organizationId) === 'offline') {
+      if (marked || getRuntimeActiveProductSpaceKind() === 'personal') {
+        throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Current ProductSpace admission requires online verification')
+      }
+      return
+    }
+    const tokens = await getCredentialManager().getAdminTokens()
+    const adminUrl = getAdminUrl()
+    if (!tokens || tokens.userId !== scope.accountId || !adminUrl) {
+      throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'The current authorization session is unavailable')
+    }
+    const generation = getRuntimeFenceGeneration()
+    const client = new AdminClient(adminUrl)
+    const list = await client.listProductSpaces(tokens.accessToken)
+    const context = list.productSpaces.find(space => space.id === scope.organizationId)
+    if (!context || context.accessMode !== 'active') {
+      throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'The requested ProductSpace is not active')
+    }
+    const fresh = await client.getProductSpaceCatalog(tokens.accessToken, context)
+    if ('notModified' in fresh) throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'A fresh ProductSpace Catalog is required')
+    const entry = fresh.entries.find(candidate => candidate.kind === 'app' && (
+      candidate.artifactInstanceId === (app.artifactInstanceId ?? app.id)
+      || candidate.catalogEntryId === (app.catalogEntryId ?? app.id)
+    ))
+    assertScopeInsideActiveProductSpace(scope)
+    if (generation !== getRuntimeFenceGeneration() || !isRuntimeFenceBoundToAccount(scope.accountId)) {
+      throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'ProductSpace changed during admission')
+    }
+    if (entry) {
+      const assertEntitlement = await requireCircleAppAdmission(client, tokens.accessToken, entry)
+      if (entry.availability !== 'available') throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'The artifact is unavailable')
+      await client.resolveProductSpaceLaunch(tokens.accessToken, context, fresh, entry.catalogEntryId, {
+        platform: process.platform as 'darwin' | 'win32' | 'linux', arch: process.arch as 'arm64' | 'x64',
+      })
+      assertEntitlement()
+      throw new LocalAppRuntimeError('INVALID_REQUEST', 'ProductSpace Apps require a full runtime identity request')
+    }
+    if (marked || context.kind === 'personal') {
+      throw new LocalAppRuntimeError('INVALID_REQUEST', 'ProductSpace Apps require fresh full identity admission')
+    }
+  }
+
   const startCatalogApp = (ctx: { webContentsId?: number | null }, scope: CatalogLocalAppScope) => {
     return (async () => {
-      const { accessMode } = await requireAuthorizedCatalogApp(scope)
+      const { app, accessMode } = await requireAuthorizedCatalogApp(scope)
+      await requireLegacyLaunchAdmission(scope, app)
       const registry = getScopedLocalAppRuntimeRegistry()
       if (accessMode === 'offline' && !await registry.isInstalledAndReady(scope)) {
         throw new LocalAppRuntimeError(
@@ -1831,7 +1950,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
    */
   const fetchAuthoritativeProductSpaceApp = async (
     identity: ProductSpaceAppRuntimeIdentity,
-  ): Promise<ProductSpaceAppIdentity> => {
+    requestedEntryId?: string,
+  ): Promise<{ app: ProductSpaceAppIdentity; assertEntitlement: () => void }> => {
+    const prior = capturePriorAppBinding(identity, requestedEntryId)
     assertProductSpaceAppOperationCurrent({
       ...identity,
       catalogEntryId: '' as ProductSpaceAppIdentity['catalogEntryId'],
@@ -1877,6 +1998,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       })
       | undefined
     if (!entry) {
+      await explainMissingCircleAdmission(client, tokens.accessToken, identity, prior)
       throw new LocalAppRuntimeError(
         'CATALOG_ENTRY_MISSING',
         'The ProductSpace Catalog no longer lists this App version',
@@ -1888,6 +2010,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         'This ProductSpace App is not available to launch',
       )
     }
+    const assertEntitlement = await requireCircleAppAdmission(client, tokens.accessToken, entry)
+    await assertProductSpaceAccountCurrent({ ...identity, catalogEntryId: entry.catalogEntryId, catalogRevision: catalog.catalogRevision, sources: entry.sources, availability: entry.availability })
     let launch: Awaited<ReturnType<AdminClient['resolveProductSpaceLaunch']>>
     try {
       launch = await client.resolveProductSpaceLaunch(
@@ -1925,7 +2049,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     await assertProductSpaceAccountCurrent(app)
     assertProductSpaceLaunchIdentity(launch, app)
-    return app
+    assertEntitlement()
+    return { app, assertEntitlement }
   }
 
   /**
@@ -1966,7 +2091,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     // Fresh-Catalog re-verification BEFORE the switch mutex (network I/O
     // never runs under the lock); the mutex fence re-checks afterwards.
-    const app = await fetchAuthoritativeProductSpaceApp(runtimeIdentity)
+    const { app, assertEntitlement } = await fetchAuthoritativeProductSpaceApp(runtimeIdentity, options.trustDerivedIdentityOnly ? undefined : requested.catalogEntryId)
     if (
       !options.trustDerivedIdentityOnly
       && (
@@ -1982,6 +2107,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       )
     }
     const scope = productSpaceBundleScope(app)
+    assertEntitlement()
     const registry = getScopedLocalAppRuntimeRegistry()
     const coordinator = getLocalAppRuntimeCoordinator()
     const identityKey = createProductSpaceAppRuntimeIdentityKey(runtimeIdentity)
@@ -2052,6 +2178,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       start = await startAndRegisterLocalApp(
       scope,
       async () => {
+        assertEntitlement()
         // INSIDE the switch mutex — cross-Workspace single-instance
         // replacement CAS: the prior generation of the same runtime identity
         // is looked up, fully torn down (capability/Run/execution/projection)
@@ -2084,11 +2211,14 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           }
         }
         // Gateway-first: a listen failure fails closed before any spawn.
+        assertEntitlement()
         await coordinator.ensureGateway()
+        assertEntitlement()
         const result = await registry.startExact(scope, app.version, {
           runtimeKey: identityKey,
           versionId: app.versionId,
           processEnvironment: ({ runtimeKind, runtimeGeneration, scopeGeneration }) => {
+            assertEntitlement()
             const signing = coordinator.signCapability({
               identity: runtimeIdentity,
               workspaceId,
@@ -2115,6 +2245,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             return { env: signing.environment, sensitiveValues: signing.sensitiveValues }
           },
         })
+        startedRuntimeGeneration = result.runtimeGeneration
+        assertEntitlement()
         if (result.runtimeKind === 'static') {
           // Static browser capability remains Main-only; no token/env enters the page.
           startedRuntimeGeneration = result.runtimeGeneration
@@ -2137,6 +2269,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             throw error
           }
         }
+        assertEntitlement()
         getAppRuntimeCenter().publish({
           identityKey,
           identity: runtimeIdentity,
@@ -2394,7 +2527,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     return withCatalogScope(
       reference,
       async scope => {
-        const { accessMode } = await requireAuthorizedCatalogApp(scope)
+        const { app, accessMode } = await requireAuthorizedCatalogApp(scope)
+        await requireLegacyLaunchAdmission(scope, app)
+        if (accessMode === 'online') await requireFreshAuthorizedCatalogApp(scope)
         const registry = getScopedLocalAppRuntimeRegistry()
         if (accessMode === 'offline' && !await registry.isInstalledAndReady(scope)) {
           throw new LocalAppRuntimeError(
@@ -2571,6 +2706,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // scopes are all rejected before any authorization entry is read.
       const scope = requireRendererCatalogScope(rawScope)
       const { app } = await requireAuthorizedCatalogEntry(scope)
+      await requireLegacyLaunchAdmission(scope, app)
       if (app.deliveryMode !== 'remote_url' || !app.remoteUrl) {
         throw new LocalAppRuntimeError(
           'INVALID_REQUEST',

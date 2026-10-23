@@ -228,12 +228,12 @@ export const MENU_SECTIONS: MenuSection[] = [EDIT_MENU, VIEW_MENU, WINDOW_MENU]
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Root-level leaf actions exposed in the Polo AI logo menu.
+ * Root-level leaf actions.
  *
- * Both DesktopAppMenu (dropdown) and MobileAppMenu (full-screen sheet) read from
- * this collection. Desktop renders all four directly inline. Mobile filters out
- * `quit` (no-op in a browser tab) and inserts navigation rows for Settings/Help/Debug
- * between `newWindow` and `keyboardShortcuts`.
+ * The avatar menu (WorkbenchAccountMenu) and the macOS native menu both read
+ * from this collection. The avatar menu renders `newChat`/`newWindow` and the
+ * shortcut-bearing `keyboardShortcuts`; `quit` is consumed by the native menu
+ * only — the in-app quit entry was dropped in POO-117.
  *
  * Icons here are Lucide names. The `newChat` item maps to the local `SquarePenRounded`
  * component in the renderer; that's the one approved exception.
@@ -362,15 +362,15 @@ export const DEBUG_MENU: MenuSection = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Settings item definition
- * Used by both AppMenu (logo dropdown) and SettingsNavigator (sidebar panel)
+ * Settings item definition — consumed by SettingsNavigator (sidebar panel)
+ * and the scope-filtered settings tests.
  */
-import { SETTINGS_PAGES, type SettingsScope, type SettingsSubpage } from './settings-registry'
+import { SETTINGS_PAGES, DEFAULT_SETTINGS_SUBPAGE, type SettingsScope, type SettingsSubpage } from './settings-registry'
 
 export interface SettingsMenuItem {
   id: SettingsSubpage
   labelKey: string    // i18n key - resolve with t() at render time
-  icon: string        // Lucide icon name for AppMenu
+  icon: string        // Lucide icon name
   descriptionKey: string // i18n key - resolve with t() at render time
   requiresAdminLogin: boolean
   /** Which settings surface this item is listed under (from settings-registry) */
@@ -397,11 +397,16 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
 }
 
 /**
- * All settings pages - derived from settings-registry (single source of truth)
- * Order is determined by SETTINGS_PAGES in settings-registry.ts
+ * Visible settings pages - derived from settings-registry (single source of
+ * truth). Order is determined by SETTINGS_PAGES in settings-registry.ts.
+ * Feature-gated pages (server) and pages hidden from users (messaging, POO-121)
+ * are filtered out here; everything downstream derives from this list.
  */
 export const SETTINGS_ITEMS: SettingsMenuItem[] = SETTINGS_PAGES
   .filter(page => page.id !== 'server' || FEATURE_FLAGS.embeddedServer)
+  // POO-121: messaging is still being iterated on — keep the page registered
+  // but out of every settings navigator. To re-list it, delete this line.
+  .filter(page => page.id !== 'messaging')
   .map(page => ({
     id: page.id,
     labelKey: page.labelKey,
@@ -423,6 +428,16 @@ export function getVisibleSettingsItems(isAdminLoggedIn: boolean): SettingsMenuI
  */
 export function getSettingsItemsForScope(scope: SettingsScope, isAdminLoggedIn: boolean): SettingsMenuItem[] {
   return getVisibleSettingsItems(isAdminLoggedIn).filter(item => item.scope === scope)
+}
+
+/**
+ * POO-121 fail-closed: the subpage a settings route may RENDER. Pages hidden
+ * from every navigator (messaging is still iterating; server is flag-gated)
+ * must not come back through a direct deep link either — an unlisted subpage
+ * resolves to the bare-settings default.
+ */
+export function resolveRenderableSettingsSubpage(subpage: SettingsSubpage): SettingsSubpage {
+  return SETTINGS_ITEMS.some(item => item.id === subpage) ? subpage : DEFAULT_SETTINGS_SUBPAGE
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

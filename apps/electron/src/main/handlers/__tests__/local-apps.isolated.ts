@@ -10,6 +10,10 @@ import type {
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import * as nativeInstallationContract from '../../../../../../packages/shared/src/admin/native-installations-contract'
 
+import { parseMemberMembershipsResponse } from '@polo-ai/shared/admin/member-circles'
+import { memberMembershipWireFixture, currentEntitlementFixture, CURRENT_CIRCLE_ID } from '../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement'
+const listMemberCircleMemberships = mock(async (_token: string) => ({ memberships: [] as any[] }))
+
 type Handler = (
   context: { clientId: string; signal: AbortSignal },
   ...args: unknown[]
@@ -106,6 +110,7 @@ const listProductSpaces = mock(async () => ({
     accessMode: 'active' as const,
   }],
 }))
+const defaultListProductSpaces = listProductSpaces.getMockImplementation()!
 const defaultProductSpaceCatalog = async () => ({
   contractVersion: 1,
   productSpaceId: 'organization-a',
@@ -159,7 +164,9 @@ const resolveProductSpaceLaunch = mock(async (
     payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-a' },
     delivery: {
       kind: 'bundle' as const,
-      downloadUrl: `https://admin.example.com/api/product-spaces/${productSpaceId}/artifacts/${entry.artifactInstanceId}/versions/${entry.version.versionId}/download?launch=issued-nonce-123456`,
+      downloadUrl: (_context as { kind?: string })?.kind === 'personal'
+        ? `https://admin.example.com/api/personal-entitlements/artifacts/${entry.artifactInstanceId}/versions/${entry.version.versionId}/download?launch=issued-nonce-123456&space=${productSpaceId}`
+        : `https://admin.example.com/api/product-spaces/${productSpaceId}/artifacts/${entry.artifactInstanceId}/versions/${entry.version.versionId}/download?launch=issued-nonce-123456`,
       expiresAt: '2099-01-01T00:10:00.000Z',
       checksum: 'b'.repeat(64),
       sizeBytes: 456,
@@ -424,6 +431,8 @@ let scopedRegistryOverride: unknown = null
 
 const scopedRegistry = {
   assertAppAuthorized,
+  listAllCatalogScopes: mock(async (): Promise<CatalogLocalAppScope[]> => []),
+  removeLegacyInstallationState: mock(async (_scope: CatalogLocalAppScope) => {}),
   install: scopedInstall,
   cancelInstall: mock(async () => false),
   start: scopedStart,
@@ -460,6 +469,7 @@ mock.module('@polo-ai/shared/admin', () => ({
     listProductSpaces = listProductSpaces
     getProductSpaceCatalog = getProductSpaceCatalog
     resolveProductSpaceLaunch = resolveProductSpaceLaunch
+    listMemberCircleMemberships = listMemberCircleMemberships
   },
   analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
   createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
@@ -704,7 +714,11 @@ describe('local app main-process authorization boundary', () => {
     context.webContentsId = 1
     getAppReleaseDownload.mockClear()
     listProductSpaces.mockClear()
+    listProductSpaces.mockImplementation(defaultListProductSpaces)
     getProductSpaceCatalog.mockClear()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    listMemberCircleMemberships.mockClear()
+    listMemberCircleMemberships.mockResolvedValue({ memberships: [] })
     resolveProductSpaceLaunch.mockClear()
     getAppCatalog.mockClear()
     getAppCatalog.mockImplementation(async () => ({
@@ -790,6 +804,37 @@ describe('local app main-process authorization boundary', () => {
     setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
     setRuntimeOfflineReadOnly(false)
     resetExecutionRegistry()
+  })
+
+  it('P-R2-04: B bootstrap preserves A ProductSpace installs and cleans only identified legacy scopes', async () => {
+    const productScope = { ...scope('artifact-instance-a'), accountId: 'account-a' }
+    const legacyScope = scope('应用.App-ID')
+    const unknownScope = { ...scope('unknown-app'), accountId: 'account-c' }
+    scopedRegistry.listAllCatalogScopes.mockResolvedValueOnce([productScope, legacyScope, unknownScope])
+    scopedRegistry.removeLegacyInstallationState.mockClear()
+    // In production A is fenced after logout; calling normal stop/uninstall
+    // here would reject. The bootstrap cleaner must not call either path.
+    scopedRegistry.stop.mockImplementationOnce(async () => {
+      throw new Error('The Admin session for this local app account is ending')
+    })
+    const { runLegacyLocalAppCleaner } = await import('@polo-ai/server-core/runtime/legacy-state-cleaners')
+    signedInAccountId = 'account-b'
+    const result = await runLegacyLocalAppCleaner()
+    expect(result.ok).toBe(true)
+    expect(scopedRegistry.removeLegacyInstallationState.mock.calls).toEqual([[legacyScope]])
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+    scopedRegistry.stop.mockReset()
+    scopedRegistry.stop.mockImplementation(async item => ({ appId: item.catalogAppId, scope: item, status: 'stopped' as const }))
+  })
+
+  it('P-R2-04: a real legacy cleanup failure remains retryable rather than granting bootstrap success', async () => {
+    scopedRegistry.listAllCatalogScopes.mockResolvedValueOnce([scope()])
+    scopedRegistry.removeLegacyInstallationState.mockRejectedValueOnce(new Error('disk is read-only'))
+    const { runLegacyLocalAppCleaner } = await import('@polo-ai/server-core/runtime/legacy-state-cleaners')
+    const result = await runLegacyLocalAppCleaner()
+    expect(result.ok).toBe(false)
+    expect(result.failedRefs).toEqual([`organization-a:${scope().catalogAppId}`])
   })
 
   it('installs a bundle only after revalidating the exact ProductSpace Catalog tuple', async () => {
@@ -3354,6 +3399,182 @@ describe('local app main-process authorization boundary', () => {
     }))
     expect(result[prototypeNamedIds.length]).not.toHaveProperty('versionError')
   })
+
+  describe('R5A paid-circle native admission', () => {
+    beforeEach(() => {
+      listProductSpaces.mockImplementation(async () => ({ contractVersion: 1, defaultProductSpaceId: 'organization-a', productSpaces: [{ id: 'organization-a', kind: 'personal', name: 'Personal', accessMode: 'active' }] }) as any)
+    })
+    for (const state of ['unknown', 'not_entitled', 'missing', 'expired'] as const) {
+      for (const channel of ['install', 'start'] as const) {
+        it(`rejects ${state} at ${channel} before installation, capability or spawn`, async () => {
+          const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+          const catalogReply = await defaultProductSpaceCatalog()
+          getProductSpaceCatalog.mockImplementation(async () => ({ ...catalogReply, entries: catalogReply.entries.map(entry => ({ ...entry, sources: [source] })) }) as any)
+          const wire = memberMembershipWireFixture({ ...(state === 'missing' ? { currentEntitlement: undefined }
+            : { currentEntitlement: currentEntitlementFixture(state === 'expired'
+              ? { validUntil: '2000-01-01T00:00:00.000Z' }
+              : { state }) }) })
+          listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [wire] }))
+          const identity = { ...productSpaceAppIdentity(), sources: [source] }
+          const handler = handlers.get(channel === 'install' ? RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE : RPC_CHANNELS.localApps.START)!
+          await expect(handler(context, channel === 'install' ? { app: identity } : { kind: 'product_space_runtime_start', app: identity }))
+            .rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { recovery: 'refresh_membership' } })
+          expect(scopedInstall).not.toHaveBeenCalled()
+          expect(scopedStartExact).not.toHaveBeenCalled()
+          expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+        })
+      }
+    }
+
+    it('does not spawn when the captured entitlement expires while gateway initialization is pending', async () => {
+      const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+      const reply = await defaultProductSpaceCatalog()
+      getProductSpaceCatalog.mockImplementation(async () => ({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) }) as any)
+      const validUntil = new Date(Date.now() + 500).toISOString()
+      listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ validUntil }) })] }))
+      const entered = createDeferred<void>(), release = createDeferred<void>()
+      runtimeCoordinator.ensureGateway.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return 'http://127.0.0.1:9876' })
+      const start = handlers.get(RPC_CHANNELS.localApps.START)!(context, { kind: 'product_space_runtime_start', app: { ...productSpaceAppIdentity(), sources: [source] } }) as Promise<unknown>
+      await entered.promise
+      await new Promise(resolve => setTimeout(resolve, 600))
+      release.resolve()
+      await expect(start).rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: 'expired' } })
+      expect(scopedStartExact).not.toHaveBeenCalled()
+      expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+    })
+    it('rejects a scope-only legacy request for a ProductSpace artifact', async () => {
+      catalog.apps[0] = { ...catalog.apps[0]!, artifactInstanceId: 'artifact-instance-a' } as any
+      const start = handlers.get(RPC_CHANNELS.localApps.START)!
+      await expect(start(context, scope())).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+      expect(scopedStart).not.toHaveBeenCalled()
+    })
+    it('does not expose a cached ProductSpace remote URL through the legacy resolver', async () => {
+      catalog.apps[0] = { ...catalog.apps[0]!, artifactInstanceId: 'artifact-instance-a', deliveryMode: 'remote_url', remoteUrl: 'https://controlled.example/private' } as any
+      await expect(handlers.get(RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL)!(context, scope()))
+        .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    })
+    for (const field of ['orderId', 'authorityEvidenceId'] as const) {
+      for (const channel of ['install', 'start'] as const) {
+        it(`R7 denies missing paid ${field} at ${channel} with zero side effects`, async () => {
+          const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+          const reply = await defaultProductSpaceCatalog()
+          getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) } as any)
+          listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ source: { ...currentEntitlementFixture().source, [field]: null } }) })] }))
+          const app = { ...productSpaceAppIdentity(), sources: [source] }
+          await expect(handlers.get(channel === 'install' ? RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE : RPC_CHANNELS.localApps.START)!(context, channel === 'install' ? { app } : { kind: 'product_space_runtime_start', app }))
+            .rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: 'unknown', recovery: 'refresh_membership' } })
+          expect(scopedInstall).not.toHaveBeenCalled()
+          expect(scopedStartExact).not.toHaveBeenCalled()
+          expect(resolveProductSpaceLaunch).not.toHaveBeenCalled()
+          expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+        })
+      }
+    }
+    for (const channel of [RPC_CHANNELS.localApps.START, RPC_CHANNELS.localApps.RESTART, RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL]) {
+      for (const state of ['expired', 'not_entitled', 'conflict'] as const) {
+        it(`R7 supersedes old-cache diagnostic: ${channel} rejects ${state} before effects`, async () => {
+          // Real disk parsing used to erase this marker; the cache roundtrip test covers that boundary.
+          catalog.apps[0] = { ...catalog.apps[0]!, artifactInstanceId: 'artifact-instance-a', catalogEntryId: 'catalog-entry-a', catalogVersion: { versionId: 'version-a', version: '2.3.4' }, ...(channel === RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL ? { deliveryMode: 'remote_url', remoteUrl: 'https://controlled.example/old' } : {}) }
+          const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+          const reply = await defaultProductSpaceCatalog()
+          getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) } as any)
+          listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture(state === 'expired' ? { validUntil: '2000-01-01T00:00:00.000Z' } : state === 'not_entitled' ? { state } : {}) })] }))
+          const resolveBefore = resolveProductSpaceLaunch.getMockImplementation()!
+          if (state === 'conflict') resolveProductSpaceLaunch.mockImplementation(async () => { throw Object.assign(new Error('current launch conflict'), { code: 'CONFLICT', status: 409 }) })
+          try {
+            await expect(handlers.get(channel)!(context, scope())).rejects.toMatchObject(state === 'conflict' ? { status: 409 } : { code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: state } })
+          } finally { resolveProductSpaceLaunch.mockImplementation(resolveBefore) }
+          expect(scopedStart).not.toHaveBeenCalled()
+          expect(scopedStartExact).not.toHaveBeenCalled()
+          expect(scopedInstall).not.toHaveBeenCalled()
+          expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+          expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+        })
+      }
+    }
+    for (const channel of [RPC_CHANNELS.localApps.START, RPC_CHANNELS.localApps.RESTART, RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL]) {
+      it(`R7 rejects an already stripped personal cache at ${channel}`, async () => {
+        catalog.apps[0] = { ...catalog.apps[0]!, id: 'artifact-instance-a', ...(channel === RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL ? { deliveryMode: 'remote_url', remoteUrl: 'https://controlled.example/old' } : {}) }
+        const reply = await defaultProductSpaceCatalog()
+        const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+        getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) } as any)
+        listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ state: 'not_entitled' }) })] }))
+        await expect(handlers.get(channel)!(context, scope('artifact-instance-a'))).rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED' })
+        expect(scopedStart).not.toHaveBeenCalled()
+        expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+      })
+    }
+    for (const channel of [RPC_CHANNELS.localApps.START, RPC_CHANNELS.localApps.RESTART, RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL]) {
+      it(`R7 rejects a vanished enterprise artifact whose old cache lost identity at ${channel}`, async () => {
+        listProductSpaces.mockImplementation(defaultListProductSpaces)
+        catalog.apps[0] = { ...catalog.apps[0]!, id: 'artifact-instance-a', ...(channel === RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL ? { deliveryMode: 'remote_url', remoteUrl: 'https://controlled.example/old' } : {}) }
+        seedTrustedBinding('account-a', 'organization-a', [{ catalogEntryId: 'catalog-entry-a', artifactInstanceId: 'artifact-instance-a', versionId: 'version-a', version: '2.3.4', sources: [] }])
+        const reply = await defaultProductSpaceCatalog()
+        getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: [] } as any)
+        await expect(handlers.get(channel)!(context, scope('artifact-instance-a'))).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+        expect(scopedStart).not.toHaveBeenCalled()
+        expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+      })
+    }
+    for (const channel of ['install', 'start'] as const) {
+      for (const origin of ['live', 'tombstone'] as const) {
+        for (const state of ['unknown', 'not_entitled'] as const) {
+          it(`R8 missing ${origin} paid artifact reports ${state} recovery at ${channel}`, async () => {
+            const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+            const identity = { ...productSpaceAppIdentity(), sources: [source] }
+            const binding = { catalogEntryId: identity.catalogEntryId, artifactInstanceId: identity.artifactInstanceId, versionId: identity.versionId, version: identity.version, sources: [source] }
+            seedTrustedBinding('account-a', 'organization-a', origin === 'live' ? [binding] : [], { tombstones: origin === 'tombstone' ? [binding] : [] })
+            const reply = await defaultProductSpaceCatalog()
+            getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: [] } as any)
+            listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ state }) })] }))
+            await expect(handlers.get(channel === 'install' ? RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE : RPC_CHANNELS.localApps.START)!(context, channel === 'install' ? { app: identity } : { kind: 'product_space_runtime_start', app: identity }))
+              .rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: state, recovery: 'refresh_membership' } })
+            expect(scopedInstall).not.toHaveBeenCalled()
+            expect(scopedStartExact).not.toHaveBeenCalled()
+            expect(resolveProductSpaceLaunch).not.toHaveBeenCalled()
+            expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+          })
+        }
+      }
+      for (const trust of ['none', 'other-account', 'other-space', 'wrong-version', 'renderer-only', 'entitled'] as const) {
+        it(`R8 ${trust} cannot relabel an arbitrary missing artifact at ${channel}`, async () => {
+          const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Forged renderer source' }
+          const identity = { ...productSpaceAppIdentity(), sources: [source] }
+          const binding = { catalogEntryId: identity.catalogEntryId, artifactInstanceId: identity.artifactInstanceId, versionId: trust === 'wrong-version' ? 'other-version' : identity.versionId, version: identity.version, sources: [source] }
+          if (trust !== 'none' && trust !== 'renderer-only') seedTrustedBinding(trust === 'other-account' ? 'account-b' : 'account-a', trust === 'other-space' ? 'space-b' : 'organization-a', [binding])
+          const reply = await defaultProductSpaceCatalog()
+          getProductSpaceCatalog.mockResolvedValue({ ...reply, entries: [] } as any)
+          listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture({ currentEntitlement: currentEntitlementFixture({ state: trust === 'entitled' ? 'entitled' : 'unknown' }) })] }))
+          await expect(handlers.get(channel === 'install' ? RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE : RPC_CHANNELS.localApps.START)!(context, channel === 'install' ? { app: identity } : { kind: 'product_space_runtime_start', app: identity }))
+            .rejects.toMatchObject({ code: 'CATALOG_ENTRY_MISSING' })
+          if (trust !== 'entitled') expect(listMemberCircleMemberships).not.toHaveBeenCalled()
+          expect(scopedInstall).not.toHaveBeenCalled()
+          expect(scopedStartExact).not.toHaveBeenCalled()
+        })
+      }
+    }
+    it('starts a single entitled circle App normally', async () => {
+      const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+      const reply = await defaultProductSpaceCatalog()
+      getProductSpaceCatalog.mockImplementation(async () => ({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [source] })) }) as any)
+      listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [memberMembershipWireFixture()] }))
+      await handlers.get(RPC_CHANNELS.localApps.START)!(context, { kind: 'product_space_runtime_start', app: { ...productSpaceAppIdentity(), sources: [source] } })
+      expect(scopedStartExact).toHaveBeenCalledTimes(1)
+    })
+    it('allows an entitled source despite an unknown sibling on the same artifact', async () => {
+      const source = { kind: 'creator_circle', circleId: CURRENT_CIRCLE_ID, name: 'Paid circle' }
+      const sibling = { ...source, circleId: '22222222-2222-4222-8222-222222222223' }
+      const reply = await defaultProductSpaceCatalog()
+      getProductSpaceCatalog.mockImplementation(async () => ({ ...reply, entries: reply.entries.map(entry => ({ ...entry, sources: [sibling, source] })) }) as any)
+      listMemberCircleMemberships.mockResolvedValue(parseMemberMembershipsResponse({ memberships: [
+        memberMembershipWireFixture(),
+        memberMembershipWireFixture({ id: '11111111-1111-4111-8111-111111111112', circle: { ...memberMembershipWireFixture().circle, id: sibling.circleId }, currentEntitlement: currentEntitlementFixture({ membershipId: '11111111-1111-4111-8111-111111111112', state: 'unknown' }) }),
+      ] }))
+      await handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!(context, { app: { ...productSpaceAppIdentity(), sources: [sibling, source] } })
+      expect(scopedInstall).toHaveBeenCalledTimes(1)
+    })
+  })
+
 })
 
 describe('local app production status projection (R34-3)', () => {
@@ -3381,6 +3602,7 @@ describe('local app production status projection (R34-3)', () => {
     getProductSpaceCatalog.mockClear()
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
     listProductSpaces.mockClear()
+    listProductSpaces.mockImplementation(defaultListProductSpaces)
     scopedStartExact.mockClear()
     scopedStartExact.mockImplementation(defaultStartExact)
     scopedStopExact.mockClear()
@@ -4543,4 +4765,5 @@ describe('local app production status projection (R34-3)', () => {
     expect(activeRuntimesByKey.size).toBe(0)
     expect(activeRuntimesByExecution.size).toBe(0)
   })
+
 })

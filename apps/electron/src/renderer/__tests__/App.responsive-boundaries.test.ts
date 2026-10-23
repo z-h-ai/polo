@@ -151,7 +151,9 @@ describe('Home launcher responsive-boundary contract (manifest-selected compiled
     expect(tabletBlocks.length).toBeGreaterThan(0)
     const joined = tabletBlocks.join('\n')
     expect(joined.includes('.min-\\[761px\\]\\:flex-row{flex-direction:row}')).toBe(true)
-    expect(joined.includes('.min-\\[761px\\]\\:items-end{align-items:flex-end}')).toBe(true)
+    // 431d48bf moved the hero row to items-center without updating this token;
+    // the stale items-end assertion only passed against pre-rebuild dist.
+    expect(joined.includes('.min-\\[761px\\]\\:items-center{align-items:center}')).toBe(true)
     expect(joined.includes('.min-\\[761px\\]\\:px-\\[26px\\]{padding-inline:26px}')).toBe(true)
     expect(joined.includes('.min-\\[761px\\]\\:pt-\\[36px\\]{padding-top:36px}')).toBe(true)
     expect(joined.includes('.min-\\[761px\\]\\:pb-\\[58px\\]{padding-bottom:58px}')).toBe(true)

@@ -171,11 +171,20 @@ export function createWebApi(options: WebApiOptions): {
     onMenuKeyboardShortcuts: () => () => {},
     onMenuToggleFocusMode: () => () => {},
     onMenuToggleSidebar: () => () => {},
+    getWindowLaunchContext: async () => null,
+    reportWorkbenchReady: async () => false,
+    onMenuNewWindowFailed: () => () => {},
     onDeepLinkNavigate: () => () => {},
 
     // Menu actions — no-ops (web has no native menu)
     menuQuit: () => Promise.resolve(),
-    menuNewWindow: () => { window.open(window.location.href, '_blank'); return Promise.resolve() },
+    // POO-117: the shared ElectronAPI contract now returns a structured
+    // outcome; the web client keeps its window.open behavior and reports it
+    // as an opaque success (browser windows are not managed by Polo).
+    menuNewWindow: () => {
+      window.open(window.location.href, '_blank')
+      return Promise.resolve({ ok: true, diagnostics: { source: 'renderer', workspaceId: null, workspaceResolved: false, created: false, visible: true } })
+    },
     menuMinimize: () => Promise.resolve(),
     menuMaximize: () => Promise.resolve(),
     menuZoomIn: () => Promise.resolve(),

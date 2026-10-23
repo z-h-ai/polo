@@ -105,7 +105,7 @@ export const AdminValidateResponseSchema = z.discriminatedUnion('valid', [
   z.object({
     valid: z.literal(true),
     user: AdminUserSchema,
-    configVersion: nonBlankString(512),
+    configVersion: nonBlankString(512).nullable(),
   }),
   z.object({
     valid: z.literal(false),
@@ -189,6 +189,23 @@ export const AppReleaseDownloadSchema = z.object({
 
 export const CatalogAppSchema = z.object({
   id: entityId,
+  // Preserve unified identity through the legacy-compatible disk cache. Dropping
+  // these fields would turn a ProductSpace artifact into a legacy execution row.
+  catalogEntryId: entityId.optional(),
+  artifactInstanceId: entityId.optional(),
+  catalogVersion: z.object({
+    versionId: entityId,
+    version: nonBlankString(128),
+    checksum: catalogChecksum.optional(),
+  }).optional(),
+  catalogSources: z.array(z.object({
+    kind: nonBlankString(128),
+    name: z.string().max(512).optional(),
+    circleId: entityId.optional(),
+  })).max(1_000).optional(),
+  rawAvailability: z.enum(['available', 'unavailable', 'blocked', 'withdrawn']).optional(),
+  sourceNames: z.array(nonBlankString(256)).max(1_000).optional(),
+  unavailableReason: z.string().max(4_096).optional(),
   organizationId: entityId,
   name: nonBlankString(256),
   description: z.string().max(4_096),

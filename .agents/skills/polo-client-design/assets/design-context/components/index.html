@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polo 组件画廊 · Canvas</title>
+<style>
+/* Translated from apps/electron/src/renderer/index.css :root/.dark plus the
+   shadow utility classes (index.css ~604-652). Values are the source ones;
+   --fg-* aliases kept for the existing prototype stylesheets. */
+
+:root {
+  --background: oklch(0.98 0.003 265);
+  --foreground: oklch(0.185 0.01 270);
+  --foreground-rgb: 38, 36, 42;
+  --accent: oklch(0.62 0.13 293);
+  --accent-rgb: 104, 78, 133;
+  --info: oklch(0.75 0.16 70);
+  --info-rgb: 180, 120, 40;
+  --success: oklch(0.55 0.17 145);
+  --success-rgb: 34, 120, 60;
+  --destructive: oklch(0.58 0.24 28);
+  --destructive-rgb: 180, 60, 50;
+  --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --user-bubble: oklch(from var(--foreground) l c h / 0.05);
+  --border: oklch(from var(--foreground) l c h / 0.05);
+  --input: oklch(from var(--foreground) l c h / 0.1);
+  --ring: oklch(from var(--foreground) l c h / 0.25);
+  --fg-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --fg-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --fg-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --fg-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+  --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+  --fg-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+  --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+  --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+  --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+  --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+  --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  /* Source-named shadcn compatibility tokens (index.css:164-178). */
+  --muted: oklch(from var(--foreground) l c h / 0.05);
+  --muted-foreground: var(--fg-50);
+  --foreground-2: var(--fg-2);
+  --amber-strong: #d97706;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--background));
+  --info-soft: color-mix(in srgb, var(--info) 12%, var(--background));
+  --success-soft: color-mix(in srgb, var(--success) 12%, var(--background));
+  --danger-soft: color-mix(in srgb, var(--destructive) 10%, var(--background));
+  --on-accent: #fff;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --panel-gap: 6px;
+  --panel-inset: 6px;
+  --tabbar-height: 36px;
+  --content-top-offset: 84px;
+  --radius-xs: 2px;
+  --radius-sm: 3.75px;
+  --radius-md: 5.625px;
+  --radius-lg: 11.25px;
+  --radius-edge: 14px;
+  --radius-pill: 999px;
+  --topbar-height: 48px;
+  /* Shadow opacity registry (index.css:113-115) and layered shadows
+     (index.css:118-139, 604-652). The 1px ring is always foreground 6%. */
+  --shadow-border-opacity: 0.08;
+  --shadow-blur-opacity: 0.06;
+  --shadow-minimal:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px;
+  --shadow-middle:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px;
+  --shadow-strong:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 12px 12px -6px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 24px 24px -12px;
+  /* Tinted shadow: set --shadow-color to an "r, g, b" triple before use
+     (index.css:619-628). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-border-opacity) * 1.5)) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-border-opacity)) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-blur-opacity) * 0.67)) 0 6px 6px -3px;
+  --shadow-panel: 0 18px 52px rgba(0,0,0,.18);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .06) 0 0 0 1px,
+    rgba(0,0,0,.04) 0 1px 1px -.5px,
+    rgba(0,0,0,.04) 0 3px 3px 0,
+    rgba(0,0,0,.02) 0 6px 6px 0,
+    rgba(0,0,0,.02) 0 12px 12px 0,
+    rgba(0,0,0,.02) 0 24px 24px 0;
+}
+
+html[data-theme="dark"] {
+  --background: oklch(0.145 0.015 270);
+  --foreground: oklch(0.95 0.01 270);
+  --foreground-rgb: 237, 236, 240;
+  --accent: oklch(0.65 0.22 293);
+  --accent-rgb: 130, 75, 185;
+  --info: oklch(0.78 0.14 70);
+  --info-rgb: 210, 155, 55;
+  --success: oklch(0.60 0.17 145);
+  --success-rgb: 50, 140, 80;
+  --destructive: oklch(0.65 0.22 28);
+  --destructive-rgb: 200, 70, 60;
+  --background-elevated: color-mix(in srgb, var(--foreground) 2.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --border: oklch(from var(--foreground) l c h / 0.09);
+  /* Dark mode uses stronger blur opacity; the ring stays foreground 6%
+     exactly as in the source (index.css:267-269 and utility classes). */
+  --shadow-border-opacity: 0.15;
+  --shadow-blur-opacity: 0.12;
+  /* Dark tinted shadows are outline-only at uniform lightness 0.425
+     (index.css:632-640). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    oklch(from rgb(var(--shadow-color, 0, 0, 0)) 0.425 c h / 0.6) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 6px 6px -3px;
+  --amber-strong: #fbbf24;
+  --shadow-panel: 0 20px 70px rgba(0,0,0,.48);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .12) 0 0 0 1px,
+    rgba(0,0,0,.08) 0 1px 1px -.5px,
+    rgba(0,0,0,.08) 0 3px 3px 0,
+    rgba(0,0,0,.04) 0 6px 6px 0,
+    rgba(0,0,0,.04) 0 12px 12px 0,
+    rgba(0,0,0,.04) 0 24px 24px 0;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html { font-size: 15px; font-optical-sizing: auto; background: var(--background); }
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: color .2s ease, background .2s ease;
+}
+button, input, textarea, select { color: inherit; font: inherit; }
+button { border: 0; cursor: pointer; }
+/* Source buttons use disabled:pointer-events-none disabled:opacity-50. */
+button:disabled { pointer-events: none; opacity: .5; }
+/* Source inputs/buttons focus with a 1px foreground/30 ring, not an accent
+   outline (input.tsx, button.tsx). */
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 30%, transparent);
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+*:hover::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: var(--fg-20); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* SpinKit grid spinner keyframes from packages/ui/src/styles/index.css,
+   used by the source Spinner component (LoadingIndicator.tsx). */
+@keyframes spinner-grid {
+  0%, 70%, 100% { transform: scale3d(0.5, 0.5, 1); }
+  35% { transform: scale3d(0, 0, 1); }
+}
+.icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; flex: 0 0 auto; }
+.icon svg { width: 100%; height: 100%; }
+.muted { color: var(--fg-50); }
+.eyebrow { margin: 0 0 7px; color: var(--fg-50); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.button { min-height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; font-size: 12px; }
+.button:hover { background: var(--fg-5); }
+.button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.button.danger { border-color: var(--destructive); background: var(--destructive); color: var(--on-accent); }
+
+html, body { height: 100%; overflow: hidden; }
+body { font-size: 14px; }
+#canvas-viewport { position: fixed; inset: 0; overflow: hidden; cursor: grab; background: var(--fg-2); }
+#canvas-viewport.panning { cursor: grabbing; }
+/* Figma-style dot grid; scales with zoom via a CSS var. */
+#canvas-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+#canvas-grid { position: fixed; inset: 0; pointer-events: none; background-image: radial-gradient(color-mix(in srgb, var(--foreground) 14%, transparent) 1px, transparent 1px); background-size: var(--grid, 24px) var(--grid, 24px); opacity: .5; }
+.canvas-section { position: absolute; pointer-events: none; }
+.canvas-section .canvas-section-label { font-size: 20px; font-weight: 600; color: var(--foreground); letter-spacing: -.01em; }
+.canvas-section .canvas-section-note { margin-top: 2px; font-size: 12px; color: var(--fg-50); }
+.canvas-frame-link { position: absolute; display: block; text-decoration: none; color: inherit; }
+.canvas-frame-card { position: relative; border-radius: 10px; overflow: hidden; background: var(--background); box-shadow: var(--shadow-minimal), 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent); }
+.canvas-frame-card iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; pointer-events: none; }
+.canvas-frame-title { margin-top: 7px; font-size: 12px; color: var(--fg-50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.canvas-frame-link:hover .canvas-frame-card { box-shadow: var(--shadow-minimal), 0 0 0 2px var(--accent); }
+.canvas-frame-link:hover .canvas-frame-title { color: var(--accent); }
+#canvas-hud { position: fixed; top: 14px; left: 16px; z-index: 50; display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 9px; background: var(--background); box-shadow: var(--shadow-minimal), 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent); font-size: 12.5px; }
+#canvas-hud .canvas-hud-title { font-weight: 600; }
+#canvas-hud .canvas-hud-hint { color: var(--fg-50); }
+#canvas-zoom { min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; color: var(--foreground); }
+#canvas-hud button { border: 0; background: transparent; color: var(--foreground); font-size: 14px; padding: 2px 7px; border-radius: 6px; }
+#canvas-hud button:hover { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+#canvas-theme { position: fixed; top: 14px; right: 16px; z-index: 50; padding: 7px 12px; border-radius: 9px; border: 0; background: var(--background); color: var(--foreground); font-size: 12.5px; box-shadow: var(--shadow-minimal), 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent); }
+</style>
+</head>
+<body>
+<div id="canvas-grid"></div>
+<div id="canvas-viewport"><div id="canvas-world"></div></div>
+<div id="canvas-hud">
+  <span class="canvas-hud-title">Polo 组件画廊</span>
+  <span class="canvas-hud-hint">拖拽平移 · ⌘/Ctrl+滚轮缩放 · 点击 frame 打开</span>
+  <button id="canvas-zoom-out" aria-label="缩小">−</button>
+  <span id="canvas-zoom">100%</span>
+  <button id="canvas-zoom-in" aria-label="放大">+</button>
+  <button id="canvas-fit" title="适配全部 (0)">适配</button>
+</div>
+<button id="canvas-theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
+<script>
+const FRAMES = [
+  {
+    "type": "section",
+    "label": "生命周期",
+    "note": "Splash、onboarding wizard 各步、reauth、Workspace 选择、组织加入"
+  },
+  {
+    "type": "frame",
+    "title": "Splash 启动屏",
+    "href": "./lifecycle/splash.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding 欢迎",
+    "href": "./lifecycle/onboarding-welcome.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding · Git Bash",
+    "href": "./lifecycle/onboarding-git-bash.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding · 选择连接方式",
+    "href": "./lifecycle/onboarding-provider-select.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding · 本地模型",
+    "href": "./lifecycle/onboarding-local-model.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding · API 配置",
+    "href": "./lifecycle/onboarding-credentials.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding · Copilot 设备码",
+    "href": "./lifecycle/onboarding-copilot-code.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 1284
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding · Claude 授权码",
+    "href": "./lifecycle/onboarding-claude-code.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 1284
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding · 设置智能体",
+    "href": "./lifecycle/onboarding-api-setup.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 1284
+  },
+  {
+    "type": "frame",
+    "title": "Onboarding · Polo AI Backend",
+    "href": "./lifecycle/onboarding-api-setup-pi.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "Reauth 重新认证",
+    "href": "./lifecycle/reauth.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "Workspace 选择",
+    "href": "./lifecycle/workspace-picker.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "组织加入",
+    "href": "./lifecycle/organization-onboarding.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 2476
+  },
+  {
+    "type": "break",
+    "advance": 3072
+  },
+  {
+    "type": "section",
+    "label": "工作台",
+    "note": "Home 启动器、组织应用卡、桌面应用菜单、Workspace 切换"
+  },
+  {
+    "type": "frame",
+    "title": "Home 启动器 (fresh profile)",
+    "href": "./workbench/home-launcher.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "桌面应用菜单",
+    "href": "./workbench/app-menu.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "Workspace 切换 · Topbar",
+    "href": "./workbench/space-switcher-topbar.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "Workspace 切换 · Compact 抽屉",
+    "href": "./workbench/space-switcher-compact.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "组织应用卡",
+    "href": "./workbench/organization-app-card.html",
+    "size": "panel",
+    "x": 0,
+    "y": 1284
+  },
+  {
+    "type": "break",
+    "advance": 1750
+  },
+  {
+    "type": "section",
+    "label": "助手会话",
+    "note": "聊天空态、会话气泡、流式/错误/详情、会话列表、会话信息、多选、远程发送、Auth 卡"
+  },
+  {
+    "type": "frame",
+    "title": "聊天空态",
+    "href": "./assistant/chat-empty.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "权限请求卡",
+    "href": "./assistant/chat-permission.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "会话多选面板",
+    "href": "./assistant/multi-select-panel.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "多选批量菜单",
+    "href": "./assistant/multi-select-menu.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "发送到 Workspace",
+    "href": "./assistant/send-remote-list.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "发送 · 全部离线",
+    "href": "./assistant/send-remote-offline.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "发送 · 传输中",
+    "href": "./assistant/send-remote-transferring.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 1284
+  },
+  {
+    "type": "frame",
+    "title": "新建聊天 FAB",
+    "href": "./assistant/fab-new-chat.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 1284
+  },
+  {
+    "type": "frame",
+    "title": "会话气泡",
+    "href": "./assistant/chat-conversation.html",
+    "size": "tall",
+    "x": 0,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "会话 · 流式响应",
+    "href": "./assistant/chat-streaming.html",
+    "size": "tall",
+    "x": 564,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "会话 · 错误气泡",
+    "href": "./assistant/chat-error.html",
+    "size": "tall",
+    "x": 1128,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "会话 · 完整回合",
+    "href": "./assistant/chat-detail.html",
+    "size": "tall",
+    "x": 0,
+    "y": 2776
+  },
+  {
+    "type": "frame",
+    "title": "任务徽章 + 下拉菜单",
+    "href": "./assistant/chat-active-tasks.html",
+    "size": "tall",
+    "x": 564,
+    "y": 2776
+  },
+  {
+    "type": "frame",
+    "title": "会话侧栏",
+    "href": "./assistant/session-sidebar.html",
+    "size": "panel",
+    "x": 0,
+    "y": 3672
+  },
+  {
+    "type": "frame",
+    "title": "凭证请求卡",
+    "href": "./assistant/chat-auth-request.html",
+    "size": "panel",
+    "x": 344,
+    "y": 3672
+  },
+  {
+    "type": "frame",
+    "title": "凭证完成",
+    "href": "./assistant/chat-auth-completed.html",
+    "size": "panel",
+    "x": 688,
+    "y": 3672
+  },
+  {
+    "type": "frame",
+    "title": "凭证取消",
+    "href": "./assistant/chat-auth-cancelled.html",
+    "size": "panel",
+    "x": 0,
+    "y": 4138
+  },
+  {
+    "type": "frame",
+    "title": "会话信息 Popover",
+    "href": "./assistant/session-info-popover.html",
+    "size": "panel",
+    "x": 344,
+    "y": 4138
+  },
+  {
+    "type": "frame",
+    "title": "文件查看器",
+    "href": "./assistant/file-viewer.html",
+    "size": "panel",
+    "x": 688,
+    "y": 4138
+  },
+  {
+    "type": "frame",
+    "title": "文件查看器空态",
+    "href": "./assistant/file-viewer-empty.html",
+    "size": "panel",
+    "x": 0,
+    "y": 4604
+  },
+  {
+    "type": "break",
+    "advance": 5070
+  },
+  {
+    "type": "section",
+    "label": "资源面板",
+    "note": "数据源/技能/自动化空态、自动化列表与详情"
+  },
+  {
+    "type": "frame",
+    "title": "数据源空态",
+    "href": "./resources/sources-empty.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "技能空态",
+    "href": "./resources/skills-empty.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "自动化空态",
+    "href": "./resources/automations-empty.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "自动化详情",
+    "href": "./resources/automation-detail.html",
+    "size": "tall",
+    "x": 0,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "自动化列表",
+    "href": "./resources/automations-list.html",
+    "size": "panel",
+    "x": 0,
+    "y": 1584
+  },
+  {
+    "type": "frame",
+    "title": "Skill 列表",
+    "href": "./resources/skills-list.html",
+    "size": "panel",
+    "x": 344,
+    "y": 1584
+  },
+  {
+    "type": "frame",
+    "title": "Skill 详情",
+    "href": "./resources/skill-detail.html",
+    "size": "panel",
+    "x": 688,
+    "y": 1584
+  },
+  {
+    "type": "frame",
+    "title": "Source 列表",
+    "href": "./resources/sources-list.html",
+    "size": "panel",
+    "x": 0,
+    "y": 2050
+  },
+  {
+    "type": "frame",
+    "title": "Source 详情",
+    "href": "./resources/source-detail.html",
+    "size": "panel",
+    "x": 344,
+    "y": 2050
+  },
+  {
+    "type": "break",
+    "advance": 2516
+  },
+  {
+    "type": "section",
+    "label": "Browser",
+    "note": "浏览器空态卡、工具栏、tab 条"
+  },
+  {
+    "type": "frame",
+    "title": "浏览器空态卡",
+    "href": "./apps/browser-empty.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "浏览器工具栏",
+    "href": "./apps/browser-toolbar.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "浏览器 tab 条",
+    "href": "./apps/browser-tab-strip.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "break",
+    "advance": 688
+  },
+  {
+    "type": "section",
+    "label": "设置",
+    "note": "设置导航器与全部设置子页"
+  },
+  {
+    "type": "frame",
+    "title": "设置导航器",
+    "href": "./settings/settings-navigator.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 应用",
+    "href": "./settings/settings-app.html",
+    "size": "tall",
+    "x": 0,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 外观",
+    "href": "./settings/settings-appearance.html",
+    "size": "tall",
+    "x": 564,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 输入",
+    "href": "./settings/settings-input.html",
+    "size": "tall",
+    "x": 1128,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "设置 · Workspace",
+    "href": "./settings/settings-workspace.html",
+    "size": "tall",
+    "x": 0,
+    "y": 1584
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 权限",
+    "href": "./settings/settings-permissions.html",
+    "size": "tall",
+    "x": 564,
+    "y": 1584
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 标签",
+    "href": "./settings/settings-labels.html",
+    "size": "tall",
+    "x": 1128,
+    "y": 1584
+  },
+  {
+    "type": "frame",
+    "title": "设置 · Messaging",
+    "href": "./settings/settings-messaging.html",
+    "size": "tall",
+    "x": 0,
+    "y": 2480
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 服务器",
+    "href": "./settings/settings-server.html",
+    "size": "tall",
+    "x": 564,
+    "y": 2480
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 快捷键",
+    "href": "./settings/settings-shortcuts.html",
+    "size": "tall",
+    "x": 1128,
+    "y": 2480
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 偏好",
+    "href": "./settings/settings-preferences.html",
+    "size": "tall",
+    "x": 0,
+    "y": 3376
+  },
+  {
+    "type": "frame",
+    "title": "设置 · 账号安全",
+    "href": "./settings/settings-account-security.html",
+    "size": "tall",
+    "x": 564,
+    "y": 3376
+  },
+  {
+    "type": "break",
+    "advance": 4272
+  },
+  {
+    "type": "section",
+    "label": "组织",
+    "note": "组织管理对话框 (成员/邀请/作品 tabs)"
+  },
+  {
+    "type": "frame",
+    "title": "组织管理 · 成员",
+    "href": "./organization/organization-manage-members.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "组织管理 · 邀请",
+    "href": "./organization/organization-manage-invitations.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "组织管理 · 作品",
+    "href": "./organization/organization-manage-artifacts.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "break",
+    "advance": 688
+  },
+  {
+    "type": "section",
+    "label": "系统",
+    "note": "快捷键对话框、重置确认、管理员登录"
+  },
+  {
+    "type": "frame",
+    "title": "重置确认",
+    "href": "./system/reset-confirmation.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "管理员登录",
+    "href": "./system/admin-login.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "验证码登录",
+    "href": "./system/phone-auth.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "验证码登录 · 输入验证码",
+    "href": "./system/phone-auth-verify.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "快捷键对话框",
+    "href": "./system/shortcuts-dialog.html",
+    "size": "tall",
+    "x": 0,
+    "y": 1284
+  },
+  {
+    "type": "break",
+    "advance": 2180
+  }
+];
+const SIZES = {"viewport":{"w":1440,"h":900},"tall":{"w":1000,"h":1500},"panel":{"w":560,"h":640}};
+const RENDER_SCALE = 0.5;
+const GAP_X = 64, GAP_Y = 120, SECTION_PAD = 48, TITLE_H = 26
+const world = document.getElementById('canvas-world')
+const viewport = document.getElementById('canvas-viewport')
+const grid = document.getElementById('canvas-grid')
+const zoomLabel = document.getElementById('canvas-zoom')
+let scale = 1, panX = 0, panY = 0
+
+// Build placeholder DOM (no iframes yet); track world bounds for fit().
+let cursorY = 0, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+const frameEntries = []
+for (const item of FRAMES) {
+  if (item.type === 'section') {
+    const section = document.createElement('div')
+    section.className = 'canvas-section'
+    section.style.left = '0px'
+    section.style.top = cursorY + 'px'
+    section.innerHTML = '<div class="canvas-section-label">' + item.label + '</div><div class="canvas-section-note">' + item.note + '</div>'
+    world.appendChild(section)
+    minY = Math.min(minY, cursorY)
+    continue
+  }
+  if (item.type === 'break') { cursorY += item.advance; continue }
+  const drawW = SIZES[item.size].w * RENDER_SCALE
+  const drawH = SIZES[item.size].h * RENDER_SCALE
+  const link = document.createElement('a')
+  link.className = 'canvas-frame-link'
+  link.href = item.href
+  link.target = '_blank'
+  link.rel = 'noopener'
+  link.style.left = item.x + 'px'
+  link.style.top = (cursorY + item.y) + 'px'
+  link.innerHTML = '<div class="canvas-frame-card" style="width:' + drawW + 'px;height:' + drawH + 'px"></div><div class="canvas-frame-title">' + item.title + '</div>'
+  world.appendChild(link)
+  frameEntries.push({ item, link, drawW, drawH, mounted: false, iframe: null })
+  minX = Math.min(minX, item.x); minY = Math.min(minY, cursorY + item.y)
+  maxX = Math.max(maxX, item.x + drawW); maxY = Math.max(maxY, cursorY + item.y + drawH + TITLE_H)
+}
+world.style.width = (maxX + 400) + 'px'
+world.style.height = (maxY + 400) + 'px'
+
+// Lazy-mount: a frame gets its real iframe only while near the viewport.
+const io = new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    const record = frameEntries.find(f => f.link === entry.target)
+    if (!record) continue
+    if (entry.isIntersecting) mount(record)
+    else park(record)
+  }
+}, { root: viewport, rootMargin: '600px 600px' })
+
+function mount(record) {
+  if (record.iframe) { record.iframe.style.display = ''; return }
+  const iframe = document.createElement('iframe')
+  iframe.src = record.item.href + '?embed=1'
+  iframe.loading = 'lazy'
+  iframe.title = record.item.title
+  iframe.tabIndex = -1
+  // Render the page at the component's logical size, then scale down to the
+  // drawn frame size — so proportions match the real app window.
+  iframe.style.width = SIZES[record.item.size].w + 'px'
+  iframe.style.height = SIZES[record.item.size].h + 'px'
+  iframe.style.transform = 'scale(' + (RENDER_SCALE) + ')'
+  record.link.querySelector('.canvas-frame-card').appendChild(iframe)
+  record.iframe = iframe
+  record.mounted = true
+}
+function park(record) {
+  if (record.iframe) record.iframe.style.display = 'none'
+  record.mounted = false
+}
+frameEntries.forEach(record => io.observe(record.link))
+
+let rafPending = false
+function apply() {
+  if (rafPending) return
+  rafPending = true
+  requestAnimationFrame(() => {
+    rafPending = false
+    world.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')'
+    const dot = Math.max(8, Math.min(56, 24 * scale))
+    grid.style.setProperty('--grid', dot + 'px')
+    grid.style.backgroundSize = dot + 'px ' + dot + 'px'
+    grid.style.backgroundPosition = panX + 'px ' + panY + 'px'
+    zoomLabel.textContent = Math.round(scale * 100) + '%'
+  })
+}
+function zoomAt(next, cx = innerWidth / 2, cy = innerHeight / 2) {
+  const prev = scale
+  scale = Math.min(2.5, Math.max(.05, next))
+  panX = cx - (cx - panX) * (scale / prev)
+  panY = cy - (cy - panY) * (scale / prev)
+  apply()
+}
+function fit() {
+  // Fit horizontally (width-first): the canvas is tall, so frame the full
+  // content width and let the user pan vertically. Still capped to 100%.
+  const w = maxX - minX
+  scale = Math.max(.1, Math.min((innerWidth - 120) / w, 1))
+  panX = (innerWidth - w * scale) / 2 - minX * scale
+  panY = 40 - minY * scale
+  apply()
+}
+viewport.addEventListener('wheel', event => {
+  event.preventDefault()
+  if (event.metaKey || event.ctrlKey) {
+    zoomAt(scale * Math.exp(-event.deltaY * .0022), event.clientX, event.clientY)
+  } else {
+    panX -= event.deltaX; panY -= event.deltaY
+    apply()
+  }
+}, { passive: false })
+let panning = false, startX = 0, startY = 0, baseX = 0, baseY = 0
+viewport.addEventListener('pointerdown', event => {
+  panning = true; startX = event.clientX; startY = event.clientY; baseX = panX; baseY = panY
+  viewport.classList.add('panning')
+})
+window.addEventListener('pointermove', event => {
+  if (!panning) return
+  panX = baseX + (event.clientX - startX); panY = baseY + (event.clientY - startY)
+  apply()
+})
+window.addEventListener('pointerup', () => { panning = false; viewport.classList.remove('panning') })
+document.getElementById('canvas-zoom-in').addEventListener('click', () => zoomAt(scale * 1.25))
+document.getElementById('canvas-zoom-out').addEventListener('click', () => zoomAt(scale / 1.25))
+document.getElementById('canvas-fit').addEventListener('click', fit)
+window.addEventListener('keydown', event => {
+  if (event.key === '0') fit()
+  if (event.key === '=' || event.key === '+') zoomAt(scale * 1.25)
+  if (event.key === '-') zoomAt(scale / 1.25)
+})
+fit()
+</script>
+</body>
+</html>

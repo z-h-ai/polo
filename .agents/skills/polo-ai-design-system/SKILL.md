@@ -5,7 +5,7 @@ description: Apply the polo-ai repository design system within its declared plat
 
 # polo-ai Design System
 
-Adoption revision: `native-materials-r3-20261022`. Mode: `extracted`.
+Adoption revision: `native-materials-r4-dev-aligned-20261023`. Mode: `extracted`.
 
 ## Applicability
 
@@ -31,7 +31,7 @@ Source-binding checks establish source consistency only. When actual material in
 
 ## Sources
 
-- `docs/client-journey-review/spec.md` — authority; 当前产品唯一来源 master-r15-closure；§13.8—13.14 覆盖旧设计指令; SHA-256 `d5233ff5bddd72362ef6c6dd0459b128253ef451e90287c9195fedb6a98264db`
+- `docs/client-journey-review/spec.md` — authority; 当前产品唯一来源；沿用既有视觉确认，D-PC-15 多空间登录确认仅按当前Spec适用，独立基线场景缺口另列; SHA-256 `c191aa04cd35abc5917451f421785ff053bf5b9183c2b6282f15a86c74e78d5e`
 - `.agents/skills/polo-ai-design-system/references/foundations.md` — authority; 本次原型提取与消费边界；明确确认/实现事实/待复看范围; SHA-256 `64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d`
 - `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css` — authority; b82fa1e5 基础样式，按最新原型逐字节提取；当前外层工作台样式维护源; SHA-256 `fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a`
 - `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css` — authority; 导航/Header、首页、统一圈子列表及 POO-105 微透材质增量；按最终CSS cascade消费; SHA-256 `be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70`
@@ -43,9 +43,9 @@ Source-binding checks establish source consistency only. When actual material in
 - `.agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `a5de1ede777f48032a3d945983bd987c28e42a6cd1f2efd5852e1f8c35a7ab73`
 - `.agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `dda528141636c0253fe70afaeeb23a9919aa8264e562d63235c77316a6248de7`
 - `.agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `b26fcc98fb62dc2d9ee91ddbed21a5bd83a23f830b9acea9028a40f747934808`
-- `.agents/skills/polo-ai-design-system/references/usage-playbook.md` — authority; 新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑; SHA-256 `09d515b56869e00eac76a45dee328b5d26dc59c73ccba7cd1ea160e653ffaf5a`
-- `.agents/skills/polo-ai-design-system/references/page-baselines.md` — authority; 页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出; SHA-256 `313d85c22643c772f0abbcd74f10ddaba374a631b5471605f456390912974027`
-- `.agents/skills/polo-ai-design-system/references/component-usage.md` — authority; 组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界; SHA-256 `e542cd359b48193857fdf97d6bec0ba0d94902aa3b5e78c9e4a7059590ee6553`
+- `.agents/skills/polo-ai-design-system/references/usage-playbook.md` — authority; 新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑; SHA-256 `5c8ee3f1446a90c7894a159ecdce260e7dfefbb855d64f0cadc5c566a7ccca52`
+- `.agents/skills/polo-ai-design-system/references/page-baselines.md` — authority; 页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出; SHA-256 `1f8f5207d773719b1ea9806adc4567fbaf0c364d9c45e540bd3b9eb1ad4efbb4`
+- `.agents/skills/polo-ai-design-system/references/component-usage.md` — authority; 组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界; SHA-256 `571019ba393a2d1d1bb6f13cffed31704ac03697a7faa83a94c965b78986edbe`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.config.mjs` — implementation; 当前实现基线生成器：vite 配置（alias @→renderer 源码，单文件内联，模块图与 watch 文件收集入输入指纹，确定性构建无时间戳）; SHA-256 `8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.scene-ids.config.mjs` — implementation; 场景清单 SSR 提取构建（ssr noExternal 全打包，单 cjs 输出）; SHA-256 `eff52dc6b1854c66cddd6242ad42735092cece0c77a2b197b160caf5e6b03252`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/scene-ids-runner.cjs` — implementation; happy-dom 下执行场景清单 SSR bundle，stdout 输出 JSON 行（只求值模块作用域，不渲染组件）; SHA-256 `4af8277faaf90e266f9a5051f5379d8abde722fb0f9c187f598fd969de9f2975`
@@ -58,8 +58,8 @@ Source-binding checks establish source consistency only. When actual material in
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/fixtures.tsx` — implementation; 受控 fixture：真实类型 satisfies+zod parse，只替换后端数据（正常态默认，写接口仅内存完成，不存任何 secret）; SHA-256 `d5c4761835f8a6a48425169e27abf2a50c518feabd6ecfbb8070705a40c4ee07`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css` — implementation; 基线浏览壳样式：@import renderer index.css + 本目录入口/场景/画廊的 Tailwind @source 扫描声明 + 仅基线文档的滚动覆盖; SHA-256 `3f708acb93832bbb1340748efaa4ae032b0eff163282f5e8c1c6ffb7e16e1cf6`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.html` — implementation; 基线 HTML 入口; SHA-256 `262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc`
-- `.agents/skills/polo-ai-design-system/references/native-reuse.md` — implementation; 当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口; SHA-256 `2889ecb9f1564c36a58bdf8420aad1467708630549e4e473e5bbfb1d5acb01d3`
-- `.agents/skills/polo-ai-design-system/references/style-usage.md` — implementation; 工作台与renderer样式体系、变量预览、原生消费和再生方法; SHA-256 `95e746851c5437f9d3495c40d41c3e1f86c4f579463b8c97c28e875cc2987958`
+- `.agents/skills/polo-ai-design-system/references/native-reuse.md` — implementation; 当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口; SHA-256 `d0c71d60967740283e140dd19b4db4277c213dc01eb4f3a9704e3d28c3ccce59`
+- `.agents/skills/polo-ai-design-system/references/style-usage.md` — implementation; 工作台与renderer样式体系、变量预览、原生消费和再生方法; SHA-256 `0f87d6691a5436941a1fb1b0d57e640ae5d573d890618a3771897a24713e1887`
 
 ## Reuse
 

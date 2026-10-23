@@ -15,7 +15,10 @@ def goto(page,sid):
  page.evaluate('(s)=>location.hash="scene="+s',sid);page.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=sid)
  f=frame(page,sid);f.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=sid);return f
 def snap(f,selector,name):
- path=E/(name+'.png');f.locator(selector).screenshot(path=str(path));report['screenshots'].append(str(path.relative_to(R)))
+ path=E/(name+'.png');f.locator(selector).screenshot(path=str(path))
+ # Keep existing repository-relative evidence portable, and support the
+ # explicitly requested external temporary evidence directory as well.
+ report['screenshots'].append(str(path.relative_to(R) if path.is_relative_to(R) else path.resolve()))
 def header(f):return f.locator('[data-prototype-scene]:visible').locator('.workbench-bar,.polo-host-bar').first
 def transparent(f):return header(f).evaluate('(e)=>getComputedStyle(e).borderBottomColor') in ['rgba(0, 0, 0, 0)','transparent']
 with sync_playwright() as p:

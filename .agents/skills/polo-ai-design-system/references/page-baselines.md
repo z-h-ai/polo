@@ -1,6 +1,6 @@
 # Polo 页面/区域基线索引
 
-版本：`native-materials-r3-20261022`。本文是 Skill 的维护源（登记于 `references/design-system.json` sources）；目标模板层引用的每个场景 ID 由 `docs/mvp-complete-flow-hifi/tools/check_design_system.py` 校验存在于消费 manifest。
+版本：`native-materials-r4-dev-aligned-20261023`。本文是 Skill 的维护源（登记于 `references/design-system.json` sources）；目标模板层引用的每个场景 ID 由 `docs/mvp-complete-flow-hifi/tools/check_design_system.py` 校验存在于消费 manifest。
 
 ## 分层：当前实现基线 vs 目标设计模板
 
@@ -67,6 +67,8 @@
 | `P-M07-SUPPORT` / `P-M07-SUPPORT-LOAD-FAIL` | 联系客服 | SupportPanel |
 | `P-M07-SOURCE-FALLBACK` | 授权来源更新 · 仍可使用 | `MemberAppCard` 详情展开 |
 | `P-M07-REJOIN-BROWSER` | 重新加入（浏览器交接） | `tab-browser/WebAppView.tsx` |
+
+本轮对齐固定 dev `6e97b314`，当前 Spec 的 D-PC-15 已纳入登录后的多空间确认。基线 fixture 仍是单个个人空间；`login-*` 是登录表单场景，未建立多空间确认页独立场景。当前实现素材由合入后的真实组件再生，旧 `P-*` 目标模板仍限于其已确认版本；来源再绑定不代表新流程或新整页已通过视觉验收。
 
 ## 覆盖缺口（明确未建立基线，不要假借其他素材冒充）
 

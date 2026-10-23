@@ -1,3 +1,4 @@
+import type { LocalAppAdmissionFailure } from '@polo-ai/shared/protocol'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
@@ -127,6 +128,33 @@ export interface BrowserEmptyStateLaunchResult {
   reason?: string
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POO-117 P117-05/P117-07 — new-main-window outcome
+//
+// The request must never silently no-op: every terminal state carries a reason
+// plus stage diagnostics (request source, workspace resolution, creation,
+// visibility). Diagnostics never include credentials or chat content.
+// NewWindowRequestSource/NewWindowFailureReason live in the shared protocol DTOs
+// (re-exported above) so the broadcast channel can type its payload.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Observable outcome of a new-main-window request (renderer ↔ main contract). */
+export interface NewWindowResult {
+  ok: boolean
+  /** BrowserWindow id — present once construction succeeded. */
+  windowId?: number
+  webContentsId?: number
+  reason?: NewWindowFailureReason
+  diagnostics: {
+    source: NewWindowRequestSource
+    /** Requested or caller-resolved workspace; null when none could be resolved. */
+    workspaceId: string | null
+    workspaceResolved: boolean
+    created: boolean
+    visible: boolean
+  }
+}
+
 export type TransportMode = 'local' | 'remote'
 
 export type TransportConnectionStatus =
@@ -232,6 +260,8 @@ import type {
   CircleReturnCancelResult,
   CircleReturnCandidate,
   CircleReturnPendingState,
+  NewWindowRequestSource,
+  NewWindowFailureReason,
 } from '@polo-ai/shared/protocol'
 import type {
   AcceptOrganizationJoinResponse,
@@ -461,7 +491,7 @@ export type AdminSetPasswordResult =
   | ({ success: false } & AdminRpcErrorPayload)
 
 export type AdminValidateResult =
-  | { loggedIn: true; user: AdminUser; configVersion: string; offline?: boolean }
+  | { loggedIn: true; user: AdminUser; configVersion: string | null; offline?: boolean }
   | ({ loggedIn: false } & AdminRpcErrorPayload)
 
 export interface AdminStatusResult {
@@ -634,6 +664,8 @@ export interface ElectronAPI {
 
   // Window management
   getWindowWorkspace(): Promise<string | null>
+  getWindowLaunchContext(): Promise<import('@polo-ai/shared/protocol').WorkbenchWindowContext | null>
+  reportWorkbenchReady(context: import('@polo-ai/shared/protocol').WorkbenchWindowContext | null): Promise<boolean>
   getWindowMode(): Promise<string | null>
   openWorkspace(workspaceId: string): Promise<void>
   openSessionInNewWindow(workspaceId: string, sessionId: string): Promise<void>
@@ -724,6 +756,8 @@ export interface ElectronAPI {
   onMenuNewChat(callback: () => void): () => void
   onMenuOpenSettings(callback: () => void): () => void
   onMenuKeyboardShortcuts(callback: () => void): () => void
+  /** POO-117 P117-07: a main-process-initiated new-window request (native menu / webview shortcut) failed. */
+  onMenuNewWindowFailed(callback: (reason: NewWindowFailureReason) => void): () => void
   onMenuToggleFocusMode(callback: () => void): () => void
   onMenuToggleSidebar(callback: () => void): () => void
 
@@ -756,7 +790,7 @@ export interface ElectronAPI {
       arch: 'arm64' | 'x64'
     }>
     install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
-    installProductSpaceBundle(request: ProductSpaceBundleInstallRequest): Promise<LocalAppInstalledApp>
+    installProductSpaceBundle(request: ProductSpaceBundleInstallRequest): Promise<LocalAppInstalledApp | LocalAppAdmissionFailure>
     getProductSpaceInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
     getProductSpaceWithdrawnInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
     uninstallProductSpaceBundle(
@@ -764,12 +798,12 @@ export interface ElectronAPI {
       options?: LocalAppUninstallOptions,
     ): Promise<void>
     cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
-    start(request: CatalogLocalAppScope): Promise<LocalAppStartResult>
-    start(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
+    start(request: CatalogLocalAppScope): Promise<LocalAppStartResult | LocalAppAdmissionFailure>
+    start(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult | LocalAppAdmissionFailure>
     stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
     stop(request: LocalAppLifecycleRequest): Promise<LocalAppRuntimeStatus>
     restart(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
-    restart(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
+    restart(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult | LocalAppAdmissionFailure>
     uninstall(app: CatalogLocalAppScope, options?: LocalAppUninstallOptions): Promise<void>
     setAvailableRelease(
       app: CatalogLocalAppScope,
@@ -1497,7 +1531,8 @@ export interface ElectronAPI {
 
   // Menu actions (from renderer to main)
   menuQuit(): Promise<void>
-  menuNewWindow(): Promise<void>
+  /** POO-117 P117-05/07: creates a managed main window and reports the observable outcome. */
+  menuNewWindow(): Promise<NewWindowResult>
   menuMinimize(): Promise<void>
   menuMaximize(): Promise<void>
   menuZoomIn(): Promise<void>

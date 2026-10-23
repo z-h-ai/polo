@@ -18,13 +18,13 @@
     ]
   },
   "mode": "extracted",
-  "revision": "native-materials-r3-20261022",
+  "revision": "native-materials-r4-dev-aligned-20261023",
   "sources": [
     {
       "path": "docs/client-journey-review/spec.md",
-      "sha256": "d5233ff5bddd72362ef6c6dd0459b128253ef451e90287c9195fedb6a98264db",
+      "sha256": "c191aa04cd35abc5917451f421785ff053bf5b9183c2b6282f15a86c74e78d5e",
       "role": "authority",
-      "scope": "当前产品唯一来源 master-r15-closure；§13.8—13.14 覆盖旧设计指令"
+      "scope": "当前产品唯一来源；沿用既有视觉确认，D-PC-15 多空间登录确认仅按当前Spec适用，独立基线场景缺口另列"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -94,19 +94,19 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/usage-playbook.md",
-      "sha256": "09d515b56869e00eac76a45dee328b5d26dc59c73ccba7cd1ea160e653ffaf5a",
+      "sha256": "5c8ee3f1446a90c7894a159ecdce260e7dfefbb855d64f0cadc5c566a7ccca52",
       "role": "authority",
       "scope": "新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/page-baselines.md",
-      "sha256": "313d85c22643c772f0abbcd74f10ddaba374a631b5471605f456390912974027",
+      "sha256": "1f8f5207d773719b1ea9806adc4567fbaf0c364d9c45e540bd3b9eb1ad4efbb4",
       "role": "authority",
       "scope": "页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/component-usage.md",
-      "sha256": "e542cd359b48193857fdf97d6bec0ba0d94902aa3b5e78c9e4a7059590ee6553",
+      "sha256": "571019ba393a2d1d1bb6f13cffed31704ac03697a7faa83a94c965b78986edbe",
       "role": "authority",
       "scope": "组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界"
     },
@@ -184,13 +184,13 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-      "sha256": "2889ecb9f1564c36a58bdf8420aad1467708630549e4e473e5bbfb1d5acb01d3",
+      "sha256": "d0c71d60967740283e140dd19b4db4277c213dc01eb4f3a9704e3d28c3ccce59",
       "role": "implementation",
       "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/style-usage.md",
-      "sha256": "95e746851c5437f9d3495c40d41c3e1f86c4f579463b8c97c28e875cc2987958",
+      "sha256": "0f87d6691a5436941a1fb1b0d57e640ae5d573d890618a3771897a24713e1887",
       "role": "implementation",
       "scope": "工作台与renderer样式体系、变量预览、原生消费和再生方法"
     }

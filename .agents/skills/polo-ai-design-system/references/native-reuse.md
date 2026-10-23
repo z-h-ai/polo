@@ -1,6 +1,6 @@
 # 原生素材到任务候选
 
-适用版本：`native-materials-r3-20261022`，以当前工作树的源码、锁文件和再生成检查为准。
+适用版本：`native-materials-r4-dev-aligned-20261023`，以当前工作树的源码、锁文件和再生成检查为准。
 `AGENTS.md` 已路由到本 Skill；无需全局 design-system-adopt / 原型制作 Skill。
 
 ## 先分清范围和来源

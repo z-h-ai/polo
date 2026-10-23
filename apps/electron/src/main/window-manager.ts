@@ -10,6 +10,10 @@ import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
 import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
 import { installWebviewSecurityHandlers, setWebviewScopeResolver } from './webview-security'
+import { createMainWindowWithOutcome, type LaunchableWindow } from './new-window-launch'
+import type { WorkbenchWindowContext, NewWindowRequestSource, NewWindowResult } from '../shared/types'
+import { captureTrustedSessionScope, getAccountTransitionEpoch, getTrustedAccountGeneration, isAccountTransitionInProgress } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+import { isSwitchInProgress, isRuntimeOfflineReadOnly, isRuntimeProductSpaceRestricted } from '@polo-ai/server-core/runtime/product-space-executions'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -47,6 +51,8 @@ function getWindowsBackgroundMaterial(): 'mica' | 'acrylic' | undefined {
 interface ManagedWindow {
   window: BrowserWindow
   workspaceId: string
+  launchContext?: WorkbenchWindowContext
+  workbenchContext?: WorkbenchWindowContext
 }
 
 export interface CreateWindowOptions {
@@ -58,6 +64,8 @@ export interface CreateWindowOptions {
   initialDeepLink?: string
   /** Full URL to restore from saved state (preserves route/query params) */
   restoreUrl?: string
+  launchContext?: WorkbenchWindowContext
+  showWhenReady?: boolean
 }
 
 export class WindowManager {
@@ -70,6 +78,85 @@ export class WindowManager {
   private keyboardCloseIntentTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Auto-clear stale keyboard-close intents
   private isAppQuitting = false  // Skip layered close interception during app quit
   private webviewSecurityInitialized = false
+  private newWindowRequests = new Map<number, Promise<NewWindowResult>>()
+  private workbenchReadyListeners = new Map<number, Set<() => void>>()
+
+  getWindowLaunchContext(webContentsId: number): WorkbenchWindowContext | null {
+    return this.windows.get(webContentsId)?.launchContext ?? null
+  }
+
+  /** A renderer may acknowledge only its own managed window and Main's trusted scope. */
+  reportWorkbenchReady(webContentsId: number, context: WorkbenchWindowContext | null): boolean {
+    const managed = this.windows.get(webContentsId)
+    if (!managed || managed.window.isDestroyed()) return false
+    managed.workbenchContext = undefined
+    if (!context || typeof context !== 'object') return false
+    const trusted = captureTrustedSessionScope()
+    const expected = managed.launchContext
+    if (!trusted || isAccountTransitionInProgress() || isSwitchInProgress() || isRuntimeOfflineReadOnly()
+      || isRuntimeProductSpaceRestricted(context.productSpaceId)
+      || context.accountId !== trusted.accountId || context.productSpaceId !== trusted.productSpaceId
+      || (expected && (expected.accountId !== context.accountId || expected.productSpaceId !== context.productSpaceId))
+      || managed.window.webContents.isLoadingMainFrame()) return false
+    managed.workbenchContext = { accountId: trusted.accountId, productSpaceId: trusted.productSpaceId }
+    // The one-time launch constraint must not prevent subsequent legitimate space switches.
+    managed.launchContext = undefined
+    for (const listener of this.workbenchReadyListeners.get(webContentsId) ?? []) listener()
+    return true
+  }
+
+  private waitForWorkbenchReady(window: LaunchableWindow, signal: AbortSignal): Promise<boolean> {
+    const id = window.webContents.id
+    return new Promise(resolve => {
+      const managed = this.windows.get(id)
+      if (!managed || window.isDestroyed() || signal.aborted) { resolve(false); return }
+      const listeners = this.workbenchReadyListeners.get(id) ?? new Set<() => void>()
+      this.workbenchReadyListeners.set(id, listeners)
+      const finish = (ready: boolean) => {
+        listeners.delete(onReady)
+        if (listeners.size === 0) this.workbenchReadyListeners.delete(id)
+        signal.removeEventListener('abort', onAbort)
+        managed.window.removeListener('closed', onClosed)
+        resolve(ready)
+      }
+      const onReady = () => finish(true)
+      const onAbort = () => finish(false)
+      const onClosed = () => finish(false)
+      listeners.add(onReady)
+      signal.addEventListener('abort', onAbort, { once: true })
+      managed.window.once('closed', onClosed)
+      if (managed.workbenchContext) finish(true)
+    })
+  }
+
+  /** All three entry points share a per-origin in-flight request and verified identity. */
+  async createNewMainWindow(originWebContentsId: number, source: NewWindowRequestSource): Promise<NewWindowResult> {
+    const existing = this.newWindowRequests.get(originWebContentsId)
+    if (existing) return existing
+    const origin = this.windows.get(originWebContentsId)
+    const context = origin?.workbenchContext
+    const accountGeneration = getTrustedAccountGeneration()
+    const transitionEpoch = getAccountTransitionEpoch()
+    const isContextCurrent = () => {
+      const trusted = captureTrustedSessionScope()
+      return Boolean(context && trusted && origin && this.windows.get(originWebContentsId) === origin
+        && origin.workbenchContext?.accountId === context.accountId
+        && origin.workbenchContext.productSpaceId === context.productSpaceId
+        && trusted.accountId === context.accountId && trusted.productSpaceId === context.productSpaceId
+        && getTrustedAccountGeneration() === accountGeneration && getAccountTransitionEpoch() === transitionEpoch
+        && !isAccountTransitionInProgress() && !isSwitchInProgress() && !isRuntimeOfflineReadOnly()
+        && !isRuntimeProductSpaceRestricted(context.productSpaceId))
+    }
+    const request = createMainWindowWithOutcome({
+      createWindow: options => this.createWindow(options),
+      waitForWorkbenchReady: (window, signal) => this.waitForWorkbenchReady(window, signal),
+      isContextCurrent,
+      log: windowLog,
+    }, { workspaceId: origin?.workspaceId, launchContext: context, source })
+    this.newWindowRequests.set(originWebContentsId, request)
+    try { return await request }
+    finally { if (this.newWindowRequests.get(originWebContentsId) === request) this.newWindowRequests.delete(originWebContentsId) }
+  }
 
   /**
    * Set the event sink and client resolver for pushing events via the RPC server
@@ -298,7 +385,7 @@ export class WindowManager {
 
     // Show window when first paint is ready (faster perceived startup)
     window.once('ready-to-show', () => {
-      window.show()
+      if (options.showWhenReady !== false && !window.isDestroyed()) window.show()
     })
 
     // Open external links in default browser, but never hand known-dangerous
@@ -344,7 +431,12 @@ export class WindowManager {
     // Store the window mapping BEFORE loadURL — bootstrap preload uses
     // __get-workspace-id (via sendSync) which reads this map during eval.
     const webContentsId = window.webContents.id
-    this.windows.set(webContentsId, { window, workspaceId })
+    this.windows.set(webContentsId, { window, workspaceId, launchContext: options.launchContext })
+    window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+      if (!isMainFrame || isInPlace) return
+      const managed = this.windows.get(webContentsId)
+      if (managed) managed.workbenchContext = undefined
+    })
 
     // Apply window-title policy now that the map size reflects this window —
     // covers both the new window and any existing windows that should switch
@@ -416,11 +508,12 @@ export class WindowManager {
         failLoadRetries++
         windowLog.info(`Retrying Vite dev server (attempt ${failLoadRetries}/5)...`)
         setTimeout(() => {
+          if (window.isDestroyed()) return
           const params = new URLSearchParams({ workspaceId }).toString()
           window.loadURL(`${VITE_DEV_SERVER_URL}?${params}`)
         }, 1000)
       } else {
-        window.loadFile(join(__dirname, 'renderer/index.html'), { query: { workspaceId } })
+        if (!window.isDestroyed()) window.loadFile(join(__dirname, 'renderer/index.html'), { query: { workspaceId } })
       }
     })
 

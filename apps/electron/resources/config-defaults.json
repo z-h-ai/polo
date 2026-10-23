@@ -11,10 +11,10 @@
     "richToolDescriptions": true,
     "extendedPromptCache": false,
     "browserToolEnabled": true,
-    "generativeUiInlineEnabled": false,
+    "generativeUiInlineEnabled": true,
     "adminUrl": "https://polo-admin.z-h-ai.com/",
     "allowRemoteEvaluate": true,
-    "generativeUiCanvasEnabled": false
+    "generativeUiCanvasEnabled": true
   },
   "workspaceDefaults": {
     "thinkingLevel": "think",

@@ -3,7 +3,11 @@ import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbench
  * TopBar - The single global workbench bar (frozen POO-41 `.workbench-bar`
  * semantics, unified with the tab strip per the POO-70 hifi prototype).
  *
- * Layout: [traffic-light inset] [AppMenu (Polo logo dropdown)] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
+ * Layout: [traffic-light inset] [Polo brand mark (static, POO-117)] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
+ *
+ * POO-117: the logo no longer hosts a menu — the former AppMenu entries moved
+ * into the avatar dropdown (`WorkbenchAccountMenu`), and the in-app quit item
+ * was dropped. The brand mark is decorative and its corner stays drag region.
  *
  * P70-NAV-01: this bar is the ONLY top navigation — the opened app tabs, the
  * current ProductSpace identity and the account menu live here, and there is no
@@ -30,28 +34,22 @@ import { useOptionalAppShellContext } from "@/context/AppShellContext"
 import { useOptionalClientPage } from "@/context/ClientPageContext"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { useTabShell } from "@/context/TabShellContext"
-import { useOptionalTheme } from "@/context/ThemeContext"
 import { navigate, routes } from "@/lib/navigate"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
-import { useOptionalActionRegistry } from "@/actions"
-import { AppMenu } from "@/components/AppMenu"
+import { requestNewMainWindow } from "@/lib/new-window-request"
+import { createEnterpriseWorkflowUrl } from "@/lib/enterprise-workflow-url"
 import { getSessionTitle } from "@/utils/session"
-import {
-  ChevronRight,
-  LogOut,
-  Settings,
-  SunMoon,
-  UserRound,
-} from "lucide-react"
+import { ChevronRight, UserRound } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
-  StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
-import { ProductSpaceSwitcher, CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
+import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
+import { PoloAiSymbol } from "../icons/PoloAiSymbol"
+import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
 import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
 import poloAppIcon from "../../../../resources/icon.png"
 
@@ -78,7 +76,6 @@ export function TopBar() {
   const workbenchStyle = useClientWorkbenchStyle()
   const appShell = useOptionalAppShellContext()
   const productSpace = useOptionalProductSpaceContext()
-  const actionRegistry = useOptionalActionRegistry()
   const {
     activeTab,
     activeTabId,
@@ -89,8 +86,97 @@ export function TopBar() {
     closeTab,
     reorderTabs,
   } = useTabShell()
-  const theme = useOptionalTheme()
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
+
+  // POO107-01: the TopBar runtime count and its execution dialog are removed.
+  // The active-execution registry itself stays — space switching (PC-F06) and
+  // the App close confirmation still consume it.
+  // Payment handoff state lives HERE, not in the dropdown content: the bar is
+  // mounted for the whole app lifetime while Radix unmounts the menu on close,
+  // and both the one-handoff-at-a-time guard and the visible-scope mirror must
+  // survive close/reopen (a remount would drop delayed handoffs and re-mint
+  // tickets).
+  // POO-119: the same lifetime argument applies to the enterprise-console
+  // entries — their click-time lease check must read a mirror that is updated
+  // for the WHOLE bar lifetime, not a per-open menu mount.
+  const visibleProductSpaceRef = useRef(productSpace)
+  useInsertionEffect(() => {
+    visibleProductSpaceRef.current = productSpace
+    return () => { visibleProductSpaceRef.current = null }
+  }, [productSpace])
+  const canOpenPayment = productSpace && !productSpace.pendingSwitch && (
+    productSpace.activeProductSpace.kind === 'personal' || productSpace.activeProductSpace.role === 'owner'
+  )
+  // One handoff at a time: every click would otherwise mint another ticket,
+  // superseding the one the user is about to redeem. Re-entry is dropped
+  // silently — the first click still owns the outcome.
+  const paymentHandoffInFlight = useRef(false)
+  const openPayment = async () => {
+    const scope = visibleProductSpaceRef.current
+    if (!scope || scope.pendingSwitch || paymentHandoffInFlight.current) return
+    paymentHandoffInFlight.current = true
+    try {
+      const result = await window.electronAPI.adminPaymentHandoff()
+      const current = visibleProductSpaceRef.current
+      if (!current || current.accountId !== scope.accountId || current.activeProductSpaceId !== scope.activeProductSpaceId
+        || current.contextVersion !== scope.contextVersion || current.pendingSwitch) return
+      if (!result.success || result.accountId !== current.accountId || result.productSpaceId !== current.activeProductSpaceId) {
+        toast.error(t("topbar.account.paymentError")); return
+      }
+      await window.electronAPI.openUrl(result.url)
+    } catch { if (visibleProductSpaceRef.current === scope) toast.error(t("topbar.account.paymentError")) }
+    finally { paymentHandoffInFlight.current = false }
+  }
+
+  // POO-119 ENTMENU-01/02: the enterprise admin console and creator center
+  // live in the account menu, gated to enterprise spaces whose role may manage
+  // (owner/manager — ENTMENU-03 keeps members out, ENTMENU-04 keeps personal
+  // spaces out). A mid-switch scope never offers the entries.
+  const activeSpace = productSpace?.activeProductSpace
+  const canOpenEnterpriseWorkflows = Boolean(
+    productSpace && !productSpace.pendingSwitch
+    && activeSpace?.kind === 'enterprise'
+    && (activeSpace.role === 'owner' || activeSpace.role === 'manager'),
+  )
+  // One console handoff at a time, mirroring openPayment.
+  const enterpriseWorkflowInFlight = useRef(false)
+  const openEnterpriseWorkflow = async (workflow: 'members' | 'publishing') => {
+    const scope = visibleProductSpaceRef.current
+    if (!scope || scope.pendingSwitch || enterpriseWorkflowInFlight.current) return
+    const space = scope.activeProductSpace
+    // ENTMENU-05 fail-closed: re-derive the right to act from the live scope —
+    // a stale render (menu opened before a space/account change) never opens.
+    if (space.kind !== 'enterprise' || (space.role !== 'owner' && space.role !== 'manager')) return
+    const clickLease = {
+      accountId: scope.accountId,
+      activeProductSpaceId: scope.activeProductSpaceId,
+      contextKey: scope.productSpaceContextKey,
+      contextVersion: scope.contextVersion,
+      enterpriseId: space.enterpriseId,
+    }
+    enterpriseWorkflowInFlight.current = true
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      const live = visibleProductSpaceRef.current
+      const leaseAlive = live
+        && live.accountId === clickLease.accountId
+        && live.activeProductSpaceId === clickLease.activeProductSpaceId
+        && live.productSpaceContextKey === clickLease.contextKey
+        && live.contextVersion === clickLease.contextVersion
+        && !live.pendingSwitch
+      // The admin session must still belong to the account that clicked, and
+      // the trusted admin origin must exist — never open a guessed host.
+      if (!leaseAlive || !status.loggedIn || !status.adminUrl || status.userId !== clickLease.accountId) {
+        toast.error(t('topbar.account.enterpriseOpenFailed'), { description: t('homeApps.errors.staleContext') })
+        return
+      }
+      await window.electronAPI.openUrl(createEnterpriseWorkflowUrl(status.adminUrl, clickLease.enterpriseId, workflow))
+    } catch {
+      toast.error(t('topbar.account.enterpriseOpenFailed'))
+    } finally {
+      enterpriseWorkflowInFlight.current = false
+    }
+  }
 
   const isHome = activeTab.type === "home"
   const showNavigation = activeTab.type === "webapp"
@@ -109,37 +195,6 @@ export function TopBar() {
     : (clientPage?.isHeaderLineVisible ?? false)
 
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
-  // POO107-01: the TopBar runtime count and its execution dialog are removed.
-  // The active-execution registry itself stays — space switching (PC-F06) and
-  // the App close confirmation still consume it.
-  const paymentScope = useRef(productSpace)
-  useInsertionEffect(() => {
-    paymentScope.current = productSpace
-    return () => { paymentScope.current = null }
-  }, [productSpace])
-  const canOpenPayment = productSpace && !productSpace.pendingSwitch && (
-    productSpace.activeProductSpace.kind === 'personal' || productSpace.activeProductSpace.role === 'owner'
-  )
-  // One handoff at a time: every click would otherwise mint another ticket,
-  // superseding the one the user is about to redeem. Re-entry is dropped
-  // silently — the first click still owns the outcome.
-  const paymentHandoffInFlight = useRef(false)
-  const openPayment = async () => {
-    const scope = paymentScope.current
-    if (!scope || scope.pendingSwitch || paymentHandoffInFlight.current) return
-    paymentHandoffInFlight.current = true
-    try {
-      const result = await window.electronAPI.adminPaymentHandoff()
-      const current = paymentScope.current
-      if (!current || current.accountId !== scope.accountId || current.activeProductSpaceId !== scope.activeProductSpaceId
-        || current.contextVersion !== scope.contextVersion || current.pendingSwitch) return
-      if (!result.success || result.accountId !== current.accountId || result.productSpaceId !== current.activeProductSpaceId) {
-        toast.error(t("topbar.account.paymentError")); return
-      }
-      await window.electronAPI.openUrl(result.url)
-    } catch { if (paymentScope.current === scope) toast.error(t("topbar.account.paymentError")) }
-    finally { paymentHandoffInFlight.current = false }
-  }
 
   const unreadSessions = useMemo(() => (
     sessionMetas
@@ -176,23 +231,13 @@ export function TopBar() {
       )}
       style={{ ...workbenchStyle, height: "var(--topbar-height)", paddingLeft: trafficLightInset, paddingRight: 8 }}
     >
-      {/* === LEFT: App menu (Polo logo dropdown) ===
-          This is the cross-platform application menu (Win/Linux have no native
-          menu bar). Handlers mirror the macOS native-menu broadcast consumers:
-          App.tsx onMenuNewChat/onMenuOpenSettings/onMenuKeyboardShortcuts and
-          AppShell's toggle listeners. The bar sits above NavigationProvider,
-          so every handler routes through the global navigate() event — same
-          contract as openSessionFromNotification below. */}
-      <div className="pointer-events-auto flex flex-none items-center">
-        <AppMenu
-          onNewChat={() => navigate(routes.action.newSession())}
-          onNewWindow={() => { void window.electronAPI.menuNewWindow() }}
-          onOpenSettings={() => navigate(routes.view.settings('app'))}
-          onOpenSettingsSubpage={(subpage) => navigate(routes.view.settings(subpage))}
-          onOpenKeyboardShortcuts={() => navigate(routes.view.settings('shortcuts'))}
-          onToggleSidebar={actionRegistry ? () => actionRegistry.execute('view.toggleSidebar') : undefined}
-          onToggleFocusMode={actionRegistry ? () => actionRegistry.execute('view.toggleFocusMode') : undefined}
-        />
+      {/* === LEFT: static Polo AI brand mark (POO-117 P117-01) ===
+          The logo is decorative — no button semantics, no dropdown. Every
+          former entry now lives in the avatar menu (WorkbenchAccountMenu).
+          pointer-events-none lets the corner stay part of the titlebar drag
+          region owned by the bar container. */}
+      <div aria-hidden data-testid="topbar-brand-mark" className="pointer-events-none flex flex-none select-none items-center pl-[2px]">
+        <PoloAiSymbol className="h-4 text-accent" />
       </div>
 
       {/* === Tabs: Home tab + open web tabs === */}
@@ -351,45 +396,18 @@ export function TopBar() {
             </button>
           </DropdownMenuTrigger>
           <StyledDropdownMenuContent style={workbenchStyle} className={clientWorkbenchMenuClassName + " w-[min(294px,calc(100vw-24px))]"} align="end" minWidth="min-w-0">
-            {user && (
-              <div className="truncate px-2 py-1.5 text-[12px]">
-                <span className="font-medium text-foreground">{userLabel}</span>
-                {user.displayName && user.username ? (
-                  <span className="text-muted-foreground"> · {user.username}</span>
-                ) : null}
-              </div>
-            )}
-            {appShell && (
-              <>
-                <StyledDropdownMenuItem onClick={appShell.onOpenSettings}>
-                  <Settings className="h-3.5 w-3.5" />
-                  {t("menu.settings")}
-                </StyledDropdownMenuItem>
-                <StyledDropdownMenuSeparator />
-              </>
-            )}
-            {canOpenPayment && <StyledDropdownMenuItem data-testid="topbar-payment" onClick={() => { void openPayment() }}>
-              <Icons.Coins className="h-4 w-4" />
-              {t("topbar.account.payment")}
-            </StyledDropdownMenuItem>}
-            <ProductSpaceSwitcher />
-            {theme && (
-              <StyledDropdownMenuItem
-                onClick={() => theme.setMode(theme.resolvedMode === "dark" ? "light" : "dark")}
-              >
-                <SunMoon className="h-3.5 w-3.5" />
-                {t("topbar.account.toggleTheme")}
-              </StyledDropdownMenuItem>
-            )}
-            {user && appShell?.onAdminLogout && (
-              <>
-                <StyledDropdownMenuSeparator />
-                <StyledDropdownMenuItem onClick={() => { void appShell.onAdminLogout?.() }}>
-                  <LogOut className="h-3.5 w-3.5" />
-                  {t("topbar.account.logout")}
-                </StyledDropdownMenuItem>
-              </>
-            )}
+            {/* POO-117 P117-02/P117-03: the single workbench menu — account
+                entries plus the migrated app menu, in one place. The bar sits
+                above NavigationProvider, so new chat routes through the global
+                navigate() event (same contract as openSessionFromNotification). */}
+            <WorkbenchAccountMenu
+              onNewChat={() => navigate(routes.action.newSession())}
+              onNewWindow={() => { void requestNewMainWindow() }}
+              canOpenPayment={canOpenPayment ?? undefined}
+              onOpenPayment={() => { void openPayment() }}
+              canOpenEnterpriseWorkflows={canOpenEnterpriseWorkflows}
+              onOpenEnterpriseWorkflow={(workflow) => { void openEnterpriseWorkflow(workflow) }}
+            />
           </StyledDropdownMenuContent>
         </DropdownMenu>
       </div>

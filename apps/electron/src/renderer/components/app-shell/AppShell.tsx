@@ -109,6 +109,8 @@ import { resolveEntityColor } from "@polo-ai/shared/colors"
 import * as storage from "@/lib/local-storage"
 import { toast } from "sonner"
 import { navigate, routes } from "@/lib/navigate"
+import { requestNewMainWindow } from "@/lib/new-window-request"
+import { useAssistantViewActions } from '@/hooks/useAssistantViewActions'
 import {
   useNavigation,
   useNavigationState,
@@ -133,6 +135,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { PanelHeader } from "./PanelHeader"
 import { FabNewChat } from "./FabNewChat"
 import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
+import { CanvasPane } from "./CanvasPane"
+import { canvasPaneAppAtomFamily } from "@/atoms/canvas-pane"
 import { MessagingDialogHost } from "@/components/messaging/MessagingDialogHost"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
 import SettingsNavigator from "@/pages/settings/SettingsNavigator"
@@ -573,6 +577,13 @@ function AppShellContent({
   const resizeHandleRef = React.useRef<HTMLDivElement>(null)
   const sessionListHandleRef = React.useRef<HTMLDivElement>(null)
   const [session, setSession] = useSession()
+
+  // POO-115: the selected session's right-side canvas pane. Auto-compact
+  // (single-panel mode) keeps the pane state but renders nothing — the pane
+  // reappears with the desktop layout.
+  const canvasSessionId = session.selected
+  const canvasApp = useAtomValue(canvasPaneAppAtomFamily(canvasSessionId ?? ""))
+  const getCanvasLayoutRect = useCallback(() => shellRef.current?.getBoundingClientRect() ?? null, [])
   const { resolvedMode, isDark, setMode } = useTheme()
   const { canGoBack, canGoForward, goBack, goForward, navigateToSource, navigateToSession } = useNavigation()
 
@@ -592,6 +603,14 @@ function AppShellContent({
     getSettingsPageScope(navState.subpage ?? DEFAULT_SETTINGS_SUBPAGE) === 'polo'
   const isAssistantSidebarVisible =
     isSidebarVisible && !effectiveSidebarAndNavigatorHidden && !isPoloSettingsRoute
+
+  // POO-125: the explicit exit from the Polo-scope settings surface. The
+  // surface hides the assistant sidebar entirely, so without this the user
+  // could only leave settings through a notification click or a deep link —
+  // "done" hands the assistant view back (the Polo tab's normal surface).
+  const handleClosePoloSettings = useCallback(() => {
+    navigate(routes.view.allSessions())
+  }, [])
 
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
@@ -1131,11 +1150,8 @@ function AppShellContent({
     setIsSidebarVisible(v => !v)
   }, [isSidebarAndNavigatorHidden])
 
-  // Sidebar toggle (CMD+B)
-  useAction('view.toggleSidebar', handleToggleSidebar)
-
-  // Focus mode toggle (CMD+.) - hides both sidebars
-  useAction('view.toggleFocusMode', () => setIsSidebarAndNavigatorHidden(v => !v))
+  const handleToggleFocusMode = useCallback(() => setIsSidebarAndNavigatorHidden(v => !v), [])
+  useAssistantViewActions(handleToggleSidebar, handleToggleFocusMode)
 
   // Panel focus navigation (CMD+SHIFT+[ / ])
   const focusNextPanel = useSetAtom(focusNextPanelAtom)
@@ -1147,14 +1163,24 @@ function AppShellContent({
   useAction('app.newChat', () => handleNewChat())
   useAction('app.newChatInPanel', () => handleNewChat(true))
 
-  // Settings
-  useAction('app.settings', onOpenSettings)
+  // Settings — POO-125: the shortcut toggles. The Polo-scope settings surface
+  // replaces the assistant view (the sidebar is hidden there), so pressing
+  // Cmd+, again must close it and hand the assistant view back; otherwise the
+  // only exits would be the notification menu or a deep link.
+  useAction('app.settings', () => {
+    if (isSettingsNavigation(navState)) {
+      navigate(routes.view.allSessions())
+    } else {
+      onOpenSettings()
+    }
+  })
 
   // Keyboard shortcuts
   useAction('app.keyboardShortcuts', onOpenKeyboardShortcuts)
 
-  // New window
-  useAction('app.newWindow', () => window.electronAPI.menuNewWindow())
+  // New window — POO-117: shared helper owns the in-flight guard and the
+  // failure toast, same outcome as the avatar-menu entry.
+  useAction('app.newWindow', () => { void requestNewMainWindow() })
 
   // Quit (note: also handled by native menu on macOS)
   useAction('app.quit', () => window.electronAPI.menuQuit())
@@ -1659,22 +1685,6 @@ function AppShellContent({
     storage.set(storage.KEYS.focusModeEnabled, isSidebarAndNavigatorHidden)
   }, [isSidebarAndNavigatorHidden])
 
-  // Listen for focus mode toggle from menu (View → Focus Mode)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onMenuToggleFocusMode?.(() => {
-      setIsSidebarAndNavigatorHidden(v => !v)
-    })
-    return cleanup
-  }, [])
-
-  // Listen for sidebar toggle from menu (View → Toggle Sidebar)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onMenuToggleSidebar?.(() => {
-      handleToggleSidebar()
-    })
-    return cleanup
-  }, [handleToggleSidebar])
-
   // Persist per-view filter map to localStorage (workspace-scoped)
   React.useEffect(() => {
     if (!activeWorkspaceId) return
@@ -1902,7 +1912,12 @@ function AppShellContent({
 
   // Create a new chat and select it
   const handleNewChat = useCallback((newPanel: boolean = false) => {
-    if (!activeWorkspace) return
+    if (!activeWorkspace) {
+      // POO-117 P117-06: the scope is not ready (e.g. mid space switch) — the
+      // request must not die silently, the user is told to wait and retry.
+      toast.error(t('toast.newChatNotReady'))
+      return
+    }
 
     // Exit search mode and switch to All Sessions
     setSearchActive(false)
@@ -1916,7 +1931,7 @@ function AppShellContent({
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, navigate])
+  }, [activeWorkspace, focusZone, navigate, t])
 
   // Create a brand new dedicated browser window and focus it.
   // Intentionally unbound: this action should always create a NEW window.
@@ -2536,7 +2551,10 @@ function AppShellContent({
               className="h-full flex flex-col min-w-0 relative z-panel"
             >
             <PanelHeader
-              title={isAssistantSidebarVisible ? listTitle : undefined}
+              // POO-125: the Polo-scope settings surface owns this header (the
+              // assistant sidebar is hidden there) — show the surface title and
+              // the "done" exit instead of an empty traffic-light strip.
+              title={(isAssistantSidebarVisible || isPoloSettingsRoute) ? listTitle : undefined}
               compensateForStoplight={!isAssistantSidebarVisible}
               badge={automationFilter?.automationType === 'scheduled' ? (
                 <Tooltip>
@@ -3177,6 +3195,17 @@ function AppShellContent({
                       {...getEditConfig('automation-config', activeWorkspace.rootPath)}
                     />
                   )}
+                  {/* POO-125: the Polo-scope settings exit. The surface hides
+                      the assistant sidebar, so "done" is the discoverable way
+                      back to the assistant view (same target as Cmd+, toggle). */}
+                  {isPoloSettingsRoute && (
+                    <HeaderIconButton
+                      icon={<Check className="h-4 w-4" />}
+                      tooltip={t("common.done")}
+                      data-testid="settings-done-button"
+                      onClick={handleClosePoloSettings}
+                    />
+                  )}
                 </>
               }
             />
@@ -3294,10 +3323,23 @@ function AppShellContent({
           }
           navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
-          isRightSidebarVisible={false}
+          isRightSidebarVisible={Boolean(canvasApp) && !isAutoCompact}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />
+
+        {/* POO-115: the selected session's right-side canvas pane, outside the
+            panel stack (right sidebar stays OUTSIDE that container). While a
+            canvas is open the affected card renders as a placeholder strip, so
+            one app never has two live webviews. */}
+        {canvasApp && !isAutoCompact && canvasSessionId && (
+          <CanvasPane
+            key={`${canvasSessionId}:${canvasApp.appId}`}
+            sessionId={canvasSessionId}
+            app={canvasApp}
+            getLayoutRect={getCanvasLayoutRect}
+          />
+        )}
 
         {/* Sidebar Resize Handle (absolute, hidden in focused mode) */}
         {!effectiveSidebarAndNavigatorHidden && (

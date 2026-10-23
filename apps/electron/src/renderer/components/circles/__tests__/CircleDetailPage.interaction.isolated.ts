@@ -565,6 +565,39 @@ describe('outer route assembly (P70-CIRCLE-DETAIL-01)', () => {
     expect(screen.queryByTestId('my-circles-page')).toBeNull()
   })
 
+  it('P-R2-01: detail → circles → return home clears the outer history', async () => {
+    await renderAssembly()
+    await navigateToDetail()
+    fireEvent.click(screen.getByTestId('circle-detail-back'))
+    await waitFor(() => expect(screen.getByTestId('my-circles-page')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('my-circles-back'))
+    await waitFor(() => expect(screen.getByTestId('home-app-hub')).toBeTruthy())
+    expect(observedRoute).toEqual({ kind: 'home' })
+    expect(probeClientPage!.canGoBack).toBe(false)
+    await act(async () => probeClientPage!.back())
+    expect(observedRoute).toEqual({ kind: 'home' })
+  })
+
+  for (const billingKind of ['free', 'paid'] as const) {
+    it(`P-R2-03: ${billingKind} subscription has one validity fact, in its details`, async () => {
+      const circle = circlesByAccount['account-a']![0]!
+      const membership = membershipsByAccount['account-a']![0]!
+      circle.billingKind = billingKind
+      membership.billingKind = billingKind
+      if (billingKind === 'paid') {
+        circle.currentPeriodEnd = membership.currentPeriodEnd = '2028-10-18T00:00:00.000Z'
+      }
+      await renderAssembly()
+      await navigateToDetail('circle-1', 'subscription')
+      await waitFor(() => expect(screen.getByTestId('circle-subscription-validity-value')).toBeTruthy())
+      expect(screen.queryByTestId('circle-detail-term')).toBeNull()
+      const fact = billingKind === 'free' ? i18n.t('poo70.c6.detail.freeTerm') : '2028-10-18'
+      expect(screen.getByTestId('circle-subscription-validity-value').textContent).toContain(fact)
+      expect(screen.getByTestId('circle-detail-page').textContent!.split(fact)).toHaveLength(2)
+      expect(screen.getByTestId('circle-detail-status')).toBeTruthy()
+    })
+  }
+
   it('switches all three sections through the route field, rendering each panel exactly once', async () => {
     await renderAssembly()
     await navigateToDetail()
@@ -640,6 +673,35 @@ describe('outer route assembly (P70-CIRCLE-DETAIL-01)', () => {
       expect(screen.getByTestId('my-circles-search').getAttribute('value')).toBe('晨星')
       expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
     })
+  })
+
+  it('POO-114: back POPS the stack — detail → circles → home — and section switches never enter it', async () => {
+    await renderAssembly()
+    await navigateToDetail()
+    // Section switches are page-internal: they must add NO depth above the
+    // ONE detail entry (the reported loop pushed a duplicate route per visit).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-detail-tab-updates'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-detail-tab-subscription'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-subscription-panel')).toBeTruthy()
+    })
+
+    // The FIRST back leaves the detail page for the circles list…
+    fireEvent.click(screen.getByTestId('circle-detail-back'))
+    expect(observedRoute).toEqual({ kind: 'circles' })
+    await waitFor(() => {
+      expect(screen.getByTestId('my-circles-page')).toBeTruthy()
+    })
+    // …and the list's own back reaches HOME again (the reported dead end).
+    fireEvent.click(screen.getByTestId('my-circles-back'))
+    await waitFor(() => {
+      expect(screen.getByTestId('client-home-router').getAttribute('data-route-kind')).toBe('home')
+    })
+    expect(observedRoute).toEqual({ kind: 'home' })
   })
 })
 
@@ -1365,4 +1427,51 @@ describe('account mismatch reauthenticate CTA (P2-2)', () => {
     const note = screen.getByTestId('circle-return-mismatch-no-entry')
     expect(note.textContent).toContain('account menu')
   })
+})
+
+describe('R4FIX-02 detail content uses current-period authority', () => {
+  for (const state of ['entitled', 'not_entitled', 'unknown'] as const) {
+    it(`gates the single-source App button using ${state}, retaining other valid sources`, async () => {
+      const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
+      circlesByAccount['account-a'] = [circleFixture({ circleId: 'circle-1', membershipId: 'ms-1', name: '当前期圈子', billingKind: 'paid' })]
+      const base = { ...membershipFixture({ circleId: 'circle-1', membershipId: 'ms-1', billingKind: 'paid' }), currentPeriodEnd: '2099-11-19T00:00:00.000Z' }
+      membershipsByAccount['account-a'] = [{
+        ...base,
+        currentEntitlement: currentEntitlementFixture({ membershipId: base.membershipId, state, currentPeriodEnd: base.currentPeriodEnd, validUntil: base.currentPeriodEnd }),
+        paymentOrders: Array.from({ length: 5 }, (_, i) => ({ orderId: `recent-${i}`, storedStatus: state === 'entitled' ? 'cancelled' : 'paid', amountMinor: 29900, currency: 'CNY', effectivePaymentStatus: state === 'entitled' ? 'cancelled' : 'paid', correction: null })),
+      }]
+      await renderAssembly()
+      await navigateToDetail('circle-1', 'content')
+      const single = document.querySelector('[data-catalog-entry-id="entry-solo"] [data-testid="circle-content-app-card"] button') as HTMLButtonElement
+      const multi = document.querySelector('[data-catalog-entry-id="entry-multi"] [data-testid="circle-content-app-card"] button') as HTMLButtonElement
+      expect(single).not.toBeNull()
+      expect(single.disabled).toBe(state !== 'entitled')
+      expect(multi.disabled).toBe(false)
+      expect(screen.getByTestId('circle-detail-heading-status').getAttribute('data-status')).toBe(state === 'entitled' ? 'valid' : 'restore')
+      expect(openAppSpy).not.toHaveBeenCalled()
+    })
+  }
+})
+
+
+it('R7 actual clock expiry agrees in list, heading and subscription without a new receipt', async () => {
+  await i18n.changeLanguage('zh-Hans')
+  const { __resetMyCirclesViewPreferencesForTests } = await import('../MyCirclesPage')
+  __resetMyCirclesViewPreferencesForTests()
+  const { currentEntitlementFixture } = await import('../../../../../../../packages/shared/src/admin/__tests__/fixtures/current-entitlement')
+  const end = new Date(Date.now() + 1000).toISOString()
+  const circle = { ...circleFixture({ circleId: 'circle-1', membershipId: 'ms-1', name: '到期测试圈', billingKind: 'paid' }), currentPeriodEnd: end }
+  const member = { ...membershipFixture({ circleId: 'circle-1', membershipId: 'ms-1', billingKind: 'paid' }), currentPeriodEnd: end, currentEntitlement: currentEntitlementFixture({ membershipId: 'ms-1', currentPeriodEnd: end, validUntil: end }) }
+  circlesByAccount['account-a'] = [circle]
+  membershipsByAccount['account-a'] = [member]
+  await renderAssembly()
+  await act(async () => { probeClientPage!.navigate({ kind: 'circle-detail', circleId: 'circle-1', section: 'subscription' }) })
+  await screen.findByTestId('circle-subscription-status')
+  expect(screen.getByTestId('circle-detail-status').textContent).toBe('有效')
+  await waitFor(() => expect(screen.getByTestId('circle-subscription-status').textContent).toBe('已到期'), { timeout: 2500 })
+  expect(screen.getByTestId('circle-detail-status').textContent).toBe('已到期')
+  await act(async () => { probeClientPage!.navigate({ kind: 'circles' }) })
+  await screen.findByTestId('my-circles-page')
+  expect(screen.getByTestId('circle-row-term').textContent).toBe('已到期')
+  expect(member.status).toBe('active')
 })
