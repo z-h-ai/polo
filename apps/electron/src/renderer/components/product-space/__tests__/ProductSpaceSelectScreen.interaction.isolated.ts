@@ -163,6 +163,8 @@ describe('ProductSpaceSelectScreen · 列表标记（M5/S3）', () => {
     expect(rows[0]!.getAttribute('data-space-kind')).toBe('enterprise')
     expect(rows[1]!.getAttribute('data-space-kind')).toBe('personal')
     expect(rows[1]!.textContent).not.toContain('企业 ·')
+    // 方案 A：个人条目也带标记 pill（productSpace.role.personal）
+    expect(rows[1]!.textContent).toContain('个人')
     const restrictedRow = rows.find(row => row.getAttribute('data-restricted') === 'true')
     expect(restrictedRow?.textContent).toContain('受限')
     expect(restrictedRow?.textContent).toContain('恒岳法务')

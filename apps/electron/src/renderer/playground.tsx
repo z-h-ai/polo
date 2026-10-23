@@ -8,7 +8,7 @@ import './playground/mock-utils'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { Provider as JotaiProvider } from 'jotai'
-import { setupI18n } from '@polo-ai/shared/i18n'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import { initReactI18next } from 'react-i18next'
 import { ThemeProvider } from './context/ThemeContext'
 import { Toaster } from './components/ui/sonner'
@@ -20,6 +20,14 @@ import './index.css'
 // Initialize i18n before any React rendering. `useTranslation()` reads from
 // the shared global instance, so we don't need an <I18nextProvider>.
 setupI18n([initReactI18next])
+
+// No language detector is installed here, so i18next would stay on its `en`
+// fallback and every preview would render English. Mirror main.tsx: respect
+// the cached language, else the POO-41 frozen product default (zh-Hans).
+const STORED_LANGUAGE_KEY = 'i18nextLng'
+// eslint-disable-next-line polo-ai/no-localstorage -- i18next language cache key; also written by AppearanceSettingsPage on explicit change
+const storedLanguage = window.localStorage.getItem(STORED_LANGUAGE_KEY)
+void i18n.changeLanguage(storedLanguage ?? 'zh-Hans')
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
