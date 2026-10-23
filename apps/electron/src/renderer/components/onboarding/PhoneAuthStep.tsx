@@ -16,6 +16,7 @@ import {
   maskMainlandPhone,
   reducePhoneAuthForm,
 } from "./phone-auth-utils"
+import type { PhoneAuthFormAction, PhoneAuthFormState } from "./phone-auth-utils"
 
 interface PhoneAuthStepProps {
   isLoading: boolean
@@ -27,6 +28,16 @@ interface PhoneAuthStepProps {
   onUsePassword: () => void
   /** Shared inline error surface, rendered below the panel heading. */
   errorNode?: ReactNode
+  /**
+   * Controlled form state — AdminLoginStep owns it so switching to the
+   * password view and back no longer drops the phone/scene mid-login
+   * (P70-PHONE "keep the login target"). Falls back to local state for
+   * standalone mounts.
+   */
+  formState?: PhoneAuthFormState
+  onFormAction?: (action: PhoneAuthFormAction) => void
+  /** Cancels an in-flight send/verify, mirroring the password scene's cancel. */
+  onCancel?: () => void
 }
 
 export function PhoneAuthStep({
@@ -38,9 +49,14 @@ export function PhoneAuthStep({
   onVerify,
   onUsePassword,
   errorNode = null,
+  formState,
+  onFormAction,
+  onCancel,
 }: PhoneAuthStepProps) {
   const { t } = useTranslation()
-  const [form, dispatch] = useReducer(reducePhoneAuthForm, INITIAL_PHONE_AUTH_FORM_STATE)
+  const [localForm, dispatchLocal] = useReducer(reducePhoneAuthForm, INITIAL_PHONE_AUTH_FORM_STATE)
+  const form = formState ?? localForm
+  const dispatch = onFormAction ?? dispatchLocal
   const [isSending, setIsSending] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
   const [countdownTick, setCountdownTick] = useState(0)
@@ -158,6 +174,19 @@ export function PhoneAuthStep({
             )}
           </button>
 
+          {/* Same operational escape hatch as the password scene: a hung
+          send/verify must not hard-lock the phone branch (busy L1). */}
+          {isBusy && onCancel ? (
+            <button
+              type="button"
+              data-testid="phone-auth-cancel"
+              onClick={onCancel}
+              className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+            >
+              {t('common.cancel')}
+            </button>
+          ) : null}
+
           <AdminLoginMethodSwitch
             target="password"
             disabled={isBusy}
@@ -238,6 +267,19 @@ export function PhoneAuthStep({
           disabled={isBusy}
           onSwitch={onUsePassword}
         />
+
+        {/* Same operational escape hatch as the password scene: a hung
+        verify must not hard-lock the code scene (busy L1). */}
+        {isBusy && onCancel ? (
+          <button
+            type="button"
+            data-testid="phone-auth-cancel"
+            onClick={onCancel}
+            className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+          >
+            {t('common.cancel')}
+          </button>
+        ) : null}
 
         {/* Prototype `.button.quiet`: bordered quiet row under the primary.
         Resending is a code send, so it shares the entry consent gate

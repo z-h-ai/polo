@@ -1,5 +1,5 @@
 import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
-import { useEffect, useState } from "react"
+import { useEffect, useReducer, useState } from "react"
 import type { FormEvent, ReactNode } from "react"
 import { AlertTriangle, Check, Eye, EyeOff } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
@@ -14,6 +14,8 @@ import { LoginAgreementClause } from "./LoginAgreementClause"
 import { LoginTrustRow } from "./LoginTrustRow"
 import {
   createPhoneAuthResendDeadline,
+  INITIAL_PHONE_AUTH_FORM_STATE,
+  reducePhoneAuthForm,
   resolvePreferredAdminLoginMode,
 } from "./phone-auth-utils"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
@@ -57,6 +59,14 @@ export function AdminLoginStep({
   const [phoneAuthResendDeadlines, setPhoneAuthResendDeadlines] = useState<
     ReadonlyMap<string, number>
   >(() => new Map())
+  // The phone form lives here (not inside PhoneAuthStep) so switching to the
+  // password view and back no longer resets the phone/scene/consent while the
+  // server-side resend deadline keeps ticking — the same persistence the
+  // password fields already have (P70-PHONE "keep the login target").
+  const [phoneForm, dispatchPhoneFormAction] = useReducer(
+    reducePhoneAuthForm,
+    INITIAL_PHONE_AUTH_FORM_STATE,
+  )
 
   useEffect(() => {
     if (phoneAuthEnabled !== undefined) {
@@ -65,7 +75,7 @@ export function AdminLoginStep({
   }, [phoneAuthEnabled])
 
   useEffect(() => {
-    if (!isLoading || loginMode !== 'password' || !onCancel) return
+    if (!isLoading || !onCancel) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -73,7 +83,7 @@ export function AdminLoginStep({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isLoading, loginMode, onCancel])
+  }, [isLoading, onCancel])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -185,6 +195,9 @@ export function AdminLoginStep({
               }}
               onVerify={onVerifyPhoneCode}
               onUsePassword={() => switchMode("password")}
+              formState={phoneForm}
+              onFormAction={dispatchPhoneFormAction}
+              onCancel={onCancel}
             />
           ) : (
             <>
