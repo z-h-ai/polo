@@ -483,6 +483,17 @@ validate_linux() {
   APP_ROOTS+=("$extract_root/squashfs-root")
   CURRENT_ARTIFACT="$appimage"
   CURRENT_VERSION="$VALIDATED_VERSION"
+  # POO-130 diagnostics: prove whether sharp's linux native packages made it
+  # into the AppImage and whether the bundled bun can load the addon from the
+  # server bundle's resolution root.
+  local diag_app_root="$extract_root/squashfs-root/resources/app"
+  echo "POO-130 diag: ls $diag_app_root/node_modules/@img:"
+  ls "$diag_app_root/node_modules/@img" 2>&1 | head -10
+  echo "POO-130 diag: sharp native addons found in extraction:"
+  find "$extract_root/squashfs-root" -path "*sharp*" -name "*.node" 2>/dev/null | head -5
+  echo "POO-130 diag: bundled bun require('@img/sharp-linux-x64') from dist/server:"
+  (cd "$diag_app_root/dist/server" \
+    && "$diag_app_root/vendor/bun/bun" -e 'try { const m = require("@img/sharp-linux-x64"); console.log("POO-130 diag: ADDON LOADED ok") } catch (e) { console.log("POO-130 diag: ADDON LOAD FAIL:", String(e.message).slice(0, 300)) }') 2>&1 | tail -2
 }
 
 preflight_previous_artifact() {
