@@ -101,6 +101,12 @@ describe('Transport — error code preservation', () => {
     expect((caught as { code?: string }).code).toBe('BROWSER_REMOTE_EVALUATE_BLOCKED')
   })
 
+  it('R8 preserves circle admission code and recovery through real RPC', async () => {
+    const { server, client } = await startPair()
+    server.handle('circle-admission', async () => { throw Object.assign(new Error('Refresh memberships'), { code: 'CIRCLE_ENTITLEMENT_REQUIRED', details: { reason: 'unknown', recovery: 'refresh_membership' } }) })
+    await expect(client.invoke('circle-admission')).rejects.toMatchObject({ code: 'CIRCLE_ENTITLEMENT_REQUIRED', data: { reason: 'unknown', recovery: 'refresh_membership' } })
+  })
+
   it('falls back to HANDLER_ERROR when handler throws a plain Error', async () => {
     const { server, client } = await startPair()
     server.handle('plain', async () => { throw new Error('boom') })

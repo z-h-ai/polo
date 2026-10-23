@@ -131,6 +131,14 @@ export function createInitialClientPageState(scopeKey: string): ClientPageState 
 export function clientPageStateReducer(state: ClientPageState, action: ClientPageAction): ClientPageState {
   switch (action.type) {
     case 'navigate': {
+      // Home is a destination, not another history entry. Every outer home
+      // entry must discard old circles/details, including a directed return
+      // to the list that itself pushed a route.
+      if (action.route.kind === 'home') {
+        return state.stack.length === 1
+          ? state
+          : { ...state, stack: [HOME_CLIENT_PAGE_ROUTE] }
+      }
       const current = state.stack[state.stack.length - 1]!
       if (areClientPageRoutesEqual(current, action.route)) return state
       const stack = [...state.stack, action.route]

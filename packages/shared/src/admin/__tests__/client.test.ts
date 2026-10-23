@@ -387,6 +387,12 @@ describe('AdminClient', () => {
     });
   });
 
+  it('R8 HTTP200 valid=true/null configVersion is an online valid session', async () => {
+    const payload = { valid: true, configVersion: null, user: { id: 'user-1', username: 'admin', displayName: null, role: 'admin', groupIds: [] } }
+    mockJsonFetch(payload)
+    expect(await new AdminClient('https://admin.example.com').validate('r8-owned-token')).toEqual(payload)
+  })
+
   it('sends validate request with bearer access token', async () => {
     const response = {
       valid: true,
@@ -423,7 +429,7 @@ describe('AdminClient', () => {
 
     mockJsonFetch({
       valid: true,
-      configVersion: null,
+      configVersion: 42,
       user: {
         id: 'user-1',
         username: 'admin',

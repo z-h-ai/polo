@@ -35,6 +35,7 @@ import {
   type HomeAppDirectory,
   type HomeAppDirectoryEntry,
 } from '@/lib/home-app-directory'
+import { useMemberCircleClock } from '@/hooks/useMemberCircleClock'
 import { selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
 import {
   formatBytes,
@@ -222,12 +223,14 @@ export function HomePage() {
   // restricted-circle ids mark the corresponding creator_circle sources lost
   // (the leave/revocation projection of §13.5: only the LAST valid source
   // failing blocks a work).
+  const entitlementNow = useMemberCircleClock(circlesResource?.memberships ?? circlesResource?.circles ?? [])
   const lostCircleIds = useMemo(
     () => selectLostCircleAuthorizationIds(
       circlesResource?.circles ?? [],
       circlesResource?.memberships ?? [],
+      entitlementNow,
     ),
-    [circlesResource?.circles, circlesResource?.memberships],
+    [circlesResource?.circles, circlesResource?.memberships, entitlementNow],
   )
   const directory = useMemo<HomeAppDirectory>(
     () => selectHomeAppDirectory(catalog.state.catalog, {
@@ -533,7 +536,16 @@ export function HomePage() {
           className="mt-[24px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
           data-testid="home-restricted-banner"
         >
-          {t('homeApps.organization.accessError')}
+          <span>{t('homeApps.organization.accessError')}</span>
+          <button
+            type="button"
+            data-testid="home-directory-denied-retry"
+            className="ml-[12px] inline-flex min-h-[28px] items-center rounded-[8px] border border-border px-[12px] font-medium text-foreground hover:bg-foreground-5"
+            disabled={catalog.state.refreshing}
+            onClick={() => { void catalog.sync(true) }}
+          >
+            {t('homeApps.actions.tryAgain')}
+          </button>
         </div>
       )}
       {phase === 'offline' && (
@@ -541,7 +553,16 @@ export function HomePage() {
           className="mt-[24px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text"
           data-testid="home-directory-offline-banner"
         >
-          {t('homeApps.organization.offlineWarning')}
+          <span>{t('homeApps.organization.offlineWarning')}</span>
+          <button
+            type="button"
+            data-testid="home-directory-offline-retry"
+            className="ml-[12px] inline-flex min-h-[28px] items-center rounded-[8px] border border-border px-[12px] font-medium text-foreground hover:bg-foreground-5"
+            disabled={catalog.state.refreshing}
+            onClick={() => { void catalog.sync(true) }}
+          >
+            {t('homeApps.actions.tryAgain')}
+          </button>
         </div>
       )}
       {phase === 'error' && hasCachedCatalog && (
