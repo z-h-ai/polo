@@ -125,6 +125,23 @@ macos_designated_requirement() {
     | tail -1
 }
 
+macos_stapler_validate() {
+  # stapler validate consults Apple services on CI runners and intermittently
+  # fails on a bundle whose ticket is present and valid (observed on the same
+  # mounted App passing and failing ~100s apart during the v0.19.0 release
+  # runs). Retry before concluding the ticket is absent; the acceptance bar
+  # itself is unchanged.
+  local target="$1"
+  local attempt
+  for attempt in 1 2 3; do
+    if xcrun stapler validate "$target" >/dev/null 2>&1; then
+      return 0
+    fi
+    [ "$attempt" -lt 3 ] && sleep 10
+  done
+  return 1
+}
+
 validate_macos_release_identity() {
   local label="$1"
   local app_bundle="$2"
@@ -148,7 +165,7 @@ validate_macos_release_identity() {
     | grep -F 'source=Notarized Developer ID' >/dev/null; then
     notarization=accepted
   fi
-  if xcrun stapler validate "$app_bundle" >/dev/null 2>&1; then
+  if macos_stapler_validate "$app_bundle"; then
     stapling=valid
   fi
 
@@ -185,7 +202,7 @@ validate_macos_dmg_release_identity() {
   # A valid stapled Apple ticket is bound to this exact disk image and is only
   # issued after Notary service acceptance. It is therefore the portable,
   # cryptographic release proof for the outer DMG.
-  if xcrun stapler validate "$dmg" >/dev/null 2>&1; then
+  if macos_stapler_validate "$dmg"; then
     stapling=valid
     notarization=accepted
   fi
