@@ -4,7 +4,9 @@
  * One per session, rendered by AppShell outside PanelStackContainer (the
  * right sidebar stays OUTSIDE that container, by its own contract): header
  * (app name + version + close) over the app's webview, with a drag sash on
- * its left edge (25%–70% of the shell row, remembered per session).
+ * its left edge (25%–70% of the shell row, remembered per session). The pane
+ * springs open from the seam on mount; while the sash is down a window-wide
+ * drag mask keeps every guest webview from swallowing the drag's mousemove.
  *
  * The webview is the same carrier contract as the inline card — same
  * ephemeral `genui-app-<sessionId>` partition, same bundle file, same
@@ -17,8 +19,10 @@
 
 import * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useAtom, useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
+import { motion, useReducedMotion } from 'motion/react'
 import { AppWindow, X } from 'lucide-react'
 import {
   GENUI_APP_CANVAS_FOCUS_EVENT,
@@ -32,6 +36,7 @@ import {
 } from '@polo-ai/ui/chat/GenUiAppCard'
 import { cn } from '@/lib/utils'
 import {
+  PANEL_EDGE_INSET,
   PANEL_SASH_HIT_WIDTH,
   PANEL_SASH_HALF_HIT_WIDTH,
   PANEL_SASH_LINE_WIDTH,
@@ -39,6 +44,7 @@ import {
 import {
   CANVAS_PANE_MAX_RATIO,
   CANVAS_PANE_MIN_RATIO,
+  canvasPaneRatioFromPointer,
   clampCanvasPaneRatio,
   canvasPaneAppAtomFamily,
   canvasPaneWidthAtomFamily,
@@ -49,6 +55,10 @@ import {
 const FOCUS_FLASH_MS = 900
 /** Keyboard nudge per ArrowLeft/ArrowRight on the sash. */
 const KEYBOARD_RATIO_STEP = 0.025
+/** Spring for programmatic width changes — matches PanelStackContainer's panels. */
+const CANVAS_PANE_SPRING = { type: 'spring' as const, stiffness: 600, damping: 49 }
+/** Reduced-motion fallback: same short tween CompactPanelTransition uses. */
+const CANVAS_PANE_REDUCED_TWEEN = { type: 'tween' as const, duration: 0.12 }
 
 interface CanvasPaneProps {
   sessionId: string
@@ -70,6 +80,7 @@ export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [focusing, setFocusing] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
+  const reduceMotion = useReducedMotion()
 
   // Per-mount card id (POO-103), same scheme as the inline card — the pane's
   // guest is its own UiCardRegistry entry, not a shadow of the card's.
@@ -99,21 +110,47 @@ export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
   }, [app.appId, sessionId])
 
   // Sash drag: pointer x → ratio of the shell row, clamped to the pane band.
+  // Measured against the row's *content* box: the pane's % width resolves
+  // against rect.width minus the row's right edge inset, so the border box
+  // would leave the sash a few pixels shy of the pointer. The inset is read
+  // from the row's computed style rather than assumed, so the basis stays
+  // exact if the row's styling ever changes.
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
+  const measureRowInset = useCallback(() => {
+    const row = rootRef.current?.parentElement
+    if (!row) return PANEL_EDGE_INSET
+    const pad = Number.parseFloat(window.getComputedStyle(row).paddingRight)
+    return Number.isFinite(pad) ? pad : PANEL_EDGE_INSET
+  }, [])
+
   useEffect(() => {
     if (!isDragging) return
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+    const inset = measureRowInset()
+    const startRect = getLayoutRect()
+    const innerWidth = startRect ? Math.max(startRect.width - inset, 1) : 1
     const onMove = (event: MouseEvent) => {
       const rect = getLayoutRect()
-      if (!rect || rect.width <= 0) return
-      setWidthRatio(clampCanvasPaneRatio((rect.right - event.clientX) / rect.width))
+      if (!rect) return
+      setWidthRatio(canvasPaneRatioFromPointer(rect.right, inset, innerWidth, event.clientX))
     }
+    // blur/pointercancel: a release outside the window (alt-tab, stray gesture)
+    // never delivers mouseup — without these the drag mask would stay up.
     const onUp = () => setIsDragging(false)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
+    window.addEventListener('blur', onUp)
+    window.addEventListener('pointercancel', onUp)
     return () => {
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('blur', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
-  }, [getLayoutRect, isDragging, setWidthRatio])
+  }, [getLayoutRect, isDragging, measureRowInset, setWidthRatio])
 
   // Placeholder → "show in canvas": flash the focus ring for this very app.
   const focusTimerRef = useRef<number | null>(null)
@@ -145,11 +182,40 @@ export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
   if (!appAtom || appAtom.appId !== app.appId) return null
 
   return (
-    <div
+    <motion.div
+      ref={rootRef}
       className="relative flex items-stretch shrink-0"
-      style={{ width: `${widthRatio * 100}%` }}
+      // The pane sweeps open from the seam on mount (canvas open, session
+      // switch back to a pane session); width tracks the dragged ratio
+      // instantly and springs only for programmatic changes (open, keyboard
+      // nudge) — same rule as PanelStackContainer's panels.
+      initial={{ width: '0%' }}
+      animate={{ width: `${widthRatio * 100}%` }}
+      transition={
+        isDragging
+          ? { duration: 0 }
+          : reduceMotion
+            ? CANVAS_PANE_REDUCED_TWEEN
+            : CANVAS_PANE_SPRING
+      }
       data-canvas-pane={app.appId}
     >
+      {/* Drag mask: keeps the hit-test in this document while the sash is
+          down. Without it a shrink drag drifts onto a guest <webview>, which
+          swallows window mousemove and freezes the sash — the "only grows,
+          never shrinks" bug. The pane's own mask is not enough: shrinking can
+          cross OTHER live inline webviews in the chat area, so the mask spans
+          the whole window via a portal and outlives no drag (unmounts on
+          up/blur/cancel, so a frozen drag cannot leave it stuck). */}
+      {isDragging &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-panel cursor-col-resize"
+            data-canvas-pane-drag-mask="true"
+            aria-hidden="true"
+          />,
+          document.body,
+        )}
       {/* Resize sash straddling the panel gap on the pane's left edge. */}
       <div
         role="separator"
@@ -159,7 +225,20 @@ export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
         aria-valuemin={Math.round(CANVAS_PANE_MIN_RATIO * 100)}
         aria-valuemax={Math.round(CANVAS_PANE_MAX_RATIO * 100)}
         tabIndex={0}
-        onMouseDown={(e) => { e.preventDefault(); setIsDragging(true) }}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          // Adopt the pointer immediately so grabbing the sash mid-open-
+          // animation does not jump to the spring's in-flight width on the
+          // first tracked move (duration: 0 takes over from wherever we are).
+          const rect = getLayoutRect()
+          if (rect) {
+            const inset = measureRowInset()
+            setWidthRatio(
+              canvasPaneRatioFromPointer(rect.right, inset, Math.max(rect.width - inset, 1), e.clientX),
+            )
+          }
+          setIsDragging(true)
+        }}
         onKeyDown={handleSashKeyDown}
         className="absolute top-0 bottom-0 z-panel cursor-col-resize flex justify-center outline-none"
         style={{ left: -PANEL_SASH_HALF_HIT_WIDTH, width: PANEL_SASH_HIT_WIDTH }}
@@ -209,6 +288,6 @@ export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
           />
         )}
       </div>
-    </div>
+    </motion.div>
   )
 }

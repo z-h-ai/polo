@@ -4,6 +4,7 @@ import {
   CANVAS_PANE_DEFAULT_RATIO,
   CANVAS_PANE_MAX_RATIO,
   CANVAS_PANE_MIN_RATIO,
+  canvasPaneRatioFromPointer,
   clampCanvasPaneRatio,
   canvasPaneAppAtomFamily,
   canvasPaneWidthAtomFamily,
@@ -45,5 +46,29 @@ describe('canvas pane atom families', () => {
     store.set(canvasPaneWidthAtomFamily('sess-2'), 0.3)
     expect(store.get(canvasPaneWidthAtomFamily('sess-1'))).toBe(0.62)
     expect(store.get(canvasPaneWidthAtomFamily('sess-2'))).toBe(0.3)
+  })
+})
+
+describe('canvasPaneRatioFromPointer', () => {
+  // A 1000px row with a 6px right inset: content box spans [0, 994].
+  const rectRight = 1000
+  const inset = 6
+  const innerWidth = 994
+
+  it('maps the pointer linearly across the row (before clamping)', () => {
+    // In-band probe points: 0.7 of the content box and 0.25 of it.
+    expect(canvasPaneRatioFromPointer(rectRight, inset, innerWidth, 994 - 0.7 * 994)).toBeCloseTo(0.7)
+    expect(canvasPaneRatioFromPointer(rectRight, inset, innerWidth, 994 - 0.25 * 994)).toBeCloseTo(0.25)
+    expect(canvasPaneRatioFromPointer(rectRight, inset, innerWidth, 994 - 0.5 * 994)).toBeCloseTo(0.5)
+  })
+
+  it('clamps into the pane band and ignores the border-box remainder', () => {
+    expect(canvasPaneRatioFromPointer(rectRight, inset, innerWidth, 1000)).toBe(CANVAS_PANE_MIN_RATIO)
+    expect(canvasPaneRatioFromPointer(rectRight, inset, innerWidth, -100)).toBe(CANVAS_PANE_MAX_RATIO)
+  })
+
+  it('falls back to the default ratio on a degenerate row', () => {
+    expect(canvasPaneRatioFromPointer(rectRight, inset, 0, 500)).toBe(CANVAS_PANE_DEFAULT_RATIO)
+    expect(canvasPaneRatioFromPointer(rectRight, inset, -5, 500)).toBe(CANVAS_PANE_DEFAULT_RATIO)
   })
 })
