@@ -100,11 +100,11 @@ jobs:
       POLO_AI_RELEASE_MACOS_APP_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_APP_REQUIREMENT }}
       POLO_AI_RELEASE_MACOS_UV_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_UV_REQUIREMENT }}
       POLO_AI_RELEASE_SIGNING_AUDIT_FILE: ${{ matrix.platform == 'macos' && format('{0}/apps/electron/release/release-signing-audit-macos-{1}.jsonl', github.workspace, matrix.arch) || '' }}
-      CSC_LINK: ${{ matrix.platform == 'macos' && secrets.macos_csc_link || '' }}
-      CSC_KEY_PASSWORD: ${{ matrix.platform == 'macos' && secrets.macos_csc_key_password || '' }}
-      APPLE_ID: ${{ matrix.platform == 'macos' && secrets.apple_id || '' }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'macos' && secrets.apple_app_specific_password || '' }}
-      APPLE_TEAM_ID: ${{ matrix.platform == 'macos' && secrets.apple_team_id || '' }}
+      CSC_LINK: ${{ matrix.platform == 'macos' && secrets.POLO_AI_MACOS_CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.platform == 'macos' && secrets.POLO_AI_MACOS_CSC_KEY_PASSWORD || '' }}
+      APPLE_ID: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_TEAM_ID || '' }}
 
     steps:
       - name: Checkout immutable release commit
