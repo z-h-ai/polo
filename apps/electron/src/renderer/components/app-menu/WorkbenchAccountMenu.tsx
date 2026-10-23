@@ -5,6 +5,7 @@ import { isMac } from "@/lib/platform"
 import { useActionLabel, useOptionalActionRegistry } from "@/actions"
 import { useOptionalAppShellContext } from "@/context/AppShellContext"
 import { useOptionalTheme } from "@/context/ThemeContext"
+import { useTabShell } from "@/context/TabShellContext"
 import { navigate, routes } from "@/lib/navigate"
 import {
   DropdownMenuSub,
@@ -55,6 +56,14 @@ export interface WorkbenchAccountMenuProps {
    */
   canOpenPayment?: boolean
   onOpenPayment?: () => void
+  /**
+   * POO-119: the enterprise admin console / creator center entries share the
+   * same TopBar-owned lifetime — the visibility gate AND the fail-closed
+   * click-time lease check (admin session + unchanged space context) live in
+   * the TopBar, which survives menu close/reopen.
+   */
+  canOpenEnterpriseWorkflows?: boolean
+  onOpenEnterpriseWorkflow?: (workflow: 'members' | 'publishing') => void
 }
 
 const roleHandlers: Record<string, () => void> = {
@@ -196,16 +205,27 @@ function renderDebugSubmenu(t: (key: string) => string): React.ReactNode {
   )
 }
 
-export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, onOpenPayment }: WorkbenchAccountMenuProps) {
+export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, onOpenPayment, canOpenEnterpriseWorkflows, onOpenEnterpriseWorkflow }: WorkbenchAccountMenuProps) {
   const { t } = useTranslation()
   const appShell = useOptionalAppShellContext()
   const theme = useOptionalTheme()
   const actionRegistry = useOptionalActionRegistry()
+  const { openTabs, activateTab } = useTabShell()
   const [isDebugMode, setIsDebugMode] = useState(false)
 
   useEffect(() => {
     window.electronAPI.isDebugMode().then(setIsDebugMode)
   }, [])
+
+  // R8 navigation boundary: settings pages are Polo-scope routes rendered
+  // inside the Polo tab. Firing the navigation from this menu while another
+  // tab is active would change no visible surface, so activate the carrier
+  // first (no-op when the tab was closed).
+  const openPoloTab = openTabs.find((tab) => tab.type === "polo")
+  const openPoloScoped = (request: () => void) => {
+    if (openPoloTab) activateTab(openPoloTab.id)
+    request()
+  }
 
   const user = appShell?.currentAdminUser ?? null
   const userLabel = user?.displayName || user?.username || ""
@@ -230,7 +250,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
         </div>
       )}
       {appShell && (
-        <StyledDropdownMenuItem onClick={appShell.onOpenSettings}>
+        <StyledDropdownMenuItem onClick={() => openPoloScoped(appShell.onOpenSettings)}>
           <Icons.Settings className="h-3.5 w-3.5" />
           {t("menu.settings")}
         </StyledDropdownMenuItem>
@@ -240,6 +260,28 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
           <Icons.Coins className="h-4 w-4" />
           {t("topbar.account.payment")}
         </StyledDropdownMenuItem>
+      )}
+      {/* POO-119 ENTMENU-01/02: enterprise-scope console entries. Visibility is
+          TopBar-gated (enterprise space + owner/manager only — ENTMENU-03
+          members and ENTMENU-04 personal spaces see neither); the click goes
+          through the TopBar lease check before any browser handoff. */}
+      {canOpenEnterpriseWorkflows && (
+        <>
+          <StyledDropdownMenuItem
+            data-testid="topbar-enterprise-admin"
+            onClick={() => onOpenEnterpriseWorkflow?.('members')}
+          >
+            <Icons.Building2 className="h-4 w-4" />
+            {t("topbar.account.enterpriseAdmin")}
+          </StyledDropdownMenuItem>
+          <StyledDropdownMenuItem
+            data-testid="topbar-creator-center"
+            onClick={() => onOpenEnterpriseWorkflow?.('publishing')}
+          >
+            <Icons.Palette className="h-4 w-4" />
+            {t("topbar.account.creatorCenter")}
+          </StyledDropdownMenuItem>
+        </>
       )}
       <ProductSpaceSwitcher />
       {theme && (
@@ -300,7 +342,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
             )
           })}
           <StyledDropdownMenuItem
-            onClick={() => navigate(routes.view.settings('shortcuts'))}
+            onClick={() => openPoloScoped(() => navigate(routes.view.settings('shortcuts')))}
           >
             <Icons.Keyboard className="h-3.5 w-3.5" />
             {t(ROOT_MENU.keyboardShortcuts.labelKey)}

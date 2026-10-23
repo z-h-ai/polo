@@ -1,5 +1,5 @@
 import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
-import { useEffect, useState } from "react"
+import { useEffect, useReducer, useState } from "react"
 import type { FormEvent, ReactNode } from "react"
 import { AlertTriangle, Check, Eye, EyeOff } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
@@ -14,6 +14,8 @@ import { LoginAgreementClause } from "./LoginAgreementClause"
 import { LoginTrustRow } from "./LoginTrustRow"
 import {
   createPhoneAuthResendDeadline,
+  INITIAL_PHONE_AUTH_FORM_STATE,
+  reducePhoneAuthForm,
   resolvePreferredAdminLoginMode,
 } from "./phone-auth-utils"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
@@ -26,6 +28,7 @@ interface AdminLoginStepProps {
   onSendPhoneCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
   onVerifyPhoneCode: (phone: string, code: string) => Promise<boolean>
   onSubmit: (identifier: string, password: string) => void
+  onCancel?: () => void
 }
 
 const STORY_POINTS = [
@@ -42,6 +45,7 @@ export function AdminLoginStep({
   onSendPhoneCode,
   onVerifyPhoneCode,
   onSubmit,
+  onCancel,
 }: AdminLoginStepProps) {
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
@@ -55,12 +59,31 @@ export function AdminLoginStep({
   const [phoneAuthResendDeadlines, setPhoneAuthResendDeadlines] = useState<
     ReadonlyMap<string, number>
   >(() => new Map())
+  // The phone form lives here (not inside PhoneAuthStep) so switching to the
+  // password view and back no longer resets the phone/scene/consent while the
+  // server-side resend deadline keeps ticking — the same persistence the
+  // password fields already have (P70-PHONE "keep the login target").
+  const [phoneForm, dispatchPhoneFormAction] = useReducer(
+    reducePhoneAuthForm,
+    INITIAL_PHONE_AUTH_FORM_STATE,
+  )
 
   useEffect(() => {
     if (phoneAuthEnabled !== undefined) {
       setLoginMode(resolvePreferredAdminLoginMode(phoneAuthEnabled))
     }
   }, [phoneAuthEnabled])
+
+  useEffect(() => {
+    if (!isLoading || !onCancel) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onCancel()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isLoading, onCancel])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -87,6 +110,17 @@ export function AdminLoginStep({
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>{errorMessage}</span>
+          {errorMessage === t('onboarding.adminLogin.localLogoutFailed') && onCancel ? (
+            <button
+              type="button"
+              data-testid="admin-logout-retry"
+              disabled={isLoading}
+              onClick={onCancel}
+              className="shrink-0 underline underline-offset-2"
+            >
+              {t('common.retry')}
+            </button>
+          ) : null}
         </motion.div>
       ) : null}
     </AnimatePresence>
@@ -161,6 +195,9 @@ export function AdminLoginStep({
               }}
               onVerify={onVerifyPhoneCode}
               onUsePassword={() => switchMode("password")}
+              formState={phoneForm}
+              onFormAction={dispatchPhoneFormAction}
+              onCancel={onCancel}
             />
           ) : (
             <>
@@ -243,6 +280,16 @@ export function AdminLoginStep({
                     t("onboarding.adminLogin.continue")
                   )}
                 </button>
+
+                {isLoading && onCancel ? (
+                  <button
+                    type="button"
+                    onClick={onCancel}
+                    className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                ) : null}
 
                 {phoneAuthEnabled ? (
                   <AdminLoginMethodSwitch

@@ -1,3 +1,4 @@
+import type { LocalAppAdmissionFailure } from '@polo-ai/shared/protocol'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
@@ -490,7 +491,7 @@ export type AdminSetPasswordResult =
   | ({ success: false } & AdminRpcErrorPayload)
 
 export type AdminValidateResult =
-  | { loggedIn: true; user: AdminUser; configVersion: string; offline?: boolean }
+  | { loggedIn: true; user: AdminUser; configVersion: string | null; offline?: boolean }
   | ({ loggedIn: false } & AdminRpcErrorPayload)
 
 export interface AdminStatusResult {
@@ -789,7 +790,7 @@ export interface ElectronAPI {
       arch: 'arm64' | 'x64'
     }>
     install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
-    installProductSpaceBundle(request: ProductSpaceBundleInstallRequest): Promise<LocalAppInstalledApp>
+    installProductSpaceBundle(request: ProductSpaceBundleInstallRequest): Promise<LocalAppInstalledApp | LocalAppAdmissionFailure>
     getProductSpaceInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
     getProductSpaceWithdrawnInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
     uninstallProductSpaceBundle(
@@ -797,12 +798,12 @@ export interface ElectronAPI {
       options?: LocalAppUninstallOptions,
     ): Promise<void>
     cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
-    start(request: CatalogLocalAppScope): Promise<LocalAppStartResult>
-    start(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
+    start(request: CatalogLocalAppScope): Promise<LocalAppStartResult | LocalAppAdmissionFailure>
+    start(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult | LocalAppAdmissionFailure>
     stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
     stop(request: LocalAppLifecycleRequest): Promise<LocalAppRuntimeStatus>
     restart(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
-    restart(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
+    restart(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult | LocalAppAdmissionFailure>
     uninstall(app: CatalogLocalAppScope, options?: LocalAppUninstallOptions): Promise<void>
     setAvailableRelease(
       app: CatalogLocalAppScope,

@@ -24,8 +24,8 @@ HEAD/status. Currency is proven by the input hashes themselves plus the
 byte-identical regeneration check — never by comparing snapshots to git.
 
 The manifest deliberately does NOT hash references/design-system.json: that
-model binds the hash of THIS manifest, so hashing the model back would create
-a cycle that can never converge. Only its `revision` string is fingerprinted.
+model binds upstream guides/generator sources; this manifest is downstream.
+Only the model `revision` string is fingerprinted, keeping generation one-way.
 
 Usage:
   python3 build.py                # regenerate the Skill assets in place
@@ -187,8 +187,8 @@ def collect_inputs(module_graph: list) -> dict:
             'build (hashes prove currency — a changed file cannot match). '
             'packages/lockfiles record the dependency set vite resolved. '
             'references/design-system.json is intentionally NOT an input: it binds '
-            'this manifest\'s hash, and hashing it back would make the pair unable '
-            'to converge. Only its revision string is fingerprinted.'
+            'upstream sources; material outputs are downstream. Only the revision '
+            'string is fingerprinted, avoiding model/output cycles.'
         ),
     }
 
@@ -364,10 +364,6 @@ def build(out: Path, provenance_base: dict | None) -> dict:
     (out / 'index.html').write_text(render_entry(manifest), encoding='utf-8')
     return manifest, reused
 
-    (out / 'baseline-manifest.json').write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + '\n')
-    (out / 'index.html').write_text(render_entry(manifest), encoding='utf-8')
-    return manifest
 
 
 def render_entry(m: dict) -> str:
@@ -423,24 +419,10 @@ def render_entry(m: dict) -> str:
 <h1>Polo AI Design System · 三层素材入口</h1>
 <p class="meta">统一入口由 <code>tools/source-baseline/build.py</code> 生成；基线素材 import 当前分支真实 renderer 源码，fixture 只替换后端数据。本页与 <code>entries/baseline.html</code> 的 JS/CSS 均已内联，可直接以 <code>file://</code> 打开。</p>
 
-<h2>第一层 · 设计基础（tokens 与原则）</h2>
-<div class="card">
-  <a href="../tokens/token-preview.html">Token 预览（workbench-base / POO-105 材质令牌）</a>
-  <p>色彩、字体、间距、材质 cascade 与状态合同；来源见 references/foundations.md。</p>
-</div>
-
-<h2>第二层 · 组件画廊（生产组件与变体）</h2>
-<div class="card">
-  <a href="entries/baseline.html?scene=components-gallery&amp;pure=1">组件画廊（生产组件逐条浏览，真实变体切换）</a>
-  <p>settings 组件 12 项（<code>@/components/settings</code>，其中 <code>settings-page-preview</code> 为 registry PageDemo 组合展示示例）、
-  聊天/TurnCard/输入区、onboarding 步骤件；渲染协议与 playground 注册同源，变体切换为真实受控交互；
-  每张卡标注生产落点（准确索引，不复制实现）。</p>
-</div>
-
-<h2>第三层 · 页面/区域基线（可直接作新需求起点）</h2>
+<h2>第一层 · 页面/区域基线（可直接作新需求起点）</h2>
 <div class="card">
   <a href="entries/baseline.html">当前实现基线 · 场景目录（{len(m['scenes'])} 个场景，按层分组）</a>
-  <p>登录壳、工作台整页、首页、圈子、助手、设置 {settings_n} 个场景（11 个注册表子页 + 1 个未登录独立态）——
+  <p>登录壳、工作台整页、首页、圈子、助手、设置 {settings_n} 个场景（注册表子页 + 未登录独立态；清单由源码求值）——
   全部由 <code>apps/electron/src/renderer</code> 真实组件渲染；地址支持 <code>?scene=ID</code> 与 <code>#scene=ID</code>，<code>&amp;pure=1</code> 为纯页面模式。</p>
 </div>
 <div class="card">
@@ -456,6 +438,21 @@ def render_entry(m: dict) -> str:
   <p>该层是已评审的目标模板基线，按已确认设计范围另列使用；与上面「当前实现基线」分层明确，勿混用。</p>
 </div>
 
+<h2>第二层 · 组件画廊（生产组件与变体）</h2>
+<div class="card">
+  <a href="entries/baseline.html?scene=components-gallery&amp;pure=1">组件画廊（生产组件逐条浏览，真实变体切换）</a>
+  <p>settings 组件 12 项（<code>@/components/settings</code>，其中 <code>settings-page-preview</code> 为 registry PageDemo 组合展示示例）、
+  聊天/TurnCard/输入区、onboarding 步骤件；渲染协议与 playground 注册同源，变体切换为真实受控交互；
+  每张卡标注生产落点（准确索引，不复制实现）。</p>
+</div>
+
+<h2>第三层 · 设计基础（tokens 与原则）</h2>
+<div class="card">
+  <a href="../tokens/token-preview.html">Token 预览（workbench-base / POO-105 材质令牌）</a>
+  <p>色彩、字体、间距、材质 cascade 与状态合同；来源见 references/foundations.md。</p>
+</div>
+
+<p>可编辑原生入口与任务候选/预览/导出方法：<code>references/native-reuse.md</code>；场景源码 <code>tools/source-baseline/entries/scenes.tsx</code>。不要编辑本 HTML 导出。</p>
 <h2>场景清单（由真实模块求值提取）</h2>
 {groups}
 

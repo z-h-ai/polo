@@ -38,6 +38,7 @@ import { navigate, routes } from "@/lib/navigate"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
 import { requestNewMainWindow } from "@/lib/new-window-request"
+import { createEnterpriseWorkflowUrl } from "@/lib/enterprise-workflow-url"
 import { getSessionTitle } from "@/utils/session"
 import { ChevronRight, UserRound } from "lucide-react"
 import {
@@ -95,10 +96,13 @@ export function TopBar() {
   // and both the one-handoff-at-a-time guard and the visible-scope mirror must
   // survive close/reopen (a remount would drop delayed handoffs and re-mint
   // tickets).
-  const paymentScope = useRef(productSpace)
+  // POO-119: the same lifetime argument applies to the enterprise-console
+  // entries — their click-time lease check must read a mirror that is updated
+  // for the WHOLE bar lifetime, not a per-open menu mount.
+  const visibleProductSpaceRef = useRef(productSpace)
   useInsertionEffect(() => {
-    paymentScope.current = productSpace
-    return () => { paymentScope.current = null }
+    visibleProductSpaceRef.current = productSpace
+    return () => { visibleProductSpaceRef.current = null }
   }, [productSpace])
   const canOpenPayment = productSpace && !productSpace.pendingSwitch && (
     productSpace.activeProductSpace.kind === 'personal' || productSpace.activeProductSpace.role === 'owner'
@@ -108,20 +112,70 @@ export function TopBar() {
   // silently — the first click still owns the outcome.
   const paymentHandoffInFlight = useRef(false)
   const openPayment = async () => {
-    const scope = paymentScope.current
+    const scope = visibleProductSpaceRef.current
     if (!scope || scope.pendingSwitch || paymentHandoffInFlight.current) return
     paymentHandoffInFlight.current = true
     try {
       const result = await window.electronAPI.adminPaymentHandoff()
-      const current = paymentScope.current
+      const current = visibleProductSpaceRef.current
       if (!current || current.accountId !== scope.accountId || current.activeProductSpaceId !== scope.activeProductSpaceId
         || current.contextVersion !== scope.contextVersion || current.pendingSwitch) return
       if (!result.success || result.accountId !== current.accountId || result.productSpaceId !== current.activeProductSpaceId) {
         toast.error(t("topbar.account.paymentError")); return
       }
       await window.electronAPI.openUrl(result.url)
-    } catch { if (paymentScope.current === scope) toast.error(t("topbar.account.paymentError")) }
+    } catch { if (visibleProductSpaceRef.current === scope) toast.error(t("topbar.account.paymentError")) }
     finally { paymentHandoffInFlight.current = false }
+  }
+
+  // POO-119 ENTMENU-01/02: the enterprise admin console and creator center
+  // live in the account menu, gated to enterprise spaces whose role may manage
+  // (owner/manager — ENTMENU-03 keeps members out, ENTMENU-04 keeps personal
+  // spaces out). A mid-switch scope never offers the entries.
+  const activeSpace = productSpace?.activeProductSpace
+  const canOpenEnterpriseWorkflows = Boolean(
+    productSpace && !productSpace.pendingSwitch
+    && activeSpace?.kind === 'enterprise'
+    && (activeSpace.role === 'owner' || activeSpace.role === 'manager'),
+  )
+  // One console handoff at a time, mirroring openPayment.
+  const enterpriseWorkflowInFlight = useRef(false)
+  const openEnterpriseWorkflow = async (workflow: 'members' | 'publishing') => {
+    const scope = visibleProductSpaceRef.current
+    if (!scope || scope.pendingSwitch || enterpriseWorkflowInFlight.current) return
+    const space = scope.activeProductSpace
+    // ENTMENU-05 fail-closed: re-derive the right to act from the live scope —
+    // a stale render (menu opened before a space/account change) never opens.
+    if (space.kind !== 'enterprise' || (space.role !== 'owner' && space.role !== 'manager')) return
+    const clickLease = {
+      accountId: scope.accountId,
+      activeProductSpaceId: scope.activeProductSpaceId,
+      contextKey: scope.productSpaceContextKey,
+      contextVersion: scope.contextVersion,
+      enterpriseId: space.enterpriseId,
+    }
+    enterpriseWorkflowInFlight.current = true
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      const live = visibleProductSpaceRef.current
+      const leaseAlive = live
+        && live.accountId === clickLease.accountId
+        && live.activeProductSpaceId === clickLease.activeProductSpaceId
+        && live.productSpaceContextKey === clickLease.contextKey
+        && live.contextVersion === clickLease.contextVersion
+        && !live.pendingSwitch
+      // The admin session must still belong to the account that clicked, and
+      // the trusted admin origin must exist — never open a guessed host.
+      if (!leaseAlive || !status.loggedIn || !status.adminUrl || status.userId !== clickLease.accountId) {
+        toast.error(t('topbar.account.enterpriseOpenFailed'), { description: t('homeApps.errors.staleContext') })
+        return
+      }
+      await window.electronAPI.openUrl(createEnterpriseWorkflowUrl(status.adminUrl, clickLease.enterpriseId, workflow))
+    } catch {
+      toast.error(t('topbar.account.enterpriseOpenFailed'))
+    } finally {
+      enterpriseWorkflowInFlight.current = false
+    }
   }
 
   const isHome = activeTab.type === "home"
@@ -351,6 +405,8 @@ export function TopBar() {
               onNewWindow={() => { void requestNewMainWindow() }}
               canOpenPayment={canOpenPayment ?? undefined}
               onOpenPayment={() => { void openPayment() }}
+              canOpenEnterpriseWorkflows={canOpenEnterpriseWorkflows}
+              onOpenEnterpriseWorkflow={(workflow) => { void openEnterpriseWorkflow(workflow) }}
             />
           </StyledDropdownMenuContent>
         </DropdownMenu>

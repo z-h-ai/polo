@@ -537,6 +537,24 @@ export class ScopedLocalAppRuntimeRegistry {
     return this.readPersistedScopes({})
   }
 
+  /**
+   * Main-only migration teardown for a scope identified by the legacy
+   * Catalog cache. Account fences intentionally remain closed: cleanup is
+   * not a business operation or a new account session. Native-admitted and
+   * unreadable installations are preserved even if an old cache matched.
+   * This method is never exposed as a renderer lifecycle channel.
+   */
+  async removeLegacyInstallationState(rawScope: CatalogLocalAppScope): Promise<void> {
+    const scope = validateCatalogLocalAppScope(rawScope)
+    const manager = await this.getExistingManager(scope)
+    if (!manager) return
+    const evidence = await manager.readNativeInstallationEvidence(createCatalogRuntimeAppId(scope), { allowMissingVersions: true })
+    if (!evidence) throw new LocalAppRuntimeError('UNINSTALL_FAILED', 'Legacy cleanup provenance could not be verified')
+    if (evidence.versions.some(version => version.admissionId !== null)) return
+    await this.stopApps([scope])
+    await manager.uninstall(createCatalogRuntimeAppId(scope), { preserveData: true })
+  }
+
   async getInstalledApps(
     scope: CatalogLocalAppScope,
   ): Promise<LocalAppInstalledApp[]> {

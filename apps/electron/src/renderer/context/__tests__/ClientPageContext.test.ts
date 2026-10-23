@@ -141,6 +141,17 @@ describe('clientPageStateReducer route stack', () => {
     expect(state).toBe(before)
   })
 
+  it('P-R2-01: explicit home navigation clears detail history even after a directed list return', () => {
+    const state = reducer(createInitialClientPageState('scope'),
+      { type: 'navigate', route: { kind: 'circles' } },
+      { type: 'navigate', route: { kind: 'circle-detail', circleId: 'c1', section: 'subscription' } },
+      { type: 'navigate', route: { kind: 'circles' } },
+      { type: 'navigate', route: { kind: 'home' } },
+    )
+    expect(state.stack).toEqual([{ kind: 'home' }])
+    expect(reducer(state, { type: 'back' }).stack).toEqual([{ kind: 'home' }])
+  })
+
   it('caps the stack depth above the un-shiftable home root', () => {
     let state = createInitialClientPageState('scope')
     for (let index = 0; index < CLIENT_PAGE_MAX_ROUTE_DEPTH + 10; index += 1) {

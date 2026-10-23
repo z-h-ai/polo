@@ -18,13 +18,13 @@
     ]
   },
   "mode": "extracted",
-  "revision": "poo105-client-material-r2-20261021",
+  "revision": "native-materials-r4-dev-aligned-20261023",
   "sources": [
     {
       "path": "docs/client-journey-review/spec.md",
-      "sha256": "d5233ff5bddd72362ef6c6dd0459b128253ef451e90287c9195fedb6a98264db",
+      "sha256": "c191aa04cd35abc5917451f421785ff053bf5b9183c2b6282f15a86c74e78d5e",
       "role": "authority",
-      "scope": "当前产品唯一来源 master-r15-closure；§13.8—13.14 覆盖旧设计指令"
+      "scope": "当前产品唯一来源；沿用既有视觉确认，D-PC-15 多空间登录确认仅按当前Spec适用，独立基线场景缺口另列"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -94,19 +94,19 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/usage-playbook.md",
-      "sha256": "47cd6163d373d8474c2b869268dccd415447bba15ecfce1fddfbb7dda0809d5b",
+      "sha256": "5c8ee3f1446a90c7894a159ecdce260e7dfefbb855d64f0cadc5c566a7ccca52",
       "role": "authority",
       "scope": "新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/page-baselines.md",
-      "sha256": "37f64e5b0d7c768d30cdbb65c754a8b778ddbfbc2fc9872c77dac40d1592ce7b",
+      "sha256": "1f8f5207d773719b1ea9806adc4567fbaf0c364d9c45e540bd3b9eb1ad4efbb4",
       "role": "authority",
       "scope": "页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/component-usage.md",
-      "sha256": "f9603d0b71bb0705e06f8a2aec848d56d34c49f8263d56bf96f69a7a56ed23ac",
+      "sha256": "571019ba393a2d1d1bb6f13cffed31704ac03697a7faa83a94c965b78986edbe",
       "role": "authority",
       "scope": "组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界"
     },
@@ -136,7 +136,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/build.py",
-      "sha256": "d9d87d3c601a5dd55c81ce813c2d21115ba27c9cec7246d2e923e9813603c8ae",
+      "sha256": "aa3f8aeeb445244037df2da327bba32ac21323082de2c7096ae3916515837f36",
       "role": "implementation",
       "scope": "基线落位生成器：tsc→vite SSR 场景提取→浏览器单文件打包→落位 assets/source-baseline→manifest+统一入口；--out 保护非拥有目录；--check 校验真实输入指纹与输出逐字节再生"
     },
@@ -150,7 +150,7 @@
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
       "sha256": "958a39ebee44cc66a3c674c69d0eaf5cdad27279c338e66d22ffc2d4d42b36ed",
       "role": "implementation",
-      "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置 11 子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
+      "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx",
@@ -181,6 +181,18 @@
       "sha256": "262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc",
       "role": "implementation",
       "scope": "基线 HTML 入口"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
+      "sha256": "d0c71d60967740283e140dd19b4db4277c213dc01eb4f3a9704e3d28c3ccce59",
+      "role": "implementation",
+      "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/references/style-usage.md",
+      "sha256": "0f87d6691a5436941a1fb1b0d57e640ae5d573d890618a3771897a24713e1887",
+      "role": "implementation",
+      "scope": "工作台与renderer样式体系、变量预览、原生消费和再生方法"
     }
   ],
   "themes": [
@@ -296,10 +308,11 @@
     "return to original circle/order with manual recheck"
   ],
   "prototype_guidance": [
+    "新需求先读 references/native-reuse.md：原生入口、任务内叶子副本/组合、providers与CSS扫描、独立依赖、真实预览和导出命令；assets是生成物，不手改、不静默改生产。",
     "先读 references/foundations.md，产品行为读Spec；当前实现基线直接打开 assets/source-baseline/index.html（file:// 可开；场景直达 entries/baseline.html?scene=<ID>）；目标设计仍消费 docs/mvp-complete-flow-hifi/prototype.html 与主manifest，逐卡按scene定位，与当前基线分开使用。",
     "实施流程按 references/usage-playbook.md：核实基线版本与范围→定位页面/区域→选择组件→消费变量→只修改必要区域→浏览器核验；新需求优先复用 Skill 内当前页面/区域基线，再真实组件，最后 token；旧目标设计按已确认范围另列，不覆盖当前实现基线。",
-    "当前实现基线（assets/source-baseline/）是 tools/source-baseline/build.py 的生成产物，不独立手改；含第二层组件画廊（components-gallery，三组生产组件卡与变体）与第三层页面/区域场景目录，场景清单以 assets/source-baseline/baseline-manifest.json 为准；当前性由 build.py --check 按真实输入指纹与输出逐字节再生判定，--out 只写入该工具自有目录。",
-    "页面/区域基线与覆盖缺口索引读 references/page-baselines.md；无法复现的区域标 Placeholder 并绑定真实代码路径，不得用历史画廊或快照冒充高保真；场景数量不是还原证明。",
+    "当前实现基线（assets/source-baseline/）是 tools/source-baseline/build.py 的生成产物，不独立手改；含第二层组件画廊（components-gallery，三组生产组件卡与变体）与页面/区域场景目录，场景清单以 assets/source-baseline/baseline-manifest.json 为准；当前性由 build.py --check 按真实输入指纹与输出逐字节再生判定，--out 只写入该工具自有目录。",
+    "页面/区域基线与覆盖缺口索引读 references/page-baselines.md；仅未修改且无法复现区域可标 Placeholder；需求区及必需入口/返回/结果须完整原生复用，不得用历史画廊或快照冒充高保真；场景数量不是还原证明。",
     "组件消费与可再生展示读 references/component-usage.md；第二层组件画廊离线浏览生产组件卡与变体（渲染协议与 playground 注册同源），playground（bun run electron:dev 后 :5173/playground.html）为完整交互调参台；assets/components/*.js 是原型行为脚本不是组件库。",
     "设计变量浏览 assets/tokens/token-preview.html（由 tools/build-token-preview.py 从两份权威 token CSS 确定性生成，禁手改）；产品面 hex 与 renderer oklch 两套 token 体系不可混用。",
     "最新原型是目标呈现；已确认风格/入口/文案与待复看整页布局分别记录。",
@@ -314,7 +327,7 @@
     "python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py",
     "env VITE_BIN=\"$PWD/node_modules/.bin/vite\" POLO_ELECTRON_ROOT=\"$PWD\" python3 docs/mvp-complete-flow-hifi/tools/build_review.py",
     "POLO_REVIEW_EVIDENCE=/tmp/poo70-design-structure python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py",
-    "python3 docs/mvp-complete-flow-hifi/tools/check_navigation_header.py",
+    "POLO_REVIEW_EVIDENCE=\"$(mktemp -d /tmp/polo-navigation.XXXXXX)\" python3 docs/mvp-complete-flow-hifi/tools/check_navigation_header.py",
     "python3 .agents/skills/polo-ai-design-system/tools/build-token-preview.py",
     "python3 .agents/skills/polo-ai-design-system/tools/source-baseline/build.py --check"
   ],
@@ -768,5 +781,23 @@
         }
       ]
     }
-  ]
+  ],
+  "materials": {
+    "version": 1,
+    "guide": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
+    "layers": [
+      {
+        "kind": "pages",
+        "source": ".agents/skills/polo-ai-design-system/references/page-baselines.md"
+      },
+      {
+        "kind": "components",
+        "source": ".agents/skills/polo-ai-design-system/references/component-usage.md"
+      },
+      {
+        "kind": "styles",
+        "source": ".agents/skills/polo-ai-design-system/references/style-usage.md"
+      }
+    ]
+  }
 }

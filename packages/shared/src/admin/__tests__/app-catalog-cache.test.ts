@@ -395,3 +395,11 @@ describe('app catalog cache', () => {
     )).schemaVersion).toBe(3)
   })
 })
+
+
+it('R7 retains ProductSpace artifact identity through disk schema roundtrip', () => {
+  const app = { ...remoteApp('artifact-r7'), catalogEntryId: 'entry-r7', artifactInstanceId: 'artifact-r7', catalogVersion: { versionId: 'version-r7', version: '1.0.0' }, sourceNames: ['Paid circle'], unavailableReason: 'not_entitled', catalogSources: [{ kind: 'creator_circle', name: 'Paid circle', circleId: 'circle-r7' }], rawAvailability: 'blocked' as const }
+  saveAppCatalog('account-1', 'organization-1', { appConfigVersion: 'r7', apps: [app] })
+  resetAppCatalogMemoryCacheForTests()
+  expect(getCachedAppCatalog('account-1', 'organization-1')?.apps[0]).toMatchObject(app)
+})
