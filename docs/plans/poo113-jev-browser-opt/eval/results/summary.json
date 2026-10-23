@@ -193,6 +193,35 @@
    "end_to_end_rate": 0.9556,
    "arbiter_latency_p50_ms": 10671,
    "cost_note": "均步成本 ≈ 快层 ¥0.002 + 16.3%×仲裁 ¥0.013 ≈ ¥0.023（vs 主模型逐步 ¥0.134，约 1/6）；83.7% 步骤不触碰主模型"
+  },
+  "b_path_model_decision": {
+   "decision": "B 路 glm-5.3-flashx → glm-5.3-flash（2026-10-23，正式 API key 实测）",
+   "flash_grounding": {
+    "exact": "122/135 (90.4%)",
+    "format": "135/135",
+    "latency_p50_ms": 5196,
+    "latency_note": "16 并发压测口径；低负载真实 prompt p50 1079ms（flashx 同口径 1708ms）"
+   },
+   "quota_probe": {
+    "flash": "50 并发两波全过零 429（管理后台口径 50 一致）",
+    "flashx": "悬崖 25–35，50 必 429 且惩罚窗口延续",
+    "deepseek": "无硬上限，32 并发零 429 动态软限流"
+   },
+   "pipeline_A_flash": {
+    "disagree": "11/135 (8.1%)",
+    "agree_wrong": 4
+   },
+   "price_cny_per_mtok": {
+    "flash": {
+     "in": 0.4,
+     "out": 1.4
+    },
+    "flashx": {
+     "in": 2,
+     "out": 7
+    }
+   },
+   "qps_application": "智谱/DeepSeek 均无需提额：flash 50 并发 ≈ 25+ req/s 覆盖 ~100 并发会话；DeepSeek 动态限流无硬顶"
   }
  }
 }

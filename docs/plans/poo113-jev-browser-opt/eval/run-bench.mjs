@@ -20,6 +20,13 @@ const CFG = {
     extra: { reasoning_effort: 'low', temperature: 0.8 },
     concurrency: 2,
   },
+  flash: {
+    endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    model: 'glm-5.3-flash',
+    keyEnv: 'BIGMODEL_API_KEY',
+    extra: { reasoning_effort: 'low', temperature: 0.8 },
+    concurrency: 16,
+  },
 }[PROVIDER];
 if (!CFG) throw new Error('PROVIDER must be deepseek|flashx');
 const KEY = process.env[CFG.keyEnv];

@@ -37,6 +37,20 @@ Reviewed by: Douglas（2026-10-22） · Accepted by: Douglas（2026-10-22，六�
 | existing | `packages/shared/src/agent/browser-tools.ts` | 修改 | 本任务 | 工厂签名增加可选 `fastDecider` 注入并透传 runtime | :233 工厂存在；沿用 `BrowserPaneFns` 同层注入模式 |
 | existing | `packages/shared/src/config/llm-connections.ts` | 不改（实现偏差已同步） | 本任务 | 原计划在此新增 `resolveBrowserFastDeciderPaths()`；实现时移入 `browser-fast-decider.ts` 的 `resolveBrowserFastDeciderEndpoints()`（避免 config 层反向依赖 agent 层类型），仅复用本文件导出的 `getLlmCredentialKey`(:356) | `getLlmCredentialKey` 已核对存在 |
 | existing | `packages/shared/src/agent/pi-agent.ts` | 修改 | 本任务 | Pi 后端浏览器命令执行处(:1858)透传 `getFastDecider`（plan 风险表中"执行时核对"项，已核对并补上） | `getSessionScopedToolCallbacks` 调用点已核对 |
+
+### 修订 1（2026-10-23）：B 路默认模型 glm-5.3-flashx → glm-5.3-flash
+
+实测依据（Mind2Web 定位口径 135 步 + 配额探测，正式 API key）：
+
+| 维度 | glm-5.3-flashx（原 B 路） | glm-5.3-flash（新 B 路） |
+|---|---|---|
+| 定位全对率 | 88.1%（119/135） | **90.4%（122/135）** |
+| 与 A 路管线 | 分歧 11.1%、一致但错 3 | **分歧 8.1%、一致但错 4（≈持平）** |
+| 并发配额（实测悬崖） | 25–35（50 必 429 + 惩罚窗口） | **50（连续两波全过，管理后台口径一致）** |
+| 低负载延迟（真实 prompt p50） | 1.71s | **1.08s** |
+| 单价 ¥/百万（入/出） | 2 / 7 | **0.4 / 1.4** |
+
+B 路四轴全面占优，切换无权衡。托管配置默认 B 路模型改为 `glm-5.3-flash`（`reasoning_effort: "low"` 不变）；flashx 保留为可配置选项。
 | existing | `packages/shared/src/config/storage.ts` | 修改 | 本任务 | 内部设置项 `browserFastDecider?: { enabled: boolean; timeoutMs?: number }`（默认 enabled=true；无用户配置 UI，模型与 key 均走托管配置） | `browserToolEnabled`(:80/:157/:556) 同文件同模式 |
 | existing | `packages/server-core/src/sessions/SessionManager.ts` | 修改 | 本任务 | 组装 decider 实例（连接解析 + 每会话单例）并传入 browser 工具工厂 | :5860 browserPaneFns 绑定处、:5396 miniModel 注入模式 |
 | existing | `apps/electron/resources/docs/browser-tools.md` | 修改 | 本任务 | 新增 `suggest` 用法、快层说明、危险标记语义、"建议≠执行" | 文件存在（模型必读文档，prerequisite 门不变） |
