@@ -24,6 +24,7 @@ import { messagingComponents } from './messaging'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
 import { settingsComponents } from './settings'
+import { productSpaceSelectComponents } from './product-space-select'
 
 export * from './types'
 
@@ -54,6 +55,7 @@ export const componentRegistry: ComponentEntry[] = [
   ...messagingComponents,
   ...imageSupportComponents,
   ...settingsComponents,
+  ...productSpaceSelectComponents,
 ]
 
 export function getCategories(): CategoryGroup[] {

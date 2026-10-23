@@ -1,8 +1,8 @@
-import { Building2, Check } from 'lucide-react'
+import { AlertCircle, Building2, Check } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
-import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchButtonClassName } from '@/components/ui/client-workbench'
+import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchButtonClassName, clientWorkbenchPrimaryClassName } from '@/components/ui/client-workbench'
 import { cn } from '@/lib/utils'
 import type { ProductSpaceSelectionSource } from '@/hooks/useProductSpaceContext'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
@@ -158,9 +158,10 @@ export function ProductSpaceSelectScreen({
                 data-restricted={restricted}
                 onClick={() => setSelectedId(space.id)}
                 className={cn(
-                  'flex w-full items-center gap-[10px] rounded-[10px] border border-transparent px-[12px] py-[9px] text-left transition-colors',
+                  // 方案 A 行组合（原型 .space-row）：两行 meta（名称 + 标记），52px 最小行高。
+                  'flex min-h-[52px] w-full items-center gap-[11px] rounded-[10px] border border-transparent px-[12px] py-[9px] text-left transition-colors',
                   'hover:bg-foreground-5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent',
-                  isSelected && 'border-border bg-foreground-5',
+                  isSelected && 'border-accent/30 bg-foreground-5 client-material-selected',
                 )}
               >
                 <span
@@ -172,23 +173,30 @@ export function ProductSpaceSelectScreen({
                 >
                   {spaceInitial(space.name, space.kind)}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                  {space.name}
-                </span>
-                <span className="flex shrink-0 items-center gap-[6px] text-[11px] text-muted-foreground">
-                  {space.kind === 'enterprise' ? (
-                    <span>{t('spaceSelect.enterpriseTag', { role: t(spaceRoleKey(space.kind, space.role)) })}</span>
-                  ) : null}
-                  {recommended ? (
-                    <span className="rounded-[6px] bg-[var(--accent-soft)] px-[6px] py-[1px] text-[10px] font-medium text-accent" data-testid="product-space-select-recommended-tag">
-                      {t('spaceSelect.recommended')}
+                <span className="min-w-0 flex-1">
+                  <span className={cn('block truncate text-[13px] font-semibold leading-[1.3]', !isSelected && 'text-foreground')}>
+                    {space.name}
+                  </span>
+                  <span className="mt-[2px] flex items-center gap-[6px]">
+                    <span className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] text-[11px] leading-[1.6] text-foreground-60">
+                      {space.kind === 'enterprise'
+                        ? t('spaceSelect.enterpriseTag', { role: t(spaceRoleKey(space.kind, space.role)) })
+                        : t(spaceRoleKey(space.kind, 'personal'))}
                     </span>
-                  ) : null}
-                  {restricted ? (
-                    <span className="rounded bg-foreground-10 px-[5px] py-[1px] text-[10px] text-muted-foreground">
-                      {t('productSpace.restricted')}
-                    </span>
-                  ) : null}
+                    {recommended ? (
+                      <span
+                        className="inline-flex items-center whitespace-nowrap rounded-full bg-[var(--accent-soft)] px-[7px] py-[1px] text-[11px] font-semibold leading-[1.6] text-accent"
+                        data-testid="product-space-select-recommended-tag"
+                      >
+                        {t('spaceSelect.recommended')}
+                      </span>
+                    ) : null}
+                    {restricted ? (
+                      <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[var(--destructive-soft)] px-[7px] py-[1px] text-[11px] leading-[1.6] text-destructive">
+                        {t('productSpace.restricted')}
+                      </span>
+                    ) : null}
+                  </span>
                 </span>
                 {isSelected ? <Check className="size-[16px] shrink-0 text-success" aria-hidden="true" /> : null}
               </button>
@@ -197,13 +205,18 @@ export function ProductSpaceSelectScreen({
         </div>
 
         {selectedRestricted && selected ? (
-          <p className="mt-[10px] mb-0 text-[12px] leading-[1.5] text-muted-foreground" data-testid="product-space-select-restricted-note">
-            {t('spaceSelect.restrictedNote', { name: selected.name })}
+          <p
+            className="mt-[14px] m-0 flex items-start gap-[8px] rounded-[10px] bg-[var(--destructive-soft)] px-[12px] py-[10px] text-left text-[12px] leading-[1.55] text-destructive"
+            role="status"
+            data-testid="product-space-select-restricted-note"
+          >
+            <AlertCircle className="mt-[2px] size-[14px] shrink-0" aria-hidden="true" />
+            <span>{t('spaceSelect.restrictedNote', { name: selected.name })}</span>
           </p>
         ) : null}
 
         <Button
-          className={clientWorkbenchButtonClassName + ' mt-[22px] w-full'}
+          className={clientWorkbenchPrimaryClassName + ' mt-[22px] min-h-[40px] w-full text-[13px] font-semibold'}
           disabled={submitting || selected === null}
           data-testid="product-space-select-confirm"
           onClick={confirm}
@@ -212,20 +225,18 @@ export function ProductSpaceSelectScreen({
         </Button>
 
         <div
-          className="mt-[16px] flex items-center justify-between gap-[12px] rounded-[10px] bg-foreground-5 px-[12px] py-[8px] text-left"
+          className="mt-[18px] flex items-center gap-[10px] border-t border-border pt-[16px] text-left"
           data-testid="product-space-select-account"
           aria-label={t('spaceSelect.accountAriaLabel')}
         >
-          <span className="flex min-w-0 items-center gap-[10px]">
-            <span className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[11px] font-semibold text-accent" aria-hidden="true">
-              {account?.displayName?.trim()?.[0] ?? '·'}
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-[12px] font-medium text-foreground">{account?.displayName ?? ''}</span>
-              <span className="block truncate text-[11px] text-foreground-40">{account?.username ?? ''}</span>
-            </span>
+          <span className="flex size-[28px] shrink-0 items-center justify-center rounded-full bg-foreground-10 text-[12px] font-semibold text-foreground-70" aria-hidden="true">
+            {account?.displayName?.trim()?.[0] ?? '·'}
           </span>
-          <Button className={clientWorkbenchButtonClassName} variant="ghost" data-testid="product-space-select-logout" onClick={onLogout}>
+          <span className="min-w-0">
+            <span className="block truncate text-[12px] font-semibold leading-[1.35] text-foreground">{account?.displayName ?? ''}</span>
+            <span className="block truncate text-[11px] leading-[1.35] text-foreground-50">{account?.username ?? ''}</span>
+          </span>
+          <Button className={clientWorkbenchButtonClassName + ' ml-auto shrink-0'} data-testid="product-space-select-logout" onClick={onLogout}>
             {t('topbar.account.logout')}
           </Button>
         </div>
