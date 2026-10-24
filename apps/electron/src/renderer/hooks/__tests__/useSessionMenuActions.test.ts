@@ -164,3 +164,52 @@ describe('useSessionMenuActions.exportSession', () => {
     expect(exportSessionToFile.mock.calls.length).toBe(2)
   })
 })
+
+
+describe('useSessionMenuActions.copySessionId', () => {
+  function setClipboard(writeText: (value: string) => Promise<void>) {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  }
+
+  it('copies the exact Polo ID and confirms only after the clipboard accepts it', async () => {
+    let accept!: () => void
+    const writeText = mock((_value: string) => new Promise<void>((resolve) => { accept = resolve }))
+    setClipboard(writeText)
+    const { result } = renderActions()
+    let copying!: Promise<void>
+    act(() => { copying = result.current.copySessionId() })
+    expect(writeText.mock.calls).toEqual([['session-export-1']])
+    expect(toastSuccess).not.toHaveBeenCalled()
+    await act(async () => { accept(); await copying })
+    expect(toastSuccess).toHaveBeenCalledWith('Session ID copied')
+  })
+
+  it('uses the newly selected session after rerender', async () => {
+    const writeText = mock(async (_value: string) => {})
+    setClipboard(writeText)
+    const { result, rerender } = renderHook(({ item }) => useSessionMenuActions({ item }), {
+      initialProps: { item: ITEM },
+      wrapper: ({ children }) => createElement(I18nextProvider, { i18n }, children),
+    })
+    await act(async () => { await result.current.copySessionId() })
+    rerender({ item: { ...ITEM, id: 'session-next' } })
+    await act(async () => { await result.current.copySessionId() })
+    expect(writeText.mock.calls).toEqual([['session-export-1'], ['session-next']])
+  })
+
+  it('reports denied clipboard access without claiming success', async () => {
+    setClipboard(async () => { throw new Error('clipboard denied') })
+    const { result } = renderActions()
+    await act(async () => { await result.current.copySessionId() })
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledWith('Failed to copy session ID. Try again.')
+  })
+
+  it('reports an unavailable clipboard without throwing', async () => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    const { result } = renderActions()
+    await act(async () => { await result.current.copySessionId() })
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledWith('Failed to copy session ID. Try again.')
+  })
+})

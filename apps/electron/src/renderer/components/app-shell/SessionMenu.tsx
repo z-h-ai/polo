@@ -257,6 +257,11 @@ export function SessionMenu({
         <span className="flex-1">{t("sessionMenu.showInFileManager", { fileManager: getFileManagerName() })}</span>
       </MenuItem>
 
+      <MenuItem onClick={actions.copySessionId}>
+        <Copy className="h-3.5 w-3.5" />
+        <span className="flex-1">{t("sessionMenu.copySessionId")}</span>
+      </MenuItem>
+
       {/* Copy Path */}
       <MenuItem onClick={actions.copyPath}>
         <Copy className="h-3.5 w-3.5" />

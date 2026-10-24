@@ -122,6 +122,7 @@
     "./skills/types": "./src/skills/types.ts",
     "./automations": "./src/automations/index.ts",
     "./automations/resolve-config-path": "./src/automations/resolve-config-path.ts",
+    "./task-events": "./src/task-events/index.ts",
     "./protocol": "./src/protocol/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./resources": "./src/resources/index.ts",
