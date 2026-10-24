@@ -16,13 +16,15 @@ set -euo pipefail
 #   3. builds the new image under a tag that never collides with the
 #      rollback tag;
 #   4. repoints only the updates-static service's image line through a strict
-#      rewrite that refuses to write anything but a one-line image change;
+#      rewrite (PyYAML line-located, one-line-diff gated, re-parsed for
+#      ownership) that refuses to write anything but that one image change;
 #   5. recreates the container with the full compose parameter set and
 #      verifies the capability plus the public feed, then force-recreates
 #      once more as the persistence proof.
 #
 # Usage:
 #   scripts/updates-static-deploy.sh [--ref <git-ref>] [--expect-version 0.20.0] [--dry-run]
+#     (default ref: origin/dev)
 #   scripts/updates-static-deploy.sh --rollback [--backup-dir /data/updates-static-deploy/backup-<ts>]
 #
 # Rules honored (see ~/.agents/skills/z-h-ai-infra/SKILL.md):
@@ -57,44 +59,86 @@ CONTEXT_PATHS=(
   scripts/strict-semver-pattern.txt
 )
 
-# Service-block title: exactly two-space indent, bare key, colon, then only
-# whitespace or a comment. Deeper-indented lines and inline junk never match,
-# so `inside` cannot leak past a sibling service heading.
-AWK_REWRITE='/^  [A-Za-z0-9_-]+:/ {
-  key = $0
-  sub(/:.*/, "", key)
-  sub(/^  /, "", key)
-  inside = (key == svc)
-}
-inside && /^    image:/ && !replaced {
-  sub(/image:.*/, "image: " img)
-  replaced = 1
-}
-{ print }'
-
 # Prints the remote shell snippet that rewrites <current> into <candidate>
 # and refuses to produce anything other than exactly one image-line change.
 # Runs unchanged locally (tests) and on the host (deploy/rollback): no sudo,
 # no paths baked in. Args: current candidate new_image service workdir
+#
+# The rewrite is driven by a read-only PyYAML pass (line number + value of the
+# target service's image key), a single sed rewrite at that exact line, and a
+# re-parse that asserts ownership: the target image must now carry the new
+# value and no sibling service image may have moved. A hand-rolled state
+# machine cannot tell `"polo-api":` or `polo.api:` headings from nested keys,
+# and would happily patch a sibling when the target block had no image line.
 compose_rewrite_snippet() {
   cat <<'SNIPPET'
 set -eu
 current="$1"; candidate="$2"; new_image="$3"; svc="$4"; workdir="$5"
-awk -v img="$new_image" -v svc="$svc" '
-/^  [A-Za-z0-9_-]+:/ {
-  key = $0
-  sub(/:.*/, "", key)
-  sub(/^  /, "", key)
-  inside = (key == svc)
-}
-inside && /^    image:/ && !replaced {
-  sub(/image:.*/, "image: " img)
-  replaced = 1
-}
-{ print }
-' "$current" > "$candidate"
-if diff -U0 "$current" "$candidate" > "$workdir/rewrite.diff" 2>/dev/null; then
-  echo "ERROR: compose rewrite produced no change (service '$svc' not found or has no image line)" >&2
+resolve="$(python3 -c '
+import sys, yaml
+root = yaml.compose(open(sys.argv[1]).read())
+svc = sys.argv[2]
+services = None
+for k, v in (root.value or []):
+    if getattr(k, "value", None) == "services":
+        services = v
+        break
+if services is None:
+    sys.exit("compose has no services mapping")
+target = None
+for k, v in (services.value or []):
+    if getattr(k, "value", None) == svc:
+        target = v
+        break
+if target is None:
+    sys.exit("service %s not found in compose" % svc)
+for k, v in (target.value or []):
+    if getattr(k, "value", None) == "image":
+        if getattr(getattr(k, "start_mark", None), "column", None) != 4:
+            sys.exit("service %s image is not a plain 4-space attribute" % svc)
+        print(k.start_mark.line + 1, v.value)
+        raise SystemExit(0)
+sys.exit("service %s has no image line" % svc)
+' "$current" "$svc")" || { echo "ERROR: refusing to rewrite compose for service '$svc' (reason above)" >&2; exit 1; }
+lineno="${resolve%% *}"
+old_image="${resolve##* }"
+case "$lineno" in ""|*[!0-9]*) echo "ERROR: bad image line resolution for '$svc'" >&2; exit 1 ;; esac
+if [ "$old_image" = "$new_image" ]; then
+  # Idempotent re-entry: the same ref was deployed before and Coolify (or a
+  # previous run) already points at this tag. Keep going so the recreate and
+  # the verification still run.
+  cp "$current" "$candidate"
+  echo "idempotent: ${svc}.image already ${new_image}; recreating to re-prove it"
+  exit 0
+fi
+sed "${lineno}s|.*|    image: ${new_image}|" "$current" > "$candidate"
+python3 -c '
+import sys, yaml
+def images(path):
+    root = yaml.compose(open(path).read())
+    out = {}
+    for k, v in (root.value or []):
+        if getattr(k, "value", None) == "services":
+            for sk, sv in (v.value or []):
+                for ak, av in (sv.value or []):
+                    if getattr(ak, "value", None) == "image":
+                        out[getattr(sk, "value", None)] = av.value
+    return out
+svc, want = sys.argv[3], sys.argv[4]
+before, after = images(sys.argv[1]), images(sys.argv[2])
+if after.get(svc) != want:
+    sys.exit("target service %s image did not become %s" % (svc, want))
+if {k: v for k, v in before.items() if k != svc} != {k: v for k, v in after.items() if k != svc}:
+    sys.exit("a sibling service image changed")
+' "$current" "$candidate" "$svc" "$new_image" || { echo "ERROR: rewritten compose failed the ownership check; refusing to install" >&2; exit 1; }
+rc=0
+diff -U0 "$current" "$candidate" > "$workdir/rewrite.diff" || rc=$?
+if [ "$rc" -eq 2 ]; then
+  echo "ERROR: diff failed while gating the compose rewrite" >&2
+  exit 1
+fi
+if [ "$rc" -eq 0 ]; then
+  echo "ERROR: compose rewrite produced no change although '$svc' image was '$old_image'; refusing to install" >&2
   exit 1
 fi
 changed="$(grep -cE '^[+-][^+-]' "$workdir/rewrite.diff" || true)"
@@ -108,6 +152,31 @@ if ! grep -Fqx "+    image: $new_image" "$workdir/rewrite.diff"; then
   cat "$workdir/rewrite.diff" >&2
   exit 1
 fi
+SNIPPET
+}
+
+# Prints the remote snippet that proves an image can execute the capability
+# probe. The docker run exit status is captured on its own line — never
+# behind a pipe, where a tail grep would swallow a probe failure (the host
+# shell has no pipefail). UPDATES_PROBE_DOCKER_CMD stubs docker in tests.
+# Args: image
+capability_probe_snippet() {
+  cat <<'SNIPPET'
+set -eu
+image="$1"
+probe_cmd="${UPDATES_PROBE_DOCKER_CMD:-sudo docker}"
+# `|| {}` keeps the real docker exit code in $? (`if !` would report the
+# negated status — 0 for every failure).
+probe_out="$($probe_cmd run --rm --entrypoint /bin/sh "$image" -c 'bun /app/publish-electron-release.ts capability')" || {
+  echo "ERROR: capability probe on $image failed with exit $?; rollback anchor unusable" >&2
+  exit 1
+}
+printf '%s\n' "$probe_out" | grep -q '^POLO_RELEASE_PUBLISHER_SCHEMA=' || {
+  echo "ERROR: capability probe on $image printed no publisher schema; output was:" >&2
+  printf '%s\n' "$probe_out" >&2
+  exit 1
+}
+printf '%s\n' "$probe_out"
 SNIPPET
 }
 
@@ -154,7 +223,7 @@ rollback_resolve_snippet() {
   fi
 }
 
-REF=""
+REF="origin/dev"
 EXPECT_VERSION="0.20.0"
 DRY_RUN=0
 ROLLBACK=0
@@ -210,15 +279,21 @@ compose_up() {
 }
 
 # Installs a compose file produced by compose_rewrite_snippet in the host
-# work dir, after the snippet's own one-line-diff gate has passed.
+# work dir, after the snippet's own gates have passed. Every command here is
+# a STANDALONE line under `set -eu`: a failed read, rewrite, install, or
+# post-check aborts the whole remote script with a non-zero status. Chaining
+# these with `&& \` around the heredoc was the old bug — a cp that is not the
+# last member of an && list is exempt from set -e, so a failed read used to
+# fall through to installing a stale candidate with a green exit.
 install_compose_candidate() {
   local new_image="$1"
-  run_remote "set -eu; sudo cp ${REMOTE_COMPOSE} ${REMOTE_WORK_ROOT}/compose.current && \
+  run_remote "set -eu
+sudo cp ${REMOTE_COMPOSE} ${REMOTE_WORK_ROOT}/compose.current
 bash -s -- ${REMOTE_WORK_ROOT}/compose.current ${REMOTE_WORK_ROOT}/compose.candidate '${new_image}' '${SERVICE}' ${REMOTE_WORK_ROOT} <<'REWRITE'
 $(compose_rewrite_snippet)
 REWRITE
-sudo cp ${REMOTE_WORK_ROOT}/compose.candidate ${REMOTE_COMPOSE} && \
-sudo grep -A2 '^  ${SERVICE}:' ${REMOTE_COMPOSE} | grep -q 'image: ${new_image}'"
+sudo cp ${REMOTE_WORK_ROOT}/compose.candidate ${REMOTE_COMPOSE}
+sudo grep -A2 '^  ${SERVICE}:' ${REMOTE_COMPOSE} | grep -qF 'image: ${new_image}'"
 }
 
 verify_capability() {
@@ -301,26 +376,31 @@ deploy() {
   # recreated: the running container is committed (docker cp patch included)
   # to a tag the new build can never overwrite, the /app tar and the compose
   # image line are captured and validated, and only then is rollback.env
-  # atomically marked COMPLETE.
-  run_remote "set -eu; sudo mkdir -p ${remote_build_dir} ${REMOTE_WORK_ROOT} ${backup_dir} && \
-sudo chown \$(id -un) ${remote_build_dir} ${REMOTE_WORK_ROOT} ${backup_dir} && \
-old_id=\$(sudo docker inspect ${CONTAINER} --format '{{.Image}}') && \
-[ -n \"\$old_id\" ] && \
-sudo docker commit ${CONTAINER} ${rollback_image} >/dev/null && \
-committed_id=\$(sudo docker image inspect ${rollback_image} --format '{{.Id}}') && \
-[ -n \"\$committed_id\" ] && \
-sudo docker run --rm --entrypoint /bin/sh ${rollback_image} -c 'bun /app/publish-electron-release.ts capability' | grep -q '^POLO_RELEASE_PUBLISHER_SCHEMA=' && \
-sudo docker exec ${CONTAINER} tar czf - -C / app > ${backup_dir}/old-app.tar.gz && \
-tar tzf ${backup_dir}/old-app.tar.gz >/dev/null && \
-[ -s ${backup_dir}/old-app.tar.gz ] && \
-img_line=\$(sudo grep -A2 '^  ${SERVICE}:' ${REMOTE_COMPOSE} | grep '^    image:' | head -1) && \
-[ -n \"\$img_line\" ] && \
-img_ref=\${img_line#*image: } && \
-[ -n \"\$img_ref\" ] && \
+  # atomically marked COMPLETE. Every command is a standalone line under
+  # `set -eu` (no && chains around the probe heredoc): a non-zero probe or
+  # backup step exits the remote script before anything downstream runs.
+  run_remote "set -eu
+sudo mkdir -p ${remote_build_dir} ${REMOTE_WORK_ROOT} ${backup_dir}
+sudo chown \$(id -un) ${remote_build_dir} ${REMOTE_WORK_ROOT} ${backup_dir}
+old_id=\$(sudo docker inspect ${CONTAINER} --format '{{.Image}}')
+[ -n \"\$old_id\" ]
+sudo docker commit ${CONTAINER} ${rollback_image} >/dev/null
+committed_id=\$(sudo docker image inspect ${rollback_image} --format '{{.Id}}')
+[ -n \"\$committed_id\" ]
+bash -s -- ${rollback_image} <<'PROBE'
+$(capability_probe_snippet)
+PROBE
+sudo docker exec ${CONTAINER} tar czf - -C / app > ${backup_dir}/old-app.tar.gz
+tar tzf ${backup_dir}/old-app.tar.gz >/dev/null
+[ -s ${backup_dir}/old-app.tar.gz ]
+img_line=\$(sudo grep -A2 '^  ${SERVICE}:' ${REMOTE_COMPOSE} | grep '^    image:' | head -1)
+[ -n \"\$img_line\" ]
+img_ref=\${img_line#*image: }
+[ -n \"\$img_ref\" ]
 printf 'ROLLBACK_IMAGE=%s\nEXPECTED_IMAGE_ID=%s\nOLD_IMAGE_LINE=image: %s\nDEPLOYED_IMAGE=%s\nBACKUP_DIR=%s\nAPP_TAR=old-app.tar.gz\n' \
-  '${rollback_image}' \"\$committed_id\" \"\$img_ref\" '${image_tag}' '${backup_dir}' > ${backup_dir}/rollback.env.tmp && \
-printf 'COMPLETE=1\n' >> ${backup_dir}/rollback.env.tmp && \
-mv ${backup_dir}/rollback.env.tmp ${backup_dir}/rollback.env && \
+  '${rollback_image}' \"\$committed_id\" \"\$img_ref\" '${image_tag}' '${backup_dir}' > ${backup_dir}/rollback.env.tmp
+printf 'COMPLETE=1\n' >> ${backup_dir}/rollback.env.tmp
+mv ${backup_dir}/rollback.env.tmp ${backup_dir}/rollback.env
 cat ${backup_dir}/rollback.env"
 
   log "step 3/6: shipping context and building on the host (x86_64, separate tag)"

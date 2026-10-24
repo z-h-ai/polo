@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'bun:test'
@@ -70,12 +70,32 @@ function runExpectingFailure(
 
 // Renders one of the script's remote snippets through a source-guarded shell
 // so the exact bytes that would run on the host run here.
-function renderSnippet(fn: 'compose_rewrite_snippet' | 'rollback_resolve_snippet'): string {
+type SnippetFn =
+  | 'compose_rewrite_snippet'
+  | 'rollback_resolve_snippet'
+  | 'rollback_snapshot_snippet'
+  | 'capability_probe_snippet'
+
+function renderSnippet(fn: SnippetFn): string {
   return execFileSync(
     'bash',
     ['-c', `source '${SCRIPT}'; ${fn === 'rollback_resolve_snippet' && process.env.FIXTURE_WORK_ROOT ? `REMOTE_WORK_ROOT='${process.env.FIXTURE_WORK_ROOT}'; ` : ''}${fn}`],
     { encoding: 'utf8' },
   )
+}
+
+// Runs a rendered snippet file with piped stdio; returns status and both streams.
+function runSnippetFile(path: string, args: string[], env: Record<string, string> = {}): { status: number; output: string } {
+  const proc = Bun.spawnSync(['bash', path, ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, ...env },
+  })
+  const text = new TextDecoder()
+  return {
+    status: proc.exitCode ?? -1,
+    output: text.decode(proc.stdout) + text.decode(proc.stderr),
+  }
 }
 
 afterAll(() => {
@@ -116,10 +136,61 @@ describe('updates-static-deploy script', () => {
   })
 
   it('proves the rollback image can run the capability probe before anything changes', () => {
-    expect(script).toContain(
-      "sudo docker run --rm --entrypoint /bin/sh ${rollback_image} -c 'bun /app/publish-electron-release.ts capability'",
-    )
-    expect(script).toContain("grep -q '^POLO_RELEASE_PUBLISHER_SCHEMA='")
+    // The probe runs through its snippet in a heredoc, and the docker run
+    // exit status is captured on its own — never behind a pipe, where a tail
+    // grep (the host shell has no pipefail) would swallow a probe failure.
+    expect(script).toContain("bash -s -- ${rollback_image} <<'PROBE'")
+    expect(script).toContain('probe_out="$($probe_cmd run --rm --entrypoint /bin/sh "$image"')
+    expect(script).toContain('failed with exit $?')
+    expect(script).toContain('grep -q \'^POLO_RELEASE_PUBLISHER_SCHEMA=\'')
+    expect(script).not.toMatch(/docker run[^\n]*\| *grep/)
+  })
+
+  describe('capability probe snippet', () => {
+    const work = mkdtempSync(join(tmpdir(), 'updates-static-deploy-probe-'))
+    fixtures.push(work)
+    const snippetPath = join(work, 'probe.sh')
+    writeFileSync(snippetPath, renderSnippet('capability_probe_snippet'))
+
+    function fakeDocker({ print = true, exit = 0 } = {}): string {
+      const path = join(work, `fake-docker-${print ? 'print' : 'silent'}-${exit}`)
+      writeFileSync(
+        path,
+        [
+          '#!/usr/bin/env bash',
+          ...(print ? ["echo 'POLO_RELEASE_PUBLISHER_SCHEMA=3'", "echo 'POLO_RELEASE_PUBLISHER_ASSETS=10'"] : []),
+          `exit ${exit}`,
+        ].join('\n') + '\n',
+      )
+      chmodSync(path, 0o755)
+      return path
+    }
+
+    it('treats a non-zero probe exit as fatal even though the probe printed a schema', () => {
+      // The regression this guards: `docker run ... | grep -q SCHEMA=` returned
+      // grep's success and let a broken rollback anchor pass.
+      const result = runSnippetFile(snippetPath, ['updates-static-rollback:fake'], {
+        UPDATES_PROBE_DOCKER_CMD: fakeDocker({ print: true, exit: 42 }),
+      })
+      expect(result.status).not.toBe(0)
+      expect(result.output).toContain('failed with exit 42')
+    })
+
+    it('accepts a healthy probe output and passes it through', () => {
+      const result = runSnippetFile(snippetPath, ['updates-static-rollback:fake'], {
+        UPDATES_PROBE_DOCKER_CMD: fakeDocker({ print: true, exit: 0 }),
+      })
+      expect(result.status).toBe(0)
+      expect(result.output).toContain('POLO_RELEASE_PUBLISHER_SCHEMA=3')
+    })
+
+    it('rejects an image whose probe prints no publisher schema', () => {
+      const result = runSnippetFile(snippetPath, ['updates-static-rollback:fake'], {
+        UPDATES_PROBE_DOCKER_CMD: fakeDocker({ print: false, exit: 0 }),
+      })
+      expect(result.status).not.toBe(0)
+      expect(result.output).toContain('no publisher schema')
+    })
   })
 
   it('takes required backups strictly: no || true before the compose rewrite', () => {
@@ -177,55 +248,196 @@ describe('updates-static-deploy script', () => {
   describe('compose rewrite snippet', () => {
     const work = mkdtempSync(join(tmpdir(), 'updates-static-deploy-rewrite-'))
     fixtures.push(work)
+    const snippetPath = join(work, 'rewrite.sh')
+    writeFileSync(snippetPath, renderSnippet('compose_rewrite_snippet'))
+    let caseNo = 0
 
-    function writeCompose(content: string): string {
-      writeFileSync(join(work, 'current.yml'), content)
-      return join(work, 'current.yml')
+    // Locates the target service's image line via a read-only PyYAML pass,
+    // sed-rewrites that exact line, then re-parses to assert ownership — so
+    // quoted (`"polo-api":`) and dotted (`polo.api:`) sibling headings can
+    // never capture the rewrite the way a hand-rolled state machine let them.
+    function rewrite(current: string, svc = 'updates-static', image = 'updates-static:abc1234-schema3'): {
+      status: number
+      output: string
+      candidate: string | null
+    } {
+      caseNo += 1
+      const currentPath = join(work, `current-${caseNo}.yml`)
+      const candidatePath = join(work, `candidate-${caseNo}.yml`)
+      writeFileSync(currentPath, current)
+      const result = runSnippetFile(snippetPath, [currentPath, candidatePath, image, svc, work])
+      return {
+        ...result,
+        candidate: existsSync(candidatePath) ? readFileSync(candidatePath, 'utf8') : null,
+      }
     }
 
     it('changes exactly the target image line and never a sibling service', () => {
-      const current = writeCompose(
+      const { status, candidate } = rewrite(
         [
           'services:',
           '  polo-postgres:',
           '    image: registry.example/postgres:16',
+          '  "polo-api": # quoted heading with an inline comment',
+          '    image: registry.example/api:v1',
+          '  polo.api: # dotted heading',
+          '    image: registry.example/api-dotted:v1',
           '  updates-static:',
           '    image: registry.example/updates:old',
-          '  polo-api: # heading with an inline comment',
-          '    image: registry.example/api:v1',
-          '      updates-static:',
-          '        image: trap-six-space',
-          '    other-key: value',
           '',
         ].join('\n'),
       )
-      const snippet = renderSnippet('compose_rewrite_snippet')
-      const snippetPath = join(work, 'rewrite.sh')
-      writeFileSync(snippetPath, snippet)
-      execFileSync(
-        'bash',
-        [snippetPath, current, join(work, 'candidate.yml'), 'updates-static:abc1234-schema3', 'updates-static', work],
-      )
-      const result = readFileSync(join(work, 'candidate.yml'), 'utf8')
-      expect(result).toContain('image: updates-static:abc1234-schema3')
-      expect(result).toContain('image: registry.example/api:v1')
-      expect(result).toContain('image: trap-six-space')
-      expect(result).toContain('image: registry.example/postgres:16')
-      expect(result.match(/updates-static:abc1234-schema3/g)).toHaveLength(1)
+      expect(status).toBe(0)
+      expect(candidate).toContain('image: updates-static:abc1234-schema3')
+      expect(candidate).toContain('image: registry.example/postgres:16')
+      expect(candidate).toContain('image: registry.example/api:v1')
+      expect(candidate).toContain('image: registry.example/api-dotted:v1')
+      expect(candidate!.match(/updates-static:abc1234-schema3/g)).toHaveLength(1)
     })
 
-    it('refuses to install when the service block is missing', () => {
-      const snippetPath = join(work, 'rewrite.sh')
-      writeFileSync(snippetPath, renderSnippet('compose_rewrite_snippet'))
-      const stderr = runExpectingFailure([
-        snippetPath,
-        join(work, 'current.yml'),
-        join(work, 'c2.yml'),
-        'whatever',
+    it('refuses when the target has no image line, even with image-bearing siblings after it', () => {
+      // The state-machine bug this replaces: `inside` leaked past the target
+      // block into a quoted/dotted sibling and rewrote ITS image line.
+      const { status, output, candidate } = rewrite(
+        [
+          'services:',
+          '  "polo-api":',
+          '    image: registry.example/api:v1',
+          '  polo.api:',
+          '    image: registry.example/api-dotted:v1',
+          '  updates-static:',
+          '    build: .',
+          '',
+        ].join('\n'),
+      )
+      expect(status).not.toBe(0)
+      expect(output).toContain('has no image line')
+      expect(candidate).toBeNull()
+    })
+
+    it('refuses a service block that is missing entirely', () => {
+      const { status, output } = rewrite(
+        ['services:', '  polo-api:', '    image: registry.example/api:v1', ''].join('\n'),
         'no-such-service',
-        work,
-      ])
-      expect(stderr).toContain('produced no change')
+        'whatever',
+      )
+      expect(status).not.toBe(0)
+      expect(output).toContain('refusing to rewrite compose')
+    })
+
+    it('re-enters idempotently when the image already matches the requested tag', () => {
+      const current = [
+        'services:',
+        '  updates-static:',
+        '    image: updates-static:abc1234-schema3',
+        '',
+      ].join('\n')
+      const { status, output, candidate } = rewrite(current)
+      expect(status).toBe(0)
+      expect(output).toContain('idempotent')
+      expect(candidate).toBe(current)
+    })
+
+    it('refuses YAML it cannot parse instead of guessing', () => {
+      const { status, output } = rewrite(
+        [
+          'services:',
+          '  updates-static:',
+          '    image: registry.example/updates:old',
+          '      updates-static:',
+          '        image: trap-six-space',
+          '',
+        ].join('\n'),
+      )
+      expect(status).not.toBe(0)
+      expect(output).toContain('refusing to rewrite compose')
+    })
+  })
+
+  describe('install_compose_candidate', () => {
+    const work = mkdtempSync(join(tmpdir(), 'updates-static-deploy-install-'))
+    fixtures.push(work)
+    const composePath = join(work, 'docker-compose.yml')
+
+    const composeBody = (image: string) =>
+      [
+        'services:',
+        '  polo-api:',
+        '    image: registry.example/api:v1',
+        '  updates-static:',
+        `    image: ${image}`,
+        '',
+      ].join('\n') + '\n'
+
+    function fakeSudoBin({ failRead = false } = {}): string {
+      const bin = join(work, `bin-${failRead ? 'fail' : 'ok'}`)
+      mkdirSync(bin, { recursive: true })
+      const path = join(bin, 'sudo')
+      writeFileSync(
+        path,
+        [
+          '#!/usr/bin/env bash',
+          ...(failRead
+            ? ['case "$*" in *compose.current*) echo "mock: compose read failure" >&2; exit 23 ;; esac']
+            : []),
+          'exec "$@"',
+        ].join('\n') + '\n',
+      )
+      chmodSync(path, 0o755)
+      return bin
+    }
+
+    // Executes install_compose_candidate locally: run_remote is overridden to
+    // run the exact remote string through bash here, and a stub `sudo` on
+    // PATH forwards to the real command (optionally failing the compose read).
+    function runInstall(tag: string, bin: string, seed: string): { status: number; output: string; composeAfter: string } {
+      writeFileSync(composePath, seed)
+      const inner = [
+        `REMOTE_COMPOSE='${composePath}'`,
+        `REMOTE_WORK_ROOT='${work}'`,
+        'DRY_RUN=0',
+        'run_remote() { bash -c "$1"; }',
+        `install_compose_candidate '${tag}'`,
+      ].join('\n')
+      const proc = Bun.spawnSync(['bash', '-c', `source '${SCRIPT}'\n${inner}`], {
+        cwd: process.cwd(),
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      })
+      const text = new TextDecoder()
+      return {
+        status: proc.exitCode ?? -1,
+        output: text.decode(proc.stdout) + text.decode(proc.stderr),
+        composeAfter: readFileSync(composePath, 'utf8'),
+      }
+    }
+
+    it('installs the rewritten compose when the whole chain succeeds', () => {
+      const result = runInstall('updates-static:abc1234-schema3', fakeSudoBin(), composeBody('registry.example/updates:old'))
+      expect(result.status).toBe(0)
+      expect(result.composeAfter).toContain('image: updates-static:abc1234-schema3')
+      expect(result.composeAfter).toContain('image: registry.example/api:v1')
+    })
+
+    it('never installs a stale candidate when the compose read fails', () => {
+      // The bug this pins: a failed first cp sat inside an && list (exempt
+      // from set -e), so a leftover compose.candidate from the previous run
+      // still got installed with a green exit.
+      writeFileSync(join(work, 'compose.candidate'), composeBody('updates-static:stale-leftover'))
+      const seed = composeBody('registry.example/updates:old')
+      const result = runInstall('updates-static:abc1234-schema3', fakeSudoBin({ failRead: true }), seed)
+      expect(result.status).not.toBe(0)
+      expect(result.output).toContain('mock: compose read failure')
+      expect(result.composeAfter).toBe(seed)
+    })
+
+    it('re-enters idempotently when the tag already matches', () => {
+      const body = composeBody('updates-static:abc1234-schema3')
+      const result = runInstall('updates-static:abc1234-schema3', fakeSudoBin(), body)
+      expect(result.status).toBe(0)
+      expect(result.output).toContain('idempotent')
+      expect(result.composeAfter).toBe(body)
     })
   })
 
@@ -311,13 +523,33 @@ describe('updates-static-deploy script', () => {
       const tag = `updates-static:${fixture.sha}-schema3`
       expect(output).toContain(tag)
       expect(output).toContain('updates-static-rollback:')
-      // ssh prints commands %q-escaped, hence the backslash-escaped space.
-      expect(output).toContain('sudo\\ docker\\ commit')
+      // Multi-line remote strings print %q-quoted with \n escapes, so their
+      // inner spaces are not backslash-escaped.
+      expect(output).toContain('docker commit vrmtxfwgyi9ebkhtkiyerzzk-updates-static-1')
       // ssh prints commands %q-escaped, hence the backslash-escaped spaces.
       expect(output).toContain('up\\ -d\\ updates-static')
       expect(output).toContain('--force-recreate\\ updates-static')
       expect(output).toContain('[dry-run] ssh dry-run.invalid')
       expect(output).toContain('https://updates.polo.z-h-ai.com/electron/latest')
+      // The install/backup chains are standalone lines under set -eu: read,
+      // rewrite, install, and post-check run in strict order and any failure
+      // aborts the ssh — nothing may chain `&& \` around a heredoc any more,
+      // which exempted a failed read from set -e and let a stale candidate
+      // install anyway.
+      expect(output).toContain('compose.current\\nbash -s --')
+      expect(output).toContain("REWRITE\\nsudo cp")
+      expect(output).not.toContain('compose.current &&')
+    })
+
+    it('defaults to origin/dev when --ref is omitted', () => {
+      const shortSha = execFileSync('git', ['rev-parse', '--short', 'origin/dev'], { encoding: 'utf8' }).trim()
+      const output = execFileSync('bash', [SCRIPT, '--dry-run'], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: { ...process.env, UPDATES_DEPLOY_SSH_HOST: 'dry-run.invalid' },
+      })
+      expect(output).toContain('deploying origin/dev')
+      expect(output).toContain(`updates-static:${shortSha}-schema3`)
     })
 
     it('fails fast when the ref is missing a Dockerfile context file', () => {
