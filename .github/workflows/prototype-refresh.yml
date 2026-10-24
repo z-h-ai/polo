@@ -1,0 +1,67 @@
+name: Prototype maintenance (opt in)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: prototype-maintenance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    if: github.event_name == 'push' && vars.DESIGN_MATERIAL_CHECK == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read-only repository material check
+        run: python3 scripts/prototype_refresh.py --boundary main-integration --check > "$RUNNER_TEMP/material-check.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: material-check-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/material-check.json
+  preview:
+    # Manual diagnostic artifact only; never backfill, commit, tag or deploy.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HUSKY: '0'
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prepare native dependencies and browser
+        run: |
+          bun install --frozen-lockfile
+          python3 -m pip install -r scripts/prototype-browser-requirements.txt
+          python3 -m playwright install --with-deps chromium
+      - name: Generate, reproduce, and render diagnostic preview
+        run: python3 scripts/prototype_refresh.py --force --output "$RUNNER_TEMP/prototype-refresh"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prototype-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/prototype-refresh/
+          retention-days: 14
+          if-no-files-found: error
