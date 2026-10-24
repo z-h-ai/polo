@@ -23,7 +23,6 @@ import {
   buildFastDeciderSystemPrompt,
   buildFastDeciderUserPrompt,
   decideFastAction,
-  resolveBrowserFastDeciderEndpoints,
   type FastDeciderEndpoint,
   type FastDeciderInput,
 } from '../browser-fast-decider.ts';
@@ -139,12 +138,12 @@ describe('browser fast decider contract', () => {
     expect(result.paths.every((p) => p.error === undefined)).toBeTrue();
   });
 
-  it('paths disagree → agreement degrades to single-A and marks the answer', async () => {
+  it('paths disagree → no reliable suggestion', async () => {
     const result = await decideFastAction(INPUT,
       [endpoint('A'), { ...endpoint('B'), model: 'glm-5.3-flashx' }],
       { timeoutMs: 2000, fetchImpl: fetchReplying({ 'deepseek-flash': 'click @e4', 'glm-5.3-flashx': 'click @e5' }) });
-    expect(result.agreement).toBe('single-A');
-    expect(result.suggestedCommand).toBe('click @e4');
+    expect(result.agreement).toBe('none');
+    expect(result.suggestedCommand).toBeNull();
   });
 
   it('invalid ref from one path counts as that path failing (constraint 3 in the gate)', async () => {
@@ -186,25 +185,33 @@ describe('browser fast decider contract', () => {
     expect(result.dangerous).toBeTrue();
   });
 
-  // ==========================================================================
-  // Endpoint resolution (managed config → connections → credentials)
-  // ==========================================================================
+  it('preserves value bytes and rejects different scroll/key/value arguments as agreement', async () => {
+    expect(fuseCommand('fill @e1 Ab  Cd')).toBe('fill @e1 Ab  Cd');
+    for (const [a, b] of [
+      ['scroll down 500', 'scroll up 500'], ['key Enter', 'key Escape'],
+      ['fill @e1 Secret', 'fill @e1 secret'], ['fill @e1 a  b', 'fill @e1 a b'],
+    ]) {
+      const result = await decideFastAction(INPUT, [endpoint('A', 'a'), endpoint('B', 'b')],
+        { timeoutMs: 1000, fetchImpl: fetchReplying({ a: a!, b: b! }) });
+      expect(result.agreement).toBe('none');
+      expect(result.suggestedCommand).toBeNull();
+    }
+  });
 
-  it('resolveBrowserFastDeciderEndpoints maps config paths through connections + credentials', async () => {
-    const endpoints = await resolveBrowserFastDeciderEndpoints(
-      [
-        { name: 'A', connectionSlug: 'deepseek-main', model: 'deepseek-flash' },
-        { name: 'B', connectionSlug: 'missing-slug', model: 'glm-5.3-flashx' },
-      ],
-      {
-        getConnections: () => [
-          { slug: 'deepseek-main', baseUrl: 'https://api.deepseek.com/v1/' },
-        ] as never,
-        getApiKey: async (key) => (key.includes('deepseek-main') ? 'sk-test' : null),
-      },
-    );
-    expect(endpoints).toHaveLength(1);
-    expect(endpoints[0]!.baseUrl).toBe('https://api.deepseek.com/v1'); // trailing slash stripped
-    expect(endpoints[0]!.apiKey).toBe('sk-test');
+  it('rejects missing command arguments rather than returning executable advice', () => {
+    for (const cmd of ['click', 'fill @e1', 'upload', 'select @e1', 'key', 'scroll down', 'click @e4 garbage']) {
+      expect(isExecutableCommand(cmd, SNAP)).toBeFalse();
+    }
+  });
+
+  it('aborts the HTTP request when the path deadline expires', async () => {
+    let signal: AbortSignal | undefined;
+    const fetchImpl = ((_: unknown, init: RequestInit) => {
+      signal = init.signal as AbortSignal;
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+    const result = await decideFastAction(INPUT, [endpoint('A')], { timeoutMs: 30, fetchImpl });
+    expect(signal?.aborted).toBeTrue();
+    expect(result.paths[0]?.error).toContain('timeout');
   });
 });

@@ -6,6 +6,7 @@
  * shared session/cookie partition and CDP automation support.
  */
 
+import {browserActionDigest, BrowserActionNotDispatched, type BrowserActionFacts} from '@polo-ai/shared/agent/browser-action-authorization'
 import { join, parse as parsePath } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
@@ -868,6 +869,71 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     })
   }
 
+  private authorizedBrowserActions=new Map<string,{browserId:string;revoked:boolean;started:boolean;expires:number;promise?:Promise<unknown>}>()
+
+  cancelBrowserAction(id:string,handle:string):void{
+    const record=this.authorizedBrowserActions.get(handle)
+    if(record){if(record.browserId===id)record.revoked=true;return}
+    this.authorizedBrowserActions.set(handle,{browserId:id,revoked:true,started:false,expires:Date.now()+120000})
+  }
+
+  async executeAuthorizedAction(id:string,parts:string[],facts:BrowserActionFacts,method:string,args:unknown[],handle:string,expiresAt:number):Promise<unknown>{
+    const instance=this.requireAliveInstance(id)
+    for(const [key,record] of this.authorizedBrowserActions)if(record.expires<Date.now())this.authorizedBrowserActions.delete(key)
+    if(!Number.isSafeInteger(expiresAt)||expiresAt<=Date.now()||expiresAt>Date.now()+120000)throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Original native permission expired')
+    if(!/^[a-f0-9-]{36}$/.test(handle))throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Missing native permission')
+    let record=this.authorizedBrowserActions.get(handle)
+    if(record?.promise)return record.promise
+    if(record?.revoked||record&&record.browserId!==id)throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Native permission cancelled')
+    if(this.authorizedBrowserActions.size>=4096)throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Native permission capacity reached')
+    record={browserId:id,revoked:false,started:false,expires:expiresAt};this.authorizedBrowserActions.set(handle,record)
+    const permit=record
+    const assertCurrent=()=>{
+      if(facts.zoomFactor!==instance.pageView.webContents.getZoomFactor()){
+        if(permit.started)throw Error('Browser input was dispatched before zoom changed; verify its original outcome')
+        throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Browser zoom changed; nothing was executed')
+      }
+      if(permit.revoked||permit.expires<Date.now()){
+        if(permit.started)throw Error('Browser input was dispatched before cancellation; verify its original outcome')
+        throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Native permission cancelled; nothing was executed')
+      }
+      permit.started=true
+    }
+    const allowed:Record<string,string>={navigate:'navigate',back:'goBack',forward:'goForward',click:'click', 'click-at':'clickAt', fill:'fill',type:'type',select:'select',key:'sendKey',paste:'sendKey'}
+    if(facts.browserId!==id||allowed[parts[0]??'']!==method)throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Browser command binding changed; nothing was executed')
+    const check=async(point?:{x:number;y:number})=>{
+      let current:BrowserActionFacts
+      try{current=await this.inspectBrowserAction(id,parts)}catch{throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Browser target expired; nothing was executed')}
+      if(browserActionDigest(current)!==browserActionDigest(facts))throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Browser target changed; nothing was executed')
+      if(point){
+        let matches=false
+        try{matches=!!facts.targetId&&await instance.cdp.actionPointMatches(facts.targetId,point.x,point.y)}catch{/* No page input was sent; an unresolvable landing point is a stale target. */}
+        if(!matches)throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Browser click landing target changed; nothing was executed')
+      }
+    }
+    const execution=instance.cdp.withActionGuard(check,async()=>{
+      switch(method){
+        case 'click':return this.clickElement(id,args[0] as string,args[1] as never)
+        case 'clickAt':return this.clickAtCoordinates(id,args[0] as number,args[1] as number)
+        case 'fill':return this.fillElement(id,args[0] as string,args[1] as string)
+        case 'type':return this.typeText(id,args[0] as string)
+        case 'select':return this.selectOption(id,args[0] as string,args[1] as string)
+        case 'sendKey':return this.sendKey(id,args[0] as BrowserKeyArgs)
+        case 'navigate':await instance.cdp.beforeActionInput();return this.navigate(id,args[0] as string)
+        case 'goBack':await instance.cdp.beforeActionInput();return this.goBack(id)
+        case 'goForward':await instance.cdp.beforeActionInput();return this.goForward(id)
+        default:throw new BrowserActionNotDispatched('[BROWSER_PRE_DISPATCH] Unsupported authorized command; nothing was executed')
+      }
+    },assertCurrent).then(value=>{if(permit.revoked)throw Error('Browser input was dispatched before cancellation; verify its original outcome');return value}).catch(error=>{if(String(error).includes('[BROWSER_PRE_DISPATCH]'))throw new BrowserActionNotDispatched(String(error));throw error})
+    permit.promise=execution
+    return execution
+  }
+
+  async inspectBrowserAction(id: string, parts: string[]): Promise<import('@polo-ai/shared/agent/browser-action-authorization').BrowserActionFacts> {
+    const instance = this.requireAliveInstance(id)
+    return { ...(await instance.cdp.inspectAction(parts)), browserId: id }
+  }
+
   async getAccessibilitySnapshot(id: string): Promise<AccessibilitySnapshot> {
     const instance = this.requireAliveInstance(id)
     return instance.cdp.getAccessibilitySnapshot()
@@ -1583,6 +1649,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   async sendKey(id: string, args: BrowserKeyArgs): Promise<void> {
     const instance = this.requireAliveInstance(id)
 
+    await instance.cdp.beforeActionInput()
     const key = args.key?.trim()
     if (!key) throw new Error('browser_key requires key')
 
@@ -2640,6 +2707,21 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
 
       // -- Interaction ---------------------------------------------------------
+      case 'cancelBrowserAction': {
+        const [instanceId,handle]=args as [string,string]
+        this.requireOwnedInstance(instanceId,ownerKey)
+        return this.cancelBrowserAction(instanceId,handle)
+      }
+      case 'executeAuthorizedAction': {
+        const [instanceId,parts,facts,method,values,handle,expiresAt]=args as [string,string[],BrowserActionFacts,string,unknown[],string,number]
+        this.requireOwnedInstance(instanceId,ownerKey)
+        return this.executeAuthorizedAction(instanceId,parts,facts,method,values,handle,expiresAt)
+      }
+      case 'inspectBrowserAction': {
+        const [instanceId, parts] = args as [string, string[]]
+        this.requireOwnedInstance(instanceId, ownerKey)
+        return this.inspectBrowserAction(instanceId, parts)
+      }
       case 'getAccessibilitySnapshot': {
         const [instanceId] = args as [string]
         this.requireOwnedInstance(instanceId, ownerKey)

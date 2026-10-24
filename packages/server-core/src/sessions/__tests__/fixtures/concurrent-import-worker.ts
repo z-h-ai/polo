@@ -96,5 +96,5 @@ try {
   const result = await manager.importSession(workspace.id, bundle, mode)
   process.stdout.write(`${result.sessionId}\n`)
 } finally {
-  manager.cleanup()
+  await manager.cleanup()
 }

@@ -54,12 +54,12 @@ import {
 
 // Config stored in JSON file (credentials stored in encrypted file, not here)
 
-/** One fast-decider path: a named slot bound to an existing LLM connection + model. */
+/** Legacy local path settings. Ignored by the managed browser runtime; retained for config compatibility. */
 export interface BrowserFastDeciderPathConfig {
   name: 'A' | 'B';
   /** Slug of an existing LLM connection (OpenAI-compatible baseUrl required). */
   connectionSlug: string;
-  /** Model id, e.g. 'deepseek-flash' / 'glm-5.3-flashx'. */
+  /** Historical model id; ignored by the managed browser factory. */
   model: string;
   /** Extra request-body params merged over per-model defaults (e.g. reasoning_effort). */
   requestParams?: Record<string, unknown>;
@@ -67,7 +67,8 @@ export interface BrowserFastDeciderPathConfig {
 
 export interface BrowserFastDeciderConfig {
   enabled?: boolean;        // default true
-  timeoutMs?: number;       // per-path timeout, default 3000
+  timeoutMs?: number;       // suggestion deadline, default 3000; original billing cleanup remains tracked
+  /** @deprecated Ignored: the current ProductSpace Admin catalog owns routing. */
   paths?: BrowserFastDeciderPathConfig[];
 }
 

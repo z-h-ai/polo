@@ -1,3 +1,4 @@
+import {setBrowserPolicyReader} from '../../runtime/browser-policy'
 import { paymentHandoffUrl } from './payment-handoff'
 import {
   AdminClient,
@@ -901,6 +902,10 @@ export function registerAdminHandlers(
   })
   const billingSession = async (scope: { accountId: string; adminOrigin: string }) => installationSession(scope.accountId, scope.adminOrigin)
   const billingOptions = () => ({ signal: AbortSignal.timeout(5_000) })
+  setBrowserPolicyReader(async scope => {
+    const session = await billingSession(scope)
+    return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, billingOptions())
+  })
   setAssistantBillingTransport({
     start: async (scope, input) => { const s = await billingSession(scope); return s.client.startAssistantRun(s.accessToken, input, billingOptions()) },
     admit: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.admitAppRequest(s.accessToken, runId, input, billingOptions()) },

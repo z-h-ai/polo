@@ -1,5 +1,7 @@
 # Plan: POO-113-P1 浏览器操作快层（suggest 子命令 · 只读建议）
 
+> 当前审计修订（2026-10-23）：见 [managed-browser-audit.md](managed-browser-audit.md)。下文保留 P1 的历史计划与当时证据；旧本地路径解析及供应商直连评测不能证明当前 Polo 托管计费。此处为历史 P1 状态。2026-10-24 用户已授权在原 POO-113 实现 P2，取代下文“另卡生效”；当前验收范围见 [acceptance/plan.json](acceptance/plan.json)，正式验收结果以独立执行回执为准。
+
 Status: accepted · Date: 2026-10-22
 Reviewed by: Douglas（2026-10-22） · Accepted by: Douglas（2026-10-22，六项裁决见下）
 

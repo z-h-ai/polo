@@ -48,6 +48,7 @@ export function getBrowserToolHelp(): string {
     '  navigate <url>',
     '  snapshot',
     '  find <query>                                   search elements by keyword (matches role, name, value)',
+    '  act <sub-step>                                 execute one complete two-model agreement through Host authorization (managed opt-in)',
     '  suggest <sub-step>                             ask the fast decider to locate a planned sub-step (read-only suggestion)',
     '  click <ref> [none|navigation|network-idle] [timeoutMs]',
     '  click-at <x> <y>                               click at pixel coordinates (canvas elements)',
@@ -684,6 +685,8 @@ export async function executeBrowserToolCommand(args: {
   platform?: NodeJS.Platform;
   /** Lazy resolver for the browser fast decider (session callback). */
   getFastDecider?: () => BrowserFastDeciderFn | undefined;
+  authorizationComplete?: boolean;
+  automatic?: boolean;
 }): Promise<BrowserCommandResult> {
   // Array mode: no batch splitting, pass directly to single command execution
   if (Array.isArray(args.command)) {
@@ -713,6 +716,8 @@ async function executeBatchCommands(args: {
   sessionId: string;
   platform?: NodeJS.Platform;
   getFastDecider?: () => BrowserFastDeciderFn | undefined;
+  authorizationComplete?: boolean;
+  automatic?: boolean;
 }): Promise<BrowserCommandResult> {
   const outputs: string[] = [];
   let lastImage: BrowserCommandImage | undefined;
@@ -746,18 +751,57 @@ async function executeSingleCommand(args: {
   sessionId: string;
   platform?: NodeJS.Platform;
   getFastDecider?: () => BrowserFastDeciderFn | undefined;
+  authorizationComplete?: boolean;
+  automatic?: boolean;
 }): Promise<BrowserCommandResult> {
   // Array mode: use parts directly, no parsing needed
   const parts = Array.isArray(args.command)
-    ? args.command
+    ? [...args.command]
     : tokenizeCommand(args.command.trim());
   const cmd = parts[0]?.toLowerCase();
+  if(cmd)parts[0]=cmd;
+  Object.freeze(parts); // Tool input cannot change while authorization awaits.
+
 
   if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
     return { output: getBrowserToolHelp(), appendReleaseHint: false };
   }
 
   const { fns } = args;
+  const effects = new Set(['navigate','back','forward','click','click-at','drag','fill','type','paste','select','key','upload','evaluate']);
+  if (effects.has(cmd) && !args.authorizationComplete) {
+    if (!fns.authorizeCommand) throw new Error('Browser action authorization is unavailable; nothing was executed');
+    return fns.authorizeCommand(parts, (facts, lease) => {
+      const guarded = {...fns};
+      if (fns.executeAuthorizedAction) {
+        for (const method of ['navigate','goBack','goForward','click','clickAt','drag','fill','type','select','sendKey','upload'] as const) {
+          (guarded as unknown as Record<string, unknown>)[method] = (...values: unknown[]) => fns.executeAuthorizedAction!(parts, facts, method, values, lease);
+        }
+      }
+      return executeSingleCommand({...args, command:parts, fns: guarded, authorizationComplete: true});
+    }, {automatic: args.automatic});
+  }
+  if (cmd === 'act') {
+    const policy = await fns.readBrowserPolicy?.();
+    if (!policy?.policy.autoAcceptEnabled) throw new Error('Browser automatic execution is disabled by managed policy');
+    const substep = parts.slice(1).join(' ').trim();
+    if (!substep) throw new Error('act requires a sub-step planned by the main model');
+    const decider = args.getFastDecider?.();
+    if (!decider) return { output: 'No fast decider; replan with the main model. Nothing was executed.', appendReleaseHint: true };
+    const original = await fns.snapshot();
+    if (original.nodes.length > 120) return { output: 'Snapshot too large; narrow the page first. Nothing was executed.', appendReleaseHint: true };
+    const result = await decider({ snapshotText: formatSnapshotText(original).join('\n'), substep });
+    const {fuseCommand, isExecutableCommand} = await import('./browser-fast-decider.ts');
+    const bothPaths = result.paths.length === 2 && new Set(result.paths.map(p => p.name)).size === 2
+      && result.paths.every(p => !p.error && fuseCommand(p.command) === result.suggestedCommand);
+    if (result.agreement !== 'both' || !result.suggestedCommand || !bothPaths
+      || !isExecutableCommand(result.suggestedCommand, formatSnapshotText(original).join('\n'))) return { output: 'No complete two-model agreement; replan with the main model. Nothing was executed.', appendReleaseHint: true };
+    const current = await fns.snapshot();
+    if (JSON.stringify(current) !== JSON.stringify(original)) return { output: 'Page changed while locating the action; re-observe. Nothing was executed.', appendReleaseHint: true };
+    if (result.suggestedCommand === 'done') return {output:'The two models reported this sub-step complete; no browser action was sent.',appendReleaseHint:true};
+    const action = await executeSingleCommand({ ...args, command: result.suggestedCommand, authorizationComplete: false, automatic: true });
+    return { ...action, output: 'Two-model action executed through browser authorization.\n' + action.output };
+  }
 
   if (cmd === 'open') {
     const foreground = parts.includes('--foreground') || parts.includes('-f');

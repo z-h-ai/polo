@@ -2,18 +2,13 @@
  * POO-113-P1 browser suggest E2E harness (real Electron main process).
  * See scripts/electron-browser-suggest-e2e.ts for the scenario contract.
  */
-import { app, BrowserWindow } from 'electron'
-import { readFileSync } from 'node:fs'
+import { app } from 'electron'
 import { join } from 'node:path'
 import { BrowserPaneManager } from '../../src/main/browser-pane-manager'
 import {
   executeBrowserToolCommand,
   formatSnapshotText,
 } from '@polo-ai/shared/agent/browser-tool-runtime'
-import {
-  createBrowserFastDecider,
-  type FastDeciderResult,
-} from '@polo-ai/shared/agent'
 
 const FAILURES: string[] = []
 
@@ -121,26 +116,8 @@ async function runScenarios(): Promise<void> {
     paths.push({ name: 'A' as const, connectionSlug: 'e2e-ds', model: 'deepseek-flash', baseUrlOverride: 'https://api.deepseek.com', apiKeyOverride: DS_KEY })
   }
   if (GLM_KEY) {
-    paths.push({ name: 'B' as const, connectionSlug: 'e2e-glm', model: 'glm-5.3-flashx', baseUrlOverride: 'https://open.bigmodel.cn/api/paas/v4', apiKeyOverride: GLM_KEY })
+    paths.push({ name: 'B' as const, connectionSlug: 'e2e-glm', model: 'glm-5.3-flash', baseUrlOverride: 'https://open.bigmodel.cn/api/paas/v4', apiKeyOverride: GLM_KEY })
   }
-  const decider: () => FastDeciderResult | Promise<FastDeciderResult> = async (input) => {
-    // In the real product this is createBrowserFastDecider(...) built by the
-    // SessionManager from managed config; here we point it at the real APIs.
-    const mod = await import('@polo-ai/shared/agent')
-    const real = mod.createBrowserFastDecider({
-      getConfig: () => ({
-        enabled: paths.length > 0,
-        timeoutMs: 15000,
-        paths: [] as never[],
-      }),
-      resolveApiKey: async () => null,
-    })
-    // The stock factory resolves endpoints from stored connections; the E2E
-    // drives the core decideFastAction with explicit endpoints instead so the
-    // test is self-contained (same production code path for the decision).
-    return real(input)
-  }
-  void decider
 
   // Production command execution — the exact call the tool layer makes.
   async function runSuggest(substep: string): Promise<string> {

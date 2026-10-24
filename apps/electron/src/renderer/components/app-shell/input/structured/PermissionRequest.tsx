@@ -1,3 +1,4 @@
+import {BrowserActionPermissionRequest} from './BrowserActionPermissionRequest'
 import { useTranslation } from 'react-i18next'
 import { ShieldAlert, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ interface PermissionRequestProps {
  */
 export function PermissionRequest({ request, onResponse, unstyled = false }: PermissionRequestProps) {
   const { t } = useTranslation()
+  if (request.type === 'browser_action') return <BrowserActionPermissionRequest request={request} onResponse={onResponse} unstyled={unstyled}/>
 
   const handleAllow = () => {
     onResponse({ type: 'permission', allowed: true, alwaysAllow: false })

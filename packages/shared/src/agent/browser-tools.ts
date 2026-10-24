@@ -122,6 +122,10 @@ export interface BrowserLifecycleActionResult {
 }
 
 export interface BrowserPaneFns {
+  authorizeCommand?: <T>(parts: string[], dispatch: (facts: import('./browser-action-authorization').BrowserActionFacts, lease: import('./browser-action-authorization').BrowserActionDispatchLease) => Promise<T>, context?: {automatic?: boolean}) => Promise<T>;
+  executeAuthorizedAction?: (parts: string[], facts: import('./browser-action-authorization').BrowserActionFacts, method: string, args: unknown[], lease: import('./browser-action-authorization').BrowserActionDispatchLease) => Promise<unknown>;
+  readBrowserPolicy?: () => Promise<import('../admin/browser-policy-contract').BrowserPolicyResponse>;
+
   openPanel: (options?: { background?: boolean }) => Promise<{ instanceId: string }>;
   navigate: (url: string) => Promise<{ url: string; title: string }>;
   snapshot: () => Promise<{ url: string; title: string; nodes: Array<{ ref: string; role: string; name: string; value?: string; description?: string; focused?: boolean; checked?: boolean; disabled?: boolean }> }>;
@@ -202,6 +206,7 @@ Examples:
 - \`navigate https://example.com\`
 - \`snapshot\`
 - \`find login button\` — search elements by keyword
+- \`act 打开项目详情\` — execute one planned sub-step only when both fast models agree and Host authorization succeeds (managed policy must enable it)
 - \`suggest 点击「登录」\` — ask the fast decider to locate a planned sub-step (read-only suggestion; verify then run the command yourself)
 - \`click @e12\`
 - \`click-at 350 200\` — click at pixel coordinates (for canvas elements)

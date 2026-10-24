@@ -22,8 +22,10 @@
 
 import { BROWSER_TOOL_ACTION_MENU } from './browser-tool-runtime.ts';
 import { withTimeout } from './llm-tool.ts';
-import { getBrowserFastDeciderConfig, getLlmConnections, type BrowserFastDeciderPathConfig } from '../config/storage.ts';
-import { getLlmCredentialKey } from '../config/llm-connections.ts';
+import { getBrowserFastDeciderConfig } from '../config/storage.ts';
+import { getLlmCredentialKey, type LlmConnection } from '../config/llm-connections.ts';
+import { startInvocationCredentialProxy } from '../credentials/invocation-credential-proxy.ts';
+import type { ManagedBillingHooks } from '../credentials/managed-billing-observation.ts';
 
 // ============================================================================
 // Public types
@@ -52,6 +54,7 @@ export interface FastDeciderEndpoint {
 
 export interface FastDeciderPathOutcome {
   name: FastDeciderPathName;
+  model?: string;
   command: string | null;
   latencyMs: number;
   error?: string;
@@ -96,7 +99,7 @@ export function fuseCommand(raw: string | null | undefined): string | null {
       break;
     }
   }
-  s = s.replace(/\s+/g, ' ').trim();
+  // Preserve argument bytes (passwords, paths, URLs and fill values).
   return s || null;
 }
 
@@ -123,6 +126,14 @@ export function parseFastCommand(command: string): ParsedFastCommand | null {
 export function isExecutableCommand(command: string, snapshotText: string): boolean {
   const parsed = parseFastCommand(command);
   if (!parsed) return false;
+  if (['click', 'fill', 'select', 'upload'].includes(parsed.verb) && !parsed.ref) return false;
+  if (parsed.ref && !/^@e\d+$/.test(parsed.ref)) return false;
+  if (parsed.verb === 'click' && !/^click @e\d+$/.test(command)) return false;
+  if (['fill', 'select', 'upload'].includes(parsed.verb) && !/^\w+ @e\d+ .+$/.test(command)) return false;
+  if (parsed.verb === 'key' && !/^key \S+$/.test(command)) return false;
+  if (parsed.verb === 'scroll' && !/^scroll (up|down|left|right) [1-9]\d*$/.test(command)) return false;
+  if (parsed.verb === 'navigate' && !/^navigate https?:\/\/\S+$/.test(command)) return false;
+  if (parsed.verb === 'done' && command !== 'done') return false;
   if (parsed.ref) {
     const refRe = new RegExp(`^\\s*${parsed.ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+\\[`, 'm');
     if (!refRe.test(snapshotText)) return false;
@@ -199,7 +210,9 @@ function defaultRequestParams(model: string): Record<string, unknown> {
 export type FetchLike = typeof fetch;
 
 export interface CallPathOptions {
+  /** Model HTTP/retry deadline; durable billing cleanup may outlive it. */
   timeoutMs: number;
+  signal?: AbortSignal;
   fetchImpl?: FetchLike;
   maxTokens?: number;
 }
@@ -212,6 +225,11 @@ export async function callFastPath(
 ): Promise<FastDeciderPathOutcome> {
   const started = Date.now();
   const doFetch = options.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  options.signal?.addEventListener('abort', cancel, { once: true });
+  if (options.signal?.aborted) cancel();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
   const body = {
     model: endpoint.model,
     messages: [
@@ -225,6 +243,7 @@ export async function callFastPath(
   };
 
   const attempt = async (): Promise<string | null> => {
+    controller.signal.throwIfAborted();
     const resp = await doFetch(`${endpoint.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -232,6 +251,7 @@ export async function callFastPath(
         Authorization: `Bearer ${endpoint.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
     if (resp.status === 429) throw new Error('rate-limited');
     if (!resp.ok) throw new Error(`http ${resp.status}`);
@@ -245,12 +265,19 @@ export async function callFastPath(
     let content: string | null = null;
     for (let i = 0; i < 2; i++) {
       try {
-        content = await withTimeout(attempt(), options.timeoutMs, `fast path ${endpoint.name} timeout`);
+        const remaining = options.timeoutMs - (Date.now() - started);
+        if (remaining <= 0) throw new Error(`fast path ${endpoint.name} timeout`);
+        content = await withTimeout(attempt(), remaining, `fast path ${endpoint.name} timeout`);
         break;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg === 'rate-limited' && i === 0) {
-          await new Promise((r) => setTimeout(r, 800));
+        if (msg === 'rate-limited' && i === 0 && options.timeoutMs - (Date.now() - started) > 800) {
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => { clearTimeout(delay); reject(new Error('Fast request cancelled')); };
+            const delay = setTimeout(() => { controller.signal.removeEventListener('abort', abort); resolve(); }, 800);
+            controller.signal.addEventListener('abort', abort, { once: true });
+            if (controller.signal.aborted) abort();
+          });
           continue;
         }
         throw e;
@@ -258,29 +285,28 @@ export async function callFastPath(
     }
     return {
       name: endpoint.name,
+      model: endpoint.model,
       command: content,
       latencyMs: Date.now() - started,
     };
   } catch (e) {
     return {
       name: endpoint.name,
+      model: endpoint.model,
       command: null,
       latencyMs: Date.now() - started,
-      error: e instanceof Error ? e.message : String(e),
+      error: options.signal?.aborted ? `fast path ${endpoint.name} cancelled`
+        : controller.signal.aborted ? `fast path ${endpoint.name} timeout` : e instanceof Error ? e.message : String(e),
     };
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', cancel);
+    controller.abort();
   }
 }
 
 function commandsMatch(a: string, b: string): boolean {
-  const pa = parseFastCommand(a);
-  const pb = parseFastCommand(b);
-  if (!pa || !pb) return a === b; // exact fallback for fail:/done
-  if (pa.verb !== pb.verb || pa.ref !== pb.ref) return false;
-  // for value-bearing verbs compare the value case-insensitively
-  if (['fill', 'select', 'upload', 'navigate'].includes(pa.verb)) {
-    return a.toLowerCase().replace(/\s+/g, ' ') === b.toLowerCase().replace(/\s+/g, ' ');
-  }
-  return true;
+  return a === b;
 }
 
 /** Core decision: two paths in parallel → agreement gate → validation. */
@@ -305,10 +331,10 @@ export async function decideFastAction(
   if (a && b && commandsMatch(a, b)) {
     agreement = 'both';
     suggestedCommand = a;
-  } else if (a) {
+  } else if (a && !b) {
     agreement = 'single-A';
     suggestedCommand = a;
-  } else if (b) {
+  } else if (b && !a) {
     agreement = 'single-B';
     suggestedCommand = b;
   }
@@ -325,62 +351,125 @@ export async function decideFastAction(
 // Factory wiring (managed config → endpoints → decider fn)
 // ============================================================================
 
-/**
- * Build endpoints from the managed fast-decider config + existing LLM
- * connections (credentials resolved through the credential store — the
- * same channel the main model uses; no plaintext keys live in settings).
- */
-export async function resolveBrowserFastDeciderEndpoints(
-  pathConfigs: BrowserFastDeciderPathConfig[],
-  deps: {
-    getConnections?: () => ReturnType<typeof getLlmConnections>;
-    getApiKey: (credentialKey: string) => Promise<string | null>;
-  },
-): Promise<FastDeciderEndpoint[]> {
-  const connections = (deps.getConnections?.() ?? getLlmConnections()) ?? [];
-  const endpoints: FastDeciderEndpoint[] = [];
-  for (const cfg of pathConfigs) {
-    const conn = connections.find((c) => c.slug === cfg.connectionSlug);
-    if (!conn?.baseUrl) continue;
-    const apiKey = await deps.getApiKey(getLlmCredentialKey(conn.slug, 'api_key'));
-    if (!apiKey) continue;
-    endpoints.push({
-      name: cfg.name,
-      baseUrl: conn.baseUrl.replace(/\/+$/, ''),
-      model: cfg.model,
-      apiKey,
-      requestParams: cfg.requestParams,
-    });
-  }
-  return endpoints;
+/** Default grounding models; availability is authorized by the current Admin catalog. */
+export const BROWSER_FAST_MODELS = [
+  { name: 'A', model: 'deepseek-flash' },
+  { name: 'B', model: 'glm-5.3-flash' },
+] as const;
+
+export interface ManagedBrowserTransport {
+  connection: LlmConnection;
+  /** Current turn lifetime, including user stop and runtime disposal. */
+  signal?: AbortSignal;
+  billing?: ManagedBillingHooks;
+  /** Only the SessionManager's verified desktop lease may set this. */
+  billingOwnedByDesktopProxy?: boolean;
+  assertCurrent(): void;
 }
 
 /**
- * Session-facing decider built from the managed config. Returns a
- * "not configured" result (null suggestion) when no endpoint resolves —
- * callers degrade gracefully and never block on the fast layer.
+ * Use the SAME invocation credential proxy and billing hooks as the main Pi
+ * model. Local settings may disable/limit the helper, never select a provider,
+ * key or ProductSpace. Each HTTP attempt (including a 429 retry) is metered.
  */
-export function createBrowserFastDecider(
-  deps: {
-    getConfig?: () => ReturnType<typeof getBrowserFastDeciderConfig>;
-    resolveApiKey: (credentialKey: string) => Promise<string | null>;
-    fetchImpl?: FetchLike;
-  },
-): BrowserFastDeciderFn {
-  return async (input) => {
+export function createBrowserFastDecider(deps: {
+  resolveTransport: () => Promise<ManagedBrowserTransport>;
+  resolveApiKey: (credentialKey: string) => Promise<string | null>;
+  getConfig?: () => ReturnType<typeof getBrowserFastDeciderConfig>;
+}): BrowserFastDeciderFn & { dispose(): Promise<void> } {
+  const pending = new Set<Promise<FastDeciderResult>>();
+  const controllers = new Set<AbortController>();
+  let disposed = false;
+  const unavailable = (): FastDeciderResult => ({ suggestedCommand: null, agreement: 'none', dangerous: false,
+    paths: BROWSER_FAST_MODELS.map(p => ({ ...p, command: null, latencyMs: 0, error: 'Managed Polo transport unavailable, cancelled or timed out' })) });
+  const decider: BrowserFastDeciderFn = async (input) => {
     const config = deps.getConfig?.() ?? getBrowserFastDeciderConfig();
-    if (!config?.enabled) {
+    if (config?.enabled === false) {
       return { suggestedCommand: null, agreement: 'none', dangerous: false, paths: [] };
     }
-    const endpoints = await resolveBrowserFastDeciderEndpoints(config.paths ?? [], {
-      getApiKey: deps.resolveApiKey,
+    if (disposed) return unavailable();
+    const requestedTimeout = config?.timeoutMs ?? 3000;
+    const timeoutMs = Number.isFinite(requestedTimeout) ? Math.min(30000, Math.max(1000, requestedTimeout)) : 3000;
+    const controller = new AbortController();
+    controllers.add(controller);
+    const cancel = () => controller.abort();
+    const cancelled = new Promise<FastDeciderResult>(resolve => {
+      controller.signal.addEventListener('abort', () => resolve(unavailable()), { once: true });
     });
-    if (endpoints.length === 0) {
-      return { suggestedCommand: null, agreement: 'none', dangerous: false, paths: [] };
-    }
-    return decideFastAction(input, endpoints, {
-      timeoutMs: config.timeoutMs ?? 3000,
-      fetchImpl: deps.fetchImpl,
-    });
+    const timer = setTimeout(cancel, timeoutMs);
+    // Keep the original work owned until admission/receipt cleanup completes.
+    // Returning the deadline result must never discard a billing journal.
+    const work = (async (): Promise<FastDeciderResult> => {
+      let proxy: Awaited<ReturnType<typeof startInvocationCredentialProxy>> | undefined;
+      let turnSignal: AbortSignal | undefined;
+      try {
+        const transport = await deps.resolveTransport();
+        const { connection, billing, billingOwnedByDesktopProxy, assertCurrent: assertScopeCurrent, signal } = transport;
+        turnSignal = signal;
+        signal?.addEventListener('abort', cancel, { once: true });
+        if (signal?.aborted) cancel();
+        const assertCurrent = () => { controller.signal.throwIfAborted(); assertScopeCurrent(); };
+        assertCurrent();
+        if (connection.managedBy !== 'admin' || !connection.baseUrl
+          || !['pi', 'pi_compat'].includes(connection.providerType)
+          || connection.customEndpoint?.api !== 'openai-completions'
+          || (!billing && !billingOwnedByDesktopProxy)) {
+          throw new Error('Managed Polo billing transport is unavailable');
+        }
+        const allowed = new Set(connection.models?.map(m => typeof m === 'string' ? m : m.id));
+        // A partial catalog is reported per path, never redirected to another
+        // connection or silently substituted with the session's main model.
+        const available = BROWSER_FAST_MODELS.filter(p => allowed.has(p.model));
+        const missing: FastDeciderPathOutcome[] = BROWSER_FAST_MODELS.filter(p => !allowed.has(p.model))
+          .map(p => ({ ...p, command: null, latencyMs: 0, error: 'Model is not in the current Admin catalog' }));
+        if (!available.length) return { suggestedCommand: null, agreement: 'none', dangerous: false, paths: missing };
+        const apiKey = await deps.resolveApiKey(getLlmCredentialKey(connection.slug, 'api_key'));
+        assertCurrent();
+        if (!apiKey) throw new Error('Managed Polo credential is unavailable');
+        let baseUrl: string, capability: string;
+        if (billingOwnedByDesktopProxy) {
+          const url = new URL(connection.baseUrl);
+          if (billing || url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port
+            || url.pathname !== '/v1' || url.username || url.password || url.search || url.hash) {
+            throw new Error('Invalid verified desktop proxy');
+          }
+          // The verified desktop proxy already owns admission and settlement.
+          baseUrl = connection.baseUrl;
+          capability = apiKey;
+        } else {
+          proxy = await startInvocationCredentialProxy({
+            upstreamBaseUrl: connection.baseUrl,
+            credential: apiKey,
+            credentialHeaders: [{ name: 'authorization', format: 'bearer' }],
+          }, { billing, assertExecutionCurrent: assertCurrent, managedPolicy: { allowedModels: available.map(p => p.model) } });
+          baseUrl = `${proxy.url}/v1`;
+          capability = proxy.capability;
+        }
+        assertCurrent();
+        const result = await decideFastAction(input, available.map(p => ({
+          ...p, baseUrl, apiKey: capability,
+        })), { timeoutMs, signal: controller.signal });
+        signal?.throwIfAborted();
+        assertCurrent();
+        return { ...result, paths: [...result.paths, ...missing].sort((a, b) => a.name.localeCompare(b.name)) };
+      } catch {
+        // Never expose provider credentials, endpoint query strings or raw
+        // upstream exceptions to the model's browser-tool transcript.
+        return unavailable();
+      } finally {
+        try { await proxy?.close(); }
+        finally { turnSignal?.removeEventListener('abort', cancel); controllers.delete(controller); }
+      }
+    })();
+    pending.add(work);
+    void work.then(() => pending.delete(work), () => pending.delete(work));
+    try { return await Promise.race([work, cancelled]); }
+    catch { return unavailable(); }
+    finally { clearTimeout(timer); }
   };
+  return Object.assign(decider, { async dispose() {
+    disposed = true;
+    for (const controller of controllers) controller.abort();
+    await Promise.all([...pending]);
+  } });
 }

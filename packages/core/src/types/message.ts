@@ -538,12 +538,13 @@ export interface TypedError {
 /**
  * Permission request type categories
  */
-export type PermissionRequestType = 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+export type PermissionRequestType = 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action';
 
 /**
  * Permission request from agent (e.g., bash command approval)
  */
 export interface PermissionRequest {
+  browserAction?: { phase: 'awaiting_authorization' | 'invalidated_before_dispatch' | 'dispatched_outcome_unknown'; fields: Array<[string,string]>; actionDigest: string };
   requestId: string;
   toolName: string;
   command?: string;  // Optional: bash commands have it, MCP tools may not

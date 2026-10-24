@@ -505,7 +505,7 @@ export class Renderer {
       state.lastEditedLength = 0
     }
 
-    if (binding.platform === 'whatsapp') {
+    if (binding.platform === 'whatsapp' || request.type === 'browser_action') {
       await adapter.sendText(
         binding.channelId,
         `⏸ Permission required: ${request.description}

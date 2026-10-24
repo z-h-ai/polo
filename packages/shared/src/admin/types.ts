@@ -109,6 +109,7 @@ export interface AdminTransitEncryptedApiKey {
 }
 
 export interface AdminLlmConnectionsResponse {
+  browserPolicy?: import("./browser-policy-contract").BrowserPolicy;
   /** Server-authorized space owning these dedicated compute credentials. */
   productSpaceId?: string;
   configVersion: string;
@@ -548,6 +549,7 @@ export type AdminAdmitAppRequestResponse = z.infer<typeof billingRuntimeAdmissio
 export type AdminRecordAppUsageInput = BillingRuntimeUsageInput;
 
 export interface AdminRecordAppUsageResponse {
+  resolution?: 'platform_absorbed';
   runId: string;
   requestId: string;
   recorded: boolean;

@@ -22,7 +22,7 @@ export type HostLlmPublicResult = (
   | { status: 'no_output' | 'timed_out' | 'failed' | 'cancelled'; error: HostLlmPublicError; requestId: string; model: string; usage?: HostLlmPublicUsage }
 ) & { providerObservation?: ProviderObservationV1 }
 export interface HostLlmExecuteInput { model?: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens: number; timeoutMs: number; signal?: AbortSignal }
-export interface HostLlmBeforeSendFacts { hostRequestId: string; model: string; transportBaseUrl: string; credentialFingerprint: string }
+export interface HostLlmBeforeSendFacts { hostRequestId: string; model: string; transportBaseUrl: string; credentialFingerprint: string; requestBounds?: { maxInputTokens: number; maxOutputTokens: number; bodySha256: string } }
 /** Server-authenticated request correlation. It stays only in Host transport memory. */
 export interface HostLlmAdmissionDecision { providerCorrelation?: ProviderCorrelationV1 }
 export interface HostLlmExecutorOptions { beforeSend?: (facts: HostLlmBeforeSendFacts) => Promise<HostLlmAdmissionDecision | void>; connectionSlug: string; model?: string; nodeRuntimePath?: string; serverPath?: string; hostRuntime?: BackendHostRuntimeContext }

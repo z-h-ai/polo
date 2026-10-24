@@ -14,6 +14,9 @@ import { createBrowserTools, type BrowserPaneFns } from '../browser-tools'
 
 function createMockFns(): BrowserPaneFns {
   return {
+    // This factory suite tests command forwarding. Business authorization is
+    // exercised with actual Host policy/facts in browser-action-authorization.
+    authorizeCommand: async (_parts,dispatch) => dispatch({} as never, {} as never),
     openPanel: async () => ({ instanceId: 'browser-test-1' }),
     navigate: async (url: string) => ({ url: `https://${url}`, title: 'Test Page' }),
     snapshot: async () => ({

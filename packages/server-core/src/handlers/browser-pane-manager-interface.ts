@@ -228,6 +228,9 @@ export interface IBrowserPaneManager {
 
   // -- Interaction ---------------------------------------------------------
 
+  cancelBrowserAction?(id:string,handle:string):void|Promise<void>
+  executeAuthorizedAction?(id:string,parts:string[],facts:import('@polo-ai/shared/agent/browser-action-authorization').BrowserActionFacts,method:string,args:unknown[],handle:string,expiresAt:number):Promise<unknown>
+  inspectBrowserAction?(id: string, parts: string[]): Promise<import('@polo-ai/shared/agent/browser-action-authorization').BrowserActionFacts>
   getAccessibilitySnapshot(id: string): Promise<AccessibilitySnapshot>
   clickElement(id: string, ref: string, options?: { waitFor?: 'none' | 'navigation' | 'network-idle'; timeoutMs?: number }): Promise<void>
   clickAtCoordinates(id: string, x: number, y: number): Promise<void>

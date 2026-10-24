@@ -1385,7 +1385,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           pendingPermission.sessionId,
           pendingPermission.requestId,
           permResponse.allowed,
-          permResponse.alwaysAllow
+          permResponse.alwaysAllow,
+          permResponse.browserActionDigest ? {browserActionDigest:permResponse.browserActionDigest,browserActionPhase:permResponse.browserActionPhase} : undefined
         )
         return
       }

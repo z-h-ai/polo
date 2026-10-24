@@ -1519,7 +1519,7 @@ export default function App() {
             setPendingPermissions(prevPerms => {
               const next = new Map(prevPerms)
               const existingQueue = next.get(sessionId) || []
-              next.set(sessionId, [...existingQueue, effect.request])
+              next.set(sessionId, [...existingQueue.filter(p => p.requestId !== effect.request.requestId), effect.request])
               return next
             })
 
@@ -1614,7 +1614,9 @@ export default function App() {
         setPendingPermissions(prevPerms => {
           if (prevPerms.has(sessionId)) {
             const next = new Map(prevPerms)
-            next.delete(sessionId)
+            const retained = (next.get(sessionId) || []).filter(p => p.browserAction && p.browserAction.phase !== 'awaiting_authorization')
+            if (retained.length) next.set(sessionId, retained)
+            else next.delete(sessionId)
             return next
           }
           return prevPerms
@@ -2394,7 +2396,7 @@ export default function App() {
       setPendingPermissions(prev => {
         const next = new Map(prev)
         const queue = next.get(sessionId) || []
-        const remainingQueue = queue.slice(1) // Remove first item
+        const remainingQueue = queue.filter(p => p.requestId !== requestId || (!!options?.browserActionPhase && p.browserAction?.phase !== options.browserActionPhase))
         if (remainingQueue.length === 0) {
           next.delete(sessionId)
         } else {
@@ -2409,7 +2411,7 @@ export default function App() {
       setPendingPermissions(prev => {
         const next = new Map(prev)
         const queue = next.get(sessionId) || []
-        const remainingQueue = queue.slice(1)
+        const remainingQueue = queue.filter(p => p.requestId !== requestId || (!!options?.browserActionPhase && p.browserAction?.phase !== options.browserActionPhase))
         if (remainingQueue.length === 0) {
           next.delete(sessionId)
         } else {
