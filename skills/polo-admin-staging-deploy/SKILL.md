@@ -20,28 +20,55 @@ From a repository checkout whose `<ref>` contains the change:
 
 ```bash
 scripts/updates-static-deploy.sh --ref origin/dev
+# After a release bumped the feed version, pin the expected online version:
+scripts/updates-static-deploy.sh --ref origin/dev --expect-version 0.20.0
 ```
 
 The script: packs the Dockerfile build context from the ref with
 `git archive`, ships it to gz-coolify-main and builds there (the host is
-x86_64 — never build locally on an arm64 machine and move the tar), backs up
-the previous image id / compose image line / container `/app` under
-`/data/updates-static-deploy/backup-<ts>/`, repoints only the
-`updates-static` service's `image:` line in the Coolify compose file,
-recreates the container with the full compose parameter set, force-recreates
-it once more as the persistence proof, and verifies the schema-3 capability
-plus the public feed.
+x86_64 — never build locally on an arm64 machine and move the tar), commits
+the RUNNING container to `updates-static-rollback:<stamp>` and proves that
+image can run the capability probe, takes verified backups (container `/app`
+tar, compose image line) under `/data/updates-static-deploy/backup-<ts>/`,
+builds the new image under a tag that never collides with the rollback tag,
+repoints only the `updates-static` service's `image:` line in the Coolify
+compose file behind a one-line-diff gate, recreates the container with the
+full compose parameter set, force-recreates it once more as the persistence
+proof, and verifies the schema-3 capability plus the public feed.
 
 ## One-command rollback
 
 ```bash
-scripts/updates-static-deploy.sh --rollback                       # newest backup
+scripts/updates-static-deploy.sh --rollback                       # newest COMPLETE snapshot
 scripts/updates-static-deploy.sh --rollback --backup-dir /data/updates-static-deploy/backup-<ts>
 ```
 
-Restores the backed-up compose image line and recreates the container. The
-old image itself stays on the host under `updates-static:<sha>-schema3`
-history until pruned.
+Restores the compose image line to the snapshot's rollback anchor
+(`updates-static-rollback:<stamp>`, a `docker commit` of the pre-deploy
+container including any live patch), recreates the container, asserts the
+running image id equals the anchored id, and re-probes the capability. Only
+snapshots whose `rollback.env` is marked `COMPLETE=1` with a readable
+`/app` tar qualify; incomplete ones are skipped with a note.
+
+## Standing boundaries
+
+- **Do not prune `updates-static:*` or `updates-static-rollback:*` images on
+  the host.** The compose file references the local tag; pruned images leave
+  the service undeeployable until the script runs again. The rollback images
+  also embed the container's env snapshot — keep them on the host, never
+  `docker push` or export them.
+- **Coolify may rewrite the compose file** (redeploy from its UI) and revert
+  the `image:` line to the old registry reference. The fix is one command:
+  re-run `scripts/updates-static-deploy.sh` — it is idempotent and rebuilds
+  from cache. Never hand-edit the line back with `docker cp`.
+- **`--expect-version` moves with every release** (default `0.20.0`). After
+  publishing a new version, pass the new one explicitly or the deploy's feed
+  check fails: `--expect-version <new-version>`. A failed deploy because of a
+  stale expectation is harmless — the container is already recreated with the
+  new image; fix the flag and re-run.
+- Deployments must run from a checkout whose ref passes the script's context
+  check; a ref missing any Dockerfile COPY source aborts before anything is
+  built or touched.
 
 ## Acceptance checks (all four, every deploy)
 
