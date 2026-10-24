@@ -414,7 +414,7 @@ describe('macOS terminal integration', () => {
       .some(name => name.includes('.polo-claim-'))).toBe(false)
   })
 
-  it('does not own or uninstall a user-created symlink to the packaged target', async () => {
+  it('adopts an installer-created symlink to the packaged target during install', async () => {
     const options = setup()
     const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
     const target = join(options.resourcesPath, 'app', 'resources', 'bin', 'polo')
@@ -423,12 +423,78 @@ describe('macOS terminal integration', () => {
 
     const before = await getTerminalIntegrationStatus(options)
     expect(before.installed).toBe(false)
-    expect(before.conflict).toEqual({ code: 'launcher_conflict', path: launcher })
+    expect(before.conflict).toBeUndefined()
+    expect(before.statusCode).toBe('not_installed')
+
+    const installed = await installTerminalIntegration(options)
+    expect(installed.conflict).toBeUndefined()
+    expect(installed.installed).toBe(true)
+    expect(installed.statusCode).toBe('ready')
+    expect(readlinkSync(launcher)).toBe(target)
+    expect(existsSync(join(options.homeDir!, '.polo-ai', 'terminal-integration.json'))).toBe(true)
+  })
+
+  it('adopts an install-app.sh symlink that points at another Polo AI.app bundle', async () => {
+    const options = setup()
+    const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
+    const bundleTarget = join(
+      options.homeDir!,
+      'Applications',
+      'Polo AI.app',
+      'Contents',
+      'Resources',
+      'app',
+      'resources',
+      'bin',
+      'polo',
+    )
+    mkdirSync(dirname(bundleTarget), { recursive: true })
+    writeFileSync(bundleTarget, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    mkdirSync(dirname(launcher), { recursive: true })
+    symlinkSync(bundleTarget, launcher)
+
+    const before = await getTerminalIntegrationStatus(options)
+    expect(before.installed).toBe(false)
+    expect(before.conflict).toBeUndefined()
+
+    const installed = await installTerminalIntegration(options)
+    expect(installed.conflict).toBeUndefined()
+    expect(installed.installed).toBe(true)
+    expect(installed.statusCode).toBe('ready')
+    expect(readlinkSync(launcher)).toBe(
+      join(options.resourcesPath, 'app', 'resources', 'bin', 'polo'),
+    )
+  })
+
+  it('adopts an installer symlink to the polo-ai compatibility wrapper', async () => {
+    const options = setup()
+    const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
+    const compatTarget = join(options.resourcesPath, 'app', 'resources', 'bin', 'polo-ai')
+    writeFileSync(compatTarget, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    mkdirSync(dirname(launcher), { recursive: true })
+    symlinkSync(compatTarget, launcher)
+
+    const status = await installTerminalIntegration(options)
+    expect(status.conflict).toBeUndefined()
+    expect(status.installed).toBe(true)
+    expect(status.statusCode).toBe('ready')
+    // Adoption republishes the launcher onto the current packaged target.
+    expect(readlinkSync(launcher)).toBe(
+      join(options.resourcesPath, 'app', 'resources', 'bin', 'polo'),
+    )
+  })
+
+  it('does not grant uninstall rights to an installer-created symlink without state', async () => {
+    const options = setup()
+    const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
+    const target = join(options.resourcesPath, 'app', 'resources', 'bin', 'polo')
+    mkdirSync(dirname(launcher), { recursive: true })
+    symlinkSync(target, launcher)
 
     const after = await uninstallTerminalIntegration(options)
     expect(lstatSync(launcher).isSymbolicLink()).toBe(true)
     expect(readlinkSync(launcher)).toBe(target)
-    expect(after.conflict).toEqual({ code: 'launcher_conflict', path: launcher })
+    expect(after.conflict).toBeUndefined()
   })
 
   it('preserves the launcher when ownership state is missing or corrupt', async () => {
@@ -450,7 +516,7 @@ describe('macOS terminal integration', () => {
     }
   })
 
-  it('preserves the launcher when the recorded ownership identity is tampered', async () => {
+  it('preserves the launcher and state when the recorded ownership identity is tampered', async () => {
     const options = setup()
     const installed = await installTerminalIntegration(options)
     const statePath = join(options.homeDir!, '.polo-ai', 'terminal-integration.json')
@@ -460,13 +526,17 @@ describe('macOS terminal integration', () => {
       launcherIdentity: '0'.repeat(64),
     })}\n`)
 
+    // The launcher still resolves into the app bundle, so it stays adoptable
+    // rather than conflicting, but uninstall must not delete it without a
+    // verified state record; a fresh install re-establishes ownership instead.
     const status = await uninstallTerminalIntegration(options)
     expect(lstatSync(installed.launcherPath).isSymbolicLink()).toBe(true)
-    expect(status.conflict).toEqual({
-      code: 'launcher_conflict',
-      path: installed.launcherPath,
-    })
     expect(existsSync(statePath)).toBe(true)
+    expect(status.conflict).toBeUndefined()
+
+    const repaired = await installTerminalIntegration(options)
+    expect(repaired.installed).toBe(true)
+    expect(repaired.statusCode).toBe('ready')
   })
 
   it('preserves a managed path whose symlink identity was replaced by the user', async () => {
