@@ -23,6 +23,7 @@ import { compare } from 'semver'
 import {
   parseReleaseContract,
   sha256,
+  RELEASE_CONTRACT_SCHEMA_VERSION,
   type ParsedReleaseContract,
   type ReleaseArtifactContract,
   type ReleaseContract,
@@ -31,6 +32,8 @@ import { isStrictSemver } from './strict-semver'
 
 export const MANIFEST_NAMES = ['latest-mac.yml', 'latest-linux.yml'] as const
 export const MACOS_X64_DMG_NAME = 'Polo-AI-x64.dmg'
+export const MACOS_ARM64_ZIP_NAME = 'Polo-AI-arm64.zip'
+export const MACOS_ARM64_DMG_NAME = 'Polo-AI-arm64.dmg'
 export const MAX_DISK_USAGE = 0.70
 export const KEEP_RELEASES = 3
 
@@ -133,7 +136,12 @@ function manifestEntryForArtifact(
   expectedArtifact: ReleaseArtifactContract,
 ): YamlFile {
   const allowed = name === 'latest-mac.yml'
-    ? new Set([expectedArtifact.fileName, MACOS_X64_DMG_NAME])
+    ? new Set([
+        expectedArtifact.fileName,
+        MACOS_X64_DMG_NAME,
+        MACOS_ARM64_ZIP_NAME,
+        MACOS_ARM64_DMG_NAME,
+      ])
     : new Set([expectedArtifact.fileName])
   const unsupported = manifest.files.find(entry => !allowed.has(entry.url))
   if (unsupported) {
@@ -188,8 +196,11 @@ export async function validateSource(
     throw new Error('release-contract.json must be a regular file')
   }
   const contract = parseReleaseContract(JSON.parse(await readFile(contractPath, 'utf8')))
-  if (contract.schemaVersion !== 2) {
-    throw new Error('Release source must use contract schema version 2')
+  if (contract.schemaVersion !== RELEASE_CONTRACT_SCHEMA_VERSION
+    && contract.schemaVersion !== 2) {
+    throw new Error(
+      `Release source must use contract schema version 2 or ${RELEASE_CONTRACT_SCHEMA_VERSION}`,
+    )
   }
   if (contract.version !== expected.version) {
     throw new Error(`Release contract has version ${contract.version}, expected ${expected.version}`)
@@ -229,6 +240,14 @@ export async function validateSource(
     }
     const expectedArtifact = manifestArtifacts[name]
     manifestEntryForArtifact(manifest, name, expectedArtifact)
+    if (contract.schemaVersion === RELEASE_CONTRACT_SCHEMA_VERSION
+      && name === 'latest-mac.yml'
+      && !manifest.files.some(entry => entry.url === MACOS_ARM64_ZIP_NAME)) {
+      // POL-268 recurrence gate: a current-schema release whose updater
+      // manifest omits the arm64 updater ZIP silently downgrades Apple
+      // Silicon clients to x64. Fail the publish pipeline here.
+      throw new Error(`${name} must reference the arm64 updater ZIP: ${MACOS_ARM64_ZIP_NAME}`)
+    }
     for (const manifestEntry of manifest.files) {
       const artifactPath = join(source, manifestEntry.url)
       const artifactStat = await stat(artifactPath)
@@ -656,7 +675,14 @@ export async function publish(
 ): Promise<PublishResult> {
   const source = resolve(args.source)
   const releasesDir = resolve(args.releasesDir)
-  await validateSource(source, args)
+  const validated = await validateSource(source, args)
+  if (validated.contract.schemaVersion !== RELEASE_CONTRACT_SCHEMA_VERSION) {
+    // New publishes must carry both macOS updater artifacts; only rollback
+    // verification of historical releases may still use schema 2.
+    throw new Error(
+      `Publishing requires contract schema version ${RELEASE_CONTRACT_SCHEMA_VERSION}`,
+    )
+  }
   const electronRoot = join(releasesDir, 'electron')
   const releaseRoot = join(electronRoot, 'releases')
   await mkdir(releaseRoot, { recursive: true })

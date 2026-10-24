@@ -9,6 +9,7 @@ import { parseStrictSemverTag } from './strict-semver'
 export const RELEASE_ASSET_NAMES = [
   'Polo-AI-x64.dmg',
   'Polo-AI-x64.zip',
+  'Polo-AI-arm64.zip',
   'Polo-AI-arm64.dmg',
   'Polo-AI-x64.AppImage',
   'Polo-AI-x64.exe',

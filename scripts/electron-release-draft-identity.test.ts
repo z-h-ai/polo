@@ -21,12 +21,12 @@ async function fixture(): Promise<{ root: string, release: object }> {
 }
 
 describe('approved Draft Release identity', () => {
-  it('pins the numeric release ID and all nine uploaded asset IDs, names, sizes, and SHA-256 digests', async () => {
+  it('pins the numeric release ID and all ten uploaded asset IDs, names, sizes, and SHA-256 digests', async () => {
     const { root, release } = await fixture()
     try {
       const identity = await createDraftReleaseIdentity(root, release)
       expect(identity.releaseId).toBe(123)
-      expect(identity.assets).toHaveLength(9)
+      expect(identity.assets).toHaveLength(10)
       expect(identity.assets.map(asset => asset.name).sort()).toEqual([...RELEASE_ASSET_NAMES].sort())
       expect(identity.assets.every(asset => /^[a-f0-9]{64}$/.test(asset.sha256))).toBe(true)
       expect(parseDraftReleaseIdentity(identity)).toEqual(identity)

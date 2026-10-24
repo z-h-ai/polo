@@ -249,8 +249,11 @@ describe("Electron release workflow boundaries", () => {
     expect(reusable).toContain("Polo-AI-x64.exe");
     expect(reusable).toContain("Get-AuthenticodeSignature");
     expect(reusable).toContain("electron:dist:mac --arch=${{ matrix.arch }}");
+    // POL-268: both architecture updater ZIPs are Draft assets, so the
+    // recovered-Draft asset count check covers ten files.
+    expect(reusable).toContain("updater: true");
     expect(release).toContain(
-      'test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 9',
+      'test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 10',
     );
   });
 

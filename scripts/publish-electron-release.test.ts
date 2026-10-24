@@ -48,6 +48,7 @@ async function createFixture(version = '1.0.0'): Promise<Fixture> {
   await Promise.all([mkdir(source), mkdir(volume)])
   const files = {
     macosZip: join(source, 'Polo-AI-x64.zip'),
+    macosArm64Zip: join(source, 'Polo-AI-arm64.zip'),
     macosX64Dmg: join(source, 'Polo-AI-x64.dmg'),
     macosArm64Dmg: join(source, 'Polo-AI-arm64.dmg'),
     linuxAppImage: join(source, 'Polo-AI-x64.AppImage'),
@@ -56,6 +57,7 @@ async function createFixture(version = '1.0.0'): Promise<Fixture> {
   }
   await Promise.all([
     writeFile(files.macosZip, 'macOS release'),
+    writeFile(files.macosArm64Zip, 'macOS arm64 release'),
     writeFile(files.macosX64Dmg, 'macOS x64 DMG'),
     writeFile(files.macosArm64Dmg, 'macOS arm64 DMG'),
     writeFile(files.linuxAppImage, 'Linux release'),
@@ -71,6 +73,20 @@ async function createFixture(version = '1.0.0'): Promise<Fixture> {
     await writeFile(
       join(source, manifestNames[index]!),
       `version: ${version}\nfiles:\n  - url: ${name}\n    sha512: ${hash}\n    size: ${contents.byteLength}\npath: ${name}\nsha512: ${hash}\n`,
+    )
+  }
+  // The current contract schema requires the macOS updater manifest to carry
+  // the arm64 updater ZIP (POL-268 recurrence gate).
+  {
+    const arm64Contents = await readFile(files.macosArm64Zip)
+    const arm64Hash = createHash('sha512').update(arm64Contents).digest('base64')
+    const manifestPath = join(source, 'latest-mac.yml')
+    await writeFile(
+      manifestPath,
+      (await readFile(manifestPath, 'utf8')).replace(
+        'files:\n',
+        `files:\n  - url: Polo-AI-arm64.zip\n    sha512: ${arm64Hash}\n    size: ${arm64Contents.byteLength}\n`,
+      ),
     )
   }
   const contract = await createReleaseContract({
@@ -98,7 +114,7 @@ describe('release publisher validation', () => {
   it('accepts the complete curated release directory', async () => {
     const fixture = await createFixture()
     try {
-      expect((await validateSource(fixture.source, fixture.args)).files).toHaveLength(9)
+      expect((await validateSource(fixture.source, fixture.args)).files).toHaveLength(10)
     } finally { await destroy(fixture) }
   })
 
@@ -119,8 +135,29 @@ describe('release publisher validation', () => {
 
       const validated = await validateSource(fixture.source, fixture.args)
 
-      expect(validated.manifests['latest-mac.yml'].files).toHaveLength(2)
-      expect(validated.manifests['latest-mac.yml'].files[1]?.url).toBe('Polo-AI-x64.zip')
+      expect(validated.manifests['latest-mac.yml'].files).toHaveLength(3)
+      expect(validated.manifests['latest-mac.yml'].files.map(entry => entry.url)).toEqual([
+        'Polo-AI-x64.dmg',
+        'Polo-AI-arm64.zip',
+        'Polo-AI-x64.zip',
+      ])
+    } finally { await destroy(fixture) }
+  })
+
+  it('rejects a current-schema macOS manifest without the arm64 updater ZIP', async () => {
+    const fixture = await createFixture()
+    try {
+      const manifestPath = join(fixture.source, 'latest-mac.yml')
+      await writeFile(
+        manifestPath,
+        (await readFile(manifestPath, 'utf8')).replace(
+          /  - url: Polo-AI-arm64\.zip\n    sha512: [^\n]+\n    size: \d+\n/,
+          '',
+        ),
+      )
+
+      await expect(validateSource(fixture.source, fixture.args))
+        .rejects.toThrow('must reference the arm64 updater ZIP')
     } finally { await destroy(fixture) }
   })
 

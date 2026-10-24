@@ -129,7 +129,7 @@ jobs:
             test "$(jq -r .isDraft /tmp/release.json)" = "true"
             mkdir existing-release
             gh release download "$GITHUB_REF_NAME" --dir existing-release
-            test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 9
+            test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 10
             for file in release/*; do
               cmp "$file" "existing-release/$(basename "$file")"
             done
@@ -162,7 +162,7 @@ jobs:
           test "$(jq -r .releaseId /tmp/draft-identity.json)" = "$release_id"
           asset_identity="$(jq -c . /tmp/draft-identity.json)"
           test "$release_id" -gt 0
-          test "$(jq '.assets | length' /tmp/draft-identity.json)" -eq 9
+          test "$(jq '.assets | length' /tmp/draft-identity.json)" -eq 10
           {
             echo "release_id=$release_id"
             echo "asset_identity=$asset_identity"
@@ -229,6 +229,7 @@ jobs:
           for asset_name in \
             Polo-AI-x64.dmg \
             Polo-AI-x64.zip \
+            Polo-AI-arm64.zip \
             Polo-AI-arm64.dmg \
             Polo-AI-x64.AppImage \
             Polo-AI-x64.exe \
@@ -260,7 +261,7 @@ jobs:
             --commit "$RELEASE_COMMIT" \
             --draft true
           test "$(jq -r .releaseId /tmp/draft-identity.json)" = "$release_id"
-          test "$(jq '.assets | length' /tmp/draft-identity.json)" -eq 9
+          test "$(jq '.assets | length' /tmp/draft-identity.json)" -eq 10
           {
             echo "release_id=$release_id"
             echo "asset_identity=$asset_identity"
