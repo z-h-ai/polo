@@ -454,8 +454,8 @@
   ],
   "default_story": "UI-refinement",
   "design": {
-    "revision": "native-materials-r4-dev-aligned-20261023",
-    "sha256": "ea00d034038b29499cb838e2500347859751c01e02a57201029e4c480dc45811",
+    "revision": "native-materials-r5-lifecycle-candidate-20261023",
+    "sha256": "9fb138ef305dd4f74dc3e2086ad213cd921db73a4f41e6887eed88ee2c80eda2",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {
@@ -508,7 +508,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/references/usage-playbook.md",
-        "sha256": "5c8ee3f1446a90c7894a159ecdce260e7dfefbb855d64f0cadc5c566a7ccca52"
+        "sha256": "2806d1d3120a96b2c72eb0f9745532f0cfeb8cc594918b3f9ed976ed5732b9c1"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/references/page-baselines.md",
@@ -568,7 +568,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-        "sha256": "d0c71d60967740283e140dd19b4db4277c213dc01eb4f3a9704e3d28c3ccce59"
+        "sha256": "34cc28424646e740e2cbcbb4482dacd09a93e50e74cd62fb869e6a7679ab7689"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/references/style-usage.md",
@@ -45634,28 +45634,28 @@
       "id": "client-workbench-template",
       "path": ".agents/skills/polo-ai-design-system/references/client-workbench.template.html",
       "label": "客户端产品页面唯一维护模板",
-      "revision": "native-materials-r4-dev-aligned-20261023",
+      "revision": "native-materials-r5-lifecycle-candidate-20261023",
       "sha256": "d50590c7bbd5ed6df9e206c3568188ebd8b20f620475e88078dd1cf80886b8f7"
     },
     {
       "id": "workbench-base-css",
       "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
       "label": "最新原型提升的 b82fa1e5 基础样式",
-      "revision": "native-materials-r4-dev-aligned-20261023",
+      "revision": "native-materials-r5-lifecycle-candidate-20261023",
       "sha256": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a"
     },
     {
       "id": "client-design-model",
       "path": ".agents/skills/polo-ai-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
-      "revision": "native-materials-r4-dev-aligned-20261023",
-      "sha256": "547f68226a968ec843cc3e4fe4b65eef8673f9971e0de061f48b99f1f7b990c9"
+      "revision": "native-materials-r5-lifecycle-candidate-20261023",
+      "sha256": "3b8045dfa458fef9388412df6be60c18cdea5d34eaa038fcb58fce68880d57cd"
     },
     {
       "id": "client-design-foundations",
       "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
       "label": "当前客户端设计来源和消费边界",
-      "revision": "native-materials-r4-dev-aligned-20261023",
+      "revision": "native-materials-r5-lifecycle-candidate-20261023",
       "sha256": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d"
     },
     {

@@ -18,7 +18,7 @@
     ]
   },
   "mode": "extracted",
-  "revision": "native-materials-r4-dev-aligned-20261023",
+  "revision": "native-materials-r5-lifecycle-candidate-20261023",
   "sources": [
     {
       "path": "docs/client-journey-review/spec.md",
@@ -94,7 +94,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/usage-playbook.md",
-      "sha256": "5c8ee3f1446a90c7894a159ecdce260e7dfefbb855d64f0cadc5c566a7ccca52",
+      "sha256": "2806d1d3120a96b2c72eb0f9745532f0cfeb8cc594918b3f9ed976ed5732b9c1",
       "role": "authority",
       "scope": "新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑"
     },
@@ -184,7 +184,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-      "sha256": "d0c71d60967740283e140dd19b4db4277c213dc01eb4f3a9704e3d28c3ccce59",
+      "sha256": "34cc28424646e740e2cbcbb4482dacd09a93e50e74cd62fb869e6a7679ab7689",
       "role": "implementation",
       "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
     },
@@ -308,6 +308,7 @@
     "return to original circle/order with manual recheck"
   ],
   "prototype_guidance": [
+    "最终 main 集成前和新任务锁定依据前，按 references/usage-playbook.md 的维护入口检查三层素材；检查只读，维护不自动 commit/push/tag/发版。",
     "新需求先读 references/native-reuse.md：原生入口、任务内叶子副本/组合、providers与CSS扫描、独立依赖、真实预览和导出命令；assets是生成物，不手改、不静默改生产。",
     "先读 references/foundations.md，产品行为读Spec；当前实现基线直接打开 assets/source-baseline/index.html（file:// 可开；场景直达 entries/baseline.html?scene=<ID>）；目标设计仍消费 docs/mvp-complete-flow-hifi/prototype.html 与主manifest，逐卡按scene定位，与当前基线分开使用。",
     "实施流程按 references/usage-playbook.md：核实基线版本与范围→定位页面/区域→选择组件→消费变量→只修改必要区域→浏览器核验；新需求优先复用 Skill 内当前页面/区域基线，再真实组件，最后 token；旧目标设计按已确认范围另列，不覆盖当前实现基线。",
