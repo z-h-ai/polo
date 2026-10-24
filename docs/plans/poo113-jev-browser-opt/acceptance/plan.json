@@ -522,6 +522,12 @@
               "selector": "[data-tutorial=permission-banner]",
               "contains": "CNY"
             }
+          ],
+          "requirement_ids": [
+            "BA-03",
+            "BA-04",
+            "BA-07",
+            "BA-12"
           ]
         },
         {
@@ -542,6 +548,12 @@
               "selector": "[data-tutorial=permission-banner]",
               "contains": "您好，方案已按今天的讨论调整"
             }
+          ],
+          "requirement_ids": [
+            "BA-03",
+            "BA-04",
+            "BA-07",
+            "BA-12"
           ]
         },
         {
@@ -562,6 +574,12 @@
               "selector": "[data-tutorial=permission-banner]",
               "contains": "重复"
             }
+          ],
+          "requirement_ids": [
+            "BA-03",
+            "BA-04",
+            "BA-07",
+            "BA-12"
           ]
         },
         {
@@ -577,6 +595,12 @@
               "selector": "[data-tutorial=permission-banner]",
               "contains": "尚未执行"
             }
+          ],
+          "requirement_ids": [
+            "BA-03",
+            "BA-04",
+            "BA-07",
+            "BA-12"
           ]
         },
         {
@@ -607,6 +631,12 @@
               "selector": "[data-tutorial=permission-banner]",
               "contains": "CNY"
             }
+          ],
+          "requirement_ids": [
+            "BA-03",
+            "BA-04",
+            "BA-07",
+            "BA-12"
           ]
         },
         {
@@ -627,6 +657,12 @@
               "selector": "[data-tutorial=permission-banner]",
               "contains": "删除"
             }
+          ],
+          "requirement_ids": [
+            "BA-03",
+            "BA-04",
+            "BA-07",
+            "BA-12"
           ]
         }
       ]

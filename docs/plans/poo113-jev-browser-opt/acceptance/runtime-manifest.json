@@ -2,7 +2,7 @@
   "version": 1,
   "taskId": "POO-113",
   "authorityTaskRevision": "d353907f0af058aff3640be3c1e6e21648c40faa1c143507f96335cc2e46fb83",
-  "planSha256": "c3baab69e48a3fe31184a35d049d714eeb7034ebcc9b32447e885df759a8585c",
+  "planSha256": "ce2c4809a8ac6fb45fe9eae7dfdc387da4b0a5c2cf2cfd40effd6f3e23c380a8",
   "executionProtocol": "agent-v1",
   "fixtureVersion": "poo113-browser-authorization-v1",
   "browser": {
