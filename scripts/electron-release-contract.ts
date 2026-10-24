@@ -7,7 +7,12 @@ import { parseArgs } from 'node:util'
 import { gt } from 'semver'
 import { isStrictSemver, parseStrictSemverTag } from './strict-semver'
 
-export const RELEASE_CONTRACT_SCHEMA_VERSION = 2 as const
+// Schema 3 adds the arm64 macOS updater ZIP (POL-268): both macOS
+// architectures must participate in the automatic-update contract.
+export const RELEASE_CONTRACT_SCHEMA_VERSION = 3 as const
+// The online predecessor still publishes schema 2 (x64-only updater ZIP);
+// preflight must keep parsing it until the first schema-3 release is live.
+export const PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION = 2 as const
 // Temporary: allows v0.18.0 to re-bootstrap the broken release chain (the
 // v0.17.0 installers never published, so the online contract still points at
 // a pre-POO-14 artifact containing the removed session-mcp-server sidecar).
@@ -22,6 +27,15 @@ const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 export const RELEASE_ARTIFACT_KEYS = [
   'macosZip',
+  'macosArm64Zip',
+  'macosX64Dmg',
+  'macosArm64Dmg',
+  'linuxAppImage',
+  'windowsExe',
+] as const
+
+export const PREVIOUS_RELEASE_ARTIFACT_KEYS = [
+  'macosZip',
   'macosX64Dmg',
   'macosArm64Dmg',
   'linuxAppImage',
@@ -31,6 +45,7 @@ export const RELEASE_ARTIFACT_KEYS = [
 const LEGACY_RELEASE_ARTIFACT_KEYS = ['macosZip', 'linuxAppImage'] as const
 
 export type ReleaseArtifactKey = (typeof RELEASE_ARTIFACT_KEYS)[number]
+type PreviousReleaseArtifactKey = (typeof PREVIOUS_RELEASE_ARTIFACT_KEYS)[number]
 
 export interface ReleaseArtifactContract {
   fileName: string
@@ -48,6 +63,17 @@ export interface LegacyReleaseContract {
   installApp: ReleaseArtifactContract
 }
 
+export interface PreviousReleaseContract {
+  schemaVersion: typeof PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION
+  repository: string
+  tag: string
+  version: string
+  commitSha: string
+  publishedAt: string
+  artifacts: Record<PreviousReleaseArtifactKey, ReleaseArtifactContract>
+  installApp: ReleaseArtifactContract
+}
+
 export interface ReleaseContract {
   schemaVersion: typeof RELEASE_CONTRACT_SCHEMA_VERSION
   repository: string
@@ -59,7 +85,7 @@ export interface ReleaseContract {
   installApp: ReleaseArtifactContract
 }
 
-export type ParsedReleaseContract = ReleaseContract | LegacyReleaseContract
+export type ParsedReleaseContract = ReleaseContract | PreviousReleaseContract | LegacyReleaseContract
 
 export interface ReleasePreflightInput {
   repository: string
@@ -125,7 +151,11 @@ export function parseReleaseContract(value: unknown): ParsedReleaseContract {
     'artifacts',
     'installApp',
   ], 'Release contract')
-  if (record.schemaVersion !== 1 && record.schemaVersion !== RELEASE_CONTRACT_SCHEMA_VERSION) {
+  if (
+    record.schemaVersion !== 1
+    && record.schemaVersion !== PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION
+    && record.schemaVersion !== RELEASE_CONTRACT_SCHEMA_VERSION
+  ) {
     throw new Error(`Unsupported release contract schema: ${String(record.schemaVersion)}`)
   }
   if (typeof record.repository !== 'string' || !REPOSITORY_PATTERN.test(record.repository)) {
@@ -155,6 +185,8 @@ export function parseReleaseContract(value: unknown): ParsedReleaseContract {
   const artifactRecord = record.artifacts as Record<string, unknown>
   const artifactKeys = record.schemaVersion === 1
     ? LEGACY_RELEASE_ARTIFACT_KEYS
+    : record.schemaVersion === PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION
+    ? PREVIOUS_RELEASE_ARTIFACT_KEYS
     : RELEASE_ARTIFACT_KEYS
   assertExactKeys(artifactRecord, artifactKeys, 'Release contract artifacts')
   const base = {
@@ -174,11 +206,24 @@ export function parseReleaseContract(value: unknown): ParsedReleaseContract {
           linuxAppImage: parseArtifact(artifactRecord.linuxAppImage, 'artifacts.linuxAppImage'),
         },
       }
+    : record.schemaVersion === PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION
+    ? {
+        schemaVersion: PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION,
+        ...base,
+        artifacts: {
+          macosZip: parseArtifact(artifactRecord.macosZip, 'artifacts.macosZip'),
+          macosX64Dmg: parseArtifact(artifactRecord.macosX64Dmg, 'artifacts.macosX64Dmg'),
+          macosArm64Dmg: parseArtifact(artifactRecord.macosArm64Dmg, 'artifacts.macosArm64Dmg'),
+          linuxAppImage: parseArtifact(artifactRecord.linuxAppImage, 'artifacts.linuxAppImage'),
+          windowsExe: parseArtifact(artifactRecord.windowsExe, 'artifacts.windowsExe'),
+        },
+      }
     : {
         schemaVersion: RELEASE_CONTRACT_SCHEMA_VERSION,
         ...base,
         artifacts: {
           macosZip: parseArtifact(artifactRecord.macosZip, 'artifacts.macosZip'),
+          macosArm64Zip: parseArtifact(artifactRecord.macosArm64Zip, 'artifacts.macosArm64Zip'),
           macosX64Dmg: parseArtifact(artifactRecord.macosX64Dmg, 'artifacts.macosX64Dmg'),
           macosArm64Dmg: parseArtifact(artifactRecord.macosArm64Dmg, 'artifacts.macosArm64Dmg'),
           linuxAppImage: parseArtifact(artifactRecord.linuxAppImage, 'artifacts.linuxAppImage'),
@@ -200,7 +245,11 @@ export function parseReleaseContract(value: unknown): ParsedReleaseContract {
     throw new Error('Release contract artifact types are invalid')
   }
   if (contract.schemaVersion === RELEASE_CONTRACT_SCHEMA_VERSION && (
-    contract.artifacts.macosX64Dmg.fileName !== 'Polo-AI-x64.dmg'
+    contract.artifacts.macosZip.fileName !== 'Polo-AI-x64.zip'
+    // POL-268 gate: a schema-3 contract without the arm64 updater ZIP cannot
+    // serve Apple Silicon clients, so the name is pinned at the parse layer.
+    || contract.artifacts.macosArm64Zip.fileName !== 'Polo-AI-arm64.zip'
+    || contract.artifacts.macosX64Dmg.fileName !== 'Polo-AI-x64.dmg'
     || contract.artifacts.macosArm64Dmg.fileName !== 'Polo-AI-arm64.dmg'
     || contract.artifacts.windowsExe.fileName !== 'Polo-AI-x64.exe'
   )) {
@@ -256,6 +305,7 @@ export async function createReleaseContract(input: {
   commitSha: string
   publishedAt: string
   macosZip: string
+  macosArm64Zip: string
   macosX64Dmg: string
   macosArm64Dmg: string
   linuxAppImage: string
@@ -271,6 +321,7 @@ export async function createReleaseContract(input: {
     publishedAt: input.publishedAt,
     artifacts: {
       macosZip: { fileName: basename(input.macosZip), sha256: await sha256(input.macosZip) },
+      macosArm64Zip: { fileName: basename(input.macosArm64Zip), sha256: await sha256(input.macosArm64Zip) },
       macosX64Dmg: { fileName: basename(input.macosX64Dmg), sha256: await sha256(input.macosX64Dmg) },
       macosArm64Dmg: { fileName: basename(input.macosArm64Dmg), sha256: await sha256(input.macosArm64Dmg) },
       linuxAppImage: { fileName: basename(input.linuxAppImage), sha256: await sha256(input.linuxAppImage) },

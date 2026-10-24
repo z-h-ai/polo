@@ -112,13 +112,17 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('A DMG is not a code object')
     expect(validator).toContain('spctl --assess --type open --context context:primary-signature')
     expect(validator).toContain('macOS DMG Gatekeeper assessment:')
-    expect(validator).toContain('xcrun stapler validate "$dmg"')
+    // v0.19.0 wraps stapler validation in the macos_stapler_validate retry
+    // helper (Apple ticket-service flake); both containers go through it.
+    expect(validator).toContain('macos_stapler_validate "$dmg"')
+    expect(validator).toContain('xcrun stapler validate "$target"')
+    expect(validator).toContain('for attempt in 1 2 3')
     expect(validator).toContain('A valid stapled Apple ticket')
     expect(validator).toContain('verify-macos-dmg')
     expect(validator).toContain('--label "DMG outer"')
     expect(validator).toContain('codesign --verify --strict --deep "$app_bundle"')
     expect(validator).toContain('spctl --assess --type execute')
-    expect(validator).toContain('xcrun stapler validate "$app_bundle"')
+    expect(validator).toContain('macos_stapler_validate "$app_bundle"')
     expect(validator).toContain('release-signing-contract.ts')
     expect(validator).toContain('release-signing-audit-')
     expect(validator).toContain('polo --help')
@@ -426,8 +430,9 @@ describe('Electron final artifact validation pipeline', () => {
     expect(distEntry.indexOf('dependencies.package(options, env)')).toBeLessThan(
       distEntry.indexOf('dependencies.finalizeArtifacts(options)'),
     )
-    expect(distEntry).toContain("options.platform === 'darwin' && options.arch === 'x64'")
+    expect(distEntry).toContain("options.platform === 'darwin'")
     expect(distEntry).toContain('finalizeMacUpdateManifest')
+    expect(distEntry).toContain('finalizeMacUpdateManifest(resolve(options.electronDir, \'release\'), options.arch)')
   })
 
   it('keeps full validation preflight and native display contracts ahead of lifecycle writes', () => {

@@ -29,7 +29,9 @@ jobs:
 
       - name: Reject Windows-illegal filenames
         run: |
-          BAD=$(git ls-files | grep -E '[<>:"|?*]' || true)
+          # core.quotepath=false: non-ASCII filenames must not be C-quoted, or the
+          # quoting's own double quotes match the pattern below and false-positive.
+          BAD=$(git -c core.quotepath=false ls-files | grep -E '[<>:"|?*]' || true)
           if [ -n "$BAD" ]; then
             echo "::error::Files with characters illegal on Windows:"
             echo "$BAD"

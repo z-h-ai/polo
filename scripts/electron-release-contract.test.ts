@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   BOOTSTRAP_VERSION,
+  RELEASE_CONTRACT_SCHEMA_VERSION,
   evaluateReleasePreflight,
   parseReleaseContract,
   type ReleaseContract,
@@ -10,7 +11,7 @@ const sha = 'a'.repeat(40)
 
 function contract(version = '0.15.2'): ReleaseContract {
   return {
-    schemaVersion: 2,
+    schemaVersion: RELEASE_CONTRACT_SCHEMA_VERSION,
     repository: 'polo/polo',
     tag: `v${version}`,
     version,
@@ -18,6 +19,7 @@ function contract(version = '0.15.2'): ReleaseContract {
     publishedAt: '2026-08-07T12:00:00.000Z',
     artifacts: {
       macosZip: { fileName: 'Polo-AI-x64.zip', sha256: '1'.repeat(64) },
+      macosArm64Zip: { fileName: 'Polo-AI-arm64.zip', sha256: '6'.repeat(64) },
       macosX64Dmg: { fileName: 'Polo-AI-x64.dmg', sha256: '2'.repeat(64) },
       macosArm64Dmg: { fileName: 'Polo-AI-arm64.dmg', sha256: '3'.repeat(64) },
       linuxAppImage: { fileName: 'Polo-AI-x64.AppImage', sha256: '3'.repeat(64) },
@@ -25,6 +27,17 @@ function contract(version = '0.15.2'): ReleaseContract {
     },
     installApp: { fileName: 'install-app.sh', sha256: '5'.repeat(64) },
   }
+}
+
+// The currently online predecessor still publishes schema 2 (POL-268 ships
+// schema 3), so parsing it must keep working until the first schema-3
+// release is live.
+function previousSchemaContract(version = '0.15.2'): Record<string, unknown> {
+  const value = contract(version) as Record<string, unknown>
+  value.schemaVersion = 2
+  const artifacts = value.artifacts as Record<string, unknown>
+  delete artifacts.macosArm64Zip
+  return value
 }
 
 function input(overrides: Record<string, unknown> = {}) {
@@ -49,9 +62,27 @@ describe('release contract', () => {
     legacy.schemaVersion = 1
     const artifacts = legacy.artifacts as Record<string, unknown>
     delete artifacts.macosX64Dmg
+    delete artifacts.macosArm64Zip
     delete artifacts.macosArm64Dmg
     delete artifacts.windowsExe
     expect(parseReleaseContract(legacy).schemaVersion).toBe(1)
+  })
+
+  it('continues to parse the schema-2 online predecessor without the arm64 ZIP', () => {
+    const previous = previousSchemaContract()
+    expect(parseReleaseContract(previous).schemaVersion).toBe(2)
+  })
+
+  it('rejects a schema-3 contract whose arm64 updater ZIP name is wrong', () => {
+    const drifted = contract()
+    drifted.artifacts.macosArm64Zip.fileName = 'Polo-AI-arm64-mac.zip'
+    expect(() => parseReleaseContract(drifted)).toThrow('manual installer names are invalid')
+  })
+
+  it('rejects a schema-3 contract missing the arm64 updater ZIP', () => {
+    const incomplete = previousSchemaContract()
+    incomplete.schemaVersion = RELEASE_CONTRACT_SCHEMA_VERSION
+    expect(() => parseReleaseContract(incomplete)).toThrow('unexpected fields')
   })
 
   it('rejects schema drift and unsafe artifact names', () => {
@@ -62,15 +93,22 @@ describe('release contract', () => {
   })
 })
 
+// BOOTSTRAP_VERSION moves with every release; derive off-by-one fixtures from
+// it so this suite survives version bumps instead of hardcoding a past one.
+function nextPatch(version: string): string {
+  return version.replace(/(\d+)$/, (digits) => String(Number(digits) + 1))
+}
+
 describe('release preflight', () => {
-  it('allows only v0.15.2 to bootstrap without an online contract', () => {
+  it('allows only the bootstrap version to bootstrap without an online contract', () => {
     expect(evaluateReleasePreflight(input())).toEqual({
       bootstrap: true,
       version: BOOTSTRAP_VERSION,
     })
+    const other = nextPatch(BOOTSTRAP_VERSION)
     expect(() => evaluateReleasePreflight(input({
-      tag: 'v0.15.3', rootVersion: '0.15.3', electronVersion: '0.15.3',
-    }))).toThrow('Only v0.15.2')
+      tag: `v${other}`, rootVersion: other, electronVersion: other,
+    }))).toThrow(`Only v${BOOTSTRAP_VERSION}`)
   })
 
   it('requires tag, package versions, and commit to match', () => {
@@ -80,10 +118,11 @@ describe('release preflight', () => {
   })
 
   it('requires a version newer than the online contract', () => {
+    const newer = nextPatch(BOOTSTRAP_VERSION)
     expect(evaluateReleasePreflight(input({
-      tag: 'v0.15.3', rootVersion: '0.15.3', electronVersion: '0.15.3',
-      onlineContract: contract(),
+      tag: `v${newer}`, rootVersion: newer, electronVersion: newer,
+      onlineContract: contract(BOOTSTRAP_VERSION),
     })).bootstrap).toBe(false)
-    expect(() => evaluateReleasePreflight(input({ onlineContract: contract() }))).toThrow('must be greater')
+    expect(() => evaluateReleasePreflight(input({ onlineContract: contract(BOOTSTRAP_VERSION) }))).toThrow('must be greater')
   })
 })

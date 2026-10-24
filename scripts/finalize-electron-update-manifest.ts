@@ -4,11 +4,20 @@ import { lstat, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { dump, load } from 'js-yaml'
 
-const MACOS_UPDATE_ARTIFACTS = [
-  'Polo-AI-x64.zip',
-  'Polo-AI-x64.dmg',
-] as const
-const MACOS_UPDATE_PATH = 'Polo-AI-x64.zip'
+export const MACOS_UPDATE_ARCHES = ['x64', 'arm64'] as const
+export type MacUpdateArch = (typeof MACOS_UPDATE_ARCHES)[number]
+
+// electron-builder emits one latest-mac.yml per single-arch build. Each build
+// finalizes only its own entries; the release workflow merges both per-arch
+// manifests into the published latest-mac.yml (electron-release-bundle.ts).
+const MACOS_UPDATE_ARTIFACTS_BY_ARCH: Record<MacUpdateArch, readonly [string, string]> = {
+  x64: ['Polo-AI-x64.zip', 'Polo-AI-x64.dmg'],
+  arm64: ['Polo-AI-arm64.zip', 'Polo-AI-arm64.dmg'],
+}
+const MACOS_UPDATE_PATH_BY_ARCH: Record<MacUpdateArch, string> = {
+  x64: 'Polo-AI-x64.zip',
+  arm64: 'Polo-AI-arm64.zip',
+}
 
 interface UpdateFile {
   url: string
@@ -25,7 +34,8 @@ interface MacUpdateManifest {
   [key: string]: unknown
 }
 
-function parseMacUpdateManifest(contents: string): MacUpdateManifest {
+function parseMacUpdateManifest(contents: string, arch: MacUpdateArch): MacUpdateManifest {
+  const artifacts = MACOS_UPDATE_ARTIFACTS_BY_ARCH[arch]
   const parsed = load(contents)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('latest-mac.yml must be a YAML object')
@@ -34,20 +44,20 @@ function parseMacUpdateManifest(contents: string): MacUpdateManifest {
   if (
     typeof manifest.version !== 'string'
     || !Array.isArray(manifest.files)
-    || manifest.path !== MACOS_UPDATE_PATH
+    || manifest.path !== MACOS_UPDATE_PATH_BY_ARCH[arch]
     || typeof manifest.sha512 !== 'string'
   ) {
-    throw new Error('latest-mac.yml does not use the macOS x64 ZIP update contract')
+    throw new Error(`latest-mac.yml does not use the macOS ${arch} ZIP update contract`)
   }
   const names = manifest.files.map((entry) => entry?.url)
   if (
-    manifest.files.length !== MACOS_UPDATE_ARTIFACTS.length
+    manifest.files.length !== artifacts.length
     || names.some(name => typeof name !== 'string')
     || new Set(names).size !== names.length
-    || MACOS_UPDATE_ARTIFACTS.some(name => !names.includes(name))
+    || artifacts.some(name => !names.includes(name))
   ) {
     throw new Error(
-      `latest-mac.yml must reference exactly: ${MACOS_UPDATE_ARTIFACTS.join(', ')}`,
+      `latest-mac.yml must reference exactly: ${artifacts.join(', ')}`,
     )
   }
   for (const entry of manifest.files) {
@@ -86,13 +96,14 @@ async function finalArtifact(path: string): Promise<{ sha512: string, size: numb
  * the hook returns. Refresh the manifest after electron-builder has fully
  * exited so every digest and size describes the immutable upload bytes.
  */
-export async function finalizeMacUpdateManifest(releaseDir: string): Promise<void> {
+export async function finalizeMacUpdateManifest(releaseDir: string, arch: MacUpdateArch): Promise<void> {
   const manifestPath = join(releaseDir, 'latest-mac.yml')
   const original = await readFile(manifestPath, 'utf8')
-  const manifest = parseMacUpdateManifest(original)
+  const manifest = parseMacUpdateManifest(original, arch)
+  const artifacts = MACOS_UPDATE_ARTIFACTS_BY_ARCH[arch]
   const finalized = new Map<string, { sha512: string, size: number }>()
 
-  for (const name of MACOS_UPDATE_ARTIFACTS) {
+  for (const name of artifacts) {
     finalized.set(name, await finalArtifact(join(releaseDir, name)))
   }
   for (const entry of manifest.files) {
@@ -101,7 +112,7 @@ export async function finalizeMacUpdateManifest(releaseDir: string): Promise<voi
     entry.sha512 = artifact.sha512
     entry.size = artifact.size
   }
-  manifest.sha512 = finalized.get(MACOS_UPDATE_PATH)!.sha512
+  manifest.sha512 = finalized.get(MACOS_UPDATE_PATH_BY_ARCH[arch])!.sha512
 
   const temporaryPath = `${manifestPath}.finalizing-${process.pid}-${randomUUID()}`
   try {
