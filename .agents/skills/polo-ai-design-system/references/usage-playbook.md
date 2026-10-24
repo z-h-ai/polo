@@ -51,3 +51,28 @@
 - 顶栏细线规则：非材质宿主「主体滚离顶部出现、回顶消失」；材质作用域内任何滚动状态都不显示（POO-105 收窄，见 foundations）。
 - 手改 `assets/source-baseline/` 下的任何生成文件（含 manifest/index.html）——它们只能由 `build.py` 再生；手改会让 `--check` 失败且不构成来源更新。
 - 基线打开方式用 `index.html`/`entries/baseline.html` 的 file:// 直开或场景参数；不要拿开发服务器中间产物（`tools/source-baseline/dist*`）当素材。
+
+
+## 维护时机与 Git 边界
+
+由 Agent 在「最终合入 main 的候选已经形成、尚未锁定验收 HEAD」或「新任务锁定源码/原型依据之前」调用本 Skill。
+仓库根目录执行 `python3 scripts/prototype_refresh.py --boundary main-integration --check` 或
+`python3 scripts/prototype_refresh.py --boundary new-task --check`。exit 0 为源/输出漂移筛查通过，exit 3 需要维护，exit 2 为检查错误。
+仅检查不会写素材；当前就复用，发现过期则由 Agent 判断影响、补原生场景/fixture，再调用既有工具。
+新页面未被场景覆盖不能只更新 hash；明确补齐或列出依赖范围缺口。
+
+本地维护步骤（仓库根目录；Python 3.12+、Node 24、Bun 1.3.14；先安装冻结依赖）：
+
+1. 在本次集成候选或独立维护 worktree，保存检查结果及现有输出，核实来源/设计授权与变化范围。
+2. `bun run --cwd packages/shared build`；修改原生源/fixture 后，按已确认范围维护 canonical model 的源绑定。
+   wrapper 用明确固定的 design-system-adopt 框架 `adopt.py <canonical-model> --repo <repo> --output <project-skill> --update` 再生；消费方不需要框架。
+3. `python3 .agents/skills/polo-ai-design-system/tools/source-baseline/build.py`；
+   `python3 .agents/skills/polo-ai-design-system/tools/build-token-preview.py`。
+4. 按七步流程第 7 步重建兼容原型/manifest，再运行 `python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py`；
+   保留实际源再生和浏览器证据，复查新场景/状态与三层入口。只读 hook 通过不能代替这些检查。
+5. 重新执行边界检查，保存源指纹、改动范围、生成/浏览器结果和未覆盖项。依赖变化、main 前进或解决冲突后重新检查。
+
+只有本地维护被授权；不会由本 Skill 自动 commit/push、升级版本、创建 tag、启动部署或调用 git-flow-release-finish。
+集成前的素材纳入同一待验收候选；新任务前的修复留在隔离候选，采用后重新绑定任务证据。
+通过检查不等于已经采用。CI 只读兜底和手动预览见仓库 docs/prototype-auto-refresh.md；下载包不能冒充仓库素材当前。
+快照 HEAD 仅记录生成来源，当前性比较实际输入字节；素材本身提交不应引发重复维护。

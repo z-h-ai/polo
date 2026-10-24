@@ -5,7 +5,7 @@ description: Apply the polo-ai repository design system within its declared plat
 
 # polo-ai Design System
 
-Adoption revision: `native-materials-r4-dev-aligned-20261023`. Mode: `extracted`.
+Adoption revision: `native-materials-r5-lifecycle-candidate-20261023`. Mode: `extracted`.
 
 ## Applicability
 
@@ -28,6 +28,8 @@ Implementation reuse coverage can extend beyond confirmed design scope. Distingu
 Create an editable task-local candidate from the native scene/composition using the guide and existing project tools. Keep layout, imports, providers, styles, assets and fixtures; implement only the requirement delta. Generated HTML is an export. Production edits are a separate authorized implementation step.
 A Placeholder is allowed only for an unchanged region that cannot be reproduced. Name its source and gap. Never hide the requested change, required entry/back path or resulting state behind a Placeholder.
 Source-binding checks establish source consistency only. When actual material inputs change, reconcile their semantic impact, regenerate affected material with its native tool, and check real inputs, outputs and reproduction separately. Never refresh hashes to disguise an old export. Browser fidelity and independent consumption require their own evidence.
+At final main integration (before acceptance is sealed) and before a new task locks its source baseline, check actual material inputs and outputs using the native reuse guide. Both workflow hooks call this same project Skill. Current material is reused; stale material requires source reconciliation, native regeneration and verification before dependent work. A CI artifact is not an adopted repository update.
+Maintenance can create local Git changes but never authorizes commit, push, version bumps, tags, release-finish or deployment. Include adopted materials in the same integration candidate; task-start repairs stay isolated until adopted. Recheck conflict-resolved inputs before publication. Use consumed bytes, not HEAD equality, to avoid a material-only commit triggering another refresh.
 
 ## Sources
 
@@ -43,7 +45,7 @@ Source-binding checks establish source consistency only. When actual material in
 - `.agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `a5de1ede777f48032a3d945983bd987c28e42a6cd1f2efd5852e1f8c35a7ab73`
 - `.agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `dda528141636c0253fe70afaeeb23a9919aa8264e562d63235c77316a6248de7`
 - `.agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `b26fcc98fb62dc2d9ee91ddbed21a5bd83a23f830b9acea9028a40f747934808`
-- `.agents/skills/polo-ai-design-system/references/usage-playbook.md` — authority; 新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑; SHA-256 `5c8ee3f1446a90c7894a159ecdce260e7dfefbb855d64f0cadc5c566a7ccca52`
+- `.agents/skills/polo-ai-design-system/references/usage-playbook.md` — authority; 新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑; SHA-256 `2806d1d3120a96b2c72eb0f9745532f0cfeb8cc594918b3f9ed976ed5732b9c1`
 - `.agents/skills/polo-ai-design-system/references/page-baselines.md` — authority; 页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出; SHA-256 `1f8f5207d773719b1ea9806adc4567fbaf0c364d9c45e540bd3b9eb1ad4efbb4`
 - `.agents/skills/polo-ai-design-system/references/component-usage.md` — authority; 组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界; SHA-256 `571019ba393a2d1d1bb6f13cffed31704ac03697a7faa83a94c965b78986edbe`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.config.mjs` — implementation; 当前实现基线生成器：vite 配置（alias @→renderer 源码，单文件内联，模块图与 watch 文件收集入输入指纹，确定性构建无时间戳）; SHA-256 `8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4`
@@ -58,7 +60,7 @@ Source-binding checks establish source consistency only. When actual material in
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/fixtures.tsx` — implementation; 受控 fixture：真实类型 satisfies+zod parse，只替换后端数据（正常态默认，写接口仅内存完成，不存任何 secret）; SHA-256 `d5c4761835f8a6a48425169e27abf2a50c518feabd6ecfbb8070705a40c4ee07`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css` — implementation; 基线浏览壳样式：@import renderer index.css + 本目录入口/场景/画廊的 Tailwind @source 扫描声明 + 仅基线文档的滚动覆盖; SHA-256 `3f708acb93832bbb1340748efaa4ae032b0eff163282f5e8c1c6ffb7e16e1cf6`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.html` — implementation; 基线 HTML 入口; SHA-256 `262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc`
-- `.agents/skills/polo-ai-design-system/references/native-reuse.md` — implementation; 当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口; SHA-256 `d0c71d60967740283e140dd19b4db4277c213dc01eb4f3a9704e3d28c3ccce59`
+- `.agents/skills/polo-ai-design-system/references/native-reuse.md` — implementation; 当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口; SHA-256 `34cc28424646e740e2cbcbb4482dacd09a93e50e74cd62fb869e6a7679ab7689`
 - `.agents/skills/polo-ai-design-system/references/style-usage.md` — implementation; 工作台与renderer样式体系、变量预览、原生消费和再生方法; SHA-256 `0f87d6691a5436941a1fb1b0d57e640ae5d573d890618a3771897a24713e1887`
 
 ## Reuse
@@ -94,6 +96,7 @@ Source-binding checks establish source consistency only. When actual material in
 
 ## Prototype guidance
 
+- 最终 main 集成前和新任务锁定依据前，按 references/usage-playbook.md 的维护入口检查三层素材；检查只读，维护不自动 commit/push/tag/发版。
 - 新需求先读 references/native-reuse.md：原生入口、任务内叶子副本/组合、providers与CSS扫描、独立依赖、真实预览和导出命令；assets是生成物，不手改、不静默改生产。
 - 先读 references/foundations.md，产品行为读Spec；当前实现基线直接打开 assets/source-baseline/index.html（file:// 可开；场景直达 entries/baseline.html?scene=<ID>）；目标设计仍消费 docs/mvp-complete-flow-hifi/prototype.html 与主manifest，逐卡按scene定位，与当前基线分开使用。
 - 实施流程按 references/usage-playbook.md：核实基线版本与范围→定位页面/区域→选择组件→消费变量→只修改必要区域→浏览器核验；新需求优先复用 Skill 内当前页面/区域基线，再真实组件，最后 token；旧目标设计按已确认范围另列，不覆盖当前实现基线。

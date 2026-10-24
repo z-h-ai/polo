@@ -101,3 +101,9 @@ POLO_TOOLCHAIN_ROOT="$REPO_DIR" POLO_BASELINE_DIST="$TASK_DIR/dist" "$REPO_DIR/n
 # cwd: 仓库根
 POLO_REVIEW_EVIDENCE="$(mktemp -d /tmp/polo-navigation.XXXXXX)" python3 docs/mvp-complete-flow-hifi/tools/check_navigation_header.py
 ```
+
+
+## 定稿与新任务的维护入口
+
+最终集成 main 前、创建新任务前均回到本 Skill，按 [使用手册的维护步骤](usage-playbook.md#维护时机与-git-边界)
+检查三层素材。检查只读，过期才修源再生。维护不自动提交、push、tag 或发版；源码未变则复用素材。

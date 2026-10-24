@@ -28,6 +28,7 @@
 - 安装与启动说明见 `README.md`，目录内的具体约定见上述开发指引。
 - 客户端产品规则见 `docs/client-journey-review/spec.md`；UI 任务读取
   `.agents/skills/polo-ai-design-system/SKILL.md` 并核对适用范围与来源绑定。
+- 在最终 main 集成候选锁定验收之前、依赖设计素材的新任务锁定依据之前，调用项目设计系统 Skill 的维护入口（`references/usage-playbook.md`）。只读检查；过期才在候选修源再生。维护不自动提交、push、tag 或发版。
 - 按改动范围运行检查，分别报告代码检查、实际运行和产品验收结果。
 
 ## 基础设施与域名（z-h-ai.com）
