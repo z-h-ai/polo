@@ -63,9 +63,9 @@
 
 <h2>生成记录（仅本次构建实际执行的步骤）</h2>
 <table>
-  <tr><td>输入快照（输入最近变化时）</td><td>HEAD <code>874c567e179841dd70ba0431d35efe3c92129d75</code><br><span class="meta">快照语义：记录输入最近一次变化时的生成环境；当前性由输入哈希与再生核对证明，不与当前 git 状态机械比对。</span></td></tr>
+  <tr><td>输入快照（输入最近变化时）</td><td>HEAD <code>4a3b69266ea3a122752d732499137fbd43bf38c5</code><br><span class="meta">快照语义：记录输入最近一次变化时的生成环境；当前性由输入哈希与再生核对证明，不与当前 git 状态机械比对。</span></td></tr>
   <tr><td>design revision</td><td><code>native-materials-r5-lifecycle-candidate-20261023</code></td></tr>
-  <tr><td>输入指纹</td><td>仓库源文件 895 个（含 <code>apps/electron/src/renderer</code> 页面/组件/样式与所维护源，来自真实 vite 模块图）；依赖包 298 个；lockfile 2 个；生成器文件 12 个。指纹：<code>ccbef376d725</code></td></tr>
+  <tr><td>输入指纹</td><td>仓库源文件 895 个（含 <code>apps/electron/src/renderer</code> 页面/组件/样式与所维护源，来自真实 vite 模块图）；依赖包 298 个；lockfile 2 个；生成器文件 12 个。指纹：<code>4235f6e8cf3d</code></td></tr>
   <tr><td>typecheck</td><td>cwd <code>仓库根</code>：<code>node_modules/.bin/tsc --project .agents/skills/polo-ai-design-system/tools/source-baseline/tsconfig.json --pretty false</code> → exit 0（本次构建执行）</td></tr>
   <tr><td>场景清单提取</td><td>cwd <code>.agents/skills/polo-ai-design-system/tools/source-baseline</code>：<code>../../../../../node_modules/.bin/vite build --config vite.scene-ids.config.mjs</code> + <code>node scene-ids-runner.cjs</code> → exit 0（本次构建执行；对真实场景模块求值，非源码正则）</td></tr>
   <tr><td>浏览器打包</td><td>cwd <code>.agents/skills/polo-ai-design-system/tools/source-baseline</code>：<code>../../../../../node_modules/.bin/vite build --config vite.config.mjs</code> → exit 0（本次构建执行；JS/CSS 内联进 <code>entries/baseline.html</code>，file:// 可直接打开，未引用 chunk 不落位）</td></tr>
