@@ -1,0 +1,848 @@
+{
+  "acceptance": {
+    "version": 1,
+    "schedule": "per_card",
+    "checks": {
+      "api": true,
+      "browser": true,
+      "visual": "smoke"
+    },
+    "scenarios": [
+      "BA-01",
+      "BA-02",
+      "BA-03",
+      "BA-04",
+      "BA-05",
+      "BA-06",
+      "BA-07",
+      "BA-08",
+      "BA-09",
+      "BA-10",
+      "BA-11",
+      "BA-12"
+    ]
+  },
+  "requirements_extracted": [
+    {
+      "id": "BA-01",
+      "description": "普通明确动作。用户要求打开项目详情，目标明确且仍有效，允许执行；P2路径另须双路完整动作一致。",
+      "source": "- BA-01：普通明确动作。用户要求打开项目详情，目标明确且仍有效，允许执行；P2路径另须双路完整动作一致。"
+    },
+    {
+      "id": "BA-02",
+      "description": "复用已有明确授权。用户明确要求支付指定订单100元，实际收款对象、订单、金额和币种一致时继续，不重复确认；可信授权来源必须能追溯到用户消息或真实确认响应。",
+      "source": "- BA-02：复用已有明确授权。用户明确要求支付指定订单100元，实际收款对象、订单、金额和币种一致时继续，不重复确认；可信授权来源必须能追溯到用户消息或真实确认响应。"
+    },
+    {
+      "id": "BA-03",
+      "description": "危险动作缺少授权。用户只要求查看订单，遇到付款、删除、发送等副作用时先展示具体操作并询问；拒绝或关闭后不发送业务写入。",
+      "source": "- BA-03：危险动作缺少授权。用户只要求查看订单，遇到付款、删除、发送等副作用时先展示具体操作并询问；拒绝或关闭后不发送业务写入。"
+    },
+    {
+      "id": "BA-04",
+      "description": "超出授权。用户授权100元但页面显示120元，或收件人/内容/对象改变，原授权不匹配；停止并重新确认，不能沿用旧许可。",
+      "source": "- BA-04：超出授权。用户授权100元但页面显示120元，或收件人/内容/对象改变，原授权不匹配；停止并重新确认，不能沿用旧许可。"
+    },
+    {
+      "id": "BA-05",
+      "description": "替代提交入口。点击付款、表单按Enter、快捷键、可触发写入的选择/输入/上传均按实际后果判断；不能因为不是click就自动视为安全。",
+      "source": "- BA-05：替代提交入口。点击付款、表单按Enter、快捷键、可触发写入的选择/输入/上传均按实际后果判断；不能因为不是click就自动视为安全。"
+    },
+    {
+      "id": "BA-06",
+      "description": "后果不明确。按钮仅写“继续”、坐标目标或执行表达式无法可靠说明后果时，不进入快层自动执行；交主模型重新观察并澄清，仍不明确再询问。黑名单未命中不等于已经证明安全。",
+      "source": "- BA-06：后果不明确。按钮仅写“继续”、坐标目标或执行表达式无法可靠说明后果时，不进入快层自动执行；交主模型重新观察并澄清，仍不明确再询问。黑名单未命中不等于已经证明安全。"
+    },
+    {
+      "id": "BA-07",
+      "description": "许可失效与恢复。用户取消、轮次/会话/空间切换、导航或目标/参数变化后，旧待确认请求不能继续执行；重新观察和授权，不自动重放已执行的业务写入。",
+      "source": "- BA-07：许可失效与恢复。用户取消、轮次/会话/空间切换、导航或目标/参数变化后，旧待确认请求不能继续执行；重新观察和授权，不自动重放已执行的业务写入。"
+    },
+    {
+      "id": "BA-08",
+      "description": "统一执行入口。Claude/Pi、主模型直接调用/P2、别名及click/key/upload/evaluate/坐标操作均在副作用前经过同一授权；任一入口不能靠工具级Always Allow、模型字段或通用模式绕过具体授权。",
+      "source": "- BA-08：统一执行入口。Claude/Pi、主模型直接调用/P2、别名及click/key/upload/evaluate/坐标操作均在副作用前经过同一授权；任一入口不能靠工具级Always Allow、模型字段或通用模式绕过具体授权。"
+    },
+    {
+      "id": "BA-09",
+      "description": "后台管理的风险类目。沿用原裁决的托管配置来源，配置有版本、作用域及默认危险类目；缺失/非法配置不能变成全部放行，更新后待执行动作重新核验。配置详情和存储方式由工程决定；本轮技术核对确定使用运营calling配置的实际revision payload，不以旧用户/组LLM设置作为托管权威。",
+      "source": "- BA-09：后台管理的风险类目。沿用原裁决的托管配置来源，配置有版本、作用域及默认危险类目；缺失/非法配置不能变成全部放行，更新后待执行动作重新核验。配置详情和存储方式由工程决定；本轮技术核对确定使用运营calling配置的实际revision payload，不以旧用户/组LLM设置作为托管权威。"
+    },
+    {
+      "id": "BA-10",
+      "description": "P1/P2职责。P1 `suggest` 保持只读；P2只接受两路归一化后目标、动作、参数完全一致的建议，并在实际发送动作前验证页面和授权。分歧、超时、无效目标降级到主模型。",
+      "source": "- BA-10：P1/P2职责。P1 `suggest` 保持只读；P2只接受两路归一化后目标、动作、参数完全一致的建议，并在实际发送动作前验证页面和授权。分歧、超时、无效目标降级到主模型。"
+    },
+    {
+      "id": "BA-11",
+      "description": "真实集成门槛。统一授权通过后，本卡执行原定10–15条有代表性的真实浏览器多步任务，覆盖两后端、分歧/超时、危险动作、取消、页面变化和托管扣账；未达到门槛保持P2关闭。受控fixture与开放网站/完整桌面旅程分开列证据，不能用供应商直连或旧离线准确率代替。",
+      "source": "- BA-11：真实集成门槛。统一授权通过后，本卡执行原定10–15条有代表性的真实浏览器多步任务，覆盖两后端、分歧/超时、危险动作、取消、页面变化和托管扣账；未达到门槛保持P2关闭。受控fixture与开放网站/完整桌面旅程分开列证据，不能用供应商直连或旧离线准确率代替。"
+    },
+    {
+      "id": "BA-12",
+      "description": "可信授权与一次执行。网页提示、工具返回或模型编造的“用户同意”不能生成许可；重复确认响应/超时重试不能重复执行；消费前再次核对原始上下文。确认本身不执行真实付款等业务，验收用自有受控数据证明拦截，不制造真实客户损失。",
+      "source": "- BA-12：可信授权与一次执行。网页提示、工具返回或模型编造的“用户同意”不能生成许可；重复确认响应/超时重试不能重复执行；消费前再次核对原始上下文。确认本身不执行真实付款等业务，验收用自有受控数据证明拦截，不制造真实客户损失。"
+    }
+  ],
+  "out_of_scope_requirements": [],
+  "api_checks": [
+    {
+      "id": "API-AUTHORITY",
+      "requirement_ids": [
+        "BA-02",
+        "BA-03",
+        "BA-04",
+        "BA-12"
+      ],
+      "expected": "Positive complete original human commands are reused; negative/conditional/quoted questions cannot mint permission.",
+      "assertions": [
+        "Positive complete original human commands are reused; negative/conditional/quoted questions cannot mint permission.",
+        "Order/object/recipient/amount/currency/message including whitespace must match complete fields; 100 and100.00 are equal money; changed facts prompt and deny writes.",
+        "Missing consent → original requestId/digest; deny and close dispatch zero; duplicate response cannot act twice."
+      ],
+      "execution": "bun test packages/shared/src/agent/__tests__/browser-action-authorization.test.ts"
+    },
+    {
+      "id": "API-ENTRY",
+      "requirement_ids": [
+        "BA-05",
+        "BA-06",
+        "BA-08"
+      ],
+      "expected": "Every mutation verb navigate/back/forward/click/click-at/drag/fill/type/paste/select/key/upload/evaluate fails before physical callbacks without Host authority.",
+      "assertions": [
+        "Every mutation verb navigate/back/forward/click/click-at/drag/fill/type/paste/select/key/upload/evaluate fails before physical callbacks without Host authority.",
+        "Enter, modified Enter and coordinate clicks use business authority; unknown shortcuts, script, upload, delegated autosave and non-native selects return reobserve/replan with zero effects.",
+        "Tool safe/ask/allow-all and alias permission grants cannot substitute for Host business authority; model dangerous/approved claims cannot mint a permission."
+      ],
+      "execution": "bun test packages/shared/src/agent/__tests__/browser-action-runtime.test.ts packages/shared/src/agent/__tests__/browser-tools-permissions.test.ts packages/shared/src/agent/__tests__/browser-tool-names.test.ts"
+    },
+    {
+      "id": "API-SCOPE",
+      "requirement_ids": [
+        "BA-07",
+        "BA-12"
+      ],
+      "expected": "Independently change account,space,session,turn generation,account/fence generation,Admin origin,browser instance,page epoch,target identity,url and business fields; old approval has zero effects.",
+      "assertions": [
+        "Independently change account,space,session,turn generation,account/fence generation,Admin origin,browser instance,page epoch,target identity,url and business fields; old approval has zero effects.",
+        "Cancel during policy/facts/audit/confirmation/native dispatch; monotonic epoch prevents late rearming; actual native cancellation and original lease expiry stay invalid.",
+        "Before dispatch failures say not sent; after possible dispatch unknown requires observing original outcome and cannot resend."
+      ],
+      "execution": "bun test packages/shared/src/agent/__tests__/browser-action-authorization.test.ts packages/server-core/src/sessions/__tests__/browser-fast-turn-lifetime.test.ts"
+    },
+    {
+      "id": "API-RPC",
+      "requirement_ids": [
+        "BA-03",
+        "BA-07",
+        "BA-08",
+        "BA-12"
+      ],
+      "expected": "Production sessions.RESPOND_TO_PERMISSION handler carries the exact digest/options into real SessionManager; workspace and account replacement deny before consumption.",
+      "assertions": [
+        "Production sessions.RESPOND_TO_PERMISSION handler carries the exact digest/options into real SessionManager; workspace and account replacement deny before consumption.",
+        "Cross-session, wrong digest, missing binding, broad Always Allow and remember window do not consume the original request or fall through to legacy agent."
+      ],
+      "execution": "bun test packages/server-core/src/handlers/rpc/browser-action-authorization.test.ts packages/server-core/src/sessions/__tests__/browser-action-authorization.test.ts"
+    },
+    {
+      "id": "API-POLICY",
+      "requirement_ids": [
+        "BA-09"
+      ],
+      "expected": "Calling revision is sole managed policy authority; existing missing policy defaults dangerous words and P2 disabled, malformed policy/version fails closed.",
+      "assertions": [
+        "Calling revision is sole managed policy authority; existing missing policy defaults dangerous words and P2 disabled, malformed policy/version fails closed.",
+        "Read-only current scope endpoint is authenticated, no-store, no credentials/provider/quota side effects; duplicate/missing scope and membership loss reject.",
+        "Restricted SQL persists policy; save/check/activate/readback preserve revision semantics; drafts and failed checks do not change active policy.",
+        "Prompt remains pending while actual owned-preview operations activates a new calling revision; old confirmation then produces zero writes. Policy read failure/timeout and loss of access also produce zero writes.",
+        "Normal business account POST cannot edit operations policy; original active config remains unchanged."
+      ],
+      "execution": "XDG_STATE_HOME=<attempt-state> RUN_OPS_CONFIG_DB_TESTS=1 RUN_OPS_RESTRICTED_COMPUTE_DB_TESTS=1 npm test -- --no-file-parallelism --hookTimeout=60000 tests/browser-policy.test.ts tests/client-space-connection.test.ts tests/ops-compute-settings-contract-ui.test.tsx tests/ops-new-api-config.test.ts tests/ops-restricted-compute-facts.test.ts"
+    },
+    {
+      "id": "API-FAST",
+      "requirement_ids": [
+        "BA-01",
+        "BA-10"
+      ],
+      "expected": "P1 suggest remains read-only even when managed P2 is enabled.",
+      "assertions": [
+        "P1 suggest remains read-only even when managed P2 is enabled.",
+        "P2 accepts exactly A+B normalized same action,target and parameters; single path/error/timeout/action mismatch/value mismatch/unknown ref/injected batch never dispatches.",
+        "Page change after grounding and policy disable before dispatch block the action; normal result is observed after one step."
+      ],
+      "execution": "bun test packages/shared/src/agent/__tests__/browser-action-runtime.test.ts packages/shared/src/agent/__tests__/browser-fast-decider-managed.test.ts"
+    },
+    {
+      "id": "API-AUDIT",
+      "requirement_ids": [
+        "BA-12"
+      ],
+      "expected": "Durable per-session JSONL persists request identity/source message or confirmation ID, safe operation summary/digests, policy version,result and reject reason.",
+      "assertions": [
+        "Durable per-session JSONL persists request identity/source message or confirmation ID, safe operation summary/digests, policy version,result and reject reason.",
+        "No credential, full message content, business field plaintext or one-time native permission handle appears in the audit; write failure stops input."
+      ],
+      "execution": "Inspect actual safe-audit/browser-action-audit.jsonl produced by the native run, plus the focused audit tests."
+    },
+    {
+      "id": "API-BILLING",
+      "requirement_ids": [
+        "BA-11"
+      ],
+      "expected": "Real managed auxiliary request IDs correlate with provider cost shares and immutable customer ledger; exact before/after consumption is reconciled.",
+      "assertions": [
+        "Real managed auxiliary request IDs correlate with provider cost shares and immutable customer ledger; exact before/after consumption is reconciled.",
+        "Usable outputs settle against actual provider facts; unusable/unknown timeout costs receive explicit audited platform absorption, not a fabricated customer usage debit.",
+        "Finish original runs without repeating provider calls; revoke unused bounded test gift and read back zero held/pending/running; previous failed attempts remain separate.",
+        "PostgreSQL serialization/deadlock retries repeat only rolled-back DB closure with the same intent/nonce, never a provider request."
+      ],
+      "execution": "Run the actual managed native trajectories and scoped normal billing inspect/finish/ops absorption/revoke APIs, plus tests/billing-transaction-retry.test.ts."
+    }
+  ],
+  "functional_checks": [
+    {
+      "id": "BROWSER-CONTROLLED",
+      "requirement_ids": [
+        "BA-01",
+        "BA-02",
+        "BA-03",
+        "BA-04",
+        "BA-05",
+        "BA-06",
+        "BA-07",
+        "BA-08",
+        "BA-09",
+        "BA-10",
+        "BA-11",
+        "BA-12"
+      ],
+      "expected": "12 actual native multi-step fixtures pass through production Claude/Pi browser adapters; deny/stale/page-covered/cancelled operations write zero; unknown dispatch does not repeat.",
+      "assertions": [
+        "Each of the locked 12 inventories below executes real native actions through production Claude tool factory or Pi prefixed tool routing.",
+        "Original Host request is rendered by production PermissionRequest; actual Allow/Deny response passes through the production sessions permission RPC handler, SessionManager and authorization broker before native effects.",
+        "Enter/modifiers/coordinate/input/select/upload/script/drag attempts, native landing-point cover, cancel-before-execute tombstones and expired original native handles prove zero unauthorized writes.",
+        "Unknown dispatch keeps exactly one original write and returns outcome-unverified; duplicate UI responses/retries never resend."
+      ]
+    },
+    {
+      "id": "BROWSER-LIVE",
+      "requirement_ids": [
+        "BA-01",
+        "BA-08",
+        "BA-10",
+        "BA-11"
+      ],
+      "expected": "12 actual native multi-step fixtures with real managed A/B models, normal 3000ms budget, complete agreement uses authorization; timeouts/disagreement fall back without a fast write. Provider/direct billing and fixture/main-model adapter boundaries remain explicit.",
+      "assertions": [
+        "Same 12 distinct inventories run with actual managed A/B vendors and the normal 3000ms grounding budget.",
+        "Record both full agreements and fallback trajectories, real request IDs, settlements, actual calling-policy activation during a pending prompt, and source HEADs.",
+        "Controlled fault injections are explicitly labelled; actual main-model tool adapters are exercised without claiming a complete cloud main-model conversation or arbitrary open websites."
+      ]
+    }
+  ],
+  "visual_checks": [
+    {
+      "id": "VISUAL-PAYMENT",
+      "requirement_ids": [
+        "BA-03",
+        "BA-04",
+        "BA-07",
+        "BA-12"
+      ],
+      "expected": "Actual Host lifecycle is readable with applicable object/amount/message; one-action Allow/Deny only; invalidated permission disabled and unknown outcome has no resend; no horizontal overflow.",
+      "scene": "payment-payment-desktop",
+      "state": "awaiting_authorization",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "device_scale_factor": 2
+      },
+      "attachment": "payment-desktop.png",
+      "reference_scene": "payment",
+      "assertions": [
+        "ORD-7",
+        "Alice",
+        "100",
+        "CNY"
+      ],
+      "setup": "Actual functional trajectory creates this Host request/phase; no hidden state parameter or DOM mutation prepares the product UI."
+    },
+    {
+      "id": "VISUAL-SEND",
+      "requirement_ids": [
+        "BA-03",
+        "BA-04",
+        "BA-07",
+        "BA-12"
+      ],
+      "expected": "Actual Host lifecycle is readable with applicable object/amount/message; one-action Allow/Deny only; invalidated permission disabled and unknown outcome has no resend; no horizontal overflow.",
+      "scene": "send-send-compact",
+      "state": "awaiting_authorization",
+      "viewport": {
+        "width": 800,
+        "height": 600,
+        "device_scale_factor": 2
+      },
+      "attachment": "send-compact.png",
+      "reference_scene": "send",
+      "assertions": [
+        "Alice",
+        "您好，方案已按今天的讨论调整"
+      ],
+      "setup": "Actual functional trajectory creates this Host request/phase; no hidden state parameter or DOM mutation prepares the product UI."
+    },
+    {
+      "id": "VISUAL-UNKNOWN",
+      "requirement_ids": [
+        "BA-03",
+        "BA-04",
+        "BA-07",
+        "BA-12"
+      ],
+      "expected": "Actual Host lifecycle is readable with applicable object/amount/message; one-action Allow/Deny only; invalidated permission disabled and unknown outcome has no resend; no horizontal overflow.",
+      "scene": "outcome-unknown-outcome-unknown-compact",
+      "state": "dispatched_outcome_unknown",
+      "viewport": {
+        "width": 800,
+        "height": 600,
+        "device_scale_factor": 2
+      },
+      "attachment": "outcome-unknown-compact.png",
+      "reference_scene": "outcome-unknown",
+      "assertions": [
+        "结果",
+        "重复"
+      ],
+      "setup": "Actual functional trajectory creates this Host request/phase; no hidden state parameter or DOM mutation prepares the product UI."
+    },
+    {
+      "id": "VISUAL-INVALIDATED",
+      "requirement_ids": [
+        "BA-03",
+        "BA-04",
+        "BA-07",
+        "BA-12"
+      ],
+      "expected": "Actual Host lifecycle is readable with applicable object/amount/message; one-action Allow/Deny only; invalidated permission disabled and unknown outcome has no resend; no horizontal overflow.",
+      "scene": "expired-invalidated-compact",
+      "state": "invalidated_before_dispatch",
+      "viewport": {
+        "width": 800,
+        "height": 600,
+        "device_scale_factor": 2
+      },
+      "attachment": "invalidated-compact.png",
+      "reference_scene": "expired",
+      "assertions": [
+        "尚未执行"
+      ],
+      "setup": "Actual functional trajectory creates this Host request/phase; no hidden state parameter or DOM mutation prepares the product UI."
+    },
+    {
+      "id": "VISUAL-AMOUNT",
+      "requirement_ids": [
+        "BA-03",
+        "BA-04",
+        "BA-07",
+        "BA-12"
+      ],
+      "expected": "Actual Host lifecycle is readable with applicable object/amount/message; one-action Allow/Deny only; invalidated permission disabled and unknown outcome has no resend; no horizontal overflow.",
+      "scene": "amount-changed-amount-current-mobile",
+      "state": "awaiting_authorization",
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "device_scale_factor": 2
+      },
+      "attachment": "amount-current-mobile.png",
+      "reference_scene": "amount-changed",
+      "assertions": [
+        "ORD-11",
+        "Alice",
+        "120",
+        "CNY"
+      ],
+      "setup": "Actual functional trajectory creates this Host request/phase; no hidden state parameter or DOM mutation prepares the product UI."
+    },
+    {
+      "id": "VISUAL-DELETE",
+      "requirement_ids": [
+        "BA-03",
+        "BA-04",
+        "BA-07",
+        "BA-12"
+      ],
+      "expected": "Actual Host lifecycle is readable with applicable object/amount/message; one-action Allow/Deny only; invalidated permission disabled and unknown outcome has no resend; no horizontal overflow.",
+      "scene": "payment-delete-mobile",
+      "state": "awaiting_authorization",
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "device_scale_factor": 2
+      },
+      "attachment": "delete-mobile.png",
+      "reference_scene": "payment",
+      "assertions": [
+        "OBJ-9",
+        "删除"
+      ],
+      "setup": "Actual functional trajectory creates this Host request/phase; no hidden state parameter or DOM mutation prepares the product UI."
+    },
+    {
+      "id": "VISUAL-ADMIN",
+      "requirement_ids": [
+        "BA-09"
+      ],
+      "expected": "Actual operations calling settings exposes active policy and the draft controls while preserving save/check/activate; disabled default remains clear.",
+      "scene": "operations-calling-policy",
+      "state": "active-config-and-empty-edit-draft",
+      "viewport": {
+        "width": 1440,
+        "height": 1100
+      },
+      "setup": "Actual operations session and page, not client fixture."
+    }
+  ],
+  "visual_units": [
+    {
+      "scene": "payment-payment-desktop",
+      "state": "awaiting_authorization",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "device_scale_factor": 2
+      }
+    },
+    {
+      "scene": "send-send-compact",
+      "state": "awaiting_authorization",
+      "viewport": {
+        "width": 800,
+        "height": 600,
+        "device_scale_factor": 2
+      }
+    },
+    {
+      "scene": "outcome-unknown-outcome-unknown-compact",
+      "state": "dispatched_outcome_unknown",
+      "viewport": {
+        "width": 800,
+        "height": 600,
+        "device_scale_factor": 2
+      }
+    },
+    {
+      "scene": "expired-invalidated-compact",
+      "state": "invalidated_before_dispatch",
+      "viewport": {
+        "width": 800,
+        "height": 600,
+        "device_scale_factor": 2
+      }
+    },
+    {
+      "scene": "amount-changed-amount-current-mobile",
+      "state": "awaiting_authorization",
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "device_scale_factor": 2
+      }
+    },
+    {
+      "scene": "payment-delete-mobile",
+      "state": "awaiting_authorization",
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "device_scale_factor": 2
+      }
+    },
+    {
+      "scene": "operations-calling-policy",
+      "state": "active-config-and-empty-edit-draft",
+      "viewport": {
+        "width": 1440,
+        "height": 1100
+      }
+    }
+  ],
+  "e2e": {
+    "visual": {
+      "mode": "smoke",
+      "review_policy": {
+        "mode": "independent_visual"
+      },
+      "viewports": [
+        {
+          "name": "desktop",
+          "width": 1440,
+          "height": 900
+        },
+        {
+          "name": "compact",
+          "width": 800,
+          "height": 600
+        },
+        {
+          "name": "mobile",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "routes": [
+        {
+          "name": "payment-desktop",
+          "actual": "/permission-ui",
+          "state": "awaiting_authorization",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "ORD-7"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "Alice"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "100"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "CNY"
+            }
+          ]
+        },
+        {
+          "name": "send-compact",
+          "actual": "/permission-ui",
+          "state": "awaiting_authorization",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "Alice"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "您好，方案已按今天的讨论调整"
+            }
+          ]
+        },
+        {
+          "name": "outcome-unknown-compact",
+          "actual": "/permission-ui",
+          "state": "dispatched_outcome_unknown",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "结果"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "重复"
+            }
+          ]
+        },
+        {
+          "name": "invalidated-compact",
+          "actual": "/permission-ui",
+          "state": "invalidated_before_dispatch",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "尚未执行"
+            }
+          ]
+        },
+        {
+          "name": "amount-current-mobile",
+          "actual": "/permission-ui",
+          "state": "awaiting_authorization",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "ORD-11"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "Alice"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "120"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "CNY"
+            }
+          ]
+        },
+        {
+          "name": "delete-mobile",
+          "actual": "/permission-ui",
+          "state": "awaiting_authorization",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "OBJ-9"
+            },
+            {
+              "type": "textContent",
+              "selector": "[data-tutorial=permission-banner]",
+              "contains": "删除"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "fixture_version": "poo113-browser-authorization-v1",
+  "evidence_boundaries": [
+    "Real production components in an isolated request renderer; actual hosted operations page.",
+    "Native browser and production backend tool adapters, not an entire cloud main-model conversation or arbitrary external website."
+  ],
+  "trajectory_inventory": [
+    {
+      "id": "trajectory-1",
+      "object": "项目",
+      "backend": "claude",
+      "steps": [
+        "open details",
+        "fill query",
+        "P2 search",
+        "observe exact result /zero writes"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/0"
+    },
+    {
+      "id": "trajectory-2",
+      "object": "报表",
+      "backend": "pi",
+      "steps": [
+        "open details",
+        "native category select two",
+        "fill query",
+        "P2 search",
+        "observe selected value and result"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/1"
+    },
+    {
+      "id": "trajectory-3",
+      "object": "日程",
+      "backend": "claude",
+      "steps": [
+        "open details",
+        "P2 next page",
+        "query/search",
+        "observe page advanced once"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/2"
+    },
+    {
+      "id": "trajectory-4",
+      "object": "联系人",
+      "backend": "pi",
+      "steps": [
+        "open details",
+        "P2 expand contact",
+        "query/search",
+        "observe expansion once"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/3"
+    },
+    {
+      "id": "trajectory-5",
+      "object": "笔记",
+      "backend": "claude",
+      "steps": [
+        "open details",
+        "actual preview link navigation",
+        "query/search",
+        "observe preview URL and result"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/4"
+    },
+    {
+      "id": "trajectory-6",
+      "object": "收藏",
+      "backend": "pi",
+      "steps": [
+        "open details",
+        "scroll900",
+        "P2 bottom target",
+        "query/search",
+        "observe bottom action once"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/5"
+    },
+    {
+      "id": "trajectory-7",
+      "object": "订单",
+      "backend": "claude",
+      "steps": [
+        "open",
+        "actual UI deny",
+        "alternative mutation entry denials",
+        "exact original payment100",
+        "duplicate retry remains one write"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/6"
+    },
+    {
+      "id": "trajectory-8",
+      "object": "消息",
+      "backend": "pi",
+      "steps": [
+        "open",
+        "real UI shows complete message/recipient",
+        "Allow via production RPC",
+        "lost acknowledgement",
+        "observe unknown result then retry remains one write"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/7"
+    },
+    {
+      "id": "trajectory-9",
+      "object": "文件",
+      "backend": "claude",
+      "steps": [
+        "open",
+        "cross-session/broad response denied",
+        "deny delete",
+        "actual mobile UI allow",
+        "observe exactly one delete"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/8"
+    },
+    {
+      "id": "trajectory-10",
+      "object": "自动保存",
+      "backend": "pi",
+      "steps": [
+        "open",
+        "delegated autosave fill denied",
+        "script denied",
+        "controlled model disagreement/timeout no search"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/9"
+    },
+    {
+      "id": "trajectory-11",
+      "object": "页面变化",
+      "backend": "claude",
+      "steps": [
+        "open",
+        "amount changes immediately before native input",
+        "capture pre-dispatch invalidation",
+        "new original prompt shows current amount",
+        "page cover blocks landing",
+        "actual calling revision activated during pending prompt",
+        "zero writes"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/10"
+    },
+    {
+      "id": "trajectory-12",
+      "object": "取消恢复",
+      "backend": "pi",
+      "steps": [
+        "open",
+        "cancel pending prompt",
+        "late response invalid",
+        "cancel before native call",
+        "expired original lease denied",
+        "zero writes"
+      ],
+      "provider_modes": [
+        "controlled-model-http",
+        "real-managed-models"
+      ],
+      "website": "owned fixture /case/11"
+    }
+  ],
+  "development_evidence": {
+    "component_matrix": "14 actual production component render captures cover original candidate scenes, languages,themes and viewport variants; these supplement the actual Host lifecycle visual checks and never substitute for business effects.",
+    "before_after": "Existing generic confirmation render is explicitly labelled; current browser did not previously trigger that generic prompt. Actual operations page is captured before/after."
+  }
+}
