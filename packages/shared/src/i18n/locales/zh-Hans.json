@@ -135,7 +135,7 @@
   "browserAuthorization.field.status": "当前状态",
   "browserAuthorization.field.target": "目标",
   "browserAuthorization.field.website": "网站",
-  "browserAuthorization.invalidatedDescription": "页面或策略在派发前发生变化，这次授权请求已失效，操作尚未发起。",
+  "browserAuthorization.invalidatedDescription": "页面或策略在派发前发生变化，这次授权请求已失效，操作尚未执行。",
   "browserAuthorization.invalidatedNotice": "重新核对当前页面后才能再次请求授权。",
   "browserAuthorization.notice": "本次允许仅适用于以上操作。",
   "browserAuthorization.operation.delete": "删除",
