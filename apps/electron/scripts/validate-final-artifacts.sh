@@ -869,6 +869,47 @@ test_macos_command_conflict() {
   grep -F 'echo user-owned' "$conflict_launcher" >/dev/null
 }
 
+# POO-133: an install-app.sh CLI symlink into the app bundle exists without
+# terminal-integration state. Setup must adopt it instead of demanding a
+# manual delete, while uninstall without state keeps the link in place.
+test_macos_installer_symlink_adoption() {
+  local installed_app="$1"
+  local adoption_home="$TEMP_ROOT/adoption 用户"
+  local adoption_launcher="$adoption_home/.local/bin/polo"
+  local packaged_launcher="$installed_app/Contents/Resources/app/resources/bin/polo"
+  mkdir -p "$(dirname "$adoption_launcher")"
+  ln -s "$packaged_launcher" "$adoption_launcher"
+
+  local executable="$installed_app/Contents/MacOS/Polo AI"
+  local output
+  output=$(HOME="$adoption_home" \
+    SHELL=/bin/zsh \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    POLO_AI_TERMINAL_HOME="$adoption_home" \
+    "$executable" --polo-terminal-integration status)
+  printf '%s' "$output" | grep -F '"statusCode":"not_installed"' >/dev/null
+  if printf '%s' "$output" | grep -F '"conflict"' >/dev/null; then
+    echo "installer symlink was reported as a conflict: $output" >&2
+    return 1
+  fi
+
+  output=$(HOME="$adoption_home" \
+    SHELL=/bin/zsh \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    POLO_AI_TERMINAL_HOME="$adoption_home" \
+    "$executable" --polo-terminal-integration install)
+  printf '%s' "$output" | grep -F '"statusCode":"ready"' >/dev/null
+  test "$(readlink "$adoption_launcher")" = "$packaged_launcher"
+
+  output=$(HOME="$adoption_home" \
+    SHELL=/bin/zsh \
+    POLO_AI_TERMINAL_HOME="$adoption_home" \
+    "$executable" --polo-terminal-integration uninstall)
+  printf '%s' "$output" | grep -F '"statusCode":"not_installed"' >/dev/null
+  # Install recorded ownership state, so uninstall removes the link it adopted.
+  test ! -e "$adoption_launcher" && test ! -L "$adoption_launcher"
+}
+
 test_macos_settings_integration() {
   local installed_app="$1"
   local integration_home="$TEMP_ROOT/settings integration 用户"
@@ -980,6 +1021,7 @@ run_macos_full_e2e() {
     "test \"\$(polo --version)\" = '$current_version' && polo --help | grep -F 'Usage: polo ' >/dev/null"
   run_packaged_headless_lifecycle /bin/zsh "$test_home"
   test_macos_command_conflict "$installed_app"
+  test_macos_installer_symlink_adoption "$installed_app"
 
   launchctl setenv POLO_AI_RUNTIME_DISCOVERY_FILE "$runtime_file"
   MAC_LAUNCH_ENV_CONFIGURED=true
