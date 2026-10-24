@@ -514,6 +514,23 @@ function isOwnedLauncher(
   return isOwnedLauncherSnapshot(path, captureLeaf(path), state, options)
 }
 
+// install-app.sh publishes `~/.local/bin/polo` (and the polo-ai alias) as
+// symlinks into the app bundle without recording terminal-integration state, so
+// a machine that installed the CLI before ever enabling the in-app command has
+// a launcher we cannot prove ownership for from state alone. A symlink that
+// resolves into a Polo AI.app bundle's packaged bin directory can only have
+// been created by our own installer, so it is safe to adopt during install.
+// This deliberately does NOT grant uninstall rights: deletion still requires a
+// verified state record.
+function isAdoptableLauncherSnapshot(
+  snapshot: LeafSnapshot,
+): boolean {
+  if (snapshot.kind !== 'symlink' || !snapshot.symlinkTarget) return false
+  return /(?:^|\/)Polo AI\.app\/Contents\/Resources\/app\/resources\/bin\/polo(?:-ai)?$/.test(
+    snapshot.symlinkTarget,
+  )
+}
+
 function installManagedLauncher(
   options: TerminalIntegrationOptions,
   path: string,
@@ -521,7 +538,11 @@ function installManagedLauncher(
   state: TerminalIntegrationState | null,
 ): boolean {
   const snapshot = captureLeaf(path)
-  if (snapshot.exists && !isOwnedLauncherSnapshot(path, snapshot, state, options)) {
+  if (
+    snapshot.exists
+    && !isOwnedLauncherSnapshot(path, snapshot, state, options)
+    && !isAdoptableLauncherSnapshot(snapshot)
+  ) {
     return false
   }
   if (snapshot.kind === 'symlink' && snapshot.symlinkTarget === target) return true
@@ -813,9 +834,14 @@ async function inspectTerminalIntegration(
     ? null
     : found
   const launcherExists = pathExists(launcherPath)
+  // An installer-created symlink into the app bundle is adopted by install
+  // instead of blocking setup behind a manual delete (POO-133).
+  const adoptableLauncher = launcherExists && !installed
+    ? isAdoptableLauncherSnapshot(captureLeaf(launcherPath))
+    : false
   const conflict = malformedProfile
     ? { code: 'profile_conflict' as const, path: malformedProfile }
-    : launcherExists && !installed
+    : launcherExists && !installed && !adoptableLauncher
       ? { code: 'launcher_conflict' as const, path: launcherPath }
       : externalFound && normalizedFound !== normalizedLauncherPath
         ? { code: 'command_conflict' as const, path: externalFound }
