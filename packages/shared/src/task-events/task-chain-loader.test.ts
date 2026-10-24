@@ -166,7 +166,7 @@ describe('translateTaskChainToSubscriptions', () => {
     expect(specs[0]).toEqual({
       targetSessionId: 'sess-1',
       subscriberSessionId: 'sess-2',
-      events: ['completed'],
+      events: ['completed', 'failed'],
       instruction: '审查产出',
       mode: 'once',
       source: 'chain:review.yaml#review',

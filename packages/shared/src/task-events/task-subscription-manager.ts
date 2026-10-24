@@ -193,7 +193,7 @@ export class TaskSubscriptionManager {
       const name = parsed.sessionName ?? this.opts.resolveSessionName?.(parsed.sessionId);
       const enriched = name ? { ...parsed, sessionName: name } : parsed;
       this.logEvent(enriched);
-      if (enriched.type === 'status_changed') this.terminalEvents.delete(enriched.sessionId);
+      if (enriched.type === 'status_changed') this.invalidateTerminalState(enriched.sessionId);
       if (enriched.type === 'completed' || enriched.type === 'failed') this.terminalEvents.set(enriched.sessionId, enriched);
       return this.dispatch(enriched);
     });
@@ -203,7 +203,11 @@ export class TaskSubscriptionManager {
   replay(subscriptionId: string, resolveEvent: () => TaskEvent | undefined): Promise<number> {
     return this.enqueue(async () => {
       const event = resolveEvent();
-      return event ? this.dispatch(event, subscriptionId) : 0;
+      if (!event) return 0;
+      // Reuse a synthesized closed-state event after restart as well. A
+      // persistent listener must not see a new ID for the same terminal state.
+      if (event.type === 'completed' || event.type === 'failed') this.terminalEvents.set(event.sessionId, event);
+      return this.dispatch(event, subscriptionId);
     });
   }
 
@@ -222,6 +226,14 @@ export class TaskSubscriptionManager {
 
   getLatestTerminalEvent(sessionId: string): TaskEvent | undefined {
     return this.terminalEvents.get(sessionId);
+  }
+
+  /** Reopening invalidates outcomes not yet accepted by any subscriber. */
+  invalidateTerminalState(sessionId: string): void {
+    this.terminalEvents.delete(sessionId);
+    this.pendingDeliveries = this.pendingDeliveries.filter(p => p.event.sessionId !== sessionId
+      || (p.event.type !== 'completed' && p.event.type !== 'failed'));
+    this.persist();
   }
 
   private enqueue(operation: () => Promise<number>): Promise<number> {

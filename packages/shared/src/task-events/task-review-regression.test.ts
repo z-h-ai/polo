@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { TaskSubscriptionManager } from './task-subscription-manager.ts';
 import { loadSubscriptions } from './task-subscription-store.ts';
-import { loadTaskChains } from './task-chain-loader.ts';
+import { loadTaskChains, translateTaskChainToSubscriptions } from './task-chain-loader.ts';
 import type { TaskEvent } from './types.ts';
 
 let root: string;
@@ -114,3 +114,46 @@ for (const [name, steps] of [
     expect(result.errors.length).toBeGreaterThan(0);
   });
 }
+
+
+test('rejects a chain reusing a resolved session in non-adjacent steps', () => {
+  mkdirSync(join(root, 'task-events/chains'), { recursive: true });
+  writeFileSync(join(root, 'task-events/chains/reused.json'), JSON.stringify({
+    chain: 'reused', steps: [
+      { id: 'a', session: 'worker' },
+      { id: 'b', session: 'reviewer', after: 'a' },
+      { id: 'c', session: 'worker-alias', after: 'b' },
+      { id: 'd', session: 'publisher', after: 'c' },
+    ],
+  }));
+  const result = loadTaskChains(root, { resolveSession: name => ({ id: name === 'worker-alias' ? 'worker' : name }) });
+  expect(result.chains).toHaveLength(0);
+  expect(result.errors.join(' ')).toContain('session');
+});
+
+
+test('a YAML dependency wakes on explicit failure and guards its success instruction', async () => {
+  const specs = translateTaskChainToSubscriptions({ chainName: 'failure', sourceFile: 'failure.yaml', steps: [
+    { id: 'a', session: 'worker', sessionId: 'worker' },
+    { id: 'b', session: 'main', sessionId: 'main', afterStepId: 'a', prompt: 'Publish the build.' },
+  ] });
+  const messages: string[] = [];
+  const m = manager(async (_id, message) => { messages.push(message); });
+  m.subscribe(specs[0]!);
+  expect(await m.handleTaskEvent({ ...event(), type: 'failed', detail: 'build failed' })).toBe(1);
+  expect(messages[0]).toContain('failure or cancellation');
+  expect(messages[0]).toContain('Publish the build.');
+});
+
+test('reopening releases an undelivered old terminal so a once listener can receive the new result', async () => {
+  let online = false;
+  const messages: string[] = [];
+  const m = manager(async (_id, message) => { if (!online) return { ok: false }; messages.push(message); });
+  m.subscribe(spec);
+  await m.handleTaskEvent({ ...event('old-result'), toStatus: 'done' });
+  await m.handleTaskEvent({ ...event('reopen'), type: 'status_changed', fromStatus: 'done', toStatus: 'in-progress' });
+  online = true;
+  expect(await m.handleTaskEvent({ ...event('new-result'), toStatus: 'done' })).toBe(1);
+  expect(messages[0]).toContain('new-result');
+  expect(messages[0]).not.toContain('old-result');
+});

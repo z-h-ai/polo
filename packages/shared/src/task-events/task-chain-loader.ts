@@ -95,11 +95,13 @@ function resolveChainSessions(
     const after = step.after === undefined ? undefined : Array.isArray(step.after) ? step.after[0] : step.after;
     steps.push({ ...step, sessionId: ref.id, afterStepId: after });
   }
-  const byId = new Map(steps.map(s => [s.id, s]));
+  const sessionSteps = new Map<string, string>();
   for (const step of steps) {
-    if (step.afterStepId && byId.get(step.afterStepId)?.sessionId === step.sessionId) {
-      return `step "${step.id}" depends on its own session (including aliases)`;
+    const previous = sessionSteps.get(step.sessionId);
+    if (previous) {
+      return `steps "${previous}" and "${step.id}" reuse the same session (including aliases); each step needs a distinct session`;
     }
+    sessionSteps.set(step.sessionId, step.id);
   }
   log.debug(`[${file}] chain "${chain.chain}" resolved (${steps.length} steps)`);
   return {
@@ -127,7 +129,7 @@ export function translateTaskChainToSubscriptions(chain: ResolvedTaskChain): Tas
     specs.push({
       targetSessionId: upstream.sessionId,
       subscriberSessionId: step.sessionId,
-      events: ['completed'],
+      events: ['completed', 'failed'],
       instruction: step.prompt
         ?? `Task chain "${chain.chainName}": upstream step "${upstream.id}" finished. Continue with this step ("${step.id}") now.`,
       mode: 'once',

@@ -5,7 +5,7 @@ import { join } from 'path'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 import { RootedSessionStorage } from '@polo-ai/shared/sessions/session-storage.ts'
 import { resetProductSpaceExecutionRegistryForTests, setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } from '../runtime/product-space-executions'
-import { setSyncTrustedProductSpaceAccountId } from '../handlers/rpc/trusted-product-space-account'
+import { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvider } from '../handlers/rpc/trusted-product-space-account'
 
 let root: string
 let sm: SessionManager
@@ -25,6 +25,7 @@ afterEach(() => {
   for (const m of internal.taskSubscriptionManagers.values()) m.dispose()
   rmSync(root, { recursive: true, force: true })
   resetProductSpaceExecutionRegistryForTests()
+  setTrustedProductSpaceAccountProvider(async () => null)
 })
 function session(id: string, accountId = 'account-a') {
   const m = createManagedSession({ id, accountId, productSpaceId: 'space-a' } as never, workspace, { messagesLoaded: true })
@@ -221,4 +222,105 @@ test('YAML edit replaces old instruction and file removal disarms its edges', ()
   rmSync(file)
   sm.loadTaskChainsForWorkspace(root, workspace.id)
   expect(hub().list()).toHaveLength(0)
+});
+
+
+test('initialize replays an existing listener after status commit without an event snapshot', async () => {
+  const main = session('main'); const worker = session('worker')
+  worker.sessionStatus = 'done'
+  hub().subscribe({ targetSessionId: 'worker', subscriberSessionId: main.id })
+  hub().dispose()
+  internal.taskSubscriptionManagers.clear()
+  internal.reinitializeAuth = async () => {}
+  internal.setupConfigWatcher = () => {}
+  internal.loadSessionsFromDisk = () => {}
+  const sends: string[] = []
+  internal.sendMessage = async (id: string, _text: string, _a: unknown, _b: unknown, _opts: unknown, _existing: unknown, _retry: unknown, ack: () => void) => { sends.push(id); ack?.() }
+  await sm.initialize()
+  await settle()
+  expect(sends).toEqual(['main'])
+  expect(hub().list()).toHaveLength(0)
+});
+
+test('idle wake-up keeps a durable recovery marker while agent bootstrap is pending', async () => {
+  setTrustedProductSpaceAccountProvider(async () => 'account-a')
+  session('main'); session('worker')
+  let release!: () => void
+  const blocked = new Promise<void>(resolve => { release = resolve })
+  internal.getOrCreateAgent = async () => { await blocked; throw new Error('test bootstrap failure') }
+  hub().subscribe({ targetSessionId: 'worker', subscriberSessionId: 'main' })
+  expect(await hub().handleTaskEvent(hub().buildEvent({ sessionId: 'worker', type: 'completed' }))).toBe(1)
+  const stored = internal.sessionStorage.load(root, 'main')
+  release()
+  await settle()
+  expect(stored.messages[0].isQueued).toBe(true)
+});
+
+test('dequeued task wake-up retains its durable marker before sendMessage starts', async () => {
+  const main = session('main'); session('worker')
+  main.isProcessing = true
+  hub().subscribe({ targetSessionId: 'worker', subscriberSessionId: 'main' })
+  await hub().handleTaskEvent(hub().buildEvent({ sessionId: 'worker', type: 'completed' }))
+  main.isProcessing = false
+  let release!: () => void
+  const blocked = new Promise<void>(resolve => { release = resolve })
+  internal.sendMessage = async () => { await blocked }
+  internal.processNextQueuedMessage('main')
+  await internal.flushSession('main')
+  const stored = internal.sessionStorage.load(root, 'main')
+  release()
+  expect(stored.messages[0].isQueued).toBe(true)
+});
+
+
+test('persistent closed-state replay retains event identity across restarts', async () => {
+  session('main'); const worker = session('worker')
+  worker.sessionStatus = 'done'
+  let sends = 0
+  internal.sendMessage = async (_id: string, _text: string, _a: unknown, _b: unknown, _opts: unknown, _existing: unknown, _retry: unknown, ack: () => void) => { sends++; ack?.() }
+  await callbacks(internal.sessions.get('main')).subscribeTaskFn({ targetSessionId: 'worker', mode: 'persistent' })
+  await settle()
+  hub().dispose()
+  internal.taskSubscriptionManagers.clear()
+  internal.reinitializeAuth = async () => {}
+  internal.setupConfigWatcher = () => {}
+  internal.loadSessionsFromDisk = () => {}
+  await sm.initialize()
+  await settle()
+  expect(sends).toBe(1)
+});
+
+test('task wake-up replay queues if a user turn wins the dequeue race', async () => {
+  let forced: boolean | undefined
+  const midstream = internal.steerOrQueueMidStreamSend.bind(internal)
+  internal.steerOrQueueMidStreamSend = async (args: any) => { forced = args.forceQueue; await midstream(args) }
+  const main = session('main'); session('worker')
+  main.isProcessing = true
+  hub().subscribe({ targetSessionId: 'worker', subscriberSessionId: 'main' })
+  await hub().handleTaskEvent(hub().buildEvent({ sessionId: 'worker', type: 'completed' }))
+  main.isProcessing = false
+  internal.processNextQueuedMessage('main')
+  main.isProcessing = true
+  let redirects = 0
+  main.agent = { redirect: () => { redirects++; return true } } as never
+  await settle()
+  expect(redirects).toBe(0)
+  expect(forced).toBe(true)
+  expect(main.messageQueue).toHaveLength(1)
+  expect(main.messages[0].isQueued).toBe(true)
+});
+
+
+test('completed wake-up clears its marker even if the next generation has already started', async () => {
+  setTrustedProductSpaceAccountProvider(async () => 'account-a')
+  const main = session('main')
+  internal.getOrCreateAgent = async () => ({
+    setSessionTurnGeneration() {}, setAllSources() {}, getModel() { return 'test-model' },
+    getSessionId() { return undefined },
+    async *chat() { yield { type: 'complete' } },
+  })
+  internal.processEvent = async () => {}
+  internal.onProcessingStopped = async () => { main.isProcessing = false; main.processingGeneration++ }
+  await sm.sendMessage('main', '[Task event] completed', undefined, undefined, undefined, undefined, undefined, undefined, { forceQueue: true })
+  expect(internal.sessionStorage.load(root, 'main').messages[0].isQueued).toBe(false)
 });

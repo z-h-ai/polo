@@ -161,7 +161,10 @@ export function renderTaskEventMessage(event: TaskEvent, subscription: TaskSubsc
     lines.push(`Detail: ${event.detail}`);
   }
   if (subscription.instruction) {
-    lines.push('', 'Subscription instruction — act on it now:', subscription.instruction);
+    const guidance = event.type === 'completed' || event.type === 'failed'
+      ? 'First verify the upstream outcome. On failure or cancellation, report the reason and stop; execute the subscription instruction only on success:'
+      : 'Subscription instruction — act on it now:';
+    lines.push('', guidance, subscription.instruction);
   }
   lines.push('', `(subscription ${subscription.id}, event ${event.id})`);
   return lines.join('\n');

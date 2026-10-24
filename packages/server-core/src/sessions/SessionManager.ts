@@ -2117,6 +2117,7 @@ export class SessionManager implements ISessionManager {
   // Task pub/sub hubs (POO-126) - one per workspace: subscription table + wake-up delivery
   private taskSubscriptionManagers: Map<string, TaskSubscriptionManager> = new Map()
   private taskSessionsHydrated = false
+  private taskWakeReplays = new Set<string>()
   // Pending credential request resolvers (keyed by requestId)
   private pendingCredentialResolvers: Map<string, (response: import('@polo-ai/shared/protocol').CredentialResponse) => void> = new Map()
   // Permission request metadata tracking (keyed by requestId)
@@ -2994,8 +2995,9 @@ export class SessionManager implements ISessionManager {
         for (const workspace of workspaces) {
           try {
             this.loadTaskChainsForWorkspace(workspace.rootPath, workspace.id)
-            this.getTaskSubscriptionManager(workspace.rootPath, workspace.id)
-              .pruneForRemovedSessions(new Set(this.sessions.keys()))
+            const manager = this.getTaskSubscriptionManager(workspace.rootPath, workspace.id)
+            manager.pruneForRemovedSessions(new Set(this.sessions.keys()))
+            for (const sub of manager.list()) this.replayTaskSubscription(manager, sub)
           } catch (error) {
             sessionLog.warn(`[TaskEvents] failed to initialize chains for ${workspace.id}:`, error)
           }
@@ -6809,7 +6811,7 @@ export class SessionManager implements ISessionManager {
           const subscriber = this.sessions.get(subscriberSessionId)
           if (!subscriber) return true
           if (!this.managedScopeTarget(subscriber, subscriber.id)) return false
-          if (subscriber.isProcessing || subscriber.turnStartReserved) return false
+          if (subscriber.isProcessing || subscriber.turnStartReserved || subscriber.questionLifecycleTombstone) return false
           if (!subscriber.messagesLoaded) {
             const stored = this.sessionStorage.load(workspaceRootPath, subscriber.id)
             if (!stored?.messages.some(m => m.type === 'user' && m.isQueued && m.content.startsWith('[Task event]'))) return true
@@ -6817,11 +6819,19 @@ export class SessionManager implements ISessionManager {
             this.hydrateMessagesForColdPersist(subscriber)
             return false
           }
+          // A crash or bootstrap failure may leave a durable event outside
+          // the in-memory FIFO. Reuse its message ID instead of appending it.
+          const pending = subscriber.messages.filter(m => m.role === 'user' && m.isQueued && m.content.startsWith('[Task event]'))
+          for (const message of pending) {
+            if (!this.taskWakeReplays.has(message.id) && !subscriber.messageQueue.some(m => m.messageId === message.id)) {
+              subscriber.messageQueue.push({ message: message.content, messageId: message.id, storedAttachments: message.attachments })
+            }
+          }
           if (subscriber.messageQueue.some(m => m.message.startsWith('[Task event]'))) {
             this.processNextQueuedMessage(subscriber.id)
             return false
           }
-          return true
+          return pending.length === 0
         },
         // Acceptance is the durable message ack, not the end of the LLM turn.
         // Queue preserves the current turn even on backends that normally steer.
@@ -6854,7 +6864,12 @@ export class SessionManager implements ISessionManager {
   /** Tool and YAML listeners share the same serialized terminal check. */
   private armTaskSubscription(manager: TaskSubscriptionManager, spec: TaskSubscriptionSpec) {
     const sub = manager.subscribe(spec)
-    void manager.replay(sub.id, () => {
+    this.replayTaskSubscription(manager, sub)
+    return sub
+  }
+
+  private replayTaskSubscription(manager: TaskSubscriptionManager, spec: TaskSubscriptionSpec & { id: string }): void {
+    void manager.replay(spec.id, () => {
       const target = this.sessions.get(spec.targetSessionId)
       if (!target) return undefined
       const status = target.sessionStatus ?? 'todo'
@@ -6862,11 +6877,11 @@ export class SessionManager implements ISessionManager {
       // Disk metadata can change while the server is offline. Never replay a
       // status-bound outcome from an earlier state of the task.
       if (terminal && (!terminal.toStatus || terminal.toStatus === status)) return terminal
+      if (terminal) manager.invalidateTerminalState(target.id)
       return this.getClosedStatusIds(target.workspace.rootPath).includes(status)
         ? manager.buildEvent({ type: 'completed', sessionId: target.id, sessionName: target.name, toStatus: status, emittedBy: 'system' })
         : undefined
     }).catch(error => sessionLog.warn('[TaskEvents] terminal replay failed:', error))
-    return sub
   }
 
   /** Status ids whose category is 'closed' — the workspace's "done" vocabulary. */
@@ -8365,6 +8380,7 @@ export class SessionManager implements ISessionManager {
     const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
     const claimedAtEntry = !managed.isProcessing && !managed.turnStartReserved
     let turnStarted = false
+    let taskWakeMessage: Message | undefined
     // `holdsReservation` may grow past the entry claim: a caller that WAITED
     // on the question-state lock re-evaluates in-lock (see below) and can
     // claim a freshly freed reservation there.
@@ -8493,6 +8509,7 @@ export class SessionManager implements ISessionManager {
         let userMessage: Message
         if (existingMessageId) {
           userMessage = this.requireExistingMessage(managed, existingMessageId)
+          if (userMessage.isQueued && userMessage.content.startsWith('[Task event]')) taskWakeMessage = userMessage
           // A replayed QUEUED message (not the answer's own resume call)
           // supersedes a pending recovery: the answer content is already in
           // history as part of the context, so the recovery retry would
@@ -8526,6 +8543,13 @@ export class SessionManager implements ISessionManager {
             kbReferences: options?.kbReferences,
           }
           managed.messages.push(userMessage)
+
+          if (rpcContext?.forceQueue && message.startsWith('[Task event]')) {
+            // Durable acceptance must remain recoverable until the backend
+            // has actually run, including the idle-session bootstrap window.
+            userMessage.isQueued = true
+            taskWakeMessage = userMessage
+          }
 
           // POO-108 v4 D-B: stage the send-time KB knowledge block for a
           // one-shot injection at the agent turn (consumed before agent.chat).
@@ -9161,6 +9185,12 @@ export class SessionManager implements ISessionManager {
         this.onProcessingStopped(sessionId, 'error')
       }
     } finally {
+      // Backend completion, failure or UI handoff consumes this wake-up.
+      // Bootstrap failures never reach this boundary and remain recoverable.
+      if (taskWakeMessage && this.sessions.get(sessionId) === managed) {
+        taskWakeMessage.isQueued = false
+        this.persistSession(managed)
+      }
       // Only handle cleanup for unexpected exits (loop break without complete event)
       // Normal completion returns early after calling onProcessingStopped
       // Errors are handled in catch block
@@ -9171,6 +9201,7 @@ export class SessionManager implements ISessionManager {
         sendSpan.end()
         this.onProcessingStopped(sessionId, 'interrupted')
       }
+      if (taskWakeMessage && this.sessions.get(sessionId) === managed) await this.flushSession(managed.id)
     }
     } catch (error) {
       // R31-5: only PRE-CHAT failures reach here — the inner handler owns
@@ -9513,7 +9544,11 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed || managed.messageQueue.length === 0) return
 
+    const candidate = managed.messageQueue[0]!
+    const taskWake = candidate.message.startsWith('[Task event]') && candidate.messageId
+    if (taskWake && this.taskWakeReplays.has(taskWake)) return
     const next = managed.messageQueue.shift()!
+    if (taskWake) this.taskWakeReplays.add(taskWake)
     sessionLog.info('replay queued', {
       sessionId,
       messageId: next.messageId,
@@ -9524,9 +9559,12 @@ export class SessionManager implements ISessionManager {
     if (next.messageId) {
       const existingMessage = managed.messages.find(m => m.id === next.messageId)
       if (existingMessage) {
-        // Clear isQueued flag and persist - prevents re-queueing if crash during processing
-        existingMessage.isQueued = false
-        this.persistSession(managed)
+        // Task wake-ups retain recovery state through dequeue and backend
+        // bootstrap. Ordinary user sends keep the existing replay policy.
+        if (!taskWake) {
+          existingMessage.isQueued = false
+          this.persistSession(managed)
+        }
 
         this.sendEvent({
           type: 'user_message',
@@ -9546,7 +9584,10 @@ export class SessionManager implements ISessionManager {
         next.attachments,
         next.storedAttachments,
         next.options,
-        next.messageId
+        next.messageId,
+        undefined,
+        undefined,
+        taskWake ? { forceQueue: true } : undefined
       ).catch(err => {
         sessionLog.error('replay failed', {
           sessionId,
@@ -9571,6 +9612,8 @@ export class SessionManager implements ISessionManager {
         }, managed.workspace.id)
         // Call onProcessingStopped to handle cleanup and check for more queued messages
         this.onProcessingStopped(sessionId, 'error')
+      }).finally(() => {
+        if (taskWake) this.taskWakeReplays.delete(taskWake)
       })
     })
   }
