@@ -1,7 +1,6 @@
-# 设计素材维护：main 集成与新任务准备（候选，未启用）
+# 设计素材维护：main 集成与新任务准备
 
-两个明确的 Agent 工作流 Hook → 项目 Design System Skill → 现有原生生成与验证工具。
-检查、维护、采用、软件发布分别处理。模型可以替换；不新增常驻进程或逐次编辑监听。
+状态（2026-10-24）：**Agent 工作流入口已采用**（本文件随 `Merge feat/prototype-auto-refresh-20261023 into main` 进入 main，两个只读检查入口在 main 实测 current）；**可选 CI 未启用且未实测**（仓库变量 `DESIGN_MATERIAL_CHECK` 未设置，main push 的 check job 实际 skipped），远程 CI 只在本地工作流层面核实过触发关系。检查、维护、采用、软件发布分别处理。模型可以替换；不新增常驻进程或逐次编辑监听。
 
 ## 两个触发时机
 
@@ -40,11 +39,15 @@ CLI 参数错误/读取失败 exit 2；需要维护 exit 3（JSON status=needs-m
 具体例子：按钮改成蓝色 → 候选同步页面/组件/变量预览 → 一起验证、合入 → 按既有授权发一次版本。
 如果只是修复素材索引，走普通维护，不调用 git-flow-release-finish，也不创建 v* 或 shared-v* tag。
 
-本候选依据 main@874c567e 的本地工作流确认：main push 触发 validate；Electron 发布由 v* tag 触发，
-共享包发布由 shared-v* tag 触发（两者另有手动入口）。git-flow-release-finish 会合并、tag 和 push，
-不是素材维护工具。仓库外部署 webhook 尚未核实，不能宣称任意 push 都不会部署。
-采用前应核对实际部署订阅，仅对已确认的纯文档/素材路径跳过部署；混有生产源码仍执行正常校验。
-不要用 [skip ci] 掩盖真实生产变化。
+发布/部署触发关系（main@37ee5703 实测核实 + GitHub Actions 运行记录）：main push 触发 validate；
+Electron 发布由 v* tag 触发，共享包发布由 shared-v* tag 触发（两者另有手动入口）。
+git-flow-release-finish 会合并、tag 和 push，不是素材维护工具。
+GitHub repo hooks API 返回空列表，但这不能证明所有外部应用的部署订阅均已核实；
+不能宣称任意 push 都不会部署。采用后仍应核对实际部署订阅，仅对已确认的纯文档/素材路径跳过部署；
+混有生产源码仍执行正常校验。不要用 [skip ci] 掩盖真实生产变化。
+既有问题（非素材维护引入）：validate 的「Reject Windows-illegal filenames」步骤在
+`core.quotePath=true` 下给中文文件名加引号后误判为非法字符，v0.17.0 起的历史证据文件触发，
+main push 的 validate 因此红；修复属仓库 CI 策略裁决，不在素材维护授权范围内。
 
 若最终合并/冲突处理改变源码，先重查再验收。发布脚本无法在合并与 tag/push 之间停下时，
 调用前必须证明最终输入等于受检候选；不能证明就保留候选并停止发布，不能发布后才补素材。
@@ -54,7 +57,8 @@ CLI 参数错误/读取失败 exit 2；需要维护 exit 3（JSON status=needs-m
 prototype-refresh.yml 的 main push job 只读检查，默认 DESIGN_MATERIAL_CHECK 未设 true 时不运行。
 它仅报告过期，不能在发布后替代前置门禁。workflow_dispatch 只生成诊断原型包与 generated.patch，
 不会回填仓库或触发软件发布。已有下载产物不等于仓库 Skill 已更新。
-本候选未启用仓库变量、未安装运行时 hook、未推送；用户最后裁决采用。
+当前状态：仓库变量未设置（首次 main push 实测该 job skipped），运行时无 hook；
+远程 CI 的 check/诊断路径未实测，仅本地工作流核实。
 
 ## 手动原型包
 
