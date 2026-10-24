@@ -212,4 +212,86 @@ describe('published manifest verification gate', () => {
       server.stop(true)
     }
   })
+
+  it('verifies a schema-2 rollback target byte-for-byte when explicitly allowed', async () => {
+    const expected = {
+      repository: 'polo/polo',
+      tag: 'v0.15.2',
+      version: '0.15.2',
+      commitSha: 'a'.repeat(40),
+    }
+    // A pre-POL-268 release: schema 2, no arm64 updater ZIP, x64-only yml.
+    // The rollback verifier must keep validating its bytes end to end.
+    const contents: Record<string, string> = {
+      'Polo-AI-x64.zip': 'macOS x64 update bytes',
+      'Polo-AI-x64.dmg': 'macOS Intel DMG bytes',
+      'Polo-AI-arm64.dmg': 'macOS Apple Silicon DMG bytes',
+      'Polo-AI-x64.AppImage': 'Linux bytes',
+      'Polo-AI-x64.exe': 'Windows bytes',
+      'install-app.sh': '#!/bin/sh\n',
+    }
+    const sha256Hex = (value: string) => createHash('sha256').update(value).digest('hex')
+    const macZipSha512 = createHash('sha512').update(contents['Polo-AI-x64.zip']).digest('base64')
+    const linuxSha512 = createHash('sha512')
+      .update(contents['Polo-AI-x64.AppImage']).digest('base64')
+    const macManifest = `version: 0.15.2\nfiles:\n  - url: Polo-AI-x64.zip\n    sha512: ${macZipSha512}\n    size: ${Buffer.byteLength(contents['Polo-AI-x64.zip'])}\npath: Polo-AI-x64.zip\nsha512: ${macZipSha512}\n`
+    const linuxManifest = `version: 0.15.2\nfiles:\n  - url: Polo-AI-x64.AppImage\n    sha512: ${linuxSha512}\n    size: ${Buffer.byteLength(contents['Polo-AI-x64.AppImage'])}\npath: Polo-AI-x64.AppImage\nsha512: ${linuxSha512}\n`
+    const schema2Contract = {
+      schemaVersion: 2,
+      repository: expected.repository,
+      tag: expected.tag,
+      version: expected.version,
+      commitSha: expected.commitSha,
+      publishedAt: '2026-08-07T12:00:00.000Z',
+      artifacts: {
+        macosZip: { fileName: 'Polo-AI-x64.zip', sha256: sha256Hex(contents['Polo-AI-x64.zip']) },
+        macosX64Dmg: { fileName: 'Polo-AI-x64.dmg', sha256: sha256Hex(contents['Polo-AI-x64.dmg']) },
+        macosArm64Dmg: { fileName: 'Polo-AI-arm64.dmg', sha256: sha256Hex(contents['Polo-AI-arm64.dmg']) },
+        linuxAppImage: { fileName: 'Polo-AI-x64.AppImage', sha256: sha256Hex(contents['Polo-AI-x64.AppImage']) },
+        windowsExe: { fileName: 'Polo-AI-x64.exe', sha256: sha256Hex(contents['Polo-AI-x64.exe']) },
+      },
+      installApp: { fileName: 'install-app.sh', sha256: sha256Hex(contents['install-app.sh']) },
+    }
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const name = basename(new URL(request.url).pathname)
+        if (request.method === 'POST') {
+          return new Response('Method not allowed', { status: 405 })
+        }
+        if (name === 'release-contract.json') {
+          return Response.json(schema2Contract, {
+            headers: { 'cache-control': 'no-cache' },
+          })
+        }
+        if (name === 'latest-mac.yml') {
+          return new Response(macManifest, { headers: { 'cache-control': 'no-cache' } })
+        }
+        if (name === 'latest-linux.yml') {
+          return new Response(linuxManifest, { headers: { 'cache-control': 'no-cache' } })
+        }
+        const file = contents[name]
+        if (file === undefined) return new Response('Not found', { status: 404 })
+        return new Response(file, {
+          headers: {
+            'content-length': String(Buffer.byteLength(file)),
+            'cache-control': 'no-cache',
+          },
+        })
+      },
+    })
+    const url = `http://127.0.0.1:${server.port}/electron/latest`
+    try {
+      const verified = await verifyPublishedRelease(url, expected, {
+        allowPreviousSchema: true,
+      })
+      expect(verified.schemaVersion).toBe(2)
+      // The default (new-release) verification must still refuse the same
+      // feed: only the rollback verifier may opt into the previous schema.
+      await expect(verifyPublishedRelease(url, expected))
+        .rejects.toThrow('pass --allow-previous-schema only when verifying a historical rollback target')
+    } finally {
+      server.stop(true)
+    }
+  })
 })

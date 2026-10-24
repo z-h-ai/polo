@@ -307,6 +307,23 @@ jobs:
               exit 1
             fi
           done
+      # POL-268: the tag workflow runs /app scripts baked into the deployed
+      # updates-static image. A publisher predating the dual-architecture
+      # contract would reject the ten-asset Draft only after the release had
+      # already been assembled, so probe it (read-only) and fail with the
+      # remediation. Deploying the rebuilt image is a release action, not a
+      # workflow step.
+      - name: Check updates server publisher supports the dual-architecture release
+        shell: bash
+        run: |
+          set -euo pipefail
+          capability_output="$(bash scripts/updates-server-exec.sh \
+            /usr/local/bin/bun /app/publish-electron-release.ts capability 2>&1 || true)"
+          if ! grep -qx 'POLO_RELEASE_PUBLISHER_SCHEMA=3' <<<"$capability_output" \
+            || ! grep -qx 'POLO_RELEASE_PUBLISHER_ASSETS=10' <<<"$capability_output"; then
+            echo "::error::Updates server publisher predates the schema-3 dual-architecture contract (expected POLO_RELEASE_PUBLISHER_SCHEMA=3 and POLO_RELEASE_PUBLISHER_ASSETS=10). Deploy the rebuilt infra/updates-static image first, then re-run this release."
+            exit 1
+          fi
       - name: Trigger updates server release pull
         id: updates-pull
         continue-on-error: true

@@ -29,6 +29,7 @@ import {
   type ReleaseContract,
 } from './electron-release-contract'
 import { isStrictSemver } from './strict-semver'
+import { RELEASE_ASSET_NAMES } from './electron-release-draft-identity'
 
 export const MANIFEST_NAMES = ['latest-mac.yml', 'latest-linux.yml'] as const
 export const MACOS_X64_DMG_NAME = 'Polo-AI-x64.dmg'
@@ -1107,7 +1108,17 @@ async function main(): Promise<void> {
     console.log(`Rollback predecessor for ${version} is restored exactly`)
     return
   }
-  throw new Error('Usage: publisher <prepare|publish|rollback|confirm|rollback-failed|finalize|assert-confirmed|assert-finalized|assert-not-latest|assert-rollback-target> [options]')
+  if (command === 'capability') {
+    // POL-268 read-only probe: the release workflow requires the deployed
+    // updates-server image to already understand the schema-3 contract and
+    // the ten-asset whitelist before it pulls a Draft into the PVC. An older
+    // image exits non-zero on this unknown command, which the workflow
+    // reports as "deploy the new publisher first".
+    console.log(`POLO_RELEASE_PUBLISHER_SCHEMA=${RELEASE_CONTRACT_SCHEMA_VERSION}`)
+    console.log(`POLO_RELEASE_PUBLISHER_ASSETS=${RELEASE_ASSET_NAMES.length}`)
+    return
+  }
+  throw new Error('Usage: publisher <prepare|publish|rollback|confirm|rollback-failed|finalize|assert-confirmed|assert-finalized|assert-not-latest|assert-rollback-target|capability> [options]')
 }
 
 if (import.meta.main) await main()

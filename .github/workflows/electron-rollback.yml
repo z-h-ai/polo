@@ -44,4 +44,5 @@ jobs:
             --repository "$GITHUB_REPOSITORY" \
             --tag "$rollback_tag" \
             --version "$rollback_version" \
-            --commit "$rollback_commit"
+            --commit "$rollback_commit" \
+            --allow-previous-schema

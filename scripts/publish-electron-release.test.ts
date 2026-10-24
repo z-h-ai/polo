@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { createReleaseContract } from './electron-release-contract'
+import { RELEASE_ASSET_NAMES } from './electron-release-draft-identity'
 import {
   confirmRelease,
   assertConfirmedRelease,
@@ -111,6 +112,24 @@ async function destroy(fixture: Fixture): Promise<void> {
 }
 
 describe('release publisher validation', () => {
+  it('reports the deployed publisher capability for the release workflow probe', async () => {
+    // POL-268: electron-release.yml runs this read-only command on the
+    // updates server before pulling a Draft; an image built before the
+    // dual-architecture contract exits non-zero on the unknown command.
+    const probe = Bun.spawn([
+      process.execPath,
+      join(import.meta.dir, 'publish-electron-release.ts'),
+      'capability',
+    ], { stdout: 'pipe', stderr: 'pipe' })
+    const [stdout, exitCode] = await Promise.all([
+      new Response(probe.stdout).text(),
+      probe.exited,
+    ])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('POLO_RELEASE_PUBLISHER_SCHEMA=3')
+    expect(stdout).toContain(`POLO_RELEASE_PUBLISHER_ASSETS=${RELEASE_ASSET_NAMES.length}`)
+  })
+
   it('accepts the complete curated release directory', async () => {
     const fixture = await createFixture()
     try {

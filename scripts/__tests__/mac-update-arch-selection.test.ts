@@ -58,13 +58,14 @@ sha512: x64zipsha512base64
 releaseDate: '2026-10-24T00:00:00.000Z'
 `) as object
 
-type Host = { uname: string, arch: 'x64' | 'arm64' }
+type Host = { uname: string, arch: 'x64' | 'arm64', translated: 0 | 1 }
 
 // electron-updater requires `electron` at load time for Squirrel bridging.
 // It is a normal npm package, so bun's module mock applies to it.
 mock.module('electron', () => ({ autoUpdater: { on: () => {} } }))
 
-// MacUpdater probes the host through `sysctl` (Rosetta) and `uname -a`
+// MacUpdater probes the host through `execFileSync('sysctl',
+// ['sysctl.proc_translated'])` (Rosetta) and `execFileSync('uname', ['-a'])`
 // (arm64). Bun's mock.module cannot patch Node built-in modules, and the ESM
 // namespace forbids assignment, so reach the CommonJS exports object that
 // electron-updater's compiled code actually requires and swap the function
@@ -76,8 +77,11 @@ async function withHost<T>(requestedHost: Host, run: () => Promise<T>): Promise<
   }
   const realExecFileSync = childProcess.execFileSync
   childProcess.execFileSync = ((file: string, args: string[]): string => {
-    if (args[0] === 'sysctl') throw new Error('sysctl unavailable in test')
-    if (args[0] === '-a') return requestedHost.uname
+    if (file === 'sysctl') {
+      // Matches MacUpdater's `result.includes('sysctl.proc_translated: 1')`.
+      return `sysctl.proc_translated: ${requestedHost.translated}\n`
+    }
+    if (file === 'uname' && args[0] === '-a') return requestedHost.uname
     return realExecFileSync(file, args) as string
   })
   const previousArch = process.arch
@@ -122,10 +126,12 @@ async function selectUpdateForHost(manifest: object, requestedHost: Host): Promi
 const ARM64_MAC = {
   uname: 'Darwin polo-mac 25.0.0 Darwin Kernel Version 25.0.0: root:xnu-11215/RELEASE_ARM64_T6031 arm64',
   arch: 'arm64',
+  translated: 0,
 } as const
 const INTEL_MAC = {
   uname: 'Darwin polo-mac 25.0.0 Darwin Kernel Version 25.0.0: root:xnu-11215/RELEASE_X86_64_XNU x86_64',
   arch: 'x64',
+  translated: 0,
 } as const
 
 describe('macOS updater architecture selection (electron-updater 6.8.2)', () => {
@@ -139,14 +145,27 @@ describe('macOS updater architecture selection (electron-updater 6.8.2)', () => 
     expect(selected).toBe('Polo-AI-x64.zip')
   })
 
-  it('steers an x64 (Rosetta) install on arm64 hardware back to the arm64 ZIP', async () => {
-    // MacUpdater treats a Rosetta-translated process as arm64 hardware. The
-    // dual manifest therefore also converts existing x64-on-ARM installs —
-    // the reported victims of this defect — to native builds on their next
+  it('steers a Rosetta-translated x64 process back to the arm64 ZIP', async () => {
+    // MacUpdater's sysctl probe reports hw translation even when neither the
+    // uname string nor process.arch reveals arm64 hardware. The dual manifest
+    // therefore converts Rosetta installs to native builds on their next
     // update check.
+    const selected = await selectUpdateForHost(DUAL_ARCH_MANIFEST, {
+      uname: INTEL_MAC.uname,
+      arch: 'x64',
+      translated: 1,
+    })
+    expect(selected).toBe('Polo-AI-arm64.zip')
+  })
+
+  it('steers an x64 process running natively on arm64 hardware back to the arm64 ZIP', async () => {
+    // The uname probe alone marks this host as arm64 hardware. The dual
+    // manifest also converts these existing x64-on-ARM installs — the
+    // reported victims of this defect.
     const selected = await selectUpdateForHost(DUAL_ARCH_MANIFEST, {
       uname: ARM64_MAC.uname,
       arch: 'x64',
+      translated: 0,
     })
     expect(selected).toBe('Polo-AI-arm64.zip')
   })

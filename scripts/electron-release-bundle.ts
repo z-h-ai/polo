@@ -8,7 +8,9 @@ import { dump, load } from 'js-yaml'
 import {
   createReleaseContract,
   parseReleaseContract,
+  PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION,
   RELEASE_CONTRACT_SCHEMA_VERSION,
+  type PreviousReleaseContract,
   type ReleaseArtifactContract,
   type ReleaseContract,
 } from './electron-release-contract'
@@ -264,7 +266,8 @@ async function verifyArtifact(
 export async function verifyPublishedRelease(
   baseUrl: string,
   expected: BundleMetadata,
-): Promise<ReleaseContract> {
+  options: { allowPreviousSchema?: boolean } = {},
+): Promise<ReleaseContract | PreviousReleaseContract> {
   const normalizedBase = baseUrl.replace(/\/$/, '')
   const contractResponse = await fetchOk(`${normalizedBase}/release-contract.json`, {
     cache: 'no-store',
@@ -280,12 +283,25 @@ export async function verifyPublishedRelease(
     throw new Error('Published contract does not match the release being verified')
   }
 
-  if (contract.schemaVersion !== RELEASE_CONTRACT_SCHEMA_VERSION) {
+  // New releases must be dual-architecture (schema 3). Historical rollback
+  // targets stay valid under the schema they were published with, so the
+  // rollback verifier opts into the schema-2 contract explicitly; the update
+  // source never published anything older through this pipeline.
+  const isCurrentSchema = contract.schemaVersion === RELEASE_CONTRACT_SCHEMA_VERSION
+  const isPreviousSchema = contract.schemaVersion === PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION
+  if (!isCurrentSchema && !isPreviousSchema) {
     throw new Error(`Published contract must use schema version ${RELEASE_CONTRACT_SCHEMA_VERSION}`)
   }
+  if (isPreviousSchema && options.allowPreviousSchema !== true) {
+    throw new Error(
+      `Published contract uses the previous schema version ${PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION};`
+      + ' pass --allow-previous-schema only when verifying a historical rollback target',
+    )
+  }
+  const typedContract = contract as ReleaseContract | PreviousReleaseContract
   const manifestContracts: Record<string, ReleaseArtifactContract> = {
-    'latest-mac.yml': contract.artifacts.macosZip,
-    'latest-linux.yml': contract.artifacts.linuxAppImage,
+    'latest-mac.yml': typedContract.artifacts.macosZip,
+    'latest-linux.yml': typedContract.artifacts.linuxAppImage,
   }
   const contractByFileName = new Map(
     Object.values(contract.artifacts).map((artifact) => [artifact.fileName, artifact]),
@@ -305,12 +321,12 @@ export async function verifyPublishedRelease(
       ? new Set([
           artifact.fileName,
           MACOS_X64_DMG_NAME,
-          MACOS_ARM64_ZIP_NAME,
-          MACOS_ARM64_DMG_NAME,
+          ...(isCurrentSchema ? [MACOS_ARM64_ZIP_NAME, MACOS_ARM64_DMG_NAME] : []),
         ])
       : new Set([artifact.fileName])
     if (
-      manifestName === 'latest-mac.yml'
+      isCurrentSchema
+      && manifestName === 'latest-mac.yml'
       && !manifest.files?.some(item => item.url === MACOS_ARM64_ZIP_NAME)
     ) {
       // POL-268 recurrence gate: the live feed must keep carrying the arm64
@@ -343,10 +359,10 @@ export async function verifyPublishedRelease(
     }
   }
   for (const artifact of [
-    contract.artifacts.macosX64Dmg,
-    contract.artifacts.macosArm64Dmg,
-    contract.artifacts.windowsExe,
-    contract.installApp,
+    typedContract.artifacts.macosX64Dmg,
+    typedContract.artifacts.macosArm64Dmg,
+    typedContract.artifacts.windowsExe,
+    typedContract.installApp,
   ]) {
     await verifyArtifact(normalizedBase, artifact)
   }
@@ -355,7 +371,7 @@ export async function verifyPublishedRelease(
   if (methodCheck.status !== 405) {
     throw new Error(`Static update service accepted POST with HTTP ${methodCheck.status}`)
   }
-  return contract
+  return typedContract
 }
 
 function required(values: Record<string, string | undefined>, key: string): string {
@@ -399,7 +415,13 @@ async function main(): Promise<void> {
   if (command === 'verify') {
     const { values } = parseArgs({
       args,
-      options: { ...common, url: { type: 'string' } },
+      options: {
+        ...common,
+        url: { type: 'string' },
+        // Rollback targets published before the dual-architecture contract
+        // stay valid under schema 2; new-release verification omits this flag.
+        'allow-previous-schema': { type: 'boolean' },
+      },
       strict: true,
     })
     await verifyPublishedRelease(required(values, 'url'), {
@@ -407,7 +429,7 @@ async function main(): Promise<void> {
       tag: required(values, 'tag'),
       version: required(values, 'version'),
       commitSha: required(values, 'commit').toLowerCase(),
-    })
+    }, { allowPreviousSchema: values['allow-previous-schema'] === true })
     return
   }
   if (command === 'validate') {

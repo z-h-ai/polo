@@ -95,6 +95,20 @@ describe("Electron release workflow boundaries", () => {
   });
 
   it("pulls the approved Draft Release through the sole PVC writer before public verification", () => {
+    // POL-268: the release pulls /app scripts baked into the deployed
+    // updates-static image, so the workflow must prove the deployed
+    // publisher understands the schema-3 ten-asset contract before the pull
+    // starts; deploying that image stays a manual release action.
+    const capabilityCheck = release.indexOf(
+      "Check updates server publisher supports the dual-architecture release",
+    );
+    const updatesPull = release.indexOf("Trigger updates server release pull");
+    expect(capabilityCheck).toBeGreaterThan(-1);
+    expect(capabilityCheck).toBeLessThan(updatesPull);
+    expect(release).toContain("publish-electron-release.ts capability");
+    expect(release).toContain("POLO_RELEASE_PUBLISHER_SCHEMA=3");
+    expect(release).toContain("POLO_RELEASE_PUBLISHER_ASSETS=10");
+    expect(release).toContain("Deploy the rebuilt infra/updates-static image first");
     expect(release).toContain("Trigger updates server release pull");
     expect(release).toContain("UPDATES_SSH_KEY");
     expect(release).toContain("UPDATES_SSH_HOST");
