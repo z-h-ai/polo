@@ -43,6 +43,7 @@ export interface SessionMenuActions {
   toggleLabel: (labelId: string) => void
   share: () => Promise<void>
   showInFinder: () => void
+  copySessionId: () => Promise<void>
   copyPath: () => Promise<void>
   /** Export the session bundle to a JSON file via the OS save dialog (no-op when cancelled). */
   exportSession: () => Promise<void>
@@ -152,6 +153,15 @@ export function useSessionMenuActions({
     window.electronAPI.sessionCommand(sessionId, { type: 'showInFinder' })
   }, [sessionId])
 
+  const copySessionId = React.useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(sessionId)
+      toast.success(t('toast.sessionIdCopied'))
+    } catch {
+      toast.error(t('toast.failedToCopySessionId'))
+    }
+  }, [sessionId, t])
+
   const copyPath = React.useCallback(async () => {
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'copyPath' }) as { success: boolean; path?: string } | undefined
     if (result?.success && result.path) {
@@ -232,6 +242,7 @@ export function useSessionMenuActions({
     toggleLabel,
     share,
     showInFinder,
+    copySessionId,
     copyPath,
     exportSession,
     refreshTitle,

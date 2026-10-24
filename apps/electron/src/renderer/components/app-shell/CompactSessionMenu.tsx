@@ -316,6 +316,7 @@ export function CompactSessionMenu({
               onOpenInNewPanel={closeAfter(actions.openInNewPanel)}
               onOpenInNewWindow={closeAfter(onOpenInNewWindow)}
               onShowInFinder={closeAfter(actions.showInFinder)}
+              onCopySessionId={closeAfter(actions.copySessionId)}
               onCopyPath={closeAfter(actions.copyPath)}
               onExport={closeAfter(actions.exportSession)}
               onDelete={closeAfter(onDelete)}
@@ -390,6 +391,7 @@ interface RootPaneProps {
   onOpenInNewPanel?: () => void
   onOpenInNewWindow?: () => void
   onShowInFinder?: () => void
+  onCopySessionId?: () => void
   onCopyPath?: () => void
   onExport?: () => void
   onDelete?: () => void
@@ -422,6 +424,7 @@ function RootPane({
   onOpenInNewPanel,
   onOpenInNewWindow,
   onShowInFinder,
+  onCopySessionId,
   onCopyPath,
   onExport,
   onDelete,
@@ -512,6 +515,7 @@ function RootPane({
         label={t('sessionMenu.showInFileManager', { fileManager: getFileManagerName() })}
         onTap={onShowInFinder}
       />
+      <Row icon={<Copy className="h-4 w-4" />} label={t('sessionMenu.copySessionId')} onTap={onCopySessionId} />
       <Row icon={<Copy className="h-4 w-4" />} label={t('sessionMenu.copyPath')} onTap={onCopyPath} />
       {onExport && (
         <Row icon={<FileDown className="h-4 w-4" />} label={t('sessionMenu.export')} onTap={onExport} />

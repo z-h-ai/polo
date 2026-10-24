@@ -85,6 +85,40 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  // Task pub/sub (POO-126) — direct pass-through; the callbacks are already
+  // scoped to the caller session by the SessionManager wiring.
+  Object.defineProperty(context, 'subscribeTask', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.subscribeTaskFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'unsubscribeTask', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.unsubscribeTaskFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'listTaskSubscriptions', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.listTaskSubscriptionsFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'emitTaskEvent', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.emitTaskEventFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
   Object.defineProperty(context, 'activateSourceInSession', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.activateSourceInSessionFn;

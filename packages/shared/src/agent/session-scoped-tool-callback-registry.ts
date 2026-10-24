@@ -94,6 +94,38 @@ export interface SessionScopedToolCallbacks {
   resolveStatusFn?: (status: string) => import('@polo-ai/session-tools-core').ResolvedStatusResult;
   /** Send a message to another session (inter-session messaging). */
   sendAgentMessageFn?: (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => Promise<void>;
+  // Task pub/sub (POO-126) — wired to the workspace TaskSubscriptionManager.
+  /** Subscribe the caller's session to another session's task events. */
+  subscribeTaskFn?: (args: {
+    targetSessionId: string;
+    events?: Array<'status_changed' | 'completed' | 'failed' | 'custom'>;
+    statuses?: string[];
+    instruction?: string;
+    mode?: 'once' | 'persistent';
+    expiresAtMs?: number;
+  }) => Promise<{ ok: true; subscriptionId: string; message: string } | { ok: false; error: string }>;
+  /** Remove one of the caller session's subscriptions. */
+  unsubscribeTaskFn?: (subscriptionId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** List subscriptions ('mine' = caller session, 'all' = workspace). */
+  listTaskSubscriptionsFn?: (scope: 'mine' | 'all') => Promise<{
+    ok: true;
+    subscriptions: Array<{
+      id: string;
+      targetSessionId: string;
+      events: string[];
+      statuses?: string[];
+      mode: string;
+      instruction?: string;
+      fireCount: number;
+      source?: string;
+    }>;
+  } | { ok: false; error: string }>;
+  /** Emit a task event for the CALLER's own session (wakes subscribers). */
+  emitTaskEventFn?: (args: { type: 'completed' | 'failed' | 'custom'; detail?: string }) => Promise<{
+    ok: boolean;
+    error?: string;
+    subscriberCount?: number;
+  }>;
   /**
    * Activate a source in the running session (source_test auto-enable flow).
    * Wired by SessionManager to the per-session onSourceActivationRequest callback

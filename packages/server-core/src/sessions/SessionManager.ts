@@ -131,6 +131,7 @@ import { extractLabelId, resolveSessionLabels } from '@polo-ai/shared/labels'
 import { ensureLabelsExist } from '@polo-ai/shared/labels/crud'
 import { loadStatusConfig } from '@polo-ai/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@polo-ai/shared/automations'
+import { DEFAULT_CLOSED_STATUS_IDS, TaskSubscriptionManager, loadTaskChains, translateTaskChainToSubscriptions, type TaskSubscriptionSpec } from '@polo-ai/shared/task-events'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 
 // Import from server-core domain utilities
@@ -1674,6 +1675,82 @@ export class SessionManager implements ISessionManager {
 
         await this.sendMessage(target.id, message, fileAttachments)
       }),
+      // Task pub/sub (POO-126): the workspace hub is created on first use — a
+      // session can subscribe before any chain or status event exists.
+      subscribeTaskFn: this.guardManagedCallback(managed, 'self.subscribeTaskFn', async (args) => {
+        const manager = this.getTaskSubscriptionManager(managed.workspace.rootPath, managed.workspace.id)
+        const target = this.managedScopeTarget(managed, args.targetSessionId)
+        if (!target) {
+          return { ok: false as const, error: `Target session "${args.targetSessionId}" not found in this workspace's trusted scope. Use list_sessions to find valid session IDs.` }
+        }
+        try {
+          const sub = this.armTaskSubscription(manager, {
+            targetSessionId: target.id,
+            subscriberSessionId: managed.id,
+            events: args.events,
+            statuses: args.statuses,
+            instruction: args.instruction,
+            mode: args.mode,
+            expiresAt: args.expiresAtMs ? Date.now() + args.expiresAtMs : undefined,
+          })
+          const eventList = args.events?.length ? args.events.join('|') : 'completed|failed'
+          return {
+            ok: true as const,
+            subscriptionId: sub.id,
+            message: [
+              `Subscription ${sub.id} armed — listening to session "${target.name ?? target.id}" (${target.id}) for [${eventList}].`,
+              args.statuses?.length ? `Only fires when the target lands in one of: ${args.statuses.join(', ')}.` : '',
+              args.mode === 'persistent' ? 'This subscription is persistent.' : 'It fires once, then is removed.',
+              'When the event arrives you will receive an injected message and start a new turn automatically.',
+              'End your turn now — do NOT poll get_session_info or list_sessions while waiting.',
+            ].filter(Boolean).join(' '),
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error)
+          return { ok: false as const, error: msg }
+        }
+      }),
+      unsubscribeTaskFn: this.guardManagedCallback(managed, 'self.unsubscribeTaskFn', async (subscriptionId: string) => {
+        const manager = this.getTaskSubscriptionManager(managed.workspace.rootPath, managed.workspace.id)
+        const removed = manager.unsubscribe(subscriptionId, managed.id)
+        return removed
+          ? { ok: true }
+          : { ok: false, error: `Subscription ${subscriptionId} is not one of this session's subscriptions (see list_task_subscriptions).` }
+      }),
+      listTaskSubscriptionsFn: this.guardManagedCallback(managed, 'self.listTaskSubscriptionsFn', async (scope: 'mine' | 'all') => {
+        const manager = this.getTaskSubscriptionManager(managed.workspace.rootPath, managed.workspace.id)
+        const subs = (scope === 'all' ? manager.list() : manager.list(managed.id)).filter(sub =>
+          this.managedScopeTarget(managed, sub.targetSessionId)
+          && this.managedScopeTarget(managed, sub.subscriberSessionId),
+        )
+        return {
+          ok: true as const,
+          subscriptions: subs.map((sub) => ({
+            id: sub.id,
+            targetSessionId: sub.targetSessionId,
+            events: sub.events,
+            statuses: sub.statuses,
+            mode: sub.mode,
+            instruction: sub.instruction,
+            fireCount: sub.fireCount,
+            source: sub.source,
+          })),
+        }
+      }),
+      emitTaskEventFn: this.guardManagedCallback(managed, 'self.emitTaskEventFn', async (args: { type: 'completed' | 'failed' | 'custom'; detail?: string }) => {
+        const manager = this.getTaskSubscriptionManager(managed.workspace.rootPath, managed.workspace.id)
+        const event = manager.buildEvent({
+          type: args.type,
+          sessionId: managed.id,
+          sessionName: managed.name ?? managed.id,
+          workspaceId: managed.workspace.id,
+          detail: args.detail,
+          emittedBy: managed.id,
+          toStatus: managed.sessionStatus ?? 'todo',
+        })
+        const woken = await manager.handleTaskEvent(event)
+        return { ok: true, subscriberCount: woken }
+      }),
       activateSourceInSessionFn: this.guardManagedCallback(managed, 'self.activateSourceInSessionFn', async (sourceSlug: string) => {
         // R38-2: route through the DIRECT agent callback, which is itself
         // guard-wrapped at its assignment site (see onSourceActivationRequest
@@ -2037,6 +2114,10 @@ export class SessionManager implements ISessionManager {
   private configWatchers: Map<string, ConfigWatcher> = new Map()
   // Automation systems for workspace event automations - one per workspace (includes scheduler, diffing, and handlers)
   private automationSystems: Map<string, AutomationSystem> = new Map()
+  // Task pub/sub hubs (POO-126) - one per workspace: subscription table + wake-up delivery
+  private taskSubscriptionManagers: Map<string, TaskSubscriptionManager> = new Map()
+  private taskSessionsHydrated = false
+  private taskWakeReplays = new Set<string>()
   // Pending credential request resolvers (keyed by requestId)
   private pendingCredentialResolvers: Map<string, (response: import('@polo-ai/shared/protocol').CredentialResponse) => void> = new Map()
   // Permission request metadata tracking (keyed by requestId)
@@ -2460,7 +2541,9 @@ export class SessionManager implements ISessionManager {
 
     // Session status
     if (managed.sessionStatus !== header.sessionStatus) {
+      const previousStatus = managed.sessionStatus
       managed.sessionStatus = header.sessionStatus
+      this.publishTaskStatusEvent(managed, previousStatus, header.sessionStatus ?? 'todo')
       this.sendEvent({ type: 'session_status_changed', sessionId, sessionStatus: header.sessionStatus ?? '' }, managed.workspace.id)
       changed = true
     }
@@ -2629,6 +2712,16 @@ export class SessionManager implements ISessionManager {
     const watcher = new ConfigWatcher(workspaceRootPath, callbacks)
     watcher.start()
     this.configWatchers.set(workspaceRootPath, watcher)
+
+    // POO-126: load declarative task chains for this workspace (fail-soft —
+    // broken files are logged, subscriptions follow the valid ones).
+    if (this.taskSessionsHydrated) {
+      try {
+        this.loadTaskChainsForWorkspace(workspaceRootPath, workspaceId)
+      } catch (error) {
+        sessionLog.warn(`[TaskEvents] failed to load task chains for ${workspaceId}:`, error)
+      }
+    }
 
     // Initialize AutomationSystem for this workspace (includes scheduler, handlers, and event logging)
     if (!this.automationSystems.has(workspaceRootPath)) {
@@ -2897,6 +2990,19 @@ export class SessionManager implements ISessionManager {
 
       // Load existing sessions from disk
       this.loadSessionsFromDisk()
+      this.taskSessionsHydrated = true
+      if (this.runtimeProfile === 'default') {
+        for (const workspace of workspaces) {
+          try {
+            this.loadTaskChainsForWorkspace(workspace.rootPath, workspace.id)
+            const manager = this.getTaskSubscriptionManager(workspace.rootPath, workspace.id)
+            manager.pruneForRemovedSessions(new Set(this.sessions.keys()))
+            for (const sub of manager.list()) this.replayTaskSubscription(manager, sub)
+          } catch (error) {
+            sessionLog.warn(`[TaskEvents] failed to initialize chains for ${workspace.id}:`, error)
+          }
+        }
+      }
 
       // Signal that initialization is complete — IPC handlers waiting on initGate will proceed
       this.initGate.markReady()
@@ -6662,6 +6768,7 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (managed) {
       const source = { managed, token: managed.runtimeOwnerToken, generation: managed.processingGeneration }
+      const previousStatus = managed.sessionStatus
       managed.sessionStatus = sessionStatus
       this.setMetadataWriteGuard(managed)
       // Persist in-memory state directly to avoid race with pending queue writes
@@ -6675,6 +6782,215 @@ export class SessionManager implements ISessionManager {
       // https://github.com/oven-sh/bun/issues/15939
       const watcher = this.configWatchers.get(managed.workspace.rootPath)
       watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
+      // POO-126: publish status-derived task events to workspace subscribers
+      // (fire-and-forget — a failed wake-up must never fail the status write).
+      this.publishTaskStatusEvent(managed, previousStatus, sessionStatus)
+    }
+  }
+
+  /**
+   * POO-126: the task pub/sub hub for a workspace (created lazily, one per
+   * workspace root). Wake-up delivery goes through sendMessage — the same
+   * channel send_agent_message uses — so a subscriber starts a fresh turn
+   * with the event in context instead of polling get_session_info.
+   */
+  getTaskSubscriptionManager(workspaceRootPath: string, workspaceId: string): TaskSubscriptionManager {
+    let manager = this.taskSubscriptionManagers.get(workspaceRootPath)
+    if (!manager) {
+      manager = new TaskSubscriptionManager({
+        workspaceRootPath,
+        workspaceId,
+        canDeliver: (subscription, event) => {
+          const subscriber = this.sessions.get(subscription.subscriberSessionId)
+          const source = this.sessions.get(event.sessionId)
+          return !!subscriber && !!source && source.workspace.rootPath === workspaceRootPath
+            && subscriber.workspace.rootPath === workspaceRootPath
+            && this.managedScopeTarget(subscriber, source.id) === source
+        },
+        recoverQueued: async (subscriberSessionId) => {
+          const subscriber = this.sessions.get(subscriberSessionId)
+          if (!subscriber) return true
+          if (!this.managedScopeTarget(subscriber, subscriber.id)) return false
+          if (subscriber.isProcessing || subscriber.turnStartReserved || subscriber.questionLifecycleTombstone) return false
+          if (!subscriber.messagesLoaded) {
+            const stored = this.sessionStorage.load(workspaceRootPath, subscriber.id)
+            if (!stored?.messages.some(m => m.type === 'user' && m.isQueued && m.content.startsWith('[Task event]'))) return true
+            // Hydration schedules the existing queue replay path; no LLM polling.
+            this.hydrateMessagesForColdPersist(subscriber)
+            return false
+          }
+          // A crash or bootstrap failure may leave a durable event outside
+          // the in-memory FIFO. Reuse its message ID instead of appending it.
+          const pending = subscriber.messages.filter(m => m.role === 'user' && m.isQueued && m.content.startsWith('[Task event]'))
+          for (const message of pending) {
+            if (!this.taskWakeReplays.has(message.id) && !subscriber.messageQueue.some(m => m.messageId === message.id)) {
+              subscriber.messageQueue.push({ message: message.content, messageId: message.id, storedAttachments: message.attachments })
+            }
+          }
+          if (subscriber.messageQueue.some(m => m.message.startsWith('[Task event]'))) {
+            this.processNextQueuedMessage(subscriber.id)
+            return false
+          }
+          return pending.length === 0
+        },
+        // Acceptance is the durable message ack, not the end of the LLM turn.
+        // Queue preserves the current turn even on backends that normally steer.
+        deliver: (subscriberSessionId, message) => new Promise(resolve => {
+          void this.sendMessage(subscriberSessionId, message, undefined, undefined,
+            undefined, undefined, undefined, () => resolve({ ok: true }), { forceQueue: true })
+            .then(() => resolve({ ok: false, reason: 'Message was not accepted' }), error => {
+              const reason = error instanceof Error ? error.message : String(error)
+              sessionLog.warn(`[TaskEvents] wake-up delivery to ${subscriberSessionId} failed: ${reason}`)
+              resolve({ ok: false, reason })
+            })
+        }),
+        resolveStatus: (input) => {
+          const config = loadStatusConfig(workspaceRootPath)
+          const byId = config.statuses.find((s) => s.id === input)
+          if (byId) return byId.id
+          const byLabel = config.statuses.find((s) => s.label.toLowerCase() === input.toLowerCase())
+          return byLabel?.id ?? null
+        },
+        resolveSessionName: (sid) => {
+          const session = this.sessions.get(sid)
+          return session?.name ?? undefined
+        },
+      })
+      this.taskSubscriptionManagers.set(workspaceRootPath, manager)
+    }
+    return manager
+  }
+
+  /** Tool and YAML listeners share the same serialized terminal check. */
+  private armTaskSubscription(manager: TaskSubscriptionManager, spec: TaskSubscriptionSpec) {
+    const sub = manager.subscribe(spec)
+    this.replayTaskSubscription(manager, sub)
+    return sub
+  }
+
+  private replayTaskSubscription(manager: TaskSubscriptionManager, spec: TaskSubscriptionSpec & { id: string }): void {
+    void manager.replay(spec.id, () => {
+      const target = this.sessions.get(spec.targetSessionId)
+      if (!target) return undefined
+      const status = target.sessionStatus ?? 'todo'
+      const terminal = manager.getLatestTerminalEvent(target.id)
+      // Disk metadata can change while the server is offline. Never replay a
+      // status-bound outcome from an earlier state of the task.
+      if (terminal && (!terminal.toStatus || terminal.toStatus === status)) return terminal
+      if (terminal) manager.invalidateTerminalState(target.id)
+      return this.getClosedStatusIds(target.workspace.rootPath).includes(status)
+        ? manager.buildEvent({ type: 'completed', sessionId: target.id, sessionName: target.name, toStatus: status, emittedBy: 'system' })
+        : undefined
+    }).catch(error => sessionLog.warn('[TaskEvents] terminal replay failed:', error))
+  }
+
+  /** Status ids whose category is 'closed' — the workspace's "done" vocabulary. */
+  private getClosedStatusIds(workspaceRootPath: string): string[] {
+    try {
+      const closed = loadStatusConfig(workspaceRootPath).statuses
+        .filter((s) => s.category === 'closed')
+        .map((s) => s.id)
+      return closed.length ? closed : DEFAULT_CLOSED_STATUS_IDS
+    } catch {
+      return DEFAULT_CLOSED_STATUS_IDS
+    }
+  }
+
+  /**
+   * POO-126: derive task events from a status transition — always a
+   * 'status_changed' event, plus 'completed' when the new status is closed.
+   * ('failed' has no reliable status vocabulary; agents emit it explicitly
+   * through emit_task_event.)
+   */
+  private publishTaskStatusEvent(managed: ManagedSession, oldStatus: string | undefined, newStatus: string): void {
+    if (oldStatus === newStatus) return
+    const rootPath = managed.workspace.rootPath
+    const manager = this.taskSubscriptionManagers.get(rootPath)
+    // No hub yet = nobody ever subscribed in this workspace — skip the work.
+    if (!manager) return
+    const base = {
+      sessionId: managed.id,
+      sessionName: managed.name ?? managed.id,
+      workspaceId: managed.workspace.id,
+      fromStatus: oldStatus,
+      toStatus: newStatus,
+      emittedBy: 'system' as const,
+    }
+    manager.handleTaskEvent(manager.buildEvent({ ...base, type: 'status_changed' })).catch((error) => {
+      sessionLog.warn('[TaskEvents] status_changed dispatch failed:', error)
+    })
+    if (this.getClosedStatusIds(rootPath).includes(newStatus)) {
+      manager.handleTaskEvent(manager.buildEvent({ ...base, type: 'completed' })).catch((error) => {
+        sessionLog.warn('[TaskEvents] completed dispatch failed:', error)
+      })
+    }
+  }
+
+  /**
+   * POO-126: load declarative chain files ({workspace}/task-events/chains/)
+   * and translate each dependency edge into a subscription. Called when the
+   * workspace watcher is set up; chains referencing sessions that do not
+   * exist yet are reported, never half-applied.
+   */
+  loadTaskChainsForWorkspace(workspaceRootPath: string, workspaceId: string): void {
+    const manager = this.getTaskSubscriptionManager(workspaceRootPath, workspaceId)
+    const { chains, errors } = loadTaskChains(workspaceRootPath, {
+      resolveSession: (nameOrId) => {
+        const byId = this.sessions.get(nameOrId)
+        if (byId && byId.workspace.id === workspaceId) return { id: byId.id, name: byId.name }
+        const matches = [...this.sessions.values()].filter(session => session.workspace.id === workspaceId && session.name === nameOrId)
+        return matches.length === 1 ? { id: matches[0]!.id, name: matches[0]!.name } : null
+      },
+    })
+    for (const error of errors) {
+      sessionLog.warn(`[TaskEvents] chain file problem: ${error}`)
+    }
+    const desiredSpecs: TaskSubscriptionSpec[] = []
+    for (const chain of chains) {
+      const specs = translateTaskChainToSubscriptions(chain)
+      // Validate the entire chain before creating any of its edges.
+      if (specs.some(spec => {
+        const source = this.sessions.get(spec.targetSessionId)
+        const subscriber = this.sessions.get(spec.subscriberSessionId)
+        return !source?.accountId || !source.productSpaceId || !subscriber
+          || source.accountId !== subscriber.accountId || source.productSpaceId !== subscriber.productSpaceId
+          || source.workspace.id !== subscriber.workspace.id
+      })) {
+        sessionLog.warn(`[TaskEvents] rejected out-of-scope chain ${chain.sourceFile}`)
+        continue
+      }
+      // Without a chain run generation, an old downstream completion must
+      // never release the next dependency before its new work has happened.
+      if (specs.some(spec => {
+        if (manager.hasCompletedChainEdge(spec)) return false
+        const subscriber = this.sessions.get(spec.subscriberSessionId)!
+        const status = subscriber.sessionStatus ?? 'todo'
+        const terminal = manager.getLatestTerminalEvent(subscriber.id)
+        return this.getClosedStatusIds(workspaceRootPath).includes(status)
+          || !!terminal && (!terminal.toStatus || terminal.toStatus === status)
+      })) {
+        sessionLog.warn(`[TaskEvents] chain ${chain.sourceFile} requires fresh, pending downstream sessions`)
+        continue
+      }
+      desiredSpecs.push(...specs)
+    }
+    // Files are the authority for generated listeners. Reconcile edits,
+    // deleted files and invalid definitions instead of retaining old prompts.
+    for (const sub of manager.list()) {
+      if (sub.source?.startsWith('chain:') && !desiredSpecs.some(spec => manager.hasSameChainDefinition(sub, spec))) {
+        manager.unsubscribe(sub.id)
+      }
+    }
+    let created = 0
+    for (const spec of desiredSpecs) {
+      const existing = manager.list().some(sub => manager.hasSameChainDefinition(sub, spec))
+      if (!existing && !manager.hasCompletedChainEdge(spec)) {
+        this.armTaskSubscription(manager, spec)
+        created += 1
+      }
+    }
+    if (created > 0) {
+      sessionLog.info(`[TaskEvents] ${created} chain subscription(s) created for workspace ${workspaceId}`)
     }
   }
 
@@ -7710,6 +8026,12 @@ export class SessionManager implements ISessionManager {
     }
     managed.questionLifecycleTombstone = { reason: 'deleted', at: Date.now() }
     this.sessions.delete(managed.id)
+    try {
+      this.taskSubscriptionManagers.get(managed.workspace.rootPath)
+        ?.pruneForRemovedSessions(new Set(this.sessions.keys()))
+    } catch (error) {
+      sessionLog.warn('[TaskEvents] failed to prune deleted-session subscriptions:', error)
+    }
     sessionLog.info(`Session ${managed.id} declared deleted (linearization point)`)
   }
 
@@ -7864,12 +8186,13 @@ export class SessionManager implements ISessionManager {
     options?: SendMessageOptions
     existingMessageId?: string
     onAck?: (messageId: string) => void
+    forceQueue?: boolean
   }): Promise<void> {
     const { managed, sessionId, message, attachments, storedAttachments, options, existingMessageId, onAck } = args
     const connection = resolveSessionConnection(managed.llmConnection, undefined)
     // Fallback to 'steer' when no connection is resolvable — preserves
     // today's exact behavior (call redirect, take whatever it returns).
-    const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
+    const behavior = args.forceQueue ? 'queue' : connection ? resolveMidStreamBehavior(connection) : 'steer'
 
     const agent = managed.agent
     let steered = false
@@ -7919,6 +8242,7 @@ export class SessionManager implements ISessionManager {
       optimisticMessageId: options?.optimisticMessageId
     }, managed.workspace.id)
 
+    userMessage.isQueued = !steered
     if (!steered) {
       // Push for FIFO replay on next onProcessingStopped tick. Same shape
       // for both queue-direct (current turn still running) and
@@ -7963,7 +8287,7 @@ export class SessionManager implements ISessionManager {
      * that should host this session's browser tools. Pass undefined when calling
      * directly (tests, intra-server flows) to leave the existing pin in place.
      */
-    rpcContext?: { callerClientId?: string },
+    rpcContext?: { callerClientId?: string; forceQueue?: boolean },
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -8056,6 +8380,7 @@ export class SessionManager implements ISessionManager {
     const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
     const claimedAtEntry = !managed.isProcessing && !managed.turnStartReserved
     let turnStarted = false
+    let taskWakeMessage: Message | undefined
     // `holdsReservation` may grow past the entry claim: a caller that WAITED
     // on the question-state lock re-evaluates in-lock (see below) and can
     // claim a freshly freed reservation there.
@@ -8146,6 +8471,7 @@ export class SessionManager implements ISessionManager {
         if (managed.isProcessing || !holdsReservation) {
           await this.steerOrQueueMidStreamSend({
             managed, sessionId, message, attachments, storedAttachments, options, existingMessageId, onAck,
+            forceQueue: rpcContext?.forceQueue,
           })
           queuedMidStream = true
           return
@@ -8183,6 +8509,7 @@ export class SessionManager implements ISessionManager {
         let userMessage: Message
         if (existingMessageId) {
           userMessage = this.requireExistingMessage(managed, existingMessageId)
+          if (userMessage.isQueued && userMessage.content.startsWith('[Task event]')) taskWakeMessage = userMessage
           // A replayed QUEUED message (not the answer's own resume call)
           // supersedes a pending recovery: the answer content is already in
           // history as part of the context, so the recovery retry would
@@ -8216,6 +8543,13 @@ export class SessionManager implements ISessionManager {
             kbReferences: options?.kbReferences,
           }
           managed.messages.push(userMessage)
+
+          if (rpcContext?.forceQueue && message.startsWith('[Task event]')) {
+            // Durable acceptance must remain recoverable until the backend
+            // has actually run, including the idle-session bootstrap window.
+            userMessage.isQueued = true
+            taskWakeMessage = userMessage
+          }
 
           // POO-108 v4 D-B: stage the send-time KB knowledge block for a
           // one-shot injection at the agent turn (consumed before agent.chat).
@@ -8851,6 +9185,12 @@ export class SessionManager implements ISessionManager {
         this.onProcessingStopped(sessionId, 'error')
       }
     } finally {
+      // Backend completion, failure or UI handoff consumes this wake-up.
+      // Bootstrap failures never reach this boundary and remain recoverable.
+      if (taskWakeMessage && this.sessions.get(sessionId) === managed) {
+        taskWakeMessage.isQueued = false
+        this.persistSession(managed)
+      }
       // Only handle cleanup for unexpected exits (loop break without complete event)
       // Normal completion returns early after calling onProcessingStopped
       // Errors are handled in catch block
@@ -8861,6 +9201,7 @@ export class SessionManager implements ISessionManager {
         sendSpan.end()
         this.onProcessingStopped(sessionId, 'interrupted')
       }
+      if (taskWakeMessage && this.sessions.get(sessionId) === managed) await this.flushSession(managed.id)
     }
     } catch (error) {
       // R31-5: only PRE-CHAT failures reach here — the inner handler owns
@@ -9203,7 +9544,11 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed || managed.messageQueue.length === 0) return
 
+    const candidate = managed.messageQueue[0]!
+    const taskWake = candidate.message.startsWith('[Task event]') && candidate.messageId
+    if (taskWake && this.taskWakeReplays.has(taskWake)) return
     const next = managed.messageQueue.shift()!
+    if (taskWake) this.taskWakeReplays.add(taskWake)
     sessionLog.info('replay queued', {
       sessionId,
       messageId: next.messageId,
@@ -9214,9 +9559,12 @@ export class SessionManager implements ISessionManager {
     if (next.messageId) {
       const existingMessage = managed.messages.find(m => m.id === next.messageId)
       if (existingMessage) {
-        // Clear isQueued flag and persist - prevents re-queueing if crash during processing
-        existingMessage.isQueued = false
-        this.persistSession(managed)
+        // Task wake-ups retain recovery state through dequeue and backend
+        // bootstrap. Ordinary user sends keep the existing replay policy.
+        if (!taskWake) {
+          existingMessage.isQueued = false
+          this.persistSession(managed)
+        }
 
         this.sendEvent({
           type: 'user_message',
@@ -9236,7 +9584,10 @@ export class SessionManager implements ISessionManager {
         next.attachments,
         next.storedAttachments,
         next.options,
-        next.messageId
+        next.messageId,
+        undefined,
+        undefined,
+        taskWake ? { forceQueue: true } : undefined
       ).catch(err => {
         sessionLog.error('replay failed', {
           sessionId,
@@ -9261,6 +9612,8 @@ export class SessionManager implements ISessionManager {
         }, managed.workspace.id)
         // Call onProcessingStopped to handle cleanup and check for more queued messages
         this.onProcessingStopped(sessionId, 'error')
+      }).finally(() => {
+        if (taskWake) this.taskWakeReplays.delete(taskWake)
       })
     })
   }
@@ -12578,6 +12931,17 @@ export class SessionManager implements ISessionManager {
       }
     }
     this.automationSystems.clear()
+
+    // Dispose task pub/sub hubs (POO-126) — persisted subscriptions reload on next start
+    for (const [workspacePath, manager] of this.taskSubscriptionManagers) {
+      try {
+        manager.dispose()
+        sessionLog.info(`Disposed task subscription hub for ${workspacePath}`)
+      } catch (error) {
+        sessionLog.error(`Failed to dispose task subscription hub for ${workspacePath}:`, error)
+      }
+    }
+    this.taskSubscriptionManagers.clear()
 
     // Clear all pending delta flush timers
     for (const [sessionId, timer] of this.deltaFlushTimers) {

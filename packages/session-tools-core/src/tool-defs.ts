@@ -49,6 +49,12 @@ import { handleGetSessionInfo } from './handlers/get-session-info.ts';
 import { handleListSessions } from './handlers/list-sessions.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
+import {
+  handleSubscribeTask,
+  handleUnsubscribeTask,
+  handleListTaskSubscriptions,
+  handleEmitTaskEvent,
+} from './handlers/task-events.ts';
 
 // ============================================================
 // Canonical Zod Schemas
@@ -679,6 +685,36 @@ export const SendAgentMessageSchema = z.object({
   })).optional().describe('Files to include with the message'),
 });
 
+// Task pub/sub (POO-126)
+export const SubscribeTaskSchema = z.object({
+  help: z.boolean().optional().describe('If true, returns usage guidance instead of subscribing'),
+  targetSessionId: z.string().optional().describe('Session ID to observe (e.g. the sessionId returned by spawn_session)'),
+  events: z.array(z.enum(['status_changed', 'completed', 'failed', 'custom'])).optional()
+    .describe('Event types to observe. Default: ["completed", "failed"]'),
+  statuses: z.array(z.string()).optional()
+    .describe('Optional narrow: only fire when the observed session lands in one of these statuses'),
+  instruction: z.string().optional()
+    .describe('What to do when the event arrives — included verbatim in the wake-up message you receive'),
+  mode: z.enum(['once', 'persistent']).optional()
+    .describe('once (default) fires a single time; persistent keeps firing'),
+  ttlMs: z.number().int().positive().optional()
+    .describe('Optional subscription lifetime in milliseconds'),
+});
+
+export const UnsubscribeTaskSchema = z.object({
+  subscriptionId: z.string().describe('Subscription ID (from subscribe_task or list_task_subscriptions)'),
+});
+
+export const ListTaskSubscriptionsSchema = z.object({
+  scope: z.enum(['mine', 'all']).optional()
+    .describe('mine (default) lists this session\'s subscriptions; all lists the workspace\'s'),
+});
+
+export const EmitTaskEventSchema = z.object({
+  type: z.enum(['completed', 'failed', 'custom']).describe('Event type to emit for THIS session'),
+  detail: z.string().optional().describe('Free-text detail delivered to subscribers (e.g. what finished or why it failed)'),
+});
+
 export const ListMessagingChannelsSchema = z.object({
   sessionId: z.string().optional().describe('Session ID to list bindings for. Defaults to current session.'),
 });
@@ -1006,6 +1042,14 @@ Use list_sessions to find session IDs, or use the sessionId returned by spawn_se
 
 The target session receives your message with a sender envelope containing your session ID, so it can use send_agent_message to reply.`,
 
+  subscribe_task: `Subscribe to a Polo session ID and receive queued event wake-ups. Defaults: completed + failed, mode once; statuses optionally filters status IDs. After success, end your turn instead of polling. Read the task-chain-pubsub Skill for orchestration guidance; help=true describes the contract.`,
+
+  unsubscribe_task: `Remove one of your task subscriptions (see list_task_subscriptions for IDs).`,
+
+  list_task_subscriptions: `List task subscriptions. Default scope "mine" shows what YOUR session is listening to; scope "all" lists subscriptions visible in the current trusted account/space/workspace scope, including YAML chains.`,
+
+  emit_task_event: `Emit a task event for THIS session (completed | failed | custom) with an optional detail message. Wakes every session subscribed to you — use it to signal milestone completion that status changes alone don't express, or to signal completion explicitly when your workflow does not map to a status.`,
+
   list_messaging_channels: `List messaging channels (Telegram, WhatsApp) bound to a session.
 Shows which external chat apps are connected and can send/receive messages.`,
 
@@ -1104,6 +1148,13 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },
   // Inter-session messaging
   { name: 'send_agent_message', description: TOOL_DESCRIPTIONS.send_agent_message, inputSchema: SendAgentMessageSchema, executionMode: 'registry', safeMode: 'block', handler: handleSendAgentMessage },
+  // Task pub/sub (POO-126) — subscribe/emit deliver wake-up messages into other
+  // sessions, so they need the same confirmation gate as send_agent_message;
+  // listing is read-only.
+  { name: 'subscribe_task', description: TOOL_DESCRIPTIONS.subscribe_task, inputSchema: SubscribeTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleSubscribeTask },
+  { name: 'unsubscribe_task', description: TOOL_DESCRIPTIONS.unsubscribe_task, inputSchema: UnsubscribeTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleUnsubscribeTask },
+  { name: 'list_task_subscriptions', description: TOOL_DESCRIPTIONS.list_task_subscriptions, inputSchema: ListTaskSubscriptionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListTaskSubscriptions },
+  { name: 'emit_task_event', description: TOOL_DESCRIPTIONS.emit_task_event, inputSchema: EmitTaskEventSchema, executionMode: 'registry', safeMode: 'block', handler: handleEmitTaskEvent },
   // Messaging gateway tools
   { name: 'list_messaging_channels', description: TOOL_DESCRIPTIONS.list_messaging_channels, inputSchema: ListMessagingChannelsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListMessagingChannels },
   { name: 'unbind_messaging_channel', description: TOOL_DESCRIPTIONS.unbind_messaging_channel, inputSchema: UnbindMessagingChannelSchema, executionMode: 'registry', safeMode: 'block', handler: handleUnbindMessagingChannel },
