@@ -83,9 +83,9 @@ const defaultDependencies: ElectronDistDependencies = {
     )
   },
   async finalizeArtifacts(options) {
-    if (options.platform === 'darwin' && options.arch === 'x64') {
-      await finalizeMacUpdateManifest(resolve(options.electronDir, 'release'))
-      console.log('Finalized latest-mac.yml from final ZIP and DMG bytes')
+    if (options.platform === 'darwin') {
+      await finalizeMacUpdateManifest(resolve(options.electronDir, 'release'), options.arch)
+      console.log(`Finalized latest-mac.yml for ${options.arch} from final ZIP and DMG bytes`)
     }
   },
 }

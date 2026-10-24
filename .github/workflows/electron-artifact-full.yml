@@ -61,12 +61,19 @@ jobs:
             manifest: latest-mac.yml
             artifact: Polo-AI-x64.zip
             manual_installer: Polo-AI-x64.dmg
-          # Keep the automatic-update contract on x64 for now. This native
-          # Apple Silicon build is a separately signed manual installer.
+            upgrade_chain_check: true
+          # POL-268: the native Apple Silicon build participates in the
+          # automatic-update contract. Its manifest is uploaded under a
+          # distinct name so the draft job can merge both architectures into
+          # the published latest-mac.yml. Updater validation stays on the
+          # `signing` mode below: the x64 predecessor upgrade fixture is
+          # architecture-unsafe on an arm64 runner.
           - platform: macos
             arch: arm64
             runner: macos-15
-            updater: false
+            updater: true
+            manifest: latest-mac-arm64.yml
+            artifact: Polo-AI-arm64.zip
             manual_installer: Polo-AI-arm64.dmg
           - platform: linux
             arch: x64
@@ -74,6 +81,7 @@ jobs:
             updater: true
             manifest: latest-linux.yml
             artifact: Polo-AI-x64.AppImage
+            upgrade_chain_check: true
           # Windows is deliberately unsigned in this release phase. It is a
           # manual NSIS installer and does not participate in updater manifests.
           - platform: windows
@@ -129,7 +137,7 @@ jobs:
               exit 1
             fi
           fi
-          if [ "${{ inputs.bootstrap }}" != "true" ] && [ "${{ matrix.updater }}" = "true" ]; then
+          if [ "${{ inputs.bootstrap }}" != "true" ] && [ "${{ matrix.upgrade_chain_check }}" = "true" ]; then
             for name in PREVIOUS_RELEASE_TAG PREVIOUS_RELEASE_VERSION PREVIOUS_RELEASE_COMMIT_SHA EXPECTED_PREVIOUS_ARTIFACT_SHA256 PREVIOUS_ARTIFACT_NAME; do
               if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
             done
@@ -143,7 +151,7 @@ jobs:
           fi
 
       - name: Verify and download previous release
-        if: ${{ inputs.bootstrap == false && matrix.updater }}
+        if: ${{ inputs.bootstrap == false && matrix.upgrade_chain_check }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -191,7 +199,7 @@ jobs:
           test -z "$(find apps/electron/resources/bin -maxdepth 2 -type f -name 'uv*' -print -quit)"
 
       - name: Revalidate previous release contract
-        if: ${{ inputs.bootstrap == false && matrix.updater }}
+        if: ${{ inputs.bootstrap == false && matrix.upgrade_chain_check }}
         shell: bash
         run: |
           args=(
@@ -332,6 +340,17 @@ jobs:
             throw "Windows installer must be explicitly unsigned for this release phase; got $($signature.Status)"
           }
           Write-Host 'Windows NSIS installer is intentionally unsigned.'
+
+      - name: Stage arm64 updater manifest under its per-arch name
+        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # electron-builder writes latest-mac.yml on every macOS build. Rename
+          # it before upload so both macOS artifacts can coexist in the draft
+          # job's merged download, where electron-release-bundle.ts prepare
+          # synthesizes the published dual-architecture latest-mac.yml.
+          mv "apps/electron/release/latest-mac.yml" "apps/electron/release/${{ matrix.manifest }}"
 
       - name: Require updater outputs
         if: matrix.updater

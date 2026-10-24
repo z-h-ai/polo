@@ -19,6 +19,7 @@ async function createDraftAssets(root: string, variant = 'A'): Promise<string> {
   await mkdir(input, { recursive: true })
   const contents = {
     'Polo-AI-x64.zip': `macOS zip ${variant}`,
+    'Polo-AI-arm64.zip': `macOS arm64 zip ${variant}`,
     'Polo-AI-x64.dmg': `macOS x64 dmg ${variant}`,
     'Polo-AI-arm64.dmg': `macOS arm64 dmg ${variant}`,
     'Polo-AI-x64.AppImage': `Linux AppImage ${variant}`,
@@ -27,8 +28,11 @@ async function createDraftAssets(root: string, variant = 'A'): Promise<string> {
   for (const [name, value] of Object.entries(contents)) await writeFile(join(input, name), value)
   const macZipHash = createHash('sha512').update(contents['Polo-AI-x64.zip']).digest('base64')
   const macDmgHash = createHash('sha512').update(contents['Polo-AI-x64.dmg']).digest('base64')
+  const arm64ZipHash = createHash('sha512').update(contents['Polo-AI-arm64.zip']).digest('base64')
+  const arm64DmgHash = createHash('sha512').update(contents['Polo-AI-arm64.dmg']).digest('base64')
   const linuxHash = createHash('sha512').update(contents['Polo-AI-x64.AppImage']).digest('base64')
   await writeFile(join(input, 'latest-mac.yml'), `version: ${version}\nfiles:\n  - url: Polo-AI-x64.dmg\n    sha512: ${macDmgHash}\n    size: ${Buffer.byteLength(contents['Polo-AI-x64.dmg'])}\n  - url: Polo-AI-x64.zip\n    sha512: ${macZipHash}\n    size: ${Buffer.byteLength(contents['Polo-AI-x64.zip'])}\npath: Polo-AI-x64.zip\nsha512: ${macZipHash}\n`)
+  await writeFile(join(input, 'latest-mac-arm64.yml'), `version: ${version}\nfiles:\n  - url: Polo-AI-arm64.zip\n    sha512: ${arm64ZipHash}\n    size: ${Buffer.byteLength(contents['Polo-AI-arm64.zip'])}\n  - url: Polo-AI-arm64.dmg\n    sha512: ${arm64DmgHash}\n    size: ${Buffer.byteLength(contents['Polo-AI-arm64.dmg'])}\npath: Polo-AI-arm64.zip\nsha512: ${arm64ZipHash}\n`)
   await writeFile(join(input, 'latest-linux.yml'), `version: ${version}\nfiles:\n  - url: Polo-AI-x64.AppImage\n    sha512: ${linuxHash}\n    size: ${Buffer.byteLength(contents['Polo-AI-x64.AppImage'])}\npath: Polo-AI-x64.AppImage\nsha512: ${linuxHash}\n`)
   const installScript = join(root, 'install-app.sh')
   await writeFile(installScript, '#!/bin/sh\n')
@@ -160,7 +164,7 @@ describe('Zeabur Draft Release puller', () => {
       })
       expect(result).toBe('published')
       expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
-      expect(await readdir(join(volume, 'electron', 'releases', version))).toHaveLength(9)
+      expect(await readdir(join(volume, 'electron', 'releases', version))).toHaveLength(10)
       expect(await readdir(join(volume, 'electron', '.incoming'))).toEqual([])
       expect(JSON.parse(await readFile(join(volume, 'electron', 'latest', 'release-contract.json'), 'utf8')).version).toBe(version)
     } finally {
@@ -418,7 +422,7 @@ describe('Zeabur Draft Release puller', () => {
         peakCapacityCheck: async () => {},
         publisherOptions: { capacityCheck: async () => {} },
       })).rejects.toThrow('differs from the approved Draft SHA-256 digests')
-      expect(await readdir(incoming)).toHaveLength(9)
+      expect(await readdir(incoming)).toHaveLength(10)
       await expect(readlink(join(volume, 'electron', 'latest'))).rejects.toThrow()
     } finally {
       server.stop(true)
@@ -506,7 +510,7 @@ describe('Zeabur Draft Release puller', () => {
         incomingCleanup: async () => { throw new Error('simulated cleanup failure') },
       })).resolves.toBe('published')
       expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
-      expect(await readdir(join(volume, 'electron', '.incoming', version))).toHaveLength(9)
+      expect(await readdir(join(volume, 'electron', '.incoming', version))).toHaveLength(10)
     } finally {
       server.stop(true)
       await rm(root, { recursive: true, force: true })
@@ -539,7 +543,7 @@ describe('Zeabur Draft Release puller', () => {
         },
       })).resolves.toBe('published')
       const incoming = join(volume, 'electron', '.incoming', version)
-      expect(await readdir(incoming)).toHaveLength(9)
+      expect(await readdir(incoming)).toHaveLength(10)
 
       await expect(pullRelease({
         repository,
