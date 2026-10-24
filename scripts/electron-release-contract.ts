@@ -13,11 +13,15 @@ export const RELEASE_CONTRACT_SCHEMA_VERSION = 3 as const
 // The online predecessor still publishes schema 2 (x64-only updater ZIP);
 // preflight must keep parsing it until the first schema-3 release is live.
 export const PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION = 2 as const
-// Temporary: allows v0.18.0 to re-bootstrap the broken release chain (the
-// v0.17.0 installers never published, so the online contract still points at
-// a pre-POO-14 artifact containing the removed session-mcp-server sidecar).
-// Re-anchor after the next chained release succeeds.
-export const BOOTSTRAP_VERSION = '0.19.2'
+// Temporary: allows re-bootstrapping the release chain while no schema-3
+// contract is online. v0.19.2 re-anchored the previously broken chain (its
+// installers never published a parseable contract); v0.19.3 is the
+// legacy(schema 2) -> schema-3 transition bootstrap itself — the update
+// source still serves only the v0.19.2 legacy metadata when it ships, so it
+// must bootstrap too, and its own successful release is what first publishes
+// a schema-3 contract. From v0.19.4 on, every tag parses the online contract
+// strictly. Re-anchor to a single version after the next chained release.
+export const BOOTSTRAP_VERSIONS = ['0.19.2', '0.19.3'] as const
 export const DEFAULT_RELEASE_CONTRACT_URL =
   'https://updates.polo.z-h-ai.com/electron/latest/release-contract.json'
 
@@ -277,8 +281,10 @@ export function evaluateReleasePreflight(input: ReleasePreflightInput): ReleaseP
     )
   }
   if (!input.onlineContract) {
-    if (version !== BOOTSTRAP_VERSION) {
-      throw new Error(`Only v${BOOTSTRAP_VERSION} may bootstrap without an online contract`)
+    if (!(BOOTSTRAP_VERSIONS as readonly string[]).includes(version)) {
+      throw new Error(
+        `Only v${BOOTSTRAP_VERSIONS.join(' or v')} may bootstrap without an online contract`,
+      )
     }
     return { bootstrap: true, version }
   }

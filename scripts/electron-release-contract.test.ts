@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  BOOTSTRAP_VERSION,
+  BOOTSTRAP_VERSIONS,
   RELEASE_CONTRACT_SCHEMA_VERSION,
   evaluateReleasePreflight,
   parseReleaseContract,
@@ -43,11 +43,11 @@ function previousSchemaContract(version = '0.15.2'): Record<string, unknown> {
 function input(overrides: Record<string, unknown> = {}) {
   return {
     repository: 'polo/polo',
-    tag: `v${BOOTSTRAP_VERSION}`,
+    tag: `v${BOOTSTRAP_VERSIONS[0]}`,
     commitSha: sha,
     tagCommitSha: sha,
-    rootVersion: BOOTSTRAP_VERSION,
-    electronVersion: BOOTSTRAP_VERSION,
+    rootVersion: BOOTSTRAP_VERSIONS[0],
+    electronVersion: BOOTSTRAP_VERSIONS[0],
     ...overrides,
   }
 }
@@ -93,22 +93,33 @@ describe('release contract', () => {
   })
 })
 
-// BOOTSTRAP_VERSION moves with every release; derive off-by-one fixtures from
-// it so this suite survives version bumps instead of hardcoding a past one.
+// BOOTSTRAP_VERSIONS move with every release; derive off-by-one fixtures from
+// them so this suite survives version bumps instead of hardcoding a past one.
 function nextPatch(version: string): string {
   return version.replace(/(\d+)$/, (digits) => String(Number(digits) + 1))
 }
 
 describe('release preflight', () => {
-  it('allows only the bootstrap version to bootstrap without an online contract', () => {
-    expect(evaluateReleasePreflight(input())).toEqual({
-      bootstrap: true,
-      version: BOOTSTRAP_VERSION,
-    })
-    const other = nextPatch(BOOTSTRAP_VERSION)
+  it('allows only the bootstrap versions to bootstrap without an online contract', () => {
+    for (const bootstrapVersion of BOOTSTRAP_VERSIONS) {
+      expect(evaluateReleasePreflight(input({
+        tag: `v${bootstrapVersion}`,
+        rootVersion: bootstrapVersion,
+        electronVersion: bootstrapVersion,
+      }))).toEqual({
+        bootstrap: true,
+        version: bootstrapVersion,
+      })
+    }
+    // v0.19.3 bootstraps the legacy(schema 2) -> schema-3 transition: the
+    // online source still serves only v0.19.2 legacy metadata when it ships.
+    expect(BOOTSTRAP_VERSIONS).toEqual(['0.19.2', '0.19.3'])
+    const afterBootstrap = nextPatch(BOOTSTRAP_VERSIONS[BOOTSTRAP_VERSIONS.length - 1]!)
     expect(() => evaluateReleasePreflight(input({
-      tag: `v${other}`, rootVersion: other, electronVersion: other,
-    }))).toThrow(`Only v${BOOTSTRAP_VERSION}`)
+      tag: `v${afterBootstrap}`, rootVersion: afterBootstrap, electronVersion: afterBootstrap,
+    }))).toThrow(
+      `Only v${BOOTSTRAP_VERSIONS.join(' or v')} may bootstrap without an online contract`,
+    )
   })
 
   it('requires tag, package versions, and commit to match', () => {
@@ -118,11 +129,13 @@ describe('release preflight', () => {
   })
 
   it('requires a version newer than the online contract', () => {
-    const newer = nextPatch(BOOTSTRAP_VERSION)
+    const newer = nextPatch(BOOTSTRAP_VERSIONS[0]!)
     expect(evaluateReleasePreflight(input({
       tag: `v${newer}`, rootVersion: newer, electronVersion: newer,
-      onlineContract: contract(BOOTSTRAP_VERSION),
+      onlineContract: contract(BOOTSTRAP_VERSIONS[0]!),
     })).bootstrap).toBe(false)
-    expect(() => evaluateReleasePreflight(input({ onlineContract: contract(BOOTSTRAP_VERSION) }))).toThrow('must be greater')
+    expect(() => evaluateReleasePreflight(input({
+      onlineContract: contract(BOOTSTRAP_VERSIONS[0]!),
+    }))).toThrow('must be greater')
   })
 })
