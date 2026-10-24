@@ -83,3 +83,13 @@ export { handleGetSessionInfo } from './get-session-info.ts';
 export type { GetSessionInfoArgs } from './get-session-info.ts';
 export { handleListSessions } from './list-sessions.ts';
 export type { ListSessionsArgs } from './list-sessions.ts';
+
+// Task pub/sub (POO-126)
+export { handleSubscribeTask } from './task-events.ts';
+export type { SubscribeTaskArgs } from './task-events.ts';
+export { handleUnsubscribeTask } from './task-events.ts';
+export type { UnsubscribeTaskArgs } from './task-events.ts';
+export { handleListTaskSubscriptions } from './task-events.ts';
+export type { ListTaskSubscriptionsArgs } from './task-events.ts';
+export { handleEmitTaskEvent } from './task-events.ts';
+export type { EmitTaskEventArgs } from './task-events.ts';

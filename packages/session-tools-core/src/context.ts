@@ -359,6 +359,52 @@ export interface SessionToolContext {
   /** Send a message to another session. Injected by backend (SessionManager). */
   sendAgentMessage?(sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>): Promise<void>;
 
+  // ============================================================
+  // Task Pub/Sub (POO-126)
+  // ============================================================
+
+  /**
+   * Subscribe this session to another session's task events. Injected by
+   * backend (SessionManager → TaskSubscriptionManager). When a matching
+   * event arrives, the workspace wakes THIS session with an injected message.
+   */
+  subscribeTask?(args: {
+    targetSessionId: string;
+    events?: Array<'status_changed' | 'completed' | 'failed' | 'custom'>;
+    statuses?: string[];
+    instruction?: string;
+    mode?: 'once' | 'persistent';
+    expiresAtMs?: number;
+  }): Promise<{ ok: true; subscriptionId: string; message: string } | { ok: false; error: string }>;
+
+  /** Remove one of this session's subscriptions. */
+  unsubscribeTask?(subscriptionId: string): Promise<{ ok: boolean; error?: string }>;
+
+  /** List subscriptions. scope 'all' is workspace-wide, 'mine' is this session's. */
+  listTaskSubscriptions?(scope: 'mine' | 'all'): Promise<{
+    ok: true;
+    subscriptions: Array<{
+      id: string;
+      targetSessionId: string;
+      events: string[];
+      statuses?: string[];
+      mode: string;
+      instruction?: string;
+      fireCount: number;
+      source?: string;
+    }>;
+  } | { ok: false; error: string }>;
+
+  /**
+   * Emit a task event for the CURRENT session (a session cannot forge
+   * another session's events). Wakes subscribed sessions.
+   */
+  emitTaskEvent?(args: { type: 'completed' | 'failed' | 'custom'; detail?: string }): Promise<{
+    ok: boolean;
+    error?: string;
+    subscriberCount?: number;
+  }>;
+
   /**
    * Activate a source in the running session: add to enabledSourceSlugs,
    * build its MCP/API servers, apply to the agent.
