@@ -58,7 +58,6 @@ jobs:
             --tag-commit "$tag_commit" \
             --root-package package.json \
             --electron-package apps/electron/package.json \
-            --contract-url https://updates.polo.z-h-ai.com/electron/latest/release-contract-v0.18.1-bootstrap.json \
             --github-output "$GITHUB_OUTPUT" \
             --contract-output previous-release-contract.json
       - name: Upload predecessor contract
