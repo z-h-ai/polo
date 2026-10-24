@@ -66,10 +66,17 @@ CONTEXT_PATHS=(
 #
 # The rewrite is driven by a read-only PyYAML pass (line number + value of the
 # target service's image key), a single sed rewrite at that exact line, and a
-# re-parse that asserts ownership: the target image must now carry the new
-# value and no sibling service image may have moved. A hand-rolled state
-# machine cannot tell `"polo-api":` or `polo.api:` headings from nested keys,
-# and would happily patch a sibling when the target block had no image line.
+# re-parse that asserts full semantic ownership. Three fail-closed gates, in
+# order:
+#   1. merge keys or aliased/shared nodes inside `services` are refused up
+#      front — an inherited sibling's effective config would silently change
+#      along with the target's line;
+#   2. the target line must be byte-exact `    image: <old>` — a flow
+#      mapping part or an inline property on that line would be deleted by
+#      the whole-line sed;
+#   3. after the rewrite, safe_load (which expands anchors and merge keys)
+#      of both files must differ in exactly /services/<svc>/image — one
+#      assertion covering every unknown collateral change.
 compose_rewrite_snippet() {
   cat <<'SNIPPET'
 set -eu
@@ -85,6 +92,25 @@ for k, v in (root.value or []):
         break
 if services is None:
     sys.exit("compose has no services mapping")
+flags = []
+seen = set()
+def scan(node):
+    if id(node) in seen:
+        flags.append("aliased/shared node")
+        return
+    seen.add(id(node))
+    if isinstance(node, yaml.MappingNode):
+        for k, v in (node.value or []):
+            if getattr(k, "value", None) == "<<":
+                flags.append("merge key")
+            scan(k)
+            scan(v)
+    elif isinstance(node, yaml.SequenceNode):
+        for v in (node.value or []):
+            scan(v)
+scan(services)
+if flags:
+    sys.exit("compose uses YAML constructs the rewrite cannot prove safe (" + "; ".join(sorted(set(flags))) + ")")
 target = None
 for k, v in (services.value or []):
     if getattr(k, "value", None) == svc:
@@ -103,6 +129,14 @@ sys.exit("service %s has no image line" % svc)
 lineno="${resolve%% *}"
 old_image="${resolve##* }"
 case "$lineno" in ""|*[!0-9]*) echo "ERROR: bad image line resolution for '$svc'" >&2; exit 1 ;; esac
+# The sed below replaces the whole line: only a byte-exact plain block-style
+# property line is proven safe to replace (flow mapping parts, inline
+# properties, or a trailing comment would be deleted with it).
+target_line="$(sed -n "${lineno}p" "$current")"
+if [ "$target_line" != "    image: $old_image" ]; then
+  echo "ERROR: image line for '$svc' is not a plain single-property line (got: $target_line); refusing to rewrite" >&2
+  exit 1
+fi
 if [ "$old_image" = "$new_image" ]; then
   # Idempotent re-entry: the same ref was deployed before and Coolify (or a
   # previous run) already points at this tag. Keep going so the recreate and
@@ -114,23 +148,28 @@ fi
 sed "${lineno}s|.*|    image: ${new_image}|" "$current" > "$candidate"
 python3 -c '
 import sys, yaml
-def images(path):
-    root = yaml.compose(open(path).read())
-    out = {}
-    for k, v in (root.value or []):
-        if getattr(k, "value", None) == "services":
-            for sk, sv in (v.value or []):
-                for ak, av in (sv.value or []):
-                    if getattr(ak, "value", None) == "image":
-                        out[getattr(sk, "value", None)] = av.value
-    return out
-svc, want = sys.argv[3], sys.argv[4]
-before, after = images(sys.argv[1]), images(sys.argv[2])
-if after.get(svc) != want:
-    sys.exit("target service %s image did not become %s" % (svc, want))
-if {k: v for k, v in before.items() if k != svc} != {k: v for k, v in after.items() if k != svc}:
-    sys.exit("a sibling service image changed")
-' "$current" "$candidate" "$svc" "$new_image" || { echo "ERROR: rewritten compose failed the ownership check; refusing to install" >&2; exit 1; }
+def diff(a, b, path):
+    if type(a) is not type(b):
+        return [path]
+    if isinstance(a, dict):
+        out = []
+        for k in set(a) | set(b):
+            out += diff(a.get(k), b.get(k), path + "/" + str(k))
+        return out
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return [path]
+        out = []
+        for i in range(len(a)):
+            out += diff(a[i], b[i], path + "/" + str(i))
+        return out
+    return [] if a == b else [path]
+svc = sys.argv[3]
+changes = diff(yaml.safe_load(open(sys.argv[1]).read()), yaml.safe_load(open(sys.argv[2]).read()), "")
+allowed = "/services/" + svc + "/image"
+if changes != [allowed]:
+    sys.exit("rewrite changed more than " + allowed + ": " + str(changes))
+' "$current" "$candidate" "$svc" || { echo "ERROR: rewritten compose failed the semantic ownership check; refusing to install" >&2; exit 1; }
 rc=0
 diff -U0 "$current" "$candidate" > "$workdir/rewrite.diff" || rc=$?
 if [ "$rc" -eq 2 ]; then

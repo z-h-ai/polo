@@ -253,13 +253,15 @@ describe('updates-static-deploy script', () => {
     let caseNo = 0
 
     // Locates the target service's image line via a read-only PyYAML pass,
-    // sed-rewrites that exact line, then re-parses to assert ownership — so
-    // quoted (`"polo-api":`) and dotted (`polo.api:`) sibling headings can
-    // never capture the rewrite the way a hand-rolled state machine let them.
+    // sed-rewrites that exact line, then re-parses to assert full semantic
+    // ownership — so quoted (`"polo-api":`) and dotted (`polo.api:`) sibling
+    // headings, flow mappings, and anchor/merge sharing can never capture the
+    // rewrite or drag extra config along with it.
     function rewrite(current: string, svc = 'updates-static', image = 'updates-static:abc1234-schema3'): {
       status: number
       output: string
       candidate: string | null
+      currentAfter: string
     } {
       caseNo += 1
       const currentPath = join(work, `current-${caseNo}.yml`)
@@ -269,50 +271,120 @@ describe('updates-static-deploy script', () => {
       return {
         ...result,
         candidate: existsSync(candidatePath) ? readFileSync(candidatePath, 'utf8') : null,
+        currentAfter: readFileSync(currentPath, 'utf8'),
       }
     }
 
     it('changes exactly the target image line and never a sibling service', () => {
-      const { status, candidate } = rewrite(
-        [
-          'services:',
-          '  polo-postgres:',
-          '    image: registry.example/postgres:16',
-          '  "polo-api": # quoted heading with an inline comment',
-          '    image: registry.example/api:v1',
-          '  polo.api: # dotted heading',
-          '    image: registry.example/api-dotted:v1',
-          '  updates-static:',
-          '    image: registry.example/updates:old',
-          '',
-        ].join('\n'),
-      )
+      const current = [
+        'services:',
+        '  polo-postgres:',
+        '    image: registry.example/postgres:16',
+        '  "polo-api": # quoted heading with an inline comment',
+        '    image: registry.example/api:v1',
+        '  polo.api: # dotted heading',
+        '    image: registry.example/api-dotted:v1',
+        '  updates-static:',
+        '    image: registry.example/updates:old',
+        '',
+      ].join('\n')
+      const { status, candidate, currentAfter } = rewrite(current)
       expect(status).toBe(0)
       expect(candidate).toContain('image: updates-static:abc1234-schema3')
       expect(candidate).toContain('image: registry.example/postgres:16')
       expect(candidate).toContain('image: registry.example/api:v1')
       expect(candidate).toContain('image: registry.example/api-dotted:v1')
       expect(candidate!.match(/updates-static:abc1234-schema3/g)).toHaveLength(1)
+      expect(currentAfter).toBe(current)
     })
 
     it('refuses when the target has no image line, even with image-bearing siblings after it', () => {
       // The state-machine bug this replaces: `inside` leaked past the target
-      // block into a quoted/dotted sibling and rewrote ITS image line.
-      const { status, output, candidate } = rewrite(
-        [
-          'services:',
-          '  "polo-api":',
-          '    image: registry.example/api:v1',
-          '  polo.api:',
-          '    image: registry.example/api-dotted:v1',
-          '  updates-static:',
-          '    build: .',
-          '',
-        ].join('\n'),
-      )
+      // block into a quoted/dotted sibling AFTER it and rewrote ITS image
+      // line — so the siblings must sit after the target to pin the shape.
+      const current = [
+        'services:',
+        '  updates-static:',
+        '    build: .',
+        '  "polo-api":',
+        '    image: registry.example/api:v1',
+        '  polo.api:',
+        '    image: registry.example/api-dotted:v1',
+        '',
+      ].join('\n')
+      const { status, output, candidate, currentAfter } = rewrite(current)
       expect(status).not.toBe(0)
       expect(output).toContain('has no image line')
       expect(candidate).toBeNull()
+      expect(currentAfter).toBe(current)
+    })
+
+    it('refuses a flow mapping whose image line carries inline properties (P1-A)', () => {
+      // Multi-line flow: the image key sits at column 4 and the sed would
+      // delete `restart: always` from the same line. Refused before any
+      // rewrite, byte-for-byte unchanged.
+      const current = [
+        'services:',
+        '  updates-static: {',
+        '    image: registry.example/updates:old, restart: always',
+        '  }',
+        '',
+      ].join('\n')
+      const { status, output, candidate, currentAfter } = rewrite(current)
+      expect(status).not.toBe(0)
+      expect(output).toContain('not a plain single-property line')
+      expect(candidate).toBeNull()
+      expect(currentAfter).toBe(current)
+    })
+
+    it('refuses a single-line flow mapping (P1-A)', () => {
+      const current = 'services:\n  updates-static: { image: old, restart: always }\n'
+      const { status, output, candidate, currentAfter } = rewrite(current)
+      expect(status).not.toBe(0)
+      expect(output).toContain('refusing to rewrite compose')
+      expect(candidate).toBeNull()
+      expect(currentAfter).toBe(current)
+    })
+
+    it('refuses anchor/merge sharing that would drag a sibling along (P1-B)', () => {
+      // The sibling inherits everything through `<<: *updates-base`: rewriting
+      // the target's image line would silently change the sibling's effective
+      // image too. Merge keys and shared nodes are refused up front.
+      const current = [
+        'services:',
+        '  updates-static: &updates-base',
+        '    image: registry.example/updates:old',
+        '    restart: always',
+        '  polo-api:',
+        '    <<: *updates-base',
+        '    ports:',
+        '      - "8080:80"',
+        '',
+      ].join('\n')
+      const { status, output, candidate, currentAfter } = rewrite(current)
+      expect(status).not.toBe(0)
+      expect(output).toContain('cannot prove safe')
+      expect(candidate).toBeNull()
+      expect(currentAfter).toBe(current)
+    })
+
+    it('refuses extension anchors merged into the services (P1-B)', () => {
+      const current = [
+        'x-defaults: &defaults',
+        '  restart: always',
+        'services:',
+        '  updates-static:',
+        '    image: registry.example/updates:old',
+        '    <<: *defaults',
+        '  polo-api:',
+        '    <<: *defaults',
+        '',
+      ].join('\n')
+      const { status, output, candidate, currentAfter } = rewrite(current)
+      expect(status).not.toBe(0)
+      expect(output).toContain('cannot prove safe')
+      expect(candidate).toBeNull()
+      expect(currentAfter).toBe(current)
     })
 
     it('refuses a service block that is missing entirely', () => {
@@ -332,10 +404,11 @@ describe('updates-static-deploy script', () => {
         '    image: updates-static:abc1234-schema3',
         '',
       ].join('\n')
-      const { status, output, candidate } = rewrite(current)
+      const { status, output, candidate, currentAfter } = rewrite(current)
       expect(status).toBe(0)
       expect(output).toContain('idempotent')
       expect(candidate).toBe(current)
+      expect(currentAfter).toBe(current)
     })
 
     it('refuses YAML it cannot parse instead of guessing', () => {
