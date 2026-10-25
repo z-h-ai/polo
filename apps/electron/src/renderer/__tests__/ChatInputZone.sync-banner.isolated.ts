@@ -1,7 +1,9 @@
 /** POO-144: the ChatInputZone status banner renders the space AI-config sync
  * states — the failed variant exposes the only retry entry, user-triggered.
- * ChatPage owns the issue→banner mapping; this file pins the banner rendering
- * contract (message, action button, click dispatch). Heavy subtree
+ * ChatPage owns the issue→banner mapping AND the input-blocking rule
+ * (isChatInputDisabled = !!inputStatusBanner); both are pinned with runtime
+ * evidence in ChatPage.sync-banner.isolated.ts. This file pins the banner
+ * rendering contract (message, action button, click dispatch). Heavy subtree
  * (InputContainer/ActiveOptionBadges/Sentry) is stubbed at the module edge. */
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
@@ -98,7 +100,7 @@ describe('ChatInputZone 状态横幅 × AI 配置同步（POO-144）', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('横幅存在时输入容器保持 disabled（同步中/失败均阻断发送入口）', () => {
+  it('inputProps.disabled 透传到 InputContainer（阻断业务规则在 ChatPage 直测：isChatInputDisabled = !!inputStatusBanner）', () => {
     renderZone({ variant: 'info', message: '正在同步空间 AI 配置…' })
     expect(screen.getByTestId('input-container-stub').getAttribute('data-disabled')).toBe('true')
   })

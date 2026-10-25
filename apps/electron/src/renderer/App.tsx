@@ -1015,14 +1015,22 @@ export default function App() {
   }, [])
 
   // Refresh LLM connections from config (called on workspace change and after connection updates)
-  const refreshLlmConnections = useCallback(async () => {
+  // POO-144 fix r1: a scoped sync passes the epochs captured before its
+  // receipt — if the space switched (sync epoch bumped) or the account session
+  // ended while the list RPC was in flight, the stale list must not land.
+  // Shared callers pass no guard and keep the unconditional write.
+  const refreshLlmConnections = useCallback(async (guard?: { syncEpoch: number; sessionEpoch: number }) => {
     const connections = await window.electronAPI.listLlmConnectionsWithStatus()
+    const guardStale = () => guard !== undefined
+      && (aiConfigSyncEpochRef.current !== guard.syncEpoch || accountSessionEpochRef.current !== guard.sessionEpoch)
+    if (guardStale()) return
     setLlmConnections(connections)
     setLlmConnectionsLoaded(true)
     setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     // Also refresh workspace default
     if (windowWorkspaceId) {
       const settings = await window.electronAPI.getWorkspaceSettings(windowWorkspaceId)
+      if (guardStale()) return
       setWorkspaceDefaultLlmConnection(settings?.defaultLlmConnection)
     }
   }, [resolveDefaultConnectionSlug, windowWorkspaceId])
@@ -1523,8 +1531,11 @@ export default function App() {
         return
       }
       // Explicit refresh — do not wait for the Main-side config watcher
-      // broadcast, which may coalesce or land after this receipt.
-      await refreshLlmConnections()
+      // broadcast, which may coalesce or land after this receipt. The refresh
+      // itself is fenced to the same captured epochs: a space switch while its
+      // list RPC is in flight must not publish the old space's connections
+      // over the new space's state (AI-SYNC-05).
+      await refreshLlmConnections({ syncEpoch, sessionEpoch })
       if (aiConfigSyncEpochRef.current !== syncEpoch) return
       setAiConfigSyncPhase('idle')
     } catch {
@@ -1542,6 +1553,16 @@ export default function App() {
         | { accountId?: unknown; productSpaceId?: unknown; contextKey?: unknown }
         | undefined
       if (!detail || typeof detail.productSpaceId !== 'string' || !detail.productSpaceId) return
+      // POO-144 fix r1: the previous space's connection list must not stand in
+      // for the target space's availability before its own sync receipt lands
+      // — a stale non-empty list suppresses the syncing/failed banners and
+      // leaves the input enabled. Mark the list stale so the target space
+      // shows the syncing banner until the refresh commits. The cold-start
+      // bootstrap recovery publishes here too; a brief syncing banner during
+      // that re-sync is the expected shape, not a regression. The global
+      // default slug is account-scoped, not space-scoped, so it stays.
+      setLlmConnections([])
+      setWorkspaceDefaultLlmConnection(undefined)
       void scopedAiConfigSyncRef.current()
     }
     window.addEventListener('polo:product-space-changed', handler)

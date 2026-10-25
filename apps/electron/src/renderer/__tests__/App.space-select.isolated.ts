@@ -209,7 +209,7 @@ const electronApiExplicit: Record<string, unknown> = {
   getEditPopoverPendingQuestion: async () => null,
   getNotificationsEnabled: async () => true,
   listLlmConnectionsWithStatus: mock(async () => []),
-  getWorkspaceSettings: async () => ({}),
+  getWorkspaceSettings: mock(async () => ({})),
   getAllDrafts: async () => ({}),
   setDraft: async () => {},
   getAppTheme: async () => null,
@@ -330,6 +330,8 @@ beforeEach(async () => {
   ;(electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>).mockImplementation(async () => ({ success: true }))
   ;(electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>).mockReset()
   ;(electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>).mockImplementation(async () => [])
+  ;(electronApiExplicit.getWorkspaceSettings as ReturnType<typeof mock>).mockReset()
+  ;(electronApiExplicit.getWorkspaceSettings as ReturnType<typeof mock>).mockImplementation(async () => ({}))
   rerenderApp = null
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: failFastElectronApi() })
   getDefaultStore().set(activeTabIdAtom, HOME_TAB_ID)
@@ -654,6 +656,74 @@ describe('登录后空间选择（space-select 门禁）× 真实 App', () => {
     expect(screen.queryByLabelText('手机号或用户名')).toBeNull()
     // 丢弃的回执不得再触发连接列表刷新
     expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('POO-144 r1：刷新（list RPC）在飞期间切空间，旧空间的连接刷新被 epoch 守卫整包丢弃', async () => {
+    authenticated = true
+    renderAppTree()
+    await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
+    const sync = electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>
+    const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
+    const settings = electronApiExplicit.getWorkspaceSettings as ReturnType<typeof mock>
+    sync.mockClear()
+    refresh.mockClear()
+    settings.mockClear()
+    let releaseListA: (value: unknown) => void = () => {}
+    const listAInFlight = new Promise(resolve => { releaseListA = resolve })
+    let releaseSyncB: (value: unknown) => void = () => {}
+    const syncBInFlight = new Promise(resolve => { releaseSyncB = resolve })
+    // A：同步回执成功 → 显式刷新的 list RPC 挂起；B：同步回执挂起
+    sync.mockImplementationOnce(async () => ({ success: true }))
+    refresh.mockImplementationOnce(() => listAInFlight)
+    sync.mockImplementationOnce(() => syncBInFlight)
+    refresh.mockImplementation(async () => [{ slug: 'conn-space-b' }])
+    await act(async () => { publishSpaceCommitted(ENTERPRISE_ID) })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
+    expect(refresh).toHaveBeenCalledTimes(1)
+    // A 的 list RPC 仍在飞时提交 B：sync epoch 自增 + 列表标 stale
+    await act(async () => { publishSpaceCommitted(SECOND_ENTERPRISE_ID) })
+    // A 的列表晚到：guard 复查发现 epoch 已换代，整包丢弃——不落 state，
+    // 也不得继续查 workspace 默认（guard 的直接下游 RPC 证据）
+    await act(async () => {
+      releaseListA([{ slug: 'conn-space-a' }])
+      await listAInFlight
+    })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
+    expect(settings).not.toHaveBeenCalled()
+    // B 的回执成功：B 自己的刷新链完整走完（list → settings → idle）
+    await act(async () => {
+      releaseSyncB({ success: true })
+      await syncBInFlight
+    })
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(settings).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
+  })
+
+  it('POO-144 r1：同账号切到未配置空间且同步失败时停等（旧列表不得续命），重试成功才恢复刷新', async () => {
+    authenticated = true
+    // 启动加载先落地一份非空的旧空间列表 —— 切换事务完成前它不得再作为
+    // 目标空间的可用依据（fix r1：commit 事件先标 stale 再触发 scoped 同步）
+    const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
+    const sync = electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>
+    refresh.mockImplementation(async () => [{ slug: 'conn-space-a', name: 'A 空间模型', isDefault: true }])
+    renderAppTree()
+    await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+    refresh.mockClear()
+    sync.mockClear()
+    // 切到未配置空间 B：同步失败 → failed 停等，不刷新、不假成功
+    sync.mockImplementation(async () => ({ success: false, errorCode: 'SYNC_FAILED', status: 500 }))
+    refresh.mockImplementation(async () => [])
+    await act(async () => { publishSpaceCommitted(SECOND_ENTERPRISE_ID) })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
+    expect(sync).toHaveBeenCalledTimes(1)
+    expect(refresh).not.toHaveBeenCalled()
+    // 同一入口重试成功后才恢复显式刷新
+    sync.mockImplementation(async () => ({ success: true }))
+    await act(async () => { publishSpaceCommitted(SECOND_ENTERPRISE_ID) })
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
   })
 
   it('POO-144：会话失效（登出/换号）后旧同步的晚到成功回执不得再落地刷新', async () => {
