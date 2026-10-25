@@ -1451,6 +1451,7 @@ export class LocalAppRuntimeCoordinator {
     const queryKey = `${runtime.identityKey}:${runId}:${requestId}`
     let executor: CoordinatorExecutor
     let admitted = false
+    let admissionDeniedForCredit = false
     let admissionDispatchStarted = false
     let cancelledBeforeDispatch = false
     let admissionOpen = true
@@ -1483,7 +1484,13 @@ export class LocalAppRuntimeCoordinator {
           // Once dispatch starts, an aborted/lost acknowledgement is unknown;
           // neither cancellation nor a later empty snapshot proves no send.
           admissionDispatchStarted = true
-          const response = await this.adapters.admin.admitAppRequest!(runId, body, this.originalAdminOptions(runtime, controller.signal))
+          const response = await this.adapters.admin.admitAppRequest!(runId, body, this.originalAdminOptions(runtime, controller.signal)).catch(error => {
+            if (error instanceof AdminError && error.errorCode === 'insufficient_credit') {
+              admissionDeniedForCredit = true
+              this.adapters.billingOutbox!.discardRejectedAdmission(journalKey!)
+            }
+            throw error
+          })
           admitted = true
           if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || !await current() || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
           return { providerCorrelation: response.request.providerCorrelation }
@@ -1564,7 +1571,7 @@ export class LocalAppRuntimeCoordinator {
       // A definite pre-dispatch error has no provider receipt. Strip Host
       // placeholders so cleanup can finish the original run without inventing
       // usage; a late abort must not relabel an earlier unrelated error.
-      const code = !admissionDispatchStarted && outcome.kind === 'error'
+      const code = admissionDeniedForCredit ? 'insufficient_credit' : !admissionDispatchStarted && outcome.kind === 'error'
         ? cancelledBeforeDispatch ? 'request_cancelled' : outcome.code
         : 'metering_unconfirmed'
       this.runState.noteHostTerminal(capGen, runId, requestId, { kind: 'error', code })

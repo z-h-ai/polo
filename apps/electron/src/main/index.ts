@@ -1688,7 +1688,7 @@ app.on('before-quit', (event) => {
         mainLog.error('Failed to flush sessions:', error)
       }
       // Clean up SessionManager resources (file watchers, timers, etc.)
-      sessionManager.cleanup()
+      await sessionManager.cleanup()
 
       // Clean up browser pane instances
       if (browserPaneManager) {

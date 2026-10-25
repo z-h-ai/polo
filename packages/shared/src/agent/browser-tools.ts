@@ -13,6 +13,7 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { executeBrowserToolCommand } from './browser-tool-runtime.ts';
+import type { BrowserFastDeciderFn } from './browser-fast-decider.ts';
 
 // Tool result type - matches MCP CallToolResult content blocks
 type ToolResult = {
@@ -121,6 +122,10 @@ export interface BrowserLifecycleActionResult {
 }
 
 export interface BrowserPaneFns {
+  authorizeCommand?: <T>(parts: string[], dispatch: (facts: import('./browser-action-authorization').BrowserActionFacts, lease: import('./browser-action-authorization').BrowserActionDispatchLease) => Promise<T>, context?: {automatic?: boolean}) => Promise<T>;
+  executeAuthorizedAction?: (parts: string[], facts: import('./browser-action-authorization').BrowserActionFacts, method: string, args: unknown[], lease: import('./browser-action-authorization').BrowserActionDispatchLease) => Promise<unknown>;
+  readBrowserPolicy?: () => Promise<import('../admin/browser-policy-contract').BrowserPolicyResponse>;
+
   openPanel: (options?: { background?: boolean }) => Promise<{ instanceId: string }>;
   navigate: (url: string) => Promise<{ url: string; title: string }>;
   snapshot: () => Promise<{ url: string; title: string; nodes: Array<{ ref: string; role: string; name: string; value?: string; description?: string; focused?: boolean; checked?: boolean; disabled?: boolean }> }>;
@@ -173,6 +178,12 @@ export interface BrowserToolsOptions {
    * Called at execution time to get the current callback from the session registry.
    */
   getBrowserPaneFns: () => BrowserPaneFns | undefined;
+  /**
+   * Lazy resolver for the browser fast decider (POO-113 "System One" layer).
+   * Optional — when absent, `browser_tool suggest` reports that the fast
+   * decider is unavailable and the model falls back to `find` + manual refs.
+   */
+  getFastDecider?: () => BrowserFastDeciderFn | undefined;
 }
 
 // ============================================================================
@@ -195,6 +206,8 @@ Examples:
 - \`navigate https://example.com\`
 - \`snapshot\`
 - \`find login button\` — search elements by keyword
+- \`act 打开项目详情\` — execute one planned sub-step only when both fast models agree and Host authorization succeeds (managed policy must enable it)
+- \`suggest 点击「登录」\` — ask the fast decider to locate a planned sub-step (read-only suggestion; verify then run the command yourself)
 - \`click @e12\`
 - \`click-at 350 200\` — click at pixel coordinates (for canvas elements)
 - \`drag 100 200 300 400\` — drag from (100,200) to (300,400)
@@ -256,6 +269,7 @@ export function createBrowserTools(options: BrowserToolsOptions) {
             command: args.command,
             fns: getBrowserFns(),
             sessionId: options.sessionId,
+            getFastDecider: options.getFastDecider,
           });
 
           const text = result.appendReleaseHint

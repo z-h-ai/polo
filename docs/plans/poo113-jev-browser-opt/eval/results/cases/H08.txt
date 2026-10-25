@@ -1,0 +1,21 @@
+## 页面快照
+URL: https://console.example.com/dns/records/75
+Title: DNS 记录 #75 - 示例云控制台
+Elements: 8 (combobox:1, textbox:2, button:2, text:2, heading:1)
+Focused ref: none, disabled: 0
+
+Elements (8):
+  @e1 [heading] "DNS 记录 #75"
+  @e2 [combobox] "记录类型" value="A"
+  @e3 [textbox] "主机记录" value="www"
+  @e4 [textbox] "记录值" value="1.2.3.4"
+  @e5 [button] "保存"
+  @e6 [button] "取消"
+  @e7 [text] "切换类型后显示区域将变更为 Target"
+  @e8 [text] "记录创建于 2026-09-01"
+
+## 任务
+把 DNS 记录类型改为 CNAME，并确保界面显示已切换到 Target
+
+## 已执行动作
+（空）

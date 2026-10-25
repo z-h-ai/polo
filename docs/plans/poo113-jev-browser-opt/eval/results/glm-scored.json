@@ -1,0 +1,427 @@
+[
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E01",
+  "sample": null,
+  "latencyMs": 5143,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E02",
+  "sample": null,
+  "latencyMs": 6591,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E03",
+  "sample": null,
+  "latencyMs": 10633,
+  "usage": null
+ },
+ {
+  "raw": "select @e2 zh-CN",
+  "norm": "select @e2 zh-CN",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "zh-CN"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E04",
+  "sample": null,
+  "latencyMs": 5578,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E05",
+  "sample": null,
+  "latencyMs": 5344,
+  "usage": null
+ },
+ {
+  "raw": "navigate https://docs.example.com",
+  "norm": "navigate https://docs.example.com",
+  "parsed": [
+   "navigate",
+   null,
+   [
+    "https://docs.example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E06",
+  "sample": null,
+  "latencyMs": 5553,
+  "usage": null
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E07",
+  "sample": null,
+  "latencyMs": 4345,
+  "usage": null
+ },
+ {
+  "raw": "上传 @e3 /Users/me/report.pdf",
+  "norm": "上传 @e3 /Users/me/report.pdf",
+  "parsed": null,
+  "format_ok": false,
+  "exact": false,
+  "partial": 0.0,
+  "detail": "unparseable",
+  "caseId": "E08",
+  "sample": null,
+  "latencyMs": 4868,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M01",
+  "sample": null,
+  "latencyMs": 4387,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M02",
+  "sample": null,
+  "latencyMs": 5676,
+  "usage": null
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M03",
+  "sample": null,
+  "latencyMs": 4131,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M04",
+  "sample": null,
+  "latencyMs": 5396,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M05",
+  "sample": null,
+  "latencyMs": 4684,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M06",
+  "sample": null,
+  "latencyMs": 5583,
+  "usage": null
+ },
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M07",
+  "sample": null,
+  "latencyMs": 5386,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M08",
+  "sample": null,
+  "latencyMs": 8021,
+  "usage": null
+ },
+ {
+  "raw": "done",
+  "norm": "done",
+  "parsed": [
+   "done",
+   null,
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H01",
+  "sample": null,
+  "latencyMs": 7716,
+  "usage": null
+ },
+ {
+  "raw": "scroll down 600",
+  "norm": "scroll down 600",
+  "parsed": [
+   "scroll",
+   null,
+   [
+    "down",
+    600
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H02",
+  "sample": null,
+  "latencyMs": 9992,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H03",
+  "sample": null,
+  "latencyMs": 4663,
+  "usage": null
+ },
+ {
+  "raw": "fail: 短信验证码已发送至 138****8000 手机，快照中未提供验证码内容且滑块验证无可用拖拽指令，无法继续完成登录验证",
+  "norm": "fail: 短信验证码已发送至 138****8000 手机，快照中未提供验证码内容且滑块验证无可用拖拽指令，无法继续完成登录验证",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "短信验证码已发送至 138****8000 手机，快照中未提供验证码内容且滑块验证无可用拖拽指令，无法继续完成登录验证"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H04",
+  "sample": null,
+  "latencyMs": 14484,
+  "usage": null
+ },
+ {
+  "raw": "key Enter",
+  "norm": "key Enter",
+  "parsed": [
+   "key",
+   null,
+   [
+    "Enter"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H05",
+  "sample": null,
+  "latencyMs": 4644,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H06",
+  "sample": null,
+  "latencyMs": 7946,
+  "usage": null
+ },
+ {
+  "raw": "fail: 页面显示\"暂无订单\"，没有可查看的订单详情",
+  "norm": "fail: 页面显示\"暂无订单\"，没有可查看的订单详情",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "页面显示\"暂无订单\"，没有可查看的订单详情"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H07",
+  "sample": null,
+  "latencyMs": 5010,
+  "usage": null
+ },
+ {
+  "raw": "select @e2 CNAME",
+  "norm": "select @e2 CNAME",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "CNAME"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.7,
+  "detail": "select ok, missing --assert-text",
+  "caseId": "H08",
+  "sample": null,
+  "latencyMs": 5661,
+  "usage": null
+ }
+]

@@ -130,7 +130,7 @@ describe('SessionManager import reservations', () => {
       ).rejects.toThrow('Invalid bundle file')
       expect(await readdir(join(root, 'sessions'))).toEqual([])
     } finally {
-      manager.cleanup()
+      await manager.cleanup()
     }
   })
 })

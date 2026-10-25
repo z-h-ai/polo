@@ -1,0 +1,21 @@
+## 页面快照
+URL: https://news.example.com/post/123
+Title: 2026 年前端趋势 - 示例资讯
+Elements: 8 (heading:1, text:3, link:3, button:1)
+Focused ref: none, disabled: 0
+
+Elements (8):
+  @e1 [heading] "2026 年前端趋势"
+  @e2 [text] "…正文第 1 段…"
+  @e3 [text] "…正文第 2 段…"
+  @e4 [text] "…正文第 3 段…"
+  @e5 [link] "相关阅读"
+  @e6 [link] "分享"
+  @e7 [button] "回到顶部"
+  @e8 [text] "全文约 8 分钟，共 3 页"
+
+## 任务
+阅读这篇文章的用户评论
+
+## 已执行动作
+navigate https://news.example.com/post/123

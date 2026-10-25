@@ -249,6 +249,15 @@ export class RemoteBrowserPaneManager implements IBrowserPaneManager {
     await this.invoke('goForward', [id])
   }
 
+  async cancelBrowserAction(id:string,handle:string):Promise<void>{await this.invoke('cancelBrowserAction',[id,handle])}
+  async executeAuthorizedAction(id:string,parts:string[],facts:import('@polo-ai/shared/agent/browser-action-authorization').BrowserActionFacts,method:string,args:unknown[],handle:string,expiresAt:number):Promise<unknown>{
+    try{return await this.invoke('executeAuthorizedAction',[id,parts,facts,method,args,handle,expiresAt])}
+    catch(error){if(String(error).includes('[BROWSER_PRE_DISPATCH]')){const {BrowserActionNotDispatched}=await import('@polo-ai/shared/agent/browser-action-authorization');throw new BrowserActionNotDispatched(String(error))}throw error}
+  }
+
+  async inspectBrowserAction(id: string, parts: string[]): Promise<import('@polo-ai/shared/agent/browser-action-authorization').BrowserActionFacts> {
+    return await this.invoke('inspectBrowserAction', [id, parts])
+  }
   async getAccessibilitySnapshot(id: string): Promise<AccessibilitySnapshot> {
     return await this.invoke('getAccessibilitySnapshot', [id])
   }

@@ -1,0 +1,19 @@
+## 页面快照
+URL: https://app.example.com/challenge
+Title: 安全验证 - 示例应用
+Elements: 6 (text:2, textbox:1, button:2, image:1)
+Focused ref: none, disabled: 0
+
+Elements (6):
+  @e1 [text] "检测到异常访问，请完成安全验证"
+  @e2 [image] "滑块验证码"
+  @e3 [textbox] "短信验证码"
+  @e4 [button] "获取短信验证码"
+  @e5 [button] "提交验证"
+  @e6 [text] "验证码已发送至 138****8000"
+
+## 任务
+登录账号
+
+## 已执行动作
+fill @e1 test@example.com；fill @e2 Abc12345；click @e3

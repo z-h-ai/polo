@@ -1,3 +1,6 @@
+import {appendBrowserActionAudit} from '@polo-ai/shared/sessions/browser-action-audit'
+import {BrowserActionAuthorization,BrowserActionNotDispatched,type BrowserActionScope,type BrowserActionConfirmation} from '@polo-ai/shared/agent/browser-action-authorization'
+import {readBrowserPolicy} from '../runtime/browser-policy'
 import { MANAGED_TOOL_UNSUPPORTED } from '../../../shared/src/agent/tool-execution-policy'
 import { CliExecutionAuthority } from './cli-execution-authority'
 import type { EventSink, RpcServer } from '@polo-ai/server-core/transport'
@@ -13,7 +16,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, createBrowserFastDecider, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
 import { fingerprintOwnerToken, getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
@@ -114,7 +117,7 @@ import { resolveAuthEnvVars } from '@polo-ai/shared/config'
 import { getLastApiError } from '@polo-ai/shared/interceptor'
 import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { restoreFiles } from '@polo-ai/shared/utils/bundle-files'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { getCredentialManager, accountToCredentialId } from '@polo-ai/shared/credentials'
 import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId, GENUI_MODEL_CONTEXT_MAX_QUEUE } from '@polo-ai/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
@@ -887,6 +890,9 @@ interface ManagedSession {
   isProcessing: boolean
   /** Set when user requests stop - allows event loop to drain before clearing isProcessing */
   stopRequested?: boolean
+  /** Cancels host-side browser model requests with their owning turn. */
+  browserFastAbortController?: AbortController
+  browserFastDecider?: ReturnType<typeof createBrowserFastDecider>
   lastMessageAt: number
   streamingText: string
   // Incremented each time a new message starts processing.
@@ -2121,9 +2127,12 @@ export class SessionManager implements ISessionManager {
   // Pending credential request resolvers (keyed by requestId)
   private pendingCredentialResolvers: Map<string, (response: import('@polo-ai/shared/protocol').CredentialResponse) => void> = new Map()
   // Permission request metadata tracking (keyed by requestId)
+  private browserActionAuthorizations = new Map<string, BrowserActionAuthorization>()
   private pendingPermissionRequests: Map<string, {
     sessionId: string
-    type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval'
+    type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action'
+    browserScope?: BrowserActionScope
+    actionDigest?: string
     commandHash?: string
   }> = new Map()
   // Privileged approval binding + audit logger
@@ -2247,12 +2256,23 @@ export class SessionManager implements ISessionManager {
    * Automatically notifies the power manager on transitions (true→false, false→true)
    * so callers don't need to remember to call onSessionStarted/onSessionStopped.
    */
+  // Includes removed sessions until their original browser work has drained.
+  private readonly browserFastDeciders = new Set<ReturnType<typeof createBrowserFastDecider>>()
+
+  private ownBrowserFastDecider(decider: ReturnType<typeof createBrowserFastDecider>) {
+    this.browserFastDeciders.add(decider)
+    return decider
+  }
+
   private setProcessing(managed: ManagedSession, processing: boolean): void {
     const was = managed.isProcessing
     managed.isProcessing = processing
     if (!was && processing) {
+      managed.browserFastAbortController?.abort()
+      managed.browserFastAbortController = new AbortController()
       sessionRuntimeHooks.onSessionStarted()
     } else if (was && !processing) {
+      managed.browserFastAbortController?.abort()
       sessionRuntimeHooks.onSessionStopped()
     }
   }
@@ -2505,6 +2525,8 @@ export class SessionManager implements ISessionManager {
   }
 
   private clearPendingPermissionRequestsForSession(sessionId: string): void {
+    this.browserActionAuthorizations.get(sessionId)?.cancel()
+    this.browserActionAuthorizations.delete(sessionId)
     for (const [requestId, metadata] of this.pendingPermissionRequests.entries()) {
       if (metadata.sessionId === sessionId) {
         this.pendingPermissionRequests.delete(requestId)
@@ -4611,6 +4633,17 @@ export class SessionManager implements ISessionManager {
     const claimOwnsFaces = opts?.ignoreQuarantineClaim !== true
       && this.findQuarantinedRuntimeDisposalEntry(managed) !== undefined
 
+    if (managed.browserFastDecider && !claimOwnsFaces) {
+      const original = managed.browserFastDecider
+      const browser = await this.boundedRuntimeDisposal(sessionId, 'browser-fast-decider', async () => {
+        await original.dispose()
+        this.browserFastDeciders.delete(original)
+        return 'disposed' as const
+      }, failures)
+      if (browser.status === 'timeout') originalOps.push(browser.original)
+      if (browser.status === 'settled' && managed.browserFastDecider === original) managed.browserFastDecider = undefined
+    }
+
     if (managed.agent && !claimOwnsFaces) {
       try {
         if (managed.agent.disposeForRestart) {
@@ -5963,8 +5996,65 @@ export class SessionManager implements ISessionManager {
         sessionLog.info('[browser-pane] BPF registering browserPaneFns', { sessionId: sid })
         // R38-2: every browser-pane method is registered through the
         // authoritative guard inventory (per-method caller-scope guard).
+        const browserOwner = managed.agent
+        const browserScope = (): BrowserActionScope => {
+          const scope = this.managedTrustedScope(managed)
+          const origin = getAdminUrl()
+          if (!scope || !origin) throw new Error('Browser authorization scope unavailable')
+          return { ...scope, sessionId: sid, generation: managed.processingGeneration,
+            adminOrigin: origin, accountGeneration: getTrustedAccountGeneration(), fenceGeneration: getRuntimeFenceGeneration() }
+        }
+        const assertBrowserScope = (scope: BrowserActionScope) => {
+          if (!managed.isProcessing || managed.stopRequested || managed.agent !== browserOwner
+            || this.sessions.get(sid) !== managed || isRuntimeOfflineReadOnly()
+            || JSON.stringify(browserScope()) !== JSON.stringify(scope)) throw new Error('Browser authorization scope changed')
+        }
+        const presentations = new Map<string, BrowserActionConfirmation>()
+        const authorization = new BrowserActionAuthorization({
+          scope: browserScope, assertCurrent: assertBrowserScope,
+          audit: event => appendBrowserActionAudit(this.sessionStorage.getSessionPath(managed.workspace.rootPath,sid),event),
+          policy: async scope => readBrowserPolicy({accountId:scope.accountId,productSpaceId:scope.productSpaceId,adminOrigin:scope.adminOrigin!}),
+          facts: async parts => {
+            if (!bpm.inspectBrowserAction) throw new Error('Browser execution authority requires an updated desktop')
+            const id = await resolveSessionBrowserInstance('browser_authorization')
+            return bpm.inspectBrowserAction(id, parts)
+          },
+          signal: () => managed.browserFastAbortController?.signal,
+          userMessages: () => ['desktop','messaging'].includes(managed.activeTurnSource ?? '') ? managed.messages.filter(m => m.role === 'user' && !m.isQueued && !managed.messageQueue.some(queued=>queued.messageId===m.id)).slice(-1).map(m => ({id:m.id,text:m.content})) : [],
+          confirm: request => {
+            assertBrowserScope(request.scope)
+            if (managed.activeTurnSource !== 'desktop' || managed.hidden) throw new Error('Browser action requires an interactive user confirmation')
+            presentations.set(request.requestId, request)
+            this.pendingPermissionRequests.set(request.requestId, {sessionId:sid,type:'browser_action',browserScope:request.scope,actionDigest:request.actionDigest})
+            this.sendEvent({type:'permission_request',sessionId:sid,request:{requestId:request.requestId,sessionId:sid,toolName:'browser_tool',type:'browser_action',description:request.description,browserAction:request.browserAction}},managed.workspace.id)
+          },
+          settled: (requestId, phase) => {
+            const request = presentations.get(requestId)
+            if (!request) return
+            try { assertBrowserScope(request.scope) } catch { return }
+            this.sendEvent({type:'permission_request',sessionId:sid,request:{requestId,sessionId:sid,toolName:'browser_tool',type:'browser_action',description:i18n.t(phase === 'dispatched_outcome_unknown' ? 'browserAuthorization.outcomeDescription' : 'browserAuthorization.invalidatedDescription'),browserAction:{...request.browserAction,phase}}},managed.workspace.id)
+          },
+          closed: requestId => { this.pendingPermissionRequests.delete(requestId); presentations.delete(requestId) },
+        })
+        this.browserActionAuthorizations.get(sid)?.cancel()
+        this.browserActionAuthorizations.set(sid, authorization)
         const rawBrowserPaneFns = {
           browserPaneFns: {
+            executeAuthorizedAction: async(parts,facts,method,args,lease)=>{
+              const assertLease=()=>{try{assertBrowserScope(lease.scope)}catch{throw new BrowserActionNotDispatched('Browser scope changed before native dispatch; nothing was executed')}if(lease.signal?.aborted||lease.expiresAt<=Date.now())throw new BrowserActionNotDispatched('Browser action cancelled before native dispatch; nothing was executed')}
+              assertLease()
+              if(!bpm.executeAuthorizedAction||!bpm.cancelBrowserAction)throw new BrowserActionNotDispatched('Browser native authorization unavailable; nothing was executed')
+              const cancel=()=>{void Promise.resolve(bpm.cancelBrowserAction!(facts.browserId,lease.id)).catch(error=>sessionLog.warn('Native browser cancellation could not be delivered',error))}
+              lease.signal?.addEventListener('abort',cancel,{once:true})
+              try{
+                const instanceId=await resolveSessionBrowserInstance('browser_authorized_dispatch')
+                assertLease()
+                if(instanceId!==facts.browserId)throw new BrowserActionNotDispatched('Browser native authorization target changed; nothing was executed')
+                return await bpm.executeAuthorizedAction(instanceId,parts,facts,method,args,lease.id,lease.expiresAt)
+              }finally{lease.signal?.removeEventListener('abort',cancel)}
+            },
+            authorizeCommand: (parts, dispatch, context) => authorization.perform(parts, dispatch, context),
+            readBrowserPolicy: () => authorization.readPolicy(),
             openPanel: async (options) => {
               const instanceId = options?.background
                 ? await bpm.createForSessionAsync(sid, { show: false, workspaceId })
@@ -6196,6 +6286,44 @@ export class SessionManager implements ISessionManager {
         }
         mergeSessionScopedToolCallbacks(sid, {
           browserPaneFns: this.guardManagedCallbackRecord(managed, 'browserPaneFns', rawBrowserPaneFns.browserPaneFns),
+          // POO-113 fast layer: dual fast-model grounding for `browser_tool suggest`.
+          // Resolve the original ProductSpace exactly as the main model does.
+          // Local fast-layer paths cannot bypass Admin model/billing authority.
+          browserFastDecider: managed.browserFastDecider = this.ownBrowserFastDecider(createBrowserFastDecider({
+            resolveTransport: async () => {
+              const generation = managed.processingGeneration
+              const signal = managed.browserFastAbortController?.signal
+              const owner = managed.agent
+              const fence = getRuntimeFenceGeneration(), accountGeneration = getTrustedAccountGeneration()
+              if (!signal || signal.aborted || managed.stopRequested || !managed.isProcessing) throw new Error('Browser turn inactive')
+              const context = await this.resolveManagedAssistantBackendContext(managed)
+              const connection = context.connection
+              if (!connection || connection.managedBy !== 'admin') throw new Error('Managed browser connection unavailable')
+              const billing = this.assistantBillingFor(managed, connection)
+              return {
+                connection,
+                signal,
+                billing,
+                billingOwnedByDesktopProxy: !!this.cliAuthority?.desktopManaged,
+                assertCurrent: () => {
+                  if (signal.aborted || managed.stopRequested || !managed.isProcessing
+                    || managed.processingGeneration !== generation
+                    || this.sessions.get(sid) !== managed || managed.agent !== owner
+                    || managed.llmConnection !== connection.slug
+                    || JSON.stringify(getLlmConnection(connection.slug)) !== JSON.stringify(connection)
+                    || getRuntimeFenceGeneration() !== fence || getTrustedAccountGeneration() !== accountGeneration
+                    || isRuntimeOfflineReadOnly()) throw new Error('Browser compute scope changed')
+                  if (this.cliAuthority?.desktopManaged) this.cliAuthority.assertConnection(connection)
+                },
+              }
+            },
+            resolveApiKey: async (credentialKey) => {
+              const id = accountToCredentialId(credentialKey)
+              if (!id) return null
+              const stored = await getCredentialManager().get(id)
+              return stored?.value ?? null
+            },
+          })),
         }, this.runtimeOwnerTokenOf(managed))
       }
 
@@ -6209,7 +6337,7 @@ export class SessionManager implements ISessionManager {
         toolName: string;
         command?: string;
         description: string;
-        type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+        type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action';
         appName?: string;
         reason?: string;
         impact?: string;
@@ -8197,6 +8325,7 @@ export class SessionManager implements ISessionManager {
     const agent = managed.agent
     let steered = false
     if (behavior === 'steer') {
+      this.browserActionAuthorizations.get(sessionId)?.cancel()
       steered = agent?.redirect(message) ?? false
     }
     // For 'queue': skip redirect entirely. The current turn is undisturbed.
@@ -9227,6 +9356,8 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       return // Session not found, nothing to cancel
     }
+    // Stop host-side model transport before awaiting durable question cleanup.
+    managed.browserFastAbortController?.abort()
 
     // A pending question cannot survive a user stop. This must run BEFORE the
     // isProcessing early-return: the QuestionRequested handoff already flipped
@@ -9759,6 +9890,15 @@ export class SessionManager implements ISessionManager {
     alwaysAllow: boolean,
     options?: import('@polo-ai/shared/protocol').PermissionResponseOptions,
   ): boolean {
+    const browserMeta = this.pendingPermissionRequests.get(requestId)
+    if (browserMeta?.type === 'browser_action' || requestId.startsWith('browser-action-')) {
+      if (!browserMeta || browserMeta.sessionId !== sessionId || !browserMeta.browserScope
+        || alwaysAllow || options?.rememberForMinutes !== undefined
+        || options?.browserActionDigest !== browserMeta.actionDigest) return false
+      const accepted = this.browserActionAuthorizations.get(sessionId)?.resolve(requestId,browserMeta.browserScope,{allowed,alwaysAllow:false,actionDigest:options!.browserActionDigest!}) ?? false
+      if (accepted) this.pendingPermissionRequests.delete(requestId)
+      return accepted
+    }
     const managed = this.sessions.get(sessionId)
     if (managed?.agent) {
       const requestMeta = this.pendingPermissionRequests.get(requestId)
@@ -12911,8 +13051,17 @@ export class SessionManager implements ISessionManager {
    * Clean up all resources held by the SessionManager.
    * Should be called on app shutdown to prevent resource leaks.
    */
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     sessionLog.info('Cleaning up resources...')
+    for (const managed of this.sessions.values()) managed.browserFastAbortController?.abort()
+    // Original receipt work remains owned until it is durably staged/settled.
+    // Shutdown must not exit while a timed-out suggest is still cleaning up.
+    const browserOwners = new Set(this.browserFastDeciders)
+    for (const managed of this.sessions.values()) if (managed.browserFastDecider) browserOwners.add(managed.browserFastDecider)
+    await Promise.all([...browserOwners].map(async decider => {
+      await decider.dispose()
+      this.browserFastDeciders.delete(decider)
+    }))
 
     // Stop all ConfigWatchers (file system watchers)
     for (const [path, watcher] of this.configWatchers) {

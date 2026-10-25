@@ -456,6 +456,8 @@ export interface PermissionRequest extends BasePermissionRequest {
 }
 
 export interface PermissionResponseOptions {
+  browserActionDigest?: string;
+  browserActionPhase?: "awaiting_authorization" | "invalidated_before_dispatch" | "dispatched_outcome_unknown";
   rememberForMinutes?: number
 }
 

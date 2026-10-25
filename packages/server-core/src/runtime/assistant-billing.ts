@@ -18,7 +18,7 @@ const assistantFinishResponseSchema = billingRuntimeFinishResponseSchema.shape.r
 export interface AssistantBillingTransport {
   start(scope: AssistantBillingJournalScope, input: { subjectKind: 'polo_assistant'; productSpaceId: string; runId: string }): Promise<unknown>
   admit(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput): Promise<unknown>
-  report(scope: AssistantBillingJournalScope, input: BillingRuntimeUsageInput): Promise<{ settlement?: 'pending' | 'confirmed' | 'no_charge' }>
+  report(scope: AssistantBillingJournalScope, input: BillingRuntimeUsageInput): Promise<{ settlement?: 'pending' | 'confirmed' | 'no_charge'; resolution?: 'platform_absorbed' }>
   inspect(scope: AssistantBillingJournalScope, runId: string, requestId: string): Promise<{ settlement?: 'pending' | 'confirmed' | 'no_charge' }>
   finish(scope: AssistantBillingJournalScope, runId: string, input: { status: 'completed' | 'unknown' | 'failed' }): Promise<unknown>
 }
@@ -92,6 +92,12 @@ export class AssistantBillingCoordinator {
     if (!transport) return
     const ack = await transport.report(scope, receipt)
     if (!ack.settlement) return
+    if (ack.resolution === 'platform_absorbed' && ack.settlement === 'no_charge') {
+      // The audited resolution already finalized the original execution.
+      // A late usable observation must not turn unknown/cancelled into completed.
+      this.outbox.applySettlement(key, 'no_charge')
+      return
+    }
     // Finish before retirement, so a lost terminal acknowledgement is also
     // recoverable. Retries keep the exact original receipt and run status.
     await transport.finish(scope, receipt.runId, { status: receipt.outputDisposition === 'usable' ? 'completed' : 'unknown' })
@@ -121,6 +127,15 @@ export class AssistantBillingCoordinator {
             }
           }
         } catch (error) {
+          if (!entry.receipt && error instanceof AdminError && error.status === 404) {
+            // A missing admission is not a settlement. Ask the original run to
+            // finish; only its validated no-charge acknowledgement can release
+            // a journal left by a failed admission and lost finish response.
+            const finished = await this.transport()!.finish(entry.scope, entry.runId, { status: 'failed' })
+              .then(value => assistantFinishResponseSchema.safeParse(value)).catch(() => null)
+            if (finished?.success && finished.data.runId === entry.runId
+              && finished.data.settlement === 'no_charge') this.outbox.discardRejectedAdmission(entry.key)
+          }
           if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') this.outbox.markConflict(entry.key)
         }
       }

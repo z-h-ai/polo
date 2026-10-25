@@ -53,6 +53,25 @@ import {
 } from './models.ts';
 
 // Config stored in JSON file (credentials stored in encrypted file, not here)
+
+/** Legacy local path settings. Ignored by the managed browser runtime; retained for config compatibility. */
+export interface BrowserFastDeciderPathConfig {
+  name: 'A' | 'B';
+  /** Slug of an existing LLM connection (OpenAI-compatible baseUrl required). */
+  connectionSlug: string;
+  /** Historical model id; ignored by the managed browser factory. */
+  model: string;
+  /** Extra request-body params merged over per-model defaults (e.g. reasoning_effort). */
+  requestParams?: Record<string, unknown>;
+}
+
+export interface BrowserFastDeciderConfig {
+  enabled?: boolean;        // default true
+  timeoutMs?: number;       // suggestion deadline, default 3000; original billing cleanup remains tracked
+  /** @deprecated Ignored: the current ProductSpace Admin catalog owns routing. */
+  paths?: BrowserFastDeciderPathConfig[];
+}
+
 export interface StoredConfig {
   // LLM Connections (authoritative source for auth and model config)
   llmConnections?: LlmConnection[];
@@ -79,6 +98,14 @@ export interface StoredConfig {
   // Tools
   browserToolEnabled?: boolean;  // Enable built-in browser tool (default: true). Disable for Playwright/Puppeteer.
   allowRemoteEvaluate?: boolean;  // Allow remote agents to call `browser_tool evaluate` on local browser (default: true).
+  /**
+   * Browser fast decider ("System One" fast layer, POO-113): dual fast-model
+   * grounding for `browser_tool suggest`. Managed config — written by the
+   * admin channel, no user-facing settings UI. No plaintext keys here:
+   * paths reference existing LLM connections by slug; credentials resolve
+   * through the credential store (same channel as the main model).
+   */
+  browserFastDecider?: BrowserFastDeciderConfig;
   // Generative UI
   generativeUiInlineEnabled?: boolean;  // Enable render_ui Generative UI inline cards (shipped default: true). User-level kill switch.
   generativeUiCanvasEnabled?: boolean;  // Enable generate_app Generative UI canvas apps (shipped default: true). User-level kill switch.
@@ -571,6 +598,38 @@ export function setBrowserToolEnabled(enabled: boolean): void {
   // Clear session tool caches so all sessions pick up the change immediately.
   // Lazy import to avoid circular dependency (storage ← session-scoped-tools ← storage).
   import('../agent/session-scoped-tools.ts').then(m => m.invalidateAllSessionToolsCaches()).catch(() => {});
+}
+
+/** Defaults shared by getBrowserFastDeciderConfig() and the admin-channel setter (POO-113). */
+const BROWSER_FAST_DECIDER_DEFAULTS: { timeoutMs: number; paths: BrowserFastDeciderPathConfig[] } = {
+  timeoutMs: 3000,
+  paths: [],
+};
+
+/**
+ * Get the browser fast decider config (POO-113 managed config).
+ * Sensible defaults when absent: enabled with no paths — the decider then
+ * resolves zero endpoints and `browser_tool suggest` degrades gracefully.
+ */
+export function getBrowserFastDeciderConfig(): BrowserFastDeciderConfig {
+  const config = loadStoredConfig();
+  return config?.browserFastDecider ?? { enabled: true, ...BROWSER_FAST_DECIDER_DEFAULTS };
+}
+
+/**
+ * Persist the admin-managed rollout switch for the browser fast decider
+ * (POO-113). Only the enabled flag is admin-owned: existing timeoutMs/paths
+ * are preserved, and a config without the field is seeded with the full
+ * default shape so the on-disk layout never regresses to `{enabled}` alone.
+ */
+export function setBrowserFastDeciderEnabled(enabled: boolean): void {
+  updateStoredConfig(config => {
+    config.browserFastDecider = {
+      ...BROWSER_FAST_DECIDER_DEFAULTS,
+      ...config.browserFastDecider,
+      enabled,
+    };
+  });
 }
 
 /**

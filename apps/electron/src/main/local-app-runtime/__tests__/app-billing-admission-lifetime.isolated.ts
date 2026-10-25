@@ -56,3 +56,19 @@ for (const phase of ['current', 'scope', 'dispose-pending'] as const) {
     } finally { releaseGuard(); releaseDispose(); await coordinator.shutdown(); rmSync(dir, { recursive: true, force: true }) }
   })
 }
+
+test('definitive credit rejection returns recharge-capable code and retires the never-sent journal',async()=>{
+ const {AdminError}=await import('@polo-ai/shared/admin')
+ const dir=mkdtempSync(join(tmpdir(),'app-credit-rejection-')),outbox=new AppBillingOutbox(dir)
+ const identity={accountId:'actor',productSpaceId:crypto.randomUUID(),artifactInstanceId:crypto.randomUUID(),versionId:crypto.randomUUID(),version:'1.0.0'}
+ let receipts=0,providerCalls=0
+ const coordinator=new LocalAppRuntimeCoordinator({billingOutbox:outbox,getAdminOrigin:()=> 'https://admin.example',admin:{startAppRun:async()=>({}),admitAppRequest:async()=>{throw new AdminError('No credit','insufficient_credit',{status:409})},recordAppUsage:async()=>{receipts++;return{}},finishAppRun:async()=>({settlement:'no_charge'})},
+ createExecutor:({beforeSend})=>({execute:async()=>{try{await beforeSend!({model:'managed-model',hostRequestId:`host-${crypto.randomUUID()}`,transportBaseUrl:'https://provider.example/v1',credentialFingerprint:'a'.repeat(64)});providerCalls++}catch{}
+ return{status:'failed',model:'managed-model',requestId:'host-owned',error:{code:'provider_failed',reason:'provider_request_failed',message:'Credit rejected'}}},dispose:async()=>{}}),resolveWorkspaceRoot:()=>dir,loadWorkspaceConfig:()=>({defaults:{defaultLlmConnection:'managed',model:'managed-model'}}),getDefaultLlmConnection:()=>null})
+ try {await coordinator.ensureGateway();const input={identity,workspaceId:'ws',executionId:'exec',runtimeKind:'static' as const,runtimeGeneration:1,scopeGeneration:1};const generation=coordinator.issueBrowserCapability(input),runtime=coordinator.registerActiveRuntime({...input,capabilityGeneration:generation});const runId=crypto.randomUUID(),signal=new AbortController().signal
+ await coordinator.dispatchBrowser(runtime,'/run/start',{runId},signal,async()=>true)
+ expect(await coordinator.dispatchBrowser(runtime,'/ai/query',{runId,requestId:crypto.randomUUID(),prompt:'owned',maxOutputTokens:16,timeoutMs:1000},signal,async()=>true)).toEqual({errorCode:'insufficient_credit'})
+ expect(providerCalls).toBe(0);expect(receipts).toBe(0);expect(outbox.entries('actor','https://admin.example')).toHaveLength(0)
+ expect(await coordinator.cleanupBrowserRun(runtime,runId,'failed')).toMatchObject({finished:true})
+ } finally {await coordinator.shutdown();rmSync(dir,{recursive:true,force:true})}
+})

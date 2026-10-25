@@ -378,6 +378,10 @@ export function getSessionScopedTools(
             const callbacks = getSessionScopedToolCallbacks(sessionId);
             return callbacks?.browserPaneFns;
           },
+          getFastDecider: () => {
+            const callbacks = getSessionScopedToolCallbacks(sessionId);
+            return callbacks?.browserFastDecider;
+          },
         }),
       );
     }

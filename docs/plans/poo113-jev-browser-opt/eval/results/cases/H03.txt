@@ -1,0 +1,19 @@
+## 页面快照
+URL: https://app.example.com/login
+Title: 登录 - 示例应用
+Elements: 6 (textbox:2, button:1, link:2, checkbox:1)
+Focused ref: none, disabled: 1
+
+Elements (6):
+  @e1 [textbox] "邮箱"
+  @e2 [textbox] "密码"
+  @e3 [button] "登录" (disabled) — 表单未填完时禁用
+  @e4 [checkbox] "记住我"
+  @e5 [link] "忘记密码？"
+  @e6 [link] "注册新账号"
+
+## 任务
+用 test@example.com / Abc12345 登录
+
+## 已执行动作
+（空）

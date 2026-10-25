@@ -1,5 +1,5 @@
+import { startInvocationCredentialProxy, type InvocationCredentialProxy } from '../credentials/invocation-credential-proxy'
 import { parseProviderCorrelation } from '../admin/provider-observation.ts'
-import { createHash } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { rmSync } from 'node:fs'
 import {
@@ -87,6 +87,8 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
     const inputErr = validateExecuteInput(input, attemptedModel)
     if (inputErr) return inputErr
     busy = true
+    let billingProxy: InvocationCredentialProxy | undefined
+    let admissionFailure: HostLlmPublicResult | undefined
     try {
       const liveConn = getLlmConnection(slug)
       if (!liveConn) return makePublicError('connection_not_found', 'missing_slug', '', attemptedModel)
@@ -106,36 +108,47 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
       if (!descriptor) return makePublicError('invalid_connection', 'unsupported_provider_auth', '', selectedModel)
       const requestId = `host-${crypto.randomUUID()}`
       pendingRequestId = requestId; pendingSelectedModel = selectedModel
-      let providerCorrelation: import('../admin/provider-observation.ts').ProviderCorrelationV1 | undefined
+      // Admission happens at the actual SDK HTTP boundary, after serialization.
+      // The child receives only the local capability, never the supplier key.
       if (options.beforeSend) {
-        const retire = (result: HostLlmPublicResult): HostLlmPublicResult => { try { rmSync(descriptor.privateHome, { recursive: true, force: true }) } catch {} return result }
-        if (credResult.credential.type !== 'api_key') return retire(makePublicError('invalid_connection', 'unsupported_provider_auth', requestId, selectedModel))
-        let decision: HostLlmAdmissionDecision | void
-        const transportBaseUrl = descriptor.wireRoute.kind === 'custom' ? descriptor.wireRoute.baseUrl : descriptor.wireRoute.transportBaseUrl
-        let admissionTimer: ReturnType<typeof setTimeout> | undefined
-        try {
-          decision = await Promise.race([
-            options.beforeSend({ hostRequestId: requestId, model: selectedModel.replace(/^pi:/, ''), transportBaseUrl, credentialFingerprint: createHash('sha256').update(credResult.credential.value).digest('hex') }),
-            new Promise<never>((_, reject) => { admissionTimer = setTimeout(() => reject(new Error('Admission timed out')), input.timeoutMs) }),
-          ])
-        } catch { return retire(makePublicError('provider_failed', 'provider_request_failed', requestId, selectedModel)) }
-        finally { if (admissionTimer) clearTimeout(admissionTimer) }
-        if (disposed) return retire(makePublicError('executor_closed', 'host_disposed', requestId, selectedModel))
-        if (input.signal?.aborted) return retire(makePublicError('cancelled', 'caller_aborted', requestId, selectedModel))
-        const afterAdmission = getLlmConnection(slug)
-        if (!afterAdmission || computeFingerprint(afterAdmission) !== fingerprint) return retire(makePublicError('connection_changed', 'configuration_drift', requestId, selectedModel))
-        const currentCredential = await readCredentialSnapshot(afterAdmission, input.timeoutMs)
-        if (disposed) return retire(makePublicError('executor_closed', 'host_disposed', requestId, selectedModel))
-        if (input.signal?.aborted) return retire(makePublicError('cancelled', 'caller_aborted', requestId, selectedModel))
-        const finalConnection = getLlmConnection(slug)
-        if (!finalConnection || computeFingerprint(finalConnection) !== fingerprint || !currentCredential.ok || currentCredential.credential.type !== 'api_key' || currentCredential.credential.value !== credResult.credential.value) return retire(makePublicError('connection_changed', 'configuration_drift', requestId, selectedModel))
-        if (decision?.providerCorrelation !== undefined) {
-          const checked = parseProviderCorrelation(decision.providerCorrelation)
-          if (!checked) return retire(makePublicError('invalid_connection', 'unsupported_provider_auth', requestId, selectedModel))
-          providerCorrelation = checked
+        if (descriptor.wireRoute.kind !== 'custom' || descriptor.wireRoute.api !== 'openai-completions' || credResult.credential.type !== 'api_key') {
+          rmSync(descriptor.privateHome, { recursive: true, force: true })
+          return makePublicError('invalid_connection', 'unsupported_provider_auth', requestId, selectedModel)
         }
+        const originalCredential = credResult.credential.value
+        const transportBaseUrl = descriptor.wireRoute.baseUrl
+        let used = false
+        const assertCurrent = () => {
+          if (disposed || input.signal?.aborted) throw new Error('Original execution ended')
+          const current = getLlmConnection(slug)
+          if (!current || computeFingerprint(current) !== fingerprint) {
+            admissionFailure = makePublicError('connection_changed', 'configuration_drift', requestId, selectedModel)
+            throw new Error('Original connection changed')
+          }
+        }
+        billingProxy = await startInvocationCredentialProxy({ upstreamBaseUrl: transportBaseUrl, credential: originalCredential, credentialHeaders: [{ name: 'authorization', format: 'bearer' }] }, {
+          assertExecutionCurrent: assertCurrent,
+          billing: { beforeSend: async facts => {
+            if (used) throw new Error('Original App request cannot be repeated')
+            used = true; assertCurrent()
+            let timer: ReturnType<typeof setTimeout> | undefined
+            const decision = await Promise.race([
+              options.beforeSend!({ ...facts, hostRequestId: requestId, transportBaseUrl }),
+              new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Admission timed out')), input.timeoutMs) }),
+            ]).finally(() => { if (timer) clearTimeout(timer) })
+            assertCurrent()
+            const currentCredential = await readCredentialSnapshot(liveConn, input.timeoutMs)
+            assertCurrent()
+            if (!currentCredential.ok || currentCredential.credential.type !== 'api_key' || currentCredential.credential.value !== originalCredential) throw new Error('Original credential changed')
+            const correlation = parseProviderCorrelation(decision?.providerCorrelation)
+            if (!correlation) throw new Error('Managed admission correlation is invalid')
+            return { providerCorrelation: correlation, assertCurrent, complete: async () => {} }
+          } },
+        })
+        descriptor.wireRoute = { ...descriptor.wireRoute, baseUrl: billingProxy.url + '/v1/' }
+        descriptor.wireCredential = { type: 'api_key', value: billingProxy.capability }
       }
-      const encoded = encodeRequestLine(requestId, selectedModel, input, descriptor.wireRoute, descriptor.wireCredential, providerCorrelation)
+      const encoded = encodeRequestLine(requestId, selectedModel, input, descriptor.wireRoute, descriptor.wireCredential)
       if (!encoded.ok) { try { rmSync(descriptor.privateHome, { recursive: true, force: true }) } catch {} return makePublicError('invalid_request', 'wire_request_too_large', requestId, selectedModel) }
       const provider = descriptor.provider
       let child: ChildProcess
@@ -167,8 +180,8 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
       pendingChild = null
       pendingCleanup = cleanupChild(child, descriptor.privateHome)
       await pendingCleanup
-      return result
-    } finally { busy = false }
+      return admissionFailure ?? result
+    } finally { await billingProxy?.close(); busy = false }
   }
 
   async function dispose(): Promise<void> {

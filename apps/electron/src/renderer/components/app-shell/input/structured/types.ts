@@ -32,6 +32,8 @@ export interface StructuredInputState {
  * Response from permission request
  */
 export interface PermissionResponse {
+  browserActionDigest?: string
+  browserActionPhase?: 'awaiting_authorization' | 'invalidated_before_dispatch' | 'dispatched_outcome_unknown'
   type: 'permission'
   allowed: boolean
   alwaysAllow: boolean

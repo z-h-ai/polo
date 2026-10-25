@@ -1,0 +1,2432 @@
+[
+ {
+  "caseId": "M001",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 644,
+  "content": "fill @e70 Metformin 1000mg tablet",
+  "usage": {
+   "prompt_tokens": 1754,
+   "completion_tokens": 11,
+   "total_tokens": 1765,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1754
+  },
+  "error": null
+ },
+ {
+  "caseId": "M002",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 608,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1376,
+   "completion_tokens": 4,
+   "total_tokens": 1380,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1376
+  },
+  "error": null
+ },
+ {
+  "caseId": "M003",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 586,
+  "content": "click @e16",
+  "usage": {
+   "prompt_tokens": 1344,
+   "completion_tokens": 4,
+   "total_tokens": 1348,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1344
+  },
+  "error": null
+ },
+ {
+  "caseId": "M004",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 608,
+  "content": "click @e61",
+  "usage": {
+   "prompt_tokens": 1508,
+   "completion_tokens": 4,
+   "total_tokens": 1512,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1508
+  },
+  "error": null
+ },
+ {
+  "caseId": "M005",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 687,
+  "content": "select @e11 Price: High - Low",
+  "usage": {
+   "prompt_tokens": 1618,
+   "completion_tokens": 9,
+   "total_tokens": 1627,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1618
+  },
+  "error": null
+ },
+ {
+  "caseId": "M006",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 584,
+  "content": "fill @e13 Western Digital internal SSD 1TB 8GB DDR RAM",
+  "usage": {
+   "prompt_tokens": 1739,
+   "completion_tokens": 16,
+   "total_tokens": 1755,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1739
+  },
+  "error": null
+ },
+ {
+  "caseId": "M007",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 647,
+  "content": "done",
+  "usage": {
+   "prompt_tokens": 1481,
+   "completion_tokens": 1,
+   "total_tokens": 1482,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1481
+  },
+  "error": null
+ },
+ {
+  "caseId": "M008",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 605,
+  "content": "click @e33",
+  "usage": {
+   "prompt_tokens": 1416,
+   "completion_tokens": 4,
+   "total_tokens": 1420,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1416
+  },
+  "error": null
+ },
+ {
+  "caseId": "M009",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 658,
+  "content": "click @e9",
+  "usage": {
+   "prompt_tokens": 1343,
+   "completion_tokens": 4,
+   "total_tokens": 1347,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1343
+  },
+  "error": null
+ },
+ {
+  "caseId": "M010",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1079,
+  "content": "click @e19",
+  "usage": {
+   "prompt_tokens": 1352,
+   "completion_tokens": 4,
+   "total_tokens": 1356,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1352
+  },
+  "error": null
+ },
+ {
+  "caseId": "M011",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 418,
+  "content": "click @e49",
+  "usage": {
+   "prompt_tokens": 1459,
+   "completion_tokens": 4,
+   "total_tokens": 1463,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1459
+  },
+  "error": null
+ },
+ {
+  "caseId": "M012",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 685,
+  "content": "fail: 当前页面为Tesla购物首页，快照中无地图或充电站相关入口，无法定位伦敦充电站地图的控件。",
+  "usage": {
+   "prompt_tokens": 1372,
+   "completion_tokens": 31,
+   "total_tokens": 1403,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1372
+  },
+  "error": null
+ },
+ {
+  "caseId": "M013",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 684,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1320,
+   "completion_tokens": 4,
+   "total_tokens": 1324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1320
+  },
+  "error": null
+ },
+ {
+  "caseId": "M014",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 592,
+  "content": "click @e31",
+  "usage": {
+   "prompt_tokens": 1420,
+   "completion_tokens": 4,
+   "total_tokens": 1424,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1420
+  },
+  "error": null
+ },
+ {
+  "caseId": "M015",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 702,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1414,
+   "completion_tokens": 4,
+   "total_tokens": 1418,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1414
+  },
+  "error": null
+ },
+ {
+  "caseId": "M016",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 641,
+  "content": "click @e38",
+  "usage": {
+   "prompt_tokens": 1574,
+   "completion_tokens": 4,
+   "total_tokens": 1578,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1574
+  },
+  "error": null
+ },
+ {
+  "caseId": "M017",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 416,
+  "content": "click @e42",
+  "usage": {
+   "prompt_tokens": 1393,
+   "completion_tokens": 4,
+   "total_tokens": 1397,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1393
+  },
+  "error": null
+ },
+ {
+  "caseId": "M018",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 641,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1456,
+   "completion_tokens": 4,
+   "total_tokens": 1460,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1456
+  },
+  "error": null
+ },
+ {
+  "caseId": "M019",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 904,
+  "content": "click @e70",
+  "usage": {
+   "prompt_tokens": 1609,
+   "completion_tokens": 4,
+   "total_tokens": 1613,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1609
+  },
+  "error": null
+ },
+ {
+  "caseId": "M020",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 904,
+  "content": "click @e55",
+  "usage": {
+   "prompt_tokens": 1532,
+   "completion_tokens": 4,
+   "total_tokens": 1536,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1532
+  },
+  "error": null
+ },
+ {
+  "caseId": "M021",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 417,
+  "content": "click @e34",
+  "usage": {
+   "prompt_tokens": 1289,
+   "completion_tokens": 4,
+   "total_tokens": 1293,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1289
+  },
+  "error": null
+ },
+ {
+  "caseId": "M022",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 698,
+  "content": "click @e39",
+  "usage": {
+   "prompt_tokens": 1379,
+   "completion_tokens": 4,
+   "total_tokens": 1383,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1379
+  },
+  "error": null
+ },
+ {
+  "caseId": "M023",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 692,
+  "content": "click @e36",
+  "usage": {
+   "prompt_tokens": 1389,
+   "completion_tokens": 4,
+   "total_tokens": 1393,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1389
+  },
+  "error": null
+ },
+ {
+  "caseId": "M024",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 487,
+  "content": "fail: 当前快照仅含图标元素，无法定位 Joe Bloggs/boredcelt 用户或发送消息入口。",
+  "usage": {
+   "prompt_tokens": 1010,
+   "completion_tokens": 27,
+   "total_tokens": 1037,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1010
+  },
+  "error": null
+ },
+ {
+  "caseId": "M025",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 701,
+  "content": "fill @e7 Spain",
+  "usage": {
+   "prompt_tokens": 1561,
+   "completion_tokens": 5,
+   "total_tokens": 1566,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1561
+  },
+  "error": null
+ },
+ {
+  "caseId": "M026",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 700,
+  "content": "click @e42",
+  "usage": {
+   "prompt_tokens": 1556,
+   "completion_tokens": 4,
+   "total_tokens": 1560,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1556
+  },
+  "error": null
+ },
+ {
+  "caseId": "M027",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 698,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1439,
+   "completion_tokens": 4,
+   "total_tokens": 1443,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1439
+  },
+  "error": null
+ },
+ {
+  "caseId": "M028",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 701,
+  "content": "click @e10",
+  "usage": {
+   "prompt_tokens": 1515,
+   "completion_tokens": 4,
+   "total_tokens": 1519,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1515
+  },
+  "error": null
+ },
+ {
+  "caseId": "M029",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 492,
+  "content": "click @e13",
+  "usage": {
+   "prompt_tokens": 1453,
+   "completion_tokens": 4,
+   "total_tokens": 1457,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1453
+  },
+  "error": null
+ },
+ {
+  "caseId": "M030",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 677,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1217,
+   "completion_tokens": 4,
+   "total_tokens": 1221,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1217
+  },
+  "error": null
+ },
+ {
+  "caseId": "M031",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 638,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1351,
+   "completion_tokens": 4,
+   "total_tokens": 1355,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1351
+  },
+  "error": null
+ },
+ {
+  "caseId": "M032",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 915,
+  "content": "click @e59",
+  "usage": {
+   "prompt_tokens": 1406,
+   "completion_tokens": 4,
+   "total_tokens": 1410,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1406
+  },
+  "error": null
+ },
+ {
+  "caseId": "M033",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 578,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1192,
+   "completion_tokens": 4,
+   "total_tokens": 1196,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1192
+  },
+  "error": null
+ },
+ {
+  "caseId": "M034",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 637,
+  "content": "click @e9",
+  "usage": {
+   "prompt_tokens": 1626,
+   "completion_tokens": 4,
+   "total_tokens": 1630,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1626
+  },
+  "error": null
+ },
+ {
+  "caseId": "M035",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 480,
+  "content": "click @e17",
+  "usage": {
+   "prompt_tokens": 1613,
+   "completion_tokens": 4,
+   "total_tokens": 1617,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1613
+  },
+  "error": null
+ },
+ {
+  "caseId": "M036",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 669,
+  "content": "fill @e3 Jeerimiah Waton",
+  "usage": {
+   "prompt_tokens": 1519,
+   "completion_tokens": 10,
+   "total_tokens": 1529,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1519
+  },
+  "error": null
+ },
+ {
+  "caseId": "M037",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 491,
+  "content": "done",
+  "usage": {
+   "prompt_tokens": 1535,
+   "completion_tokens": 1,
+   "total_tokens": 1536,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1535
+  },
+  "error": null
+ },
+ {
+  "caseId": "M038",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 686,
+  "content": "click @e59",
+  "usage": {
+   "prompt_tokens": 1488,
+   "completion_tokens": 4,
+   "total_tokens": 1492,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1488
+  },
+  "error": null
+ },
+ {
+  "caseId": "M039",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 637,
+  "content": "click @e66",
+  "usage": {
+   "prompt_tokens": 1447,
+   "completion_tokens": 4,
+   "total_tokens": 1451,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1447
+  },
+  "error": null
+ },
+ {
+  "caseId": "M040",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 686,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1446,
+   "completion_tokens": 4,
+   "total_tokens": 1450,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1446
+  },
+  "error": null
+ },
+ {
+  "caseId": "M041",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 688,
+  "content": "fail: 当前快照为 Six Flags 首页，未包含纽约州公园的礼品商店信息，也无相关导航入口（如公园选择中的 New York 公园或礼品店链接），无法据此决策下一步。",
+  "usage": {
+   "prompt_tokens": 1426,
+   "completion_tokens": 45,
+   "total_tokens": 1471,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1426
+  },
+  "error": null
+ },
+ {
+  "caseId": "M042",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 644,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1437,
+   "completion_tokens": 4,
+   "total_tokens": 1441,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1437
+  },
+  "error": null
+ },
+ {
+  "caseId": "M043",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 489,
+  "content": "click @e63",
+  "usage": {
+   "prompt_tokens": 1390,
+   "completion_tokens": 4,
+   "total_tokens": 1394,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1390
+  },
+  "error": null
+ },
+ {
+  "caseId": "M044",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 680,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1551,
+   "completion_tokens": 4,
+   "total_tokens": 1555,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1551
+  },
+  "error": null
+ },
+ {
+  "caseId": "M045",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 494,
+  "content": "click @e10",
+  "usage": {
+   "prompt_tokens": 1608,
+   "completion_tokens": 4,
+   "total_tokens": 1612,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1608
+  },
+  "error": null
+ },
+ {
+  "caseId": "M046",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 599,
+  "content": "fill @e25 123456789",
+  "usage": {
+   "prompt_tokens": 1002,
+   "completion_tokens": 8,
+   "total_tokens": 1010,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1002
+  },
+  "error": null
+ },
+ {
+  "caseId": "M047",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 677,
+  "content": "fill @e1 Niagara Falls",
+  "usage": {
+   "prompt_tokens": 1530,
+   "completion_tokens": 6,
+   "total_tokens": 1536,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1530
+  },
+  "error": null
+ },
+ {
+  "caseId": "M048",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 697,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1589,
+   "completion_tokens": 4,
+   "total_tokens": 1593,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1589
+  },
+  "error": null
+ },
+ {
+  "caseId": "M049",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 676,
+  "content": "fill @e56 Tree stands",
+  "usage": {
+   "prompt_tokens": 1333,
+   "completion_tokens": 6,
+   "total_tokens": 1339,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1333
+  },
+  "error": null
+ },
+ {
+  "caseId": "M050",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 592,
+  "content": "fill @e56 Tree stands",
+  "usage": {
+   "prompt_tokens": 1377,
+   "completion_tokens": 6,
+   "total_tokens": 1383,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1377
+  },
+  "error": null
+ },
+ {
+  "caseId": "M051",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 676,
+  "content": "fill @e34 Chicago Bulls",
+  "usage": {
+   "prompt_tokens": 1563,
+   "completion_tokens": 6,
+   "total_tokens": 1569,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1563
+  },
+  "error": null
+ },
+ {
+  "caseId": "M052",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 697,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1420,
+   "completion_tokens": 4,
+   "total_tokens": 1424,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1420
+  },
+  "error": null
+ },
+ {
+  "caseId": "M053",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 677,
+  "content": "click @e52",
+  "usage": {
+   "prompt_tokens": 1396,
+   "completion_tokens": 4,
+   "total_tokens": 1400,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1396
+  },
+  "error": null
+ },
+ {
+  "caseId": "M054",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 630,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1424,
+   "completion_tokens": 4,
+   "total_tokens": 1428,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1424
+  },
+  "error": null
+ },
+ {
+  "caseId": "M055",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 652,
+  "content": "fill @e16 recetas españolas",
+  "usage": {
+   "prompt_tokens": 1308,
+   "completion_tokens": 8,
+   "total_tokens": 1316,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1308
+  },
+  "error": null
+ },
+ {
+  "caseId": "M056",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 413,
+  "content": "click @e12",
+  "usage": {
+   "prompt_tokens": 1325,
+   "completion_tokens": 4,
+   "total_tokens": 1329,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1325
+  },
+  "error": null
+ },
+ {
+  "caseId": "M057",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 576,
+  "content": "fill @e49 BMW X5",
+  "usage": {
+   "prompt_tokens": 1414,
+   "completion_tokens": 7,
+   "total_tokens": 1421,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1414
+  },
+  "error": null
+ },
+ {
+  "caseId": "M058",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 600,
+  "content": "click @e18",
+  "usage": {
+   "prompt_tokens": 1304,
+   "completion_tokens": 4,
+   "total_tokens": 1308,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1304
+  },
+  "error": null
+ },
+ {
+  "caseId": "M059",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 578,
+  "content": "click @e58",
+  "usage": {
+   "prompt_tokens": 1389,
+   "completion_tokens": 4,
+   "total_tokens": 1393,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1389
+  },
+  "error": null
+ },
+ {
+  "caseId": "M060",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 684,
+  "content": "fail: 当前页面为 Newegg 首页/账户概览，未显示任何无线打印机或星级筛选信息，无法执行比较任务。",
+  "usage": {
+   "prompt_tokens": 1708,
+   "completion_tokens": 30,
+   "total_tokens": 1738,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1708
+  },
+  "error": null
+ },
+ {
+  "caseId": "M061",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 736,
+  "content": "fail: 该页面为Budget Truck租车首页，任务要求预订带GPS和不限里程电子收费的出租车并面向退伍军人，但快照中无相关车型、价格比较或预订选项，信息不足以决策。",
+  "usage": {
+   "prompt_tokens": 1518,
+   "completion_tokens": 47,
+   "total_tokens": 1565,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1518
+  },
+  "error": null
+ },
+ {
+  "caseId": "M062",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 648,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1559,
+   "completion_tokens": 4,
+   "total_tokens": 1563,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1559
+  },
+  "error": null
+ },
+ {
+  "caseId": "M063",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 488,
+  "content": "fill @e67 10001",
+  "usage": {
+   "prompt_tokens": 1496,
+   "completion_tokens": 7,
+   "total_tokens": 1503,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1496
+  },
+  "error": null
+ },
+ {
+  "caseId": "M064",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 683,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1627,
+   "completion_tokens": 4,
+   "total_tokens": 1631,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1627
+  },
+  "error": null
+ },
+ {
+  "caseId": "M065",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 479,
+  "content": "navigate https://www.ticketcenter.com",
+  "usage": {
+   "prompt_tokens": 1359,
+   "completion_tokens": 9,
+   "total_tokens": 1368,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1359
+  },
+  "error": null
+ },
+ {
+  "caseId": "M066",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 610,
+  "content": "select @e54 2",
+  "usage": {
+   "prompt_tokens": 1649,
+   "completion_tokens": 6,
+   "total_tokens": 1655,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1649
+  },
+  "error": null
+ },
+ {
+  "caseId": "M067",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 575,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1522,
+   "completion_tokens": 4,
+   "total_tokens": 1526,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1522
+  },
+  "error": null
+ },
+ {
+  "caseId": "M068",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 635,
+  "content": "fill @e36 newly listed pre-owned Nike shoes size 9 free local pickup under 75",
+  "usage": {
+   "prompt_tokens": 1345,
+   "completion_tokens": 19,
+   "total_tokens": 1364,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1345
+  },
+  "error": null
+ },
+ {
+  "caseId": "M069",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 575,
+  "content": "click @e15",
+  "usage": {
+   "prompt_tokens": 1341,
+   "completion_tokens": 4,
+   "total_tokens": 1345,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1341
+  },
+  "error": null
+ },
+ {
+  "caseId": "M070",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 664,
+  "content": "click @e25",
+  "usage": {
+   "prompt_tokens": 729,
+   "completion_tokens": 4,
+   "total_tokens": 733,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 729
+  },
+  "error": null
+ },
+ {
+  "caseId": "M071",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 611,
+  "content": "click @e62",
+  "usage": {
+   "prompt_tokens": 1516,
+   "completion_tokens": 4,
+   "total_tokens": 1520,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1516
+  },
+  "error": null
+ },
+ {
+  "caseId": "M072",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 675,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1526,
+   "completion_tokens": 4,
+   "total_tokens": 1530,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1526
+  },
+  "error": null
+ },
+ {
+  "caseId": "M073",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 466,
+  "content": "fill @e1 $100 Google Play Gift Card",
+  "usage": {
+   "prompt_tokens": 1294,
+   "completion_tokens": 10,
+   "total_tokens": 1304,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1294
+  },
+  "error": null
+ },
+ {
+  "caseId": "M074",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 625,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1233,
+   "completion_tokens": 4,
+   "total_tokens": 1237,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1233
+  },
+  "error": null
+ },
+ {
+  "caseId": "M075",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 685,
+  "content": "click @e40",
+  "usage": {
+   "prompt_tokens": 1507,
+   "completion_tokens": 4,
+   "total_tokens": 1511,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1507
+  },
+  "error": null
+ },
+ {
+  "caseId": "M076",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 627,
+  "content": "click @e57",
+  "usage": {
+   "prompt_tokens": 1433,
+   "completion_tokens": 4,
+   "total_tokens": 1437,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1433
+  },
+  "error": null
+ },
+ {
+  "caseId": "M077",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 632,
+  "content": "click @e36",
+  "usage": {
+   "prompt_tokens": 1265,
+   "completion_tokens": 4,
+   "total_tokens": 1269,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1265
+  },
+  "error": null
+ },
+ {
+  "caseId": "M078",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 694,
+  "content": "click @e51",
+  "usage": {
+   "prompt_tokens": 1487,
+   "completion_tokens": 4,
+   "total_tokens": 1491,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1487
+  },
+  "error": null
+ },
+ {
+  "caseId": "M079",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 673,
+  "content": "click @e70",
+  "usage": {
+   "prompt_tokens": 1467,
+   "completion_tokens": 4,
+   "total_tokens": 1471,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1467
+  },
+  "error": null
+ },
+ {
+  "caseId": "M080",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 648,
+  "content": "click @e16",
+  "usage": {
+   "prompt_tokens": 1446,
+   "completion_tokens": 4,
+   "total_tokens": 1450,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1446
+  },
+  "error": null
+ },
+ {
+  "caseId": "M081",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 639,
+  "content": "click @e12",
+  "usage": {
+   "prompt_tokens": 1588,
+   "completion_tokens": 4,
+   "total_tokens": 1592,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1588
+  },
+  "error": null
+ },
+ {
+  "caseId": "M082",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 792,
+  "content": "click @e21",
+  "usage": {
+   "prompt_tokens": 1449,
+   "completion_tokens": 4,
+   "total_tokens": 1453,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1449
+  },
+  "error": null
+ },
+ {
+  "caseId": "M083",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 804,
+  "content": "fill @e44 66 Perry St., New York",
+  "usage": {
+   "prompt_tokens": 1410,
+   "completion_tokens": 11,
+   "total_tokens": 1421,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1410
+  },
+  "error": null
+ },
+ {
+  "caseId": "M084",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 573,
+  "content": "done",
+  "usage": {
+   "prompt_tokens": 1539,
+   "completion_tokens": 1,
+   "total_tokens": 1540,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1539
+  },
+  "error": null
+ },
+ {
+  "caseId": "M085",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 806,
+  "content": "fill @e1 smartwatch compatible with iPhone",
+  "usage": {
+   "prompt_tokens": 1344,
+   "completion_tokens": 9,
+   "total_tokens": 1353,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1344
+  },
+  "error": null
+ },
+ {
+  "caseId": "M086",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 705,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1244,
+   "completion_tokens": 4,
+   "total_tokens": 1248,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1244
+  },
+  "error": null
+ },
+ {
+  "caseId": "M087",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 782,
+  "content": "fill @e56 Keen women's brown hiking shoes size 9",
+  "usage": {
+   "prompt_tokens": 1364,
+   "completion_tokens": 14,
+   "total_tokens": 1378,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1364
+  },
+  "error": null
+ },
+ {
+  "caseId": "M088",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 626,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1339,
+   "completion_tokens": 4,
+   "total_tokens": 1343,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1339
+  },
+  "error": null
+ },
+ {
+  "caseId": "M089",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 756,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1417,
+   "completion_tokens": 4,
+   "total_tokens": 1421,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1417
+  },
+  "error": null
+ },
+ {
+  "caseId": "M090",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 771,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1581,
+   "completion_tokens": 4,
+   "total_tokens": 1585,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1581
+  },
+  "error": null
+ },
+ {
+  "caseId": "M091",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 673,
+  "content": "fill @e1 full-sized Amazon basic comforter red",
+  "usage": {
+   "prompt_tokens": 1266,
+   "completion_tokens": 12,
+   "total_tokens": 1278,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1266
+  },
+  "error": null
+ },
+ {
+  "caseId": "M092",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 703,
+  "content": "done",
+  "usage": {
+   "prompt_tokens": 1465,
+   "completion_tokens": 1,
+   "total_tokens": 1466,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1465
+  },
+  "error": null
+ },
+ {
+  "caseId": "M093",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 795,
+  "content": "click @e35",
+  "usage": {
+   "prompt_tokens": 1279,
+   "completion_tokens": 4,
+   "total_tokens": 1283,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1279
+  },
+  "error": null
+ },
+ {
+  "caseId": "M094",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1011,
+  "content": "click @e63",
+  "usage": {
+   "prompt_tokens": 1252,
+   "completion_tokens": 4,
+   "total_tokens": 1256,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1252
+  },
+  "error": null
+ },
+ {
+  "caseId": "M095",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 726,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1299,
+   "completion_tokens": 4,
+   "total_tokens": 1303,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1299
+  },
+  "error": null
+ },
+ {
+  "caseId": "M096",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 678,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1464,
+   "completion_tokens": 4,
+   "total_tokens": 1468,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1464
+  },
+  "error": null
+ },
+ {
+  "caseId": "M097",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 691,
+  "content": "click @e44",
+  "usage": {
+   "prompt_tokens": 1366,
+   "completion_tokens": 4,
+   "total_tokens": 1370,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1366
+  },
+  "error": null
+ },
+ {
+  "caseId": "M098",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 729,
+  "content": "fill @e57 Belo Horizonte",
+  "usage": {
+   "prompt_tokens": 1405,
+   "completion_tokens": 8,
+   "total_tokens": 1413,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1405
+  },
+  "error": null
+ },
+ {
+  "caseId": "M099",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 675,
+  "content": "click @e33",
+  "usage": {
+   "prompt_tokens": 1371,
+   "completion_tokens": 4,
+   "total_tokens": 1375,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1371
+  },
+  "error": null
+ },
+ {
+  "caseId": "M100",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 701,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1421,
+   "completion_tokens": 4,
+   "total_tokens": 1425,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1421
+  },
+  "error": null
+ },
+ {
+  "caseId": "M101",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 689,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1467,
+   "completion_tokens": 4,
+   "total_tokens": 1471,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1467
+  },
+  "error": null
+ },
+ {
+  "caseId": "M102",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 805,
+  "content": "fail: 当前页面为 Enterprise 租车首页静态快照，无“convertible cars for sale under 20000”相关列表或入口，无法决策下一步。",
+  "usage": {
+   "prompt_tokens": 1386,
+   "completion_tokens": 36,
+   "total_tokens": 1422,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1386
+  },
+  "error": null
+ },
+ {
+  "caseId": "M103",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 667,
+  "content": "fail: 当前页面是 Marriott 酒店预订首页，没有招聘/实习职位搜索或筛选功能，无法完成任务。",
+  "usage": {
+   "prompt_tokens": 1635,
+   "completion_tokens": 26,
+   "total_tokens": 1661,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1635
+  },
+  "error": null
+ },
+ {
+  "caseId": "M104",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 700,
+  "content": "click @e39",
+  "usage": {
+   "prompt_tokens": 1536,
+   "completion_tokens": 4,
+   "total_tokens": 1540,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1536
+  },
+  "error": null
+ },
+ {
+  "caseId": "M105",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 776,
+  "content": "click @e8",
+  "usage": {
+   "prompt_tokens": 1507,
+   "completion_tokens": 4,
+   "total_tokens": 1511,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1507
+  },
+  "error": null
+ },
+ {
+  "caseId": "M106",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 698,
+  "content": "fill @e1 Dota 2",
+  "usage": {
+   "prompt_tokens": 1420,
+   "completion_tokens": 8,
+   "total_tokens": 1428,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1420
+  },
+  "error": null
+ },
+ {
+  "caseId": "M107",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 755,
+  "content": "fill @e3 Addis Ababa",
+  "usage": {
+   "prompt_tokens": 1469,
+   "completion_tokens": 8,
+   "total_tokens": 1477,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1469
+  },
+  "error": null
+ },
+ {
+  "caseId": "M108",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 775,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1519,
+   "completion_tokens": 4,
+   "total_tokens": 1523,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1519
+  },
+  "error": null
+ },
+ {
+  "caseId": "M109",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 763,
+  "content": "click @e57",
+  "usage": {
+   "prompt_tokens": 1483,
+   "completion_tokens": 4,
+   "total_tokens": 1487,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1483
+  },
+  "error": null
+ },
+ {
+  "caseId": "M110",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 689,
+  "content": "click @e65",
+  "usage": {
+   "prompt_tokens": 1356,
+   "completion_tokens": 4,
+   "total_tokens": 1360,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1356
+  },
+  "error": null
+ },
+ {
+  "caseId": "M111",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 688,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1428,
+   "completion_tokens": 4,
+   "total_tokens": 1432,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1428
+  },
+  "error": null
+ },
+ {
+  "caseId": "M112",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 728,
+  "content": "click @e14",
+  "usage": {
+   "prompt_tokens": 1482,
+   "completion_tokens": 4,
+   "total_tokens": 1486,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1482
+  },
+  "error": null
+ },
+ {
+  "caseId": "M113",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 689,
+  "content": "click @e23",
+  "usage": {
+   "prompt_tokens": 1459,
+   "completion_tokens": 4,
+   "total_tokens": 1463,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1459
+  },
+  "error": null
+ },
+ {
+  "caseId": "M114",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 719,
+  "content": "fill @e59 DL145",
+  "usage": {
+   "prompt_tokens": 1445,
+   "completion_tokens": 6,
+   "total_tokens": 1451,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1445
+  },
+  "error": null
+ },
+ {
+  "caseId": "M115",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 686,
+  "content": "click @e65",
+  "usage": {
+   "prompt_tokens": 1288,
+   "completion_tokens": 4,
+   "total_tokens": 1292,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1288
+  },
+  "error": null
+ },
+ {
+  "caseId": "M116",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 698,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1351,
+   "completion_tokens": 4,
+   "total_tokens": 1355,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1351
+  },
+  "error": null
+ },
+ {
+  "caseId": "M117",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 790,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1554,
+   "completion_tokens": 4,
+   "total_tokens": 1558,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1554
+  },
+  "error": null
+ },
+ {
+  "caseId": "M118",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 808,
+  "content": "click @e22",
+  "usage": {
+   "prompt_tokens": 1407,
+   "completion_tokens": 4,
+   "total_tokens": 1411,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1407
+  },
+  "error": null
+ },
+ {
+  "caseId": "M119",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 798,
+  "content": "fill @e70 Alaska",
+  "usage": {
+   "prompt_tokens": 1427,
+   "completion_tokens": 5,
+   "total_tokens": 1432,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1427
+  },
+  "error": null
+ },
+ {
+  "caseId": "M120",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 739,
+  "content": "click @e23",
+  "usage": {
+   "prompt_tokens": 1294,
+   "completion_tokens": 4,
+   "total_tokens": 1298,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1294
+  },
+  "error": null
+ },
+ {
+  "caseId": "M121",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 749,
+  "content": "done",
+  "usage": {
+   "prompt_tokens": 1592,
+   "completion_tokens": 1,
+   "total_tokens": 1593,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1592
+  },
+  "error": null
+ },
+ {
+  "caseId": "M122",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 759,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1327,
+   "completion_tokens": 4,
+   "total_tokens": 1331,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1327
+  },
+  "error": null
+ },
+ {
+  "caseId": "M123",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 741,
+  "content": "click @e43",
+  "usage": {
+   "prompt_tokens": 1210,
+   "completion_tokens": 4,
+   "total_tokens": 1214,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1210
+  },
+  "error": null
+ },
+ {
+  "caseId": "M124",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 726,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1370,
+   "completion_tokens": 4,
+   "total_tokens": 1374,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1370
+  },
+  "error": null
+ },
+ {
+  "caseId": "M125",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 726,
+  "content": "click @e21",
+  "usage": {
+   "prompt_tokens": 1278,
+   "completion_tokens": 4,
+   "total_tokens": 1282,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1278
+  },
+  "error": null
+ },
+ {
+  "caseId": "M126",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 904,
+  "content": "fill @e1 sonoma bath towels",
+  "usage": {
+   "prompt_tokens": 1605,
+   "completion_tokens": 8,
+   "total_tokens": 1613,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1605
+  },
+  "error": null
+ },
+ {
+  "caseId": "M127",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 765,
+  "content": "click @e64",
+  "usage": {
+   "prompt_tokens": 1439,
+   "completion_tokens": 4,
+   "total_tokens": 1443,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1439
+  },
+  "error": null
+ },
+ {
+  "caseId": "M128",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 675,
+  "content": "click @e31",
+  "usage": {
+   "prompt_tokens": 1572,
+   "completion_tokens": 4,
+   "total_tokens": 1576,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1572
+  },
+  "error": null
+ },
+ {
+  "caseId": "M129",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 805,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1683,
+   "completion_tokens": 4,
+   "total_tokens": 1687,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1683
+  },
+  "error": null
+ },
+ {
+  "caseId": "M130",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 760,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1582,
+   "completion_tokens": 4,
+   "total_tokens": 1586,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1582
+  },
+  "error": null
+ },
+ {
+  "caseId": "M131",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 799,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1718,
+   "completion_tokens": 4,
+   "total_tokens": 1722,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1718
+  },
+  "error": null
+ },
+ {
+  "caseId": "M132",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 800,
+  "content": "click @e42",
+  "usage": {
+   "prompt_tokens": 1583,
+   "completion_tokens": 4,
+   "total_tokens": 1587,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1583
+  },
+  "error": null
+ },
+ {
+  "caseId": "M133",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 745,
+  "content": "done",
+  "usage": {
+   "prompt_tokens": 1413,
+   "completion_tokens": 1,
+   "total_tokens": 1414,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1413
+  },
+  "error": null
+ },
+ {
+  "caseId": "M134",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 674,
+  "content": "click @e28",
+  "usage": {
+   "prompt_tokens": 1567,
+   "completion_tokens": 4,
+   "total_tokens": 1571,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1567
+  },
+  "error": null
+ },
+ {
+  "caseId": "M135",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 765,
+  "content": "click @e45",
+  "usage": {
+   "prompt_tokens": 1491,
+   "completion_tokens": 4,
+   "total_tokens": 1495,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 1491
+  },
+  "error": null
+ }
+]

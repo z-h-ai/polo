@@ -36,6 +36,9 @@ export type BrowserCapabilityMethod =
   | 'goBack'
   | 'goForward'
   // Interaction
+  | 'cancelBrowserAction'
+  | 'executeAuthorizedAction'
+  | 'inspectBrowserAction'
   | 'getAccessibilitySnapshot'
   | 'clickElement'
   | 'clickAtCoordinates'

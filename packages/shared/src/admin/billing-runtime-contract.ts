@@ -1,5 +1,5 @@
 // GENERATED from polo-admin/src/lib/billing/runtime-contract.ts
-// Source SHA-256: f215bb3e610b82f3905115b9c162c4c6384aa3d147048795a624364825f2bfc2
+// Source SHA-256: a0248fc6b743238d80edacf9255a12afcc92d4002f3d8a15dfbb88fd88d50799
 // Run backend scripts/sync-billing-runtime-contract.mjs --client <checkout>; do not edit.
 
 // Authority for the deployed billing runtime HTTP boundary. Client copies are
@@ -78,6 +78,8 @@ export const billingRequestAdmissionSchema = z.object({
   hostRequestId: z.string().regex(/^host-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
   transportBaseUrl: z.string().url().max(2048).refine(value => { const url = new URL(value); return !url.username && !url.password && !url.search && !url.hash; }),
   credentialFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  // Optional only for historical journal reads; new admissions require bounds.
+  requestBounds: z.object({ maxInputTokens: z.number().int().positive().max(1073741823), maxOutputTokens: z.number().int().positive().max(1073741823), bodySha256: z.string().regex(/^[0-9a-f]{64}$/) }).strict().optional(),
 }).strict();
 
 export const billingRuntimeAdmissionResponseSchema = z.object({
@@ -98,12 +100,13 @@ export const billingRuntimeStartResponseSchema = z.object({
 }).strip();
 export const billingRuntimeUsageResponseSchema = z.object({
   receipt: z.object({requestId: billingExternalIdSchema}).strip().nullable(),
+  resolution: z.literal("platform_absorbed").optional(),
   recorded: z.boolean(),
   idempotent: z.boolean(),
   legacy: z.literal(true).optional(),
   settlement: z.enum(["pending", "confirmed", "no_charge"]).optional(),
   request: z.object({ requestId: billingExternalIdSchema }).strict().optional(),
-}).strip().refine(value => value.settlement === "pending" ? Boolean(value.request) && value.receipt === null : value.recorded !== value.idempotent && (value.receipt !== null || value.legacy === true && value.idempotent), {
+}).strip().refine(value => value.settlement === "pending" ? Boolean(value.request) && value.receipt === null : (value.resolution === "platform_absorbed" ? value.settlement === "no_charge" && Boolean(value.request) && value.receipt === null : value.recorded !== value.idempotent && (value.receipt !== null || value.legacy === true && value.idempotent)), {
   message: "Usage acknowledgement must record new usage or confirm an exact replay",
 });
 export const billingRuntimeFinishResponseSchema = z.object({

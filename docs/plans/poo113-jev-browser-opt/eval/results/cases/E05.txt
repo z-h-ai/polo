@@ -1,0 +1,21 @@
+## 页面快照
+URL: https://news.example.com/post/123
+Title: 2026 年前端趋势 - 示例资讯
+Elements: 8 (button:3, text:2, heading:1, link:1, dialog:1)
+Focused ref: none, disabled: 0
+
+Elements (8):
+  @e1 [dialog] "Cookie 使用提示"
+  @e2 [text] "我们使用 Cookie 改善您的体验"
+  @e3 [button] "全部接受"
+  @e4 [button] "仅必要 Cookie"
+  @e5 [button] "拒绝全部"
+  @e6 [heading] "2026 年前端趋势"
+  @e7 [text] "全文约 8 分钟"
+  @e8 [link] "评论 (12)"
+
+## 任务
+接受 Cookie 并继续浏览文章
+
+## 已执行动作
+navigate https://news.example.com/post/123

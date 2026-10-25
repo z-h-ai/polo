@@ -66,7 +66,7 @@ export type AgentProvider = ModelProvider;
 /**
  * Permission prompt types for different tool categories.
  */
-export type PermissionRequestType = 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+export type PermissionRequestType = 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action';
 
 /**
  * Permission request callback signature.

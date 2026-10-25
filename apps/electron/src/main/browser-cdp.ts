@@ -9,6 +9,7 @@
  * no fragile CSS selectors needed.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { WebContents } from 'electron'
 import { mainLog } from './logger'
 
@@ -154,8 +155,20 @@ export class BrowserCDP {
     }
   }
 
+  private actionGuard = new AsyncLocalStorage<{check:(point?:{x:number;y:number})=>Promise<void>;assertCurrent:()=>void;checked:boolean}>()
+
+  withActionGuard<T>(check:(point?:{x:number;y:number})=>Promise<void>,dispatch:()=>Promise<T>,assertCurrent:()=>void=()=>{}):Promise<T>{
+    return this.actionGuard.run({check,assertCurrent,checked:false},dispatch)
+  }
+
+  async beforeActionInput(point?:{x:number;y:number}):Promise<void>{
+    const guard=this.actionGuard.getStore()
+    if(guard&&!guard.checked){await guard.check(point);guard.assertCurrent();guard.checked=true}
+  }
+
   private async send(method: string, params?: Record<string, unknown>): Promise<any> {
     await this.ensureAttached()
+    const guard=this.actionGuard.getStore();if(guard?.checked)guard.assertCurrent()
     try {
       return await this.webContents.debugger.sendCommand(method, params)
     } finally {
@@ -617,6 +630,7 @@ export class BrowserCDP {
 
   // Explicit CDP mouse fallback methods kept for resilience.
   private async clickAtCDP(x: number, y: number): Promise<void> {
+    await this.beforeActionInput({x,y})
     await this.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
       x,
@@ -641,6 +655,7 @@ export class BrowserCDP {
     let lastX = x1
     let lastY = y1
 
+    await this.beforeActionInput()
     await this.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
       x: x1,
@@ -686,6 +701,15 @@ export class BrowserCDP {
   // ---------------------------------------------------------------------------
 
   async clickAtCoordinates(x: number, y: number): Promise<void> {
+    if(this.actionGuard.getStore()){
+      // Authorized business clicks send no hover trajectory before the final
+      // target check; a rejected action must not emit any page input event.
+      await this.beforeActionInput({x,y})
+      const zoom=this.webContents.getZoomFactor()
+      this.sendMouseEvent('mouseDown',Math.round(x*zoom),Math.round(y*zoom),'left',1)
+      this.sendMouseEvent('mouseUp',Math.round(x*zoom),Math.round(y*zoom),'left',1)
+      return
+    }
     try {
       // Generate short trajectory to the click target for realism
       const startX = x + (Math.random() - 0.5) * 60
@@ -697,10 +721,12 @@ export class BrowserCDP {
         await new Promise(resolve => setTimeout(resolve, 4 + Math.random() * 8))
       }
 
+      await this.beforeActionInput({x,y})
       this.sendMouseEvent('mouseDown', Math.round(x), Math.round(y), 'left', 1)
       await new Promise(resolve => setTimeout(resolve, 20 + Math.random() * 40))
       this.sendMouseEvent('mouseUp', Math.round(x), Math.round(y), 'left', 1)
     } catch (error) {
+      if(this.actionGuard.getStore())throw error
       mainLog.warn(`[browser-cdp] native clickAt failed, falling back to CDP: ${error instanceof Error ? error.message : String(error)}`)
       await this.clickAtCDP(x, y)
     }
@@ -751,6 +777,7 @@ export class BrowserCDP {
   }
 
   async typeText(text: string): Promise<void> {
+    await this.beforeActionInput()
     for (const char of text) {
       await this.send('Input.dispatchKeyEvent', { type: 'keyDown', text: char })
       await this.send('Input.dispatchKeyEvent', { type: 'keyUp', text: char })
@@ -805,6 +832,80 @@ export class BrowserCDP {
     }
   }
 
+  /** Read-only facts for Host authorization. Resolves the original DOM node,
+   * never accepts page/model supplied authorization or executable JS. */
+  async inspectAction(parts: string[]): Promise<Omit<import('@polo-ai/shared/agent/browser-action-authorization').BrowserActionFacts, 'browserId'>> {
+    const tree = await this.send('Page.getFrameTree');
+    const frame = tree.frameTree.frame;
+    let objectId: string | undefined;
+    let targetId = "";
+    const ref = parts.find(p => /^@e\d+$/.test(p));
+    if (ref) {
+      const backendNodeId = this.refMap.get(ref);
+      if (!backendNodeId) throw new Error('Browser target reference expired before dispatch');
+      targetId = String(backendNodeId);
+      objectId = (await this.send('DOM.resolveNode', { backendNodeId })).object.objectId;
+    } else if (parts[0] === 'click-at') {
+      const hit = await this.nodeAtViewportPoint(Number(parts[1]),Number(parts[2]));
+      targetId = String(hit.backendNodeId);
+      objectId = (await this.send('DOM.resolveNode', { backendNodeId: hit.backendNodeId })).object.objectId;
+    } else {
+      objectId = (await this.send('Runtime.evaluate', { expression: 'document.activeElement || document.body' })).result.objectId;
+    }
+    if(!targetId){const node=await this.send('DOM.describeNode',{objectId});targetId=String(node.node.backendNodeId)}
+    const read = await this.send('Runtime.callFunctionOn', { objectId, returnByValue: true,
+      functionDeclaration: `function() {
+        const target = this.nodeType === 1 ? this : document.body;
+        const form = target.form || target.closest('form');
+        const scope = form || target.closest('[role="dialog"]') || document.body;
+        const fields = {}; let incomplete=false;
+        const aliases = {orderid:'orderId', order:'orderId', objectid:'objectId', projectid:'objectId', amount:'amount', total:'amount', price:'amount', currency:'currency', recipient:'recipient', payee:'recipient', merchant:'recipient', content:'content', message:'content'};
+        for (const input of scope.querySelectorAll('input,textarea,select')) {
+          const name = String(input.name || input.id || '').toLowerCase().replace(/[_-]/g,'');
+          const key = aliases[name];
+          if (key && !['password','file'].includes(input.type)) {
+            if (fields[key] !== undefined) { fields[key] = ''; continue; }
+            const value=String(input.value || '');
+            if(value.length>65536){incomplete=true;fields[key]='';}else fields[key]=value;
+          }
+        }
+        return {connected: target.isConnected, frameUrl: document.URL, tag: target.tagName.toLowerCase(), role: target.getAttribute('role') || '',
+          name: String(target.getAttribute('aria-label') || target.innerText || target.getAttribute('placeholder') || '').trim().slice(0,500),
+          href: target.href || '', inputType: target.type || '', formText: String(form?.innerText || '').slice(0,2000), fields,
+          incomplete, hasInlineMutation: ['oninput','onchange','onbeforeinput','onpaste','onfocus','onblur'].some(k => target.hasAttribute(k))};
+      }` });
+    if (!read.result.value || read.exceptionDetails) throw new Error('Cannot verify browser target before dispatch');
+    // Detect delegated listeners too (React / addEventListener), not only HTML attributes.
+    let hasInputListeners=read.result.value.hasInlineMutation;
+    if(['fill','type','paste','select'].includes(parts[0]??'')){
+      const ancestors=await this.send('Runtime.callFunctionOn',{objectId,functionDeclaration:'function(){const a=[];for(let n=this;n;n=n.parentNode||n.host)a.push(n);a.push(window);return a}',returnByValue:false});
+      const properties=await this.send('Runtime.getProperties',{objectId:ancestors.result.objectId,ownProperties:true});
+      for(const property of properties.result){
+        if(!/^\d+$/.test(property.name)||!property.value?.objectId)continue;
+        const events=await this.send('DOMDebugger.getEventListeners',{objectId:property.value.objectId});
+        if(events.listeners.some((event:{type:string})=>['input','change','beforeinput','keydown','keyup','keypress','paste','focus','blur','focusin','focusout'].includes(event.type))){hasInputListeners=true;break}
+      }
+      await this.send('Runtime.releaseObject',{objectId:ancestors.result.objectId});
+    }
+    return { ...read.result.value, hasInlineMutation:hasInputListeners,targetId,zoomFactor:this.webContents.getZoomFactor(),url: frame.url, documentId: frame.id + ':' + frame.loaderId };
+  }
+
+  private async nodeAtViewportPoint(x:number,y:number):Promise<{backendNodeId:number}>{
+    // DOM.getNodeForLocation takes document coordinates, while native input
+    // and getBoxModel use the visible viewport. Keep hit tests correct after scroll.
+    const metrics=await this.send('Page.getLayoutMetrics')
+    const viewport=metrics.cssVisualViewport??metrics.visualViewport
+    return this.send('DOM.getNodeForLocation',{x:Math.round(x+(viewport.pageX??0)),y:Math.round(y+(viewport.pageY??0)),includeUserAgentShadowDOM:true})
+  }
+
+  async actionPointMatches(targetId:string,x:number,y:number):Promise<boolean>{
+    const hit=await this.nodeAtViewportPoint(x,y)
+    const target=await this.send('DOM.resolveNode',{backendNodeId:Number(targetId)})
+    const actual=await this.send('DOM.resolveNode',{backendNodeId:hit.backendNodeId})
+    const match=await this.send('Runtime.callFunctionOn',{objectId:target.object.objectId,arguments:[{objectId:actual.object.objectId}],returnByValue:true,functionDeclaration:'function(hit){return this===hit||this.contains(hit)}'})
+    return match.result.value===true
+  }
+
   async fillElement(ref: string, value: string): Promise<ElementGeometry> {
     const backendNodeId = this.refMap.get(ref)
     if (!backendNodeId) {
@@ -812,6 +913,7 @@ export class BrowserCDP {
     }
 
     try {
+      await this.beforeActionInput()
       // Focus the element first
       await this.send('DOM.focus', { backendNodeId })
 
@@ -853,6 +955,7 @@ export class BrowserCDP {
   }
 
   async selectOption(ref: string, value: string): Promise<ElementGeometry> {
+    await this.beforeActionInput()
     const backendNodeId = this.refMap.get(ref)
     if (!backendNodeId) {
       throw new Error(`Element ${ref} not found. Run browser_snapshot first to get current element refs.`)
@@ -909,13 +1012,23 @@ export class BrowserCDP {
 
           const isNativeSelect = this instanceof HTMLSelectElement || String(this.tagName || '').toLowerCase() === 'select'
           if (isNativeSelect) {
-            this.value = val
+            // AX snapshots expose visible labels; their underlying option
+            // values may be opaque IDs. Prefer an exact value, otherwise only
+            // accept one matching label. Never clear an existing selection
+            // just because a model supplied an unknown/ambiguous option.
+            const enabledOptions = Array.from(this.options).filter(option => !option.disabled && !option.parentElement?.disabled)
+            const valueMatches = enabledOptions.filter(option => option.value === val)
+            const matches = valueMatches.length > 0 ? valueMatches : enabledOptions.filter(option => normalize(option.label || option.textContent) === desired)
+            if (this.disabled || matches.length !== 1) {
+              return { ok: false, strategy: 'native', reason: 'option is missing, disabled or ambiguous', selectedValue: this.value || '', selectedText: '' }
+            }
+            const target = matches[0]
+            this.value = target.value
             this.dispatchEvent(new Event('input', { bubbles: true }))
             this.dispatchEvent(new Event('change', { bubbles: true }))
 
             const selected = this.selectedOptions && this.selectedOptions.length > 0 ? this.selectedOptions[0] : null
-            const selectedValue = selected ? (selected.value || selected.textContent || '') : (this.value || '')
-            const verified = hasDesired(selectedValue) || hasDesired(this.value)
+            const verified = selected === target && this.value === target.value
             return {
               ok: verified,
               strategy: 'native',

@@ -1,0 +1,20 @@
+## 页面快照
+URL: https://docs.example.com/settings
+Title: 设置 - 示例文档站
+Elements: 7 (combobox:1, button:2, link:3, heading:1)
+Focused ref: none, disabled: 0
+
+Elements (7):
+  @e1 [heading] "通用设置"
+  @e2 [combobox] "界面语言" value="en-US"
+  @e3 [button] "保存设置"
+  @e4 [button] "恢复默认"
+  @e5 [link] "账号安全"
+  @e6 [link] "通知偏好"
+  @e7 [link] "外观主题"
+
+## 任务
+把界面语言切换为简体中文（选项值 zh-CN）
+
+## 已执行动作
+（空）

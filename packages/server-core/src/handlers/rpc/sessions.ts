@@ -635,7 +635,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Respond to a permission request (bash command approval)
   // Returns true if the response was delivered, false if agent/session is gone
-  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (ctx, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
+  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (ctx, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: import("@polo-ai/shared/protocol").PermissionResponseOptions) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     // Responding can resume agent processing: never allowed in the offline
     // read-only view.
@@ -643,7 +643,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // R38-3: post-authorization CAS before resuming agent work.
     const respondScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
     assertSessionScopeTokenCurrent(respondScopeToken)
-    return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
+    return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow, options)
   })
 
   // Respond to a credential request (secure auth input)

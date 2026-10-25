@@ -13,6 +13,7 @@
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
+import type { BrowserFastDeciderFn } from './browser-fast-decider.ts';
 import type { AuthRequest, RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import { createHash } from 'node:crypto';
 import { debug } from '../utils/debug.ts';
@@ -79,6 +80,13 @@ export interface SessionScopedToolCallbacks {
    * with the session's bound browser instance.
    */
   browserPaneFns?: BrowserPaneFns;
+
+  /**
+   * Browser fast decider for `browser_tool suggest` (POO-113 fast layer).
+   * Set by the session manager; resolves endpoints from the managed config
+   * + LLM connection credentials. Optional — suggest degrades gracefully.
+   */
+  browserFastDecider?: BrowserFastDeciderFn;
 
   /** Set labels on a session (defaults to current). */
   setSessionLabelsFn?: (sessionId: string | undefined, labels: string[]) => void | Promise<void>;

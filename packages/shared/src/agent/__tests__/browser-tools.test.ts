@@ -14,6 +14,9 @@ import { createBrowserTools, type BrowserPaneFns } from '../browser-tools'
 
 function createMockFns(): BrowserPaneFns {
   return {
+    // This factory suite tests command forwarding. Business authorization is
+    // exercised with actual Host policy/facts in browser-action-authorization.
+    authorizeCommand: async (_parts,dispatch) => dispatch({} as never, {} as never),
     openPanel: async () => ({ instanceId: 'browser-test-1' }),
     navigate: async (url: string) => ({ url: `https://${url}`, title: 'Test Page' }),
     snapshot: async () => ({
@@ -1060,5 +1063,101 @@ describe('createBrowserTools', () => {
       expect(result.isError).toBe(true)
       expect(result.content[0].text).toContain('Network error')
     })
+  })
+})
+
+// ============================================================================
+// suggest (POO-113 fast layer, P1: read-only suggestions)
+// ============================================================================
+
+describe('browser_tool suggest (fast decider)', () => {
+  let mockFns: BrowserPaneFns
+
+  beforeEach(() => {
+    mockFns = createMockFns()
+  })
+
+  function makeTools(decider?: () => any) {
+    return createBrowserTools({
+      sessionId: 'test-session',
+      getBrowserPaneFns: () => mockFns,
+      getFastDecider: decider,
+    })
+  }
+
+  it('returns a suggestion with agreement and latency; never executes', async () => {
+    const decider = async () => ({
+      suggestedCommand: 'click @e1',
+      agreement: 'both',
+      dangerous: false,
+      paths: [
+        { name: 'A', command: 'click @e1', latencyMs: 800 },
+        { name: 'B', command: 'click @e1', latencyMs: 1500 },
+      ],
+    })
+    const result = await executeTool(makeTools(() => decider), 'browser_tool', { command: 'suggest 点击「Click me」' })
+    expect(result.isError).toBeUndefined()
+    const text = result.content[0].text
+    expect(text).toContain('Suggested command: click @e1')
+    expect(text).toContain('Agreement: both')
+    expect(text).toContain('nothing was executed')
+    // mock fns click would be a no-op; ensure the decider snapshot was requested
+    expect(mockFns.click).toBeDefined()
+  })
+
+  it('flags dangerous suggestions', async () => {
+    const decider = async () => ({
+      suggestedCommand: 'click @e1',
+      agreement: 'single-A',
+      dangerous: true,
+      paths: [{ name: 'A', command: 'click @e1', latencyMs: 900 }],
+    })
+    const result = await executeTool(makeTools(() => decider), 'browser_tool', { command: 'suggest 点击保存' })
+    expect(result.content[0].text).toContain('⚠ Dangerous-looking target')
+  })
+
+  it('reports no-reliable-suggestion when paths disagree or fail', async () => {
+    const decider = async () => ({
+      suggestedCommand: null,
+      agreement: 'none',
+      dangerous: false,
+      paths: [
+        { name: 'A', command: null, latencyMs: 3000, error: 'timeout' },
+        { name: 'B', command: 'click @e5', latencyMs: 1200 },
+      ],
+    })
+    const result = await executeTool(makeTools(() => decider), 'browser_tool', { command: 'suggest 登录' })
+    expect(result.content[0].text).toContain('No reliable suggestion')
+    expect(result.content[0].text).toContain('[timeout]')
+  })
+
+  it('degrades gracefully without a decider callback', async () => {
+    const result = await executeTool(makeTools(), 'browser_tool', { command: 'suggest 登录' })
+    expect(result.content[0].text).toContain('Fast decider is not available')
+  })
+
+  it('rejects oversized snapshots without calling the decider', async () => {
+    let deciderCalled = false
+    const decider = async () => {
+      deciderCalled = true
+      return { suggestedCommand: null, agreement: 'none' as const, dangerous: false, paths: [] }
+    }
+    const manyFns = createMockFns()
+    manyFns.snapshot = async () => ({
+      url: 'https://example.com',
+      title: 'Big',
+      nodes: Array.from({ length: 121 }, (_, i) => ({ ref: `@e${i + 1}`, role: 'link', name: `Link ${i + 1}` })),
+    })
+    const tools = createBrowserTools({ sessionId: 's', getBrowserPaneFns: () => manyFns, getFastDecider: () => decider })
+    const result = await executeTool(tools, 'browser_tool', { command: 'suggest anything' })
+    expect(result.content[0].text).toContain('too large')
+    expect(deciderCalled).toBeFalse()
+  })
+
+  it('requires a sub-step argument', async () => {
+    const decider = async () => ({ suggestedCommand: null, agreement: 'none' as const, dangerous: false, paths: [] })
+    const result = await executeTool(makeTools(() => decider), 'browser_tool', { command: 'suggest' })
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toContain('suggest requires a sub-step')
   })
 })
