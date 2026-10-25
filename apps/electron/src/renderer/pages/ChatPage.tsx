@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtomValue, useSetAtom, getDefaultStore } from 'jotai'
 import { AlertCircle, Globe, Copy, RefreshCw, Link2Off, Info } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
@@ -25,6 +25,7 @@ import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
 import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
+import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
@@ -282,6 +283,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setAttachmentsValue(attachments)
     onAttachmentsChange(sessionId, attachments)
   }, [sessionId, onAttachmentsChange])
+
+  // POO-135: picked web element references — a per-session jotai draft (no
+  // persistence: an unsent reference dies with the session, matching the
+  // prototype). Reads feed the composer chips; writes come from chip removal.
+  const elementRefsValue = useAtomValue(
+    React.useMemo(() => elementDraftRefsAtomFamily(sessionId), [sessionId]),
+  )
+  const handleElementRefsChange = React.useCallback((refs: import('@polo-ai/core/types').WebElementReference[]) => {
+    getDefaultStore().set(elementDraftRefsAtomFamily(sessionId), refs)
+  }, [sessionId])
 
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>
@@ -746,6 +757,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onInputChange={handleInputChange}
                 attachmentsValue={attachmentsValue}
                 onAttachmentsChange={handleAttachmentsChange}
+                elementReferencesValue={elementRefsValue}
+                onElementReferencesChange={handleElementRefsChange}
                 sources={enabledSources}
                 skills={skills}
                 sessionStatuses={sessionStatuses}
@@ -801,9 +814,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           <ChatDisplay
             ref={chatDisplayRef}
             session={session}
-            onSendMessage={(message, attachments, skillSlugs, kbCollectionIds) => {
+            onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences) => {
               if (session) {
-                onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds)
+                onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences)
               }
             }}
             onOpenFile={handleOpenFile}
@@ -822,6 +835,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onInputChange={handleInputChange}
             attachmentsValue={attachmentsValue}
             onAttachmentsChange={handleAttachmentsChange}
+            elementReferencesValue={elementRefsValue}
+            onElementReferencesChange={handleElementRefsChange}
             sources={enabledSources}
             skills={skills}
             labels={labels}
