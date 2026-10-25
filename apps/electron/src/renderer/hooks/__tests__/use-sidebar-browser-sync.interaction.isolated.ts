@@ -285,6 +285,22 @@ describe('useSidebarBrowserSync (POO-135)', () => {
     expect(toastInfo).toHaveBeenCalledWith('browserPane.elementPicker.cancelledNavigation')
   })
 
+  it('a cancelled event only clears the picking state of ITS instance (r1)', () => {
+    mount('sess-a')
+    defaultStore.set(activeElementPickingAtom, {
+      instanceId: 'inst-1',
+      targetSessionId: 'sess-a',
+      originSessionId: 'sess-a',
+    })
+
+    // Stale cancellation from a DIFFERENT instance must not clear inst-1's UI.
+    pickerHandler!({ kind: 'cancelled', reason: 'user', instanceId: 'inst-stale' })
+    expect(defaultStore.get(activeElementPickingAtom)).not.toBeNull()
+
+    pickerHandler!({ kind: 'cancelled', reason: 'user', instanceId: 'inst-1' })
+    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+  })
+
   it('terminating the LAST visible browser closes the slot and toasts with a reopen action', async () => {
     listedInstances = [makeInstance({ id: 'inst-1' })]
     mount('sess-a')

@@ -405,7 +405,8 @@ export interface SendMessageOptions {
    */
   elementReferences?: WebElementReference[]
   /**
-   * the SAME send-time retrieval as `kbReferences`, staged by the
+   * Resolved KB model context for this turn — assembled server-side from the
+   * SAME send-time retrieval as `kbReferences`, staged by the
    * SessionManager for a ONE-SHOT injection into this turn's model prompt.
    * Internal only — never persisted, never part of the message record, and a
    * client-supplied value is always dropped.

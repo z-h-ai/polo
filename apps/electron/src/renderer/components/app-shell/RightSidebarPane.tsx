@@ -14,9 +14,15 @@
  *
  * A browser popped out to a standalone window shows a placeholder card in the
  * slot (「已在独立窗口中打开」+ 收回); system-closing that popup returns the
- * browser here (use-sidebar-browser-sync). Narrow viewports keep the existing
- * compact single-column rule (the whole right sidebar, canvas included, is
- * hidden by AppShell's isAutoCompact).
+ * browser here (use-sidebar-browser-sync, mounted at the AppShell layer so it
+ * keeps subscribing even when this pane is unmounted). Every route off the
+ * embedded container (tab switch, narrow viewport, session switch, hide)
+ * detaches the native view in Main (unembed) so it cannot cover window
+ * content. A popped-out slot shows a read-only status bar (single active
+ * surface). 「隐藏浏览器」 hides the slot while preserving the instance object
+ * (spec suggested behavior 4). Narrow viewports keep the existing compact
+ * single-column rule (the whole right sidebar, canvas included, is hidden by
+ * AppShell's isAutoCompact).
  */
 
 import * as React from 'react'
@@ -31,6 +37,7 @@ import {
   ArrowRight,
   Crosshair,
   ExternalLink,
+  EyeOff,
   Globe,
   LayoutGrid,
   PictureInPicture2,
@@ -66,7 +73,6 @@ import {
 } from '@/atoms/sidebar-browser'
 import { browserInstancesMapAtom } from '@/atoms/browser-pane'
 import { sessionMetaMapAtom } from '@/atoms/sessions'
-import { useSidebarBrowserSync } from '@/hooks/use-sidebar-browser-sync'
 
 /** Fallback width-atom key when only the browser slot is open (no session canvas key). */
 export const SIDEBAR_ONLY_WIDTH_KEY = 'sidebar-browser-only'
@@ -89,6 +95,12 @@ interface RightSidebarPaneProps {
   activeWorkspaceId: string | null
   remoteWorkspaceId: string | null
   onSelectSession: (sessionId: string) => void
+  /**
+   * POO-135 r1: terminate from the AppShell-resident sync hook — the hook
+   * lives above the pane so its event subscriptions survive narrow viewports
+   * and a closed sidebar slot.
+   */
+  onTerminate: (instance: BrowserInstanceInfo) => Promise<void>
 }
 
 export function RightSidebarPane({
@@ -100,6 +112,7 @@ export function RightSidebarPane({
   activeWorkspaceId,
   remoteWorkspaceId,
   onSelectSession,
+  onTerminate,
 }: RightSidebarPaneProps) {
   const { t } = useTranslation()
   const [widthRatio, setWidthRatio] = useAtom(
@@ -110,17 +123,42 @@ export function RightSidebarPane({
 
   const browserSlotOpen = useAtomValue(sidebarBrowserOpenAtom)
   const storedTab = useAtomValue(rightPaneTabAtom)
+  const allBrowserInstances = useAtomValue(browserInstancesMapAtom)
+
+  // POO-135 r1: the browser tab stays reachable while instances are merely
+  // hidden (slot closed, objects preserved) so they can be shown again.
+  const visibleBrowserCount = useMemo(
+    () =>
+      filterSidebarBrowserInstances(
+        Array.from(allBrowserInstances.values()),
+        currentSessionId,
+        activeWorkspaceId,
+        remoteWorkspaceId,
+      ).length,
+    [allBrowserInstances, currentSessionId, activeWorkspaceId, remoteWorkspaceId],
+  )
+  const browserReachable = browserSlotOpen || visibleBrowserCount > 0
 
   // The pane exists when either content kind is open; with only one kind open
   // it always shows that kind regardless of the stored tab.
-  const effectiveTab = canvasApp && browserSlotOpen ? storedTab : browserSlotOpen ? 'browser' : 'canvas'
+  const effectiveTab = canvasApp && browserReachable ? storedTab : browserReachable ? 'browser' : 'canvas'
 
-  const { terminateBrowser } = useSidebarBrowserSync({
-    currentSessionId,
-    activeWorkspaceId,
-    remoteWorkspaceId,
-    onSelectSession,
-  })
+  /** POO-135 r1: leaving the browser content (tab/instance switch) disarms an
+   * active picker — the page-side picking never silently re-points. */
+  const disarmArmedPicker = useCallback(() => {
+    const store = getDefaultStore()
+    const picking = store.get(activeElementPickingAtom)
+    if (!picking) return
+    store.set(activeElementPickingAtom, null)
+    void window.electronAPI?.browserPane?.setElementPicking?.(picking.instanceId, false).catch(() => {})
+  }, [])
+
+  const handleTabSwitch = useCallback((tab: 'canvas' | 'browser') => {
+    disarmArmedPicker()
+    const store = getDefaultStore()
+    if (tab === 'browser') store.set(sidebarBrowserOpenAtom, true)
+    store.set(rightPaneTabAtom, tab)
+  }, [disarmArmedPicker])
 
   // Sash drag: pointer x → ratio of the shell row — same contract as
   // CanvasPane (content-box basis; see the measurement comment there).
@@ -222,8 +260,8 @@ export function RightSidebarPane({
         />
       </div>
       <div className="h-full w-full min-w-0 flex flex-col overflow-hidden rounded-[8px] border bg-background">
-        {canvasApp && browserSlotOpen && (
-          <RightPaneTabs tab={effectiveTab} />
+        {canvasApp && browserReachable && (
+          <RightPaneTabs tab={effectiveTab} onSwitch={handleTabSwitch} />
         )}
         {effectiveTab === 'canvas' && canvasApp && canvasSessionId ? (
           <CanvasPaneCard sessionId={canvasSessionId} app={canvasApp} />
@@ -233,7 +271,8 @@ export function RightSidebarPane({
             activeWorkspaceId={activeWorkspaceId}
             remoteWorkspaceId={remoteWorkspaceId}
             onSelectSession={onSelectSession}
-            onTerminate={terminateBrowser}
+            onTerminate={onTerminate}
+            onSwitchAway={disarmArmedPicker}
           />
         )}
       </div>
@@ -242,9 +281,8 @@ export function RightSidebarPane({
 }
 
 /** Layer 1 tab strip — only rendered when BOTH content kinds are open. */
-function RightPaneTabs({ tab }: { tab: 'canvas' | 'browser' }) {
+function RightPaneTabs({ tab, onSwitch }: { tab: 'canvas' | 'browser'; onSwitch: (tab: 'canvas' | 'browser') => void }) {
   const { t } = useTranslation()
-  const setTab = useSetAtom(rightPaneTabAtom)
   return (
     <div
       className="px-2 py-1.5 bg-muted/50 border-b flex items-center gap-1 shrink-0"
@@ -254,7 +292,7 @@ function RightPaneTabs({ tab }: { tab: 'canvas' | 'browser' }) {
         type="button"
         data-testid="right-pane-tab-canvas"
         aria-pressed={tab === 'canvas'}
-        onClick={() => setTab('canvas')}
+        onClick={() => onSwitch('canvas')}
         className={cn(
           'inline-flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[12px] font-medium transition-colors',
           tab === 'canvas'
@@ -269,7 +307,7 @@ function RightPaneTabs({ tab }: { tab: 'canvas' | 'browser' }) {
         type="button"
         data-testid="right-pane-tab-browser"
         aria-pressed={tab === 'browser'}
-        onClick={() => setTab('browser')}
+        onClick={() => onSwitch('browser')}
         className={cn(
           'inline-flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[12px] font-medium transition-colors',
           tab === 'browser'
@@ -290,6 +328,8 @@ interface SidebarBrowserSectionProps {
   remoteWorkspaceId: string | null
   onSelectSession: (sessionId: string) => void
   onTerminate: (instance: BrowserInstanceInfo) => Promise<void>
+  /** POO-135 r1: disarm an armed picker before the shown instance changes. */
+  onSwitchAway: () => void
 }
 
 /** The browser slot: layer-2 header over the embedded container / placeholder / empty state. */
@@ -299,6 +339,7 @@ function SidebarBrowserSection({
   remoteWorkspaceId,
   onSelectSession,
   onTerminate,
+  onSwitchAway,
 }: SidebarBrowserSectionProps) {
   const { t } = useTranslation()
   const allInstances = useAtomValue(browserInstancesMapAtom)
@@ -325,9 +366,9 @@ function SidebarBrowserSection({
     const api = window.electronAPI?.browserPane
     if (!api) return
     try {
-      // Same creation source as an in-chat session browser: bound to the
-      // current session so ownership isolation applies from birth.
-      const id = await api.create({ show: false, bindToSessionId: currentSessionId ?? undefined })
+      // Spec v0.7 suggested behavior 5: a manual create stays workspace-
+      // visible and is NOT bound to the current session (no forced isolation).
+      const id = await api.create({ show: false })
       const store = getDefaultStore()
       store.set(sidebarBrowserOpenAtom, true)
       store.set(sidebarBrowserInstanceIdAtom, id)
@@ -335,7 +376,7 @@ function SidebarBrowserSection({
     } catch {
       toast.error(t('toast.failedToCreateBrowser'))
     }
-  }, [currentSessionId, t])
+  }, [t])
 
   const handleEmbed = useCallback(async (id: string) => {
     try {
@@ -352,6 +393,30 @@ function SidebarBrowserSection({
       toast.error(t('toast.failedToDetachBrowser'))
     }
   }, [t])
+
+  /** POO-135 r1 (spec suggested behavior 4): hide without destroying — the
+   * instance object, its page and its history all stay alive in Main. */
+  const handleHide = useCallback(async (id: string) => {
+    const store = getDefaultStore()
+    onSwitchAway()
+    try {
+      await window.electronAPI?.browserPane?.unembed?.(id)
+    } catch {
+      // Main also unhooks the view when the container unmounts.
+    }
+    store.set(sidebarBrowserOpenAtom, false)
+    store.set(rightPaneTabAtom, 'canvas')
+    toast.info(t('browserPane.sidebar.hiddenToast'), {
+      duration: 8000,
+      action: {
+        label: t('browserPane.sidebar.show'),
+        onClick: () => {
+          store.set(sidebarBrowserOpenAtom, true)
+          store.set(rightPaneTabAtom, 'browser')
+        },
+      },
+    })
+  }, [onSwitchAway, t])
 
   if (!instance) {
     return <SidebarBrowserEmptyState onCreate={handleCreate} />
@@ -379,7 +444,12 @@ function SidebarBrowserSection({
             aria-label={t('browserPane.sidebar.selectInstance')}
             data-testid="sidebar-browser-instance-select"
             value={instance.id}
-            onChange={(e) => setSelectedId(e.target.value)}
+            onChange={(e) => {
+              // POO-135 r1: switching instances disarms the armed picker —
+              // the page-side picking never silently re-points.
+              onSwitchAway()
+              setSelectedId(e.target.value)
+            }}
             className="shrink-0 max-w-[110px] rounded-[6px] border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground-80 outline-none"
           >
             {visible.map((item) => (
@@ -414,6 +484,15 @@ function SidebarBrowserSection({
         )}
         <button
           type="button"
+          data-testid="sidebar-browser-hide"
+          title={t('browserPane.sidebar.hide')}
+          onClick={() => void handleHide(instance.id)}
+          className="shrink-0 inline-flex items-center justify-center rounded-[6px] p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          <EyeOff className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
           data-testid="sidebar-browser-terminate"
           title={t('browserPane.sidebar.terminate')}
           onClick={() => void onTerminate(instance)}
@@ -423,13 +502,20 @@ function SidebarBrowserSection({
         </button>
       </div>
 
-      {/* Layer 2: navigation + element picking. */}
-      <BrowserNavLayer
-        instance={instance}
-        targetSessionId={targetSessionId}
-        currentSessionId={currentSessionId}
-        isPicking={isPicking}
-      />
+      {/* Layer 2: navigation + element picking — embedded only. A popped-out
+          browser's single active surface is the popup window; the slot keeps a
+          read-only status bar with a show-window entry (spec: one active
+          location). */}
+      {instance.hostMode === 'popup' ? (
+        <PopupStatusBar instance={instance} />
+      ) : (
+        <BrowserNavLayer
+          instance={instance}
+          targetSessionId={targetSessionId}
+          currentSessionId={currentSessionId}
+          isPicking={isPicking}
+        />
+      )}
 
       {instance.hostMode === 'popup' ? (
         <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-2 p-4 text-center" data-testid="sidebar-browser-popup-placeholder">
@@ -590,10 +676,46 @@ function BrowserNavLayer({ instance, targetSessionId, currentSessionId, isPickin
 }
 
 /**
+ * POO-135 r1: read-only status bar shown while the browser is popped out —
+ * the popup window is the single active surface; the slot offers showing it.
+ */
+function PopupStatusBar({ instance }: { instance: BrowserInstanceInfo }) {
+  const { t } = useTranslation()
+  return (
+    <div
+      className="px-2 py-1.5 border-b bg-background/60 flex items-center gap-2 shrink-0"
+      data-testid="sidebar-browser-popup-status"
+    >
+      <span
+        className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground"
+        title={instance.url}
+        aria-label={t('browserPane.sidebar.currentUrl')}
+      >
+        {instance.url || t('browserPane.sidebar.urlPlaceholder')}
+      </span>
+      <button
+        type="button"
+        data-testid="sidebar-browser-show-window"
+        title={t('browserPane.sidebar.showWindow')}
+        onClick={() => void window.electronAPI?.browserPane?.focus?.(instance.id)}
+        className="shrink-0 inline-flex items-center gap-1 rounded-[6px] border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground-80 transition-colors hover:text-foreground"
+      >
+        <ExternalLink className="w-3 h-3" />
+        {t('browserPane.sidebar.showWindow')}
+      </button>
+    </div>
+  )
+}
+
+/**
  * The embedded browser container: a purely visual mount point. The actual
  * WebContentsView lives in Main, layered over this window at the bounds we
  * report — ResizeObserver keeps those bounds tracking the pane (open/close
  * animation included).
+ *
+ * POO-135 r1: on unmount the view is detached in Main (unembed) — every
+ * route off this container (tab switch, narrow viewport, session switch,
+ * hide) must stop the native view from covering window content.
  */
 function EmbeddedBrowserContainer({ instanceId }: { instanceId: string }) {
   const containerRef = React.useRef<HTMLDivElement | null>(null)
@@ -621,6 +743,7 @@ function EmbeddedBrowserContainer({ instanceId }: { instanceId: string }) {
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', report)
+      void window.electronAPI?.browserPane?.unembed?.(instanceId).catch(() => {})
     }
   }, [instanceId])
 

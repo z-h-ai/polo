@@ -95,8 +95,9 @@ mock.module('motion/react', () => ({
 // NOTE: react-dom is intentionally NOT mocked — @testing-library/react reads
 // act internals from it. createPortal renders the (inert) drag mask to body.
 
+const toastInfo = mock((_msg: string, _opts?: unknown) => {})
 mock.module('sonner', () => ({
-  toast: { success: () => {}, error: () => {}, warning: () => {}, info: () => {} },
+  toast: { success: () => {}, error: () => {}, warning: () => {}, info: toastInfo },
 }))
 
 // Relative to THIS test file (bun resolves mock.module specifiers from here).
@@ -110,15 +111,13 @@ mock.module('@/atoms/sessions', () => ({
   sessionMetaMapAtom: sessionMetaMapAtomRef,
 }))
 
+// r1: terminate flows in as the AppShell-resident hook's control (prop).
 const terminateBrowser = mock((_instance: unknown) => Promise.resolve())
-mock.module('@/hooks/use-sidebar-browser-sync', () => ({
-  useSidebarBrowserSync: () => ({ terminateBrowser }),
-}))
 
 // --- electronAPI.browserPane capture -----------------------------------------
 
 const apiCalls: Record<string, unknown[][]> = {
-  create: [], navigate: [], embed: [], detachToPopup: [],
+  create: [], navigate: [], embed: [], detachToPopup: [], unembed: [], focus: [],
   destroy: [], setElementPicking: [], goBack: [], goForward: [], reload: [],
 }
 let nextInstanceId = 'inst-created'
@@ -136,6 +135,8 @@ Object.defineProperty(window, 'electronAPI', {
       navigate: async (...args: unknown[]) => { apiCalls.navigate.push(args) },
       embed: async (...args: unknown[]) => { apiCalls.embed.push(args) },
       detachToPopup: async (...args: unknown[]) => { apiCalls.detachToPopup.push(args) },
+      unembed: async (...args: unknown[]) => { apiCalls.unembed.push(args) },
+      focus: async (...args: unknown[]) => { apiCalls.focus.push(args) },
       destroy: async (...args: unknown[]) => { apiCalls.destroy.push(args) },
       setElementPicking: async (...args: unknown[]) => { apiCalls.setElementPicking.push(args) },
       goBack: async (...args: unknown[]) => { apiCalls.goBack.push(args) },
@@ -182,6 +183,7 @@ function mountPane(overrides: Record<string, unknown> = {}) {
     activeWorkspaceId: null,
     remoteWorkspaceId: null,
     onSelectSession: () => {},
+    onTerminate: terminateBrowser,
     ...overrides,
   }
   return render(createElement(RightSidebarPane, props as any))
@@ -200,6 +202,7 @@ afterEach(() => {
   storeValues.set(sessionMetaMapAtomRef, new Map())
   for (const key of Object.keys(apiCalls)) apiCalls[key].length = 0
   terminateBrowser.mockClear()
+  toastInfo.mockClear()
   nextInstanceId = 'inst-created'
 })
 
@@ -296,7 +299,7 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     rerender(createElement(RightSidebarPane, {
       layoutKey: 'sess-a', canvasSessionId: null, canvasApp: null, getLayoutRect: () => null,
       currentSessionId: 'sess-a', activeWorkspaceId: null, remoteWorkspaceId: null,
-      onSelectSession: () => {},
+      onSelectSession: () => {}, onTerminate: terminateBrowser,
     } as any))
     const pickActive = getByTestId('sidebar-browser-pick-element') as HTMLButtonElement
     expect(pickActive.getAttribute('aria-pressed')).toBe('true')
@@ -333,13 +336,14 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     await waitFor(() => expect(apiCalls.embed).toEqual([['inst-1']]))
   })
 
-  it('no browser at all: the empty state creates one bound to the CURRENT session, embedded', async () => {
+  it('no browser at all: the empty state creates one WORKSPACE-visible (not session-bound), embedded (r1)', async () => {
     const { getByTestId, queryByTestId } = mountPane({ currentSessionId: 'sess-a' })
 
     expect(getByTestId('sidebar-browser-empty-state')).toBeTruthy()
     fireEvent.click(getByTestId('sidebar-browser-create'))
 
-    await waitFor(() => expect(apiCalls.create).toEqual([[{ show: false, bindToSessionId: 'sess-a' }]]))
+    // Spec v0.7 suggested behavior 5: no bindToSessionId — visible workspace-wide.
+    await waitFor(() => expect(apiCalls.create).toEqual([[{ show: false }]]))
     await waitFor(() => expect(apiCalls.embed).toEqual([['inst-created']]))
     expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(true)
     expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-created')
@@ -356,5 +360,91 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     expect(select.value).toBe('inst-1')
     fireEvent.change(select, { target: { value: 'inst-2' } })
     expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
+  })
+
+  it('popped-out slot: layer 2 collapses to a read-only status bar with a show-window entry (r1)', async () => {
+    setInstances([makeInstance({ hostMode: 'popup', isVisible: true })])
+    const { getByTestId, queryByTestId } = mountPane({ currentSessionId: 'sess-a' })
+
+    // No navigation, no picking — the popup window is the single active surface.
+    expect(queryByTestId('sidebar-browser-nav-layer')).toBeNull()
+    expect(queryByTestId('sidebar-browser-pick-element')).toBeNull()
+    expect(getByTestId('sidebar-browser-popup-status').textContent).toContain('https://example.com/page')
+
+    fireEvent.click(getByTestId('sidebar-browser-show-window'))
+    await waitFor(() => expect(apiCalls.focus).toEqual([['inst-1']]))
+  })
+
+  it('hide keeps the instance alive: unembed + slot closed + toast with a show action (r1)', async () => {
+    setInstances([makeInstance()])
+    const { getByTestId } = mountPane({ currentSessionId: 'sess-a' })
+
+    fireEvent.click(getByTestId('sidebar-browser-hide'))
+
+    await waitFor(() => expect(apiCalls.unembed).toEqual([['inst-1']]))
+    // Slot closes (back to canvas when one is open) but the object is preserved.
+    expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(false)
+    expect(defaultStore.get(rightPaneTabAtom)).toBe('canvas')
+    expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-1')
+    expect(toastInfo).toHaveBeenCalledTimes(1)
+    const [message, opts] = toastInfo.mock.calls[0]
+    expect(message).toBe('browserPane.sidebar.hiddenToast')
+    const action = (opts as any).action
+    expect(action.label).toBe('browserPane.sidebar.show')
+
+    // The toast action restores the slot on the browser tab.
+    action.onClick()
+    expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(true)
+    expect(defaultStore.get(rightPaneTabAtom)).toBe('browser')
+  })
+
+  it('switching to the canvas tab disarms an armed picker (r1)', async () => {
+    setInstances([makeInstance({ ownerSessionId: 'sess-a' })])
+    defaultStore.set(rightPaneTabAtom, 'browser')
+    defaultStore.set(activeElementPickingAtom, {
+      instanceId: 'inst-1',
+      targetSessionId: 'sess-a',
+      originSessionId: 'sess-a',
+    })
+    const { getByTestId } = mountPane({
+      currentSessionId: 'sess-a',
+      canvasSessionId: 'sess-a',
+      canvasApp: { kind: 'preview' } as any,
+    })
+
+    fireEvent.click(getByTestId('right-pane-tab-canvas'))
+
+    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+    expect(apiCalls.setElementPicking).toEqual([['inst-1', false]])
+  })
+
+  it('switching instances via the switcher disarms an armed picker (r1)', async () => {
+    setInstances([
+      makeInstance({ id: 'inst-1', ownerSessionId: 'sess-a' }),
+      makeInstance({ id: 'inst-2', ownerSessionId: null }),
+    ])
+    defaultStore.set(activeElementPickingAtom, {
+      instanceId: 'inst-1',
+      targetSessionId: 'sess-a',
+      originSessionId: 'sess-a',
+    })
+    const { getByTestId } = mountPane({ currentSessionId: 'sess-a' })
+
+    const select = getByTestId('sidebar-browser-instance-select') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: 'inst-2' } })
+
+    expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
+    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+    expect(apiCalls.setElementPicking).toEqual([['inst-1', false]])
+  })
+
+  it('unmounting the embedded container unhooks the native view (unembed) (r1)', async () => {
+    setInstances([makeInstance()])
+    const { getByTestId, unmount } = mountPane({ currentSessionId: 'sess-a' })
+    expect(getByTestId('sidebar-browser-embedded-container')).toBeTruthy()
+
+    unmount()
+
+    await waitFor(() => expect(apiCalls.unembed).toEqual([['inst-1']]))
   })
 })

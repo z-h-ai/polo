@@ -137,6 +137,7 @@ import { FabNewChat } from "./FabNewChat"
 import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
 import { RightSidebarPane, SIDEBAR_ONLY_WIDTH_KEY } from "./RightSidebarPane"
 import { sidebarBrowserOpenAtom } from "@/atoms/sidebar-browser"
+import { useSidebarBrowserSync } from "@/hooks/use-sidebar-browser-sync"
 import { canvasPaneAppAtomFamily } from "@/atoms/canvas-pane"
 import { MessagingDialogHost } from "@/components/messaging/MessagingDialogHost"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
@@ -1376,6 +1377,16 @@ function AppShellContent({
   // For remote workspaces, sessions have the remote workspace ID (not the local one),
   // so we match against both the local and remote workspace IDs.
   const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
+  // POO-135 r1: the browser-pane sync hook lives HERE — in the always-mounted
+  // shell, above the right pane — so its browser-pane:* subscriptions
+  // (system-close → re-embed, picker outcomes) survive narrow viewports and a
+  // closed sidebar slot.
+  const { terminateBrowser } = useSidebarBrowserSync({
+    currentSessionId: session.selected ?? null,
+    activeWorkspaceId: activeWorkspaceId ?? null,
+    remoteWorkspaceId: remoteWorkspaceId ?? null,
+    onSelectSession: navigateToSession,
+  })
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
     if (!activeWorkspaceId) return metas.filter(s => !s.hidden)
@@ -3326,6 +3337,7 @@ function AppShellContent({
             activeWorkspaceId={activeWorkspaceId ?? null}
             remoteWorkspaceId={remoteWorkspaceId ?? null}
             onSelectSession={navigateToSession}
+            onTerminate={terminateBrowser}
           />
         )}
 

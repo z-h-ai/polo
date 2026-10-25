@@ -155,11 +155,17 @@ export function useSidebarBrowserSync({
 
     // cancelled: user Esc is silent; host transitions (embed/detach/hide) are
     // visible on their own; navigation gets an explicit toast because the
-    // page the user was picking on is gone.
-    store.set(activeElementPickingAtom, null)
+    // page the user was picking on is gone. Only a cancellation from the
+    // ARMED instance clears the UI — a stale event from a previous instance
+    // must not clear a newer picker (POO-135 r1).
     if (event.reason === 'navigation') {
+      const picking = store.get(activeElementPickingAtom)
+      if (picking?.instanceId === event.instanceId) store.set(activeElementPickingAtom, null)
       toast.info(t('browserPane.elementPicker.cancelledNavigation'))
+      return
     }
+    const picking = store.get(activeElementPickingAtom)
+    if (picking?.instanceId === event.instanceId) store.set(activeElementPickingAtom, null)
   }, [appendDraftReference, t])
 
   // Switching chats while a picker is armed cancels it — the target never
