@@ -3025,9 +3025,9 @@ export default function App() {
     void requestSwitch(productSpaceId)
   }, [requestSwitch])
 
-  const handleRefreshProductSpaces = useCallback(() => {
-    void refreshProductSpaces()
-  }, [refreshProductSpaces])
+  // POO-142: the returned list (or null on failure) is consumed by the
+  // membership-transition banner to release its single-flight busy state.
+  const handleRefreshProductSpaces = useCallback(() => refreshProductSpaces(), [refreshProductSpaces])
 
   const productSpaceContextValue = useMemo<ProductSpaceContextValue | null>(() => {
     if (
@@ -3045,6 +3045,7 @@ export default function App() {
       activeProductSpace: productSpace.activeProductSpace,
       productSpaces: productSpace.productSpaces,
       allProductSpaces: productSpace.allProductSpaces,
+      membershipListVerified: productSpace.membershipListVerified,
       personalProductSpaceId: productSpace.personalProductSpaceId,
       productSpaceContextKey: productSpace.productSpaceContextKey,
       contextVersion: productSpace.contextVersion,
@@ -3078,6 +3079,7 @@ export default function App() {
     productSpace.activeProductSpace,
     productSpace.activeProductSpaceId,
     productSpace.allProductSpaces,
+    productSpace.membershipListVerified,
     productSpace.contextVersion,
     productSpace.personalProductSpaceId,
     productSpace.productSpaceContextKey,
