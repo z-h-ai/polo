@@ -82,6 +82,12 @@ export interface ClaudeContextOptions {
   onAuthRequest: (request: unknown) => void;
   onQuestionRequested?: (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>;
   /**
+   * POO-134: goal_update report channel (Goal turns only). The handler awaits
+   * the host's durable accounting; the generation was snapshotted at tool-call
+   * initiation by the handler and is forwarded as-is.
+   */
+  onGoalUpdateReport?: (report: import('@polo-ai/session-tools-core').GoalUpdateReport, generationAtRequest: number) => void | Promise<void>;
+  /**
    * Tool-call-time generation reader: the
    * request_user_input handler invokes this synchronously at initiation and
    * binds the value immutably into the callback chain.
@@ -102,7 +108,7 @@ export interface ClaudeContextOptions {
  * - Icon management
  */
 export function createClaudeContext(options: ClaudeContextOptions): SessionToolContext {
-  const { sessionId, workspacePath, workspaceId, onPlanSubmitted, onAuthRequest, onQuestionRequested, getTurnGeneration } = options;
+  const { sessionId, workspacePath, workspaceId, onPlanSubmitted, onAuthRequest, onQuestionRequested, onGoalUpdateReport, getTurnGeneration } = options;
   const sessionStorage = options.sessionStorage ?? defaultWorkspaceSessionStorage;
 
   // File system implementation
@@ -127,6 +133,7 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     onPlanSubmitted,
     onAuthRequest: (request) => onAuthRequest(request),
     ...(onQuestionRequested ? { onQuestionRequested } : {}),
+    ...(onGoalUpdateReport ? { onGoalUpdateReport } : {}),
   };
 
   // Validators implementation

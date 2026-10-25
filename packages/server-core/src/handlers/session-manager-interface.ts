@@ -25,6 +25,7 @@ import type {
   QuestionRequest,
   QuestionResolution,
   QuestionResolutionResult,
+  GoalProjection,
 } from '@polo-ai/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@polo-ai/shared/sessions'
 import type { EventSink } from '../transport'
@@ -102,6 +103,12 @@ export interface ISessionManager {
   ): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   cancelAllProcessing(): Promise<void>
+  // POO-134: Goal lifecycle commands (server-authoritative; all fail closed
+  // against unknown/stale/terminal Goal states).
+  goalPause(sessionId: string): Promise<{ ok: boolean; flushed: boolean; error?: string }>
+  goalResume(sessionId: string): Promise<{ ok: boolean; error?: string }>
+  goalEnd(sessionId: string): Promise<{ ok: boolean; error?: string }>
+  goalProjection(sessionId: string): GoalProjection | undefined
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(
     taskId: string,

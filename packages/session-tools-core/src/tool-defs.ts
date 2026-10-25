@@ -37,6 +37,8 @@ import {
 import { handleCredentialPrompt } from './handlers/credential-prompt.ts';
 import { handleRequestUserInput } from './handlers/request-user-input.ts';
 import { RequestUserInputArgsSchema, REQUEST_USER_INPUT_OTHER_OPTION_ID } from './question-types.ts';
+import { handleGoalUpdate } from './handlers/goal-update.ts';
+import { GOAL_UPDATE_TOOL_NAME, GoalUpdateArgsSchema } from './goal-types.ts';
 import { handleUpdatePreferences } from './handlers/update-preferences.ts';
 import { handleTransformData } from './handlers/transform-data.ts';
 import { handleRenderUi } from './handlers/render-ui.ts';
@@ -846,6 +848,19 @@ Use this ONLY for product-level decisions that affect the user's results or perm
 
 **IMPORTANT:** After calling this tool, execution pauses until the user answers or skips. Do not output further content — the conversation resumes with their answers.`,
 
+  goal_update: `Report structured progress on the ACTIVE GOAL of this session (progress / clarification / candidate). This is the ONLY channel the goal system reads — a plain-text summary never updates the goal's state.
+
+**When to call it:**
+- \`kind: "progress"\` — after you complete a meaningful step, or whenever the todo list changed. Always send the FULL current todo list; reuse the SAME \`id\` for the same item across calls (completed items must never disappear or regress). \`criteria\` refines the goal's completion requirements when the user's message clarified them.
+- \`kind: "clarification"\` — when a requirement is genuinely missing or ambiguous and you cannot proceed sensibly. Ask ONE concrete question; a concrete \`suggestion\` the user can simply accept is strongly preferred over an open-ended question. The goal pauses; end your turn after reporting.
+- \`kind: "candidate"\` — ONLY when you believe EVERY requirement is met. Each criterion needs real evidence: \`kind: "file"\` with the path of a file you actually wrote in this workspace, or \`kind: "message"\` with the id of an assistant message THIS GOAL produced — the server lists those exact ids (with excerpts) in the goal continuation prompt as \`[message <id>]\`; only those verify. The server verifies the evidence independently — fabricating, copying or reusing evidence (including an earlier goal's or another conversation's message) fails the goal.
+
+**Rules:**
+- Never claim completion yourself: all todos checked off is NOT completion; only the server's verification completes a goal.
+- Evidence paths must be files that really exist in this workspace; message ids must be from THIS conversation.
+- If requirements are unclear, report \`clarification\` and stop — do not guess and do not start an unrelated new task.`,
+
+
   update_user_preferences: `Update stored user preferences. Use this when you learn information about the user that would be helpful to remember for future conversations. This includes their name, timezone, location, preferred language, or any other relevant notes. Only update fields you have confirmed information about - don't guess.`,
 
   transform_data: `Transform data files using a script and write structured output for datatable/spreadsheet blocks, or extract HTML content for html-preview blocks.
@@ -1115,6 +1130,12 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // (see SessionToolFilterOptions.allowRequestUserInput). Safe in all permission
   // modes: asking a question must not trigger another permission confirmation.
   { name: 'request_user_input', description: TOOL_DESCRIPTIONS.request_user_input, inputSchema: RequestUserInputArgsSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRequestUserInput },
+  // POO-134 structured goal reporting — registered ONLY for turns that belong
+  // to an active Goal (see SessionToolFilterOptions.allowGoalUpdate). Safe in
+  // all permission modes: reporting never executes anything and never writes
+  // Goal authority state — the server's GoalController applies a report only
+  // after matching it to a successful tool_result of the same Goal turn.
+  { name: GOAL_UPDATE_TOOL_NAME, description: TOOL_DESCRIPTIONS[GOAL_UPDATE_TOOL_NAME], inputSchema: GoalUpdateArgsSchema, executionMode: 'registry', safeMode: 'allow', handler: handleGoalUpdate },
   // Generative UI inline cards — same desktop-only gating as request_user_input
   // (see SessionToolFilterOptions.allowRenderUi), plus the generativeUI.inline
   // feature toggle folded into the flag by the session layer. Declared JSON
@@ -1190,6 +1211,14 @@ export interface SessionToolFilterOptions {
    */
   allowGenerateApp?: boolean;
   /**
+   * POO-134: only turns that BELONG to the session's active Goal expose
+   * goal_update. An ordinary chat turn (and any paused/terminal-Goal turn)
+   * fails closed — a chat message can never mutate Goal authority state, and
+   * a running Goal never leaks its reporting channel to unrelated turns.
+   * Defaults to false so backends must opt in explicitly.
+   */
+  allowGoalUpdate?: boolean;
+  /**
    * POO-104 model-side component index (proposal §5.7): the enabled-component
    * catalog snapshot appended, one `type — one-line description` per entry, to
    * the render_ui tool description. Description-only — it never changes which
@@ -1211,6 +1240,7 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
   const allowRenderUi = options?.allowRenderUi ?? false;
   const allowGenerateApp = options?.allowGenerateApp ?? false;
+  const allowGoalUpdate = options?.allowGoalUpdate ?? false;
 
   return SESSION_TOOL_DEFS.filter(def => {
     if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
@@ -1223,6 +1253,9 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
       return false;
     }
     if (!allowGenerateApp && (def.name === 'generate_app' || def.name === 'update_app_data')) {
+      return false;
+    }
+    if (!allowGoalUpdate && def.name === GOAL_UPDATE_TOOL_NAME) {
       return false;
     }
     return true;
@@ -1342,6 +1375,7 @@ export function getToolDefsAsJsonSchema(opts?: {
   allowRequestUserInput?: boolean;
   allowRenderUi?: boolean;
   allowGenerateApp?: boolean;
+  allowGoalUpdate?: boolean;
   renderUiCatalog?: GenUiComponentDescriptor[];
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
@@ -1350,6 +1384,7 @@ export function getToolDefsAsJsonSchema(opts?: {
     allowRequestUserInput: opts?.allowRequestUserInput,
     allowRenderUi: opts?.allowRenderUi,
     allowGenerateApp: opts?.allowGenerateApp,
+    allowGoalUpdate: opts?.allowGoalUpdate,
   });
   const renderUiCatalog = opts?.renderUiCatalog ?? GENUI_BUILTIN_COMPONENT_DESCRIPTORS;
 

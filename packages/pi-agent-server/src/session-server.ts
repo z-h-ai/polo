@@ -144,7 +144,8 @@ type InboundMessage =
   | { type: 'pre_tool_use_response'; requestId: string; action: 'allow' | 'block' | 'modify'; input?: Record<string, unknown>; reason?: string }
   | { type: 'abort'; canonicalTurnId?: string }
   | { type: 'mini_completion'; id: string; prompt: string }
-  | { type: 'llm_query'; id: string; request: LLMQueryRequest }
+  | { type: 'llm_query'; id: string; request: LLMQueryRequest; isolation?: 'no-tools' }
+  | { type: 'llm_query_cancel'; id: string }
   | { type: 'ensure_session_ready'; id: string }
   | { type: 'set_model'; model: string }
   | { type: 'set_thinking_level'; level: string }
@@ -873,7 +874,20 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
 // LLM Query (ephemeral session for call_llm + mini completions)
 // ============================================================
 
-async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
+async function queryLlm(
+  request: LLMQueryRequest,
+  hooks?: {
+    /** Registers the cancellation handle for the in-flight query (called once the ephemeral session exists). */
+    onStarted?: (cancel: () => void) => void;
+    /** Clears the cancellation handle once the query loop has exited. */
+    onCancelled?: () => void;
+    /**
+     * POO-134 verification isolation: build a bare-completion session — no
+     * built-in tools, no extensions, no global/project settings discovery.
+     */
+    isolation?: 'no-tools';
+  },
+): Promise<LLMQueryResult> {
   if (!initConfig) throw new Error('Cannot run queryLlm: init not received');
 
   debugLog('[queryLlm] Starting');
@@ -937,6 +951,22 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
       model: piModel,
     };
 
+    // POO-134 verification isolation: `tools: []` alone is only an allowlist —
+    // the SDK would still discover global extensions/settings from ~/.pi/agent.
+    // `noTools: 'all'` is the explicit suppression mode, and a dedicated empty
+    // agentDir under the session path stops global extension discovery. The
+    // system prompt is force-overridden below, so no project context leaks in.
+    if (hooks?.isolation === 'no-tools') {
+      ephemeralOptions.noTools = 'all';
+      ephemeralOptions.tools = [];
+      const sessionPath = initConfig?.sessionPath;
+      const isolatedAgentDir = sessionPath ? join(sessionPath, '.pi-agent-verify') : undefined;
+      if (isolatedAgentDir) {
+        mkdirSync(isolatedAgentDir, { recursive: true });
+        ephemeralOptions.agentDir = isolatedAgentDir;
+      }
+    }
+
     const { session: ephemeralSession } = await createAgentSession(ephemeralOptions);
 
     // Pi SDK ignores options.model for ephemeral sessions (same issue as options.tools).
@@ -994,6 +1024,22 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
       }
     });
 
+    // POO-134 cancellation: aborting the ephemeral session interrupts the
+    // in-flight model request; the resulting agent_end settles the promise and
+    // the finally block disposes the session. The pending promise is rejected
+    // with an unambiguous `queryLlm cancelled` marker so callers can tell a
+    // cancellation from a model error.
+    let cancelled = false;
+    hooks?.onStarted?.(() => {
+      cancelled = true;
+      try {
+        void ephemeralSession.abort();
+      } catch (error) {
+        debugLog(`[queryLlm] Abort failed during cancel: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      completionResolve();
+    });
+
     try {
       await ephemeralSession.prompt(request.prompt);
       await withTimeout(
@@ -1003,6 +1049,11 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
       );
       debugLog(`[queryLlm] Result length: ${result.trim().length}`);
 
+      if (cancelled) {
+        hooks?.onCancelled?.();
+        throw new Error('queryLlm cancelled');
+      }
+
       // If we got no text but captured an error, throw so callers see the real issue
       if (!result.trim() && lastError) {
         throw new Error(lastError);
@@ -1010,6 +1061,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
 
       return result.trim();
     } finally {
+      hooks?.onCancelled?.();
       unsub();
       ephemeralSession.dispose();
     }
@@ -1421,9 +1473,21 @@ async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_c
 // Adding a field to LLMQueryRequest? Nothing to do here — we pass `msg.request`
 // to queryLlm() verbatim. But verify queryLlm() actually honors the new field;
 // request-propagation + request-honoring are independent (see #596).
+
+// POO-134: per-query cancellation registry. `llm_query_cancel {id}` fires the
+// registered canceller, which aborts/disposes the ephemeral session running
+// that query so the model HTTP request is actually torn down — not just the
+// main-process await. Entries are self-cleaning: every queryLlm completion
+// (result, error or cancel) removes its own handle.
+const llmQueryCancellers = new Map<string, () => void>();
+
 async function handleLlmQuery(msg: Extract<InboundMessage, { type: 'llm_query' }>): Promise<void> {
   try {
-    const result = await queryLlm(msg.request);
+    const result = await queryLlm(msg.request, {
+      onStarted: (cancel) => { llmQueryCancellers.set(msg.id, cancel); },
+      onCancelled: () => { llmQueryCancellers.delete(msg.id); },
+      isolation: msg.isolation,
+    });
     send({ type: 'llm_query_result', id: msg.id, result });
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1431,8 +1495,28 @@ async function handleLlmQuery(msg: Extract<InboundMessage, { type: 'llm_query' }
     // Dual-emit: the generic `error` channel drives main-process OAuth
     // auth-refresh detection (centralized in PiAgent), while the targeted
     // `llm_query_result` rejects the pending promise for this specific call.
-    send({ type: 'error', message: errorMsg, code: 'llm_query_error' });
-    send({ type: 'llm_query_result', id: msg.id, result: null, errorMessage: errorMsg, errorCode: 'llm_query_error' });
+    // A cancellation is surfaced the same way — the caller's local signal
+    // already rejected its side, so this only closes the subprocess half.
+    const code = errorMsg.includes('queryLlm cancelled') ? 'llm_query_cancelled' : 'llm_query_error';
+    send({ type: 'error', message: errorMsg, code });
+    send({ type: 'llm_query_result', id: msg.id, result: null, errorMessage: errorMsg, errorCode: code });
+  } finally {
+    llmQueryCancellers.delete(msg.id);
+  }
+}
+
+async function handleLlmQueryCancel(msg: Extract<InboundMessage, { type: 'llm_query_cancel' }>): Promise<void> {
+  const cancel = llmQueryCancellers.get(msg.id);
+  if (!cancel) {
+    // Already finished (or never started) — nothing to tear down.
+    debugLog(`[handleLlmQueryCancel] No in-flight llm_query for id ${msg.id}`);
+    return;
+  }
+  debugLog(`[handleLlmQueryCancel] Cancelling llm_query ${msg.id}`);
+  try {
+    cancel();
+  } catch (error) {
+    debugLog(`[handleLlmQueryCancel] Cancel failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -1693,6 +1777,10 @@ async function processMessage(msg: InboundMessage): Promise<void> {
 
     case 'llm_query':
       await handleLlmQuery(msg);
+      break;
+
+    case 'llm_query_cancel':
+      await handleLlmQueryCancel(msg);
       break;
 
     case 'ensure_session_ready':

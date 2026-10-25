@@ -63,6 +63,28 @@ export interface LLMQueryResult {
 }
 
 /**
+ * POO-134: optional per-call controls for queryLlm.
+ *
+ * These are LOCAL transport options — they are never serialized into the
+ * LLMQueryRequest that crosses the Pi RPC boundary, so the existing
+ * `llm_query` wire shape stays byte-identical and older subprocesses keep
+ * working. Omitting the whole object preserves today's behavior exactly.
+ */
+export interface LLMQueryOptions {
+  /**
+   * Local abort signal. Aborting makes queryLlm reject (and, where the
+   * backend supports it, cancel the underlying model HTTP request).
+   */
+  signal?: AbortSignal;
+  /**
+   * Verification-query isolation. `'no-tools'` = a bare completion: no
+   * built-in tools, no MCP servers, no filesystem/project settings —
+   * the query can neither act nor load configuration from the host.
+   */
+  isolation?: 'none' | 'no-tools';
+}
+
+/**
  * Unified timeout for secondary LLM calls (call_llm and mini-completion flows).
  * Keep this consistent across backends to avoid model-specific timeout behavior.
  */

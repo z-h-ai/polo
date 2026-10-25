@@ -131,6 +131,34 @@ export type {
   RequestUserInputArgs,
 } from './question-types.ts';
 
+// Goal update protocol (goal_update) — POO-134
+export {
+  GOAL_UPDATE_TOOL_NAME,
+  GOAL_UPDATE_REPORT_MARKER,
+  GOAL_UPDATE_MAX_TODOS,
+  GOAL_UPDATE_MAX_CRITERIA,
+  GOAL_UPDATE_MAX_EVIDENCE,
+  GOAL_UPDATE_MAX_CLARIFICATION_OPTIONS,
+  GoalTodoStatusSchema,
+  GoalUpdateTodoSchema,
+  GoalUpdateEvidenceSchema,
+  GoalUpdateClarificationSchema,
+  GoalUpdateCandidateSchema,
+  GoalUpdateArgsSchema,
+  validateGoalUpdateCrossFields,
+  parseGoalUpdateArgs,
+  serializeGoalUpdateReport,
+  parseGoalUpdateReportPayload,
+} from './goal-types.ts';
+
+export type {
+  GoalUpdateTodo,
+  GoalUpdateEvidence,
+  GoalUpdateClarification,
+  GoalUpdateCandidate,
+  GoalUpdateReport,
+} from './goal-types.ts';
+
 // Session MCP server spawn spec (dependency-free leaf — see spawn-spec.ts)
 export { buildSessionMcpServerArgs } from './spawn-spec.ts';
 export type { SessionMcpSpawnOptions } from './spawn-spec.ts';
@@ -192,6 +220,8 @@ export {
   handleCredentialPrompt,
   // Request User Input
   handleRequestUserInput,
+  // Goal Update (POO-134 structured goal reporting)
+  handleGoalUpdate,
   // Update Preferences
   handleUpdatePreferences,
   // Transform Data
