@@ -745,6 +745,16 @@ app.whenReady().then(async () => {
     // Initialize browser pane manager (always — even in headless, for deps wiring)
     browserPaneManager = new BrowserPaneManager()
     browserPaneManager.setWindowManager(windowManager)
+    // POO-135: popup window ownership labels (「加入:<会话名>」). The module-level
+    // sessionManager is assigned later in bootstrap — resolve through the
+    // variable so the label is always computed from the live manager.
+    browserPaneManager.setSessionNameResolver((sessionId) => {
+      try {
+        return sessionManager?.getSessions().find((s) => s.id === sessionId)?.name ?? null
+      } catch {
+        return null
+      }
+    })
     browserPaneManager.registerToolbarIpc()
     browserPaneManager.registerCapabilityIpc()
 
