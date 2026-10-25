@@ -17,12 +17,25 @@ export interface ProductSpaceContextValue {
   activeProductSpace: ProductSpaceSummary
   productSpaces: ProductSpaceSummary[]
   allProductSpaces: ProductSpaceSummary[]
+  /**
+   * POO-142: true only when THIS scope's list was published from an
+   * authoritative online read — an offline/cached restore stays false so the
+   * membership-transition banner can never treat a snapshot as "no
+   * membership".
+   */
+  membershipListVerified: boolean
   personalProductSpaceId: string
   productSpaceContextKey: string
   contextVersion: number
   pendingSwitch: PendingSpaceSwitch | null
   onSelectProductSpace: (productSpaceId: string) => void
-  onRefreshProductSpaces: () => void
+  /**
+   * Fire-and-forget for existing consumers; POO-142's membership banner
+   * awaits the returned list to release its single-flight busy state. `null`
+   * means the refresh failed or was superseded — never a successful empty
+   * list.
+   */
+  onRefreshProductSpaces: () => void | Promise<ProductSpaceSummary[] | null>
   /** Recommit a revoked scope before publishing a recovered Catalog. */
   onRecoverActiveProductSpace?: () => Promise<boolean>
   onConfirmStopAndSwitch: () => void
