@@ -6,7 +6,6 @@ import {
   it,
 } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement } from 'react'
 import { setupI18n } from '@polo-ai/shared/i18n'
 import type {
   ProductSpaceContextStorage,
