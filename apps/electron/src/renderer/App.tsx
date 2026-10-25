@@ -1523,6 +1523,12 @@ export default function App() {
       if (accountSessionEpochRef.current !== sessionEpoch) return
       if (!syncResult.success && isAdminAuthFailureResult(syncResult)) {
         handleAdminAuthFailure(syncResult)
+        // Explicit local fallback: the phase reset normally arrives via the
+        // handleAdminAuthFailure → resetAccountScopedClientState two-hop chain
+        // (App.tsx resetAccountScopedClientState sets 'idle'); restate it here
+        // so this branch's own return path does not depend on that indirect
+        // side effect. Setting 'idle' twice for the same failure is a no-op.
+        setAiConfigSyncPhase('idle')
         return
       }
       if (!syncResult.success) {
@@ -1553,6 +1559,15 @@ export default function App() {
         | { accountId?: unknown; productSpaceId?: unknown; contextKey?: unknown }
         | undefined
       if (!detail || typeof detail.productSpaceId !== 'string' || !detail.productSpaceId) return
+      // POO-144 fix r2: ignore events committed by a different account. The
+      // hook's publishCommittedSelection always carries a non-empty accountId
+      // (string signature), but a late event from a just-exited account must
+      // not clear this account's list or start its scoped sync. An absent or
+      // empty accountId is allowed through — only a non-empty mismatch ignores.
+      const eventAccountId = typeof detail.accountId === 'string' && detail.accountId
+        ? detail.accountId
+        : null
+      if (eventAccountId && eventAccountId !== currentAdminUserIdRef.current) return
       // POO-144 fix r1: the previous space's connection list must not stand in
       // for the target space's availability before its own sync receipt lands
       // — a stale non-empty list suppresses the syncing/failed banners and
