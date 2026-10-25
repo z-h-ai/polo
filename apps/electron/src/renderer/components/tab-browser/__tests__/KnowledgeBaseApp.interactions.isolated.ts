@@ -273,6 +273,10 @@ describe('KnowledgeBaseApp interactions (POO-143 S1/S2)', () => {
     ])
     await renderApp()
 
+    // The document rows land on their own async chain — wait before clicking
+    // (same discipline as the review r1 G8 fix; this commit also mounts the
+    // sibling row its button below reads).
+    await screen.findByTestId('kb-document-doc-a')
     fireEvent.click(screen.getByTestId('kb-doc-submit-doc-a'))
     const pendingBadge = await screen.findByTestId('kb-row-pending-doc-a')
     expect(pendingBadge.textContent).toContain('Submitting')
@@ -294,7 +298,7 @@ describe('KnowledgeBaseApp interactions (POO-143 S1/S2)', () => {
       doc({ id: 'doc-a', collectionId: 'col-1', status: 'published' }),
     ])
     await renderApp(15)
-    expect(screen.getByTestId('kb-document-doc-a')).toBeTruthy()
+    await screen.findByTestId('kb-document-doc-a')
 
     // A remote writer lands a new document between polls.
     harness.docs.push(doc({ id: 'doc-remote', collectionId: 'col-1', status: 'in_review' }))
@@ -311,6 +315,9 @@ describe('KnowledgeBaseApp interactions (POO-143 S1/S2)', () => {
     ])
     await renderApp(15)
 
+    // Same async-chain discipline as P10/G8: the row exists only after the
+    // documents effect commits.
+    await screen.findByTestId('kb-document-doc-a')
     fireEvent.click(screen.getByTestId('kb-doc-submit-doc-a'))
     await screen.findByTestId('kb-row-pending-doc-a')
     // The submit is still in flight — the fake server still says `draft`,
