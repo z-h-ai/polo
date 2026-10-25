@@ -70,17 +70,20 @@ interface CanvasPaneProps {
   getLayoutRect: () => DOMRect | null
 }
 
-export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
+/**
+ * POO-135: the canvas card WITHOUT the pane shell (motion width, sash, drag
+ * mask) — the card body + its own little header. Extracted so the unified
+ * right sidebar (RightSidebarPane) can host the very same card under its
+ * canvas tab while the standalone CanvasPane keeps its exact prior behavior.
+ */
+export function CanvasPaneCard({ sessionId, app }: {
+  sessionId: string
+  app: CanvasPaneApp
+}) {
   const { t } = useTranslation()
   const webviewRef = React.useRef<HTMLElement | null>(null)
-  const [widthRatio, setWidthRatio] = useAtom(
-    useMemo(() => canvasPaneWidthAtomFamily(sessionId), [sessionId]),
-  )
-  const appAtom = useAtomValue(useMemo(() => canvasPaneAppAtomFamily(sessionId), [sessionId]))
-  const [isDragging, setIsDragging] = useState(false)
   const [focusing, setFocusing] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
-  const reduceMotion = useReducedMotion()
 
   // Per-mount card id (POO-103), same scheme as the inline card — the pane's
   // guest is its own UiCardRegistry entry, not a shadow of the card's.
@@ -107,6 +110,93 @@ export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
 
   const handleClose = useCallback(() => {
     dispatchGenUiAppCanvasClose({ sessionId, appId: app.appId })
+  }, [app.appId, sessionId])
+
+  // Placeholder → "show in canvas": flash the focus ring for this very app.
+  const focusTimerRef = useRef<number | null>(null)
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<GenUiAppCanvasFocusRequest>).detail
+      if (!detail || detail.sessionId !== sessionId || detail.appId !== app.appId) return
+      setFocusing(true)
+      if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
+      focusTimerRef.current = window.setTimeout(() => setFocusing(false), FOCUS_FLASH_MS)
+    }
+    window.addEventListener(GENUI_APP_CANVAS_FOCUS_EVENT, listener)
+    return () => {
+      window.removeEventListener(GENUI_APP_CANVAS_FOCUS_EVENT, listener)
+      if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
+    }
+  }, [app.appId, sessionId])
+
+  return (
+    <div
+      className={cn(
+        'h-full w-full min-w-0 flex flex-col overflow-hidden rounded-[8px] border bg-background transition-shadow',
+        focusing ? 'ring-2 ring-accent/60 border-accent/60' : '',
+      )}
+    >
+      <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-1.5 shrink-0">
+        <AppWindow className="w-3.5 h-3.5 text-muted-foreground/70 shrink-0" />
+        <span className="text-[12px] text-muted-foreground font-medium truncate flex-1 min-w-0">{app.title}</span>
+        {typeof app.version === 'number' && (
+          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/80 tabular-nums">
+            {t('genui.app.version', { version: app.version })}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={handleClose}
+          title={t('genui.app.closeCanvas')}
+          className="shrink-0 inline-flex items-center justify-center rounded-[6px] p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {loadFailed ? (
+        <div className="flex-1 flex items-center justify-center text-[12px] text-muted-foreground/70">
+          {t('genui.app.loadError')}
+        </div>
+      ) : (
+        <webview
+          ref={webviewRef as React.RefObject<HTMLElement>}
+          src={src}
+          partition={partition}
+          webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
+          className="w-full flex-1 min-h-0 bg-white"
+        />
+      )}
+    </div>
+  )
+}
+
+export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
+  const { t } = useTranslation()
+  const [widthRatio, setWidthRatio] = useAtom(
+    useMemo(() => canvasPaneWidthAtomFamily(sessionId), [sessionId]),
+  )
+  const appAtom = useAtomValue(useMemo(() => canvasPaneAppAtomFamily(sessionId), [sessionId]))
+  const [isDragging, setIsDragging] = useState(false)
+  // Focus flash for the sash highlight (the card body flashes its own ring
+  // inside CanvasPaneCard); both listen to the same broadcast independently.
+  const [focusing, setFocusing] = useState(false)
+  const reduceMotion = useReducedMotion()
+
+  // Placeholder → "show in canvas": flash the sash ring for this very app.
+  const focusTimerRef = useRef<number | null>(null)
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<GenUiAppCanvasFocusRequest>).detail
+      if (!detail || detail.sessionId !== sessionId || detail.appId !== app.appId) return
+      setFocusing(true)
+      if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
+      focusTimerRef.current = window.setTimeout(() => setFocusing(false), FOCUS_FLASH_MS)
+    }
+    window.addEventListener(GENUI_APP_CANVAS_FOCUS_EVENT, listener)
+    return () => {
+      window.removeEventListener(GENUI_APP_CANVAS_FOCUS_EVENT, listener)
+      if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
+    }
   }, [app.appId, sessionId])
 
   // Sash drag: pointer x → ratio of the shell row, clamped to the pane band.
@@ -151,23 +241,6 @@ export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
       window.removeEventListener('pointercancel', onUp)
     }
   }, [getLayoutRect, isDragging, measureRowInset, setWidthRatio])
-
-  // Placeholder → "show in canvas": flash the focus ring for this very app.
-  const focusTimerRef = useRef<number | null>(null)
-  useEffect(() => {
-    const listener = (event: Event) => {
-      const detail = (event as CustomEvent<GenUiAppCanvasFocusRequest>).detail
-      if (!detail || detail.sessionId !== sessionId || detail.appId !== app.appId) return
-      setFocusing(true)
-      if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
-      focusTimerRef.current = window.setTimeout(() => setFocusing(false), FOCUS_FLASH_MS)
-    }
-    window.addEventListener(GENUI_APP_CANVAS_FOCUS_EVENT, listener)
-    return () => {
-      window.removeEventListener(GENUI_APP_CANVAS_FOCUS_EVENT, listener)
-      if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
-    }
-  }, [app.appId, sessionId])
 
   const handleSashKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -251,43 +324,7 @@ export function CanvasPane({ sessionId, app, getLayoutRect }: CanvasPaneProps) {
           style={{ width: PANEL_SASH_LINE_WIDTH }}
         />
       </div>
-      <div
-        className={cn(
-          'h-full w-full min-w-0 flex flex-col overflow-hidden rounded-[8px] border bg-background transition-shadow',
-          focusing ? 'ring-2 ring-accent/60 border-accent/60' : '',
-        )}
-      >
-        <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-1.5 shrink-0">
-          <AppWindow className="w-3.5 h-3.5 text-muted-foreground/70 shrink-0" />
-          <span className="text-[12px] text-muted-foreground font-medium truncate flex-1 min-w-0">{app.title}</span>
-          {typeof app.version === 'number' && (
-            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/80 tabular-nums">
-              {t('genui.app.version', { version: app.version })}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={handleClose}
-            title={t('genui.app.closeCanvas')}
-            className="shrink-0 inline-flex items-center justify-center rounded-[6px] p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-        {loadFailed ? (
-          <div className="flex-1 flex items-center justify-center text-[12px] text-muted-foreground/70">
-            {t('genui.app.loadError')}
-          </div>
-        ) : (
-          <webview
-            ref={webviewRef as React.RefObject<HTMLElement>}
-            src={src}
-            partition={partition}
-            webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
-            className="w-full flex-1 min-h-0 bg-white"
-          />
-        )}
-      </div>
+      <CanvasPaneCard sessionId={sessionId} app={app} />
     </motion.div>
   )
 }

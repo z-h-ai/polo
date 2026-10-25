@@ -135,7 +135,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { PanelHeader } from "./PanelHeader"
 import { FabNewChat } from "./FabNewChat"
 import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
-import { CanvasPane } from "./CanvasPane"
+import { RightSidebarPane, SIDEBAR_ONLY_WIDTH_KEY } from "./RightSidebarPane"
+import { sidebarBrowserOpenAtom } from "@/atoms/sidebar-browser"
 import { canvasPaneAppAtomFamily } from "@/atoms/canvas-pane"
 import { MessagingDialogHost } from "@/components/messaging/MessagingDialogHost"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
@@ -581,8 +582,11 @@ function AppShellContent({
   // POO-115: the selected session's right-side canvas pane. Auto-compact
   // (single-panel mode) keeps the pane state but renders nothing — the pane
   // reappears with the desktop layout.
+  // POO-135: the browser pane shares this same right sidebar (RightSidebarPane);
+  // the sidebar exists when either content kind is open.
   const canvasSessionId = session.selected
   const canvasApp = useAtomValue(canvasPaneAppAtomFamily(canvasSessionId ?? ""))
+  const sidebarBrowserOpen = useAtomValue(sidebarBrowserOpenAtom)
   const getCanvasLayoutRect = useCallback(() => shellRef.current?.getBoundingClientRect() ?? null, [])
   const { resolvedMode, isDark, setMode } = useTheme()
   const { canGoBack, canGoForward, goBack, goForward, navigateToSource, navigateToSession } = useNavigation()
@@ -3300,21 +3304,28 @@ function AppShellContent({
           }
           navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
-          isRightSidebarVisible={Boolean(canvasApp) && !isAutoCompact}
+          isRightSidebarVisible={Boolean(canvasApp || sidebarBrowserOpen) && !isAutoCompact}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />
 
-        {/* POO-115: the selected session's right-side canvas pane, outside the
-            panel stack (right sidebar stays OUTSIDE that container). While a
-            canvas is open the affected card renders as a placeholder strip, so
-            one app never has two live webviews. */}
-        {canvasApp && !isAutoCompact && canvasSessionId && (
-          <CanvasPane
-            key={`${canvasSessionId}:${canvasApp.appId}`}
-            sessionId={canvasSessionId}
-            app={canvasApp}
+        {/* POO-115/POO-135: the unified right sidebar (canvas + browser pane),
+            outside the panel stack (right sidebar stays OUTSIDE that
+            container). While a canvas is open the affected card renders as a
+            placeholder strip, so one app never has two live webviews. The
+            browser slot rides in the same pane; the width key follows the
+            session when a canvas exists so the remembered ratio stays
+            per-session, falling back to a workspace-wide key otherwise. */}
+        {(canvasApp || sidebarBrowserOpen) && !isAutoCompact && (
+          <RightSidebarPane
+            layoutKey={canvasSessionId ?? SIDEBAR_ONLY_WIDTH_KEY}
+            canvasSessionId={canvasSessionId}
+            canvasApp={canvasApp}
             getLayoutRect={getCanvasLayoutRect}
+            currentSessionId={session.selected ?? null}
+            activeWorkspaceId={activeWorkspaceId ?? null}
+            remoteWorkspaceId={remoteWorkspaceId ?? null}
+            onSelectSession={navigateToSession}
           />
         )}
 
