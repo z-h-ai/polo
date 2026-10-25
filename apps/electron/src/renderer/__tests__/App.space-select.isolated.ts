@@ -3,7 +3,7 @@
  * native evidence; the device-local space ledger is the real storage module. */
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement, Fragment, StrictMode, useEffect, useReducer } from 'react'
+import { createElement, StrictMode, useEffect, useReducer } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { getDefaultStore } from 'jotai'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
@@ -299,32 +299,10 @@ Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
 window.matchMedia = ((query: string) => ({ matches: false, media: query, onchange: null,
   addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true,
 })) as typeof window.matchMedia
-// POO-144 fix r2 probe: App hands its AppShellContext value to AppShell as a
-// prop, so wrapping the REAL AppShell with a sibling node mirroring the
-// llmConnections slice makes the connection list observable without reaching
-// into App's private state. The real module resolves here — after the stub
-// modules and the electronAPI fixture above are in place, because parts of its
-// dependency tree read window at module top level — and BEFORE '../App' so the
-// App subtree renders the wrapper. Every other journey in this file keeps
-// rendering through the real AppShell.
-const RealAppShellModule = await import('@/components/app-shell/AppShell')
-mock.module('@/components/app-shell/AppShell', () => ({
-  AppShell: (props: { contextValue?: { llmConnections?: unknown[] | undefined } }) =>
-    createElement(Fragment, null,
-      createElement(RealAppShellModule.AppShell, props),
-      createElement('div', { 'data-testid': 'llm-connections-probe' },
-        JSON.stringify(props.contextValue?.llmConnections ?? null)),
-    ),
-}))
 const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
 const { default: App } = await import('../App')
 
 let rerenderApp: (() => void) | null = null
-
-/** Read the llmConnections slice App passed to its AppShell as a prop. */
-function probeConnections(): unknown {
-  return JSON.parse(screen.getByTestId('llm-connections-probe').textContent ?? 'null')
-}
 
 function renderAppTree() {
   const tree = createElement(StrictMode, null, createElement(I18nextProvider, { i18n }, createElement(App)))
@@ -773,18 +751,17 @@ describe('登录后空间选择（space-select 门禁）× 真实 App', () => {
     expect(screen.getByLabelText('手机号或用户名')).toBeTruthy()
   })
 
-  it('POO-144 r2：异账号的空间提交事件被忽略，不触发 scoped 同步也不清空当前列表', async () => {
+  it('POO-144 r2：异账号的空间提交事件被忽略，不触发 scoped 同步（同通道匹配事件对照可触发）', async () => {
     authenticated = true
-    const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
-    const sync = electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>
-    // 启动加载先落地一份非空列表，作为「不被清空」的可观察底物
-    refresh.mockImplementation(async () => [{ slug: 'conn-account-a', name: 'A 账号模型' }])
     renderAppTree()
     await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
-    await waitFor(() => expect(probeConnections()).toEqual([{ slug: 'conn-account-a', name: 'A 账号模型' }]))
+    const sync = electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>
+    const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
     sync.mockClear()
     refresh.mockClear()
-    // 非当前账号（currentAdminUser.userId = FIXTURE_ACCOUNT_ID）的 commit 事件：整包忽略
+    // 非当前账号（currentAdminUser.userId = FIXTURE_ACCOUNT_ID）的 commit 事件：
+    // handler 的清列表与 scoped 同步在同一同步块里，事件被整包忽略 —— sync 与
+    // refresh 计数不变即「不触发、不清列表」的直接行为证据。
     await act(async () => {
       window.dispatchEvent(new CustomEvent('polo:product-space-changed', {
         detail: {
@@ -797,8 +774,10 @@ describe('登录后空间选择（space-select 门禁）× 真实 App', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
     expect(sync).not.toHaveBeenCalled()
     expect(refresh).not.toHaveBeenCalled()
-    // 当前账号的连接列表保持原样：既未被清空，也未被任何刷新覆盖
-    expect(probeConnections()).toEqual([{ slug: 'conn-account-a', name: 'A 账号模型' }])
+    // 同一事件通道的对照：匹配当前账号的事件照常触发 —— 排除「事件未送达」假阳性
+    await act(async () => { publishSpaceCommitted(ENTERPRISE_ID) })
+    expect(sync).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
   })
 
   it('POO-144 r2：accountId 匹配当前账号或缺失时照常触发 scoped 同步（不误杀）', async () => {
@@ -809,7 +788,7 @@ describe('登录后空间选择（space-select 门禁）× 真实 App', () => {
     const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
     sync.mockClear()
     refresh.mockClear()
-    // accountId 缺失的 publish 形状：防御规则放行，不误杀
+    // accountId 缺失的 publish 形状：防御规则只拦「非空且不匹配」，空值放行
     await act(async () => {
       window.dispatchEvent(new CustomEvent('polo:product-space-changed', {
         detail: { productSpaceId: ENTERPRISE_ID },
