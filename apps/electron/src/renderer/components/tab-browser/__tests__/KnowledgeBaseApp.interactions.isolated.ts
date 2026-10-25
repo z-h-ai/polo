@@ -323,6 +323,36 @@ describe('KnowledgeBaseApp interactions (POO-143 S1/S2)', () => {
     await waitFor(() => expect(screen.getByTestId('kb-document-status-doc-a').textContent).toContain('In review'))
   })
 
+  it('P10: a transitioning row keeps its LOCAL version across polls that already carry the server row', async () => {
+    const harness = makeHarness([
+      doc({ id: 'doc-a', collectionId: 'col-1', status: 'draft', title: 'Local Title' }),
+    ])
+    await renderApp(15)
+
+    // The document row lands on its own async chain — wait for it before
+    // clicking (same discipline as the review r1 G8 fix).
+    await screen.findByTestId('kb-document-doc-a')
+    fireEvent.click(screen.getByTestId('kb-doc-submit-doc-a'))
+    await screen.findByTestId('kb-row-pending-doc-a')
+
+    // While the RPC is held the listing picks the newer row up — then an even
+    // older snapshot follows. The merge must NOT consume the transition's
+    // protection on server confirmation (review r1 minor#4): the optimistic
+    // row stays under the pending badge until the operation settles.
+    harness.docs[0] = doc({ id: 'doc-a', collectionId: 'col-1', status: 'in_review', title: 'Server Title' })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
+    harness.docs[0] = doc({ id: 'doc-a', collectionId: 'col-1', status: 'in_review', title: 'Older Title' })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
+    expect(screen.getByTestId('kb-document-doc-a').textContent).toContain('Local Title')
+    expect(screen.getByTestId('kb-row-pending-doc-a')).toBeTruthy()
+
+    // Settle releases the protection; the silent refresh converges the row.
+    harness.submitDeferreds.get('doc-a')!.resolve(doc({ id: 'doc-a', collectionId: 'col-1', status: 'in_review' }))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
+    expect(screen.queryByTestId('kb-row-pending-doc-a')).toBeNull()
+    expect(screen.getByTestId('kb-document-status-doc-a').textContent).toContain('In review')
+  })
+
   it('P2b: a failed create rolls back and its toast retry reopens the dialog with the name kept', async () => {
     const harness = makeHarness([])
     harness.failNextCreate = Object.assign(new Error('dup'), { code: 'kb_conflict' })

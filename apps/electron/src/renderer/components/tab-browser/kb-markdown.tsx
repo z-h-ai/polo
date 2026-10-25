@@ -152,6 +152,9 @@ export function renderKbMarkdown(source: string): ReactNode {
     const bullet = line.match(LIST_ITEM_PATTERN)
     if (bullet) {
       flushParagraph()
+      // A list item ENDS an open quote (source order must be preserved) —
+      // same discipline as a plain text line below.
+      flushQuote()
       if (list && list.kind !== 'ul') flushList()
       list = list ?? { kind: 'ul', items: [] }
       list.items.push(bullet[1])
@@ -160,6 +163,7 @@ export function renderKbMarkdown(source: string): ReactNode {
     const ordered = line.match(ORDERED_ITEM_PATTERN)
     if (ordered) {
       flushParagraph()
+      flushQuote()
       if (list && list.kind !== 'ol') flushList()
       list = list ?? { kind: 'ol', items: [] }
       list.items.push(ordered[1])

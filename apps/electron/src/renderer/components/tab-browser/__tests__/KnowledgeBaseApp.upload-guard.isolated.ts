@@ -204,11 +204,33 @@ describe('KnowledgeBaseApp upload guards (POO-143 S3/S5)', () => {
     fireEvent.change(screen.getByTestId('kb-document-content-input'), { target: { value: over } })
 
     expect(screen.getByTestId('kb-up-byte-error')).toBeTruthy()
+    // The verdict ALSO rides its own queue row, inline.
+    const overRowQid = (() => {
+      const testId = screen.getAllByTestId(/^kb-queue-row-/)[0]!.getAttribute('data-testid')!
+      return testId.slice('kb-queue-row-'.length)
+    })()
+    expect(screen.getByTestId(`kb-up-byte-error-${overRowQid}`)).toBeTruthy()
+    expect(screen.getByTestId('kb-document-upload-confirm').hasAttribute('disabled')).toBe(true)
+
+    // A second row joins; switching the preview to it hides the left-pane
+    // error but the over-limit ROW keeps its inline verdict and the batch
+    // stays disabled (review r1 nit#8).
+    await ingest(input, makeFileList(new File(['# other'], 'other.md')))
+    const otherQid = (() => {
+      const rows = screen.getAllByTestId(/^kb-queue-row-/)
+      const other = rows.find(row => row.textContent!.includes('other'))!
+      return other.getAttribute('data-testid')!.slice('kb-queue-row-'.length)
+    })()
+    fireEvent.click(screen.getByTestId(`kb-queue-row-${otherQid}`))
+    await waitFor(() => expect(screen.queryByTestId('kb-up-byte-error')).toBeNull())
+    expect(screen.getByTestId(`kb-up-byte-error-${overRowQid}`)).toBeTruthy()
     expect(screen.getByTestId('kb-document-upload-confirm').hasAttribute('disabled')).toBe(true)
 
     // Recovering under the cap re-enables the batch.
+    fireEvent.click(screen.getByTestId(`kb-queue-row-${overRowQid}`))
     fireEvent.change(screen.getByTestId('kb-document-content-input'), { target: { value: '# small again' } })
     await waitFor(() => expect(screen.getByTestId('kb-document-upload-confirm').hasAttribute('disabled')).toBe(false))
+    await waitFor(() => expect(screen.queryByTestId(new RegExp('^kb-up-byte-error-'))).toBeNull())
   })
 
   it('G5: closing the dialog without confirming KEEPS the queue; reopening shows it', async () => {
@@ -282,9 +304,11 @@ describe('KnowledgeBaseApp upload guards (POO-143 S3/S5)', () => {
       { i18n },
       createElement(KnowledgeBaseApp as FC<KbAppProps>, { pollIntervalMs: 15 }),
     ))
-    // First load succeeds; THEN the sync starts failing.
+    // First load succeeds; THEN the sync starts failing. The document row
+    // arrives on its own async chain (selection → documents effect → list
+    // RPC → commit), so WAIT for it instead of asserting synchronously.
     await screen.findByTestId('kb-collection-list')
-    expect(screen.getByTestId('kb-document-doc-seed')).toBeTruthy()
+    await screen.findByTestId('kb-document-doc-seed')
     harness.listCollectionsFailuresLeft = 999
 
     const banner = await screen.findByTestId('kb-sync-banner', {}, { timeout: 3000 })
@@ -292,8 +316,17 @@ describe('KnowledgeBaseApp upload guards (POO-143 S3/S5)', () => {
     // The stale data stays on the face (Spec S5.2).
     expect(screen.getByTestId('kb-document-doc-seed')).toBeTruthy()
 
-    // Recovery clears the banner.
+    // A manual retry that ALSO fails keeps the banner up — the retry enters
+    // the counter already counting one failure, so a single failure re-reaches
+    // the threshold instead of clearing the banner (review r1 minor#3).
+    fireEvent.click(screen.getByTestId('kb-sync-retry'))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
+    expect(screen.getByTestId('kb-sync-banner')).toBeTruthy()
+    expect(screen.getByTestId('kb-document-doc-seed')).toBeTruthy()
+
+    // Recovery clears the banner (one successful silent tick is enough).
     harness.listCollectionsFailuresLeft = 0
-    await waitFor(() => expect(screen.queryByTestId('kb-sync-banner')).toBeNull(), { timeout: 3000 })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
+    expect(screen.queryByTestId('kb-sync-banner')).toBeNull()
   })
 })

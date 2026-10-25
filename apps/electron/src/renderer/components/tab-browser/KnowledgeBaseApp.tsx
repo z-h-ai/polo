@@ -224,16 +224,27 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
   const workspaceIdRef = useRef(workspaceId)
   workspaceIdRef.current = workspaceId
   /**
-   * Doc ids whose LOCAL row wins over the server listing: a transitioning row
-   * (Spec S2.4 — a pending row is never rewound by an older snapshot) and a
-   * freshly uploaded row the server listing may not reflect yet. Released
-   * when the server listing confirms the id or the operation settles.
+   * Doc ids whose LOCAL row wins over the server listing, in two flavors: a
+   * freshly uploaded row stays local until the listing confirms it, and a
+   * transitioning row (Spec S2.4 — a pending row is never rewound by an older
+   * snapshot) stays local until its operation settles. The merge only consumes
+   * the upload flavor — a transition's protection must outlive the polls that
+   * run while its RPC is in flight.
    */
   const protectedDocIdsRef = useRef(new Set<string>())
+  const transitionDocIdsRef = useRef(new Set<string>())
 
   const selectedCollection = useMemo(
     () => collections.find(collection => collection.id === selectedCollectionId) ?? null,
     [collections, selectedCollectionId],
+  )
+
+  // Upload rows render inside the SELECTED collection's document panel, so
+  // the empty-state check sees the same filtered slice — an in-flight upload
+  // elsewhere must not suppress this panel's empty message.
+  const visibleUploads = useMemo(
+    () => activeUploads.filter(row => row.collectionId === selectedCollectionId),
+    [activeUploads, selectedCollectionId],
   )
 
   // #region silent merge + refresh -------------------------------------------------
@@ -259,18 +270,21 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
   const applyServerDocuments = useCallback((incoming: KbDocumentSummary[], collectionId: string) => {
     if (documentsCollectionIdRef.current !== collectionId) return
     const protectedIds = protectedDocIdsRef.current
+    const transitionIds = transitionDocIdsRef.current
     const local = new Map(documentsRef.current.map(row => [row.id, row]))
     const result: KbDocumentSummary[] = []
     const confirmedIds: string[] = []
     for (const doc of incoming) {
-      const keepLocal = local.has(doc.id) && protectedIds.has(doc.id)
-      if (keepLocal) confirmedIds.push(doc.id)
+      const keepLocal = local.has(doc.id) && (protectedIds.has(doc.id) || transitionIds.has(doc.id))
+      // Server confirmation releases only the upload flavor of protection; a
+      // transitioning row keeps its protection until the operation settles.
+      if (keepLocal && !transitionIds.has(doc.id)) confirmedIds.push(doc.id)
       result.push(keepLocal ? local.get(doc.id)! : doc)
     }
     // Protected rows the listing does not know about yet (a just-finished
     // upload the walk missed) stay on the face instead of vanishing.
     for (const row of documentsRef.current) {
-      if (!incoming.some(doc => doc.id === row.id) && protectedIds.has(row.id)) result.push(row)
+      if (!incoming.some(doc => doc.id === row.id) && (protectedIds.has(row.id) || transitionIds.has(row.id))) result.push(row)
     }
     for (const id of confirmedIds) protectedIds.delete(id)
     setDocuments(result)
@@ -322,6 +336,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
   useEffect(() => {
     documentsCollectionIdRef.current = selectedCollectionId
     protectedDocIdsRef.current.clear()
+    transitionDocIdsRef.current.clear()
     if (!selectedCollectionId) {
       setDocuments([])
       return
@@ -453,7 +468,9 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
       return next
     })
     setRowPending(prev => ({ ...prev, [doc.id]: { op, reason } }))
-    protectedDocIdsRef.current.add(doc.id)
+    // The transition protection lives until the operation settles — server
+    // confirmations seen while the RPC is in flight must not release it.
+    transitionDocIdsRef.current.add(doc.id)
     const invoke = async () => {
       switch (op) {
         case 'submit':
@@ -482,7 +499,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
           delete next[doc.id]
           return next
         })
-        protectedDocIdsRef.current.delete(doc.id)
+        transitionDocIdsRef.current.delete(doc.id)
         toast.success(t(TRANSITION_TOAST_KEY[op]))
         await refreshCollections({ silent: true })
         await refreshDocuments(doc.collectionId, { silent: true })
@@ -493,7 +510,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
           delete next[doc.id]
           return next
         })
-        protectedDocIdsRef.current.delete(doc.id)
+        transitionDocIdsRef.current.delete(doc.id)
         // Spec S1.2: the row rolls back to its true state and offers an
         // inline retry (the toast carries the neutral failure text).
         setFailedRows(prev => ({
@@ -511,11 +528,16 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
 
   const uploadRunningRef = useRef(false)
 
+  // Both mutators mirror the change into activeUploadsRef immediately — a
+  // settle callback that reads the ref in the same tick as a cancel click
+  // (nit: one-render lag) then sees the cancelled stage, not the last commit.
   const patchUpload = useCallback((qid: string, patch: Partial<KbActiveUpload>) => {
+    activeUploadsRef.current = activeUploadsRef.current.map(row => (row.qid === qid ? { ...row, ...patch } : row))
     setActiveUploads(rows => rows.map(row => (row.qid === qid ? { ...row, ...patch } : row)))
   }, [])
 
   const removeUpload = useCallback((qid: string) => {
+    activeUploadsRef.current = activeUploadsRef.current.filter(row => row.qid !== qid)
     setActiveUploads(rows => rows.filter(row => row.qid !== qid))
   }, [])
 
@@ -975,7 +997,11 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
               variant="secondary"
               className={clientWorkbenchButtonClassName}
               data-testid="kb-sync-retry"
-              onClick={() => { pollFailureRef.current = 0; void runSilentSyncRef.current() }}
+              // A retry is issued already counting one failure: if it fails
+              // again the counter reaches the threshold and the banner STAYS
+              // (it never drops below the threshold on a failed retry). Only
+              // a successful sync clears the counter inside runSilentSync.
+              onClick={() => { pollFailureRef.current = KB_SYNC_FAIL_THRESHOLD - 1; void runSilentSyncRef.current() }}
             >
               {t('knowledgeBase.sync.retry')}
             </Button>
@@ -1107,7 +1133,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                 <div className="flex min-h-[160px] items-center justify-center">
                   <Icons.LoaderCircle className="size-4 animate-spin text-muted-foreground" />
                 </div>
-              ) : documents.length === 0 && activeUploads.length === 0 ? (
+              ) : documents.length === 0 && visibleUploads.length === 0 ? (
                 <p className="m-0 px-[16px] py-[28px] text-center text-[12px] text-muted-foreground">
                   {canManage ? t('knowledgeBase.documentsEmptyManage') : t('knowledgeBase.documentsEmptyMember')}
                 </p>
@@ -1177,9 +1203,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                       </li>
                     )
                   })}
-                  {activeUploads
-                    .filter(row => row.collectionId === selectedCollectionId)
-                    .map(row => renderUploadRow(row))}
+                  {visibleUploads.map(row => renderUploadRow(row))}
                 </ul>
               )}
             </section>

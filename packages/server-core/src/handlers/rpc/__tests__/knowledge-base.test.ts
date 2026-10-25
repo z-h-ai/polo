@@ -887,12 +887,13 @@ describe('knowledge-base document lifecycle', () => {
     const { invoke } = createHarness()
     const { collection } = await seedCollection(invoke)
     // The content write lands on the tree AFTER the caller's shrunken write
-    // deadline has already fired — the server holds the answer 400ms while the
-    // client gives up at 100ms, the classic "the write MAY have taken effect"
-    // case. The fake serves the delay before the write handler, so the node
-    // still lands once the delay drains.
-    ov.setDelay('/api/v1/content/write', 400)
-    setOpenVikingTimeoutsForTests({ writeMs: 100 })
+    // deadline has already fired — the server holds the answer 800ms while the
+    // client gives up at 80ms (a 10:1 margin so slow CI still separates the
+    // two timers), the classic "the write MAY have taken effect" case. The
+    // fake serves the delay before the write handler, so the node still lands
+    // once the delay drains.
+    ov.setDelay('/api/v1/content/write', 800)
+    setOpenVikingTimeoutsForTests({ writeMs: 80 })
     try {
       await expect(invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
         workspaceId: WORKSPACE_ID, collectionId: collection.id,
@@ -902,7 +903,7 @@ describe('knowledge-base document lifecycle', () => {
       resetOpenVikingTimeoutsForTests()
     }
     // Let the fake's write handler finish past the abandoned request.
-    await new Promise(resolve => setTimeout(resolve, 500))
+    await new Promise(resolve => setTimeout(resolve, 900))
     // The write is on the tree and the audit records the UNKNOWN outcome —
     // the failed answer never claimed a clean failure.
     const rows = await invoke(RPC_CHANNELS.kb.LIST_DOCUMENTS, {

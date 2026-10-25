@@ -215,8 +215,17 @@ export function KbUploadDialog(props: KbUploadDialogProps) {
                     onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onSelect(item.qid) }}
                   >
                     <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{item.title}</span>
-                    <span className="shrink-0 text-[10.5px] text-foreground-40">
+                    <span
+                      className={`shrink-0 text-[10.5px] ${item.qid === overLimitQid ? 'font-bold text-destructive' : 'text-foreground-40'}`}
+                    >
                       {t('knowledgeBase.upload.queue.bytes', { bytes: item.sizeBytes })}
+                      {item.qid === overLimitQid && (
+                        // The over-limit verdict stays on ITS row, so the
+                        // error survives switching the preview to another row.
+                        <span className="ml-[6px]" data-testid={`kb-up-byte-error-${item.qid}`}>
+                          {t('knowledgeBase.pending.byteOver')}
+                        </span>
+                      )}
                     </span>
                     <span className="shrink-0 rounded-full bg-foreground/8 px-[8px] py-[1px] text-[10px] font-semibold text-foreground-70">
                       {t('knowledgeBase.pending.stageQueued')}
