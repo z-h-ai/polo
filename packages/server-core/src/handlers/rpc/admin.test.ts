@@ -410,6 +410,7 @@ const configState: {
   defaultConnection: string | null
   generativeUiRemoteCapability?: unknown
   webAppArtifactPolicy?: unknown
+  browserFastDeciderEnabled?: boolean
 } = {
   adminUrl: 'https://admin.example.com',
   adminConfigVersion: undefined,
@@ -417,6 +418,7 @@ const configState: {
   defaultConnection: null,
   generativeUiRemoteCapability: undefined,
   webAppArtifactPolicy: undefined,
+  browserFastDeciderEnabled: undefined,
 }
 
 const managerState: {
@@ -567,6 +569,11 @@ mock.module('@polo-ai/shared/config', () => ({
   // (POO-102) the same way.
   setWebAppArtifactPolicy: (policy: unknown) => {
     configState.webAppArtifactPolicy = policy ?? undefined
+  },
+  // Captured so tests can assert the admin rollout switch for the browser
+  // fast decider (POO-113) lands in stored config the same way.
+  setBrowserFastDeciderEnabled: (enabled: boolean) => {
+    configState.browserFastDeciderEnabled = enabled
   },
 }))
 
@@ -722,6 +729,8 @@ beforeEach(() => {
   configState.connections = []
   configState.defaultConnection = null
   configState.generativeUiRemoteCapability = undefined
+  configState.webAppArtifactPolicy = undefined
+  configState.browserFastDeciderEnabled = undefined
   managerState.tokens = null
   managerState.llmApiKeys = new Map()
   managerState.deletedCredentialSlugs = []
@@ -1852,6 +1861,74 @@ describe('registerAdminHandlers', () => {
       managedBy: 'admin',
     })
     expect(managerState.llmApiKeys.get('mimo-token-plan')).toBe('sk-mimo-secret')
+  })
+
+  it('persists browserFastDecider enabled=false from the sync response', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v1',
+      connections: [adminConnection()],
+      defaultConnection: 'admin-anthropic',
+      browserFastDecider: { enabled: false },
+    })
+    const { syncConnections } = createHarness()
+
+    const result = await syncConnections({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ success: true })
+    expect(configState.browserFastDeciderEnabled).toBe(false)
+  })
+
+  it('persists browserFastDecider enabled=true from the sync response', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v1',
+      connections: [adminConnection()],
+      defaultConnection: 'admin-anthropic',
+      browserFastDecider: { enabled: true },
+    })
+    const { syncConnections } = createHarness()
+
+    const result = await syncConnections({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ success: true })
+    expect(configState.browserFastDeciderEnabled).toBe(true)
+  })
+
+  it('treats an absent browserFastDecider field as enabled during sync', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v1',
+      connections: [adminConnection()],
+      defaultConnection: 'admin-anthropic',
+    })
+    const { syncConnections } = createHarness()
+
+    const result = await syncConnections({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ success: true })
+    expect(configState.browserFastDeciderEnabled).toBe(true)
   })
 
   it('returns an admin error payload when login fails', async () => {

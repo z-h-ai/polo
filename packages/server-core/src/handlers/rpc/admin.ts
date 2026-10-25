@@ -71,6 +71,7 @@ import {
   getAdminUrl,
   getLlmConnections,
   setAdminConfigVersion,
+  setBrowserFastDeciderEnabled,
   setDefaultLlmConnection,
   setGenerativeUiRemoteCapability,
   setWebAppArtifactPolicy,
@@ -3923,6 +3924,10 @@ async function syncAdminConnections(args: {
           setDefaultLlmConnection(response.defaultConnection)
         }
         setAdminConfigVersion(response.configVersion)
+        // POO-113: consume the admin rollout switch for the browser fast
+        // decider. An absent field means enabled so an older admin keeps the
+        // new client on the managed path.
+        setBrowserFastDeciderEnabled(response.browserFastDecider?.enabled ?? true)
       }, { phase: 'compute-connection-commit', productSpaceId: requestedSpaceId }),
     )
     if (!applied.applied) throw new AdminSessionChangedError()

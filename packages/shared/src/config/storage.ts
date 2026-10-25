@@ -600,6 +600,12 @@ export function setBrowserToolEnabled(enabled: boolean): void {
   import('../agent/session-scoped-tools.ts').then(m => m.invalidateAllSessionToolsCaches()).catch(() => {});
 }
 
+/** Defaults shared by getBrowserFastDeciderConfig() and the admin-channel setter (POO-113). */
+const BROWSER_FAST_DECIDER_DEFAULTS: { timeoutMs: number; paths: BrowserFastDeciderPathConfig[] } = {
+  timeoutMs: 3000,
+  paths: [],
+};
+
 /**
  * Get the browser fast decider config (POO-113 managed config).
  * Sensible defaults when absent: enabled with no paths — the decider then
@@ -607,7 +613,23 @@ export function setBrowserToolEnabled(enabled: boolean): void {
  */
 export function getBrowserFastDeciderConfig(): BrowserFastDeciderConfig {
   const config = loadStoredConfig();
-  return config?.browserFastDecider ?? { enabled: true, timeoutMs: 3000, paths: [] };
+  return config?.browserFastDecider ?? { enabled: true, ...BROWSER_FAST_DECIDER_DEFAULTS };
+}
+
+/**
+ * Persist the admin-managed rollout switch for the browser fast decider
+ * (POO-113). Only the enabled flag is admin-owned: existing timeoutMs/paths
+ * are preserved, and a config without the field is seeded with the full
+ * default shape so the on-disk layout never regresses to `{enabled}` alone.
+ */
+export function setBrowserFastDeciderEnabled(enabled: boolean): void {
+  updateStoredConfig(config => {
+    config.browserFastDecider = {
+      ...BROWSER_FAST_DECIDER_DEFAULTS,
+      ...config.browserFastDecider,
+      enabled,
+    };
+  });
 }
 
 /**

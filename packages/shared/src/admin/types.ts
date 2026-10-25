@@ -110,6 +110,8 @@ export interface AdminTransitEncryptedApiKey {
 
 export interface AdminLlmConnectionsResponse {
   browserPolicy?: import("./browser-policy-contract").BrowserPolicy;
+  /** Admin rollout switch for the browser fast decider (POO-113). Absent = enabled. */
+  browserFastDecider?: { enabled: boolean };
   /** Server-authorized space owning these dedicated compute credentials. */
   productSpaceId?: string;
   configVersion: string;
