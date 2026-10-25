@@ -11,6 +11,7 @@ import type {
   TypedError,
   ContentBadge,
   KbReference,
+  WebElementReference,
   ToolDisplayMeta,
   AnnotationV1,
   PermissionRequest as BasePermissionRequest,
@@ -396,7 +397,14 @@ export interface SendMessageOptions {
    */
   kbReferences?: KbReference[]
   /**
-   * POO-108 v4 D-B: the bounded knowledge context assembled server-side from
+   * Picked web element reference snapshots carried by this send (POO-135).
+   * The composer's draft references ride the SEND_MESSAGE chain and are
+   * persisted verbatim on the user message — a point-in-time snapshot that
+   * later page changes never rewrite. Agent-context assembly reusing the KB
+   * reference path is a follow-up wiring point (see POO-135 coder report).
+   */
+  elementReferences?: WebElementReference[]
+  /**
    * the SAME send-time retrieval as `kbReferences`, staged by the
    * SessionManager for a ONE-SHOT injection into this turn's model prompt.
    * Internal only — never persisted, never part of the message record, and a
@@ -789,7 +797,36 @@ export interface BrowserInstanceInfo {
    * and main processes that pre-date the field working unchanged.
    */
   workspaceId?: string | null
+  /**
+   * POO-135: where the instance's page view currently lives. `popup` (the
+   * default and the pre-POO-135 behavior) means the dedicated frameless
+   * BrowserWindow; `embedded` means the page view is attached to the main
+   * window's right sidebar. Optional so older managers stay compatible.
+   */
+  hostMode?: 'popup' | 'embedded'
 }
+
+/**
+ * POO-135: rectangle of the sidebar's page area in main-window (content)
+ * coordinates, used to position an embedded browser page view.
+ */
+export interface BrowserEmbedBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * POO-135: outcome of the in-page element picker. `picked` carries the
+ * whitelist snapshot fields (see WebElementReference); `cancelled` covers
+ * Esc, host transitions (embed/detach/hide) and navigation; `unavailable`
+ * reports content the picker refuses to reference (iframe, sensitive…).
+ */
+export type BrowserElementPickerEvent =
+  | { instanceId: string; kind: 'picked'; reference: WebElementReference }
+  | { instanceId: string; kind: 'cancelled'; reason: 'user' | 'navigation' | 'host' | 'destroyed' }
+  | { instanceId: string; kind: 'unavailable'; reason: 'iframe' | 'sensitive' | 'hidden' }
 
 export interface DeepLinkNavigation {
   view?: string

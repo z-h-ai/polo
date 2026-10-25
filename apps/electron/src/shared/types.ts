@@ -1,8 +1,13 @@
 import type { LocalAppAdmissionFailure } from '@polo-ai/shared/protocol'
+import type { BrowserEmbedBounds, BrowserElementPickerEvent } from '@polo-ai/shared/protocol'
+import type { WebElementReference } from '@polo-ai/core/types'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
 export * from '@polo-ai/shared/protocol'
+// POO-135: explicit re-exports for the sidebar/picker types this file's API
+// surface references (WebElementReference is declared in core, not protocol).
+export type { BrowserEmbedBounds, BrowserElementPickerEvent, WebElementReference }
 
 // =============================================================================
 // Package re-exports (convenience for renderer imports)
@@ -1557,10 +1562,20 @@ export interface ElectronAPI {
     reload(id: string): Promise<void>
     stop(id: string): Promise<void>
     focus(id: string): Promise<void>
+    /** POO-135: attach the instance's page view to this window's right sidebar. */
+    embed(id: string, bounds?: BrowserEmbedBounds): Promise<void>
+    /** POO-135: move the embedded page view back into its own popup window. */
+    detachToPopup(id: string): Promise<void>
+    /** POO-135: reposition an embedded page view (main-window coordinates). */
+    setEmbedBounds(id: string, bounds: BrowserEmbedBounds): Promise<void>
+    /** POO-135: toggle the in-page element picker for an instance. */
+    setElementPicking(id: string, active: boolean, options?: { targetSessionId?: string | null }): Promise<void>
     emptyStateLaunch(payload: BrowserEmptyStateLaunchPayload): Promise<BrowserEmptyStateLaunchResult>
     onStateChanged(callback: (info: BrowserInstanceInfo) => void): () => void
     onRemoved(callback: (id: string) => void): () => void
     onInteracted(callback: (id: string) => void): () => void
+    /** POO-135: element picker outcome (picked / cancelled / unavailable). */
+    onElementPickerEvent(callback: (event: BrowserElementPickerEvent) => void): () => void
   }
 
   // LLM Connections (provider configurations)

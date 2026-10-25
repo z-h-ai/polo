@@ -506,10 +506,15 @@ export const CHANNEL_MAP = {
   'browserPane.reload': invoke(RPC_CHANNELS.browserPane.RELOAD),
   'browserPane.stop': invoke(RPC_CHANNELS.browserPane.STOP),
   'browserPane.focus': invoke(RPC_CHANNELS.browserPane.FOCUS),
+  'browserPane.embed': invoke(RPC_CHANNELS.browserPane.EMBED),
+  'browserPane.detachToPopup': invoke(RPC_CHANNELS.browserPane.DETACH_TO_POPUP),
+  'browserPane.setEmbedBounds': invoke(RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS),
+  'browserPane.setElementPicking': invoke(RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING),
   'browserPane.emptyStateLaunch': invoke(RPC_CHANNELS.browserPane.LAUNCH),
   'browserPane.onStateChanged': listener(RPC_CHANNELS.browserPane.STATE_CHANGED),
   'browserPane.onRemoved': listener(RPC_CHANNELS.browserPane.REMOVED),
   'browserPane.onInteracted': listener(RPC_CHANNELS.browserPane.INTERACTED),
+  'browserPane.onElementPickerEvent': listener(RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT),
 
   // LLM Connections
   listLlmConnections: invoke(RPC_CHANNELS.llmConnections.LIST),

@@ -541,9 +541,17 @@ export const RPC_CHANNELS = {
     EVALUATE: 'browser-pane:evaluate',
     SCROLL: 'browser-pane:scroll',
     LAUNCH: 'browser-empty-state:launch',
+    // POO-135: embed/restore a browser page view into the main window's right
+    // sidebar, plus the in-page element picker used to add web elements to a
+    // chat draft.
+    EMBED: 'browser-pane:embed',
+    DETACH_TO_POPUP: 'browser-pane:detach-to-popup',
+    SET_EMBED_BOUNDS: 'browser-pane:set-embed-bounds',
+    SET_ELEMENT_PICKING: 'browser-pane:set-element-picking',
     STATE_CHANGED: 'browser-pane:state-changed',
     REMOVED: 'browser-pane:removed',
     INTERACTED: 'browser-pane:interacted',
+    ELEMENT_PICKER_EVENT: 'browser-pane:element-picker',
   },
   automations: {
     GET: 'automations:get',
