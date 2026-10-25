@@ -47,8 +47,18 @@ export interface MembershipTransitionFacts {
  * - The personal space is always present and never proves a membership.
  * - Any enterprise space (any role, `read_only` included) hides the banner —
  *   the copy must not mask a real restriction reason.
- * - Any positive relations receipt hides it too: a circles-only account has a
- *   membership, and a suspended/expired row is still "joined", not "never".
+ * - CL-TR-05 (adjudicated decision, implemented per the plan's D1 recommendation
+ *   option A): a circles-only account IS affiliated. Any positive relations
+ *   receipt — circles or memberships, suspended/expired rows included, since a
+ *   lapsed row is still "joined", not "never" — hides the banner. Rationale: the
+ *   banner is a display-only "not joined yet" hint, so showing it to a member
+ *   whose membership is merely restricted would both misinform the user and
+ *   mask the real restriction reason; the reverse error (a never-joined user
+ *   temporarily not seeing the banner) is self-healing via 刷新状态 and the
+ *   scope's own authoritative pulls. Option A (any positive receipt wins over
+ *   an empty twin) was chosen over per-kind copy because the client has no
+ *   cross-install circle-invite source channel today, so a circle-only
+ *   "unaffiliated" variant would be unreachable copy.
  * - Both receipts PRESENT and both empty is the only proof of "no membership".
  *   A null receipt (never read, failed before its first success) is unknown —
  *   a later failed refresh keeps the previous receipts in place, so an already

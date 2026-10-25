@@ -49,7 +49,7 @@ describe('deriveMembershipTransition', () => {
       .toEqual({ status: 'unaffiliated', audience: 'enterprise' })
   })
 
-  it('hides for circles-only accounts (any positive receipt wins over an empty twin)', () => {
+  it('hides for circles-only accounts (CL-TR-05 / plan D1 option A: any positive receipt wins over an empty twin)', () => {
     expect(deriveMembershipTransition(facts({ memberships: [{ id: 'm1' } as never] })))
       .toEqual({ status: 'affiliated' })
     expect(deriveMembershipTransition(facts({ circles: [{ id: 'c1' } as never] })))
