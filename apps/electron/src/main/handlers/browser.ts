@@ -25,6 +25,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.EMBED,
   RPC_CHANNELS.browserPane.DETACH_TO_POPUP,
   RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS,
+  RPC_CHANNELS.browserPane.UNEMBED,
   RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING,
 ] as const
 
@@ -131,6 +132,14 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
     const hostWindow = resolveHostWindow(ctx.webContentsId)
     if (!hostWindow) return
     browserPaneManager.setEmbedBounds(id, bounds)
+  })
+
+  // POO-135 r1: the sidebar container unmounted — stop the native view from
+  // covering window content (it stays embedded; re-attaches on next bounds).
+  server.handle(RPC_CHANNELS.browserPane.UNEMBED, (ctx, id: string) => {
+    const hostWindow = resolveHostWindow(ctx.webContentsId)
+    if (!hostWindow) return
+    browserPaneManager.unembedInstance(id)
   })
 
   server.handle(RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING, async (_ctx, id: string, active: boolean, options?: { targetSessionId?: string | null }) => {

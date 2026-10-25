@@ -184,6 +184,23 @@ const ELEMENT_PICKER_SCRIPT = String.raw`
     }
     return chain.join(' > ');
   }
+  function isCssHidden(node) {
+    // POO-135 r1: selector-hidden is checked via HIDDEN_SEL above; this also
+    // rejects CSS-hidden elements (display:none / visibility:hidden / zero
+    // box) so their text is never captured as visible content.
+    var cursor = node;
+    while (cursor && cursor.nodeType === 1) {
+      var style = doc.defaultView && doc.defaultView.getComputedStyle(cursor);
+      if (style) {
+        if (style.display === 'none' || style.visibility === 'hidden') return true;
+        var rect = cursor.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return true;
+      }
+      if (cursor === doc.documentElement) break;
+      cursor = cursor.parentElement;
+    }
+    return false;
+  }
   function buildReference(el) {
     var tag = el.tagName.toLowerCase();
     var sensitive = !!el.closest(SENSITIVE_SEL);
@@ -191,7 +208,7 @@ const ELEMENT_PICKER_SCRIPT = String.raw`
     var hidden = !!el.closest(HIDDEN_SEL);
     if (sensitive) return { kind: 'unavailable', reason: 'sensitive' };
     if (framed) return { kind: 'unavailable', reason: 'iframe' };
-    if (hidden || el === doc.documentElement || el === doc.body) return { kind: 'unavailable', reason: 'hidden' };
+    if (hidden || isCssHidden(el) || el === doc.documentElement || el === doc.body) return { kind: 'unavailable', reason: 'hidden' };
     var isForm = tag === 'input' || tag === 'textarea' || tag === 'select';
     var text = isForm ? '' : collapse(el.innerText).slice(0, 500);
     var aria = collapse(el.getAttribute('aria-label') || '').slice(0, 160)
@@ -366,6 +383,14 @@ interface BrowserInstance {
   hostMode: 'popup' | 'embedded'
   /** POO-135: host window while embedded (null in popup mode). */
   embeddedHostWindow: BrowserWindow | null
+  /**
+   * POO-135 r1: whether the page view is actually attached to the embed host.
+   * The sidebar container can unmount (tab switch, narrow viewport, session
+   * switch, hide) while the instance stays embedded — the view is then
+   * removed so it cannot cover window content, and re-attached on the next
+   * valid bounds report.
+   */
+  embeddedViewsAttached: boolean
   /** POO-135: whether the in-page element picker is armed on the page. */
   elementPicking: boolean
   /** POO-135: chat session the armed picker will target (renderer-declared). */
@@ -698,6 +723,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       lastLaunchToken: null,
       hostMode: 'popup',
       embeddedHostWindow: null,
+      embeddedViewsAttached: false,
       elementPicking: false,
       elementPickingTargetSessionId: null,
     }
@@ -777,6 +803,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       const host = instance.embeddedHostWindow
       if (host && !host.isDestroyed()) host.removeBrowserView(instance.pageView)
       instance.embeddedHostWindow = null
+      instance.embeddedViewsAttached = false
     })
 
     try {
@@ -1129,6 +1156,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     // Bounds are driven by the sidebar renderer; auto-resize would fight it.
     instance.pageView.setAutoResize({ width: false, height: false })
     instance.embeddedHostWindow = hostWindow
+    instance.embeddedViewsAttached = true
     instance.hostMode = 'embedded'
     if (!instance.window.isDestroyed() && instance.window.isVisible()) {
       instance.window.hide()
@@ -1156,6 +1184,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       host.removeBrowserView(instance.pageView)
     }
     instance.embeddedHostWindow = null
+    instance.embeddedViewsAttached = false
     instance.hostMode = 'popup'
 
     const win = instance.window
@@ -1178,7 +1207,43 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     const instance = this.instances.get(id)
     if (!instance || instance.window.isDestroyed()) return
     if (instance.hostMode !== 'embedded') return
+    const width = Math.floor(Number(bounds?.width))
+    const height = Math.floor(Number(bounds?.height))
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      // Zero-sized report = the sidebar container is gone or unmeasured — the
+      // view must not keep covering window content (POO-135 r1).
+      this.unembedInstance(id)
+      return
+    }
+    // Re-attach implicitly: the sidebar container remounted after an unembed.
+    const host = instance.embeddedHostWindow
+    if (!instance.embeddedViewsAttached && host && !host.isDestroyed()) {
+      host.addBrowserView(instance.pageView)
+      instance.embeddedViewsAttached = true
+    }
     this.applyEmbedBounds(instance, bounds)
+  }
+
+  /**
+   * POO-135 r1: remove the page view from the embed host WITHOUT leaving
+   * embedded mode — the sidebar container unmounted (tab switch to canvas,
+   * narrow viewport, session switch, explicit hide) and the native view would
+   * otherwise keep covering window content. The instance stays alive and
+   * embedded; the next valid `setEmbedBounds` re-attaches it.
+   */
+  unembedInstance(id: string): void {
+    const instance = this.instances.get(id)
+    if (!instance || instance.hostMode !== 'embedded' || !instance.embeddedViewsAttached) return
+    const host = instance.embeddedHostWindow
+    if (host && !host.isDestroyed()) {
+      try {
+        host.removeBrowserView(instance.pageView)
+      } catch (error) {
+        mainLog.warn(`[browser-pane] unembed remove failed id=${id}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    instance.embeddedViewsAttached = false
+    mainLog.info(`[browser-pane] unembedded from sidebar id=${id}`)
   }
 
   private applyEmbedBounds(instance: BrowserInstance, bounds: BrowserEmbedBounds): void {
@@ -1243,6 +1308,13 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     if (instance.elementPicking) {
       await this.teardownElementPicker(instance)
     }
+    // POO-135 r1: defense in depth — the renderer disables the entry without
+    // a target, but Main must not arm a picker whose picks would have no
+    // destination session.
+    const targetSessionId = options?.targetSessionId ?? instance.ownerSessionId ?? null
+    if (!targetSessionId) {
+      throw new Error('[browser-pane] element picking requires a target session')
+    }
     try {
       await instance.pageView.webContents.executeJavaScript(ELEMENT_PICKER_SCRIPT)
     } catch (error) {
@@ -1250,8 +1322,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       throw error
     }
     instance.elementPicking = true
-    instance.elementPickingTargetSessionId = options?.targetSessionId ?? instance.ownerSessionId
-    mainLog.info(`[browser-pane] element picker armed id=${id} target=${instance.elementPickingTargetSessionId ?? 'none'}`)
+    instance.elementPickingTargetSessionId = targetSessionId
+    mainLog.info(`[browser-pane] element picker armed id=${id} target=${targetSessionId}`)
   }
 
   private async teardownElementPicker(instance: BrowserInstance): Promise<void> {
@@ -1294,6 +1366,11 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     const payload = parsed as Record<string, unknown>
 
     if (payload.kind === 'cancel') {
+      // POO-135 r1: the page picker does NOT self-destruct (it only reports);
+      // a signal-driven terminal outcome must run the teardown here or
+      // click/keydown interception stays armed on the page.
+      this.teardownPickerOnSignal(instance)
+      if (!instance.elementPicking) return
       instance.elementPicking = false
       instance.elementPickingTargetSessionId = null
       this.emitElementPickerEvent({ instanceId: instance.id, kind: 'cancelled', reason: 'user' })
@@ -1308,13 +1385,24 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     if (payload.kind === 'picked') {
       const reference = this.sanitizePickedReference(instance, payload.reference)
+      const wasArmed = instance.elementPicking
+      this.teardownPickerOnSignal(instance)
       instance.elementPicking = false
       instance.elementPickingTargetSessionId = null
-      // The picker script tears itself down after a successful pick.
-      if (reference) {
+      // Exactly one picked outcome per arm — duplicate/late signals are
+      // dropped so the renderer draft never gets double chips.
+      if (wasArmed && reference) {
         this.emitElementPickerEvent({ instanceId: instance.id, kind: 'picked', reference })
       }
     }
+  }
+
+  /** POO-135 r1: fire-and-forget teardown after a signal-driven terminal outcome. */
+  private teardownPickerOnSignal(instance: BrowserInstance): void {
+    if (instance.pageView.webContents.isDestroyed()) return
+    void instance.pageView.webContents
+      .executeJavaScript(ELEMENT_PICKER_TEARDOWN_SCRIPT)
+      .catch(() => {})
   }
 
   /** Clamp a page-reported pick to the whitelist snapshot fields. */

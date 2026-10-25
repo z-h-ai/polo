@@ -233,6 +233,53 @@ describe('BrowserPaneManager sidebar/popup state machine (POO-135)', () => {
     expect(view.setBounds).not.toHaveBeenCalled()
   })
 
+  it('unembed detaches the view while staying embedded; the next valid bounds re-attach it (r1)', () => {
+    const id = manager.createInstance('browser-3b', { show: false })
+    manager.embedInstance(id, hostWindow as any)
+    const instance = (manager as any).instances.get(id)
+    const view = instance.pageView
+    hostWindow.removeBrowserView.mockClear()
+
+    // Container unmounted → view must leave the host window…
+    manager.unembedInstance(id)
+    expect(hostWindow.removeBrowserView).toHaveBeenCalledWith(view)
+    expect(instance.hostMode).toBe('embedded')
+    expect(instance.embeddedViewsAttached).toBe(false)
+
+    // …and a valid bounds report (container remounted) re-attaches it.
+    hostWindow.addBrowserView.mockClear()
+    manager.setEmbedBounds(id, { x: 10, y: 10, width: 300, height: 200 })
+    expect(hostWindow.addBrowserView).toHaveBeenCalledWith(view)
+    expect(instance.embeddedViewsAttached).toBe(true)
+    expect(view.setBounds).toHaveBeenCalledWith({ x: 10, y: 10, width: 300, height: 200 })
+  })
+
+  it('a zero-sized bounds report unhooks the view instead of covering the window (r1)', () => {
+    const id = manager.createInstance('browser-3c', { show: false })
+    manager.embedInstance(id, hostWindow as any)
+    const instance = (manager as any).instances.get(id)
+    hostWindow.removeBrowserView.mockClear()
+
+    manager.setEmbedBounds(id, { x: 0, y: 0, width: 0, height: 0 })
+
+    expect(hostWindow.removeBrowserView).toHaveBeenCalledWith(instance.pageView)
+    expect(instance.embeddedViewsAttached).toBe(false)
+  })
+
+  it('unembed is a no-op for popup instances and already-detached embedded ones (r1)', () => {
+    const id = manager.createInstance('browser-3d', { show: false })
+    // Still a popup — nothing to remove.
+    manager.unembedInstance(id)
+    expect(hostWindow.removeBrowserView).not.toHaveBeenCalled()
+
+    manager.embedInstance(id, hostWindow as any)
+    manager.unembedInstance(id)
+    hostWindow.removeBrowserView.mockClear()
+    // Already detached — idempotent.
+    manager.unembedInstance(id)
+    expect(hostWindow.removeBrowserView).not.toHaveBeenCalled()
+  })
+
   it('detachToPopup returns the page view to the own window, applies the ownership title, and shows it', () => {
     manager.setSessionNameResolver((sessionId) => (sessionId === 'sess-alpha' ? 'Alpha' : null))
     const id = manager.createForSession('sess-alpha', { show: false })
@@ -262,6 +309,14 @@ describe('BrowserPaneManager sidebar/popup state machine (POO-135)', () => {
 
     expect(ownWindow.addBrowserView).not.toHaveBeenCalled()
     expect(ownWindow.focus).toHaveBeenCalled()
+  })
+
+  it('arming without any target session is rejected (defense in depth)', async () => {
+    const id = manager.createInstance('browser-4b', { show: false })
+    // No ownerSessionId and no targetSessionId option.
+    await expect(manager.setElementPicking(id, true)).rejects.toThrow(/target session/)
+    const instance = (manager as any).instances.get(id)
+    expect(instance.elementPicking).toBe(false)
   })
 
   it('arming the element picker injects the picker script and disarming tears it down', async () => {
@@ -321,6 +376,50 @@ describe('BrowserPaneManager sidebar/popup state machine (POO-135)', () => {
     expect(json).not.toContain('alert')
     expect(json).not.toContain('steal')
     expect(instance.elementPicking).toBe(false)
+  })
+
+  it('a duplicate picked signal after the first does not re-emit and tears the page picker down (r1)', async () => {
+    const events: any[] = []
+    manager.onElementPickerEvent((e) => events.push(e))
+
+    const id = manager.createInstance('browser-6b', { show: false })
+    const instance = (manager as any).instances.get(id)
+    instance.pageView.getURL = mock(() => 'https://example.com/page')
+    await manager.setElementPicking(id, true, { targetSessionId: 'sess-t' })
+
+    const pageWc = instance.pageView.webContents
+    const signal = '__polo-element-pick:' + JSON.stringify({
+      kind: 'picked',
+      reference: { tag: 'a', text: 'Link', locator: 'css=.l', pageTitle: 'P', url: 'https://example.com/page' },
+    })
+    pageWc._emit('console-message', 2, signal)
+    pageWc.executeJavaScript.mockClear()
+    // Late duplicate (page listener residue, racing signals) — must be a no-op
+    // for events, and the page picker must still be torn down.
+    pageWc._emit('console-message', 2, signal)
+    pageWc._emit('console-message', 2, signal)
+
+    expect(events.filter((e) => e.kind === 'picked')).toHaveLength(1)
+    const tornDown = pageWc.executeJavaScript.mock.calls.map((c: unknown[]) => String(c[0]))
+    expect(tornDown.some((expr: string) => expr.includes('teardown'))).toBe(true)
+  })
+
+  it('a cancel signal tears the page picker down and emits cancelled once (r1)', async () => {
+    const events: any[] = []
+    manager.onElementPickerEvent((e) => events.push(e))
+
+    const id = manager.createInstance('browser-6c', { show: false })
+    await manager.setElementPicking(id, true, { targetSessionId: 'sess-t' })
+    const pageWc = (manager as any).instances.get(id).pageView.webContents
+    pageWc.executeJavaScript.mockClear()
+
+    const escSignal = '__polo-element-pick:' + JSON.stringify({ kind: 'cancel' })
+    pageWc._emit('console-message', 2, escSignal)
+    pageWc._emit('console-message', 2, escSignal)
+
+    expect(events.filter((e) => e.kind === 'cancelled')).toHaveLength(1)
+    const tornDown = pageWc.executeJavaScript.mock.calls.map((c: unknown[]) => String(c[0]))
+    expect(tornDown.some((expr: string) => expr.includes('teardown'))).toBe(true)
   })
 
   it('a picked payload with a non-http(s) URL is dropped (no event)', async () => {

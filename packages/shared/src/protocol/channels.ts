@@ -547,6 +547,10 @@ export const RPC_CHANNELS = {
     EMBED: 'browser-pane:embed',
     DETACH_TO_POPUP: 'browser-pane:detach-to-popup',
     SET_EMBED_BOUNDS: 'browser-pane:set-embed-bounds',
+    // POO-135 r1: detach the embedded view when the sidebar container unmounts
+    // (tab switch / narrow viewport / session switch / hide) so it cannot
+    // cover window content; re-attaches on the next valid bounds report.
+    UNEMBED: 'browser-pane:unembed',
     SET_ELEMENT_PICKING: 'browser-pane:set-element-picking',
     STATE_CHANGED: 'browser-pane:state-changed',
     REMOVED: 'browser-pane:removed',

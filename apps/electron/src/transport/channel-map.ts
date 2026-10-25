@@ -509,6 +509,7 @@ export const CHANNEL_MAP = {
   'browserPane.embed': invoke(RPC_CHANNELS.browserPane.EMBED),
   'browserPane.detachToPopup': invoke(RPC_CHANNELS.browserPane.DETACH_TO_POPUP),
   'browserPane.setEmbedBounds': invoke(RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS),
+  'browserPane.unembed': invoke(RPC_CHANNELS.browserPane.UNEMBED),
   'browserPane.setElementPicking': invoke(RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING),
   'browserPane.emptyStateLaunch': invoke(RPC_CHANNELS.browserPane.LAUNCH),
   'browserPane.onStateChanged': listener(RPC_CHANNELS.browserPane.STATE_CHANGED),

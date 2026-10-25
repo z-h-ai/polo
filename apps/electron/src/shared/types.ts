@@ -1568,6 +1568,13 @@ export interface ElectronAPI {
     detachToPopup(id: string): Promise<void>
     /** POO-135: reposition an embedded page view (main-window coordinates). */
     setEmbedBounds(id: string, bounds: BrowserEmbedBounds): Promise<void>
+    /**
+     * POO-135 r1: remove the embedded page view from this window without
+     * leaving embedded mode — the sidebar container unmounted and the native
+     * view must not keep covering window content. Re-attaches on the next
+     * valid setEmbedBounds.
+     */
+    unembed(id: string): Promise<void>
     /** POO-135: toggle the in-page element picker for an instance. */
     setElementPicking(id: string, active: boolean, options?: { targetSessionId?: string | null }): Promise<void>
     emptyStateLaunch(payload: BrowserEmptyStateLaunchPayload): Promise<BrowserEmptyStateLaunchResult>
