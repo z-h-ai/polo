@@ -1,6 +1,7 @@
 export * from './types'
 export * from './channels'
 export * from './dto'
+export * from './goal'
 export * from './knowledge-base'
 export * from './events'
 export * from './routing'

@@ -732,6 +732,11 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     'clearPendingPlanExecution',
     'addAnnotation',
     'removeAnnotation',
+    // POO-134: Goal lifecycle commands mutate the session's authoritative Goal
+    // record (and resume can start agent work) — never available offline.
+    'goalPause',
+    'goalResume',
+    'goalEnd',
   ])
 
   // Session commands - consolidated handler for session operations
@@ -851,6 +856,17 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.removeMessageAnnotation(sessionId, command.messageId, command.annotationId)
       case 'updateAnnotation':
         return sessionManager.updateMessageAnnotation(sessionId, command.messageId, command.annotationId, command.patch)
+      // POO-134: Goal lifecycle — server-authoritative transitions against the
+      // session's persisted Goal record. Every one fails closed on unknown,
+      // stale or terminal Goal state instead of resurrecting a Goal.
+      case 'goalPause':
+        return sessionManager.goalPause(sessionId)
+      case 'goalResume':
+        // Resuming can start agent work: the offline read-only view refuses.
+        assertOnlineBusinessSurface()
+        return sessionManager.goalResume(sessionId)
+      case 'goalEnd':
+        return sessionManager.goalEnd(sessionId)
       default: {
         const _exhaustive: never = command
         throw new Error(`Unknown session command: ${JSON.stringify(command)}`)

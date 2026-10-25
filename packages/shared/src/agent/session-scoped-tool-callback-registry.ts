@@ -13,7 +13,7 @@
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
-import type { AuthRequest, RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
+import type { AuthRequest, GoalUpdateReport, RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import { createHash } from 'node:crypto';
 import { debug } from '../utils/debug.ts';
 
@@ -52,6 +52,16 @@ export interface SessionScopedToolCallbacks {
    * snapshotted by the agent at tool-call time and carried through.
    */
   onQuestionRequested?: (questions: RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>;
+
+  /**
+   * POO-134: called when the agent files a structured goal_update report on a
+   * Goal turn. The report is NOT authority — the host's GoalController applies
+   * it only after matching a successful goal_update tool_result of the SAME
+   * turn against the GoalID/runGeneration captured at turn start.
+   * `generationAtRequest` is the issuing turn's generation, snapshotted at
+   * tool-call time and carried through immutably.
+   */
+  onGoalUpdateReport?: (report: GoalUpdateReport, generationAtRequest: number) => void | Promise<void>;
 
   /**
    * Reader for the CURRENT processing generation, registered by each agent

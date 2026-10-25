@@ -23,6 +23,7 @@ import type {
   CredentialInputMode as SharedCredentialInputMode,
   CredentialAuthRequest as SharedCredentialAuthRequest,
 } from '../agent/index'
+import type { GoalProjection } from './goal'
 
 // Re-export generateMessageId for handler convenience
 export { generateMessageId } from '@polo-ai/core/types'
@@ -356,6 +357,7 @@ export type SessionEvent =
   | { type: 'source_activated'; sessionId: string; sourceSlug: string; originalMessage: string }
   | { type: 'usage_update'; sessionId: string; tokenUsage: { inputTokens: number; contextWindow?: number } }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
+  | { type: 'goal_projection'; sessionId: string; projection: GoalProjection }
   | { type: 'working_directory_error'; sessionId: string; error: string }
   // P0-2 render_ui skeleton streaming (Wave-1): partial tool input for an
   // in-flight render_ui call, so the chat can preview "building <type> —
@@ -401,6 +403,15 @@ export interface SendMessageOptions {
    * client-supplied value is always dropped.
    */
   kbModelContext?: { block: string; docs: number; bytes: number }
+  /**
+   * POO-134 Goal intent carried by the send. Only `start` exists: pausing,
+   * resuming and ending a Goal are dedicated server commands, so a client can
+   * never complete, resume or overwrite a Goal through a send. The server
+   * validates the intent against the session's authoritative Goal state — a
+   * start while a non-terminal Goal is present fails closed (the user ends the
+   * current Goal first; a running Goal is never replaced by a new task).
+   */
+  goalIntent?: { action: 'start' }
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +447,12 @@ export type SessionCommand =
   | { type: 'addAnnotation'; messageId: string; annotation: AnnotationV1 }
   | { type: 'removeAnnotation'; messageId: string; annotationId: string }
   | { type: 'updateAnnotation'; messageId: string; annotationId: string; patch: Partial<AnnotationV1> }
+  // POO-134 Goal lifecycle. Server-authoritative: each resolves against the
+  // session's persisted Goal record and the current trusted scope; unknown,
+  // stale or terminal states fail closed instead of resurrecting a Goal.
+  | { type: 'goalPause' }
+  | { type: 'goalResume' }
+  | { type: 'goalEnd' }
 
 export interface NewChatActionParams {
   input?: string

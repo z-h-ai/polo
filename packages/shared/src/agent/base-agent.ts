@@ -26,7 +26,7 @@ import type { ThinkingLevel } from './thinking-levels.ts';
 import { DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from './thinking-levels.ts';
 import type { PermissionMode } from './mode-manager.ts';
 import type { LoadedSource } from '../sources/types.ts';
-import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
+import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryOptions, type LLMQueryResult } from './llm-tool.ts';
 import { getLlmConnections, getDefaultLlmConnection } from '../config/storage.ts';
 import { loadAllSources } from '../sources/storage.ts';
 import type { ApiServerConfig } from '../mcp/mcp-pool.ts';
@@ -47,7 +47,7 @@ import type {
 } from './backend/types.ts';
 import { AbortReason } from './backend/types.ts';
 import type { AuthRequest } from './session-scoped-tools.ts';
-import { parseRequestUserInputArgs, type RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
+import { parseRequestUserInputArgs, type GoalUpdateReport, type RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import type { Workspace } from '../config/storage.ts';
 
 // Core modules
@@ -266,6 +266,13 @@ export abstract class BaseAgent implements AgentBackend {
    */
   onQuestionRequested: ((questions: RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>) | null = null;
   /**
+   * POO-134: goal_update report channel. Only wired on Goal turns; the
+   * SessionManager's GoalController re-validates every report against the
+   * GoalID/runGeneration captured when the turn started, so a stale or
+   * out-of-scope report never mutates Goal state.
+   */
+  onGoalUpdateReport: ((report: GoalUpdateReport, generationAtRequest: number) => void | Promise<void>) | null = null;
+  /**
    * Per-turn capability flag: whether the request_user_input tool is visible.
    * Set by the SessionManager before each turn (desktop interactive sessions
    * only — messaging/automation/headless/internal turns fail closed).
@@ -285,6 +292,13 @@ export abstract class BaseAgent implements AgentBackend {
    * every other combination fails closed.
    */
   allowGenerateApp = false;
+  /**
+   * Per-turn capability flag: whether the goal_update tool (POO-134 structured
+   * goal reporting) is visible. Set by the SessionManager before each turn —
+   * ONLY turns that belong to the session's active Goal; ordinary chat turns,
+   * paused Goals and terminal Goals all fail closed.
+   */
+  allowGoalUpdate = false;
   /**
    * The processing generation of the turn whose events this agent is
    * currently processing. Injected by the SessionManager at every turn start
@@ -1242,9 +1256,11 @@ ${formattedMessages}
    * - PiAgent: One-shot completion via Pi SDK in the subprocess
    *
    * @param request - The query request (prompt, model, systemPrompt, etc.)
+   * @param options - POO-134: optional local transport options (abort signal,
+   * verification isolation). Never serialized onto the wire request.
    * @returns The model's response text and optional token usage
    */
-  abstract queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult>;
+  abstract queryLlm(request: LLMQueryRequest, options?: LLMQueryOptions): Promise<LLMQueryResult>;
 
   /**
    * Pre-execute a call_llm request: resolve attachments, validate model, run query.

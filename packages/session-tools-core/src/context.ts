@@ -17,6 +17,7 @@ import type {
   McpSourceConfig,
 } from './types.ts';
 import type { RequestUserInputQuestionArgs } from './question-types.ts';
+import type { GoalUpdateReport } from './goal-types.ts';
 
 // ============================================================
 // Source Credential Types
@@ -73,6 +74,19 @@ export interface SessionToolCallbacks {
    * handler degrades to a plain-text error.
    */
   onQuestionRequested?(questions: RequestUserInputQuestionArgs[], generationAtRequest: number): void | Promise<void>;
+
+  /**
+   * POO-134: called when the agent files a structured goal_update report on a
+   * Goal turn. The handler never writes Goal state — the host's GoalController
+   * is the only authority, and it re-validates the report against the turn it
+   * was captured on.
+   *
+   * `generationAtRequest` is the processing generation of the turn that issued
+   * the tool call, snapshotted AT TOOL-CALL INITIATION (see
+   * onQuestionRequested). Optional — sessions without an active Goal leave it
+   * undefined and the handler fails closed.
+   */
+  onGoalUpdateReport?(report: GoalUpdateReport, generationAtRequest: number): void | Promise<void>;
 }
 
 // ============================================================

@@ -620,6 +620,11 @@ export async function updateSessionMetadata(
     | 'llmConnection'
     | 'isArchived'
     | 'archivedAt'
+    // POO-134: cold-start Goal recovery. Header-only writes so booting a
+    // session with a running Goal never hydrates its full message history.
+    | 'goal'
+    | 'goalHistory'
+    | 'goalProjectionRevision'
   >>,
   storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): Promise<void> {
@@ -644,6 +649,11 @@ export async function updateSessionMetadata(
   if (updates.llmConnection !== undefined) session.llmConnection = updates.llmConnection;
   if (updates.isArchived !== undefined) session.isArchived = updates.isArchived;
   if ('archivedAt' in updates) session.archivedAt = updates.archivedAt;
+  // POO-134: 'in updates' (not !== undefined) so a recovery that CLEARS the
+  // current projection (terminal/ended) is representable.
+  if ('goal' in updates) session.goal = updates.goal;
+  if ('goalHistory' in updates) session.goalHistory = updates.goalHistory;
+  if ('goalProjectionRevision' in updates) session.goalProjectionRevision = updates.goalProjectionRevision;
 
   await saveSessionWithStorage(session, storage);
 }

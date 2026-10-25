@@ -134,6 +134,7 @@ import { getSessionToolProxyDefs, SESSION_TOOL_NAMES, type SessionToolProxyDef }
 import {
   SESSION_BACKEND_TOOL_NAMES,
   SESSION_TOOL_REGISTRY,
+  GOAL_UPDATE_TOOL_NAME,
   type ToolResult as SessionToolResult,
 } from '@polo-ai/session-tools-core';
 import { createClaudeContext, type SessionToolContext } from './claude-context.ts';
@@ -163,7 +164,7 @@ import type { RtkContext } from './core/rtk-rewrite.ts';
 import { extractWorkspaceSlug } from '../utils/workspace.ts';
 
 // LLM tool types
-import { LLM_QUERY_TIMEOUT_MS, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
+import { LLM_QUERY_TIMEOUT_MS, type LLMQueryRequest, type LLMQueryOptions, type LLMQueryResult } from './llm-tool.ts';
 import { executeBrowserToolCommand } from './browser-tool-runtime.ts';
 import { saveBinaryResponse } from '../utils/binary-detection.ts';
 
@@ -310,6 +311,12 @@ export class PiAgent extends BaseAgent {
     reject: (error: Error) => void;
   }> = new Map();
 
+  // POO-134: local cancellation handles for in-flight llm_query calls. The
+  // verifier supplies an AbortSignal; firing it sends `llm_query_cancel` to the
+  // subprocess (which aborts/disposes the ephemeral session) and settles the
+  // pending promise here. Purely local — never serialized onto the wire request.
+  private pendingLlmQueryCancellers: Map<string, () => void> = new Map();
+
   // Pending ensure_session_ready requests (branch preflight handshake)
   private pendingEnsureSessionReady: Map<string, {
     resolve: (sessionId: string | null) => void;
@@ -362,6 +369,10 @@ export class PiAgent extends BaseAgent {
   // Last allowGenerateApp value sent to the subprocess — same drift detection
   // for the generate_app tool (Generative UI canvas apps).
   private _lastRegisteredAllowGenerateApp: boolean = false;
+
+  // Last allowGoalUpdate value sent to the subprocess — same drift detection
+  // for the goal_update tool (POO-134 goal turns only).
+  private _lastRegisteredAllowGoalUpdate: boolean = false;
 
   // RPC request counter for unique IDs
   private rpcIdCounter: number = 0;
@@ -672,6 +683,7 @@ export class PiAgent extends BaseAgent {
       allowRequestUserInput: this.allowRequestUserInput,
       allowRenderUi: this.allowRenderUi,
       allowGenerateApp: this.allowGenerateApp,
+      allowGoalUpdate: this.allowGoalUpdate,
     });
 
     // Mirror Claude's gate: hide `browser_tool` when the user has disabled
@@ -711,7 +723,8 @@ export class PiAgent extends BaseAgent {
     this._lastRegisteredAllowRequestUserInput = this.allowRequestUserInput;
     this._lastRegisteredAllowRenderUi = this.allowRenderUi;
     this._lastRegisteredAllowGenerateApp = this.allowGenerateApp;
-    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp})`);
+    this._lastRegisteredAllowGoalUpdate = this.allowGoalUpdate;
+    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}, allowGoalUpdate=${this.allowGoalUpdate})`);
   }
 
   /**
@@ -723,10 +736,11 @@ export class PiAgent extends BaseAgent {
     const ruiDrifted = this._lastRegisteredAllowRequestUserInput !== this.allowRequestUserInput;
     const guiDrifted = this._lastRegisteredAllowRenderUi !== this.allowRenderUi;
     const gapDrifted = this._lastRegisteredAllowGenerateApp !== this.allowGenerateApp;
-    if (!ruiDrifted && !guiDrifted && !gapDrifted) {
+    const goalDrifted = this._lastRegisteredAllowGoalUpdate !== this.allowGoalUpdate;
+    if (!ruiDrifted && !guiDrifted && !gapDrifted && !goalDrifted) {
       return;
     }
-    this.debug(`session tool visibility changed (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}) — re-registering session tools`);
+    this.debug(`session tool visibility changed (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}, allowGoalUpdate=${this.allowGoalUpdate}) — re-registering session tools`);
     this.sendSessionToolRegistration();
   }
 
@@ -1777,6 +1791,11 @@ export class PiAgent extends BaseAgent {
         // FORWARD the immutable handler snapshot — never re-read the field.
         return this.onQuestionRequested?.(questions, generationAtRequest);
       },
+      onGoalUpdateReport: (report, generationAtRequest) => {
+        this.onDebug?.(`[PiAgent] onGoalUpdateReport received: ${report.kind}`);
+        // FORWARD the immutable handler snapshot — never re-read the field.
+        return this.onGoalUpdateReport?.(report, generationAtRequest);
+      },
     });
 
     // Attach session self-management bindings (lazy getters from callback registry)
@@ -1820,6 +1839,15 @@ export class PiAgent extends BaseAgent {
       if (toolName === 'update_app_data' && !this.allowGenerateApp) {
         return {
           content: 'update_app_data is not available in this session. Create a canvas app with generate_app first, or present the data as markdown, a datatable block, or a render_ui card instead.',
+          isError: true,
+        };
+      }
+      // POO-134: goal_update only exists on turns that belong to the active
+      // Goal — a stale registration must never let a chat turn mutate Goal
+      // state.
+      if (toolName === GOAL_UPDATE_TOOL_NAME && !this.allowGoalUpdate) {
+        return {
+          content: 'goal_update is not available in this session: there is no active goal on this turn. Summarize progress in plain text instead.',
           isError: true,
         };
       }
@@ -2052,6 +2080,7 @@ export class PiAgent extends BaseAgent {
       pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
     }
     this.pendingLlmQueries.clear();
+    this.pendingLlmQueryCancellers.clear();
 
     // Reject pending ensure_session_ready requests
     for (const [, pending] of this.pendingEnsureSessionReady) {
@@ -2874,8 +2903,12 @@ export class PiAgent extends BaseAgent {
    * See packages/shared/CLAUDE.md → "queryLlm backend contract" and
    * packages/pi-agent-server/src/index.ts → handleLlmQuery for the invariant.
    */
-  async queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
+  async queryLlm(request: LLMQueryRequest, options?: LLMQueryOptions): Promise<LLMQueryResult> {
     this.debug('[PiAgent.queryLlm] Starting');
+
+    if (options?.signal?.aborted) {
+      throw new Error('queryLlm aborted before start');
+    }
 
     await this.ensureSubprocess();
 
@@ -2884,19 +2917,64 @@ export class PiAgent extends BaseAgent {
       this.pendingLlmQueries.set(id, { resolve, reject });
     });
 
-    this.send({ type: 'llm_query', id, request });
+    const cancelLocally = (reason: string) => {
+      // The subprocess-side entry is cancelled by the explicit `llm_query_cancel`
+      // message; this side settles the local pending promise so no caller is
+      // left hanging on an entry the result message will never match.
+      this.pendingLlmQueryCancellers.delete(id);
+      const pending = this.pendingLlmQueries.get(id);
+      if (pending) {
+        this.pendingLlmQueries.delete(id);
+        pending.reject(new Error(`queryLlm cancelled: ${reason}`));
+      }
+    };
+
+    let onAbort: (() => void) | undefined;
+    if (options?.signal) {
+      onAbort = () => {
+        try {
+          this.send({ type: 'llm_query_cancel', id });
+        } catch (error) {
+          this.debug(`[PiAgent.queryLlm] Failed to send llm_query_cancel: ${error}`);
+        }
+        cancelLocally('aborted');
+      };
+      options.signal.addEventListener('abort', onAbort, { once: true });
+    }
+    this.pendingLlmQueryCancellers.set(id, () => cancelLocally('aborted'));
 
     // Keep this aligned with the subprocess-side queryLlm timeout.
     const timeout = new Promise<LLMQueryResult>((_, reject) => {
       setTimeout(() => {
         if (this.pendingLlmQueries.has(id)) {
+          this.pendingLlmQueryCancellers.delete(id);
+          if (options?.signal) {
+            options.signal.removeEventListener('abort', onAbort!);
+          }
           this.pendingLlmQueries.delete(id);
           reject(new Error(`queryLlm timed out after ${LLM_QUERY_TIMEOUT_MS / 1000}s`));
         }
       }, LLM_QUERY_TIMEOUT_MS);
     });
 
-    return Promise.race([resultPromise, timeout]);
+    try {
+      // The isolation flag rides on the RPC envelope, NOT on LLMQueryRequest —
+      // the request shape stays byte-identical for existing consumers.
+      this.send({
+        type: 'llm_query',
+        id,
+        request,
+        ...(options?.isolation === 'no-tools' ? { isolation: 'no-tools' } : {}),
+      });
+      return await Promise.race([resultPromise, timeout]);
+    } finally {
+      // Settled (result, timeout, abort or subprocess death): drop the local
+      // cancellation handle and detach the listener so nothing leaks.
+      this.pendingLlmQueryCancellers.delete(id);
+      if (options?.signal && onAbort) {
+        options.signal.removeEventListener('abort', onAbort);
+      }
+    }
   }
 
   // ============================================================
