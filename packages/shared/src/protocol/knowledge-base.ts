@@ -31,6 +31,10 @@ export const KB_ERROR_CODES = [
   'kb_service_unavailable',
   'kb_collection_not_published',
   'kb_conflict',
+  // POO-143 S5.1: an upload whose write timed out or lost its connection MAY
+  // have landed — the wire distinguishes this "unknown" outcome from a clean
+  // failure so the renderer offers a verify step instead of a blind retry.
+  'kb_result_unknown',
 ] as const
 export type KbErrorCode = (typeof KB_ERROR_CODES)[number]
 
