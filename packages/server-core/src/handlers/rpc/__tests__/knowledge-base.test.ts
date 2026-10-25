@@ -883,6 +883,38 @@ describe('knowledge-base document lifecycle', () => {
     })).rejects.toMatchObject({ code: 'kb_content_too_large' })
   })
 
+  it('answers a write that timed out PAST its landing with kb_result_unknown, never a clean failure (POO-143 S5.1)', async () => {
+    const { invoke } = createHarness()
+    const { collection } = await seedCollection(invoke)
+    // The content write lands on the tree AFTER the caller's shrunken write
+    // deadline has already fired — the server holds the answer 800ms while the
+    // client gives up at 80ms (a 10:1 margin so slow CI still separates the
+    // two timers), the classic "the write MAY have taken effect" case. The
+    // fake serves the delay before the write handler, so the node still lands
+    // once the delay drains.
+    ov.setDelay('/api/v1/content/write', 800)
+    setOpenVikingTimeoutsForTests({ writeMs: 80 })
+    try {
+      await expect(invoke(RPC_CHANNELS.kb.UPLOAD_DOCUMENT, {
+        workspaceId: WORKSPACE_ID, collectionId: collection.id,
+        title: 'Late landing', content: 'written but unanswered',
+      })).rejects.toMatchObject({ code: 'kb_result_unknown' })
+    } finally {
+      resetOpenVikingTimeoutsForTests()
+    }
+    // Let the fake's write handler finish past the abandoned request.
+    await new Promise(resolve => setTimeout(resolve, 900))
+    // The write is on the tree and the audit records the UNKNOWN outcome —
+    // the failed answer never claimed a clean failure.
+    const rows = await invoke(RPC_CHANNELS.kb.LIST_DOCUMENTS, {
+      workspaceId: WORKSPACE_ID, collectionId: collection.id,
+    }) as KbDocumentSummary[]
+    expect(rows.map(row => row.title)).toContain('Late landing')
+    const writeResults = readAudit(workspaceRoot, binding)
+      .filter(entry => entry.action === 'remote.content_write.result')
+    expect(writeResults.some(entry => entry.detail?.outcome === 'unknown')).toBe(true)
+  })
+
   it('recycles deleted documents out of the live tenant (brief D4)', async () => {
     const { invoke } = createHarness()
     const { collection, document } = await seedCollection(invoke, {

@@ -1407,7 +1407,24 @@ export async function uploadDocument(
   // The deterministic URI makes the write replace-idempotent: a timed-out
   // upload retried under the same id rewrites the same node (brief D4).
   const uri = kbDocumentUri(collection.uri, record.title, record.docId)
-  await remoteWriteContent(space, uri, input.content, documentTags(record))
+  try {
+    await remoteWriteContent(space, uri, input.content, documentTags(record))
+  } catch (error) {
+    // POO-143 S5.1: a timeout / lost connection / gateway failure means the
+    // write MAY have landed. Answering `kb_service_unavailable` would let the
+    // UI present a clean failure and invite a blind retry that creates a
+    // duplicate; the unknown-outcome code tells the renderer to VERIFY the
+    // collection listing instead (the write is replace-idempotent by URI, so
+    // a user-driven retry under the same title is still safe).
+    if (remoteOutcomeOf(error) === 'unknown') {
+      throw new KbStoreError(
+        'kb_result_unknown',
+        'The upload result is not confirmed yet',
+        `${uri} write outcome unknown`,
+      )
+    }
+    throw error
+  }
   appendAudit(space.workspaceRoot, space.binding, {
     actor: space.actor,
     action: 'document.upload',
