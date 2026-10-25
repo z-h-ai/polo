@@ -34,7 +34,18 @@ import type { SessionOptions, SessionOptionUpdates } from '../hooks/useSessionOp
 import { defaultSessionOptions } from '../hooks/useSessionOptions'
 import { sessionAtomFamily } from '../atoms/sessions'
 
-export type ChatAccessIssue = 'no-ai-service' | 'quota-exhausted' | 'account-disabled'
+/**
+ * POO-144: `ai-config-syncing` / `ai-config-sync-failed` are renderer-side
+ * projections of the space AI-config sync state machine — they only ever
+ * shadow `no-ai-service` while the managed connection list is empty, and never
+ * gate quota/account semantics.
+ */
+export type ChatAccessIssue =
+  | 'no-ai-service'
+  | 'quota-exhausted'
+  | 'account-disabled'
+  | 'ai-config-syncing'
+  | 'ai-config-sync-failed'
 
 export interface ChatAccessStatus {
   issue: ChatAccessIssue
@@ -55,6 +66,8 @@ export interface AppShellContextType {
   workspaceDefaultLlmConnection?: string
   /** Blocking account/config/quota state for the chat input area */
   chatAccessStatus?: ChatAccessStatus | null
+  /** POO-144: user-triggered retry of a failed space AI-config sync (never automatic) */
+  onRetryAiConfigSync?: () => void
   /** Signed-in Admin user, when Admin auth is configured */
   currentAdminUser?: Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null
   /** Log out the current Admin user and return to login */

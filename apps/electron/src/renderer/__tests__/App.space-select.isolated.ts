@@ -149,6 +149,10 @@ let reauthListener: ((value: unknown) => void) | undefined
 const electronApiExplicit: Record<string, unknown> = {
   isDebugMode: async () => false,
   getWindowWorkspace: async () => 'ws-space-select-unit',
+  // Route read added in v0.17.0 (routeThroughProductSpace); the preload
+  // fallback shape is `async () => null` — without it the fail-fast proxy
+  // turns the route read into space-error before any screen can render.
+  getWindowLaunchContext: async () => null,
   getSetupNeeds: async () => ({
     isFullyConfigured: authenticated, needsAdminLogin: !authenticated,
     needsCredentials: false, needsBillingConfig: false,
@@ -179,7 +183,7 @@ const electronApiExplicit: Record<string, unknown> = {
   adminLogout: async () => { authenticated = false; return { success: true } },
   clearClaudeOAuthState: async () => {},
   onAdminReauthRequired: (listener: (value: unknown) => void) => { reauthListener = listener; return () => { reauthListener = undefined } },
-  adminSyncConnections: async () => ({ success: true }),
+  adminSyncConnections: mock(async () => ({ success: true })),
   getRuntimeEnvironment: () => 'electron',
   getSources: async () => [],
   listStatuses: async () => [],
@@ -204,7 +208,7 @@ const electronApiExplicit: Record<string, unknown> = {
   getTransportConnectionState: async () => ({ state: 'connected' }),
   getEditPopoverPendingQuestion: async () => null,
   getNotificationsEnabled: async () => true,
-  listLlmConnectionsWithStatus: async () => [],
+  listLlmConnectionsWithStatus: mock(async () => []),
   getWorkspaceSettings: async () => ({}),
   getAllDrafts: async () => ({}),
   setDraft: async () => {},
@@ -215,7 +219,8 @@ const electronApiExplicit: Record<string, unknown> = {
   isChannelAvailable: () => true,
   getWindowFocusState: async () => ({ focused: true }),
   refreshBadge: () => {},
-  reportWorkbenchReady: () => {},
+  // useWorkbenchReady awaits/.catches the receipt — must be promise-shaped.
+  reportWorkbenchReady: async () => {},
   createSession: async () => { throw new Error('electronAPI fixture: createSession is not reachable in this space-select journey fixture') },
   createEditPopoverSession: async () => { throw new Error('electronAPI fixture: createEditPopoverSession is not reachable') },
   sendMessage: async () => { throw new Error('electronAPI fixture: sendMessage is not reachable') },
@@ -321,6 +326,10 @@ beforeEach(async () => {
   productSpaceState.confirmStopAndSwitch.mockReset()
   productSpaceState.confirmStopAndSwitch.mockImplementation(async () => {})
   ;(electronApiExplicit.adminLogin as ReturnType<typeof mock>).mockClear()
+  ;(electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>).mockReset()
+  ;(electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>).mockImplementation(async () => ({ success: true }))
+  ;(electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>).mockReset()
+  ;(electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>).mockImplementation(async () => [])
   rerenderApp = null
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: failFastElectronApi() })
   getDefaultStore().set(activeTabIdAtom, HOME_TAB_ID)
@@ -376,6 +385,18 @@ function armStoredEnterpriseGate() {
   productSpaceState.allProductSpaces = [personalSpace, enterpriseSpace]
   productSpaceState.activeProductSpaceId = ENTERPRISE_ID
   productSpaceState.activeProductSpace = { id: ENTERPRISE_ID, kind: 'enterprise', name: '星辰传媒' }
+}
+
+/** POO-144: publish the commit event exactly the way the real hook's
+ * publishCommittedSelection does after every committed selection. */
+function publishSpaceCommitted(productSpaceId: string) {
+  window.dispatchEvent(new CustomEvent('polo:product-space-changed', {
+    detail: {
+      accountId: FIXTURE_ACCOUNT_ID,
+      productSpaceId,
+      contextKey: `${FIXTURE_ACCOUNT_ID}|${productSpaceId}`,
+    },
+  }))
 }
 
 describe('登录后空间选择（space-select 门禁）× 真实 App', () => {
@@ -568,5 +589,95 @@ describe('登录后空间选择（space-select 门禁）× 真实 App', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
     expect(screen.queryByTestId('home-quick-access-section')).toBeNull()
     expect(screen.queryByTestId('product-space-select-screen')).toBeNull()
+  })
+
+  // ---- POO-144：空间提交 → scoped AI 配置同步状态机 ----
+
+  it('POO-144：空间提交事件触发 scoped 同步，成功后显式刷新连接列表（不等广播）', async () => {
+    authenticated = true
+    renderAppTree()
+    await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
+    const sync = electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>
+    const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
+    sync.mockClear()
+    refresh.mockClear()
+    await act(async () => { publishSpaceCommitted(ENTERPRISE_ID) })
+    expect(sync).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+  })
+
+  it('POO-144：同步失败不刷新不假成功，重试（同一入口）成功后恢复显式刷新', async () => {
+    authenticated = true
+    const sync = electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>
+    const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
+    sync.mockImplementation(async () => ({ success: false, errorCode: 'SYNC_FAILED', status: 500 }))
+    renderAppTree()
+    await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
+    sync.mockClear()
+    refresh.mockClear()
+    await act(async () => { publishSpaceCommitted(ENTERPRISE_ID) })
+    expect(sync).toHaveBeenCalledTimes(1)
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
+    // 失败回执不触发连接列表刷新（failed 态等待用户重试）
+    expect(refresh).not.toHaveBeenCalled()
+    expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
+    // 用户点击「重试」与提交事件走同一条 runScopedAiConfigSync 路径
+    sync.mockImplementation(async () => ({ success: true }))
+    await act(async () => { publishSpaceCommitted(ENTERPRISE_ID) })
+    expect(sync).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+  })
+
+  it('POO-144：快速切换后旧空间的晚到 auth 失败回执不得把新会话打回登录页', async () => {
+    authenticated = true
+    renderAppTree()
+    await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
+    const sync = electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>
+    const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
+    sync.mockClear()
+    refresh.mockClear()
+    let releaseStale: (value: unknown) => void = () => {}
+    const staleReceipt = new Promise(resolve => { releaseStale = resolve })
+    sync.mockImplementationOnce(() => staleReceipt)
+    sync.mockImplementation(async () => ({ success: true }))
+    // A 空间同步在飞；B 空间快速提交并完成
+    await act(async () => { publishSpaceCommitted(ENTERPRISE_ID) })
+    await act(async () => { publishSpaceCommitted(SECOND_ENTERPRISE_ID) })
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    // 旧空间 A 的同步以 auth 失败晚到：epoch 已过期，回执必须整包丢弃
+    await act(async () => {
+      releaseStale({ success: false, loggedIn: false, errorCode: 'TOKEN_EXPIRED' })
+      await staleReceipt
+    })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+    expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
+    expect(screen.queryByLabelText('手机号或用户名')).toBeNull()
+    // 丢弃的回执不得再触发连接列表刷新
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('POO-144：会话失效（登出/换号）后旧同步的晚到成功回执不得再落地刷新', async () => {
+    authenticated = true
+    renderAppTree()
+    await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
+    const sync = electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>
+    const refresh = electronApiExplicit.listLlmConnectionsWithStatus as ReturnType<typeof mock>
+    sync.mockClear()
+    refresh.mockClear()
+    let releaseStale: (value: unknown) => void = () => {}
+    const staleReceipt = new Promise(resolve => { releaseStale = resolve })
+    sync.mockImplementationOnce(() => staleReceipt)
+    await act(async () => { publishSpaceCommitted(ENTERPRISE_ID) })
+    // 同步在飞时会话失效（auth 失败 → resetAccountScopedClientState）
+    await act(async () => { reauthListener?.({ loggedIn: false, errorCode: 'TOKEN_EXPIRED' }) })
+    await waitFor(() => expect(screen.getByLabelText('手机号或用户名')).toBeTruthy())
+    await act(async () => {
+      releaseStale({ success: true })
+      await staleReceipt
+    })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+    // 成功回执属于已结束的会话：不得刷新列表、不得改变登录页状态
+    expect(refresh).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('手机号或用户名')).toBeTruthy()
   })
 })

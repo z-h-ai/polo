@@ -45,6 +45,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     llmConnections,
     workspaceDefaultLlmConnection,
     chatAccessStatus,
+    onRetryAiConfigSync,
     onSendMessage,
     onOpenFile,
     onOpenUrl,
@@ -305,10 +306,24 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           variant: 'destructive' as const,
           message: t('chat.statusBanner.accountDisabled'),
         }
+      // POO-144: the space AI-config sync states shadow the empty-list banner —
+      // syncing is informational, failed offers an explicit user-triggered retry.
+      case 'ai-config-syncing':
+        return {
+          variant: 'info' as const,
+          message: t('chat.statusBanner.aiConfigSyncing'),
+        }
+      case 'ai-config-sync-failed':
+        return {
+          variant: 'destructive' as const,
+          message: t('chat.statusBanner.aiConfigSyncFailed'),
+          actionLabel: t('chat.statusBanner.retrySync'),
+          onAction: onRetryAiConfigSync,
+        }
       default:
         return null
     }
-  }, [chatAccessStatus?.issue, t])
+  }, [chatAccessStatus?.issue, onRetryAiConfigSync, t])
 
   const isChatInputDisabled = !!inputStatusBanner
 
