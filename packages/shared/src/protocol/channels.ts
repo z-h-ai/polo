@@ -36,6 +36,10 @@ export const RPC_CHANNELS = {
     COMMAND: 'sessions:command',
     GET_PENDING_PLAN_EXECUTION: 'sessions:getPendingPlanExecution',
     GET_PERMISSION_MODE_STATE: 'sessions:getPermissionModeState',
+    // POO-134: read-only hydration pull for the session's Goal projection —
+    // late joiners converge with the event stream via the same per-session
+    // monotonic revision; never mutates anything.
+    GET_GOAL_PROJECTION: 'sessions:goalProjection',
     EVENT: 'session:event',
     GET_MODEL: 'session:getModel',
     SET_MODEL: 'session:setModel',

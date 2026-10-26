@@ -50,6 +50,7 @@ import {
   handleQuestionRequest,
   handleQuestionResolved,
   handleUsageUpdate,
+  handleGoalProjection,
 } from './handlers/session'
 
 /**
@@ -220,6 +221,9 @@ export function processEvent(
 
     case 'usage_update':
       return handleUsageUpdate(state, event)
+
+    case 'goal_projection':
+      return handleGoalProjection(state, event)
 
     default: {
       // Unknown event type - return state unchanged but as new reference

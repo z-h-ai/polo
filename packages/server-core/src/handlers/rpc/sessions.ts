@@ -234,6 +234,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
   RPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE,
+  RPC_CHANNELS.sessions.GET_GOAL_PROJECTION,
   RPC_CHANNELS.sessions.SEARCH_CONTENT,
   RPC_CHANNELS.sessions.GET_FILES,
   RPC_CHANNELS.sessions.GET_NOTES,
@@ -896,6 +897,20 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const modeScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
     if (!modeScopeToken || !isTrustedSessionScopeTokenCurrent(modeScopeToken)) return null
     return sessionManager.getSessionPermissionModeState(sessionId)
+  })
+
+  // POO-134: read-only hydration pull for the session's Goal projection.
+  // Late joiners merge this with the goal_projection event stream through the
+  // renderer's revision gate; this handler never mutates Goal state.
+  server.handle(RPC_CHANNELS.sessions.GET_GOAL_PROJECTION, async (
+    ctx,
+    sessionId: string
+  ) => {
+    if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return null
+    // R38-3: post-authorization CAS before disclosure.
+    const goalScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    if (!goalScopeToken || !isTrustedSessionScopeTokenCurrent(goalScopeToken)) return null
+    return sessionManager.goalProjection(sessionId) ?? null
   })
 
   // ============================================================
