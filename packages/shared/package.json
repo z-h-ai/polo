@@ -50,6 +50,7 @@
     "./docs/doc-links": "./src/docs/doc-links.ts",
     "./config/types": "./src/config/types.ts",
     "./credentials": "./src/credentials/index.ts",
+    "./credentials/insufficient-credit-codes": "./src/credentials/insufficient-credit-codes.ts",
     "./credentials/managed-billing-observation": "./src/credentials/managed-billing-observation.ts",
     "./genui": "./src/genui/index.ts",
     "./mcp": "./src/mcp/index.ts",

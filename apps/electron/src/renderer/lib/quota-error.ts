@@ -8,7 +8,11 @@
 // deliberately gone: an unknown error class must never be talked into a
 // billing category. The period-reset copy is likewise conditional: it renders
 // only when the server itself provided a reset fact.
-import { isInsufficientCreditCode } from '@polo-ai/shared/credentials'
+// Direct-module import (NOT the '@polo-ai/shared/credentials' barrel): the
+// barrel re-exports the koffi-based native write-lock backends, and a
+// renderer import would drag that native binary into the vite bundle
+// (rollup parse error on koffi.node — v0.21.6 first-build failure).
+import { isInsufficientCreditCode } from '@polo-ai/shared/credentials/insufficient-credit-codes'
 
 export function readErrorField(error: unknown, field: 'errorCode' | 'code' | 'status' | 'message'): unknown {
   if (!error || typeof error !== 'object') return undefined
