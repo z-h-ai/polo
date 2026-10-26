@@ -16,10 +16,13 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import type { BrowserInstanceInfo } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS, type BrowserInstanceInfo } from '@polo-ai/shared/protocol'
 
 mock.module('electron', () => ({
   ipcMain: { handle: () => {}, on: () => {} },
+  // POO-135 handlers import BrowserWindow for embed host resolution; this
+  // file never exercises embed, so a deterministic static stub suffices.
+  BrowserWindow: { getAllWindows: () => [] },
 }))
 
 type HandlerFn = (...args: unknown[]) => unknown
@@ -94,6 +97,9 @@ function makeDeps(opts: {
       onStateChange: (cb: (info: BrowserInstanceInfo) => void) => opts.captureStateCb?.(cb),
       onRemoved: (cb: (id: string) => void) => opts.captureRemovedCb?.(cb),
       onInteracted: (cb: (id: string) => void) => opts.captureInteractedCb?.(cb),
+      // POO-135: handler unconditionally subscribes to element-picker events;
+      // no test in this file dispatches one, so a no-op subscription stubs it.
+      onElementPickerEvent: () => {},
     } as unknown as NonNullable<HandlerDeps['browserPaneManager']>,
     oauthFlowStore: {} as HandlerDeps['oauthFlowStore'],
   }
@@ -128,6 +134,36 @@ describe('browser handler — workspace filtering', () => {
       captured!(makeInstance('b-unbound', { workspaceId: null }))
       expect(recorder.pushes).toHaveLength(2)
       expect(recorder.pushes[1].target).toEqual({ to: 'all' })
+    })
+
+    // POO-135: the new hostMode state rides the same broadcast contract. A
+    // sidebar-embedded instance (hidden popup, remote-stamped workspace) must
+    // still reach every renderer — the renderer, not the server, filters.
+    it('BR-EMBED-STATE: an embedded instance broadcasts its full state to all renderers', async () => {
+      let captured: ((info: BrowserInstanceInfo) => void) | null = null
+      const { registerBrowserHandlers } = await import('../browser')
+      registerBrowserHandlers(
+        recorder.server,
+        makeDeps({
+          instances: [],
+          captureStateCb: (cb) => { captured = cb },
+        }),
+      )
+
+      const embedded = makeInstance('b-embedded', {
+        hostMode: 'embedded',
+        workspaceId: 'remote-ws',
+        isVisible: false,
+      })
+      captured!(embedded)
+
+      expect(recorder.pushes).toEqual([
+        {
+          channel: RPC_CHANNELS.browserPane.STATE_CHANGED,
+          target: { to: 'all' },
+          args: [embedded],
+        },
+      ])
     })
   })
 
