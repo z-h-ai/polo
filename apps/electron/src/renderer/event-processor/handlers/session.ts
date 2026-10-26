@@ -42,6 +42,7 @@ import type {
   QuestionRequestEvent,
   QuestionResolvedEvent,
   UsageUpdateEvent,
+  GoalProjectionEvent,
   Effect,
 } from '../types'
 import type { Message } from '../../../shared/types'
@@ -461,6 +462,26 @@ export function handlePermissionModeChanged(
       modeVersion: event.modeVersion,
       changedAt: event.changedAt,
       changedBy: event.changedBy,
+    }],
+  }
+}
+
+/**
+ * Handle goal_projection (POO-134) — forward the server's authoritative Goal
+ * projection to the App layer as an effect. Mirrors handlePermissionModeChanged:
+ * the projection is per-session App state (not message state), so the session
+ * passes through unchanged and the App store applies the revision gate.
+ */
+export function handleGoalProjection(
+  state: SessionState,
+  event: GoalProjectionEvent
+): ProcessResult {
+  return {
+    state,
+    effects: [{
+      type: 'goal_projection',
+      sessionId: event.sessionId,
+      projection: event.projection,
     }],
   }
 }

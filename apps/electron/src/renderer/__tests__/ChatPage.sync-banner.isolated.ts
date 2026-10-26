@@ -75,8 +75,12 @@ mock.module('@/lib/perf', () => ({
   rendererPerf: { startSessionSwitch: () => {}, markSessionSwitch: () => {}, endSessionSwitch: () => {} },
 }))
 // ChatPage resolves this atom write on mount; the real write hits the session
-// loader — not under test here.
+// loader — not under test here. Everything else stays REAL (ChatInputZone now
+// also imports the per-session goal atoms and AppShellContext's
+// sessionAtomFamily, so a partial mock would break unrelated consumers).
+const realSessionAtoms = await import('@/atoms/sessions')
 mock.module('@/atoms/sessions', () => ({
+  ...realSessionAtoms,
   loadedSessionsAtom: atom(new Set<string>()),
   sessionMetaMapAtom: atom(new Map()),
   ensureSessionMessagesLoadedAtom: atom(null, async (_get: unknown, _set: unknown, sessionId: string) => ({ id: sessionId })),

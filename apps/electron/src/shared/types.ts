@@ -247,6 +247,7 @@ import type {
   DeepLinkActionResult,
   TestAutomationPayload,
   TestAutomationResult,
+  GoalProjection,
   WindowCloseRequest,
   DirectoryListingResult,
   RemoteSessionTransferPayload,
@@ -632,7 +633,7 @@ export interface ElectronAPI {
   getEditPopoverPendingQuestion(workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
 
   // Consolidated session command handler
-  sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number }>
+  sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number } | { ok: boolean; flushed?: boolean; error?: string }>
 
   // Server info (REMOTE_ELIGIBLE — returns data from whichever server owns the workspace)
   getServerHomeDir(): Promise<string>
@@ -667,6 +668,8 @@ export interface ElectronAPI {
   getPendingPlanExecution(sessionId: string): Promise<{ planPath: string; draftInputSnapshot?: string; awaitingCompaction: boolean; executionDispatched: boolean } | null>
   // Permission mode reconciliation
   getSessionPermissionModeState(sessionId: string): Promise<PermissionModeState | null>
+  // POO-134: read-only Goal projection hydration (null when no Goal state)
+  getGoalProjection(sessionId: string): Promise<GoalProjection | null>
 
   // Workspace management
   getWorkspaces(): Promise<Workspace[]>

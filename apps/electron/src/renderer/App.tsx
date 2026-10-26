@@ -7,7 +7,7 @@ import { i18n } from '@polo-ai/shared/i18n'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult, GoalProjection } from '../shared/types'
 import type { WebElementReference } from '@polo-ai/core/types'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
@@ -58,6 +58,8 @@ import {
   loadedSessionsAtom,
   forceSessionMessagesReloadAtom,
   backgroundTasksAtomFamily,
+  applyGoalProjectionAtom,
+  goalStartIntentForSession,
   extractSessionMeta,
   windowWorkspaceIdAtom,
   type SessionMeta,
@@ -115,6 +117,7 @@ import {
   subscribeToProductSpaceContractFailures,
 } from '@/lib/product-space-contract-failure'
 import { onTargetProjectionFailure } from '@/lib/target-projection'
+import { getErrorText, isQuotaExhaustedError, readErrorField } from './lib/quota-error'
 
 /** App-level states for the ProductSpace-first client shell. */
 type AppState =
@@ -174,35 +177,7 @@ function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: 
     || (result.status === 403 && /disabled|禁用/i.test(result.message ?? ''))
 }
 
-function readErrorField(error: unknown, field: 'errorCode' | 'code' | 'status' | 'message'): unknown {
-  if (!error || typeof error !== 'object') return undefined
-  return (error as Record<string, unknown>)[field]
-}
 
-function getErrorText(error: unknown): string {
-  if (error instanceof Error) return error.message
-  const message = readErrorField(error, 'message')
-  if (typeof message === 'string') return message
-  if (typeof error === 'string') return error
-  try {
-    return JSON.stringify(error)
-  } catch {
-    return String(error)
-  }
-}
-
-function isQuotaExhaustedError(error: unknown): boolean {
-  const code = String(readErrorField(error, 'errorCode') ?? readErrorField(error, 'code') ?? '').toUpperCase()
-  const status = Number(readErrorField(error, 'status'))
-  const message = getErrorText(error)
-
-  return code === 'QUOTA_EXHAUSTED'
-    || code === 'QUOTA_LIMIT_EXCEEDED'
-    || code === 'USAGE_LIMIT_EXCEEDED'
-    || code === 'INSUFFICIENT_QUOTA'
-    || status === 429
-    || /quota|额度|limit exceeded|exhausted|insufficient_quota|monthly usage|本月额度已用完/i.test(message)
-}
 
 /**
  * Helper to handle background task events from the agent.
@@ -700,6 +675,40 @@ export default function App() {
     }
   }, [applyPermissionModeState])
 
+  // =========================================================================
+  // POO-134 Goal projection state (event stream + hydration, one revision gate)
+  // =========================================================================
+
+  /**
+   * Single revision gate for a session's Goal projection. BOTH the
+   * goal_projection event stream and the sessions:goalProjection hydration
+   * pull land in applyGoalProjectionAtom: a projection with `revision <=`
+   * the highest seen is DROPPED, so a stale terminal event for Goal A can
+   * never clobber Goal B and a slow hydration receipt never regresses a
+   * fresher event. A new Goal (different id) resets the panel to collapsed;
+   * ANY accepted projection ends an armed-but-unsent 目标模式 intent — once
+   * the server authoritatively claims the session the start intent has done
+   * its job, and the menu keeps its selected look via `armed || !!goal`.
+   */
+  const applyGoalProjection = useCallback((sessionId: string, projection: GoalProjection) => {
+    store.set(applyGoalProjectionAtom, sessionId, projection)
+  }, [store])
+
+  /** Hydration pull for late joiners (open/refresh/reconnect) — mirrors reconcilePermissionModeState. */
+  const reconcileGoalProjection = useCallback(async (sessionId: string, isSessionCurrent?: () => boolean) => {
+    try {
+      const projection = await window.electronAPI.getGoalProjection(sessionId)
+      if (isSessionCurrent && !isSessionCurrent()) return
+      if (!projection) return
+      applyGoalProjection(sessionId, projection)
+    } catch (error) {
+      window.electronAPI.debugLog('[Goal] Failed to reconcile goal projection', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [applyGoalProjection])
+
   // Event processor hook - handles all agent events through pure functions
   const { processAgentEvent, clearStreamingState } = useEventProcessor()
 
@@ -760,6 +769,8 @@ export default function App() {
           // downgraded by the fetch.
           applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
           void reconcilePermissionModeState(sessionId, () => accountSessionEpochRef.current === capturedEpoch)
+          // POO-134: hydrate the Goal projection for late joiners (open/refresh).
+          void reconcileGoalProjection(sessionId, () => accountSessionEpochRef.current === capturedEpoch)
           if (preservedStaleMessages) outcome = 'preserved_stale_messages'
         },
       )
@@ -768,7 +779,7 @@ export default function App() {
       console.error(`[App] Failed to refresh session ${sessionId}:`, err)
       return 'failed'
     }
-  }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, store])
+  }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, reconcileGoalProjection, store])
 
   const loadSessionsFromServer = useCallback(async () => {
     // P70-BOOT-03 epoch fence: a session-list receipt computed for an account
@@ -825,10 +836,14 @@ export default function App() {
       setSessionOptions(optionsMap)
 
       await Promise.allSettled(
-        loadedSessions.map((s) => reconcilePermissionModeState(
-          s.id,
-          () => accountSessionEpochRef.current === capturedEpoch,
-        ))
+        loadedSessions.map((s) => {
+          const isCurrent = () => accountSessionEpochRef.current === capturedEpoch
+          return Promise.allSettled([
+            reconcilePermissionModeState(s.id, isCurrent),
+            // POO-134: hydrate each session's Goal projection on first list load.
+            reconcileGoalProjection(s.id, isCurrent),
+          ])
+        })
       )
 
       // P3-1: the reconcile tail is fenced too — the superseded receipt never
@@ -880,7 +895,7 @@ export default function App() {
       setSessionLoadError(formatSessionLoadFailure(err))
       setSessionsLoaded(true)
     }
-  }, [initializeSessions, initialSessionId, reconcilePermissionModeState, windowWorkspaceId])
+  }, [initializeSessions, initialSessionId, reconcilePermissionModeState, reconcileGoalProjection, windowWorkspaceId])
 
   // Any OTHER failing target projection (skills, sources, …) triggers the
   // same automatic reverse transaction — never a half-loaded ready shell.
@@ -979,10 +994,14 @@ export default function App() {
           })
         },
       )
-      await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(
-        s.id,
-        () => accountSessionEpochRef.current === capturedEpoch,
-      )))
+      await Promise.allSettled(sessions.map(s => {
+        const isCurrent = () => accountSessionEpochRef.current === capturedEpoch
+        return Promise.allSettled([
+          reconcilePermissionModeState(s.id, isCurrent),
+          // POO-134: reconnect metadata refresh also re-pulls Goal projections.
+          reconcileGoalProjection(s.id, isCurrent),
+        ])
+      }))
       // P3-1: the reconcile tail is fenced too.
       if (accountSessionEpochRef.current !== capturedEpoch) return null
 
@@ -1002,7 +1021,7 @@ export default function App() {
       })
       return null
     }
-  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, pendingQuestionGuardRef, windowWorkspaceId, windowRemoteWorkspaceId])
+  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, reconcileGoalProjection, pendingQuestionGuardRef, windowWorkspaceId, windowRemoteWorkspaceId])
 
   // Stale session watchdog — catches stuck sessions that the reconnect protocol misses
   const { trackSessionActivity } = useStaleSessionRecovery({
@@ -1809,6 +1828,13 @@ export default function App() {
             toast.error(effect.message, { duration: 5000 })
             break
           }
+          case 'goal_projection': {
+            // POO-134: the per-session projection store applies the monotonic
+            // revision gate (drop revision <= highest seen) shared with the
+            // hydration pull path.
+            applyGoalProjection(sessionId, effect.projection)
+            break
+          }
         }
       }
 
@@ -1992,6 +2018,7 @@ export default function App() {
     syncSessionOptionsFromSession,
     applyPermissionModeState,
     reconcilePermissionModeState,
+    applyGoalProjection,
   ])
 
   // Transport reconnect recovery — refresh session metadata plus active/processing
@@ -2414,6 +2441,13 @@ export default function App() {
         elementReferences,
         optimisticMessageId: userMessage.id,
         invocationSource: 'desktop',
+        // POO-134: an armed 目标模式 send declares the Goal start intent. The
+        // server validates against the session's authoritative Goal state — a
+        // start while a non-terminal Goal exists fails closed; the error text
+        // is surfaced verbatim below and NEVER downgraded to an ordinary chat.
+        // The accepted first projection disarms the intent (applyGoalProjectionAtom),
+        // so follow-up messages during the run carry NO goalIntent.
+        ...(goalStartIntentForSession(store.get, sessionId) ?? {}),
       })
       // The send was handed off: drop the composer's draft queue for this
       // session (FreeFormInput already cleared its copy).
@@ -2424,6 +2458,15 @@ export default function App() {
       console.error('Failed to send message:', error)
       if (isQuotaExhaustedError(error)) {
         setRuntimeChatAccessIssue('quota-exhausted')
+      }
+      // POO-134: a rejected Goal start (e.g. a non-terminal Goal already owns
+      // the session) surfaces the server's error text verbatim — the armed
+      // goal-mode intent stays selected so the user can end the current Goal
+      // or edit and resend; no automatic downgrade to an ordinary chat.
+      if (goalStartIntentForSession(store.get, sessionId)) {
+        toast.error(i18n.t('goal.startFailed', {
+          error: error instanceof Error ? error.message : String(error),
+        }), { duration: 5000 })
       }
       updateSessionById(sessionId, (s) => ({
         isProcessing: false,
@@ -2438,7 +2481,7 @@ export default function App() {
         ]
       }))
     }
-  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
+  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, store, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
 
   /**
    * Unified handler for all session option changes.
@@ -2462,6 +2505,32 @@ export default function App() {
       window.electronAPI.sessionCommand(sessionId, { type: 'setThinkingLevel', level: updates.thinkingLevel })
     }
   }, [sessionOptions])
+
+  /**
+   * POO-134: Goal lifecycle commands (暂停/继续/结束) via the existing
+   * sessionCommand channel. Server-authoritative — a {ok:false,error} result
+   * or a thrown RPC surfaces the server's error text verbatim as a toast.
+   */
+  const handleGoalCommand = useCallback((sessionId: string, command: 'goalPause' | 'goalResume' | 'goalEnd') => {
+    void (async () => {
+      try {
+        const result = await window.electronAPI.sessionCommand(sessionId, { type: command })
+        if (
+          result
+          && typeof result === 'object'
+          && 'ok' in result
+          && (result as { ok?: unknown }).ok === false
+        ) {
+          const errorText = (result as { error?: string }).error ?? ''
+          toast.error(i18n.t('goal.commandFailed', { error: errorText }), { duration: 5000 })
+        }
+      } catch (error) {
+        toast.error(i18n.t('goal.commandFailed', {
+          error: error instanceof Error ? error.message : String(error),
+        }), { duration: 5000 })
+      }
+    })()
+  }, [])
 
   // Handle input draft changes per session with debounced persistence
   const draftSaveTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -3094,6 +3163,8 @@ export default function App() {
     onReset: handleReset,
     // Session options
     onSessionOptionsChange: handleSessionOptionsChange,
+    // POO-134: Goal lifecycle (goalPause/goalResume/goalEnd)
+    onGoalCommand: handleGoalCommand,
     onInputChange: handleInputChange,
     onAttachmentsChange: handleAttachmentsChange,
     // New chat (via deep link navigation)
@@ -3142,6 +3213,7 @@ export default function App() {
     handleOpenKeyboardShortcuts,
     handleReset,
     handleSessionOptionsChange,
+    handleGoalCommand,
     handleInputChange,
     handleAttachmentsChange,
     openNewChat,
