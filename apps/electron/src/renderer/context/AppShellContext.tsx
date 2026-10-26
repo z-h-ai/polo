@@ -42,6 +42,11 @@ import { sessionAtomFamily } from '../atoms/sessions'
  */
 export type ChatAccessIssue =
   | 'no-ai-service'
+  /** Journey #1: payer lacks allowance — recharge handoff (owner/personal) or
+   * contact-an-admin copy (member). Never carries a reset promise. */
+  | 'insufficient-credit'
+  /** Journey #1: period quota exhausted. `quotaResetAt` carries the server's
+   * reset fact; without it the banner stays promise-free. */
   | 'quota-exhausted'
   | 'account-disabled'
   | 'ai-config-syncing'
@@ -49,6 +54,8 @@ export type ChatAccessIssue =
 
 export interface ChatAccessStatus {
   issue: ChatAccessIssue
+  /** Epoch-ms reset fact for `quota-exhausted`, only when the server supplied one. */
+  quotaResetAt?: number
 }
 
 export interface AppShellContextType {

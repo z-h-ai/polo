@@ -18,6 +18,7 @@ import {
   goalProjectionAtomFamily,
   goalExpandedAtomFamily,
   goalModeActiveAtomFamily,
+  sendFailureAtomFamily,
 } from '../sessions'
 
 function msg(id: string, role: Message['role'] = 'user'): Message {
@@ -384,6 +385,18 @@ describe('applyGoalProjectionAtom + 发送链 (POO-134 review F1)', () => {
     expect(store.get(goalExpandedAtomFamily(sessionId))).toBe(false)
   })
 
+  it('journey #5: a terminal projection RETAINS the goal record for the read-only strip', () => {
+    const store = createStore()
+    store.set(applyGoalProjectionAtom, sessionId, terminalProjection(3))
+    const projection = store.get(goalProjectionAtomFamily(sessionId))
+    // currentGoalId is cleared (the Goal no longer owns the session) but the
+    // last record survives so the strip can re-render it read-only after
+    // re-entering the session.
+    expect(projection?.currentGoalId).toBeUndefined()
+    expect(projection?.goal?.status).toBe('completed')
+    expect(projection?.goal?.id).toBe('goal-a')
+  })
+
   it('same-goal progress keeps the panel open; a stale replay drops without touching armed', () => {
     const store = createStore()
     store.set(applyGoalProjectionAtom, sessionId, activeProjection(1, 'goal-a'))
@@ -433,5 +446,72 @@ describe('goal atom families cleanup (POO-134 review F2)', () => {
     expect(store.get(goalProjectionAtomFamily('s2'))).toBeNull()
     expect(store.get(goalExpandedAtomFamily('s2'))).toBe(false)
     expect(store.get(goalModeActiveAtomFamily('s2'))).toBe(false)
+  })
+})
+
+describe('sendFailure atom family (journey #8)', () => {
+  const failure = { title: 'not sent', detail: 'socket hang up', draft: 'hello' }
+
+  it('per-session isolation: one session’s prompt never leaks into another', () => {
+    const store = createStore()
+    store.set(sendFailureAtomFamily('s1'), failure)
+    expect(store.get(sendFailureAtomFamily('s2'))).toBeNull()
+    expect(store.get(sendFailureAtomFamily('s1'))).toEqual(failure)
+  })
+
+  it('removeSessionAtom drops the prompt — a deleted session keeps no stale retry', () => {
+    const store = createStore()
+    store.set(initializeSessionsAtom, [makeSession({ id: 's1' })])
+    store.set(sendFailureAtomFamily('s1'), failure)
+
+    store.set(removeSessionAtom, 's1')
+
+    expect(store.get(sendFailureAtomFamily('s1'))).toBeNull()
+  })
+
+  it('initializeSessionsAtom drops prompts of sessions missing from the new workspace (账号/空间切换失效)', () => {
+    const store = createStore()
+    store.set(initializeSessionsAtom, [
+      makeSession({ id: 's1' }),
+      makeSession({ id: 's2' }),
+    ])
+    store.set(sendFailureAtomFamily('s1'), failure)
+    store.set(sendFailureAtomFamily('s2'), failure)
+
+    // Account/space switch: only s1 exists in the new scope.
+    store.set(initializeSessionsAtom, [makeSession({ id: 's1' })])
+
+    expect(store.get(sendFailureAtomFamily('s2'))).toBeNull()
+    expect(store.get(sendFailureAtomFamily('s1'))).toEqual(failure)
+  })
+
+  // Journey #1 (review R2 N1): the billing latch only clears on a space
+  // transition — the exact sweep that used to destroy the blocked draft.
+  it('billing-blocked draft survives a space sweep with keepBillingDrafts; ordinary drafts do not', () => {
+    const store = createStore()
+    store.set(initializeSessionsAtom, [
+      makeSession({ id: 's1' }),
+      makeSession({ id: 's2' }),
+    ])
+    const billing = { ...failure, billingBlocked: true }
+    store.set(sendFailureAtomFamily('s1'), billing)
+    store.set(sendFailureAtomFamily('s2'), failure)
+
+    // Space switch: neither session exists in the target space's list.
+    store.set(initializeSessionsAtom, [makeSession({ id: 's9' })], { keepBillingDrafts: true })
+
+    expect(store.get(sendFailureAtomFamily('s1'))).toEqual(billing)
+    expect(store.get(sendFailureAtomFamily('s2'))).toBeNull()
+  })
+
+  it('billing-blocked draft does NOT leak across accounts: the account reset omits keepBillingDrafts', () => {
+    const store = createStore()
+    store.set(initializeSessionsAtom, [makeSession({ id: 's1' })])
+    store.set(sendFailureAtomFamily('s1'), { ...failure, billingBlocked: true })
+
+    // Account exit funnels through initializeSessions([]) without the flag.
+    store.set(initializeSessionsAtom, [])
+
+    expect(store.get(sendFailureAtomFamily('s1'))).toBeNull()
   })
 })

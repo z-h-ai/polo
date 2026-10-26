@@ -93,7 +93,8 @@ describe('TopBar real account-menu ProductSpace entry', () => {
     expect(rows[2]!.textContent).toContain('受限')
     const submenu = rows[0]!.closest('[role=menu]') as HTMLElement
     expect(submenu.style.getPropertyValue('--info')).toBe('#3275d8')
-    expect(submenu.style.getPropertyValue('--muted-foreground')).toBe('var(--fg-50)')
+    // Review #6: the muted alias binds to the §13.14 material muted value.
+    expect(submenu.style.getPropertyValue('--muted-foreground')).toBe('var(--client-material-fg-muted)')
     rows[1]!.focus()
     await user.keyboard('{Enter}')
     expect(select).toHaveBeenCalledWith('enterprise')

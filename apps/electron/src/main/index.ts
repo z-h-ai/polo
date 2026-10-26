@@ -147,6 +147,7 @@ import {
   BeforeQuitCleanupCoordinator,
   canQuitAfterLocalAppShutdown,
 } from './local-app-runtime/quit-guard'
+import { handleQuitCancellation } from './local-app-runtime/quit-cancel-dialog'
 import {
   getTerminalIntegrationStatus,
   shutdownTerminalIntegration,
@@ -1711,6 +1712,10 @@ app.on('before-quit', (event) => {
       if (!canQuit) {
         windowManager?.setAppQuitting(false)
         mainLog.error('Quit cancelled because local app runtimes were not fully stopped')
+        handleQuitCancellation('local-app-runtime', {
+          info: message => mainLog.info(message),
+          error: (message, error) => mainLog.error(message, error),
+        })
         return false
       }
     }
@@ -1718,6 +1723,10 @@ app.on('before-quit', (event) => {
     if (!await shutdownCliManagedBrokers()) {
       windowManager?.setAppQuitting(false)
       mainLog.error('Quit cancelled because managed CLI runtimes were not fully stopped')
+      handleQuitCancellation('cli-managed-broker', {
+        info: message => mainLog.info(message),
+        error: (message, error) => mainLog.error(message, error),
+      })
       return false
     }
 

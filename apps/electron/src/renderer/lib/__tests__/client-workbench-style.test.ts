@@ -27,7 +27,7 @@ describe('canonical workbench CSS consumption', () => {
     expect(style['--popover']).toBe('var(--surface)')
     expect(style['--primary']).toBe('var(--accent)')
     expect(style['--ring']).toBe('var(--accent)')
-    expect(style['--muted-foreground']).toBe('var(--fg-50)')
+    expect(style['--muted-foreground']).toBe('var(--client-material-fg-muted)')
     expect(style['--foreground-50']).toBe('var(--fg-50)')
     expect(style['--shadow-xs']).toBe('var(--shadow-minimal)')
     expect(style['--shadow-modal-small']).toBe('var(--shadow-panel)')

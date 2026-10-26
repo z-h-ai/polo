@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils'
 import { routes } from '@/lib/navigate'
 import { Spinner } from '@polo-ai/ui'
 import { RenameDialog } from '@/components/ui/rename-dialog'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import type {
   CreatorSkillBackup,
   LoadedSource,
@@ -358,34 +359,42 @@ export default function WorkspaceSettingsPage() {
     [enabledModes, updateWorkspaceSetting, t]
   )
 
+  // Journey #7: deleting creator-skill backups asks via the shared confirm
+  // dialog; the delete itself runs as the dialog's onConfirm so a failure
+  // keeps the dialog open (backup intact) with the error inline for a
+  // deliberate retry, and a pending confirm can't double-fire.
+  const { requestConfirm, confirmElement } = useConfirmDialog()
+
   const handleDeleteCreatorSkillBackups = useCallback(async (
     backup?: Pick<CreatorSkillBackup, 'slug' | 'backupId'>,
   ) => {
     if (!window.electronAPI || !activeWorkspaceId) return
-    const confirmed = window.confirm(
-      t(backup
+    await requestConfirm({
+      testId: 'skill-backup-delete-confirm',
+      title: t(backup
         ? 'creatorSkills.backups.confirmDelete'
         : 'creatorSkills.backups.confirmDeleteAll'),
-    )
-    if (!confirmed) return
-    try {
-      const result = await window.electronAPI.creatorSkillDeleteBackups({
-        workspaceId: activeWorkspaceId,
-        ...(backup ? { backup } : {}),
-      })
-      if (!result.success) {
-        toast.error(translateCreatorSkillError(t, result), {
-          description: creatorSkillErrorDiagnostic(result),
-        })
-        return
-      }
-      await loadCreatorSkillBackups()
-      toast.success(t('creatorSkills.backups.deleted', { count: result.deleted }))
-    } catch (error) {
-      console.error('[Creator Skills] Failed to delete backup:', error)
-      toast.error(translateCreatorSkillError(t))
-    }
-  }, [activeWorkspaceId, loadCreatorSkillBackups, t])
+      onConfirm: async () => {
+        try {
+          const result = await window.electronAPI.creatorSkillDeleteBackups({
+            workspaceId: activeWorkspaceId,
+            ...(backup ? { backup } : {}),
+          })
+          if (!result.success) {
+            throw new Error(
+              `${translateCreatorSkillError(t, result)}\n${creatorSkillErrorDiagnostic(result)}`,
+            )
+          }
+          await loadCreatorSkillBackups()
+          toast.success(t('creatorSkills.backups.deleted', { count: result.deleted }))
+        } catch (error) {
+          console.error('[Creator Skills] Failed to delete backup:', error)
+          if (error instanceof Error && error.message) throw error
+          throw new Error(translateCreatorSkillError(t))
+        }
+      },
+    })
+  }, [activeWorkspaceId, loadCreatorSkillBackups, t, requestConfirm])
 
   const formatBackupSize = useCallback((bytes: number) => {
     if (bytes < 1024) return `${bytes} B`
@@ -684,6 +693,7 @@ export default function WorkspaceSettingsPage() {
         onCancel={cancelWdBrowser}
         initialPath={workingDirectory || undefined}
       />
+      {confirmElement}
     </div>
   )
 }

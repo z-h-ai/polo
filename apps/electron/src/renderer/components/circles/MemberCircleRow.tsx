@@ -104,7 +104,9 @@ export function MemberCircleRow({ model, onOpen, testId = 'circle-row' }: Member
             {model.name}
           </h2>
         </div>
-        <p className="m-0 mb-[10px] truncate text-[12px] text-foreground-50" data-testid="circle-row-creator">
+        {/* Review #6: readable 12px metadata — muted token (AA-compliant),
+            not the decorative fg-50 mix. */}
+        <p className="m-0 mb-[10px] truncate text-[12px] text-muted-foreground" data-testid="circle-row-creator">
           {creatorLine}
         </p>
         {model.summary !== null && (
@@ -114,7 +116,7 @@ export function MemberCircleRow({ model, onOpen, testId = 'circle-row' }: Member
         )}
         {/* FIXED entitlement position: term first, counts beside it — identical
         slot for free / paid / restricted rows (P70-CIRCLE-LIST-01). */}
-        <div className="flex flex-wrap items-center gap-x-[16px] gap-y-[8px] text-[12px] leading-[1.6] text-foreground-50">
+        <div className="flex flex-wrap items-center gap-x-[16px] gap-y-[8px] text-[12px] leading-[1.6] text-muted-foreground">
           <span className="text-foreground-70" data-testid="circle-row-term">{model.termText}</span>
           <span className="border-l border-border pl-[16px]" data-testid="circle-row-count">{countText}</span>
         </div>

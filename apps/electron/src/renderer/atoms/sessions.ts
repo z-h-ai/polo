@@ -281,10 +281,20 @@ export const updateStreamingContentAtom = atom(
  */
 export const initializeSessionsAtom = atom(
   null,
-  (get, set, sessions: Session[]) => {
+  (
+    get,
+    set,
+    sessions: Session[],
+    opts?: { keepBillingDrafts?: boolean },
+  ) => {
     // Clean up stale atom family entries from previous workspace.
     // Without this, switching workspaces leaves orphaned atoms in memory
     // and components subscribed to old session IDs see stale/empty data.
+    // Journey #1 (review R2 N1): with `keepBillingDrafts` (space transitions
+    // via loadSessionsFromServer — the only paths that clear the billing
+    // block latch), a billing-blocked draft survives the sweep so the
+    // "restore draft" prompt is reachable once the latch lifts. Account
+    // exits omit the flag: nothing leaks across accounts.
     const oldIds = get(sessionIdsAtom)
     const newIdSet = new Set(sessions.map(s => s.id))
     for (const oldId of oldIds) {
@@ -294,6 +304,9 @@ export const initializeSessionsAtom = atom(
         goalProjectionAtomFamily.remove(oldId)
         goalExpandedAtomFamily.remove(oldId)
         goalModeActiveAtomFamily.remove(oldId)
+        if (!(opts?.keepBillingDrafts && get(sendFailureAtomFamily(oldId))?.billingBlocked)) {
+          sendFailureAtomFamily.remove(oldId)
+        }
       }
     }
     // Reset loaded sessions tracking — new workspace needs fresh lazy loading
@@ -463,6 +476,7 @@ export const removeSessionAtom = atom(
     goalProjectionAtomFamily.remove(sessionId)
     goalExpandedAtomFamily.remove(sessionId)
     goalModeActiveAtomFamily.remove(sessionId)
+    sendFailureAtomFamily.remove(sessionId)
   }
 )
 
@@ -746,6 +760,40 @@ export const goalModeActiveAtomFamily = atomFamily(
   (a, b) => a === b
 )
 
+// ===========================================================================
+// Journey #8: send-failure transient state (per session)
+// ===========================================================================
+
+/**
+ * A local send failure's transient prompt. This is SESSION state, not a
+ * message: nothing lands in `messages`, nothing persists server-side. The
+ * captured draft is what the explicit "restore draft" action puts back into
+ * the composer — re-sending stays a deliberate user act (a failed send's
+ * server receipt is unknown, so the renderer never auto-resends).
+ */
+export interface SessionSendFailure {
+  /** Localized heading (what happened). */
+  title: string
+  /** Technical detail from the transport error — rendered collapsed. */
+  detail: string
+  /** The unsent draft captured from the failed attempt. */
+  draft: string
+  /**
+   * Journey #1 (review R2 N1): set when the failure was a billing block. The
+   * block latch only clears on a space/account transition — exactly the
+   * transitions that sweep per-session atoms — so a billing draft must
+   * survive `initializeSessionsAtom`'s stale-entry cleanup (with
+   * `keepBillingDrafts`) to stay restorable after the block lifts. Account
+   * resets do NOT pass that flag: drafts never leak across accounts.
+   */
+  billingBlocked?: boolean
+}
+
+export const sendFailureAtomFamily = atomFamily(
+  (_sessionId: string) => atom<SessionSendFailure | null>(null),
+  (a, b) => a === b
+)
+
 /**
  * POO-134 revision gate, shared by the goal_projection event stream AND the
  * sessions:goalProjection hydration pull. `revision` is MONOTONIC PER SESSION
@@ -803,8 +851,9 @@ export const applyGoalProjectionAtom = atom(
     }
     // Accepted projection ⇒ the server's Goal state is authoritative here:
     // a claimed Goal takes over the menu's selected look (`armed || !!goal`),
-    // a terminal/cleared one removes the strip — either way the unsent start
-    // intent is spent.
+    // and a terminal one keeps its record readable (journey #5 — the strip
+    // stays as a read-only receipt; currentGoalId is cleared while `goal` is
+    // retained). Either way the unsent start intent is spent.
     set(goalModeActiveAtomFamily(sessionId), false)
   }
 )

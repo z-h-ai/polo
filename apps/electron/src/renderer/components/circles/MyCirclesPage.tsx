@@ -327,7 +327,8 @@ export function MyCirclesPage() {
             {t('poo70.c3.page.back')}
           </button>
           <div className="min-w-0 flex-1">
-            <p className="m-0 mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-foreground-50">
+            {/* Review #6: readable eyebrow — muted token (AA-compliant). */}
+            <p className="m-0 mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-muted-foreground">
               {t('poo70.c3.page.eyebrow')}
             </p>
             <h1
@@ -480,7 +481,7 @@ export function MyCirclesPage() {
                 value={filter}
                 onChange={event => setFilter(event.target.value as MyCirclesEntitlementFilter)}
                 data-testid="my-circles-filter"
-                className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground"
+                className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[3px]"
               >
                 <option value="all">{t('poo70.c3.filter.all')}</option>
                 <option value="valid">{t('poo70.c3.filter.valid')}</option>

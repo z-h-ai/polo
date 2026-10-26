@@ -60,6 +60,7 @@ import {
   backgroundTasksAtomFamily,
   applyGoalProjectionAtom,
   goalStartIntentForSession,
+  sendFailureAtomFamily,
   extractSessionMeta,
   windowWorkspaceIdAtom,
   type SessionMeta,
@@ -67,6 +68,7 @@ import {
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
 import { extractBadges } from '@/lib/mentions'
+import { classifySendFailure, stripFailedOptimisticMessage } from '@/lib/send-failure'
 import { getDefaultStore } from 'jotai'
 import {
   ShikiThemeProvider,
@@ -117,7 +119,7 @@ import {
   subscribeToProductSpaceContractFailures,
 } from '@/lib/product-space-contract-failure'
 import { onTargetProjectionFailure } from '@/lib/target-projection'
-import { getErrorText, isQuotaExhaustedError, readErrorField } from './lib/quota-error'
+import { getErrorText, readErrorField } from './lib/quota-error'
 
 /** App-level states for the ProductSpace-first client shell. */
 type AppState =
@@ -392,8 +394,13 @@ export default function App() {
   // Global default LLM connection slug (from app config)
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
   // Quota/account gates only — the empty-list projections (no-ai-service and
-  // the POO-144 sync states) never route through here.
-  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<'quota-exhausted' | 'account-disabled' | null>(null)
+  // the POO-144 sync states) never route through here. Journey #1: billing
+  // blocks split into insufficient-credit (recharge handoff / member copy)
+  // and period-quota (reset copy only with a server-provided reset fact).
+  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<'insufficient-credit' | 'quota-exhausted' | 'account-disabled' | null>(null)
+  // Journey #1: the server-provided period-reset fact accompanying a
+  // quota-exhausted latch. Cleared with the latch; never synthesized.
+  const [runtimeQuotaResetAt, setRuntimeQuotaResetAt] = useState<number | undefined>(undefined)
   // POO-144: space AI-config sync state machine. The startup adminSyncConnections
   // (below) runs before the Main runtime fence exists, so it is a personal/global
   // sync; only the committed product space scopes the managed-connection sync.
@@ -466,7 +473,12 @@ export default function App() {
 
   const chatAccessStatus = useMemo<ChatAccessStatus | null>(() => {
     if (runtimeChatAccessIssue) {
-      return { issue: runtimeChatAccessIssue }
+      return {
+        issue: runtimeChatAccessIssue,
+        ...(runtimeChatAccessIssue === 'quota-exhausted' && runtimeQuotaResetAt !== undefined
+          ? { quotaResetAt: runtimeQuotaResetAt }
+          : {}),
+      }
     }
     if (llmConnectionsLoaded && llmConnections.length === 0) {
       // POO-144: an empty list is only "no AI service" once the space-scoped
@@ -480,7 +492,24 @@ export default function App() {
       return { issue: 'no-ai-service' }
     }
     return null
-  }, [aiConfigSyncPhase, llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue])
+  }, [aiConfigSyncPhase, llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue, runtimeQuotaResetAt])
+
+  // Journey #1: a billing block belongs to the space whose admission surface
+  // produced it. A committed PRODUCT-SPACE switch discards it (the new space
+  // re-adjudicates on its own first send); account exits clear the whole latch
+  // in resetAccountScopedClientState. Merely opening the Browser and coming
+  // back, or switching workspace tabs, never touches this state — the block
+  // stands until a space/account boundary or a real server answer replaces it.
+  const billingResetSpaceIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prevSpaceId = billingResetSpaceIdRef.current
+    const nextSpaceId = productSpace.activeProductSpaceId ?? null
+    billingResetSpaceIdRef.current = nextSpaceId
+    if (prevSpaceId !== null && prevSpaceId !== nextSpaceId) {
+      setRuntimeChatAccessIssue(prev => (prev === 'insufficient-credit' || prev === 'quota-exhausted') ? null : prev)
+      setRuntimeQuotaResetAt(undefined)
+    }
+  }, [productSpace.activeProductSpaceId])
 
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Session selection state — declared with the other account-scoped state so
@@ -592,6 +621,7 @@ export default function App() {
     sessionDraftsRef.current.clear()
     setSession({ selected: null })
     setRuntimeChatAccessIssue(null)
+    setRuntimeQuotaResetAt(undefined)
     // POO-144: the leaving account's in-flight scoped sync must not publish
     // into the next one — bump the epoch (its receipt is dropped) and reset
     // the banner state machine to idle.
@@ -804,7 +834,11 @@ export default function App() {
           loadedSessions = sessions
           // Initialize per-session atoms and metadata map
           // NOTE: No sessionsAtom used - sessions are only in per-session atoms
-          initializeSessions(loadedSessions)
+          // Journey #1 (review R2 N1): space transitions clear the billing
+          // block latch — the same sweep must preserve billing-blocked drafts
+          // so the restore prompt is reachable once the block lifts. Account
+          // resets (resetAccountScopedClientState) deliberately omit the flag.
+          initializeSessions(loadedSessions, { keepBillingDrafts: true })
 
           // Hydrate pending agent questions from the snapshot — fill holes
           // only: entries that already exist came from fresher realtime
@@ -2266,6 +2300,10 @@ export default function App() {
   ])
 
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => {
+    // Journey #8: the optimistic bubble's id, hoisted so the catch block can
+    // strip exactly that bubble (the send's server receipt is unknown — the
+    // failed attempt must not linger as a half-confirmed message).
+    let optimisticUserMessageId: string | null = null
     try {
       if (chatAccessStatus) {
         return
@@ -2412,6 +2450,7 @@ export default function App() {
         isPending: true,  // Optimistic - will be confirmed by backend
         isQueued: sendingMidStream,
       }
+      optimisticUserMessageId = userMessage.id
 
       // Optimistic UI update - add user message and set processing state
       updateSessionById(sessionId, (s) => ({
@@ -2456,29 +2495,55 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to send message:', error)
-      if (isQuotaExhaustedError(error)) {
-        setRuntimeChatAccessIssue('quota-exhausted')
-      }
-      // POO-134: a rejected Goal start (e.g. a non-terminal Goal already owns
-      // the session) surfaces the server's error text verbatim — the armed
-      // goal-mode intent stays selected so the user can end the current Goal
-      // or edit and resend; no automatic downgrade to an ordinary chat.
-      if (goalStartIntentForSession(store.get, sessionId)) {
+      // Journey #8: a failed send is classified once, then applied. The
+      // optimistic user bubble is ALWAYS stripped — the server receipt is
+      // unknown, so no half-confirmed message lingers and no raw
+      // "Failed to send message: …" text is persisted into the conversation.
+      const outcome = classifySendFailure(error, {
+        hadGoalStartIntent: !!goalStartIntentForSession(store.get, sessionId),
+      })
+      if (outcome.kind === 'billing-block') {
+        // Journey #1: the latch records WHICH billing class blocked the send —
+        // insufficient credit (recharge/member copy) vs period quota (reset
+        // copy only with the server's own reset fact). A reset fact the
+        // server did not send is never invented here.
+        setRuntimeChatAccessIssue(outcome.issue)
+        setRuntimeQuotaResetAt(outcome.issue === 'quota-exhausted' ? outcome.quotaResetAt : undefined)
+        // Journey #8 (review F1): the block banner outranks the draft prompt,
+        // but the draft itself must survive the block — it rides in the same
+        // session-scoped prompt atom and becomes restorable once the latch
+        // clears. Losing the text entirely was the bug.
+        store.set(sendFailureAtomFamily(sessionId), {
+          title: i18n.t('chat.sendFailed.title'),
+          detail: error instanceof Error ? error.message : String(error),
+          draft: message,
+          billingBlocked: true,
+        })
+      } else if (outcome.kind === 'goal-start-failed') {
+        // POO-134: a rejected Goal start (e.g. a non-terminal Goal already owns
+        // the session) surfaces the server's error text verbatim — the armed
+        // goal-mode intent stays selected so the user can end the current Goal
+        // or edit and resend; no automatic downgrade to an ordinary chat.
         toast.error(i18n.t('goal.startFailed', {
           error: error instanceof Error ? error.message : String(error),
         }), { duration: 5000 })
+      } else {
+        // Journey #8: session-scoped transient prompt (localized title +
+        // collapsed technical detail + explicit restore-draft action). The
+        // draft is preserved here — re-sending stays a deliberate user act,
+        // never an automatic resend of a message whose server receipt is
+        // unknown.
+        store.set(sendFailureAtomFamily(sessionId), {
+          title: i18n.t('chat.sendFailed.title'),
+          detail: outcome.detail,
+          draft: message,
+        })
       }
       updateSessionById(sessionId, (s) => ({
         isProcessing: false,
-        messages: [
-          ...s.messages,
-          {
-            id: generateMessageId(),
-            role: 'error' as const,
-            content: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            timestamp: Date.now()
-          }
-        ]
+        messages: optimisticUserMessageId
+          ? stripFailedOptimisticMessage(s.messages, optimisticUserMessageId)
+          : s.messages,
       }))
     }
   }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, store, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])

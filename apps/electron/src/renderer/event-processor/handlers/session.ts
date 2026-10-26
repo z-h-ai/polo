@@ -47,6 +47,7 @@ import type {
 } from '../types'
 import type { Message } from '../../../shared/types'
 import { generateMessageId, appendMessage } from '../helpers'
+import { localizeChatBillingError } from '../../lib/chat-billing-error'
 
 /**
  * Handle complete - agent loop finished
@@ -133,11 +134,19 @@ export function handleError(
       : m
   )
 
+  // Journey #1: a known billing error (POLO_INSUFFICIENT_CREDIT sentinel from
+  // the credential proxy / managed broker) shows its localized copy in the
+  // bubble; the technical raw text rides errorOriginal into the collapsible
+  // details instead of being the message. Anything else is untouched.
+  const billingError = localizeChatBillingError(event.error)
+
   const errorMessage: Message = {
     id: generateMessageId(),
     role: 'error',
-    content: event.error,
+    content: billingError.content,
     timestamp: event.timestamp ?? Date.now(),
+    ...(billingError.errorTitle !== undefined && { errorTitle: billingError.errorTitle }),
+    ...(billingError.errorOriginal !== undefined && { errorOriginal: billingError.errorOriginal }),
   }
 
   return {
