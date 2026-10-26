@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { CHAT_LAYOUT } from '@/config/layout'
 import { flattenLabels, type LabelConfig } from '@polo-ai/shared/labels'
@@ -18,6 +19,8 @@ import { useOptionalAppShellContext } from '../../../context/AppShellContext'
 export interface ChatInputStatusBanner {
   variant: 'info' | 'destructive'
   message: string
+  /** Journey #8: optional technical detail, rendered collapsed. */
+  detail?: string
   /** POO-144: optional explicit action (e.g. retry sync) — user-triggered only */
   actionLabel?: string
   onAction?: () => void
@@ -64,6 +67,7 @@ export function ChatInputZone({
   className,
   inputProps,
 }: ChatInputZoneProps) {
+  const { t } = useTranslation()
   const [autoOpenLabelId, setAutoOpenLabelId] = React.useState<string | null>(null)
   const shouldShowOptionBadges = showOptionBadges ?? !compactMode
 
@@ -155,15 +159,29 @@ export function ChatInputZone({
       {statusBanner && (
         <div
           className={cn(
-            'mb-1.5 flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] leading-5 animate-[chat-status-slide-up_250ms_ease-out]',
+            'mb-1.5 flex items-start gap-2 rounded-lg px-3 py-2 text-[13px] leading-5 animate-[chat-status-slide-up_250ms_ease-out]',
             statusBanner.variant === 'info'
               ? 'bg-info/10 text-info'
               : 'bg-destructive/10 text-destructive',
           )}
           role="status"
+          data-testid="chat-status-banner"
+          data-banner-variant={statusBanner.variant}
         >
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          <span>{statusBanner.message}</span>
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <span>{statusBanner.message}</span>
+            {statusBanner.detail && (
+              <details data-testid="chat-status-banner-detail" className="mt-1">
+                <summary className="cursor-pointer select-none text-[12px] opacity-70 transition-opacity hover:opacity-100">
+                  {t('chat.sendFailed.detailSummary')}
+                </summary>
+                <div className="mt-1 max-h-24 overflow-y-auto break-words font-mono text-[11px] leading-4 opacity-70">
+                  {statusBanner.detail}
+                </div>
+              </details>
+            )}
+          </div>
           {statusBanner.actionLabel && statusBanner.onAction && (
             <button
               type="button"

@@ -294,6 +294,7 @@ export const initializeSessionsAtom = atom(
         goalProjectionAtomFamily.remove(oldId)
         goalExpandedAtomFamily.remove(oldId)
         goalModeActiveAtomFamily.remove(oldId)
+        sendFailureAtomFamily.remove(oldId)
       }
     }
     // Reset loaded sessions tracking — new workspace needs fresh lazy loading
@@ -463,6 +464,7 @@ export const removeSessionAtom = atom(
     goalProjectionAtomFamily.remove(sessionId)
     goalExpandedAtomFamily.remove(sessionId)
     goalModeActiveAtomFamily.remove(sessionId)
+    sendFailureAtomFamily.remove(sessionId)
   }
 )
 
@@ -743,6 +745,31 @@ export const goalExpandedAtomFamily = atomFamily(
  */
 export const goalModeActiveAtomFamily = atomFamily(
   (_sessionId: string) => atom<boolean>(false),
+  (a, b) => a === b
+)
+
+// ===========================================================================
+// Journey #8: send-failure transient state (per session)
+// ===========================================================================
+
+/**
+ * A local send failure's transient prompt. This is SESSION state, not a
+ * message: nothing lands in `messages`, nothing persists server-side. The
+ * captured draft is what the explicit "restore draft" action puts back into
+ * the composer — re-sending stays a deliberate user act (a failed send's
+ * server receipt is unknown, so the renderer never auto-resends).
+ */
+export interface SessionSendFailure {
+  /** Localized heading (what happened). */
+  title: string
+  /** Technical detail from the transport error — rendered collapsed. */
+  detail: string
+  /** The unsent draft captured from the failed attempt. */
+  draft: string
+}
+
+export const sendFailureAtomFamily = atomFamily(
+  (_sessionId: string) => atom<SessionSendFailure | null>(null),
   (a, b) => a === b
 )
 

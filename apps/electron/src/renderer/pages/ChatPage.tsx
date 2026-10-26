@@ -30,8 +30,9 @@ import { decideChatAccessBanner } from '@/lib/chat-access-banner'
 import { formatQuotaResetTime } from '@/lib/quota-reset-time'
 import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
-import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
+import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sendFailureAtomFamily, sessionMetaMapAtom } from '@/atoms/sessions'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
+import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
@@ -311,6 +312,25 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     store.set(elementDraftRefsAtomFamily(sessionId), refs)
   }, [sessionId, store])
 
+  // Journey #8: a failed local send leaves a session-scoped prompt (not a
+  // message). The explicit action restores the preserved draft into the
+  // composer and focuses it — re-sending stays a deliberate user act, so a
+  // send whose server receipt is unknown is never blindly re-issued, and a
+  // double click settles on the first tap (the prompt is consumed).
+  const sendFailure = useAtomValue(
+    React.useMemo(() => sendFailureAtomFamily(sessionId), [sessionId]),
+  )
+
+  const handleRestoreSendFailureDraft = React.useCallback(() => {
+    const failure = store.get(sendFailureAtomFamily(sessionId))
+    if (!failure) return
+    store.set(sendFailureAtomFamily(sessionId), null)
+    window.dispatchEvent(new CustomEvent('craft:restore-input', {
+      detail: { sessionId, text: failure.draft },
+    }))
+    dispatchFocusInputEvent({ sessionId })
+  }, [sessionId, store])
+
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>
     isSessionConnectionUnavailable(session?.llmConnection, llmConnections),
@@ -325,23 +345,37 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   )
 
   const inputStatusBanner = React.useMemo(() => {
-    if (!bannerDecision) return null
-    return {
-      variant: bannerDecision.variant,
-      message: t(
-        bannerDecision.messageKey,
-        bannerDecision.quotaResetAt !== undefined
-          ? { reset: formatQuotaResetTime(bannerDecision.quotaResetAt, i18n.resolvedLanguage) }
-          : {},
-      ),
-      ...(bannerDecision.action === 'recharge'
-        ? { actionLabel: t('chat.statusBanner.recharge'), onAction: openPayment }
-        : {}),
-      ...(bannerDecision.action === 'retry-ai-config-sync'
-        ? { actionLabel: t('chat.statusBanner.retrySync'), onAction: onRetryAiConfigSync }
-        : {}),
+    // Journey #1 billing block wins: under a hard access block a draft
+    // prompt would be noise — the banner owns the messaging and the input.
+    if (bannerDecision) {
+      return {
+        variant: bannerDecision.variant,
+        message: t(
+          bannerDecision.messageKey,
+          bannerDecision.quotaResetAt !== undefined
+            ? { reset: formatQuotaResetTime(bannerDecision.quotaResetAt, i18n.resolvedLanguage) }
+            : {},
+        ),
+        ...(bannerDecision.action === 'recharge'
+          ? { actionLabel: t('chat.statusBanner.recharge'), onAction: openPayment }
+          : {}),
+        ...(bannerDecision.action === 'retry-ai-config-sync'
+          ? { actionLabel: t('chat.statusBanner.retrySync'), onAction: onRetryAiConfigSync }
+          : {}),
+      }
     }
-  }, [bannerDecision, onRetryAiConfigSync, openPayment, t])
+    // Journey #8: the failed-send prompt (title + collapsed detail + restore).
+    if (sendFailure) {
+      return {
+        variant: 'destructive' as const,
+        message: sendFailure.title,
+        detail: sendFailure.detail,
+        actionLabel: t('chat.sendFailed.restoreDraft'),
+        onAction: handleRestoreSendFailureDraft,
+      }
+    }
+    return null
+  }, [bannerDecision, onRetryAiConfigSync, openPayment, t, sendFailure, handleRestoreSendFailureDraft])
 
   const isChatInputDisabled = !!inputStatusBanner
 

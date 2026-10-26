@@ -136,13 +136,20 @@ describe('ChatInputZone × Goal 接线（POO-134）', () => {
     expect(badgeProps?.goalRunning).toBe(true)
   })
 
-  it('终态投影（无 currentGoalId）：不渲染 Goal 条，goalRunning=false', () => {
+  it('终态投影（无 currentGoalId）：journey #5 起保留只读 Goal 条，goalRunning=false', () => {
     const p = projection()
     delete (p as { currentGoalId?: string }).currentGoalId
+    p.goal.status = 'completed'
     store.set(goalProjectionAtomFamily(p.sessionId), p)
     renderZone(p.sessionId)
-    expect(screen.queryByTestId('goal-strip')).toBeNull()
+    // Journey #5: the last record stays readable after the Goal ends — the
+    // strip renders it read-only (no pause/resume actions) instead of
+    // vanishing with the terminal projection.
+    expect(screen.getByTestId('goal-strip')).not.toBeNull()
+    expect(screen.queryByTestId('goal-strip-pause')).toBeNull()
+    expect(screen.queryByTestId('goal-strip-resume')).toBeNull()
     expect(badgeProps?.goalRunning).toBe(false)
+    expect(badgeProps?.goalModeActive).toBe(false)
   })
 
   it('armed（未发送）也点亮 goalModeActive，但不渲染 Goal 条', () => {

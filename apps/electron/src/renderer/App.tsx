@@ -60,6 +60,7 @@ import {
   backgroundTasksAtomFamily,
   applyGoalProjectionAtom,
   goalStartIntentForSession,
+  sendFailureAtomFamily,
   extractSessionMeta,
   windowWorkspaceIdAtom,
   type SessionMeta,
@@ -67,6 +68,7 @@ import {
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
 import { extractBadges } from '@/lib/mentions'
+import { classifySendFailure, stripFailedOptimisticMessage } from '@/lib/send-failure'
 import { getDefaultStore } from 'jotai'
 import {
   ShikiThemeProvider,
@@ -117,7 +119,7 @@ import {
   subscribeToProductSpaceContractFailures,
 } from '@/lib/product-space-contract-failure'
 import { onTargetProjectionFailure } from '@/lib/target-projection'
-import { getErrorText, isInsufficientCreditError, isPeriodQuotaError, readErrorField, readQuotaResetAt } from './lib/quota-error'
+import { getErrorText, readErrorField } from './lib/quota-error'
 
 /** App-level states for the ProductSpace-first client shell. */
 type AppState =
@@ -2294,6 +2296,10 @@ export default function App() {
   ])
 
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => {
+    // Journey #8: the optimistic bubble's id, hoisted so the catch block can
+    // strip exactly that bubble (the send's server receipt is unknown — the
+    // failed attempt must not linger as a half-confirmed message).
+    let optimisticUserMessageId: string | null = null
     try {
       if (chatAccessStatus) {
         return
@@ -2440,6 +2446,7 @@ export default function App() {
         isPending: true,  // Optimistic - will be confirmed by backend
         isQueued: sendingMidStream,
       }
+      optimisticUserMessageId = userMessage.id
 
       // Optimistic UI update - add user message and set processing state
       updateSessionById(sessionId, (s) => ({
@@ -2484,37 +2491,45 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to send message:', error)
-      // Journey #1: the latch records WHICH billing class blocked the send —
-      // insufficient credit (recharge/member copy) vs period quota (reset copy
-      // only with the server's own reset fact). A reset fact the server did
-      // not send is never invented here.
-      if (isInsufficientCreditError(error)) {
-        setRuntimeChatAccessIssue('insufficient-credit')
-        setRuntimeQuotaResetAt(undefined)
-      } else if (isPeriodQuotaError(error)) {
-        setRuntimeChatAccessIssue('quota-exhausted')
-        setRuntimeQuotaResetAt(readQuotaResetAt(error))
-      }
-      // POO-134: a rejected Goal start (e.g. a non-terminal Goal already owns
-      // the session) surfaces the server's error text verbatim — the armed
-      // goal-mode intent stays selected so the user can end the current Goal
-      // or edit and resend; no automatic downgrade to an ordinary chat.
-      if (goalStartIntentForSession(store.get, sessionId)) {
+      // Journey #8: a failed send is classified once, then applied. The
+      // optimistic user bubble is ALWAYS stripped — the server receipt is
+      // unknown, so no half-confirmed message lingers and no raw
+      // "Failed to send message: …" text is persisted into the conversation.
+      const outcome = classifySendFailure(error, {
+        hadGoalStartIntent: !!goalStartIntentForSession(store.get, sessionId),
+      })
+      if (outcome.kind === 'billing-block') {
+        // Journey #1: the latch records WHICH billing class blocked the send —
+        // insufficient credit (recharge/member copy) vs period quota (reset
+        // copy only with the server's own reset fact). A reset fact the
+        // server did not send is never invented here.
+        setRuntimeChatAccessIssue(outcome.issue)
+        setRuntimeQuotaResetAt(outcome.issue === 'quota-exhausted' ? outcome.quotaResetAt : undefined)
+      } else if (outcome.kind === 'goal-start-failed') {
+        // POO-134: a rejected Goal start (e.g. a non-terminal Goal already owns
+        // the session) surfaces the server's error text verbatim — the armed
+        // goal-mode intent stays selected so the user can end the current Goal
+        // or edit and resend; no automatic downgrade to an ordinary chat.
         toast.error(i18n.t('goal.startFailed', {
           error: error instanceof Error ? error.message : String(error),
         }), { duration: 5000 })
+      } else {
+        // Journey #8: session-scoped transient prompt (localized title +
+        // collapsed technical detail + explicit restore-draft action). The
+        // draft is preserved here — re-sending stays a deliberate user act,
+        // never an automatic resend of a message whose server receipt is
+        // unknown.
+        store.set(sendFailureAtomFamily(sessionId), {
+          title: i18n.t('chat.sendFailed.title'),
+          detail: outcome.detail,
+          draft: message,
+        })
       }
       updateSessionById(sessionId, (s) => ({
         isProcessing: false,
-        messages: [
-          ...s.messages,
-          {
-            id: generateMessageId(),
-            role: 'error' as const,
-            content: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            timestamp: Date.now()
-          }
-        ]
+        messages: optimisticUserMessageId
+          ? stripFailedOptimisticMessage(s.messages, optimisticUserMessageId)
+          : s.messages,
       }))
     }
   }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, store, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
