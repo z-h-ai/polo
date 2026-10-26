@@ -99,7 +99,7 @@ export interface ISessionManager {
     existingMessageId?: string,
     _isAuthRetry?: boolean,
     onAck?: (messageId: string) => void,
-    rpcContext?: { callerClientId?: string },
+    rpcContext?: { callerClientId?: string; forceQueue?: boolean },
   ): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   cancelAllProcessing(): Promise<void>

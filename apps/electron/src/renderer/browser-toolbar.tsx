@@ -30,6 +30,8 @@ interface ToolbarState {
   canGoBack: boolean
   canGoForward: boolean
   themeColor?: string | null
+  /** POO-135: localized「加入:<会话名>」when the browser belongs to a session. */
+  boundSessionName?: string | null
 }
 
 declare global {
@@ -181,6 +183,16 @@ function BrowserToolbarApp() {
         onGoForward={handleGoForward}
         onReload={handleReload}
         onStop={handleStop}
+        leadingContent={state.boundSessionName ? (
+          // POO-135: target-chat identity — the picker adds to THIS chat.
+          <span
+            data-testid="browser-toolbar-bound-session"
+            title={state.boundSessionName}
+            className="mr-1.5 max-w-[140px] shrink-0 truncate rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-foreground-70 shadow-minimal"
+          >
+            {state.boundSessionName}
+          </span>
+        ) : undefined}
         trailingContent={(
           <div className="ml-2 flex items-center gap-1.5 titlebar-no-drag">
             <DropdownMenu open={windowMenuOpen} onOpenChange={setWindowMenuOpen}>

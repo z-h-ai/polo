@@ -11,17 +11,13 @@
 
 import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
+import type { CanvasPaneApp, CanvasPanePopoutState } from '../../shared/types'
 
-export interface CanvasPaneApp {
-  appId: string
-  title: string
-  /**
-   * Absolute bundle path. The pane only hosts real bundles — cards built from
-   * a data: fallback have no identity and never get a canvas entry.
-   */
-  indexPath: string
-  version?: number
-}
+// POO-135 验收修复: the interface moved to shared/types (it is now the
+// canvasPane.detachToPopup wire payload); re-exported so existing
+// `import type { CanvasPaneApp } from '@/atoms/canvas-pane'` call sites
+// keep working unchanged.
+export type { CanvasPaneApp } from '../../shared/types'
 
 export const CANVAS_PANE_MIN_RATIO = 0.25
 export const CANVAS_PANE_MAX_RATIO = 0.7
@@ -57,6 +53,17 @@ export function canvasPaneRatioFromPointer(
  */
 export const canvasPaneAppAtomFamily = atomFamily((_sessionId: string) =>
   atom<CanvasPaneApp | null>(null),
+)
+
+/**
+ * POO-135 验收修复 (SB-CANVAS-OUT): per-session popout reconciliation flags,
+ * written ONLY by the canvas-pane:state-changed subscription (Main is the
+ * authority on where the canvas lives). While `poppedOut` is true the sidebar
+ * hosts a placeholder instead of the card — one live canvas surface per
+ * session, popup XOR sidebar.
+ */
+export const canvasPanePopoutAtomFamily = atomFamily((_sessionId: string) =>
+  atom<CanvasPanePopoutState | null>(null),
 )
 
 /** Per-session pane width ratio, remembered across open/close within the run. */

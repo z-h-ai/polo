@@ -53,6 +53,12 @@ interface ManagedWindow {
   workspaceId: string
   launchContext?: WorkbenchWindowContext
   workbenchContext?: WorkbenchWindowContext
+  /**
+   * POO-135 验收修复 (SB-CANVAS-OUT): aux windows (canvas popup) join the map
+   * only so webview scope resolution maps them to a workspace; the workspace
+   * title policy never retitles them and they don't count as main windows.
+   */
+  aux?: boolean
 }
 
 export interface CreateWindowOptions {
@@ -291,8 +297,9 @@ export class WindowManager {
    */
   private refreshWindowTitles(): void {
     const defaultTitle = app.getName()
-    const showWorkspaceName = this.windows.size > 1
-    for (const { window, workspaceId } of this.windows.values()) {
+    const mainWindows = Array.from(this.windows.values()).filter((m) => !m.aux)
+    const showWorkspaceName = mainWindows.length > 1
+    for (const { window, workspaceId } of mainWindows) {
       if (window.isDestroyed()) continue
       let title = defaultTitle
       if (showWorkspaceName && workspaceId) {
@@ -788,6 +795,25 @@ export class WindowManager {
     // Re-apply window-title policy after re-registration (e.g. post-refresh).
     this.refreshWindowTitles()
     windowLog.info(`Registered window ${webContentsId} for workspace ${workspaceId}`)
+  }
+
+  /**
+   * POO-135 验收修复 (SB-CANVAS-OUT): register a non-main window (canvas
+   * popup) so webview scope resolution maps it to the owning workspace.
+   * Skips the workspace title policy and main-window counting on purpose —
+   * a canvas popup always shows its own app name.
+   */
+  registerAuxWindow(window: BrowserWindow, workspaceId: string | null): void {
+    const webContentsId = window.webContents.id
+    this.windows.set(webContentsId, { window, workspaceId: workspaceId ?? '', aux: true })
+    windowLog.info(`Registered aux window ${webContentsId} for workspace ${workspaceId ?? '(none)'}`)
+  }
+
+  /** Remove an aux window registration (popup closed). */
+  unregisterAuxWindow(webContentsId: number): void {
+    if (this.windows.delete(webContentsId)) {
+      windowLog.info(`Unregistered aux window ${webContentsId}`)
+    }
   }
 
   /**

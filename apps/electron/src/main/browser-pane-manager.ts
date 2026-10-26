@@ -18,9 +18,13 @@ import { BrowserCDP, type AccessibilitySnapshot, type ElementGeometry } from './
 import {
   type BrowserEmptyStateLaunchPayload,
   type BrowserEmptyStateLaunchResult,
+  type BrowserEmbedBounds,
+  type BrowserElementPickerEvent,
   type BrowserInstanceInfo,
+  type WebElementReference,
 } from '../shared/types'
 import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@polo-ai/shared/config'
+import { i18n } from '@polo-ai/shared/i18n'
 import { CodedError } from '@polo-ai/shared/protocol'
 import { getBrowserLiveFxCornerRadii } from '../shared/browser-live-fx'
 import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
@@ -51,6 +55,13 @@ const SCREENSHOT_NETWORK_IDLE_TIMEOUT_MS = 1_000
 const SCREENSHOT_NETWORK_IDLE_MS = 300
 const THEME_COLOR_SIGNAL_PREFIX = '__craft_theme_color__:'
 const THEME_COLOR_NULL_SENTINEL = '__NULL__'
+/** POO-135: page→main signal prefix for the in-page element picker. */
+const ELEMENT_PICKER_SIGNAL_PREFIX = '__polo-element-pick:'
+const ELEMENT_PICKER_TEXT_MAX = 500
+const ELEMENT_PICKER_ARIA_MAX = 160
+const ELEMENT_PICKER_LOCATOR_MAX = 300
+const ELEMENT_PICKER_TITLE_MAX = 200
+const ELEMENT_PICKER_LOCATOR_DEPTH = 12
 const THEME_OBSERVER_MIN_INTERVAL_MS = 120
 const EARLY_THEME_EXTRACTION_DELAY_MS = 100
 const BROWSER_EMPTY_STATE_PAGE = 'browser-empty-state.html'
@@ -109,6 +120,185 @@ const THEME_COLOR_EXTRACTOR_FN = String.raw`
   // 3. Fallback: body then html
   return parseBg(document.body) || parseBg(document.documentElement) || null;
 }
+`
+
+/**
+ * POO-135: in-page element picker. Injected via executeJavaScript on toggle;
+ * reports back through the console-message signal channel (the page sandbox
+ * has no IPC). Static script — no page-controlled interpolation. Only
+ * whitelist snapshot fields are reported: visible text, tag, accessible
+ * name, locator chain, page title, page URL. Form-control VALUES are never
+ * read (passwords, hidden inputs, user-typed text stay on the page); script
+ * / style / template content and whole-page text are never collected.
+ */
+const ELEMENT_PICKER_SCRIPT = String.raw`
+(() => {
+  var SIGNAL = '__polo-element-pick:';
+  if (window.__poloElementPicker) {
+    try { window.__poloElementPicker.teardown(); } catch (e) {}
+  }
+  var doc = document;
+  var overlay = doc.createElement('div');
+  var label = doc.createElement('div');
+  overlay.setAttribute('aria-hidden', 'true');
+  label.setAttribute('aria-hidden', 'true');
+  overlay.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483646;pointer-events:none;display:none;border:2px solid #6366f1;background:rgba(99,102,241,0.12);border-radius:4px;';
+  label.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;display:none;max-width:min(280px,calc(100vw - 16px));padding:5px 8px;background:#1f2937;color:#f9fafb;font:11px/1.4 -apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  function mount() {
+    if (!doc.body) return false;
+    doc.body.appendChild(overlay);
+    doc.body.appendChild(label);
+    return true;
+  }
+  var mounted = mount();
+
+  var SENSITIVE_SEL = 'input[type=password],input[type=hidden]';
+  var HIDDEN_SEL = '[hidden],[aria-hidden="true"],script,style,template,noscript,head,meta,link,title';
+  var FRAME_SEL = 'iframe,frame,object,embed';
+
+  function collapse(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+  function summarize(el) {
+    if (el.closest(SENSITIVE_SEL)) return '敏感内容';
+    if (el.closest(FRAME_SEL)) return '嵌入内容 · 暂不支持';
+    if (el.closest(HIDDEN_SEL)) return '不可见内容';
+    var tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      var named = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+      return '表单控件' + (named ? ' · ' + collapse(named).slice(0, 64) : '');
+    }
+    var text = collapse(el.innerText);
+    return text ? text.slice(0, 64) : '无文本';
+  }
+  function locate(el) {
+    var chain = [];
+    var node = el;
+    while (node && node !== doc.documentElement && chain.length < 12) {
+      var parent = node.parentElement;
+      var index = 1;
+      var cursor = node;
+      while ((cursor = cursor.previousElementSibling)) index++;
+      chain.unshift(node.tagName.toLowerCase() + ':nth-child(' + index + ')');
+      node = parent;
+    }
+    return chain.join(' > ');
+  }
+  function isCssHidden(node) {
+    // POO-135 r1: selector-hidden is checked via HIDDEN_SEL above; this also
+    // rejects CSS-hidden elements (display:none / visibility:hidden / zero
+    // box) so their text is never captured as visible content.
+    var cursor = node;
+    while (cursor && cursor.nodeType === 1) {
+      var style = doc.defaultView && doc.defaultView.getComputedStyle(cursor);
+      if (style) {
+        if (style.display === 'none' || style.visibility === 'hidden') return true;
+        var rect = cursor.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return true;
+      }
+      if (cursor === doc.documentElement) break;
+      cursor = cursor.parentElement;
+    }
+    return false;
+  }
+  function buildReference(el) {
+    var tag = el.tagName.toLowerCase();
+    var sensitive = !!el.closest(SENSITIVE_SEL);
+    var framed = !!el.closest(FRAME_SEL);
+    var hidden = !!el.closest(HIDDEN_SEL);
+    if (sensitive) return { kind: 'unavailable', reason: 'sensitive' };
+    if (framed) return { kind: 'unavailable', reason: 'iframe' };
+    if (hidden || isCssHidden(el) || el === doc.documentElement || el === doc.body) return { kind: 'unavailable', reason: 'hidden' };
+    var isForm = tag === 'input' || tag === 'textarea' || tag === 'select';
+    var text = isForm ? '' : collapse(el.innerText).slice(0, 500);
+    var aria = collapse(el.getAttribute('aria-label') || '').slice(0, 160)
+      || collapse(el.getAttribute && el.getAttribute('placeholder') || '').slice(0, 160)
+      || '';
+    return {
+      kind: 'picked',
+      reference: {
+        tag: tag,
+        text: text,
+        aria: aria,
+        locator: locate(el).slice(0, 300),
+        pageTitle: collapse(doc.title || '').slice(0, 200),
+        url: String(location.href || '').slice(0, 2048)
+      }
+    };
+  }
+  function hideVisuals() {
+    overlay.style.display = 'none';
+    label.style.display = 'none';
+  }
+  function onMouseMove(event) {
+    if (!mounted) mounted = mount();
+    var el = event.target;
+    if (!(el instanceof Element) || !doc.contains(el)) { hideVisuals(); return; }
+    var rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) { hideVisuals(); return; }
+    overlay.style.display = 'block';
+    overlay.style.left = rect.left + 'px';
+    overlay.style.top = rect.top + 'px';
+    overlay.style.width = rect.width + 'px';
+    overlay.style.height = rect.height + 'px';
+    var text = el.tagName.toLowerCase() + ' · ' + summarize(el);
+    label.textContent = text;
+    label.style.display = 'block';
+    var box = label.getBoundingClientRect();
+    var left = Math.min(Math.max(4, rect.left), window.innerWidth - box.width - 4);
+    var top = rect.top > box.height + 12 ? rect.top - box.height - 6 : rect.bottom + 6;
+    label.style.left = left + 'px';
+    label.style.top = Math.max(4, top) + 'px';
+  }
+  function onClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    var el = event.target;
+    if (!(el instanceof Element)) return;
+    report(buildReference(el));
+  }
+  function onKey(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      report({ kind: 'cancel' });
+    }
+  }
+  function onScroll() { hideVisuals(); }
+  function report(payload) {
+    try { console.log(SIGNAL + JSON.stringify(payload)); } catch (e) {}
+  }
+  window.addEventListener('mousemove', onMouseMove, true);
+  window.addEventListener('click', onClick, true);
+  window.addEventListener('keydown', onKey, true);
+  window.addEventListener('scroll', onScroll, true);
+  window.addEventListener('resize', onScroll, true);
+  doc.documentElement.style.cursor = 'crosshair';
+  window.__poloElementPicker = {
+    teardown: function () {
+      window.removeEventListener('mousemove', onMouseMove, true);
+      window.removeEventListener('click', onClick, true);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll, true);
+      try { overlay.remove(); label.remove(); } catch (e) {}
+      doc.documentElement.style.cursor = '';
+      try { delete window.__poloElementPicker; } catch (e) { window.__poloElementPicker = undefined; }
+    }
+  };
+  return true;
+})()
+`
+
+/** POO-135: idempotent teardown script for the in-page element picker. */
+const ELEMENT_PICKER_TEARDOWN_SCRIPT = String.raw`
+(() => {
+  if (window.__poloElementPicker) {
+    try { window.__poloElementPicker.teardown(); } catch (e) {}
+  }
+  return true;
+})()
 `
 
 /** IPC channels for the browser toolbar preload */
@@ -184,6 +374,27 @@ interface BrowserInstance {
   networkLogs: BrowserNetworkEntry[]
   downloads: BrowserDownloadEntry[]
   lastLaunchToken: string | null
+  /**
+   * POO-135: where the page view currently lives — the dedicated popup
+   * window (`popup`, pre-POO-135 behavior) or the main window's right
+   * sidebar (`embedded`). The toolbar/overlay views always stay on the
+   * popup window; only the page view migrates.
+   */
+  hostMode: 'popup' | 'embedded'
+  /** POO-135: host window while embedded (null in popup mode). */
+  embeddedHostWindow: BrowserWindow | null
+  /**
+   * POO-135 r1: whether the page view is actually attached to the embed host.
+   * The sidebar container can unmount (tab switch, narrow viewport, session
+   * switch, hide) while the instance stays embedded — the view is then
+   * removed so it cannot cover window content, and re-attached on the next
+   * valid bounds report.
+   */
+  embeddedViewsAttached: boolean
+  /** POO-135: whether the in-page element picker is armed on the page. */
+  elementPicking: boolean
+  /** POO-135: chat session the armed picker will target (renderer-declared). */
+  elementPickingTargetSessionId: string | null
 }
 
 interface CreateBrowserInstanceOptions {
@@ -327,6 +538,8 @@ interface LastBrowserAction {
 }
 
 let instanceCounter = 0
+/** POO-135: global monotonic id for captured element references. */
+let elementReferenceCounter = 0
 
 export class BrowserPaneManager implements IBrowserPaneManager {
   private instances: Map<string, BrowserInstance> = new Map()
@@ -342,6 +555,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   private popupParentByWebContentsId = new Map<number, string>()
   private windowManager: WindowManager | null = null
   private sessionPathResolver: ((sessionId: string) => string | null) | null = null
+  private sessionNameResolver: ((sessionId: string) => string | null) | null = null
+  private elementPickerCallback: ((event: BrowserElementPickerEvent) => void) | null = null
 
   setWindowManager(windowManager: WindowManager): void {
     this.windowManager = windowManager
@@ -349,6 +564,25 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   setSessionPathResolver(fn: (sessionId: string) => string | null): void {
     this.sessionPathResolver = fn
+  }
+
+  /**
+   * POO-135: resolves a session id to its display name for ownership labels
+   * (popup window title「加入:<会话名>」). Injected by main once the session
+   * manager exists; may be absent (tests, headless) — labels degrade to the
+   * page title.
+   */
+  setSessionNameResolver(fn: (sessionId: string) => string | null): void {
+    this.sessionNameResolver = fn
+  }
+
+  /** POO-135: subscribe to element picker outcomes (picked/cancelled/unavailable). */
+  onElementPickerEvent(callback: (event: BrowserElementPickerEvent) => void): void {
+    this.elementPickerCallback = callback
+  }
+
+  private emitElementPickerEvent(event: BrowserElementPickerEvent): void {
+    this.elementPickerCallback?.(event)
   }
 
   onStateChange(callback: (info: BrowserInstanceInfo) => void): void {
@@ -487,6 +721,11 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       networkLogs: [],
       downloads: [],
       lastLaunchToken: null,
+      hostMode: 'popup',
+      embeddedHostWindow: null,
+      embeddedViewsAttached: false,
+      elementPicking: false,
+      elementPickingTargetSessionId: null,
     }
 
     const defaultUa = pageView.webContents.userAgent || ''
@@ -559,6 +798,13 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     runCleanup('closePopupsForParent', () => this.closePopupsForParent(instance.id, 'parent_destroy'))
     runCleanup('applyAgentControlLock', () => this.applyAgentControlLock(instance, false))
     runCleanup('updateNativeOverlayState', () => this.updateNativeOverlayState(instance))
+    runCleanup('cancelElementPicking', () => this.cancelElementPicking(instance, 'destroyed'))
+    runCleanup('detachEmbeddedView', () => {
+      const host = instance.embeddedHostWindow
+      if (host && !host.isDestroyed()) host.removeBrowserView(instance.pageView)
+      instance.embeddedHostWindow = null
+      instance.embeddedViewsAttached = false
+    })
 
     try {
       if (!instance.window.isDestroyed()) {
@@ -816,6 +1062,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
 
     if (win.isMinimized()) win.restore()
+    if (instance.hostMode === 'popup') {
+      // Keep the ownership label fresh (session may have been renamed).
+      this.applyOwnershipTitle(instance)
+    }
     win.show()
     win.focus()
 
@@ -844,6 +1094,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
 
     this.forceCloseToolbarMenu(instance, 'window-hide')
+    this.cancelElementPicking(instance, 'host')
 
     // Cancel an in-flight page load before hiding. Hiding the window while the
     // BrowserView is still loading can trigger a Chromium compositor assertion
@@ -867,6 +1118,324 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       instance.isHiding = false
       this.emitStateChange(instance)
     })
+  }
+
+  // ---------------------------------------------------------------------------
+  // POO-135: sidebar embed / popup restore / in-page element picker
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Attach the instance's page view to the main window's right sidebar. The
+   * toolbar/overlay views stay on the dedicated window, which is hidden (not
+   * destroyed) so the same live WebContents keeps its JS heap, history and
+   * scroll. `hostWindow` is the sender of the embed request — the main
+   * window's own renderer.
+   */
+  embedInstance(id: string, hostWindow: BrowserWindow, bounds?: BrowserEmbedBounds): void {
+    const instance = this.requireAliveInstance(id)
+    if (hostWindow.isDestroyed()) {
+      throw new Error(`Embed host window is gone (instance: ${id})`)
+    }
+
+    if (instance.hostMode === 'embedded') {
+      if (instance.embeddedHostWindow === hostWindow) {
+        if (bounds) this.applyEmbedBounds(instance, bounds)
+        return
+      }
+      try {
+        instance.embeddedHostWindow?.removeBrowserView(instance.pageView)
+      } catch (error) {
+        mainLog.warn(`[browser-pane] embed re-anchor remove failed id=${id}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    } else {
+      this.cancelElementPicking(instance, 'host')
+      instance.window.removeBrowserView(instance.pageView)
+    }
+
+    hostWindow.addBrowserView(instance.pageView)
+    // Bounds are driven by the sidebar renderer; auto-resize would fight it.
+    instance.pageView.setAutoResize({ width: false, height: false })
+    instance.embeddedHostWindow = hostWindow
+    instance.embeddedViewsAttached = true
+    instance.hostMode = 'embedded'
+    if (!instance.window.isDestroyed() && instance.window.isVisible()) {
+      instance.window.hide()
+    }
+    if (bounds) this.applyEmbedBounds(instance, bounds)
+    mainLog.info(`[browser-pane] embedded into sidebar id=${id}`)
+    this.emitStateChange(instance)
+  }
+
+  /**
+   * Move an embedded page view back into its own popup window and show it.
+   * Ownership label (`加入:<会话名>` for session windows) is applied to the
+   * native window title.
+   */
+  detachToPopup(id: string): void {
+    const instance = this.requireAliveInstance(id)
+    if (instance.hostMode !== 'embedded') {
+      this.focus(id)
+      return
+    }
+
+    this.cancelElementPicking(instance, 'host')
+    const host = instance.embeddedHostWindow
+    if (host && !host.isDestroyed()) {
+      host.removeBrowserView(instance.pageView)
+    }
+    instance.embeddedHostWindow = null
+    instance.embeddedViewsAttached = false
+    instance.hostMode = 'popup'
+
+    const win = instance.window
+    if (!win.isDestroyed()) {
+      win.addBrowserView(instance.pageView)
+      win.addBrowserView(instance.nativeOverlayView)
+      win.addBrowserView(instance.toolbarView)
+      win.setTopBrowserView(instance.toolbarView)
+      this.layoutAllViews(instance)
+      this.applyOwnershipTitle(instance)
+      win.show()
+      win.focus()
+    }
+    mainLog.info(`[browser-pane] detached to popup id=${id}`)
+    this.emitStateChange(instance)
+  }
+
+  /** Reposition an embedded page view (main-window content coordinates). */
+  setEmbedBounds(id: string, bounds: BrowserEmbedBounds): void {
+    const instance = this.instances.get(id)
+    if (!instance || instance.window.isDestroyed()) return
+    if (instance.hostMode !== 'embedded') return
+    const width = Math.floor(Number(bounds?.width))
+    const height = Math.floor(Number(bounds?.height))
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      // Zero-sized report = the sidebar container is gone or unmeasured — the
+      // view must not keep covering window content (POO-135 r1).
+      this.unembedInstance(id)
+      return
+    }
+    // Re-attach implicitly: the sidebar container remounted after an unembed.
+    const host = instance.embeddedHostWindow
+    if (!instance.embeddedViewsAttached && host && !host.isDestroyed()) {
+      host.addBrowserView(instance.pageView)
+      instance.embeddedViewsAttached = true
+    }
+    this.applyEmbedBounds(instance, bounds)
+  }
+
+  /**
+   * POO-135 r1: remove the page view from the embed host WITHOUT leaving
+   * embedded mode — the sidebar container unmounted (tab switch to canvas,
+   * narrow viewport, session switch, explicit hide) and the native view would
+   * otherwise keep covering window content. The instance stays alive and
+   * embedded; the next valid `setEmbedBounds` re-attaches it.
+   */
+  unembedInstance(id: string): void {
+    const instance = this.instances.get(id)
+    if (!instance || instance.hostMode !== 'embedded' || !instance.embeddedViewsAttached) return
+    const host = instance.embeddedHostWindow
+    if (host && !host.isDestroyed()) {
+      try {
+        host.removeBrowserView(instance.pageView)
+      } catch (error) {
+        mainLog.warn(`[browser-pane] unembed remove failed id=${id}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    instance.embeddedViewsAttached = false
+    mainLog.info(`[browser-pane] unembedded from sidebar id=${id}`)
+  }
+
+  private applyEmbedBounds(instance: BrowserInstance, bounds: BrowserEmbedBounds): void {
+    const host = instance.embeddedHostWindow
+    if (!host || host.isDestroyed()) return
+    const clamp = (value: unknown, min: number): number => {
+      const n = Math.floor(Number(value))
+      return Number.isFinite(n) ? Math.max(min, n) : min
+    }
+    instance.pageView.setBounds({
+      x: clamp(bounds.x, 0),
+      y: clamp(bounds.y, 0),
+      width: clamp(bounds.width, 1),
+      height: clamp(bounds.height, 1),
+    })
+  }
+
+  /**
+   * Ownership label for the popup window title. Session windows show
+   * 「加入:<会话名>」 (localized); manual windows follow the page title.
+   */
+  private applyOwnershipTitle(instance: BrowserInstance): void {
+    if (instance.window.isDestroyed()) return
+    const label = this.resolveOwnershipLabel(instance)
+    const title = label ?? instance.title
+    try {
+      instance.window.setTitle(title)
+    } catch (error) {
+      mainLog.warn(`[browser-pane] setTitle failed id=${instance.id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /**
+   * Localized「加入:<会话名>」label for session-owned browsers, or null for
+   * workspace (manual) browsers — used for the popup window title and the
+   * toolbar's target-chat chip.
+   */
+  private resolveOwnershipLabel(instance: BrowserInstance): string | null {
+    if (!instance.ownerSessionId) return null
+    const name = this.sessionNameResolver?.(instance.ownerSessionId) ?? null
+    if (!name) return null
+    return i18n.t('browserPane.sidebar.ownershipTitle', { session: name })
+  }
+
+  /**
+   * Arm or disarm the in-page element picker. `targetSessionId` is the chat
+   * the picked element will be added to (owner session for session browsers,
+   * current session at arm time for workspace browsers) — stamped onto the
+   * captured reference so the snapshot carries its target.
+   */
+  async setElementPicking(id: string, active: boolean, options?: { targetSessionId?: string | null }): Promise<void> {
+    const instance = this.requireAliveInstance(id)
+
+    if (!active) {
+      if (!instance.elementPicking) return
+      await this.teardownElementPicker(instance)
+      instance.elementPickingTargetSessionId = null
+      return
+    }
+
+    // Re-arm on an already-armed page: teardown first so listeners never stack.
+    if (instance.elementPicking) {
+      await this.teardownElementPicker(instance)
+    }
+    // POO-135 r1: defense in depth — the renderer disables the entry without
+    // a target, but Main must not arm a picker whose picks would have no
+    // destination session.
+    const targetSessionId = options?.targetSessionId ?? instance.ownerSessionId ?? null
+    if (!targetSessionId) {
+      throw new Error('[browser-pane] element picking requires a target session')
+    }
+    try {
+      await instance.pageView.webContents.executeJavaScript(ELEMENT_PICKER_SCRIPT)
+    } catch (error) {
+      mainLog.warn(`[browser-pane] element picker arm failed id=${id}: ${error instanceof Error ? error.message : String(error)}`)
+      throw error
+    }
+    instance.elementPicking = true
+    instance.elementPickingTargetSessionId = targetSessionId
+    mainLog.info(`[browser-pane] element picker armed id=${id} target=${targetSessionId}`)
+  }
+
+  private async teardownElementPicker(instance: BrowserInstance): Promise<void> {
+    instance.elementPicking = false
+    try {
+      if (!instance.pageView.webContents.isDestroyed()) {
+        await instance.pageView.webContents.executeJavaScript(ELEMENT_PICKER_TEARDOWN_SCRIPT)
+      }
+    } catch (error) {
+      mainLog.warn(`[browser-pane] element picker teardown failed id=${instance.id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** Cancel picking because of a host transition / navigation / destruction. */
+  private cancelElementPicking(instance: BrowserInstance, reason: 'user' | 'navigation' | 'host' | 'destroyed'): void {
+    if (!instance.elementPicking) return
+    instance.elementPicking = false
+    instance.elementPickingTargetSessionId = null
+    if (!instance.pageView.webContents.isDestroyed()) {
+      void instance.pageView.webContents
+        .executeJavaScript(ELEMENT_PICKER_TEARDOWN_SCRIPT)
+        .catch(() => {})
+    }
+    this.emitElementPickerEvent({ instanceId: instance.id, kind: 'cancelled', reason })
+  }
+
+  /**
+   * Handle a `__polo-element-pick:` console signal from the page. Payloads
+   * are re-validated and clamped against the whitelist — the page sandbox is
+   * untrusted, so only known fields at bounded length ever leave this method.
+   */
+  private handleElementPickerSignal(instance: BrowserInstance, rawPayload: string): void {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(rawPayload)
+    } catch {
+      return
+    }
+    if (!parsed || typeof parsed !== 'object') return
+    const payload = parsed as Record<string, unknown>
+
+    if (payload.kind === 'cancel') {
+      // POO-135 r1: the page picker does NOT self-destruct (it only reports);
+      // a signal-driven terminal outcome must run the teardown here or
+      // click/keydown interception stays armed on the page.
+      this.teardownPickerOnSignal(instance)
+      if (!instance.elementPicking) return
+      instance.elementPicking = false
+      instance.elementPickingTargetSessionId = null
+      this.emitElementPickerEvent({ instanceId: instance.id, kind: 'cancelled', reason: 'user' })
+      return
+    }
+
+    if (payload.kind === 'unavailable') {
+      const reason = payload.reason === 'iframe' || payload.reason === 'sensitive' ? payload.reason : 'hidden'
+      this.emitElementPickerEvent({ instanceId: instance.id, kind: 'unavailable', reason })
+      return
+    }
+
+    if (payload.kind === 'picked') {
+      const reference = this.sanitizePickedReference(instance, payload.reference)
+      const wasArmed = instance.elementPicking
+      this.teardownPickerOnSignal(instance)
+      instance.elementPicking = false
+      instance.elementPickingTargetSessionId = null
+      // Exactly one picked outcome per arm — duplicate/late signals are
+      // dropped so the renderer draft never gets double chips.
+      if (wasArmed && reference) {
+        this.emitElementPickerEvent({ instanceId: instance.id, kind: 'picked', reference })
+      }
+    }
+  }
+
+  /** POO-135 r1: fire-and-forget teardown after a signal-driven terminal outcome. */
+  private teardownPickerOnSignal(instance: BrowserInstance): void {
+    if (instance.pageView.webContents.isDestroyed()) return
+    void instance.pageView.webContents
+      .executeJavaScript(ELEMENT_PICKER_TEARDOWN_SCRIPT)
+      .catch(() => {})
+  }
+
+  /** Clamp a page-reported pick to the whitelist snapshot fields. */
+  private sanitizePickedReference(instance: BrowserInstance, raw: unknown): WebElementReference | null {
+    if (!raw || typeof raw !== 'object') return null
+    const data = raw as Record<string, unknown>
+    const clampString = (value: unknown, max: number): string =>
+      typeof value === 'string' ? value.slice(0, max) : ''
+
+    const tag = clampString(data.tag, 32).replace(/[^a-z0-9]/gi, '').toLowerCase()
+    if (!tag) return null
+
+    let url = clampString(data.url, 2048)
+    try {
+      const parsedUrl = new URL(url)
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') return null
+      url = parsedUrl.toString()
+    } catch {
+      return null
+    }
+
+    const aria = clampString(data.aria, ELEMENT_PICKER_ARIA_MAX)
+    return {
+      id: `element-${++elementReferenceCounter}`,
+      browserInstanceId: instance.id,
+      sessionId: instance.elementPickingTargetSessionId ?? instance.ownerSessionId ?? '',
+      tag,
+      text: clampString(data.text, ELEMENT_PICKER_TEXT_MAX),
+      ...(aria ? { aria } : {}),
+      locator: clampString(data.locator, ELEMENT_PICKER_LOCATOR_MAX),
+      pageTitle: clampString(data.pageTitle, ELEMENT_PICKER_TITLE_MAX),
+      url,
+    }
   }
 
   private authorizedBrowserActions=new Map<string,{browserId:string;revoked:boolean;started:boolean;expires:number;promise?:Promise<unknown>}>()
@@ -2402,6 +2971,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       canGoBack: instance.canGoBack,
       canGoForward: instance.canGoForward,
       themeColor: instance.themeColor,
+      // POO-135: ownership label for the popup toolbar's target-chat chip.
+      // Omitted (not null) when the browser is not session-bound so the
+      // payload shape stays identical to the pre-POO-135 one for unowned panes.
+      ...(this.resolveOwnershipLabel(instance)
+        ? { boundSessionName: this.resolveOwnershipLabel(instance) }
+        : {}),
     }
     instance.toolbarView.webContents.send(TOOLBAR_CHANNELS.STATE_UPDATE, state)
   }
@@ -3527,6 +4102,9 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       })
       instance.canGoBack = pageWc.canGoBack()
       instance.canGoForward = pageWc.canGoForward()
+      // A main-frame navigation destroys the picker's DOM listeners — cancel
+      // cleanly so the renderer can stop showing "picking" UI (POO-135).
+      this.cancelElementPicking(instance, 'navigation')
       // Drain in-flight count — prior page's requests are cancelled on navigation
       this.inFlightRequestsByWebContentsId.set(pageWc.id, 0)
       this.lastNetworkActivityByWebContentsId.set(pageWc.id, Date.now())
@@ -3551,6 +4129,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       instance.title = normalized.title
       instance.canGoBack = pageWc.canGoBack()
       instance.canGoForward = pageWc.canGoForward()
+      // SPA navigations swap the document too — the picker cannot survive it.
+      this.cancelElementPicking(instance, 'navigation')
 
       void this.maybeHandleEmptyStateLaunch(instance, url).then((handled) => {
         if (handled) {
@@ -3597,6 +4177,13 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     })
 
     pageWc.on('console-message', (_event, level, message) => {
+      if (message.startsWith(ELEMENT_PICKER_SIGNAL_PREFIX)) {
+        // Picker signals never enter the page console log — they are the
+        // page→main channel for picked/cancelled/unavailable outcomes.
+        this.handleElementPickerSignal(instance, message.slice(ELEMENT_PICKER_SIGNAL_PREFIX.length))
+        return
+      }
+
       if (message.startsWith(THEME_COLOR_SIGNAL_PREFIX)) {
         const payload = message.slice(THEME_COLOR_SIGNAL_PREFIX.length)
         const delimiterIdx = payload.indexOf(':')
@@ -3748,6 +4335,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       agentControlActive: !!instance.agentControl?.active,
       themeColor: instance.themeColor,
       workspaceId: instance.workspaceId,
+      hostMode: instance.hostMode,
     }
   }
 

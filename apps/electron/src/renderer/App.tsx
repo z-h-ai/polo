@@ -8,6 +8,8 @@ import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult } from '../shared/types'
+import type { WebElementReference } from '@polo-ai/core/types'
+import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -2237,7 +2239,7 @@ export default function App() {
     runtimeChatAccessIssue,
   ])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => {
     try {
       if (chatAccessStatus) {
         return
@@ -2408,9 +2410,17 @@ export default function App() {
         // (review #12). `undefined` (non-composer callers) keeps the stored
         // scope untouched.
         kbCollectionIds,
+        // POO-135: picked web element references ride the same chain and are
+        // persisted on the stored user message.
+        elementReferences,
         optimisticMessageId: userMessage.id,
         invocationSource: 'desktop',
       })
+      // The send was handed off: drop the composer's draft queue for this
+      // session (FreeFormInput already cleared its copy).
+      if (elementReferences && elementReferences.length > 0) {
+        store.set(elementDraftRefsAtomFamily(sessionId), [])
+      }
     } catch (error) {
       console.error('Failed to send message:', error)
       if (isQuotaExhaustedError(error)) {

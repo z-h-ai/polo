@@ -30,7 +30,7 @@ import {
   type GenUiAppCanvasOpenRequest,
   type GenUiAppCanvasQuery,
 } from '@polo-ai/ui/chat/GenUiAppCard'
-import { canvasPaneAppAtomFamily } from '@/atoms/canvas-pane'
+import { canvasPaneAppAtomFamily, canvasPanePopoutAtomFamily } from '@/atoms/canvas-pane'
 
 export function GenUiCanvasBridge() {
   // The ambient jotai store, NOT getDefaultStore(): the app renders inside a
@@ -40,6 +40,14 @@ export function GenUiCanvasBridge() {
   const store = useStore()
   const handleOpen = useCallback((request: GenUiAppCanvasOpenRequest) => {
     if (!request.sessionId || !request.appId || !request.indexPath) return
+    // POO-135 验收修复 (SB-CANVAS-OUT): the canvas lives in ONE surface per
+    // session. An explicit open (inline card → sidebar canvas) while the
+    // canvas is popped out first returns it — Main closes the popup and its
+    // closed broadcast flips the popout flags; the sidebar shows the opened
+    // app as soon as the pane atom is written here.
+    if (store.get(canvasPanePopoutAtomFamily(request.sessionId))?.poppedOut) {
+      void window.electronAPI?.canvasPane?.attachFromPopup?.(request.sessionId).catch(() => {})
+    }
     store.set(canvasPaneAppAtomFamily(request.sessionId), {
       appId: request.appId,
       title: request.title,

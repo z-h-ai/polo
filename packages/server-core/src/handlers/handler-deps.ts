@@ -2,6 +2,7 @@ import type { PlatformServices } from '../runtime/platform'
 import type { ISessionManager } from './session-manager-interface'
 import type { IOAuthFlowStore } from './oauth-flow-store-interface'
 import type { IBrowserPaneManager } from './browser-pane-manager-interface'
+import type { ICanvasPopupManager } from './canvas-popup-manager-interface'
 import type { IWindowManager } from './window-manager-interface'
 import type { IMessagingGatewayRegistry } from './messaging-registry-interface'
 import type { SessionStorage } from '@polo-ai/shared/sessions'
@@ -34,6 +35,7 @@ export interface HandlerDeps<
   TOAuthFlowStore extends IOAuthFlowStore = IOAuthFlowStore,
   TWindowManager extends IWindowManager = IWindowManager,
   TBrowserPaneManager extends IBrowserPaneManager = IBrowserPaneManager,
+  TCanvasPopupManager extends ICanvasPopupManager = ICanvasPopupManager,
 > {
   sessionManager: TSessionManager
   /** Runtime-owned path resolver for every session artifact. */
@@ -43,6 +45,8 @@ export interface HandlerDeps<
   platform: PlatformServices
   windowManager?: TWindowManager
   browserPaneManager?: TBrowserPaneManager
+  /** POO-135 验收修复 (SB-CANVAS-OUT): the canvas popup window host. */
+  canvasPopupManager?: TCanvasPopupManager
   oauthFlowStore: TOAuthFlowStore
   messagingRegistry?: IMessagingGatewayRegistry
   /**

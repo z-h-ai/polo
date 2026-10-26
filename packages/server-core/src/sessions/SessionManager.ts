@@ -8687,6 +8687,8 @@ export class SessionManager implements ISessionManager {
         // The KB reference snapshot rides the message on FIRST persistence —
         // steer and queue replays must not lose it (review #10).
         kbReferences: options?.kbReferences,
+        // POO-135: picked web element snapshots, same first-persistence rule.
+        elementReferences: options?.elementReferences,
       }
       managed.messages.push(userMessage)
     }
@@ -8759,7 +8761,7 @@ export class SessionManager implements ISessionManager {
      * that should host this session's browser tools. Pass undefined when calling
      * directly (tests, intra-server flows) to leave the existing pin in place.
      */
-    rpcContext?: { callerClientId?: string },
+    rpcContext?: { callerClientId?: string; forceQueue?: boolean },
     /**
      * POO-134 ICR-1: server-only continuation identity, carried PER CALL. Set
      * exclusively by the GoalController host's sendInternalContinuation — it is
@@ -9062,6 +9064,8 @@ export class SessionManager implements ISessionManager {
             // by construction. Queue replays bypass the SEND_MESSAGE handler
             // and carry no staged context, so they simply inject nothing.
             kbReferences: options?.kbReferences,
+            // POO-135: picked web element snapshots (queue replays included).
+            elementReferences: options?.elementReferences,
           }
           managed.messages.push(userMessage)
 

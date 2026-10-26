@@ -11,6 +11,7 @@ import type {
   TypedError,
   ContentBadge,
   KbReference,
+  WebElementReference,
   ToolDisplayMeta,
   AnnotationV1,
   PermissionRequest as BasePermissionRequest,
@@ -396,8 +397,16 @@ export interface SendMessageOptions {
    */
   kbReferences?: KbReference[]
   /**
-   * POO-108 v4 D-B: the bounded knowledge context assembled server-side from
-   * the SAME send-time retrieval as `kbReferences`, staged by the
+   * Picked web element reference snapshots carried by this send (POO-135).
+   * The composer's draft references ride the SEND_MESSAGE chain and are
+   * persisted verbatim on the user message — a point-in-time snapshot that
+   * later page changes never rewrite. Agent-context assembly reusing the KB
+   * reference path is a follow-up wiring point (see POO-135 coder report).
+   */
+  elementReferences?: WebElementReference[]
+  /**
+   * Resolved KB model context for this turn — assembled server-side from the
+   * SAME send-time retrieval as `kbReferences`, staged by the
    * SessionManager for a ONE-SHOT injection into this turn's model prompt.
    * Internal only — never persisted, never part of the message record, and a
    * client-supplied value is always dropped.
@@ -789,6 +798,68 @@ export interface BrowserInstanceInfo {
    * and main processes that pre-date the field working unchanged.
    */
   workspaceId?: string | null
+  /**
+   * POO-135: where the instance's page view currently lives. `popup` (the
+   * default and the pre-POO-135 behavior) means the dedicated frameless
+   * BrowserWindow; `embedded` means the page view is attached to the main
+   * window's right sidebar. Optional so older managers stay compatible.
+   */
+  hostMode?: 'popup' | 'embedded'
+}
+
+/**
+ * POO-135: rectangle of the sidebar's page area in main-window (content)
+ * coordinates, used to position an embedded browser page view.
+ */
+export interface BrowserEmbedBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * POO-135: outcome of the in-page element picker. `picked` carries the
+ * whitelist snapshot fields (see WebElementReference); `cancelled` covers
+ * Esc, host transitions (embed/detach/hide) and navigation; `unavailable`
+ * reports content the picker refuses to reference (iframe, sensitive…).
+ */
+export type BrowserElementPickerEvent =
+  | { instanceId: string; kind: 'picked'; reference: WebElementReference }
+  | { instanceId: string; kind: 'cancelled'; reason: 'user' | 'navigation' | 'host' | 'destroyed' }
+  | { instanceId: string; kind: 'unavailable'; reason: 'iframe' | 'sensitive' | 'hidden' }
+
+/**
+ * POO-135 验收修复 (SB-CANVAS-OUT): where a session's canvas app currently
+ * lives. `poppedOut` means the dedicated canvas BrowserWindow hosts it (the
+ * sidebar shows a placeholder + return entry); a `false` broadcast — also
+ * emitted when the popup window closes by any route (explicit return, the
+ * system close button) — returns the canvas to the sidebar. The canvas app
+ * object itself (atoms/canvas-pane.ts) never moves: the sidebar and the
+ * popup are two carriers of the same logical canvas.
+ */
+export interface CanvasPanePopoutState {
+  sessionId: string
+  poppedOut: boolean
+  /** Whether the popup window is currently visible (focus/restore affordance). */
+  isVisible: boolean
+}
+
+/**
+ * POO-135 验收修复 (SB-CANVAS-OUT): the canvas app a sidebar tab / popup
+ * window hosts. Wire payload of `canvasPane.detachToPopup` — identified by
+ * its on-disk bundle (indexPath), the same shape the renderer's canvas-pane
+ * atom has always carried.
+ */
+export interface CanvasPaneApp {
+  appId: string
+  title: string
+  /**
+   * Absolute bundle path. The pane only hosts real bundles — cards built from
+   * a data: fallback have no identity and never get a canvas entry.
+   */
+  indexPath: string
+  version?: number
 }
 
 export interface DeepLinkNavigation {

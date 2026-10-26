@@ -57,9 +57,11 @@ import { SourceSelectorPopover } from '@/components/ui/SourceSelectorPopover'
 import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
 import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingDirectorySelector'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
+import { ElementReferenceChips } from '@/components/chat/ElementReferenceChips'
 import { KnowledgeBaseSelectorPopover } from './KnowledgeBaseSelectorPopover'
 import { useKbSelectionSave } from './use-kb-selection-save'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
+import type { WebElementReference } from '@polo-ai/core/types'
 import type { KbCollection } from '@polo-ai/shared/protocol'
 import type { PermissionMode } from '@polo-ai/shared/agent/modes'
 import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
@@ -129,6 +131,8 @@ export interface FreeFormInputProps {
     skillSlugs?: string[],
     /** POO-108: the composer's KB scope, committed server-side on the first send. */
     kbOptions?: { kbCollectionIds?: string[] },
+    /** POO-135: picked web element references attached to this send. */
+    elementReferences?: WebElementReference[],
   ) => void
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
   onStop?: (silent?: boolean) => void
@@ -156,6 +160,10 @@ export interface FreeFormInputProps {
   attachmentsValue?: FileAttachment[]
   /** Callback when attachment list changes (add, remove, clear on send) */
   onAttachmentsChange?: (attachments: FileAttachment[]) => void
+  /** POO-135: picked web element references queued for this session's composer. */
+  elementReferencesValue?: WebElementReference[]
+  /** Callback when a draft reference is removed by the user (send clears the rest). */
+  onElementReferencesChange?: (references: WebElementReference[]) => void
   /** When true, removes container styling (shadow, bg, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
   /** Callback when component height changes (for external animation sync) */
@@ -273,6 +281,8 @@ export function FreeFormInput({
   onInputChange,
   attachmentsValue,
   onAttachmentsChange,
+  elementReferencesValue,
+  onElementReferencesChange,
   unstyled = false,
   onHeightChange,
   onFocusChange,
@@ -438,6 +448,11 @@ export function FreeFormInput({
   React.useEffect(() => {
     attachmentsRef.current = attachments
   }, [attachments])
+
+  // POO-135: latest element-reference callback for send-time reads (no stale
+  // closure; the draft itself is read through the prop in handleSubmit).
+  const onElementReferencesChangeRef = React.useRef(onElementReferencesChange)
+  onElementReferencesChangeRef.current = onElementReferencesChange
 
   // Seed from parent when `attachmentsValue` changes (e.g., switching sessions).
   // `skipPersistRef` tells the save effect below that the next `attachments` change
@@ -1346,14 +1361,20 @@ export function FreeFormInput({
       ? { kbCollectionIds: [...kbSelection] }
       : undefined
 
+    const elementSnapshot = elementReferencesValue
     onSubmit(
       input.trim(),
       attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
       mentions.skills.length > 0 ? mentions.skills : undefined,
-      kbDraft
+      kbDraft,
+      elementSnapshot && elementSnapshot.length > 0 ? elementSnapshot : undefined
     )
     setInput('')
     setAttachments([])
+    // POO-135: references ride with THIS send; the user's typed text was
+    // never touched by removals, and the queue clears only after the
+    // submission has been handed off (App clears its mirror on failure paths).
+    onElementReferencesChangeRef.current?.([])
     // Clear draft immediately (cancel any pending debounced sync)
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
     onInputChange?.('')
@@ -1366,7 +1387,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir])
+  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir, elementReferencesValue])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1718,6 +1739,22 @@ export function FreeFormInput({
           disabled={disabled}
           loadingCount={loadingCount}
         />
+
+        {/* POO-135: picked web element references queued for the next send.
+            Removable one by one; the user's typed text is never touched. */}
+        {elementReferencesValue && elementReferencesValue.length > 0 && (
+          <div className="px-3 pt-2.5">
+            <ElementReferenceChips
+              mode="draft"
+              references={elementReferencesValue}
+              onRemove={(id) => {
+                onElementReferencesChangeRef.current?.(
+                  (elementReferencesValue ?? []).filter((r) => r.id !== id),
+                )
+              }}
+            />
+          </div>
+        )}
 
         {/* Follow-up context chips */}
         <AnimatePresence initial={false}>
