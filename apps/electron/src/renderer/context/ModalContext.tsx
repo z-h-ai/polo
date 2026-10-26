@@ -86,6 +86,11 @@ export function useModalRegistry() {
  * Hook to register a modal. Call this in your modal component.
  * The modal will be automatically unregistered when the component unmounts.
  *
+ * Tolerant of a missing provider (review F4 follow-up): surfaces that render
+ * dialogs outside the App tree's ModalProvider (isolated test harnesses,
+ * future popout surfaces) must not crash — registration then degrades to a
+ * no-op and only the Cmd+W layered-close nicety is lost.
+ *
  * @param isOpen - Whether the modal is currently open
  * @param onClose - Function to close the modal
  * @param priority - Higher priority modals are closed first (default: 0)
@@ -99,13 +104,13 @@ export function useModalRegistry() {
  * ```
  */
 export function useRegisterModal(isOpen: boolean, onClose: () => void, priority = 0) {
-  const { registerModal } = useModalRegistry()
+  const context = useContext(ModalContext)
   const idRef = useRef(`modal-${Math.random().toString(36).slice(2)}`)
 
   React.useEffect(() => {
-    if (isOpen) {
-      const unregister = registerModal(idRef.current, onClose, priority)
+    if (isOpen && context) {
+      const unregister = context.registerModal(idRef.current, onClose, priority)
       return unregister
     }
-  }, [isOpen, onClose, priority, registerModal])
+  }, [isOpen, onClose, priority, context])
 }

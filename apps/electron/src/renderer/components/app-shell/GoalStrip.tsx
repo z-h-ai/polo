@@ -18,6 +18,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAtom } from 'jotai'
+import { formatQuotaResetTime } from '../../lib/quota-reset-time'
 import {
   AlertCircle,
   Check,
@@ -84,7 +85,7 @@ const VERIFICATION_STATUS_META = {
 } as const
 
 export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: GoalStripProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [expanded, setExpanded] = useAtom(goalExpandedAtomFamily(sessionId))
   const running = isGoalRunning(goal.status)
   const badge = GOAL_BADGE_META[goalBadgeState(goal)]
@@ -312,7 +313,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                   </span>
                   <span data-testid="goal-verification-time">
                     {t('goal.verificationAt', {
-                      time: new Date(verification.verifiedAt).toLocaleString(),
+                      time: formatQuotaResetTime(verification.verifiedAt, i18n.resolvedLanguage),
                     })}
                   </span>
                 </div>

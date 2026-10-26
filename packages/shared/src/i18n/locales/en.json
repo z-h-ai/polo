@@ -338,6 +338,7 @@
   "chat.scrollUpForEarlier": "Scroll up for earlier messages ({{count}} more)",
   "chat.selectedText": "Selected text",
   "chat.sendFailed.detailSummary": "Technical details",
+  "chat.sendFailed.discardDraft": "Discard draft",
   "chat.sendFailed.restoreDraft": "Restore draft",
   "chat.sendFailed.title": "Message not sent — your draft was preserved",
   "chat.session": "Session",

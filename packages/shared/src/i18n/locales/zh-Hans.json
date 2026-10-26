@@ -338,6 +338,7 @@
   "chat.scrollUpForEarlier": "向上滚动查看更早的消息 (还有 {{count}} 条)",
   "chat.selectedText": "选中文本",
   "chat.sendFailed.detailSummary": "技术详情",
+  "chat.sendFailed.discardDraft": "放弃草稿",
   "chat.sendFailed.restoreDraft": "恢复草稿",
   "chat.sendFailed.title": "消息未发送，草稿已保留",
   "chat.session": "会话",

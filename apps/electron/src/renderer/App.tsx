@@ -2505,6 +2505,15 @@ export default function App() {
         // server did not send is never invented here.
         setRuntimeChatAccessIssue(outcome.issue)
         setRuntimeQuotaResetAt(outcome.issue === 'quota-exhausted' ? outcome.quotaResetAt : undefined)
+        // Journey #8 (review F1): the block banner outranks the draft prompt,
+        // but the draft itself must survive the block — it rides in the same
+        // session-scoped prompt atom and becomes restorable once the latch
+        // clears. Losing the text entirely was the bug.
+        store.set(sendFailureAtomFamily(sessionId), {
+          title: i18n.t('chat.sendFailed.title'),
+          detail: error instanceof Error ? error.message : String(error),
+          draft: message,
+        })
       } else if (outcome.kind === 'goal-start-failed') {
         // POO-134: a rejected Goal start (e.g. a non-terminal Goal already owns
         // the session) surfaces the server's error text verbatim — the armed

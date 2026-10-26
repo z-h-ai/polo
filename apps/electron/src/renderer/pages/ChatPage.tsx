@@ -331,6 +331,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     dispatchFocusInputEvent({ sessionId })
   }, [sessionId, store])
 
+  // Journey #8 (review F4): the user may prefer to abandon the preserved
+  // draft and type something new — the prompt must be dismissible, and the
+  // composer must stay usable while only this non-blocking prompt is up.
+  const handleDiscardSendFailureDraft = React.useCallback(() => {
+    store.set(sendFailureAtomFamily(sessionId), null)
+  }, [store])
+
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>
     isSessionConnectionUnavailable(session?.llmConnection, llmConnections),
@@ -365,6 +372,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       }
     }
     // Journey #8: the failed-send prompt (title + collapsed detail + restore).
+    // Non-blocking (review F4): it must not disable the composer — the user
+    // may abandon the draft and type anew — so it carries an explicit
+    // discard action instead.
     if (sendFailure) {
       return {
         variant: 'destructive' as const,
@@ -372,12 +382,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         detail: sendFailure.detail,
         actionLabel: t('chat.sendFailed.restoreDraft'),
         onAction: handleRestoreSendFailureDraft,
+        dismissLabel: t('chat.sendFailed.discardDraft'),
+        onDismiss: handleDiscardSendFailureDraft,
       }
     }
     return null
-  }, [bannerDecision, onRetryAiConfigSync, openPayment, t, sendFailure, handleRestoreSendFailureDraft])
+  }, [bannerDecision, onRetryAiConfigSync, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
 
-  const isChatInputDisabled = !!inputStatusBanner
+  // Only the hard billing block disables the composer (review F4); the
+  // failed-send prompt is advisory.
+  const isChatInputDisabled = !!bannerDecision
 
   // Effective model for this session (session-specific or global fallback)
   const effectiveModel = React.useMemo(() => {
