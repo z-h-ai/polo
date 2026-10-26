@@ -138,6 +138,7 @@ import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
 import { RightSidebarPane, SIDEBAR_ONLY_WIDTH_KEY } from "./RightSidebarPane"
 import { sidebarBrowserOpenAtom } from "@/atoms/sidebar-browser"
 import { useSidebarBrowserSync } from "@/hooks/use-sidebar-browser-sync"
+import { useCanvasPaneSync } from "@/hooks/use-canvas-pane-sync"
 import { canvasPaneAppAtomFamily } from "@/atoms/canvas-pane"
 import { MessagingDialogHost } from "@/components/messaging/MessagingDialogHost"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
@@ -1387,6 +1388,10 @@ function AppShellContent({
     remoteWorkspaceId: remoteWorkspaceId ?? null,
     onSelectSession: navigateToSession,
   })
+  // POO-135 验收修复 (SB-CANVAS-OUT): canvas-pane:state-changed → popout atoms,
+  // mounted at the same always-mounted layer so a system-closed popup window
+  // reconciles the sidebar even when the pane is not rendered.
+  useCanvasPaneSync()
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
     if (!activeWorkspaceId) return metas.filter(s => !s.hidden)

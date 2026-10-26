@@ -23,7 +23,7 @@ import { createPortal } from 'react-dom'
 import { useAtom, useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { motion, useReducedMotion } from 'motion/react'
-import { AppWindow, X } from 'lucide-react'
+import { AppWindow, ExternalLink, X } from 'lucide-react'
 import {
   GENUI_APP_CANVAS_FOCUS_EVENT,
   GENUI_SESSION_ID_PATTERN,
@@ -75,10 +75,16 @@ interface CanvasPaneProps {
  * mask) — the card body + its own little header. Extracted so the unified
  * right sidebar (RightSidebarPane) can host the very same card under its
  * canvas tab while the standalone CanvasPane keeps its exact prior behavior.
+ *
+ * POO-135 验收修复 (SB-CANVAS-OUT): an optional `onPopOut` renders a
+ * 「弹出为独立窗口」 header entry (canvas affordance in the card's own header —
+ * the locked header rule only constrains browser entries). The popup carrier
+ * passes nothing: there the header ✕ already means「收回」.
  */
-export function CanvasPaneCard({ sessionId, app }: {
+export function CanvasPaneCard({ sessionId, app, onPopOut }: {
   sessionId: string
   app: CanvasPaneApp
+  onPopOut?: () => void
 }) {
   const { t } = useTranslation()
   const webviewRef = React.useRef<HTMLElement | null>(null)
@@ -143,6 +149,17 @@ export function CanvasPaneCard({ sessionId, app }: {
           <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/80 tabular-nums">
             {t('genui.app.version', { version: app.version })}
           </span>
+        )}
+        {onPopOut && (
+          <button
+            type="button"
+            data-testid="canvas-card-popout"
+            title={t('browserPane.sidebar.detach')}
+            onClick={onPopOut}
+            className="shrink-0 inline-flex items-center justify-center rounded-[6px] p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
         )}
         <button
           type="button"

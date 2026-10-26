@@ -35,6 +35,7 @@ import { motion, useReducedMotion } from 'motion/react'
 import {
   ArrowLeft,
   ArrowRight,
+  AppWindow,
   Crosshair,
   ExternalLink,
   EyeOff,
@@ -56,6 +57,7 @@ import {
 import {
   CANVAS_PANE_MAX_RATIO,
   CANVAS_PANE_MIN_RATIO,
+  canvasPanePopoutAtomFamily,
   canvasPaneRatioFromPointer,
   clampCanvasPaneRatio,
   canvasPaneWidthAtomFamily,
@@ -125,6 +127,14 @@ export function RightSidebarPane({
   const storedTab = useAtomValue(rightPaneTabAtom)
   const allBrowserInstances = useAtomValue(browserInstancesMapAtom)
 
+  // POO-135 验收修复 (SB-CANVAS-OUT): while the session's canvas lives in the
+  // popup window the sidebar hosts a placeholder — one live canvas surface
+  // per session (popup XOR sidebar card).
+  const canvasPopout = useAtomValue(
+    useMemo(() => canvasPanePopoutAtomFamily(canvasSessionId ?? ''), [canvasSessionId]),
+  )
+  const canvasPoppedOut = Boolean(canvasApp && canvasSessionId && canvasPopout?.poppedOut)
+
   // POO-135 r1: the browser tab stays reachable while instances are merely
   // hidden (slot closed, objects preserved) so they can be shown again.
   const visibleBrowserCount = useMemo(
@@ -159,6 +169,32 @@ export function RightSidebarPane({
     if (tab === 'browser') store.set(sidebarBrowserOpenAtom, true)
     store.set(rightPaneTabAtom, tab)
   }, [disarmArmedPicker])
+
+  // POO-135 验收修复 (SB-CANVAS-OUT): canvas popout controls. Main owns the
+  // window and broadcasts the reconciling state; the sidebar only requests.
+  const handleCanvasDetach = useCallback(() => {
+    if (!canvasSessionId || !canvasApp) return
+    void window.electronAPI?.canvasPane?.detachToPopup?.(canvasSessionId, {
+      appId: canvasApp.appId,
+      title: canvasApp.title,
+      indexPath: canvasApp.indexPath,
+      version: canvasApp.version,
+    }).catch(() => {
+      toast.error(t('toast.failedToDetachCanvas'))
+    })
+  }, [canvasApp, canvasSessionId, t])
+
+  const handleCanvasAttach = useCallback(() => {
+    if (!canvasSessionId) return
+    void window.electronAPI?.canvasPane?.attachFromPopup?.(canvasSessionId).catch(() => {
+      toast.error(t('toast.failedToAttachCanvas'))
+    })
+  }, [canvasSessionId, t])
+
+  const handleCanvasFocusPopup = useCallback(() => {
+    if (!canvasSessionId) return
+    void window.electronAPI?.canvasPane?.focus?.(canvasSessionId)
+  }, [canvasSessionId])
 
   // Sash drag: pointer x → ratio of the shell row — same contract as
   // CanvasPane (content-box basis; see the measurement comment there).
@@ -264,7 +300,19 @@ export function RightSidebarPane({
           <RightPaneTabs tab={effectiveTab} onSwitch={handleTabSwitch} />
         )}
         {effectiveTab === 'canvas' && canvasApp && canvasSessionId ? (
-          <CanvasPaneCard sessionId={canvasSessionId} app={canvasApp} />
+          canvasPoppedOut ? (
+            <CanvasPopoutPlaceholder
+              app={canvasApp}
+              onAttach={handleCanvasAttach}
+              onFocusPopup={handleCanvasFocusPopup}
+            />
+          ) : (
+            <CanvasPaneCard
+              sessionId={canvasSessionId}
+              app={canvasApp}
+              onPopOut={handleCanvasDetach}
+            />
+          )
         ) : (
           <SidebarBrowserSection
             currentSessionId={currentSessionId}
@@ -277,6 +325,53 @@ export function RightSidebarPane({
         )}
       </div>
     </motion.div>
+  )
+}
+
+/**
+ * POO-135 验收修复 (SB-CANVAS-OUT): the sidebar-side placeholder shown while
+ * the session's canvas lives in the popup window — the popup is the single
+ * active surface; the slot offers 收回 (return) and 显示窗口 (focus).
+ */
+function CanvasPopoutPlaceholder({ app, onAttach, onFocusPopup }: {
+  app: CanvasPaneApp
+  onAttach: () => void
+  onFocusPopup: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div
+      className="flex-1 min-h-0 flex flex-col items-center justify-center gap-2 p-4 text-center"
+      data-testid="sidebar-canvas-popup-placeholder"
+    >
+      <AppWindow className="w-5 h-5 text-muted-foreground/60" />
+      <div className="text-[13px] font-medium text-foreground-80 max-w-[260px] truncate">
+        {app.title}
+      </div>
+      <div className="max-w-[260px] text-[12px] text-muted-foreground">
+        {t('browserPane.sidebar.popupBody')}
+      </div>
+      <div className="mt-1 flex items-center gap-1.5">
+        <button
+          type="button"
+          data-testid="sidebar-canvas-attach"
+          onClick={onAttach}
+          className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-background px-2.5 py-1 text-[12px] text-foreground-80 transition-colors hover:border-foreground/20 hover:text-foreground"
+        >
+          <PictureInPicture2 className="w-3.5 h-3.5" />
+          {t('browserPane.sidebar.embed')}
+        </button>
+        <button
+          type="button"
+          data-testid="sidebar-canvas-show-window"
+          onClick={onFocusPopup}
+          className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-background px-2.5 py-1 text-[12px] text-foreground-80 transition-colors hover:border-foreground/20 hover:text-foreground"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          {t('browserPane.sidebar.showWindow')}
+        </button>
+      </div>
+    </div>
   )
 }
 
