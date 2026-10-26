@@ -3,25 +3,48 @@
  *
  * Rendering is a pure projection of the server-owned Goal record: summary,
  * accumulated runtime (`computeGoalElapsedMs`, second-granularity tick while
- * the server clock runs), status badge, and exactly one action button
+ * the server clock runs), status badge, and at most one action button
  * (active→pause, paused→resume, verifying shows the running state instead).
- * The strip expands upward into a read-only todo panel; expansion state is
- * per-session via `goalExpandedAtomFamily`.
+ * The strip expands upward into a read-only todo panel.
+ *
+ * Journey #5: the badge distinguishes WHY a goal is not running
+ * (awaiting_user/error/no_progress/restart_required) instead of a blanket
+ * 「已暂停」, terminal records stay readable (completed/ended badge, no
+ * resume affordance), and the panel shows the independent verification
+ * receipt — per-criterion verdicts with the evidence bound to THIS goal,
+ * unknown facts rendered as 未知, and no fabricated verification duration.
+ * Expansion state is per-session via `goalExpandedAtomFamily`.
  */
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAtom } from 'jotai'
-import { Check, ChevronDown, ChevronUp, Circle, CircleDot, Target } from 'lucide-react'
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  CircleDot,
+  FileText,
+  MessageSquareText,
+  ShieldQuestion,
+  Target,
+  X,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isGoalRunning, type GoalRecord, type GoalTodoItem } from '@polo-ai/shared/protocol'
 import { goalExpandedAtomFamily } from '../../atoms/sessions'
 import { formatGoalElapsed, goalElapsedMs } from './goal-progress'
+import { GOAL_BADGE_META, goalBadgeState } from './goal-status'
+import { describeGoalVerification } from './goal-verification-view'
 
 export interface GoalStripProps {
   sessionId: string
   goal: GoalRecord
   onPause?: () => void
   onResume?: () => void
+  /** Journey #5: opens `file` evidence through the app's existing file entry. */
+  onOpenFile?: (path: string) => void
 }
 
 const TODO_STATUS_META: Record<GoalTodoItem['status'], { icon: React.ReactNode; className: string; labelKey: string }> = {
@@ -42,10 +65,29 @@ const TODO_STATUS_META: Record<GoalTodoItem['status'], { icon: React.ReactNode; 
   },
 }
 
-export function GoalStrip({ sessionId, goal, onPause, onResume }: GoalStripProps) {
+const VERIFICATION_STATUS_META = {
+  passed: {
+    icon: <Check className="h-3 w-3" strokeWidth={2.5} />,
+    className: 'bg-success/10 text-success',
+    labelKey: 'goal.verificationPassed',
+  },
+  not_satisfied: {
+    icon: <ShieldQuestion className="h-3 w-3" strokeWidth={2.5} />,
+    className: 'bg-info/10 text-info',
+    labelKey: 'goal.verificationNotSatisfied',
+  },
+  failed: {
+    icon: <X className="h-3 w-3" strokeWidth={2.5} />,
+    className: 'bg-destructive/10 text-destructive',
+    labelKey: 'goal.verificationFailed',
+  },
+} as const
+
+export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: GoalStripProps) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useAtom(goalExpandedAtomFamily(sessionId))
   const running = isGoalRunning(goal.status)
+  const badge = GOAL_BADGE_META[goalBadgeState(goal)]
   const [now, setNow] = React.useState(() => Date.now())
   const triggerRef = React.useRef<HTMLButtonElement>(null)
   const panelId = React.useId()
@@ -84,17 +126,21 @@ export function GoalStrip({ sessionId, goal, onPause, onResume }: GoalStripProps
     [goal.todos],
   )
   const completedCount = todos.filter(td => td.status === 'completed').length
+  const verification = React.useMemo(() => describeGoalVerification(goal), [goal])
 
   const emptyKey = todos.length === 0
-    ? goal.status === 'paused' && goal.pauseReason === 'awaiting_user'
-      ? 'goal.emptyPaused'
-      : running
-        ? 'goal.emptyDecomposing'
-        : 'goal.emptyWaiting'
+    ? goal.status === 'completed' || goal.status === 'ended'
+      ? 'goal.panelTerminalEmpty'
+      : goal.status === 'paused' && goal.pauseReason === 'awaiting_user'
+        ? 'goal.emptyPaused'
+        : running
+          ? 'goal.emptyDecomposing'
+          : 'goal.emptyWaiting'
     : null
 
   // Exactly one action slot: pause while active, resume while paused;
   // verifying is still running server-side, so it shows the running state.
+  // Terminal records offer NO resume/start-over affordance (journey #5).
   const action = goal.status === 'active'
     ? { label: t('goal.pause'), onClick: onPause, testId: 'goal-strip-pause' }
     : goal.status === 'paused'
@@ -143,12 +189,13 @@ export function GoalStrip({ sessionId, goal, onPause, onResume }: GoalStripProps
           </span>
           <span
             data-testid="goal-strip-status"
+            title={badge.hintKey ? t(badge.hintKey) : undefined}
             className={cn(
               'shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none',
-              running ? 'bg-success/10 text-success' : 'bg-foreground/5 text-muted-foreground',
+              badge.className,
             )}
           >
-            {running ? t('goal.statusRunning') : t('goal.statusPaused')}
+            {t(badge.labelKey)}
           </span>
         </button>
         {action ? (
@@ -168,7 +215,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume }: GoalStripProps
             data-testid="goal-strip-verifying"
             className="shrink-0 px-2 text-xs font-medium text-muted-foreground"
           >
-            {t('goal.statusRunning')}
+            {t('goal.statusVerifying')}
           </span>
         ) : null}
       </div>
@@ -234,6 +281,123 @@ export function GoalStrip({ sessionId, goal, onPause, onResume }: GoalStripProps
                   )
                 })}
               </ul>
+            )}
+
+            {verification && (
+              <div
+                data-testid="goal-verification"
+                data-verification-status={verification.status}
+                className="mt-2 border-t border-foreground/10 pt-2"
+              >
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t('goal.verificationHeading')}
+                  </span>
+                  <span
+                    data-testid="goal-verification-status"
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none',
+                      VERIFICATION_STATUS_META[verification.status].className,
+                    )}
+                  >
+                    {VERIFICATION_STATUS_META[verification.status].icon}
+                    {t(VERIFICATION_STATUS_META[verification.status].labelKey)}
+                  </span>
+                </div>
+                <div data-testid="goal-verification-meta" className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                  <span data-testid="goal-verification-model">
+                    {t('goal.verificationModel', {
+                      model: verification.model ?? t('goal.evidenceUnknown'),
+                    })}
+                  </span>
+                  <span data-testid="goal-verification-time">
+                    {t('goal.verificationAt', {
+                      time: new Date(verification.verifiedAt).toLocaleString(),
+                    })}
+                  </span>
+                </div>
+                {verification.criteria.length > 0 && (
+                  <ul data-testid="goal-criterion-list" className="space-y-1">
+                    {verification.criteria.map((c, i) => (
+                      <li
+                        key={i}
+                        data-testid={`goal-criterion-${i}`}
+                        data-criterion-passed={c.passed}
+                        className="flex items-start gap-2 text-[13px] leading-5 text-foreground/85"
+                      >
+                        <span
+                          aria-label={t(c.passed ? 'goal.criterionPassed' : 'goal.criterionNotSatisfied')}
+                          className={cn(
+                            'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                            c.passed
+                              ? 'border-success/40 bg-success/10 text-success'
+                              : 'border-destructive/40 bg-destructive/10 text-destructive',
+                          )}
+                        >
+                          {c.passed
+                            ? <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                            : <X className="h-2.5 w-2.5" strokeWidth={3} />}
+                        </span>
+                        <span className="min-w-0 break-words">
+                          {c.criterion}
+                          {c.note && (
+                            <span className="block text-[11px] text-muted-foreground">{c.note}</span>
+                          )}
+                          {c.evidence.length > 0 && (
+                            <span className="mt-0.5 flex flex-wrap gap-1" data-testid="goal-criterion-evidence">
+                              {c.evidence.map((ev, j) => ev.status === 'known-file' && ev.path ? (
+                                <button
+                                  key={j}
+                                  type="button"
+                                  data-testid={`goal-evidence-file-${j}`}
+                                  data-evidence-kind="file"
+                                  onClick={() => onOpenFile?.(ev.path!)}
+                                  title={t('goal.evidenceOpenFile')}
+                                  className={cn(
+                                    'inline-flex max-w-full items-center gap-1 rounded border border-foreground/15 px-1 py-0.5 text-[11px]',
+                                    'text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-accent/50',
+                                  )}
+                                >
+                                  <FileText className="h-2.5 w-2.5 shrink-0" />
+                                  <span className="truncate">{ev.label}</span>
+                                </button>
+                              ) : ev.status === 'known-message' ? (
+                                <span
+                                  key={j}
+                                  data-testid={`goal-evidence-message-${j}`}
+                                  data-evidence-kind="message"
+                                  title={ev.messageId}
+                                  className="inline-flex max-w-full items-center gap-1 rounded border border-foreground/15 px-1 py-0.5 text-[11px] text-muted-foreground"
+                                >
+                                  <MessageSquareText className="h-2.5 w-2.5 shrink-0" />
+                                  <span className="truncate">{ev.label}</span>
+                                </span>
+                              ) : (
+                                <span
+                                  key={j}
+                                  data-testid={`goal-evidence-unknown-${j}`}
+                                  data-evidence-kind="unknown"
+                                  className="inline-flex items-center gap-1 rounded border border-dashed border-foreground/20 px-1 py-0.5 text-[11px] text-muted-foreground/70"
+                                >
+                                  <AlertCircle className="h-2.5 w-2.5 shrink-0" />
+                                  {t('goal.evidenceUnknown')}
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {(verification.warning || verification.executionFactsNote || verification.error) && (
+                  <div data-testid="goal-verification-notes" className="mt-1.5 space-y-0.5 text-[11px] text-muted-foreground">
+                    {verification.warning && <p>{t('goal.verificationWarning', { warning: verification.warning })}</p>}
+                    {verification.executionFactsNote && <p>{verification.executionFactsNote}</p>}
+                    {verification.error && <p>{t('goal.verificationError', { error: verification.error })}</p>}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>

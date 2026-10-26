@@ -68,11 +68,14 @@ export function ChatInputZone({
   const shouldShowOptionBadges = showOptionBadges ?? !compactMode
 
   // POO-134: Goal strip rides above the option badges. The projection is
-  // server-authoritative; a missing/terminal Goal renders nothing here.
+  // server-authoritative. Journey #5: the LAST record stays readable after
+  // the goal completes/ends — the projection retains it (currentGoalId is
+  // cleared, `goal` is kept), so the strip renders it read-only with its
+  // verification receipt instead of vanishing; re-entering the session
+  // restores the same projection.
   const goalProjection = useAtomValue(goalProjectionAtomFamily(sessionId))
-  const goal = goalProjection?.currentGoalId !== undefined
-    ? goalProjection.goal ?? null
-    : null
+  const goal = goalProjection?.goal ?? null
+  const goalTerminal = !!goal && isGoalTerminal(goal.status)
   const goalModeArmed = useAtomValue(goalModeActiveAtomFamily(sessionId))
   const setGoalModeActive = useSetAtom(goalModeActiveAtomFamily(sessionId))
   const shell = useOptionalAppShellContext()
@@ -117,6 +120,7 @@ export function ChatInputZone({
           goal={goal}
           onPause={() => handleGoalCommand('goalPause')}
           onResume={() => handleGoalCommand('goalResume')}
+          onOpenFile={shell?.onOpenFile}
         />
       )}
 
@@ -124,8 +128,8 @@ export function ChatInputZone({
         <ActiveOptionBadges
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
-          goalModeActive={goalModeArmed || !!goal}
-          goalRunning={!!goal && !isGoalTerminal(goal.status)}
+          goalModeActive={goalModeArmed || (!!goal && !goalTerminal)}
+          goalRunning={!!goal && !goalTerminal}
           onGoalModeToggle={() => setGoalModeActive(v => !v)}
           onGoalEnd={() => handleGoalCommand('goalEnd')}
           tasks={tasks}

@@ -803,8 +803,9 @@ export const applyGoalProjectionAtom = atom(
     }
     // Accepted projection ⇒ the server's Goal state is authoritative here:
     // a claimed Goal takes over the menu's selected look (`armed || !!goal`),
-    // a terminal/cleared one removes the strip — either way the unsent start
-    // intent is spent.
+    // and a terminal one keeps its record readable (journey #5 — the strip
+    // stays as a read-only receipt; currentGoalId is cleared while `goal` is
+    // retained). Either way the unsent start intent is spent.
     set(goalModeActiveAtomFamily(sessionId), false)
   }
 )

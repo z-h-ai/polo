@@ -111,7 +111,7 @@ describe('模式菜单目标模式（POO-134）', () => {
     expect(menuItem('goal-end')).toBeNull()
   })
 
-  it('Goal 运行中：目标模式项禁用不可选，尾部出现「结束目标」，点击发 onGoalEnd', async () => {
+  it('Goal 运行中：目标模式项禁用不可选，尾部出现「结束目标」，点击先弹确认', async () => {
     const onGoalModeToggle = mock(() => {})
     const onGoalEnd = mock(() => {})
     await openMenu({ goalRunning: true, onGoalModeToggle, onGoalEnd })
@@ -121,6 +121,29 @@ describe('模式菜单目标模式（POO-134）', () => {
     expect(onGoalModeToggle).not.toHaveBeenCalled()
     expect(menuItem('goal-end')).not.toBeNull()
     fireEvent.click(menuItem('goal-end')!)
+    // Journey #5: the command is NOT sent yet — the confirmation dialog is.
+    expect(onGoalEnd).not.toHaveBeenCalled()
+    await waitFor(() => expect(document.querySelector('[data-testid="goal-end-confirm"]')).not.toBeNull())
+  })
+
+  it('journey #5：确认框显式确认才下发 goalEnd；取消不下发任何命令', async () => {
+    const onGoalEnd = mock(() => {})
+    await openMenu({ goalRunning: true, onGoalEnd })
+    fireEvent.click(menuItem('goal-end')!)
+    await waitFor(() => expect(document.querySelector('[data-testid="goal-end-confirm"]')).not.toBeNull())
+
+    // Cancel path: dialog closes, nothing is sent.
+    fireEvent.click(document.querySelector('[data-testid="goal-end-cancel"]')!)
+    await waitFor(() => expect(document.querySelector('[data-testid="goal-end-confirm"]')).toBeNull())
+    expect(onGoalEnd).not.toHaveBeenCalled()
+
+    // Confirm path: exactly one command.
+    await openMenu({ goalRunning: true, onGoalEnd })
+    fireEvent.click(menuItem('goal-end')!)
+    await waitFor(() => expect(document.querySelector('[data-testid="goal-end-confirm"]')).not.toBeNull())
+    expect(document.querySelector('[data-testid="goal-end-confirm"]')!.textContent).toContain('cannot be undone')
+    fireEvent.click(document.querySelector('[data-testid="goal-end-confirm-action"]')!)
+    await waitFor(() => expect(document.querySelector('[data-testid="goal-end-confirm"]')).toBeNull())
     expect(onGoalEnd).toHaveBeenCalledTimes(1)
   })
 

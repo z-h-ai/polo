@@ -384,6 +384,18 @@ describe('applyGoalProjectionAtom + 发送链 (POO-134 review F1)', () => {
     expect(store.get(goalExpandedAtomFamily(sessionId))).toBe(false)
   })
 
+  it('journey #5: a terminal projection RETAINS the goal record for the read-only strip', () => {
+    const store = createStore()
+    store.set(applyGoalProjectionAtom, sessionId, terminalProjection(3))
+    const projection = store.get(goalProjectionAtomFamily(sessionId))
+    // currentGoalId is cleared (the Goal no longer owns the session) but the
+    // last record survives so the strip can re-render it read-only after
+    // re-entering the session.
+    expect(projection?.currentGoalId).toBeUndefined()
+    expect(projection?.goal?.status).toBe('completed')
+    expect(projection?.goal?.id).toBe('goal-a')
+  })
+
   it('same-goal progress keeps the panel open; a stale replay drops without touching armed', () => {
     const store = createStore()
     store.set(applyGoalProjectionAtom, sessionId, activeProjection(1, 'goal-a'))
