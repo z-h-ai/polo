@@ -10,7 +10,8 @@ import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } fr
 // Types
 // ============================================================================
 
-export type SlashCommandId = PermissionMode | 'compact'
+/** POO-134: 'goal' toggles Goal mode; 'goal-end' ends the running Goal (mode menu only). */
+export type SlashCommandId = PermissionMode | 'compact' | 'goal' | 'goal-end'
 
 /** Union type for all item types in the slash menu */
 export type SlashItemType = 'command' | 'folder'
@@ -23,6 +24,8 @@ export interface SlashCommand {
   shortcut?: string
   /** Optional color for the command (hex color string) */
   color?: string
+  /** POO-134: disabled items stay visible but cannot be selected */
+  disabled?: boolean
 }
 
 /** Folder item for the slash menu */
@@ -253,12 +256,18 @@ export function SlashCommandMenu({
       <CommandPrimitive.Item
         key={cmd.id}
         value={cmd.id}
-        onSelect={() => onSelect(cmd.id)}
+        disabled={cmd.disabled}
+        onSelect={() => {
+          // cmdk suppresses select for disabled items, but guard anyway
+          if (cmd.disabled) return
+          onSelect(cmd.id)
+        }}
         data-tutorial={`permission-mode-${cmd.id}`}
         className={cn(
           MENU_ITEM_STYLE,
           'outline-none',
-          'data-[selected=true]:bg-foreground/5'
+          'data-[selected=true]:bg-foreground/5',
+          cmd.disabled && 'cursor-default opacity-40'
         )}
       >
         <CommandItemContent command={cmd} isActive={isActive} />

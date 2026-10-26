@@ -177,6 +177,10 @@ export interface AppShellContextType {
   // Unified session options callback
   onSessionOptionsChange: (sessionId: string, updates: SessionOptionUpdates) => void
 
+  // POO-134: Goal lifecycle commands (暂停/继续/结束) — server-authoritative,
+  // errors surface as toasts in the App layer.
+  onGoalCommand?: (sessionId: string, command: 'goalPause' | 'goalResume' | 'goalEnd') => void
+
   // Input draft callback
   onInputChange: (sessionId: string, value: string) => void
 

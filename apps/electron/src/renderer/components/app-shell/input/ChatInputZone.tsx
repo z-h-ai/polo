@@ -3,12 +3,17 @@ import { cn } from '@/lib/utils'
 import { CHAT_LAYOUT } from '@/config/layout'
 import { flattenLabels, type LabelConfig } from '@polo-ai/shared/labels'
 import type { PermissionMode } from '@polo-ai/shared/agent/modes'
+import { isGoalTerminal } from '@polo-ai/shared/protocol'
 import type { SessionStatus } from '@/config/session-status-config'
 import type { BackgroundTask } from '../ActiveTasksBar'
 import { ActiveOptionBadges } from '../ActiveOptionBadges'
+import { GoalStrip } from '../GoalStrip'
 import { InputContainer } from './InputContainer'
 import { InputErrorBoundary } from './InputErrorBoundary'
 import { AlertTriangle } from 'lucide-react'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { goalModeActiveAtomFamily, goalProjectionAtomFamily } from '../../../atoms/sessions'
+import { useOptionalAppShellContext } from '../../../context/AppShellContext'
 
 export interface ChatInputStatusBanner {
   variant: 'info' | 'destructive'
@@ -61,6 +66,20 @@ export function ChatInputZone({
 }: ChatInputZoneProps) {
   const [autoOpenLabelId, setAutoOpenLabelId] = React.useState<string | null>(null)
   const shouldShowOptionBadges = showOptionBadges ?? !compactMode
+
+  // POO-134: Goal strip rides above the option badges. The projection is
+  // server-authoritative; a missing/terminal Goal renders nothing here.
+  const goalProjection = useAtomValue(goalProjectionAtomFamily(sessionId))
+  const goal = goalProjection?.currentGoalId !== undefined
+    ? goalProjection.goal ?? null
+    : null
+  const goalModeArmed = useAtomValue(goalModeActiveAtomFamily(sessionId))
+  const setGoalModeActive = useSetAtom(goalModeActiveAtomFamily(sessionId))
+  const shell = useOptionalAppShellContext()
+  const handleGoalCommand = React.useCallback((command: 'goalPause' | 'goalResume' | 'goalEnd') => {
+    shell?.onGoalCommand?.(sessionId, command)
+  }, [shell, sessionId])
+
   const inputResetKey = `${sessionId}::${inputProps.structuredInput?.type === 'question'
     ? `question-${(inputProps.structuredInput.data as { requestId?: string }).requestId ?? 'unknown'}`
     : inputProps.structuredInput?.type ?? 'freeform'}`
@@ -92,10 +111,23 @@ export function ChatInputZone({
         className,
       )}
     >
+      {goal && (
+        <GoalStrip
+          sessionId={sessionId}
+          goal={goal}
+          onPause={() => handleGoalCommand('goalPause')}
+          onResume={() => handleGoalCommand('goalResume')}
+        />
+      )}
+
       {shouldShowOptionBadges && (
         <ActiveOptionBadges
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
+          goalModeActive={goalModeArmed || !!goal}
+          goalRunning={!!goal && !isGoalTerminal(goal.status)}
+          onGoalModeToggle={() => setGoalModeActive(v => !v)}
+          onGoalEnd={() => handleGoalCommand('goalEnd')}
           tasks={tasks}
           sessionId={sessionId}
           sessionFolderPath={sessionFolderPath}
