@@ -856,13 +856,18 @@ app.whenReady().then(async () => {
     })
     // POO-151: host the SMS-login challenge issuer page inside an app-owned
     // window (无感 unless the provider demands interaction). The requester's
-    // URL is re-validated here: the renderer is an untrusted boundary.
+    // URL is re-validated here: the renderer is an untrusted boundary. open()
+    // resolves to the challenge id that scopes the CLOSED notification and
+    // close() to exactly the flow that opened it.
     ipcMain.handle(PHONE_AUTH_CHALLENGE_OPEN_CHANNEL, (event, url: unknown) => {
       const issuerUrl = validatePhoneAuthChallengeOpenRequest(url)
-      phoneAuthChallengeWindowManager.open(event.sender, issuerUrl.toString())
+      return phoneAuthChallengeWindowManager.open(event.sender, issuerUrl.toString())
     })
-    ipcMain.handle(PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL, (event) => {
-      phoneAuthChallengeWindowManager.close(event.sender)
+    ipcMain.handle(PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL, (event, challengeId: unknown) => {
+      phoneAuthChallengeWindowManager.close(
+        event.sender,
+        typeof challengeId === 'number' ? challengeId : undefined,
+      )
     })
     ipcMain.handle('terminal-integration:get-status', () =>
       terminalIntegrationIpcResult('status', () =>

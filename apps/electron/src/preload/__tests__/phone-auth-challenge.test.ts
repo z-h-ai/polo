@@ -196,19 +196,35 @@ describe('phone auth challenge in-app window (POO-151)', () => {
   }
 
   function createController(openImpl?: (url: string) => Promise<void>) {
-    let closedListener: (() => void) | null = null
+    let nextId = 0
+    let currentId: number | undefined
+    // In production every flow on the same WebContents receives every CLOSED
+    // notification (one IPC channel) — model that with a listener set, not a
+    // single slot.
+    const closedListeners = new Set<(challengeId: unknown) => void>()
+    const urls: string[] = []
     return {
       open: mock(async (url: string) => {
+        urls.push(url)
         await openImpl?.(url)
+        currentId = ++nextId
+        return currentId
       }),
-      close: mock(async () => {}),
-      onClosed: mock((listener: () => void) => {
-        closedListener = listener
+      close: mock(async (_challengeId: unknown) => {}),
+      onClosed: mock((listener: (challengeId: unknown) => void) => {
+        closedListeners.add(listener)
         return () => {
-          closedListener = null
+          closedListeners.delete(listener)
         }
       }),
-      emitClosed: () => closedListener?.(),
+      // The main side notifies the displaced flow's id only.
+      emitClosed: (challengeId: unknown = currentId) => {
+        for (const listener of [...closedListeners]) listener(challengeId)
+      },
+      get currentId() {
+        return currentId
+      },
+      urls,
     }
   }
 
@@ -251,10 +267,8 @@ describe('phone auth challenge in-app window (POO-151)', () => {
 
   it('cancels at once when the user closes the challenge window', async () => {
     const { promise } = createDeferredCallback()
-    const controller = createController(async () => {
-      controller.emitClosed()
-    })
-    const result = await acquirePhoneAuthChallenge(
+    const controller = createController()
+    const flow = acquirePhoneAuthChallenge(
       createDiscoveryClient(),
       {
         createCallback: async () => ({ promise, url: 'http://localhost:6477', close: mock(() => {}) }),
@@ -262,12 +276,70 @@ describe('phone auth challenge in-app window (POO-151)', () => {
         challengeWindow: controller,
       },
     )
+    // Let open() resolve first (IPC ordering: the CLOSED notification can
+    // only arrive after the open invoke reply).
+    await Bun.sleep(0)
+    controller.emitClosed()
+    const result = await flow
 
     expect(result).toEqual({
       success: false,
       errorCode: 'phone_auth_challenge_cancelled',
     })
-    expect(controller.close).toHaveBeenCalledTimes(1)
+    // The window is already gone on the main side — the flow must NOT reap
+    // again (review F1: reaping here once destroyed a replacement flow's
+    // window on the same WebContents).
+    expect(controller.close).not.toHaveBeenCalled()
+  })
+
+  it('keeps the newest flow alive when it replaces a pending one (review F1)', async () => {
+    // Both flows run on ONE controller: in production they share the login
+    // window's WebContents and its single CLOSED channel.
+    const controller = createController()
+    const flowA = acquirePhoneAuthChallenge(
+      createDiscoveryClient(),
+      {
+        createCallback: async () => ({
+          promise: new Promise<{ query: Record<string, string> }>(() => {}),
+          url: 'http://localhost:6477',
+          close: mock(() => {}),
+        }),
+        openExternal: mock(async () => {}),
+        challengeWindow: controller,
+      },
+    )
+    await Bun.sleep(0)
+    const deferredB = createDeferredCallback()
+    const flowB = acquirePhoneAuthChallenge(
+      createDiscoveryClient(),
+      {
+        createCallback: async () => ({
+          promise: deferredB.promise,
+          url: 'http://localhost:6477',
+          close: mock(() => {}),
+        }),
+        openExternal: mock(async () => {}),
+        challengeWindow: controller,
+      },
+    )
+    await Bun.sleep(0)
+    // B's open displaced A: the main side notifies the displaced id only.
+    controller.emitClosed(1)
+
+    const resultA = await flowA
+    expect(resultA).toEqual({
+      success: false,
+      errorCode: 'phone_auth_challenge_cancelled',
+    })
+
+    // The newest flow is unaffected and completes normally.
+    const stateB = new URL(controller.urls[1]!).searchParams.get('state')!
+    deferredB.resolveCallback({ query: { code: 'newest-token', state: stateB } })
+    expect(await flowB).toEqual({ success: true, challengeToken: 'newest-token' })
+
+    // Only B's success-path reap ran (id-scoped); A never touched the window
+    // B now owns.
+    expect(controller.close.mock.calls).toEqual([[controller.currentId]])
   })
 
   it('grades an in-app challenge timeout as a failed challenge', async () => {

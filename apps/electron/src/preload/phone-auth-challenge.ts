@@ -31,12 +31,17 @@ export type PhoneAuthChallengeResult =
 /**
  * POO-151: app-owned challenge window (main-process BrowserWindow behind IPC).
  * Present in production builds; E2E builds omit it and keep `openExternal`.
+ * The challenge id threads through open()/onClosed/close(): two flows can
+ * share one WebContents (dismiss login, re-enter, send again), so CLOSED and
+ * close are scoped to the flow that owns the id — a replacement cancels only
+ * the flow it displaced, and a stale flow cannot destroy the new window.
  */
 export interface PhoneAuthChallengeWindowController {
+  /** Resolves to the challenge id owning the opened window. */
   open: (url: string) => Promise<unknown>
-  close: () => Promise<unknown>
-  /** Notifies when the window was closed by any route outside this flow. */
-  onClosed: (listener: () => void) => () => void
+  close: (challengeId: unknown) => Promise<unknown>
+  /** Notifies with the id when that challenge's window was closed out-of-flow. */
+  onClosed: (listener: (challengeId: unknown) => void) => () => void
 }
 
 export interface PhoneAuthChallengeDependencies {
@@ -161,6 +166,13 @@ export async function acquirePhoneAuthChallenge(
     const closedPromise = new Promise<'cancelled'>((resolve) => {
       closedGate.resolve = resolve
     })
+    // Set when this flow's own window was closed out-of-flow (user close,
+    // blocked navigation, failed load) — the window is already gone on the
+    // main side, so the finally below must NOT reap again.
+    let challengeCancelled = false
+    // This flow's challenge id (assigned by open()); CLOSED/close are scoped
+    // to it so a newer flow on the same window is never disturbed.
+    let challengeId: unknown
 
     try {
       if (challengeWindow) {
@@ -168,8 +180,10 @@ export async function acquirePhoneAuthChallenge(
         // surfaces when the challenge needs interaction. A close from any
         // route outside this flow means the user gave up — cancel at once
         // instead of waiting out the timeout.
-        unsubscribeClosed = challengeWindow.onClosed(() => closedGate.resolve?.('cancelled'))
-        await challengeWindow.open(issuerUrl.toString())
+        unsubscribeClosed = challengeWindow.onClosed((closedId) => {
+          if (closedId === challengeId) closedGate.resolve?.('cancelled')
+        })
+        challengeId = await challengeWindow.open(issuerUrl.toString())
         const outcome = await Promise.race([
           callbackServer.promise.then(
             callback => ({ kind: 'callback', callback }) as const,
@@ -182,6 +196,7 @@ export async function acquirePhoneAuthChallenge(
         ])
 
         if (outcome === 'cancelled') {
+          challengeCancelled = true
           return { success: false, errorCode: 'phone_auth_challenge_cancelled' }
         }
         if (outcome.kind === 'timeout') {
@@ -206,7 +221,7 @@ export async function acquirePhoneAuthChallenge(
       return finishChallenge(callback, state)
     } finally {
       unsubscribeClosed?.()
-      await challengeWindow?.close()
+      if (!challengeCancelled) await challengeWindow?.close(challengeId)
     }
   } catch {
     return { success: false, errorCode: 'phone_auth_configuration_error' }

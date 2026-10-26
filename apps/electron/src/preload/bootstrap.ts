@@ -350,9 +350,9 @@ const phoneAuthChallengeWindow: PhoneAuthChallengeWindowController | undefined =
     ? undefined
     : {
         open: url => ipcRenderer.invoke(PHONE_AUTH_CHALLENGE_OPEN_CHANNEL, url),
-        close: () => ipcRenderer.invoke(PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL),
+        close: challengeId => ipcRenderer.invoke(PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL, challengeId),
         onClosed: listener => {
-          const handler = () => listener()
+          const handler = (_event: unknown, challengeId: unknown) => listener(challengeId)
           ipcRenderer.on(PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL, handler)
           return () => {
             ipcRenderer.removeListener(PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL, handler)

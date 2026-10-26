@@ -151,14 +151,35 @@ describe('PhoneAuthChallengeWindowManager (POO-151)', () => {
     expect(requester.send).not.toHaveBeenCalled()
   })
 
-  it('notifies the requester when the user closes the window themselves', () => {
+  it('notifies the requester with the challenge id when the user closes the window', () => {
     const manager = new PhoneAuthChallengeWindowManager({ showAfterMs: 60_000 })
     const requester = createRequester()
     manager.open(requester, ISSUER_URL)
     // System close button — destroy from outside the manager.
     createdWindows[0]!._emit('closed')
 
-    expect(requester.send).toHaveBeenCalledWith('__phone-auth-challenge:closed')
+    expect(requester.send).toHaveBeenCalledWith('__phone-auth-challenge:closed', 1)
+  })
+
+  it('cancels when the challenge page fails to load and ignores subframe/aborted failures', () => {
+    const manager = new PhoneAuthChallengeWindowManager({ showAfterMs: 60_000 })
+    const requester = createRequester()
+    manager.open(requester, ISSUER_URL)
+    const win = createdWindows[0]!
+    const failLoad = (errorCode: number, isMainFrame = true) =>
+      (win.webContents as any)._emit('did-fail-load', {}, errorCode, 'ERR', 'https://x', isMainFrame)
+
+    // Aborted-by-navigation and subframe failures are not real failures.
+    failLoad(-3)
+    failLoad(-2, false)
+    expect(win.destroy).not.toHaveBeenCalled()
+    expect(requester.send).not.toHaveBeenCalled()
+
+    // Offline / DNS on the main frame: cancel at once instead of hanging
+    // blank until the flow times out (review F2).
+    failLoad(-106)
+    expect(win.destroy).toHaveBeenCalledTimes(1)
+    expect(requester.send).toHaveBeenCalledWith('__phone-auth-challenge:closed', 1)
   })
 
   it('cancels on off-contract navigation and allows issuer/callback origins', () => {
@@ -175,7 +196,7 @@ describe('PhoneAuthChallengeWindowManager (POO-151)', () => {
 
     navigate('https://evil.example.com/phish')
     expect(win.destroy).toHaveBeenCalledTimes(1)
-    expect(requester.send).toHaveBeenCalledWith('__phone-auth-challenge:closed')
+    expect(requester.send).toHaveBeenCalledWith('__phone-auth-challenge:closed', 1)
   })
 
   it('cancels on off-contract main-frame redirects and allows issuer/callback origins', () => {
@@ -197,7 +218,7 @@ describe('PhoneAuthChallengeWindowManager (POO-151)', () => {
 
     expect(redirect('https://evil.example.com/phish')).toHaveBeenCalledTimes(1)
     expect(win.destroy).toHaveBeenCalledTimes(1)
-    expect(requester.send).toHaveBeenCalledWith('__phone-auth-challenge:closed')
+    expect(requester.send).toHaveBeenCalledWith('__phone-auth-challenge:closed', 1)
     expect(requester.send).toHaveBeenCalledTimes(1)
   })
 
@@ -210,7 +231,7 @@ describe('PhoneAuthChallengeWindowManager (POO-151)', () => {
 
     expect(createdWindows.length).toBe(2)
     expect(createdWindows[0]!.destroy).toHaveBeenCalledTimes(1)
-    expect(first.send).toHaveBeenCalledWith('__phone-auth-challenge:closed')
+    expect(first.send).toHaveBeenCalledWith('__phone-auth-challenge:closed', 1)
     manager.close()
     // Only the replaced flow is cancelled; the current flow closes silently.
     expect(second.send).not.toHaveBeenCalled()
@@ -236,6 +257,24 @@ describe('PhoneAuthChallengeWindowManager (POO-151)', () => {
     expect(second.send).not.toHaveBeenCalled()
   })
 
+  it('scopes close() to the challenge id so a stale flow cannot reap the replacement', () => {
+    const manager = new PhoneAuthChallengeWindowManager({ showAfterMs: 60_000 })
+    const first = createRequester()
+    const second = createRequester()
+    manager.open(first, ISSUER_URL)   // challenge id 1
+    manager.open(second, ISSUER_URL)  // challenge id 2, owns the live window
+
+    // Stale flow 1 (same WebContents in production, so requester matches too):
+    // neither its id nor its legacy any-of-mine close may destroy window 2.
+    manager.close(second, 1)
+    manager.close(undefined, 1)
+    expect(createdWindows[1]!.destroy).not.toHaveBeenCalled()
+
+    // The live flow reaps its own window by id.
+    manager.close(second, 2)
+    expect(createdWindows[1]!.destroy).toHaveBeenCalledTimes(1)
+  })
+
   it('destroyAll is idempotent and clears every trace', () => {
     const manager = new PhoneAuthChallengeWindowManager({ showAfterMs: 60_000 })
     manager.open(createRequester(), ISSUER_URL)
@@ -258,5 +297,18 @@ describe('validatePhoneAuthChallengeOpenRequest (POO-151)', () => {
     expect(() => validatePhoneAuthChallengeOpenRequest(`https://challenge.example.com/${'a'.repeat(2100)}`)).toThrow('invalid')
     expect(() => validatePhoneAuthChallengeOpenRequest('https://challenge.example.com/issue')).toThrow('redirect_uri')
     expect(() => validatePhoneAuthChallengeOpenRequest(undefined)).toThrow('invalid')
+  })
+
+  it('constrains redirect_uri to HTTP loopback (review F3)', () => {
+    const withRedirect = (redirectUri: string) =>
+      `https://challenge.example.com/issue?redirect_uri=${encodeURIComponent(redirectUri)}`
+
+    expect(() => validatePhoneAuthChallengeOpenRequest(withRedirect('https://attacker.example/cb'))).toThrow('loopback')
+    expect(() => validatePhoneAuthChallengeOpenRequest(withRedirect('http://evil.example.com/cb'))).toThrow('loopback')
+    expect(() => validatePhoneAuthChallengeOpenRequest(withRedirect('not a url'))).toThrow('invalid')
+
+    for (const ok of ['http://127.0.0.1:6477/cb', 'http://localhost:6477/cb', 'http://[::1]:6477/cb']) {
+      expect(() => validatePhoneAuthChallengeOpenRequest(withRedirect(ok))).not.toThrow()
+    }
   })
 })

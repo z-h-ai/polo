@@ -176,7 +176,7 @@ describe('admin preload RPC chain', () => {
         })
       }),
       close: mock(async () => {}),
-      onClosed: mock((_listener: () => void) => () => {}),
+      onClosed: mock((_listener: (challengeId: unknown) => void) => () => {}),
     }
     const api = buildAdminPreloadApi(
       {

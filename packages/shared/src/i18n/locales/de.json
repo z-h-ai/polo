@@ -1181,6 +1181,7 @@
   "onboarding.adminLogin.agreement": "Nutzungsbedingungen und Datenschutzrichtlinie zustimmen",
   "onboarding.adminLogin.ariaLabel": "Admin-Anmeldung",
   "onboarding.adminLogin.challengeFailed": "Die Verifizierungsprüfung ist fehlgeschlagen. Bitte versuche es erneut.",
+  "onboarding.adminLogin.challengeWindowTitle": "Sicherheitsprüfung",
   "onboarding.adminLogin.code": "Bestätigungscode",
   "onboarding.adminLogin.codeExpires": "Der Code ist 5 Minuten gültig.",
   "onboarding.adminLogin.codePlaceholder": "6-stelliger Code",

@@ -26,6 +26,7 @@
  */
 
 import { BrowserWindow } from 'electron'
+import { i18n } from '@polo-ai/shared/i18n'
 import {
   PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL,
 } from '../shared/types'
@@ -49,6 +50,9 @@ export interface PhoneAuthChallengeRequester {
 export class PhoneAuthChallengeWindowManager {
   private window: BrowserWindow | null = null
   private requester: PhoneAuthChallengeRequester | null = null
+  /** Identity of the live challenge; scopes CLOSED/close to one flow. */
+  private challengeId: number | null = null
+  private lastIssuedChallengeId = 0
   private issuerOrigin: string | null = null
   private callbackOrigin: string | null = null
   private showTimer: ReturnType<typeof setTimeout> | null = null
@@ -62,12 +66,16 @@ export class PhoneAuthChallengeWindowManager {
   /**
    * Hosts `url` (the validated challenge issuer URL, loopback redirect_uri
    * already attached) for the renderer that asked. A previous window is
-   * replaced: one challenge at a time, newest request wins.
+   * replaced: one challenge at a time, newest request wins. Returns the
+   * challenge id — the CLOSED notification and close() both carry it, so a
+   * replacement can cancel only the flow it displaced (both flows share one
+   * WebContents, so an unscoped broadcast would cancel the winner too).
    */
-  open(requester: PhoneAuthChallengeRequester, url: string): void {
+  open(requester: PhoneAuthChallengeRequester, url: string): number {
     const replaced = this.window && !this.window.isDestroyed() ? this.requester : null
+    const replacedId = this.challengeId
     this.close()
-    if (replaced) this.notifyClosed(replaced)
+    if (replaced && replacedId !== null) this.notifyClosed(replaced, replacedId)
 
     const issuerUrl = new URL(url)
     const redirectUri = issuerUrl.searchParams.get('redirect_uri')
@@ -89,7 +97,7 @@ export class PhoneAuthChallengeWindowManager {
       // window during the silent phase (see header comment).
       modal: false,
       show: false,
-      title: '安全验证',
+      title: i18n.t('onboarding.adminLogin.challengeWindowTitle'),
       autoHideMenuBar: true,
       // External content must not get any bridge surface at all.
       webPreferences: {
@@ -101,6 +109,8 @@ export class PhoneAuthChallengeWindowManager {
     })
     this.window = window
     this.requester = requester
+    this.challengeId = ++this.lastIssuedChallengeId
+    const challengeId = this.challengeId
 
     // The challenge window hosts an external page; its own <title> is noise.
     window.on('page-title-updated', (event) => event.preventDefault())
@@ -117,12 +127,27 @@ export class PhoneAuthChallengeWindowManager {
       event.preventDefault()
       mainLog.warn('[phone-auth-challenge] blocked off-contract navigation — cancelling')
       const cancelled = this.requester
+      const cancelledId = this.challengeId
       this.close()
-      if (cancelled) this.notifyClosed(cancelled)
+      if (cancelled && cancelledId !== null) this.notifyClosed(cancelled, cancelledId)
     }
     window.webContents.on('will-navigate', enforceNavigation)
     window.webContents.on('will-redirect', (details) => {
       if (details.isMainFrame) enforceNavigation(details, details.url)
+    })
+
+    // A load failure (offline, DNS) would otherwise leave a blank window
+    // hanging until the flow times out — treat it as the same out-of-flow
+    // close route as a blocked navigation: cancel the pending flow at once.
+    // errorCode -3 (ABORTED) is a load superseded by another navigation, not
+    // a failure.
+    window.webContents.on('did-fail-load', (_event, errorCode, _desc, _url, isMainFrame) => {
+      if (!isMainFrame || errorCode === -3 || this.window !== window) return
+      mainLog.warn('[phone-auth-challenge] challenge page failed to load — cancelling')
+      const cancelled = this.requester
+      const cancelledId = this.challengeId
+      this.close()
+      if (cancelled && cancelledId !== null) this.notifyClosed(cancelled, cancelledId)
     })
 
     // A close from OUTSIDE the flow (system close button, teardown) funnels
@@ -134,7 +159,10 @@ export class PhoneAuthChallengeWindowManager {
       if (this.window !== window) return
       this.window = null
       this.clearShowTimer()
-      this.notifyClosed(requester)
+      const closedId = this.challengeId
+      this.challengeId = null
+      this.requester = null
+      if (closedId !== null) this.notifyClosed(requester, closedId)
     })
 
     // 无感 phase: stay invisible; surface only if the challenge outlives the
@@ -142,16 +170,25 @@ export class PhoneAuthChallengeWindowManager {
     this.scheduleShow(window)
 
     void window.loadURL(url)
+    return challengeId
   }
 
-  /** Flow-driven close (challenge finished or the flow gave up). Idempotent. */
-  close(requester?: PhoneAuthChallengeRequester): void {
+  /**
+   * Flow-driven close (challenge finished or the flow gave up). Idempotent.
+   * `challengeId` scopes the close to one flow: a stale flow releasing its
+   * window must not destroy the window a newer flow on the same WebContents
+   * now owns (identity by WebContents alone cannot tell them apart). An
+   * omitted id keeps the legacy any-of-mine semantics.
+   */
+  close(requester?: PhoneAuthChallengeRequester, challengeId?: number): void {
     if (requester && requester !== this.requester) return
+    if (challengeId !== undefined && this.challengeId !== challengeId) return
     const window = this.window
     this.clearShowTimer()
     if (!window) return
     this.window = null
     this.requester = null
+    this.challengeId = null
     if (!window.isDestroyed()) {
       window.destroy()
     }
@@ -161,6 +198,7 @@ export class PhoneAuthChallengeWindowManager {
   destroyAll(): void {
     this.close()
     this.requester = null
+    this.challengeId = null
     this.issuerOrigin = null
     this.callbackOrigin = null
   }
@@ -198,10 +236,9 @@ export class PhoneAuthChallengeWindowManager {
     return this.issuerOrigin !== null && targetUrl.origin === this.issuerOrigin
   }
 
-  private notifyClosed(requester: PhoneAuthChallengeRequester): void {
-    this.requester = null
+  private notifyClosed(requester: PhoneAuthChallengeRequester, challengeId: number): void {
     if (!requester.isDestroyed()) {
-      requester.send(PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL)
+      requester.send(PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL, challengeId)
     }
   }
 }
@@ -212,8 +249,10 @@ export class PhoneAuthChallengeWindowManager {
  * the preload enforces) may spawn a window. The loopback HTTP allowance is an
  * E2E-build-only capability on the preload side, and E2E builds never inject
  * this window path (they keep the `open-external` mock), so this guard stays
- * strict HTTPS. The loopback redirect_uri rides as a query param and is
- * allow-listed by origin in the manager, not here.
+ * strict HTTPS. The loopback redirect_uri rides as a query param: the manager
+ * allow-lists its origin for navigation, so it must itself be constrained to
+ * an HTTP loopback URL — anything else would let a compromised renderer add
+ * an arbitrary origin to that allow-list.
  */
 export function validatePhoneAuthChallengeOpenRequest(url: unknown): URL {
   if (typeof url !== 'string' || !url.trim() || url.length > 2048) {
@@ -223,8 +262,23 @@ export function validatePhoneAuthChallengeOpenRequest(url: unknown): URL {
   if (parsed.username || parsed.password || parsed.protocol !== 'https:') {
     throw new Error('Phone auth challenge URL must use HTTPS')
   }
-  if (!parsed.searchParams.get('redirect_uri')) {
+  const redirectUri = parsed.searchParams.get('redirect_uri')
+  if (!redirectUri) {
     throw new Error('Phone auth challenge URL lacks a redirect_uri')
+  }
+  let redirect: URL
+  try {
+    redirect = new URL(redirectUri)
+  } catch {
+    throw new Error('Phone auth challenge redirect_uri is invalid')
+  }
+  const isLoopbackHostname = (
+    redirect.hostname === '127.0.0.1'
+    || redirect.hostname === 'localhost'
+    || redirect.hostname === '[::1]'
+  )
+  if (redirect.protocol !== 'http:' || !isLoopbackHostname) {
+    throw new Error('Phone auth challenge redirect_uri must be an HTTP loopback URL')
   }
   return parsed
 }

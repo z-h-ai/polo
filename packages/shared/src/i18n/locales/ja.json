@@ -1181,6 +1181,7 @@
   "onboarding.adminLogin.agreement": "利用規約とプライバシーポリシーに同意する",
   "onboarding.adminLogin.ariaLabel": "管理者ログイン",
   "onboarding.adminLogin.challengeFailed": "認証チャレンジに失敗しました。もう一度お試しください。",
+  "onboarding.adminLogin.challengeWindowTitle": "セキュリティ認証",
   "onboarding.adminLogin.code": "確認コード",
   "onboarding.adminLogin.codeExpires": "コードは5分間有効です。",
   "onboarding.adminLogin.codePlaceholder": "6桁のコード",
