@@ -115,6 +115,7 @@ import {
   subscribeToProductSpaceContractFailures,
 } from '@/lib/product-space-contract-failure'
 import { onTargetProjectionFailure } from '@/lib/target-projection'
+import { getErrorText, isQuotaExhaustedError, readErrorField } from './lib/quota-error'
 
 /** App-level states for the ProductSpace-first client shell. */
 type AppState =
@@ -174,35 +175,7 @@ function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: 
     || (result.status === 403 && /disabled|禁用/i.test(result.message ?? ''))
 }
 
-function readErrorField(error: unknown, field: 'errorCode' | 'code' | 'status' | 'message'): unknown {
-  if (!error || typeof error !== 'object') return undefined
-  return (error as Record<string, unknown>)[field]
-}
 
-function getErrorText(error: unknown): string {
-  if (error instanceof Error) return error.message
-  const message = readErrorField(error, 'message')
-  if (typeof message === 'string') return message
-  if (typeof error === 'string') return error
-  try {
-    return JSON.stringify(error)
-  } catch {
-    return String(error)
-  }
-}
-
-function isQuotaExhaustedError(error: unknown): boolean {
-  const code = String(readErrorField(error, 'errorCode') ?? readErrorField(error, 'code') ?? '').toUpperCase()
-  const status = Number(readErrorField(error, 'status'))
-  const message = getErrorText(error)
-
-  return code === 'QUOTA_EXHAUSTED'
-    || code === 'QUOTA_LIMIT_EXCEEDED'
-    || code === 'USAGE_LIMIT_EXCEEDED'
-    || code === 'INSUFFICIENT_QUOTA'
-    || status === 429
-    || /quota|额度|limit exceeded|exhausted|insufficient_quota|monthly usage|本月额度已用完/i.test(message)
-}
 
 /**
  * Helper to handle background task events from the agent.

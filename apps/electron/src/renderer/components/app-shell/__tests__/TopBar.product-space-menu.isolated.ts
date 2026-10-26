@@ -55,7 +55,7 @@ function tree(active: ProductSpaceSummary, productSpaces = [personal, enterprise
   return createElement(I18nextProvider, { i18n }, createElement(ProductSpaceProvider, {
     children: createElement(TopBar),
     value: {
-      accountId: 'account-a', activeProductSpaceId: active.id, activeProductSpace: active,
+      accountId: 'account-a', membershipListVerified: true, activeProductSpaceId: active.id, activeProductSpace: active,
       personalProductSpaceId: personal.id, productSpaces, allProductSpaces: productSpaces,
       productSpaceContextKey: JSON.stringify(['product-space', 1, 'account-a', active.id]), contextVersion: 1,
       pendingSwitch: null, onSelectProductSpace: select, onRefreshProductSpaces: () => {},
