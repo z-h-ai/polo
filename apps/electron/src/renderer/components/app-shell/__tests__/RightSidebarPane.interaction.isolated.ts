@@ -33,34 +33,44 @@ if (typeof (globalThis as any).ResizeObserver === 'undefined') {
 
 // --- Fake jotai --------------------------------------------------------------
 
-const storeValues = new Map<object, unknown>()
-
 function fakeAtom(readOrInit?: unknown, write?: unknown): any {
   if (typeof readOrInit === 'function' && write === undefined) return { read: readOrInit }
   return { init: readOrInit, write }
 }
 
-const defaultStore = {
-  get(a: any): unknown {
-    if (!storeValues.has(a)) storeValues.set(a, typeof a.read === 'function' ? undefined : a.init)
-    return storeValues.get(a)
-  },
-  set(a: any, ...args: unknown[]): unknown {
+// POO-135 r3 去假绿化 — TWO fake stores mirroring the production topology:
+// <JotaiProvider> (no store prop) creates its OWN store, so getDefaultStore()
+// is a DIFFERENT object than the store useStore()/useAtomValue() resolve
+// against. The old single-store fake collapsed the two and masked exactly
+// that bug class; every seed and assertion here goes through contextStore,
+// the store the pane's provider-tree readers actually see.
+function makeFakeStore() {
+  const values = new Map<object, unknown>()
+  const get = (a: any): unknown => {
+    if (!values.has(a)) values.set(a, typeof a.read === 'function' ? undefined : a.init)
+    return values.get(a)
+  }
+  const set = (a: any, ...args: unknown[]): unknown => {
     if (typeof a.write === 'function') {
-      a.write((x: any) => defaultStore.get(x), (x: any, v: unknown) => defaultStore.set(x, v), ...args)
+      a.write((x: any) => get(x), (x: any, v: unknown) => set(x, v), ...args)
       return undefined
     }
-    storeValues.set(a, args[0])
+    values.set(a, args[0])
     return args[0]
-  },
+  }
+  return { values, get, set }
 }
+
+const defaultStore = makeFakeStore()
+const contextStore = makeFakeStore()
 
 mock.module('jotai', () => ({
   atom: fakeAtom,
   getDefaultStore: () => defaultStore,
-  useAtomValue: (a: any) => defaultStore.get(a),
-  useSetAtom: (a: any) => (...args: unknown[]) => defaultStore.set(a, ...args),
-  useAtom: (a: any) => [defaultStore.get(a), (...args: unknown[]) => defaultStore.set(a, ...args)],
+  useStore: () => contextStore,
+  useAtomValue: (a: any) => contextStore.get(a),
+  useSetAtom: (a: any) => (...args: unknown[]) => contextStore.set(a, ...args),
+  useAtom: (a: any) => [contextStore.get(a), (...args: unknown[]) => contextStore.set(a, ...args)],
 }))
 mock.module('jotai/utils', () => ({
   atomFamily: (factory: (key: string) => any) => {
@@ -157,6 +167,7 @@ const {
   sidebarBrowserOpenAtom,
 } = await import('@/atoms/sidebar-browser')
 const { browserInstancesMapAtom } = await import('@/atoms/browser-pane')
+const { getDefaultStore, useStore } = await import('jotai')
 
 function makeInstance(overrides: Record<string, unknown> = {}): any {
   return {
@@ -190,16 +201,17 @@ function mountPane(overrides: Record<string, unknown> = {}) {
 }
 
 function setInstances(instances: any[]) {
-  defaultStore.set(browserInstancesMapAtom, new Map(instances.map((i) => [i.id, i])))
-  defaultStore.set(sidebarBrowserOpenAtom, true)
-  defaultStore.set(sidebarBrowserInstanceIdAtom, instances[0]?.id ?? null)
+  contextStore.set(browserInstancesMapAtom, new Map(instances.map((i) => [i.id, i])))
+  contextStore.set(sidebarBrowserOpenAtom, true)
+  contextStore.set(sidebarBrowserInstanceIdAtom, instances[0]?.id ?? null)
 }
 
 afterEach(() => {
   cleanup()
-  storeValues.clear()
+  contextStore.values.clear()
+  contextStore.values.clear()
   // The pane reads this everywhere; seed a default so it is never undefined.
-  storeValues.set(sessionMetaMapAtomRef, new Map())
+  contextStore.values.set(sessionMetaMapAtomRef, new Map())
   for (const key of Object.keys(apiCalls)) apiCalls[key].length = 0
   terminateBrowser.mockClear()
   toastInfo.mockClear()
@@ -223,16 +235,16 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     // content-following is driven by the stored value on the next render).
     const second = mountPane({ canvasSessionId: 'sess-a', canvasApp: { kind: 'preview' } as any })
     fireEvent.click(second.getByTestId('right-pane-tab-browser'))
-    expect(defaultStore.get(rightPaneTabAtom)).toBe('browser')
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
     second.unmount()
 
-    defaultStore.set(rightPaneTabAtom, 'browser')
+    contextStore.set(rightPaneTabAtom, 'browser')
     const third = mountPane({ canvasSessionId: 'sess-a', canvasApp: { kind: 'preview' } as any })
     expect(third.getByTestId('sidebar-browser-section')).toBeTruthy()
     expect(third.queryByTestId('canvas-pane-card')).toBeNull()
     third.unmount()
 
-    defaultStore.set(rightPaneTabAtom, 'canvas')
+    contextStore.set(rightPaneTabAtom, 'canvas')
     const fourth = mountPane({ canvasSessionId: 'sess-a', canvasApp: { kind: 'preview' } as any })
     expect(fourth.getByTestId('canvas-pane-card')).toBeTruthy()
   })
@@ -257,7 +269,7 @@ describe('RightSidebarPane header integration (POO-135)', () => {
 
   it('layer 1 shows the ownership title (加入：<会话名>) for a session-owned browser', () => {
     setInstances([makeInstance({ ownerSessionId: 'sess-a' })])
-    storeValues.set(sessionMetaMapAtomRef, new Map([['sess-a', { name: 'Alpha' }]]))
+    contextStore.values.set(sessionMetaMapAtomRef, new Map([['sess-a', { name: 'Alpha' }]]))
     const { getByTestId } = mountPane({ currentSessionId: 'sess-a' })
 
     expect(getByTestId('sidebar-browser-title').textContent).toBe('Joining: Alpha')
@@ -288,7 +300,7 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     await waitFor(() =>
       expect(apiCalls.setElementPicking).toEqual([['inst-1', true, { targetSessionId: 'sess-a' }]]),
     )
-    expect(defaultStore.get(activeElementPickingAtom)).toEqual({
+    expect(contextStore.get(activeElementPickingAtom)).toEqual({
       instanceId: 'inst-1',
       targetSessionId: 'sess-a',
       originSessionId: 'sess-a',
@@ -308,7 +320,7 @@ describe('RightSidebarPane header integration (POO-135)', () => {
       ['inst-1', true, { targetSessionId: 'sess-a' }],
       ['inst-1', false],
     ]))
-    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+    expect(contextStore.get(activeElementPickingAtom)).toBeNull()
   })
 
   it('embedded browser: detach pops it out; terminate reaches the sync hook', async () => {
@@ -345,8 +357,8 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     // Spec v0.7 suggested behavior 5: no bindToSessionId — visible workspace-wide.
     await waitFor(() => expect(apiCalls.create).toEqual([[{ show: false }]]))
     await waitFor(() => expect(apiCalls.embed).toEqual([['inst-created']]))
-    expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(true)
-    expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-created')
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(true)
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-created')
   })
 
   it('multiple visible instances: the layer-1 switcher re-points the slot', async () => {
@@ -359,7 +371,7 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     const select = getByTestId('sidebar-browser-instance-select') as HTMLSelectElement
     expect(select.value).toBe('inst-1')
     fireEvent.change(select, { target: { value: 'inst-2' } })
-    expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
   })
 
   it('popped-out slot: layer 2 collapses to a read-only status bar with a show-window entry (r1)', async () => {
@@ -383,9 +395,9 @@ describe('RightSidebarPane header integration (POO-135)', () => {
 
     await waitFor(() => expect(apiCalls.unembed).toEqual([['inst-1']]))
     // Slot closes (back to canvas when one is open) but the object is preserved.
-    expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(false)
-    expect(defaultStore.get(rightPaneTabAtom)).toBe('canvas')
-    expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-1')
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(false)
+    expect(contextStore.get(rightPaneTabAtom)).toBe('canvas')
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-1')
     expect(toastInfo).toHaveBeenCalledTimes(1)
     const [message, opts] = toastInfo.mock.calls[0]
     expect(message).toBe('browserPane.sidebar.hiddenToast')
@@ -394,14 +406,14 @@ describe('RightSidebarPane header integration (POO-135)', () => {
 
     // The toast action restores the slot on the browser tab.
     action.onClick()
-    expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(true)
-    expect(defaultStore.get(rightPaneTabAtom)).toBe('browser')
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(true)
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
   })
 
   it('switching to the canvas tab disarms an armed picker (r1)', async () => {
     setInstances([makeInstance({ ownerSessionId: 'sess-a' })])
-    defaultStore.set(rightPaneTabAtom, 'browser')
-    defaultStore.set(activeElementPickingAtom, {
+    contextStore.set(rightPaneTabAtom, 'browser')
+    contextStore.set(activeElementPickingAtom, {
       instanceId: 'inst-1',
       targetSessionId: 'sess-a',
       originSessionId: 'sess-a',
@@ -414,7 +426,7 @@ describe('RightSidebarPane header integration (POO-135)', () => {
 
     fireEvent.click(getByTestId('right-pane-tab-canvas'))
 
-    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+    expect(contextStore.get(activeElementPickingAtom)).toBeNull()
     expect(apiCalls.setElementPicking).toEqual([['inst-1', false]])
   })
 
@@ -423,7 +435,7 @@ describe('RightSidebarPane header integration (POO-135)', () => {
       makeInstance({ id: 'inst-1', ownerSessionId: 'sess-a' }),
       makeInstance({ id: 'inst-2', ownerSessionId: null }),
     ])
-    defaultStore.set(activeElementPickingAtom, {
+    contextStore.set(activeElementPickingAtom, {
       instanceId: 'inst-1',
       targetSessionId: 'sess-a',
       originSessionId: 'sess-a',
@@ -433,8 +445,8 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     const select = getByTestId('sidebar-browser-instance-select') as HTMLSelectElement
     fireEvent.change(select, { target: { value: 'inst-2' } })
 
-    expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
-    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
+    expect(contextStore.get(activeElementPickingAtom)).toBeNull()
     expect(apiCalls.setElementPicking).toEqual([['inst-1', false]])
   })
 
@@ -446,5 +458,19 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     unmount()
 
     await waitFor(() => expect(apiCalls.unembed).toEqual([['inst-1']]))
+  })
+
+  it('topology guard (r3): the pane resolves the PROVIDER store, not getDefaultStore', () => {
+    // The r1/r2 fake collapsed both stores into one and masked the production
+    // getDefaultStore/Provider split; if they collapse again every cross-store
+    // assertion above goes vacuous — fail here first.
+    let probe: unknown
+    function StoreProbe() {
+      probe = useStore()
+      return null
+    }
+    render(createElement(StoreProbe))
+    expect(probe).toBeTruthy()
+    expect(probe).not.toBe(getDefaultStore())
   })
 })

@@ -30,40 +30,47 @@ if (typeof (globalThis as any).ResizeObserver === 'undefined') {
   }
 }
 
-// --- Fake jotai (single store — the component tree reads/writes all land here) -
-
-const storeValues = new Map<object, unknown>()
+// --- Fake jotai (two stores mirroring the production Provider topology) -------
 
 function fakeAtom(readOrInit?: unknown, write?: unknown): any {
   if (typeof readOrInit === 'function' && write === undefined) return { read: readOrInit }
   return { init: readOrInit, write }
 }
 
-const defaultStore = {
-  get(a: any): unknown {
-    if (!storeValues.has(a)) storeValues.set(a, typeof a.read === 'function' ? undefined : a.init)
-    return storeValues.get(a)
-  },
-  set(a: any, ...args: unknown[]): unknown {
+// POO-135 r3 去假绿化 — the earlier fake COLLAPSED getDefaultStore and the
+// provider store into one ("the fake collapses both stores into one"), which
+// masked the production store-split bug across r1/r2. Production: the
+// <JotaiProvider> (no store prop) creates its OWN store, so the sync hook /
+// pane / bridge (useStore, useAtomValue, useSetAtom) share contextStore while
+// getDefaultStore() hands out a different object nobody in the tree reads.
+// Every seed and assertion below goes through contextStore.
+function makeFakeStore() {
+  const values = new Map<object, unknown>()
+  const get = (a: any): unknown => {
+    if (!values.has(a)) values.set(a, typeof a.read === 'function' ? undefined : a.init)
+    return values.get(a)
+  }
+  const set = (a: any, ...args: unknown[]): unknown => {
     if (typeof a.write === 'function') {
-      a.write((x: any) => defaultStore.get(x), (x: any, v: unknown) => defaultStore.set(x, v), ...args)
+      a.write((x: any) => get(x), (x: any, v: unknown) => set(x, v), ...args)
       return undefined
     }
-    storeValues.set(a, args[0])
+    values.set(a, args[0])
     return args[0]
-  },
+  }
+  return { values, get, set }
 }
+
+const defaultStore = makeFakeStore()
+const contextStore = makeFakeStore()
 
 mock.module('jotai', () => ({
   atom: fakeAtom,
   getDefaultStore: () => defaultStore,
-  // The sync hook and GenUiCanvasBridge resolve the CONTEXT store — the fake
-  // collapses both stores into one, matching the production single-Provider
-  // topology the sidebar reads/writes through.
-  useStore: () => defaultStore,
-  useAtomValue: (a: any) => defaultStore.get(a),
-  useSetAtom: (a: any) => (...args: unknown[]) => defaultStore.set(a, ...args),
-  useAtom: (a: any) => [defaultStore.get(a), (...args: unknown[]) => defaultStore.set(a, ...args)],
+  useStore: () => contextStore,
+  useAtomValue: (a: any) => contextStore.get(a),
+  useSetAtom: (a: any) => (...args: unknown[]) => contextStore.set(a, ...args),
+  useAtom: (a: any) => [contextStore.get(a), (...args: unknown[]) => contextStore.set(a, ...args)],
 }))
 mock.module('jotai/utils', () => ({
   atomFamily: (factory: (key: string) => any) => {
@@ -169,6 +176,7 @@ const {
 } = await import('@/atoms/sidebar-browser')
 const { browserInstancesMapAtom } = await import('@/atoms/browser-pane')
 const { GENUI_APP_CANVAS_OPEN_EVENT } = await import('@polo-ai/ui/chat/GenUiAppCard')
+const { getDefaultStore, useStore } = await import('jotai')
 
 const APP = { appId: 'app-1', title: 'Weather Card', indexPath: '/bundles/app-1/index.html', version: 3 }
 
@@ -219,8 +227,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  storeValues.clear()
-  storeValues.set(sessionMetaMapAtomRef, new Map())
+  contextStore.values.clear()
+  contextStore.values.clear()
+  contextStore.values.set(sessionMetaMapAtomRef, new Map())
   canvasPaneStateCbs = []
   for (const key of Object.keys(apiCalls)) apiCalls[key].length = 0
 })
@@ -240,13 +249,13 @@ describe('canvas popout in the unified right sidebar (SB-CANVAS-OUT)', () => {
     const view = mountPane()
     expect(view.getByTestId('sidebar-canvas-popup-placeholder')).toBeTruthy()
     expect(view.queryByTestId('canvas-pane-card')).toBeNull()
-    expect(defaultStore.get(canvasPanePopoutAtomFamily('sess-a'))).toEqual({
+    expect(contextStore.get(canvasPanePopoutAtomFamily('sess-a'))).toEqual({
       sessionId: 'sess-a', poppedOut: true, isVisible: true,
     })
   })
 
   it('placeholder 收回 → attachFromPopup; the closed broadcast returns the card', () => {
-    defaultStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
+    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
     const view = mountPane()
     fireEvent.click(view.getByTestId('sidebar-canvas-attach'))
     expect(apiCalls.attachFromPopup).toEqual([['sess-a']])
@@ -260,7 +269,7 @@ describe('canvas popout in the unified right sidebar (SB-CANVAS-OUT)', () => {
   })
 
   it('placeholder 显示窗口 → focus', () => {
-    defaultStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
+    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
     const view = mountPane()
     fireEvent.click(view.getByTestId('sidebar-canvas-show-window'))
     expect(apiCalls.focus).toEqual([['sess-a']])
@@ -275,10 +284,10 @@ describe('canvas popout in the unified right sidebar (SB-CANVAS-OUT)', () => {
 
   it('a popped-out canvas does not evict the browser: both tabs stay and switch', () => {
     const instances = [makeInstance()]
-    defaultStore.set(browserInstancesMapAtom, new Map(instances.map((i) => [i.id, i])))
-    defaultStore.set(sidebarBrowserOpenAtom, true)
-    defaultStore.set(sidebarBrowserInstanceIdAtom, 'inst-1')
-    defaultStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
+    contextStore.set(browserInstancesMapAtom, new Map(instances.map((i) => [i.id, i])))
+    contextStore.set(sidebarBrowserOpenAtom, true)
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'inst-1')
+    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
 
     const view = mountPane()
     // Both content kinds reachable → tab strip, canvas tab shows the placeholder.
@@ -286,7 +295,7 @@ describe('canvas popout in the unified right sidebar (SB-CANVAS-OUT)', () => {
     expect(view.getByTestId('sidebar-canvas-popup-placeholder')).toBeTruthy()
 
     fireEvent.click(view.getByTestId('right-pane-tab-browser'))
-    expect(defaultStore.get(rightPaneTabAtom)).toBe('browser')
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
     view.unmount()
 
     const switched = mountPane()
@@ -306,11 +315,11 @@ describe('useCanvasPaneSync (SB-CANVAS-OUT)', () => {
     expect(canvasPaneStateCbs.length).toBe(subscribedBefore + 1)
 
     broadcastCanvasState({ sessionId: 'sess-x', poppedOut: true, isVisible: true })
-    expect(defaultStore.get(canvasPanePopoutAtomFamily('sess-x'))).toEqual({
+    expect(contextStore.get(canvasPanePopoutAtomFamily('sess-x'))).toEqual({
       sessionId: 'sess-x', poppedOut: true, isVisible: true,
     })
     broadcastCanvasState({ sessionId: 'sess-x', poppedOut: false, isVisible: false })
-    expect(defaultStore.get(canvasPanePopoutAtomFamily('sess-x'))).toEqual({
+    expect(contextStore.get(canvasPanePopoutAtomFamily('sess-x'))).toEqual({
       sessionId: 'sess-x', poppedOut: false, isVisible: false,
     })
     view.unmount()
@@ -322,7 +331,7 @@ describe('useCanvasPaneSync (SB-CANVAS-OUT)', () => {
 
 describe('GenUiCanvasBridge open-while-popped guard (SB-CANVAS-OUT)', () => {
   it('an explicit canvas open while popped out first returns the popup', () => {
-    defaultStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
+    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
 
     const view = render(createElement(GenUiCanvasBridge))
     window.dispatchEvent(new window.CustomEvent(GENUI_APP_CANVAS_OPEN_EVENT, {
@@ -330,7 +339,7 @@ describe('GenUiCanvasBridge open-while-popped guard (SB-CANVAS-OUT)', () => {
     }))
 
     expect(apiCalls.attachFromPopup).toEqual([['sess-a']])
-    expect(defaultStore.get(canvasPaneAppAtomFamily('sess-a'))).toEqual(APP)
+    expect(contextStore.get(canvasPaneAppAtomFamily('sess-a'))).toEqual(APP)
     view.unmount()
   })
 
@@ -340,7 +349,21 @@ describe('GenUiCanvasBridge open-while-popped guard (SB-CANVAS-OUT)', () => {
       detail: { sessionId: 'sess-a', appId: APP.appId, title: APP.title, indexPath: APP.indexPath, version: 3 },
     }))
     expect(apiCalls.attachFromPopup).toEqual([])
-    expect(defaultStore.get(canvasPaneAppAtomFamily('sess-a'))).toEqual(APP)
+    expect(contextStore.get(canvasPaneAppAtomFamily('sess-a'))).toEqual(APP)
     view.unmount()
+  })
+
+  it('topology guard (r3): the sync hook and the pane share the PROVIDER store, distinct from getDefaultStore', () => {
+    // The pre-r3 fake collapsed both stores into one and hid the production
+    // store split for two review rounds; if they collapse again the mirror
+    // and guard assertions above go vacuous — fail here first.
+    let probe: unknown
+    function StoreProbe() {
+      probe = useStore()
+      return null
+    }
+    render(createElement(StoreProbe))
+    expect(probe).toBeTruthy()
+    expect(probe).not.toBe(getDefaultStore())
   })
 })

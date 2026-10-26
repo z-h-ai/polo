@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAtomValue, useSetAtom, getDefaultStore } from 'jotai'
+import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AlertCircle, Globe, Copy, RefreshCw, Link2Off, Info } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
@@ -287,12 +287,17 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // POO-135: picked web element references — a per-session jotai draft (no
   // persistence: an unsent reference dies with the session, matching the
   // prototype). Reads feed the composer chips; writes come from chip removal.
+  // The ambient jotai store (the <JotaiProvider> context store), NOT
+  // getDefaultStore() — the sync hook writes drafts into the provider store
+  // (POO-135 r3); a default-store write here would land in a different store
+  // and never reach the chips above.
+  const store = useStore()
   const elementRefsValue = useAtomValue(
     React.useMemo(() => elementDraftRefsAtomFamily(sessionId), [sessionId]),
   )
   const handleElementRefsChange = React.useCallback((refs: import('@polo-ai/core/types').WebElementReference[]) => {
-    getDefaultStore().set(elementDraftRefsAtomFamily(sessionId), refs)
-  }, [sessionId])
+    store.set(elementDraftRefsAtomFamily(sessionId), refs)
+  }, [sessionId, store])
 
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>

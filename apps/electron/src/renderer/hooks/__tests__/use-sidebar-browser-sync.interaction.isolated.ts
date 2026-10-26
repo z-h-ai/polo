@@ -25,33 +25,49 @@ if (typeof window === 'undefined') {
 
 // --- Fake jotai (primitive + writable atoms are enough for the real atoms) --
 
-const storeValues = new Map<object, unknown>()
-
 function fakeAtom(readOrInit?: unknown, write?: unknown): any {
   if (typeof readOrInit === 'function' && write === undefined) return { read: readOrInit }
   return { init: readOrInit, write }
 }
 
-const defaultStore = {
-  get(a: any): unknown {
-    if (!storeValues.has(a)) storeValues.set(a, typeof a.read === 'function' ? undefined : a.init)
-    return storeValues.get(a)
-  },
-  set(a: any, ...args: unknown[]): unknown {
+// POO-135 r3 去假绿化 — TWO fake stores mirroring the production topology:
+// <JotaiProvider> (no store prop) creates its OWN store, so getDefaultStore()
+// hands out a DIFFERENT object than the store useStore()/useAtomValue()/
+// useSetAtom() resolve against in the provider tree. A getDefaultStore()
+// write is invisible to provider readers. The r1/r2 fake collapsed the two
+// into one, which masked exactly this class of bug; these two keep it
+// visible — every seed and assertion below goes through contextStore, the
+// store production readers actually see.
+function makeFakeStore() {
+  const values = new Map<object, unknown>()
+  const get = (a: any): unknown => {
+    if (!values.has(a)) values.set(a, typeof a.read === 'function' ? undefined : a.init)
+    return values.get(a)
+  }
+  const set = (a: any, ...args: unknown[]): unknown => {
     if (typeof a.write === 'function') {
-      a.write((x: any) => defaultStore.get(x), (x: any, v: unknown) => defaultStore.set(x, v), ...args)
+      a.write((x: any) => get(x), (x: any, v: unknown) => set(x, v), ...args)
       return undefined
     }
-    storeValues.set(a, args[0])
+    values.set(a, args[0])
     return args[0]
-  },
+  }
+  return { values, get, set }
 }
+
+// The trap store: what getDefaultStore() hands out (production: nobody in the
+// provider tree reads this). Kept ONLY so the smoke test can prove the hook
+// no longer writes here.
+const defaultStore = makeFakeStore()
+// The provider store: the production-visible side.
+const contextStore = makeFakeStore()
 
 mock.module('jotai', () => ({
   atom: fakeAtom,
   getDefaultStore: () => defaultStore,
-  useAtomValue: (a: any) => defaultStore.get(a),
-  useSetAtom: (a: any) => (...args: unknown[]) => defaultStore.set(a, ...args),
+  useStore: () => contextStore,
+  useAtomValue: (a: any) => contextStore.get(a),
+  useSetAtom: (a: any) => (...args: unknown[]) => contextStore.set(a, ...args),
 }))
 mock.module('jotai/utils', () => ({
   atomFamily: (factory: (key: string) => any) => {
@@ -129,6 +145,7 @@ const {
   sidebarBrowserOpenAtom,
 } = await import('@/atoms/sidebar-browser')
 const { browserInstancesMapAtom } = await import('@/atoms/browser-pane')
+const { useAtomValue, getDefaultStore, useStore } = await import('jotai')
 
 function makeInstance(overrides: Record<string, unknown> = {}): any {
   return {
@@ -174,7 +191,8 @@ function mount(currentSessionId: string | null, onSelectSession: (id: string) =>
 
 function resetAll() {
   cleanup()
-  storeValues.clear()
+  defaultStore.values.clear()
+  contextStore.values.clear()
   stateHandler = null
   removedHandler = null
   pickerHandler = null
@@ -201,10 +219,10 @@ describe('useSidebarBrowserSync (POO-135)', () => {
 
     pickerHandler!({ kind: 'picked', reference: makeReference('sess-a') })
 
-    const draft = defaultStore.get(elementDraftRefsAtomFamily('sess-a')) as any[]
+    const draft = contextStore.get(elementDraftRefsAtomFamily('sess-a')) as any[]
     expect(draft).toHaveLength(1)
     expect(draft[0].id).toBe('element-1')
-    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+    expect(contextStore.get(activeElementPickingAtom)).toBeNull()
     expect(onSelectSession).not.toHaveBeenCalled()
     expect(focusQueued).toHaveLength(0)
   })
@@ -215,14 +233,14 @@ describe('useSidebarBrowserSync (POO-135)', () => {
 
     pickerHandler!({ kind: 'picked', reference: makeReference('sess-b') })
 
-    expect((defaultStore.get(elementDraftRefsAtomFamily('sess-b')) as any[])).toHaveLength(1)
-    expect((defaultStore.get(elementDraftRefsAtomFamily('sess-a')) as any[])).toHaveLength(0)
+    expect((contextStore.get(elementDraftRefsAtomFamily('sess-b')) as any[])).toHaveLength(1)
+    expect((contextStore.get(elementDraftRefsAtomFamily('sess-a')) as any[])).toHaveLength(0)
     expect(focusQueued).toEqual(['sess-b'])
     expect(onSelectSession).toHaveBeenCalledWith('sess-b')
   })
 
   it('switching chats while picking cancels the armed picker with an explicit toast', () => {
-    defaultStore.set(activeElementPickingAtom, {
+    contextStore.set(activeElementPickingAtom, {
       instanceId: 'inst-1',
       targetSessionId: 'sess-a',
       originSessionId: 'sess-a',
@@ -232,13 +250,13 @@ describe('useSidebarBrowserSync (POO-135)', () => {
     // User switches to sess-b while the picker is armed for sess-a.
     rerender(createElement(Harness, { currentSessionId: 'sess-b', onSelectSession: () => {} }))
 
-    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+    expect(contextStore.get(activeElementPickingAtom)).toBeNull()
     expect(apiCalls.setElementPicking).toEqual([['inst-1', false]])
     expect(toastInfo).toHaveBeenCalledWith('browserPane.elementPicker.cancelledSwitchChat')
   })
 
   it('switching within the same origin session does NOT cancel picking', () => {
-    defaultStore.set(activeElementPickingAtom, {
+    contextStore.set(activeElementPickingAtom, {
       instanceId: 'inst-1',
       targetSessionId: 'sess-a',
       originSessionId: 'sess-a',
@@ -246,7 +264,7 @@ describe('useSidebarBrowserSync (POO-135)', () => {
     const { rerender } = mount('sess-a')
     rerender(createElement(Harness, { currentSessionId: 'sess-a', onSelectSession: () => {} }))
 
-    expect(defaultStore.get(activeElementPickingAtom)).not.toBeNull()
+    expect(contextStore.get(activeElementPickingAtom)).not.toBeNull()
     expect(apiCalls.setElementPicking).toHaveLength(0)
     expect(toastInfo).not.toHaveBeenCalled()
   })
@@ -254,8 +272,8 @@ describe('useSidebarBrowserSync (POO-135)', () => {
   it('system-close of the detached popup returns the browser to the sidebar (embed)', () => {
     listedInstances = [makeInstance({ id: 'inst-1' })]
     mount('sess-a')
-    defaultStore.set(sidebarBrowserOpenAtom, true)
-    defaultStore.set(sidebarBrowserInstanceIdAtom, 'inst-1')
+    contextStore.set(sidebarBrowserOpenAtom, true)
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'inst-1')
 
     // Main reports the popup window disappeared (system close button).
     stateHandler!(makeInstance({ id: 'inst-1', hostMode: 'popup', isVisible: false }))
@@ -287,7 +305,7 @@ describe('useSidebarBrowserSync (POO-135)', () => {
 
   it('a cancelled event only clears the picking state of ITS instance (r1)', () => {
     mount('sess-a')
-    defaultStore.set(activeElementPickingAtom, {
+    contextStore.set(activeElementPickingAtom, {
       instanceId: 'inst-1',
       targetSessionId: 'sess-a',
       originSessionId: 'sess-a',
@@ -295,24 +313,24 @@ describe('useSidebarBrowserSync (POO-135)', () => {
 
     // Stale cancellation from a DIFFERENT instance must not clear inst-1's UI.
     pickerHandler!({ kind: 'cancelled', reason: 'user', instanceId: 'inst-stale' })
-    expect(defaultStore.get(activeElementPickingAtom)).not.toBeNull()
+    expect(contextStore.get(activeElementPickingAtom)).not.toBeNull()
 
     pickerHandler!({ kind: 'cancelled', reason: 'user', instanceId: 'inst-1' })
-    expect(defaultStore.get(activeElementPickingAtom)).toBeNull()
+    expect(contextStore.get(activeElementPickingAtom)).toBeNull()
   })
 
   it('terminating the LAST visible browser closes the slot and toasts with a reopen action', async () => {
     listedInstances = [makeInstance({ id: 'inst-1' })]
     mount('sess-a')
-    defaultStore.set(browserInstancesMapAtom, new Map([['inst-1', makeInstance({ id: 'inst-1' })]]))
-    defaultStore.set(sidebarBrowserOpenAtom, true)
-    defaultStore.set(sidebarBrowserInstanceIdAtom, 'inst-1')
+    contextStore.set(browserInstancesMapAtom, new Map([['inst-1', makeInstance({ id: 'inst-1' })]]))
+    contextStore.set(sidebarBrowserOpenAtom, true)
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'inst-1')
 
     await capturedControls!.terminateBrowser(makeInstance({ id: 'inst-1' }))
 
     expect(apiCalls.destroy).toEqual(['inst-1'])
-    expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(false)
-    expect(defaultStore.get(rightPaneTabAtom)).toBe('canvas')
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(false)
+    expect(contextStore.get(rightPaneTabAtom)).toBe('canvas')
     expect(toastSuccess).toHaveBeenCalledTimes(1)
     expect(toastSuccess.mock.calls[0][0]).toBe('browserPane.ended')
     const action = (toastSuccess.mock.calls[0][1] as any).action
@@ -325,16 +343,16 @@ describe('useSidebarBrowserSync (POO-135)', () => {
     expect(apiCalls.create).toEqual([{ show: false, bindToSessionId: undefined }])
     expect(apiCalls.navigate).toEqual([['inst-new', 'https://example.com/page']])
     expect(apiCalls.embed).toEqual(['inst-new'])
-    expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(true)
-    expect(defaultStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-new')
-    expect(defaultStore.get(rightPaneTabAtom)).toBe('browser')
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(true)
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-new')
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
   })
 
   it('reopen re-binds the ORIGINAL owning session even from a different chat', async () => {
     const onSelectSession = mock((_id: string) => {})
     listedInstances = [makeInstance({ id: 'inst-1', ownerSessionId: 'sess-owned' })]
     mount('sess-a', onSelectSession)
-    defaultStore.set(browserInstancesMapAtom, new Map([['inst-1', listedInstances[0]]]))
+    contextStore.set(browserInstancesMapAtom, new Map([['inst-1', listedInstances[0]]]))
 
     await capturedControls!.terminateBrowser(listedInstances[0])
     const action = (toastSuccess.mock.calls[0][1] as any).action
@@ -352,14 +370,14 @@ describe('useSidebarBrowserSync (POO-135)', () => {
     const b = makeInstance({ id: 'inst-b' })
     listedInstances = [a, b]
     mount('sess-a')
-    defaultStore.set(browserInstancesMapAtom, new Map([['inst-a', a], ['inst-b', b]]))
-    defaultStore.set(sidebarBrowserOpenAtom, true)
-    defaultStore.set(sidebarBrowserInstanceIdAtom, 'inst-a')
+    contextStore.set(browserInstancesMapAtom, new Map([['inst-a', a], ['inst-b', b]]))
+    contextStore.set(sidebarBrowserOpenAtom, true)
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'inst-a')
 
     await capturedControls!.terminateBrowser(a)
 
     expect(apiCalls.destroy).toEqual(['inst-a'])
-    expect(defaultStore.get(sidebarBrowserOpenAtom)).toBe(true)
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(true)
     expect(toastSuccess).not.toHaveBeenCalled()
   })
 
@@ -382,5 +400,43 @@ describe('useSidebarBrowserSync (POO-135)', () => {
         null,
       ).map((i) => i.id),
     ).toEqual(['inst-free'])
+  })
+
+  it('topology guard (r3): getDefaultStore and useStore stay DISTINCT stores', () => {
+    // If the two fake stores ever collapse back into one, every cross-store
+    // assertion in this file goes vacuous again (the r1/r2 blind spot that
+    // hid the production bug) — fail loudly here instead.
+    let probe: unknown
+    function StoreProbe() {
+      probe = useStore()
+      return null
+    }
+    render(createElement(StoreProbe))
+    expect(probe).toBeTruthy()
+    expect(probe).not.toBe(getDefaultStore())
+  })
+
+  it('SMOKE (r3 store topology): a picked draft the hook writes is readable by a ChatPage-style reader', () => {
+    // Reader mirrors ChatPage.tsx: useAtomValue(elementDraftRefsAtomFamily(id))
+    // inside the provider tree — the composer chips read the draft this way.
+    let seen: unknown
+    function ChatDraftReader({ sessionId }: { sessionId: string }) {
+      seen = useAtomValue(elementDraftRefsAtomFamily(sessionId))
+      return null
+    }
+
+    mount('sess-a')
+    pickerHandler!({ kind: 'picked', reference: makeReference('sess-a') })
+
+    // The write is visible through the provider store — the same store the
+    // ChatPage reader resolves against.
+    const view = render(createElement(ChatDraftReader, { sessionId: 'sess-a' }))
+    expect(seen).toHaveLength(1)
+    view.unmount()
+
+    // The trap store stayed empty: with the pre-fix getDefaultStore() write
+    // the draft landed THERE, the reader above saw [], and this is the
+    // assertion that fails.
+    expect(getDefaultStore().get(elementDraftRefsAtomFamily('sess-a'))).toHaveLength(0)
   })
 })

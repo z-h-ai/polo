@@ -16,10 +16,9 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react'
-import { useSetAtom } from 'jotai'
+import { useSetAtom, useStore } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getDefaultStore } from 'jotai'
 import type { BrowserInstanceInfo, BrowserElementPickerEvent } from '../../shared/types'
 import {
   browserInstancesMapAtom,
@@ -60,19 +59,27 @@ export function useSidebarBrowserSync({
   const setInstances = useSetAtom(setBrowserInstancesAtom)
   const updateInstance = useSetAtom(updateBrowserInstanceAtom)
   const removeInstance = useSetAtom(removeBrowserInstanceAtom)
+  // The ambient jotai store (the <JotaiProvider> context store) — NOT
+  // getDefaultStore(): the production provider creates its own store, so
+  // writes to the default store are invisible to useAtomValue readers
+  // (POO-135 r3). Callbacks reach it through a ref so they never act on a
+  // stale closure, same discipline as onSelectSessionRef below.
+  const store = useStore()
+  const storeRef = useRef(store)
+  storeRef.current = store
   const onSelectSessionRef = useRef(onSelectSession)
   onSelectSessionRef.current = onSelectSession
   const currentSessionIdRef = useRef(currentSessionId)
   currentSessionIdRef.current = currentSessionId
 
   const visibleCountExcluding = useCallback((excludedId: string): number => {
-    const store = getDefaultStore()
+    const store = storeRef.current
     const rest = Array.from(store.get(browserInstancesMapAtom).values()).filter((i) => i.id !== excludedId)
     return filterSidebarBrowserInstances(rest, currentSessionIdRef.current, activeWorkspaceId, remoteWorkspaceId).length
   }, [activeWorkspaceId, remoteWorkspaceId])
 
   // Initial mirror + event subscriptions. Handlers read fresh state through
-  // the default store so callbacks never act on stale closures.
+  // the context store (via storeRef) so callbacks never act on stale closures.
   useEffect(() => {
     const api = window.electronAPI?.browserPane
     if (!api?.list || !window.electronAPI.isChannelAvailable?.('browser-pane:list')) return
@@ -87,7 +94,7 @@ export function useSidebarBrowserSync({
       // System-closed (or toolbar-hidden) while the sidebar slot showed this
       // instance detached → return it to the sidebar. The instance stays
       // alive; URL, history and draft references are untouched.
-      const store = getDefaultStore()
+      const store = storeRef.current
       if (
         info.hostMode !== 'embedded' &&
         !info.isVisible &&
@@ -102,7 +109,7 @@ export function useSidebarBrowserSync({
 
     const offRemoved = api.onRemoved((id) => {
       removeInstance(id)
-      const store = getDefaultStore()
+      const store = storeRef.current
       if (store.get(sidebarBrowserInstanceIdAtom) === id) {
         store.set(sidebarBrowserInstanceIdAtom, null)
       }
@@ -124,13 +131,13 @@ export function useSidebarBrowserSync({
   }, [removeInstance, setInstances, t, updateInstance])
 
   const appendDraftReference = useCallback((sessionId: string, event: Extract<BrowserElementPickerEvent, { kind: 'picked' }>) => {
-    const store = getDefaultStore()
+    const store = storeRef.current
     const family = elementDraftRefsAtomFamily(sessionId)
     store.set(family, [...store.get(family), event.reference])
   }, [])
 
   const handlePickerEvent = useCallback((event: BrowserElementPickerEvent) => {
-    const store = getDefaultStore()
+    const store = storeRef.current
     if (event.kind === 'picked') {
       const target = event.reference.sessionId
       if (target) {
@@ -172,7 +179,7 @@ export function useSidebarBrowserSync({
   // silently re-points at another chat.
   useEffect(() => {
     if (!currentSessionId) return
-    const store = getDefaultStore()
+    const store = storeRef.current
     const picking = store.get(activeElementPickingAtom)
     if (!picking || picking.originSessionId === currentSessionId) return
     store.set(activeElementPickingAtom, null)
@@ -188,7 +195,7 @@ export function useSidebarBrowserSync({
       if (saved.ownerSessionId && saved.ownerSessionId !== currentSessionIdRef.current) {
         onSelectSessionRef.current(saved.ownerSessionId)
       }
-      const store = getDefaultStore()
+      const store = storeRef.current
       const id = await api.create({ show: false, bindToSessionId: saved.ownerSessionId ?? undefined })
       store.set(sidebarBrowserOpenAtom, true)
       store.set(sidebarBrowserInstanceIdAtom, id)
@@ -205,7 +212,7 @@ export function useSidebarBrowserSync({
 
   /** Terminate a browser; ending the LAST visible one shows the reopen toast. */
   const terminateBrowser = useCallback(async (instance: BrowserInstanceInfo): Promise<void> => {
-    const store = getDefaultStore()
+    const store = storeRef.current
     const api = window.electronAPI?.browserPane
     if (!api) return
     try {

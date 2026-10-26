@@ -28,8 +28,7 @@
 import * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { getDefaultStore } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { motion, useReducedMotion } from 'motion/react'
 import {
@@ -153,22 +152,26 @@ export function RightSidebarPane({
   // it always shows that kind regardless of the stored tab.
   const effectiveTab = canvasApp && browserReachable ? storedTab : browserReachable ? 'browser' : 'canvas'
 
+  // The ambient jotai store (the <JotaiProvider> context store), NOT
+  // getDefaultStore() — a default-store write lands in a different store and
+  // the useAtomValue readers above would never see it (POO-135 r3). Same
+  // discipline as GenUiCanvasBridge.
+  const store = useStore()
+
   /** POO-135 r1: leaving the browser content (tab/instance switch) disarms an
    * active picker — the page-side picking never silently re-points. */
   const disarmArmedPicker = useCallback(() => {
-    const store = getDefaultStore()
     const picking = store.get(activeElementPickingAtom)
     if (!picking) return
     store.set(activeElementPickingAtom, null)
     void window.electronAPI?.browserPane?.setElementPicking?.(picking.instanceId, false).catch(() => {})
-  }, [])
+  }, [store])
 
   const handleTabSwitch = useCallback((tab: 'canvas' | 'browser') => {
     disarmArmedPicker()
-    const store = getDefaultStore()
     if (tab === 'browser') store.set(sidebarBrowserOpenAtom, true)
     store.set(rightPaneTabAtom, tab)
-  }, [disarmArmedPicker])
+  }, [disarmArmedPicker, store])
 
   // POO-135 验收修复 (SB-CANVAS-OUT): canvas popout controls. Main owns the
   // window and broadcasts the reconciling state; the sidebar only requests.
@@ -457,6 +460,12 @@ function SidebarBrowserSection({
   const targetSessionId = resolvePickTargetSessionId(instance, currentSessionId)
   const isPicking = Boolean(instance && picking?.instanceId === instance.id)
 
+  // The ambient jotai store (the <JotaiProvider> context store), NOT
+  // getDefaultStore() — the useAtomValue readers in RightSidebarPane scope to
+  // the provider store, so a default-store write would be invisible there
+  // (POO-135 r3).
+  const store = useStore()
+
   const handleCreate = useCallback(async () => {
     const api = window.electronAPI?.browserPane
     if (!api) return
@@ -464,14 +473,13 @@ function SidebarBrowserSection({
       // Spec v0.7 suggested behavior 5: a manual create stays workspace-
       // visible and is NOT bound to the current session (no forced isolation).
       const id = await api.create({ show: false })
-      const store = getDefaultStore()
       store.set(sidebarBrowserOpenAtom, true)
       store.set(sidebarBrowserInstanceIdAtom, id)
       await api.embed(id)
     } catch {
       toast.error(t('toast.failedToCreateBrowser'))
     }
-  }, [t])
+  }, [store, t])
 
   const handleEmbed = useCallback(async (id: string) => {
     try {
@@ -482,17 +490,19 @@ function SidebarBrowserSection({
   }, [t])
 
   const handleDetach = useCallback(async (id: string) => {
+    // r3 (spec 28): detaching cancels an armed picker — the popup hosts a
+    // fresh webview and must not inherit a live picking session.
+    onSwitchAway()
     try {
       await window.electronAPI?.browserPane?.detachToPopup?.(id)
     } catch {
       toast.error(t('toast.failedToDetachBrowser'))
     }
-  }, [t])
+  }, [onSwitchAway, t])
 
   /** POO-135 r1 (spec suggested behavior 4): hide without destroying — the
    * instance object, its page and its history all stay alive in Main. */
   const handleHide = useCallback(async (id: string) => {
-    const store = getDefaultStore()
     onSwitchAway()
     try {
       await window.electronAPI?.browserPane?.unembed?.(id)
@@ -511,7 +521,7 @@ function SidebarBrowserSection({
         },
       },
     })
-  }, [onSwitchAway, t])
+  }, [onSwitchAway, store, t])
 
   if (!instance) {
     return <SidebarBrowserEmptyState onCreate={handleCreate} />
@@ -650,6 +660,10 @@ function BrowserNavLayer({ instance, targetSessionId, currentSessionId, isPickin
   const { t } = useTranslation()
   const [urlDraft, setUrlDraft] = useState(instance.url ?? '')
   const navigatingRef = useRef(false)
+  // The ambient jotai store (the <JotaiProvider> context store), NOT
+  // getDefaultStore() — the picking readers scope to the provider store
+  // (POO-135 r3).
+  const store = useStore()
 
   // Follow navigations the user made inside the page (link clicks, redirects).
   useEffect(() => {
@@ -675,7 +689,6 @@ function BrowserNavLayer({ instance, targetSessionId, currentSessionId, isPickin
 
   const togglePicking = useCallback(async () => {
     const api = window.electronAPI?.browserPane
-    const store = getDefaultStore()
     if (!api?.setElementPicking || !targetSessionId) return
     if (isPicking) {
       store.set(activeElementPickingAtom, null)
@@ -697,7 +710,7 @@ function BrowserNavLayer({ instance, targetSessionId, currentSessionId, isPickin
       store.set(activeElementPickingAtom, null)
       toast.error(t('browserPane.elementPicker.startFailed'))
     }
-  }, [currentSessionId, instance.id, isPicking, targetSessionId, t])
+  }, [currentSessionId, instance.id, isPicking, store, targetSessionId, t])
 
   return (
     <div
