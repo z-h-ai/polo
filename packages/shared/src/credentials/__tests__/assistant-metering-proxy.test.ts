@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { createServer, type Server } from 'node:http'
 import { createHash } from 'node:crypto'
 import { startInvocationCredentialProxy, type InvocationCredentialProxy } from '../invocation-credential-proxy'
+import { INSUFFICIENT_CREDIT_ERROR_CODES } from '../insufficient-credit-codes'
 
 const servers: Server[] = []
 const proxies: InvocationCredentialProxy[] = []
@@ -49,6 +50,18 @@ test('managed request is denied before upstream consumption', async () => {
   const response = await f.send(); await response.text()
   expect(response.ok).toBe(false)
   expect(f.seen).toHaveLength(0)
+})
+test('every backend spelling of an exhausted allowance classifies as insufficient credit', async () => {
+  for (const errorCode of INSUFFICIENT_CREDIT_ERROR_CODES) {
+    const f = await fixture({ beforeSend: async () => { throw Object.assign(new Error('denied'), { errorCode }) } })
+    const response = await f.send(); const body = await response.text()
+    expect(response.status).toBe(402)
+    expect(body).toContain('POLO_INSUFFICIENT_CREDIT')
+  }
+  const unavailable = await fixture({ beforeSend: async () => { throw Object.assign(new Error('denied'), { errorCode: 'validation_error' }) } })
+  const response = await unavailable.send(); const body = await response.text()
+  expect(response.status).toBe(502)
+  expect(body).toContain('Credential proxy upstream request failed')
 })
 test('each real request gets private admission and provider-final usage; cache tokens are disjoint', async () => {
   const admissions: any[] = [], receipts: any[] = []
