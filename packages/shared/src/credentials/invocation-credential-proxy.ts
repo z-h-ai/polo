@@ -10,6 +10,7 @@ import { request as httpsRequest } from 'node:https'
 import { createHash, randomBytes } from 'node:crypto'
 import { ManagedBillingObservation, newManagedHostRequestId, readManagedRequest, type ManagedBillingHooks, type ManagedBillingLease } from './managed-billing-observation'
 import { parseProviderCorrelation } from '../admin/provider-observation'
+import { isInsufficientCreditCode } from './insufficient-credit-codes'
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -453,7 +454,7 @@ export async function startInvocationCredentialProxy(
     } catch (error) {
       await complete(false).catch(() => {})
       const code = (error as { errorCode?: string })?.errorCode
-      const insufficientCredit = !!options.billing && ['insufficient_credit', 'INSUFFICIENT_BALANCE'].includes(code ?? '')
+      const insufficientCredit = !!options.billing && isInsufficientCreditCode(code)
       if (!response.headersSent) response.writeHead(insufficientCredit ? 402 : 502, { 'content-type': 'text/plain; charset=utf-8' })
       response.end(insufficientCredit ? `POLO_INSUFFICIENT_CREDIT: ${setupI18n().t('billing.insufficientCredit')}` : 'Credential proxy upstream request failed')
     } finally { done() }

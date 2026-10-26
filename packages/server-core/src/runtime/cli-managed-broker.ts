@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { z } from 'zod'
 import { hasManagedCliMarkers, getAdminUrl, getLlmConnection, sameDesktopManagedOwner, type DesktopManagedOwner, type DesktopManagedDescriptor, type LlmConnection } from '@polo-ai/shared/config'
-import { getCredentialManager, startInvocationCredentialProxy, type InvocationCredentialProxy } from '@polo-ai/shared/credentials'
+import { getCredentialManager, startInvocationCredentialProxy, isInsufficientCreditCode, type InvocationCredentialProxy } from '@polo-ai/shared/credentials'
 import { RootedSessionStorage } from '@polo-ai/shared/sessions'
 import { processIdentityMatches } from '@polo-ai/shared/utils'
 import { PRODUCT_SPACE_CONTRACT_VERSION, ProductSpaceIdSchema, ProductSpaceExecutionScopeSchema } from '@polo-ai/shared/product-spaces'
@@ -169,7 +169,7 @@ export class CliManagedBroker {
         try { return await hooks.beforeSend(facts) }
         catch (error) {
           const raw = (error as { errorCode?: string })?.errorCode
-          const code = ['insufficient_credit', 'insufficient_quota', 'budget_exceeded', 'INSUFFICIENT_BALANCE'].includes(raw ?? '') ? 'POLO_INSUFFICIENT_CREDIT' : 'POLO_BILLING_UNAVAILABLE'
+          const code = isInsufficientCreditCode(raw) ? 'POLO_INSUFFICIENT_CREDIT' : 'POLO_BILLING_UNAVAILABLE'
           if (lease) {
             this.server.push('cliManaged.failed', { to: 'client', clientId: lease.clientId }, { leaseId: descriptor.leaseId, code })
             void this.stop(lease)
