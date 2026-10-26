@@ -480,7 +480,7 @@ export function MyCirclesPage() {
                 value={filter}
                 onChange={event => setFilter(event.target.value as MyCirclesEntitlementFilter)}
                 data-testid="my-circles-filter"
-                className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground"
+                className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[3px]"
               >
                 <option value="all">{t('poo70.c3.filter.all')}</option>
                 <option value="valid">{t('poo70.c3.filter.valid')}</option>

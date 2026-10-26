@@ -613,9 +613,13 @@ html[data-font="inter"] {
     background: var(--muted-foreground);
   }
 
-  /* Focus ring styles - override Tailwind ring utilities */
+  /* Focus ring styles - keyboard focus stays visible app-wide (review #2).
+     Base treatment mirrors the design-system workbench focus frame
+     (accent outline, 3px offset). Ring utilities keep binding to the theme
+     ring tokens so components that layer a ring still resolve it. */
   *:focus-visible {
-    outline: none;
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
     --tw-ring-offset-width: var(--ring-offset);
     --tw-ring-width: var(--ring-width);
     --tw-ring-color: var(--ring);

@@ -507,7 +507,7 @@ export function HomePage() {
               value={sourceFilter}
               onChange={event => setSourceFilter(event.target.value)}
               data-testid="home-directory-source"
-              className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground"
+              className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[3px]"
             >
               <option value="all">{t('poo70.h3.home.sourceAll')}</option>
               {sourceOptions.map(option => (
@@ -521,7 +521,7 @@ export function HomePage() {
               value={sortMode}
               onChange={event => setSortMode(event.target.value as HomeAppSortMode)}
               data-testid="home-directory-sort"
-              className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground"
+              className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[3px]"
             >
               <option value="recent">{t('poo70.h3.home.sortRecent')}</option>
               <option value="frequent">{t('poo70.h3.home.sortFrequent')}</option>
