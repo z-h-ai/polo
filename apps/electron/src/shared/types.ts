@@ -480,6 +480,15 @@ export type AdminPhoneAuthChallengeConfigResult =
     }
   | ({ success: false } & AdminRpcErrorPayload)
 
+/**
+ * POO-151: main↔preload channels hosting the SMS-login challenge issuer page
+ * in an app-owned window (see src/main/phone-auth-challenge-window.ts).
+ * Shared so the main handler and the preload controller cannot drift.
+ */
+export const PHONE_AUTH_CHALLENGE_OPEN_CHANNEL = '__phone-auth-challenge:open'
+export const PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL = '__phone-auth-challenge:close'
+export const PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL = '__phone-auth-challenge:closed'
+
 export type AdminSendPhoneAuthCodeResult =
   | {
       success: true
@@ -491,7 +500,13 @@ export type AdminSendPhoneAuthCodeResult =
 
 export type AdminPhoneAuthChallengeResult =
   | { success: true; challengeToken: string }
-  | { success: false; errorCode: 'phone_auth_configuration_error' }
+  | {
+      success: false
+      errorCode:
+        | 'phone_auth_configuration_error'
+        | 'phone_auth_challenge_failed'
+        | 'phone_auth_challenge_cancelled'
+    }
 
 export type AdminVerifyPhoneAuthCodeResult =
   | { success: true; user: AdminUser; isNewUser: boolean }

@@ -151,9 +151,11 @@ describe('phone auth challenge provider', () => {
       },
     )
 
+    // POO-151: a delivered-but-invalid callback is a failed challenge, not a
+    // configuration problem — the retryable copy, not "temporarily unavailable".
     expect(result).toEqual({
       success: false,
-      errorCode: 'phone_auth_configuration_error',
+      errorCode: 'phone_auth_challenge_failed',
     })
     expect(close).toHaveBeenCalledTimes(1)
   })
@@ -175,5 +177,153 @@ describe('phone auth challenge provider', () => {
       errorCode: 'phone_auth_configuration_error',
     })
     expect(openExternal).not.toHaveBeenCalled()
+  })
+})
+
+describe('phone auth challenge in-app window (POO-151)', () => {
+  const httpsDiscovery = {
+    success: true,
+    type: 'browser_redirect',
+    issuerUrl: 'https://challenge.example.com/issue',
+  }
+
+  function createDeferredCallback() {
+    let resolveCallback!: (payload: { query: Record<string, string> }) => void
+    const promise = new Promise<{ query: Record<string, string> }>(resolve => {
+      resolveCallback = resolve
+    })
+    return { promise, resolveCallback }
+  }
+
+  function createController(openImpl?: (url: string) => Promise<void>) {
+    let closedListener: (() => void) | null = null
+    return {
+      open: mock(async (url: string) => {
+        await openImpl?.(url)
+      }),
+      close: mock(async () => {}),
+      onClosed: mock((listener: () => void) => {
+        closedListener = listener
+        return () => {
+          closedListener = null
+        }
+      }),
+      emitClosed: () => closedListener?.(),
+    }
+  }
+
+  function createDiscoveryClient() {
+    return {
+      invoke: mock(async () => ({ ...httpsDiscovery })),
+    }
+  }
+
+  it('hosts the issuer in-app, resolves the token and closes the window', async () => {
+    const { promise, resolveCallback } = createDeferredCallback()
+    const closeCallback = mock(() => {})
+    // The provider completes the challenge in the hidden window and the
+    // loopback callback server receives the state-bound code.
+    const controller = createController(async url => {
+      const parsed = new URL(url)
+      expect(parsed.origin + parsed.pathname).toBe('https://challenge.example.com/issue')
+      expect(parsed.searchParams.get('redirect_uri')).toStartWith('http://localhost:')
+      expect(parsed.searchParams.get('client_id')).toBe('polo-electron')
+      resolveCallback({
+        query: { code: 'in-app-issued-token', state: parsed.searchParams.get('state')! },
+      })
+    })
+    const result = await acquirePhoneAuthChallenge(
+      createDiscoveryClient(),
+      {
+        createCallback: async () => ({ promise, url: 'http://localhost:6477', close: closeCallback }),
+        openExternal: mock(async () => {
+          throw new Error('system browser must not be used when hosting in-app')
+        }),
+        challengeWindow: controller,
+      },
+    )
+
+    expect(result).toEqual({ success: true, challengeToken: 'in-app-issued-token' })
+    expect(controller.open).toHaveBeenCalledTimes(1)
+    expect(controller.close).toHaveBeenCalledTimes(1)
+    expect(closeCallback).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels at once when the user closes the challenge window', async () => {
+    const { promise } = createDeferredCallback()
+    const controller = createController(async () => {
+      controller.emitClosed()
+    })
+    const result = await acquirePhoneAuthChallenge(
+      createDiscoveryClient(),
+      {
+        createCallback: async () => ({ promise, url: 'http://localhost:6477', close: mock(() => {}) }),
+        openExternal: mock(async () => {}),
+        challengeWindow: controller,
+      },
+    )
+
+    expect(result).toEqual({
+      success: false,
+      errorCode: 'phone_auth_challenge_cancelled',
+    })
+    expect(controller.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('grades an in-app challenge timeout as a failed challenge', async () => {
+    const { promise } = createDeferredCallback()
+    const controller = createController()
+    const result = await acquirePhoneAuthChallenge(
+      createDiscoveryClient(),
+      {
+        createCallback: async () => ({ promise, url: 'http://localhost:6477', close: mock(() => {}) }),
+        openExternal: mock(async () => {}),
+        challengeWindow: controller,
+        timeoutMs: 20,
+      },
+    )
+
+    expect(result).toEqual({
+      success: false,
+      errorCode: 'phone_auth_challenge_failed',
+    })
+    expect(controller.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps configuration grading when the in-app window cannot open', async () => {
+    const { promise } = createDeferredCallback()
+    const controller = createController(async () => {
+      throw new Error('ipc channel unavailable')
+    })
+    const result = await acquirePhoneAuthChallenge(
+      createDiscoveryClient(),
+      {
+        createCallback: async () => ({ promise, url: 'http://localhost:6477', close: mock(() => {}) }),
+        openExternal: mock(async () => {}),
+        challengeWindow: controller,
+      },
+    )
+
+    expect(result).toEqual({
+      success: false,
+      errorCode: 'phone_auth_configuration_error',
+    })
+  })
+
+  it('does not open a window when discovery fails closed', async () => {
+    const controller = createController()
+    const result = await acquirePhoneAuthChallenge(
+      { invoke: mock(async () => ({ success: false })) },
+      {
+        openExternal: mock(async () => {}),
+        challengeWindow: controller,
+      },
+    )
+
+    expect(result).toEqual({
+      success: false,
+      errorCode: 'phone_auth_configuration_error',
+    })
+    expect(controller.open).not.toHaveBeenCalled()
   })
 })

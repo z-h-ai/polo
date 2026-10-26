@@ -161,4 +161,49 @@ describe('admin preload RPC chain', () => {
     })
     expect(openExternal).toHaveBeenCalledTimes(1)
   })
+
+  it('routes the challenge through the in-app window when provided (POO-151)', async () => {
+    let resolveCallback!: (payload: { query: Record<string, string> }) => void
+    const callbackPromise = new Promise<{ query: Record<string, string> }>(resolve => {
+      resolveCallback = resolve
+    })
+    const openExternal = mock(async () => {})
+    const controller = {
+      open: mock(async (url: string) => {
+        const parsed = new URL(url)
+        resolveCallback({
+          query: { code: 'in-app-token', state: parsed.searchParams.get('state')! },
+        })
+      }),
+      close: mock(async () => {}),
+      onClosed: mock((_listener: () => void) => () => {}),
+    }
+    const api = buildAdminPreloadApi(
+      {
+        invoke: mock(async () => ({
+          success: true,
+          type: 'browser_redirect',
+          issuerUrl: 'https://challenge.example.com/issue',
+        })),
+        on: mock(() => () => {}),
+      },
+      {
+        createCallback: async () => ({
+          promise: callbackPromise,
+          url: 'http://localhost:6477',
+          close: mock(() => {}),
+        }),
+        openExternal,
+        challengeWindow: controller,
+      },
+    )
+
+    await expect(api.adminAcquirePhoneAuthChallenge()).resolves.toEqual({
+      success: true,
+      challengeToken: 'in-app-token',
+    })
+    expect(controller.open).toHaveBeenCalledTimes(1)
+    expect(controller.close).toHaveBeenCalledTimes(1)
+    expect(openExternal).not.toHaveBeenCalled()
+  })
 })

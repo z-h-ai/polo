@@ -22,6 +22,7 @@ import type { ApiSetupMethod, OnboardingState } from '@/components/onboarding'
 import type { AdminUser } from '@polo-ai/shared/admin/types'
 import type {
   AdminLoginResult,
+  AdminPhoneAuthChallengeResult,
   AdminSendPhoneAuthCodeResult,
   AdminVerifyPhoneAuthCodeResult,
   SetupNeeds,
@@ -288,6 +289,17 @@ describe('admin onboarding flow', () => {
       errorCode: 'invalid_credentials',
       message: 'challenge verifier secret detail',
     })).toBe('Verification challenge failed. Please try again.')
+
+    // POO-151: a failed/timed-out or user-closed in-app challenge shares the
+    // retryable challenge copy, not "temporarily unavailable".
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'phone_auth_challenge_failed',
+    })).toBe('Verification challenge failed. Please try again.')
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'phone_auth_challenge_cancelled',
+    })).toBe('Verification challenge failed. Please try again.')
   })
 
   it('maps all 5xx login and phone failures before business codes or messages', () => {
@@ -313,9 +325,10 @@ describe('admin onboarding flow', () => {
 
   it('falls back to password login when no real challenge issuer is configured', () => {
     expect(resolvePhoneAuthAvailability(true, undefined, true)).toBe(false)
-    expect(resolvePhoneAuthAvailability(false, async () => 'signed-token', true)).toBe(false)
-    expect(resolvePhoneAuthAvailability(true, async () => 'signed-token', false)).toBe(false)
-    expect(resolvePhoneAuthAvailability(true, async () => 'signed-token', true)).toBe(true)
+    const provider = async (): Promise<AdminPhoneAuthChallengeResult> => ({ success: true, challengeToken: 'signed-token' })
+    expect(resolvePhoneAuthAvailability(false, provider, true)).toBe(false)
+    expect(resolvePhoneAuthAvailability(true, provider, false)).toBe(false)
+    expect(resolvePhoneAuthAvailability(true, provider, true)).toBe(true)
   })
 
   it('does not send a code without an issuer-signed challenge token', async () => {
@@ -343,12 +356,47 @@ describe('admin onboarding flow', () => {
 
     const result = await sendPhoneAuthCodeWithChallenge(
       '13800138000',
-      async () => 'issuer-signed-opaque-token',
+      async () => ({ success: true, challengeToken: 'issuer-signed-opaque-token' }),
       send,
     )
 
     expect(result).toMatchObject({ success: true, resendAfter: 47 })
     expect(send).toHaveBeenCalledWith('13800138000', 'issuer-signed-opaque-token')
+  })
+
+  for (const errorCode of [
+    'phone_auth_configuration_error',
+    'phone_auth_challenge_failed',
+    'phone_auth_challenge_cancelled',
+  ] as const) {
+    it(`preserves ${errorCode} without sending an SMS`, async () => {
+      const send = mock(async () => ({ success: true as const, accepted: true, expiresIn: 300, resendAfter: 60 }))
+      const result = await sendPhoneAuthCodeWithChallenge(
+        '13800138000',
+        async () => ({ success: false, errorCode }),
+        send,
+      )
+      expect(result).toEqual({ success: false, errorCode })
+      expect(mapAdminPhoneAuthError(result)).toBe(i18n.t(
+        errorCode === 'phone_auth_configuration_error'
+          ? 'onboarding.adminLogin.phoneAuthUnavailable'
+          : 'onboarding.adminLogin.challengeFailed',
+      ))
+      expect(send).not.toHaveBeenCalled()
+    })
+  }
+
+  it('rejects empty challenge tokens and thrown providers without sending an SMS', async () => {
+    const send = mock(async () => ({ success: true as const, accepted: true, expiresIn: 300, resendAfter: 60 }))
+    for (const provider of [
+      async (): Promise<AdminPhoneAuthChallengeResult> => ({ success: true, challengeToken: '  ' }),
+      async (): Promise<AdminPhoneAuthChallengeResult> => { throw new Error('challenge failed') },
+    ]) {
+      expect(await sendPhoneAuthCodeWithChallenge('13800138000', provider, send)).toEqual({
+        success: false, errorCode: 'phone_auth_challenge_failed',
+      })
+    }
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('moves from kicked back to admin-login when relogin is requested', () => {
@@ -539,7 +587,7 @@ function renderAdminLoginHooks(
     onComplete?: () => void
     onDismiss?: () => void
     onConfigSaved?: () => void
-    phoneAuthChallengeProvider?: () => Promise<string | null>
+    phoneAuthChallengeProvider?: () => Promise<AdminPhoneAuthChallengeResult>
     initialStep?: 'welcome' | 'admin-login'
   } = {},
 ) {
@@ -644,7 +692,7 @@ describe('admin login session fencing (hook)', () => {
     const failure = { success: false as const, errorCode: 'TIMEOUT', message: 'Admin request timed out' }
     const send = mock(async () => failure)
     const verify = mock(async () => failure)
-    const challenge = mock(async () => 'issuer-signed-opaque-token')
+    const challenge = mock(async () => ({ success: true as const, challengeToken: 'issuer-signed-opaque-token' }))
     installElectronApi({ adminSendPhoneAuthCode: send, adminVerifyPhoneAuthCode: verify })
     const { result } = renderAdminLoginHooks({ phoneAuthChallengeProvider: challenge })
     await act(async () => { expect(await result.current.handleAdminSendPhoneCode('13800138000')).toEqual(failure) })
@@ -840,7 +888,7 @@ describe('admin login session fencing (hook)', () => {
     const deferred = makeDeferred<AdminSendPhoneAuthCodeResult>()
     const adminSendPhoneAuthCode = mock(() => deferred.promise)
     installElectronApi({ adminSendPhoneAuthCode })
-    const challengeProvider = mock(async () => 'issuer-signed-opaque-token')
+    const challengeProvider = mock(async () => ({ success: true as const, challengeToken: 'issuer-signed-opaque-token' }))
     const { result } = renderAdminLoginHooks({ phoneAuthChallengeProvider: challengeProvider })
 
     let firstResult: AdminSendPhoneAuthCodeResult | undefined

@@ -20,6 +20,7 @@ import type { LocalModelSubmitData } from '@/components/onboarding/LocalModelSte
 import type { ApiKeySubmitData } from '@/components/apisetup'
 import type { CustomEndpointConfig } from '@config/llm-connections'
 import type {
+  AdminPhoneAuthChallengeResult,
   AdminSendPhoneAuthCodeResult,
   LlmConnectionSetup,
   SetupNeeds,
@@ -46,11 +47,11 @@ interface UseOnboardingOptions {
   /** Set of slugs already in use (for generating unique slugs when creating new) */
   existingSlugs?: Set<string>
   /**
-   * Returns an opaque token issued by the configured human/device challenge.
+   * Returns an opaque token or the configured challenge's structured failure.
    * Electron intentionally has no fallback token: without a real issuer, phone
    * authentication is reported as unavailable and password login remains usable.
    */
-  phoneAuthChallengeProvider?: () => Promise<string | null>
+  phoneAuthChallengeProvider?: () => Promise<AdminPhoneAuthChallengeResult>
 }
 
 interface UseOnboardingReturn {
@@ -222,6 +223,11 @@ export function mapAdminPhoneAuthError(error: unknown): string {
     case 'sms_send_failed':
     case 'phone_auth_configuration_error':
       return i18n.t('onboarding.adminLogin.phoneAuthUnavailable')
+    // POO-151: an in-app challenge that failed, timed out or was closed by
+    // the user is retryable — same copy as a rejected challenge.
+    case 'phone_auth_challenge_failed':
+    case 'phone_auth_challenge_cancelled':
+      return i18n.t('onboarding.adminLogin.challengeFailed')
     case 'NETWORK_ERROR':
     case 'TIMEOUT':
       return i18n.t('onboarding.adminLogin.networkError')
@@ -257,12 +263,19 @@ export async function sendPhoneAuthCodeWithChallenge(
     return { success: false, errorCode: 'phone_auth_configuration_error' }
   }
 
+  let challenge: AdminPhoneAuthChallengeResult
   try {
-    const challengeToken = await challengeProvider()
-    if (!challengeToken?.trim()) {
-      return { success: false, errorCode: 'phone_auth_configuration_error' }
-    }
-    return await send(phone, challengeToken)
+    challenge = await challengeProvider()
+  } catch {
+    return { success: false, errorCode: 'phone_auth_challenge_failed' }
+  }
+  if (!challenge.success) return challenge
+  if (!challenge.challengeToken.trim()) {
+    return { success: false, errorCode: 'phone_auth_challenge_failed' }
+  }
+
+  try {
+    return await send(phone, challenge.challengeToken)
   } catch {
     return { success: false, errorCode: 'phone_auth_configuration_error' }
   }

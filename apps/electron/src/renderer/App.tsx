@@ -1247,8 +1247,7 @@ export default function App() {
   ])
 
   const acquirePhoneAuthChallenge = useCallback(async () => {
-    const result = await window.electronAPI.adminAcquirePhoneAuthChallenge()
-    return result.success ? result.challengeToken : null
+    return window.electronAPI.adminAcquirePhoneAuthChallenge()
   }, [])
 
   const adminAuthCompletion = useAdminAuthCompletion({

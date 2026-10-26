@@ -23,6 +23,7 @@ import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
 import { buildAdminPreloadApi } from './admin-api'
+import type { PhoneAuthChallengeWindowController } from './phone-auth-challenge'
 import { createCallbackServer } from '@polo-ai/shared/auth/callback-server'
 import { CHATGPT_OAUTH_CONFIG } from '@polo-ai/shared/auth/chatgpt-oauth-config'
 import {
@@ -38,7 +39,13 @@ import {
 import type { ConfirmDialogSpec, FileDialogSpec, BrowserCapabilityRequest } from '@polo-ai/server-core/transport'
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { RemoteServerConfig } from '@polo-ai/core/types'
-import { RPC_CHANNELS, type ElectronAPI } from '../shared/types'
+import {
+  PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL,
+  PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL,
+  PHONE_AUTH_CHALLENGE_OPEN_CHANNEL,
+  RPC_CHANNELS,
+  type ElectronAPI,
+} from '../shared/types'
 
 // ---------------------------------------------------------------------------
 // Client interface — common surface for both RoutedClient and WsRpcClient
@@ -335,11 +342,30 @@ const trustedPhoneAuthE2eMode = (
   typeof __POLO_AI_TRUSTED_PHONE_AUTH_E2E__ === 'boolean'
   && __POLO_AI_TRUSTED_PHONE_AUTH_E2E__ === true
 )
+// POO-151: production hosts the challenge issuer page in an app-owned window
+// (无感 unless the provider demands interaction) instead of the system
+// browser. E2E builds keep the open-external mock — no window, no browser.
+const phoneAuthChallengeWindow: PhoneAuthChallengeWindowController | undefined = (
+  trustedPhoneAuthE2eMode
+    ? undefined
+    : {
+        open: url => ipcRenderer.invoke(PHONE_AUTH_CHALLENGE_OPEN_CHANNEL, url),
+        close: () => ipcRenderer.invoke(PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL),
+        onClosed: listener => {
+          const handler = () => listener()
+          ipcRenderer.on(PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL, handler)
+          return () => {
+            ipcRenderer.removeListener(PHONE_AUTH_CHALLENGE_CLOSED_CHANNEL, handler)
+          }
+        },
+      }
+)
 Object.assign(api, buildAdminPreloadApi(client, {
   allowInsecureLoopbackIssuer: trustedPhoneAuthE2eMode,
   openExternal: trustedPhoneAuthE2eMode
     ? url => ipcRenderer.invoke('__phone-auth-e2e:open-external', url)
     : url => shell.openExternal(url),
+  challengeWindow: phoneAuthChallengeWindow,
 }))
 
 // ── performOAuth ─────────────────────────────────────────────────────────
