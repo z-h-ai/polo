@@ -21,7 +21,7 @@ export const PREVIOUS_RELEASE_CONTRACT_SCHEMA_VERSION = 2 as const
 // must bootstrap too, and its own successful release is what first publishes
 // a schema-3 contract. From v0.19.4 on, every tag parses the online contract
 // strictly. Re-anchor to a single version after the next chained release.
-export const BOOTSTRAP_VERSIONS = ['0.21.0'] as const
+export const BOOTSTRAP_VERSIONS = ['0.21.1'] as const
 export const DEFAULT_RELEASE_CONTRACT_URL =
   'https://updates.polo.z-h-ai.com/electron/latest/release-contract.json'
 
