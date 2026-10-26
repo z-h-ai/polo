@@ -141,6 +141,10 @@ let reauthListener: ((value: unknown) => void) | undefined
 const electronApiExplicit: Record<string, unknown> = {
   isDebugMode: async () => false,
   getWindowWorkspace: async () => 'ws-auth-unit',
+  // Route read added in v0.17.0 (routeThroughProductSpace); the preload
+  // fallback shape is `async () => null` — without it the fail-fast proxy
+  // turns the route read into space-error before any screen can render.
+  getWindowLaunchContext: async () => null,
   getSetupNeeds: async () => ({
     isFullyConfigured: authenticated, needsAdminLogin: !authenticated,
     needsCredentials: false, needsBillingConfig: false,
@@ -171,7 +175,7 @@ const electronApiExplicit: Record<string, unknown> = {
   adminLogout: async () => { authenticated = false; return { success: true } },
   clearClaudeOAuthState: async () => {},
   onAdminReauthRequired: (listener: (value: unknown) => void) => { reauthListener = listener; return () => { reauthListener = undefined } },
-  adminSyncConnections: async () => ({ success: true }),
+  adminSyncConnections: mock(async () => ({ success: true })),
   getRuntimeEnvironment: () => 'electron',
   getSources: async () => [],
   listStatuses: async () => [],
@@ -207,7 +211,8 @@ const electronApiExplicit: Record<string, unknown> = {
   isChannelAvailable: () => true,
   getWindowFocusState: async () => ({ focused: true }),
   refreshBadge: () => {},
-  reportWorkbenchReady: () => {},
+  // useWorkbenchReady awaits/.catches the receipt — must be promise-shaped.
+  reportWorkbenchReady: async () => {},
   createSession: async () => { throw new Error('electronAPI fixture: createSession is not reachable in this authentication journey fixture') },
   createEditPopoverSession: async () => { throw new Error('electronAPI fixture: createEditPopoverSession is not reachable') },
   sendMessage: async () => { throw new Error('electronAPI fixture: sendMessage is not reachable') },
@@ -302,6 +307,8 @@ beforeEach(async () => {
   productSpaceState.retryBootstrap.mockImplementation(async () => 'ready')
   ;(electronApiExplicit.adminLogin as ReturnType<typeof mock>).mockClear()
   ;(electronApiExplicit.adminVerifyPhoneAuthCode as ReturnType<typeof mock>).mockClear()
+  ;(electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>).mockReset()
+  ;(electronApiExplicit.adminSyncConnections as ReturnType<typeof mock>).mockImplementation(async () => ({ success: true }))
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: failFastElectronApi() })
   getDefaultStore().set(activeTabIdAtom, HOME_TAB_ID)
   await i18n.changeLanguage('en')
@@ -373,6 +380,29 @@ describe('authenticated onboarding × real App initialization', () => {
     await assertHome()
     expect(productSpaceState.bootstrap).toHaveBeenCalledTimes(1)
     expect(electronApiExplicit.adminLogin).not.toHaveBeenCalled()
+  })
+
+  it('POO-144: bootstrap recovery of the last space publishes the commit and runs the scoped sync on top of the startup sync', async () => {
+    authenticated = true
+    // The real hook commits the recovered selection through
+    // publishCommittedSelection, which dispatches this exact event — mirror it
+    // inside the bootstrap fixture so the App-level subscription sees the
+    // cold-start recovery the same way it sees a switch commit.
+    productSpaceState.bootstrap.mockImplementation(async () => {
+      window.dispatchEvent(new CustomEvent('polo:product-space-changed', {
+        detail: {
+          accountId: FIXTURE_ACCOUNT_ID,
+          productSpaceId: FIXTURE_SPACE_ID,
+          contextKey: `${FIXTURE_ACCOUNT_ID}|${FIXTURE_SPACE_ID}`,
+        },
+      }))
+      return 'ready'
+    })
+    renderApp()
+    await assertHome()
+    // Startup's unscoped sync (fence still null) + the scoped sync for the
+    // recovered space — the second call is the POO-144 subscription firing.
+    expect(electronApiExplicit.adminSyncConnections).toHaveBeenCalledTimes(2)
   })
 
   it('expiry during cold status read rejects its late authenticated receipt', async () => {

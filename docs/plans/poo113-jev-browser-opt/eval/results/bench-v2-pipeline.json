@@ -1,0 +1,58 @@
+{
+ "v2_pipeline": {
+  "mode": "主模型子步骤 + 双路定位 + fuse/可执行校验 + 一致放行 + 危险动词/分歧升级仲裁",
+  "auto_accept": {
+   "n": 113,
+   "correct": 110
+  },
+  "arbitrated": {
+   "n": 22,
+   "correct": 19,
+   "triggers": {
+    "disagree": 15,
+    "agree_danger": 7
+   }
+  },
+  "end_to_end_exact": "129/135",
+  "end_to_end_rate": 0.9556,
+  "arbiter_latency_p50_ms": 10671
+ },
+ "v2_fails": [
+  [
+   "M004",
+   "arb",
+   "点击 @e61",
+   "verb ok, wrong element"
+  ],
+  [
+   "M005",
+   "auto",
+   "select @e11 Price: High - Low",
+   "value diff: 'Price: High - Low' vs '"
+  ],
+  [
+   "M024",
+   "auto",
+   "click @e1",
+   "verb ok, wrong element"
+  ],
+  [
+   "M070",
+   "arb",
+   "click @e25",
+   "verb ok, wrong element"
+  ],
+  [
+   "M095",
+   "auto",
+   "click @e7",
+   "verb ok, wrong element"
+  ],
+  [
+   "M127",
+   "arb",
+   "click @e64",
+   "verb ok, wrong element"
+  ]
+ ]
+}

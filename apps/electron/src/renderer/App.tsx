@@ -8,6 +8,8 @@ import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult } from '../shared/types'
+import type { WebElementReference } from '@polo-ai/core/types'
+import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -15,7 +17,7 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import { AppShellProvider, type AppShellContextType, type ChatAccessIssue, type ChatAccessStatus } from '@/context/AppShellContext'
+import { AppShellProvider, type AppShellContextType, type ChatAccessStatus } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -414,7 +416,19 @@ export default function App() {
   const [workspaceDefaultLlmConnection, setWorkspaceDefaultLlmConnection] = useState<string | undefined>()
   // Global default LLM connection slug (from app config)
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
-  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service'> | null>(null)
+  // Quota/account gates only — the empty-list projections (no-ai-service and
+  // the POO-144 sync states) never route through here.
+  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<'quota-exhausted' | 'account-disabled' | null>(null)
+  // POO-144: space AI-config sync state machine. The startup adminSyncConnections
+  // (below) runs before the Main runtime fence exists, so it is a personal/global
+  // sync; only the committed product space scopes the managed-connection sync.
+  // `syncing`/`failed` shadow the empty-list no-ai-service banner until the
+  // scoped sync lands, fails, or the list turns out to be genuinely empty.
+  const [aiConfigSyncPhase, setAiConfigSyncPhase] = useState<'idle' | 'syncing' | 'failed'>('idle')
+  // Epoch guarding the in-flight scoped sync: every newly triggered sync and
+  // every account-scoped reset bumps it, so a late receipt for a superseded
+  // space or account can never publish over newer state.
+  const aiConfigSyncEpochRef = useRef(0)
   const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null>(null)
   const currentAdminUserIdRef = useRef<string | null>(null)
   const currentAdminUserGenerationRef = useRef(0)
@@ -480,10 +494,18 @@ export default function App() {
       return { issue: runtimeChatAccessIssue }
     }
     if (llmConnectionsLoaded && llmConnections.length === 0) {
+      // POO-144: an empty list is only "no AI service" once the space-scoped
+      // sync is neither in flight nor failed-and-awaiting-retry.
+      if (aiConfigSyncPhase === 'syncing') {
+        return { issue: 'ai-config-syncing' }
+      }
+      if (aiConfigSyncPhase === 'failed') {
+        return { issue: 'ai-config-sync-failed' }
+      }
       return { issue: 'no-ai-service' }
     }
     return null
-  }, [llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue])
+  }, [aiConfigSyncPhase, llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue])
 
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Session selection state — declared with the other account-scoped state so
@@ -595,6 +617,11 @@ export default function App() {
     sessionDraftsRef.current.clear()
     setSession({ selected: null })
     setRuntimeChatAccessIssue(null)
+    // POO-144: the leaving account's in-flight scoped sync must not publish
+    // into the next one — bump the epoch (its receipt is dropped) and reset
+    // the banner state machine to idle.
+    aiConfigSyncEpochRef.current += 1
+    setAiConfigSyncPhase('idle')
     setWorkspaces([])
     setWindowWorkspaceId(null)
     setLlmConnections([])
@@ -990,14 +1017,22 @@ export default function App() {
   }, [])
 
   // Refresh LLM connections from config (called on workspace change and after connection updates)
-  const refreshLlmConnections = useCallback(async () => {
+  // POO-144 fix r1: a scoped sync passes the epochs captured before its
+  // receipt — if the space switched (sync epoch bumped) or the account session
+  // ended while the list RPC was in flight, the stale list must not land.
+  // Shared callers pass no guard and keep the unconditional write.
+  const refreshLlmConnections = useCallback(async (guard?: { syncEpoch: number; sessionEpoch: number }) => {
     const connections = await window.electronAPI.listLlmConnectionsWithStatus()
+    const guardStale = () => guard !== undefined
+      && (aiConfigSyncEpochRef.current !== guard.syncEpoch || accountSessionEpochRef.current !== guard.sessionEpoch)
+    if (guardStale()) return
     setLlmConnections(connections)
     setLlmConnectionsLoaded(true)
     setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     // Also refresh workspace default
     if (windowWorkspaceId) {
       const settings = await window.electronAPI.getWorkspaceSettings(windowWorkspaceId)
+      if (guardStale()) return
       setWorkspaceDefaultLlmConnection(settings?.defaultLlmConnection)
     }
   }, [resolveDefaultConnectionSlug, windowWorkspaceId])
@@ -1471,6 +1506,86 @@ export default function App() {
     return subscribeToAdminAuthFailures(handleAdminAuthFailure)
   }, [handleAdminAuthFailure])
 
+  // POO-144: one scoped admin-connection sync per committed product space.
+  // The startup sync above runs while the Main runtime fence is still null
+  // (personal/global only), and the space-commit event previously had zero
+  // listeners — so managed space connections never arrived until the user
+  // synced by hand. The hook publishes 'polo:product-space-changed' after
+  // every committed selection (bootstrap recovery, switch commit, re-login),
+  // which is exactly the scope this sync follows.
+  const runScopedAiConfigSync = useCallback(async () => {
+    const syncEpoch = ++aiConfigSyncEpochRef.current
+    const sessionEpoch = accountSessionEpochRef.current
+    setAiConfigSyncPhase('syncing')
+    try {
+      const syncResult = await window.electronAPI.adminSyncConnections()
+      // A newer sync (fast space switch), an account exit, or a superseded
+      // session owns the state now — this receipt is dropped, never published.
+      if (aiConfigSyncEpochRef.current !== syncEpoch) return
+      if (accountSessionEpochRef.current !== sessionEpoch) return
+      if (!syncResult.success && isAdminAuthFailureResult(syncResult)) {
+        handleAdminAuthFailure(syncResult)
+        // Explicit local fallback: the phase reset normally arrives via the
+        // handleAdminAuthFailure → resetAccountScopedClientState two-hop chain
+        // (App.tsx resetAccountScopedClientState sets 'idle'); restate it here
+        // so this branch's own return path does not depend on that indirect
+        // side effect. Setting 'idle' twice for the same failure is a no-op.
+        setAiConfigSyncPhase('idle')
+        return
+      }
+      if (!syncResult.success) {
+        // Transient failure (network/5xx): retryable, user-triggered only.
+        setAiConfigSyncPhase('failed')
+        return
+      }
+      // Explicit refresh — do not wait for the Main-side config watcher
+      // broadcast, which may coalesce or land after this receipt. The refresh
+      // itself is fenced to the same captured epochs: a space switch while its
+      // list RPC is in flight must not publish the old space's connections
+      // over the new space's state (AI-SYNC-05).
+      await refreshLlmConnections({ syncEpoch, sessionEpoch })
+      if (aiConfigSyncEpochRef.current !== syncEpoch) return
+      setAiConfigSyncPhase('idle')
+    } catch {
+      if (aiConfigSyncEpochRef.current !== syncEpoch) return
+      setAiConfigSyncPhase('failed')
+    }
+  }, [handleAdminAuthFailure, refreshLlmConnections])
+
+  const scopedAiConfigSyncRef = useRef(runScopedAiConfigSync)
+  scopedAiConfigSyncRef.current = runScopedAiConfigSync
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { accountId?: unknown; productSpaceId?: unknown; contextKey?: unknown }
+        | undefined
+      if (!detail || typeof detail.productSpaceId !== 'string' || !detail.productSpaceId) return
+      // POO-144 fix r2: ignore events committed by a different account. The
+      // hook's publishCommittedSelection always carries a non-empty accountId
+      // (string signature), but a late event from a just-exited account must
+      // not clear this account's list or start its scoped sync. An absent or
+      // empty accountId is allowed through — only a non-empty mismatch ignores.
+      const eventAccountId = typeof detail.accountId === 'string' && detail.accountId
+        ? detail.accountId
+        : null
+      if (eventAccountId && eventAccountId !== currentAdminUserIdRef.current) return
+      // POO-144 fix r1: the previous space's connection list must not stand in
+      // for the target space's availability before its own sync receipt lands
+      // — a stale non-empty list suppresses the syncing/failed banners and
+      // leaves the input enabled. Mark the list stale so the target space
+      // shows the syncing banner until the refresh commits. The cold-start
+      // bootstrap recovery publishes here too; a brief syncing banner during
+      // that re-sync is the expected shape, not a regression. The global
+      // default slug is account-scoped, not space-scoped, so it stays.
+      setLlmConnections([])
+      setWorkspaceDefaultLlmConnection(undefined)
+      void scopedAiConfigSyncRef.current()
+    }
+    window.addEventListener('polo:product-space-changed', handler)
+    return () => window.removeEventListener('polo:product-space-changed', handler)
+  }, [])
+
   // PC-F11 single gate: any ProductSpace DTO reporting contract
   // incompatibility tears down the fence and projections through the hook's
   // trusted transition and renders the upgrade gate.
@@ -1608,7 +1723,7 @@ export default function App() {
             setPendingPermissions(prevPerms => {
               const next = new Map(prevPerms)
               const existingQueue = next.get(sessionId) || []
-              next.set(sessionId, [...existingQueue, effect.request])
+              next.set(sessionId, [...existingQueue.filter(p => p.requestId !== effect.request.requestId), effect.request])
               return next
             })
 
@@ -1703,7 +1818,9 @@ export default function App() {
         setPendingPermissions(prevPerms => {
           if (prevPerms.has(sessionId)) {
             const next = new Map(prevPerms)
-            next.delete(sessionId)
+            const retained = (next.get(sessionId) || []).filter(p => p.browserAction && p.browserAction.phase !== 'awaiting_authorization')
+            if (retained.length) next.set(sessionId, retained)
+            else next.delete(sessionId)
             return next
           }
           return prevPerms
@@ -2122,7 +2239,7 @@ export default function App() {
     runtimeChatAccessIssue,
   ])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => {
     try {
       if (chatAccessStatus) {
         return
@@ -2293,9 +2410,17 @@ export default function App() {
         // (review #12). `undefined` (non-composer callers) keeps the stored
         // scope untouched.
         kbCollectionIds,
+        // POO-135: picked web element references ride the same chain and are
+        // persisted on the stored user message.
+        elementReferences,
         optimisticMessageId: userMessage.id,
         invocationSource: 'desktop',
       })
+      // The send was handed off: drop the composer's draft queue for this
+      // session (FreeFormInput already cleared its copy).
+      if (elementReferences && elementReferences.length > 0) {
+        store.set(elementDraftRefsAtomFamily(sessionId), [])
+      }
     } catch (error) {
       console.error('Failed to send message:', error)
       if (isQuotaExhaustedError(error)) {
@@ -2490,7 +2615,7 @@ export default function App() {
       setPendingPermissions(prev => {
         const next = new Map(prev)
         const queue = next.get(sessionId) || []
-        const remainingQueue = queue.slice(1) // Remove first item
+        const remainingQueue = queue.filter(p => p.requestId !== requestId || (!!options?.browserActionPhase && p.browserAction?.phase !== options.browserActionPhase))
         if (remainingQueue.length === 0) {
           next.delete(sessionId)
         } else {
@@ -2505,7 +2630,7 @@ export default function App() {
       setPendingPermissions(prev => {
         const next = new Map(prev)
         const queue = next.get(sessionId) || []
-        const remainingQueue = queue.slice(1)
+        const remainingQueue = queue.filter(p => p.requestId !== requestId || (!!options?.browserActionPhase && p.browserAction?.phase !== options.browserActionPhase))
         if (remainingQueue.length === 0) {
           next.delete(sessionId)
         } else {
@@ -2929,6 +3054,7 @@ export default function App() {
     llmConnections,
     workspaceDefaultLlmConnection,
     chatAccessStatus,
+    onRetryAiConfigSync: runScopedAiConfigSync,
     currentAdminUser,
     onAdminLogout: handleAdminLogout,
     refreshLlmConnections,
@@ -2981,6 +3107,7 @@ export default function App() {
     llmConnections,
     workspaceDefaultLlmConnection,
     chatAccessStatus,
+    runScopedAiConfigSync,
     currentAdminUser,
     handleAdminLogout,
     refreshLlmConnections,
@@ -3025,9 +3152,9 @@ export default function App() {
     void requestSwitch(productSpaceId)
   }, [requestSwitch])
 
-  const handleRefreshProductSpaces = useCallback(() => {
-    void refreshProductSpaces()
-  }, [refreshProductSpaces])
+  // POO-142: the returned list (or null on failure) is consumed by the
+  // membership-transition banner to release its single-flight busy state.
+  const handleRefreshProductSpaces = useCallback(() => refreshProductSpaces(), [refreshProductSpaces])
 
   const productSpaceContextValue = useMemo<ProductSpaceContextValue | null>(() => {
     if (
@@ -3045,6 +3172,7 @@ export default function App() {
       activeProductSpace: productSpace.activeProductSpace,
       productSpaces: productSpace.productSpaces,
       allProductSpaces: productSpace.allProductSpaces,
+      membershipListVerified: productSpace.membershipListVerified,
       personalProductSpaceId: productSpace.personalProductSpaceId,
       productSpaceContextKey: productSpace.productSpaceContextKey,
       contextVersion: productSpace.contextVersion,
@@ -3078,6 +3206,7 @@ export default function App() {
     productSpace.activeProductSpace,
     productSpace.activeProductSpaceId,
     productSpace.allProductSpaces,
+    productSpace.membershipListVerified,
     productSpace.contextVersion,
     productSpace.personalProductSpaceId,
     productSpace.productSpaceContextKey,

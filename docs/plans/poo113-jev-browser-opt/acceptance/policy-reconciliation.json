@@ -1,0 +1,161 @@
+{
+  "task": "POO-113",
+  "classification": "engineering provenance repair, no policy/model/style change",
+  "originalModelBinding": "82511a07edfbc4fdff09cd836595a7d93580d51b2e922cd05727e9339e35b767",
+  "verifiedCurrentModelBinding": "6ccd89ae6d8991efcc1ef8f4b366f2411f7c1e7896aa67c54a513520ffc6d9ed",
+  "baseline": "253781a3d2712f2a17f47bf91c1ac2fb73f2a71c",
+  "finding": "Inherited alignment digest was already stale at the original task HEAD; it did not match any of the six available model-changing historical versions. Its old model cannot be reconstructed, so no equivalence to that unknown snapshot is claimed.",
+  "reconciliation": "Re-read all six existing scoped confirmation quotes against their authoritative current sections, verify every current bound source, retain all current decisions and rule scope unchanged, and bind this fully rechecked current model. Browser confirmation uses actual renderer components and a separately confirmed task-native reference, not the historical assistant-shell.",
+  "confirmedDecisions": [
+    "D-CURRENT-STYLE",
+    "D-NAV-HEADER",
+    "D-HOME-CIRCLE",
+    "D-ASSISTANT-REUSE",
+    "D-PAGE-VISUAL",
+    "D-POO105-MATERIAL"
+  ],
+  "sourcesVerified": [
+    {
+      "path": "docs/client-journey-review/spec.md",
+      "sha256": "d5233ff5bddd72362ef6c6dd0459b128253ef451e90287c9195fedb6a98264db",
+      "role": "authority"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "sha256": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d",
+      "role": "authority"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "sha256": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
+      "role": "authority"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "sha256": "be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70",
+      "role": "authority"
+    },
+    {
+      "path": "apps/electron/src/renderer/index.css",
+      "sha256": "b3dabc1562cf3a91e45f055935ff749183e87b75a0d9a8158a67948a1cf8eeeb",
+      "role": "implementation"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/g4-product.css",
+      "sha256": "fe62101ae60d6a11021f98af04e20b1eba97920eb41d7f49d4f9751dd6bb0218",
+      "role": "implementation"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/g4-review-record.md",
+      "sha256": "56fdd07ddaf3f5525736b124cac3cdc14ecb6953703283f0a09730effdbd7843",
+      "role": "implementation"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/renderer-index.css",
+      "sha256": "964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/components/workbench-header-scroll.js",
+      "sha256": "56eb0f05806951543eaaf4c0033c7fcc08eae3336ca6010794776f6ca97ab409",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js",
+      "sha256": "a5de1ede777f48032a3d945983bd987c28e42a6cd1f2efd5852e1f8c35a7ab73",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js",
+      "sha256": "dda528141636c0253fe70afaeeb23a9919aa8264e562d63235c77316a6248de7",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js",
+      "sha256": "b26fcc98fb62dc2d9ee91ddbed21a5bd83a23f830b9acea9028a40f747934808",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/references/usage-playbook.md",
+      "sha256": "47cd6163d373d8474c2b869268dccd415447bba15ecfce1fddfbb7dda0809d5b",
+      "role": "authority"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/references/page-baselines.md",
+      "sha256": "37f64e5b0d7c768d30cdbb65c754a8b778ddbfbc2fc9872c77dac40d1592ce7b",
+      "role": "authority"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/references/component-usage.md",
+      "sha256": "f9603d0b71bb0705e06f8a2aec848d56d34c49f8263d56bf96f69a7a56ed23ac",
+      "role": "authority"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/vite.config.mjs",
+      "sha256": "8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/vite.scene-ids.config.mjs",
+      "sha256": "eff52dc6b1854c66cddd6242ad42735092cece0c77a2b197b160caf5e6b03252",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/scene-ids-runner.cjs",
+      "sha256": "4af8277faaf90e266f9a5051f5379d8abde722fb0f9c187f598fd969de9f2975",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/tsconfig.json",
+      "sha256": "fe55756c85d43c98d8776a79b18188dc89dbe873ebf6eb9b5e79ffc8b3f6e0e4",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/build.py",
+      "sha256": "d9d87d3c601a5dd55c81ce813c2d21115ba27c9cec7246d2e923e9813603c8ae",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx",
+      "sha256": "6033e00e1aa89a0e267b84b2df2e8a73117827d0db4bea703e32e149ae81b855",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
+      "sha256": "958a39ebee44cc66a3c674c69d0eaf5cdad27279c338e66d22ffc2d4d42b36ed",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx",
+      "sha256": "3973d12d5b6356c1c3f7c3adcd3aaf805f7351dde4a1e0dbb098b0e4d5c3e227",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scene-ids.ts",
+      "sha256": "95ce8fbb7474bdb0fc408c7cc23ab6dd710f24374d794f896dea824e2b477b9f",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/fixtures.tsx",
+      "sha256": "d5c4761835f8a6a48425169e27abf2a50c518feabd6ecfbb8070705a40c4ee07",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css",
+      "sha256": "3f708acb93832bbb1340748efaa4ae032b0eff163282f5e8c1c6ffb7e16e1cf6",
+      "role": "implementation"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.html",
+      "sha256": "262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc",
+      "role": "implementation"
+    }
+  ],
+  "validation": {
+    "status": "aligned",
+    "unresolved": [],
+    "bases": [
+      "confirmed_design"
+    ]
+  }
+}

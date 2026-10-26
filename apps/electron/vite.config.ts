@@ -49,6 +49,7 @@ export default defineConfig({
         'browser-toolbar': resolve(__dirname, 'src/renderer/browser-toolbar.html'),
         'browser-empty-state': resolve(__dirname, 'src/renderer/browser-empty-state.html'),
         'poloai-protocol-test': resolve(__dirname, 'src/renderer/poloai-protocol-test.html'),
+        'canvas-popout': resolve(__dirname, 'src/renderer/canvas-popout.html'),
       }
     }
   },

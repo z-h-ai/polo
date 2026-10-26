@@ -1,0 +1,19 @@
+## 页面快照
+URL: https://app.example.com/orders
+Title: 我的订单 - 示例应用
+Elements: 6 (text:2, link:3, button:1)
+Focused ref: none, disabled: 0
+
+Elements (6):
+  @e1 [text] "暂无订单"
+  @e2 [text] "下单后可在这里查看物流与发票"
+  @e3 [link] "去逛逛"
+  @e4 [link] "首页"
+  @e5 [link] "帮助中心"
+  @e6 [button] "联系客服"
+
+## 任务
+查看最近一笔订单的详情
+
+## 已执行动作
+（空）

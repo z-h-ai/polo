@@ -1,3 +1,6 @@
+import {appendBrowserActionAudit} from '@polo-ai/shared/sessions/browser-action-audit'
+import {BrowserActionAuthorization,BrowserActionNotDispatched,type BrowserActionScope,type BrowserActionConfirmation} from '@polo-ai/shared/agent/browser-action-authorization'
+import {readBrowserPolicy} from '../runtime/browser-policy'
 import { MANAGED_TOOL_UNSUPPORTED } from '../../../shared/src/agent/tool-execution-policy'
 import { CliExecutionAuthority } from './cli-execution-authority'
 import type { EventSink, RpcServer } from '@polo-ai/server-core/transport'
@@ -11,9 +14,9 @@ import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@polo-ai/server-core/runtime'
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
-import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
+import { chmod, mkdir, open, readFile, realpath, rename, stat as fsStat, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, createBrowserFastDecider, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
 import { fingerprintOwnerToken, getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
@@ -114,7 +117,7 @@ import { resolveAuthEnvVars } from '@polo-ai/shared/config'
 import { getLastApiError } from '@polo-ai/shared/interceptor'
 import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { restoreFiles } from '@polo-ai/shared/utils/bundle-files'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { getCredentialManager, accountToCredentialId } from '@polo-ai/shared/credentials'
 import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId, GENUI_MODEL_CONTEXT_MAX_QUEUE } from '@polo-ai/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
@@ -248,6 +251,19 @@ const METADATA_WRITE_GUARD_MS = 5000
  * the agent reads this, not the end user.
  */
 const PLAN_APPROVAL_MESSAGE = 'Plan approved, please execute.'
+
+// ============================================================================
+// POO-134: Goal state — one authoritative server-side controller per session.
+// ============================================================================
+import { GOAL_VERIFICATION_MAX_FILE_CHARS, buildGoalProjection, GoalController, resolveEvidenceBase, resolveEvidenceInputPath, sha256Hex, summarizeGoalFactInput, type GoalControllerHost, type GoalRuntimeState, type GoalTurnBinding } from './goal-controller'
+import { GOAL_UPDATE_TOOL_NAME, parseGoalUpdateReportPayload, type GoalUpdateReport } from '@polo-ai/session-tools-core'
+import type { GoalProjection, GoalRecord } from '@polo-ai/shared/protocol'
+import { isGoalRunning, isGoalTerminal } from '@polo-ai/shared/protocol'
+
+/** Bounded retention of terminal Goal records per session. */
+const GOAL_HISTORY_LIMIT = 20
+/** Per-file evidence budget for the independent verification material. */
+const GOAL_EVIDENCE_MAX_FILE_BYTES = 2 * 1024 * 1024
 
 // validateSpawnAttachmentPath removed — use shared validateFilePath from @polo-ai/server-core/handlers
 
@@ -887,6 +903,9 @@ interface ManagedSession {
   isProcessing: boolean
   /** Set when user requests stop - allows event loop to drain before clearing isProcessing */
   stopRequested?: boolean
+  /** Cancels host-side browser model requests with their owning turn. */
+  browserFastAbortController?: AbortController
+  browserFastDecider?: ReturnType<typeof createBrowserFastDecider>
   lastMessageAt: number
   streamingText: string
   // Incremented each time a new message starts processing.
@@ -1092,6 +1111,13 @@ interface ManagedSession {
   lastSentAttachments?: FileAttachment[]
   lastSentStoredAttachments?: StoredAttachment[]
   lastSentOptions?: SendMessageOptions
+  /**
+   * POO-134 ICR-1: the continuation identity of the LAST send (undefined for a
+   * user send). Part of the auth-retry snapshot like the parameters above — the
+   * retry replays the SAME kind of send, and the retry's user-message cleanup
+   * must not delete a real message an internal send never created.
+   */
+  lastSentInternalContinuation?: GoalInternalContinuationMeta
   // Flag to prevent infinite retry loops (reset at start of each sendMessage)
   authRetryAttempted?: boolean
   // Flag indicating auth retry is in progress (to prevent complete handler from interfering)
@@ -1176,6 +1202,48 @@ interface ManagedSession {
     /** True after the first matching sendMessage consumes the slot; later matches drop. */
     committed: boolean
   }
+  /**
+   * POO-134: the session's authoritative Goal record. Persisted via
+   * SESSION_PERSISTENT_FIELDS; a non-terminal record means the Goal owns the
+   * session's objective. Undefined after completion/ending (the record moves to
+   * goalHistory). A session JSONL without it is an ordinary chat session.
+   */
+  goal?: GoalRecord
+  /** Terminal Goal records, retained newest-last (bounded by GOAL_HISTORY_LIMIT). */
+  goalHistory?: GoalRecord[]
+  /**
+   * Monotonic per-session projection revision — the ONLY ordering consumers
+   * may trust for goal_projection events. Persisted so a restart never
+   * re-broadcasts a revision a client has already seen.
+   */
+  goalProjectionRevision?: number
+  /**
+   * Runtime-only Goal machinery (turn binding, staged reports, same-turn tool
+   * starts, verification handle). Never persisted — rebuilt per turn and
+   * re-derived on cold start by recoverOnColdStart.
+   */
+  goalRuntime?: GoalRuntimeState
+  /**
+   * POO-134 F2: a plan-review handoff interrupted the turn — the SubmitPlan
+   * review wait is part of the Goal run, NOT a failure. Set when the plan
+   * interrupt fires, read+cleared by the goal's non-complete turn-end hook so
+   * the abort is not mis-attributed as an error. Cleared again when the plan
+   * is approved. Runtime-only.
+   */
+  goalPlanReviewPending?: boolean
+}
+
+/**
+ * POO-134 ICR-1: the per-call identity of a server-scheduled internal
+ * continuation. Constructed ONLY inside the SessionManager (the controller
+ * host's sendInternalContinuation) and consumed in the same call — never part
+ * of SendMessageOptions, never settable by a client, and never a
+ * session-global flag a concurrent send could steal.
+ */
+export interface GoalInternalContinuationMeta {
+  source: 'automatic' | 'manual-resume'
+  goalId: string
+  runGeneration: number
 }
 
 const PI_SDK_MESSAGE_ID_CACHE_LIMIT = 256
@@ -1210,6 +1278,19 @@ export function claimAutoRetryPending(
 
   return 'send'
 }
+
+// ============================================================
+// POO-134 ICR-2: bounded execution-fact summaries
+// ============================================================
+
+/**
+ * Per-fact summary cap for the goal execution record (independent per field).
+ * Plan r2 A.3: the production capture point is `summarizeGoalFactInput` in
+ * goal-controller (semantic extract → secret scrub → clip), which uses the same
+ * 400-char bound (GOAL_FACT_PARAM_CHARS); this constant stays the declared
+ * SM-side bound for the record's parameter summaries.
+ */
+export const GOAL_FACT_SUMMARY_CHARS = 400
 
 /**
  * Per-turn eligibility for the request_user_input tool (fail-closed matrix).
@@ -1280,6 +1361,20 @@ export function computeGenerateAppEligibility(
     isMini,
     origin,
   )
+}
+
+/**
+ * POO-134: per-turn eligibility for the goal_update report tool.
+ *
+ * Deliberately NOT a desktop-only matrix: a Goal runs on the server for any
+ * invocation source, so its structured report channel must exist on every
+ * source. The gate that matters is GOAL OWNERSHIP — the tool is only ever
+ * registered for a turn that the GoalController has bound to the session's
+ * running Goal (the caller passes the turn binding), which is what keeps
+ * ordinary chat turns and sub-agents from ever seeing it.
+ */
+export function computeGoalUpdateEligibility(isGoalTurn: boolean): boolean {
+  return isGoalTurn
 }
 
 /**
@@ -1936,6 +2031,166 @@ export class SessionManager implements ISessionManager {
 
   private sessions: Map<string, ManagedSession> = new Map()
 
+  // ------------------------------------------------------------------
+  // POO-134: the ONE Goal authority. One controller instance adapts every
+  // session through the host below; all Goal state transitions, clock
+  // accounting, report application and verification funnel through it.
+  // ------------------------------------------------------------------
+  private _goalController?: GoalController
+  private get goal(): GoalController {
+    if (!this._goalController) this._goalController = new GoalController(this.createGoalControllerHost())
+    return this._goalController
+  }
+
+  /** Test/introspection access to the shared controller. */
+  get goalControllerForTests(): GoalController {
+    return this.goal
+  }
+
+  private createGoalControllerHost(): GoalControllerHost {
+    const managedOf = (sessionId: string): ManagedSession | undefined => this.sessions.get(sessionId)
+    return {
+      now: () => this.monotonic(),
+      info: (message, ...details) => sessionLog.info(message, ...details),
+      warn: (message, ...details) => sessionLog.warn(message, ...details),
+      error: (message, ...details) => sessionLog.error(message, ...details),
+      hasSession: sessionId => managedOf(sessionId) !== undefined,
+      flushSession: async sessionId => { await this.flushSession(sessionId) },
+      persistSession: sessionId => {
+        const managed = managedOf(sessionId)
+        if (managed) this.persistSession(managed)
+      },
+      persistGoalMetadataCold: async (sessionId, goal, history, revision) => {
+        const managed = managedOf(sessionId)
+        if (!managed) return
+        await updateSessionMetadata(managed.workspace.rootPath, sessionId, {
+          goal,
+          goalHistory: history.slice(-GOAL_HISTORY_LIMIT),
+          goalProjectionRevision: revision,
+        })
+      },
+      publishProjection: (sessionId, projection) => {
+        const managed = managedOf(sessionId)
+        if (!managed) return
+        this.sendEvent({ type: 'goal_projection', sessionId, projection }, managed.workspace.id)
+      },
+      notifyStorageFailure: (sessionId, message) => {
+        const managed = managedOf(sessionId)
+        if (!managed) return
+        this.sendEvent({ type: 'info', sessionId, message, level: 'warning' }, managed.workspace.id)
+      },
+      appendGoalMessage: (sessionId, content) => this.appendGoalNotice(sessionId, content),
+      getSessionMessages: sessionId => {
+        const managed = managedOf(sessionId)
+        if (!managed) return []
+        return managed.messages.map(m => ({
+          id: m.id,
+          role: m.role,
+          isIntermediate: m.isIntermediate,
+          content: m.content,
+          timestamp: m.timestamp,
+        }))
+      },
+      sendInternalContinuation: async (sessionId, prompt, meta) => {
+        const managed = managedOf(sessionId)
+        if (!managed) throw new Error(`Session ${sessionId} not found`)
+        // ICR-1: the ONLY internal continuation channel is a real production
+        // send whose continuation identity is carried PER CALL as a
+        // server-only parameter — no session-global flag a concurrent send
+        // could steal, and no client-reachable field that could forge it.
+        // REAL scheduling provenance (read-only observation line): states WHO
+        // scheduled this turn and for which Goal run, emitted from the point
+        // that actually dispatches the send — never synthesized by a driver.
+        sessionLog.info(
+          `[goal] internal continuation scheduled (source=${meta.source}, goalId=${meta.goalId}, runGeneration=${meta.runGeneration}, sessionId=${sessionId})`,
+        )
+        // arg order: sessionId, message, attachments, storedAttachments,
+        //            options, existingMessageId, _isAuthRetry, onAck,
+        //            rpcContext, internalContinuation
+        await this.sendMessage(
+          sessionId,
+          prompt,
+          undefined, // attachments
+          undefined, // storedAttachments
+          undefined, // options
+          undefined, // existingMessageId
+          undefined, // _isAuthRetry
+          undefined, // onAck
+          undefined, // rpcContext
+          {
+            source: meta.source,
+            goalId: meta.goalId,
+            runGeneration: meta.runGeneration,
+          },
+        )
+      },
+      getEffectiveModel: sessionId => {
+        const managed = managedOf(sessionId)
+        if (!managed) return undefined
+        // The session's pinned model, else the live agent's — undefined means
+        // the backend default, which the verification receipt reports honestly.
+        return managed.model ?? managed.agent?.getModel()
+      },
+      queryLlm: async (sessionId, request, options) => {
+        const managed = managedOf(sessionId)
+        const agent = managed?.agent
+        if (!agent) throw new Error(`Session ${sessionId} has no live agent for the verification query`)
+        return agent.queryLlm(request, options)
+      },
+      inspectEvidenceFile: async (sessionId, rawPath) => {
+        const managed = managedOf(sessionId)
+        if (!managed) return { ok: false as const, reason: 'session not found' }
+        try {
+          // validateFilePath realpaths the FILE before the allowed-dirs
+          // comparison; on macOS `/tmp` is a symlink to `/private/tmp`, so a
+          // workspace registered under its `/tmp/…` form would never match the
+          // realpath'd file. Bring the allowed dirs into the SAME real-path
+          // domain — the identical directories, no permission widened.
+          const extraDirs = await Promise.all(
+            getWorkspaceAllowedDirs(managed.workspace.id).map(async dir => {
+              try {
+                return await realpath(dir)
+              } catch {
+                return dir
+              }
+            }),
+          )
+          // The model cites evidence relative to the directory the agent
+          // actually works in — the session's effective workingDirectory when
+          // one is set, else the workspace root (the form the file tools
+          // accept); resolve that FIRST, then let the EXISTING permission
+          // fence decide readability — the same validateFilePath every tool
+          // write/read goes through. No new privilege, no widened directory,
+          // no symlink escape: a workingDirectory outside the fence simply
+          // fails closed.
+          const safePath = await validateFilePath(
+            resolveEvidenceInputPath(rawPath, resolveEvidenceBase(managed)),
+            extraDirs,
+          )
+          const fileStat = await fsStat(safePath)
+          if (!fileStat.isFile()) return { ok: false as const, reason: 'not a regular file' }
+          if (fileStat.size > GOAL_EVIDENCE_MAX_FILE_BYTES) {
+            return { ok: false as const, reason: `file exceeds the ${GOAL_EVIDENCE_MAX_FILE_BYTES} byte evidence budget` }
+          }
+          const buffer = await readFile(safePath)
+          const excerpt = buffer.toString('utf8').slice(0, GOAL_VERIFICATION_MAX_FILE_CHARS)
+          return { ok: true as const, absolutePath: safePath, bytes: fileStat.size, sha256: sha256Hex(buffer), excerpt }
+        } catch (error) {
+          return { ok: false as const, reason: error instanceof Error ? error.message : String(error) }
+        }
+      },
+      canStartTurn: sessionId => {
+        const managed = managedOf(sessionId)
+        return !!managed && this.sessions.get(sessionId) === managed && !managed.isProcessing && !managed.turnStartReserved
+      },
+      cancelGoalVerification: sessionId => {
+        const managed = managedOf(sessionId)
+        const controller = managed?.goalRuntime?.verification?.controller
+        if (controller && !controller.signal.aborted) controller.abort(new Error('verification cancelled'))
+      },
+    }
+  }
+
   /**
    * R36-1: resolves the CURRENT complete Main-owned trusted scope for one
    * managed session at EVERY callback invocation. The managed session
@@ -2121,9 +2376,12 @@ export class SessionManager implements ISessionManager {
   // Pending credential request resolvers (keyed by requestId)
   private pendingCredentialResolvers: Map<string, (response: import('@polo-ai/shared/protocol').CredentialResponse) => void> = new Map()
   // Permission request metadata tracking (keyed by requestId)
+  private browserActionAuthorizations = new Map<string, BrowserActionAuthorization>()
   private pendingPermissionRequests: Map<string, {
     sessionId: string
-    type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval'
+    type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action'
+    browserScope?: BrowserActionScope
+    actionDigest?: string
     commandHash?: string
   }> = new Map()
   // Privileged approval binding + audit logger
@@ -2247,12 +2505,23 @@ export class SessionManager implements ISessionManager {
    * Automatically notifies the power manager on transitions (true→false, false→true)
    * so callers don't need to remember to call onSessionStarted/onSessionStopped.
    */
+  // Includes removed sessions until their original browser work has drained.
+  private readonly browserFastDeciders = new Set<ReturnType<typeof createBrowserFastDecider>>()
+
+  private ownBrowserFastDecider(decider: ReturnType<typeof createBrowserFastDecider>) {
+    this.browserFastDeciders.add(decider)
+    return decider
+  }
+
   private setProcessing(managed: ManagedSession, processing: boolean): void {
     const was = managed.isProcessing
     managed.isProcessing = processing
     if (!was && processing) {
+      managed.browserFastAbortController?.abort()
+      managed.browserFastAbortController = new AbortController()
       sessionRuntimeHooks.onSessionStarted()
     } else if (was && !processing) {
+      managed.browserFastAbortController?.abort()
       sessionRuntimeHooks.onSessionStopped()
     }
   }
@@ -2505,6 +2774,8 @@ export class SessionManager implements ISessionManager {
   }
 
   private clearPendingPermissionRequestsForSession(sessionId: string): void {
+    this.browserActionAuthorizations.get(sessionId)?.cancel()
+    this.browserActionAuthorizations.delete(sessionId)
     for (const [requestId, metadata] of this.pendingPermissionRequests.entries()) {
       if (metadata.sessionId === sessionId) {
         this.pendingPermissionRequests.delete(requestId)
@@ -3055,6 +3326,17 @@ export class SessionManager implements ISessionManager {
           }
 
           this.sessions.set(meta.id, managed)
+
+          // POO-134 cold-start recovery: a Goal found running/verifying after a
+          // restart becomes paused/restart_required — the crash-to-restart gap
+          // is NEVER folded into the accumulated runtime. Header-only write, no
+          // message hydration; the projection revision advances so clients drop
+          // any pre-crash event they still hold.
+          if (managed.goal) {
+            void this.goal.recoverOnColdStart(managed).catch((error: unknown) => {
+              sessionLog.error(`[goal] cold-start recovery failed for session ${meta.id}:`, error)
+            })
+          }
           if (this.cliAuthority) {
             this.assertCliSessionOwned(meta.id)
             this.cliAuthority.assertConnection(managed.llmConnection ? getLlmConnection(managed.llmConnection) : null)
@@ -3286,6 +3568,18 @@ export class SessionManager implements ISessionManager {
     // Clear pending auth state
     managed.pendingAuthRequestId = undefined
     managed.pendingAuthRequest = undefined
+
+    // POO-134 F2: the native auth resolution is what the paused Goal was
+    // waiting for. A SUCCESSFUL auth resumes the Goal — the result message
+    // sent below is the resuming turn (no internal continuation, or the
+    // session would be double-driven). A DECLINED / failed auth keeps the
+    // Goal paused: refusing a permission is never a resume.
+    if (result.success && managed.goal?.status === 'paused' && managed.goal.pauseReason === 'awaiting_permission') {
+      const resumeOutcome = await this.goal.resume(managed, { skipInternalContinuation: true })
+      if (!resumeOutcome.ok) {
+        sessionLog.info(`[goal] auth-result resume declined for session ${sessionId}: ${resumeOutcome.error}`)
+      }
+    }
 
     // Auto-enable the source in the session after successful auth
     if (result.success && result.sourceSlug) {
@@ -4610,6 +4904,17 @@ export class SessionManager implements ISessionManager {
     // (ignoreQuarantineClaim) may issue.
     const claimOwnsFaces = opts?.ignoreQuarantineClaim !== true
       && this.findQuarantinedRuntimeDisposalEntry(managed) !== undefined
+
+    if (managed.browserFastDecider && !claimOwnsFaces) {
+      const original = managed.browserFastDecider
+      const browser = await this.boundedRuntimeDisposal(sessionId, 'browser-fast-decider', async () => {
+        await original.dispose()
+        this.browserFastDeciders.delete(original)
+        return 'disposed' as const
+      }, failures)
+      if (browser.status === 'timeout') originalOps.push(browser.original)
+      if (browser.status === 'settled' && managed.browserFastDecider === original) managed.browserFastDecider = undefined
+    }
 
     if (managed.agent && !claimOwnsFaces) {
       try {
@@ -5963,8 +6268,65 @@ export class SessionManager implements ISessionManager {
         sessionLog.info('[browser-pane] BPF registering browserPaneFns', { sessionId: sid })
         // R38-2: every browser-pane method is registered through the
         // authoritative guard inventory (per-method caller-scope guard).
+        const browserOwner = managed.agent
+        const browserScope = (): BrowserActionScope => {
+          const scope = this.managedTrustedScope(managed)
+          const origin = getAdminUrl()
+          if (!scope || !origin) throw new Error('Browser authorization scope unavailable')
+          return { ...scope, sessionId: sid, generation: managed.processingGeneration,
+            adminOrigin: origin, accountGeneration: getTrustedAccountGeneration(), fenceGeneration: getRuntimeFenceGeneration() }
+        }
+        const assertBrowserScope = (scope: BrowserActionScope) => {
+          if (!managed.isProcessing || managed.stopRequested || managed.agent !== browserOwner
+            || this.sessions.get(sid) !== managed || isRuntimeOfflineReadOnly()
+            || JSON.stringify(browserScope()) !== JSON.stringify(scope)) throw new Error('Browser authorization scope changed')
+        }
+        const presentations = new Map<string, BrowserActionConfirmation>()
+        const authorization = new BrowserActionAuthorization({
+          scope: browserScope, assertCurrent: assertBrowserScope,
+          audit: event => appendBrowserActionAudit(this.sessionStorage.getSessionPath(managed.workspace.rootPath,sid),event),
+          policy: async scope => readBrowserPolicy({accountId:scope.accountId,productSpaceId:scope.productSpaceId,adminOrigin:scope.adminOrigin!}),
+          facts: async parts => {
+            if (!bpm.inspectBrowserAction) throw new Error('Browser execution authority requires an updated desktop')
+            const id = await resolveSessionBrowserInstance('browser_authorization')
+            return bpm.inspectBrowserAction(id, parts)
+          },
+          signal: () => managed.browserFastAbortController?.signal,
+          userMessages: () => ['desktop','messaging'].includes(managed.activeTurnSource ?? '') ? managed.messages.filter(m => m.role === 'user' && !m.isQueued && !managed.messageQueue.some(queued=>queued.messageId===m.id)).slice(-1).map(m => ({id:m.id,text:m.content})) : [],
+          confirm: request => {
+            assertBrowserScope(request.scope)
+            if (managed.activeTurnSource !== 'desktop' || managed.hidden) throw new Error('Browser action requires an interactive user confirmation')
+            presentations.set(request.requestId, request)
+            this.pendingPermissionRequests.set(request.requestId, {sessionId:sid,type:'browser_action',browserScope:request.scope,actionDigest:request.actionDigest})
+            this.sendEvent({type:'permission_request',sessionId:sid,request:{requestId:request.requestId,sessionId:sid,toolName:'browser_tool',type:'browser_action',description:request.description,browserAction:request.browserAction}},managed.workspace.id)
+          },
+          settled: (requestId, phase) => {
+            const request = presentations.get(requestId)
+            if (!request) return
+            try { assertBrowserScope(request.scope) } catch { return }
+            this.sendEvent({type:'permission_request',sessionId:sid,request:{requestId,sessionId:sid,toolName:'browser_tool',type:'browser_action',description:i18n.t(phase === 'dispatched_outcome_unknown' ? 'browserAuthorization.outcomeDescription' : 'browserAuthorization.invalidatedDescription'),browserAction:{...request.browserAction,phase}}},managed.workspace.id)
+          },
+          closed: requestId => { this.pendingPermissionRequests.delete(requestId); presentations.delete(requestId) },
+        })
+        this.browserActionAuthorizations.get(sid)?.cancel()
+        this.browserActionAuthorizations.set(sid, authorization)
         const rawBrowserPaneFns = {
           browserPaneFns: {
+            executeAuthorizedAction: async(parts,facts,method,args,lease)=>{
+              const assertLease=()=>{try{assertBrowserScope(lease.scope)}catch{throw new BrowserActionNotDispatched('Browser scope changed before native dispatch; nothing was executed')}if(lease.signal?.aborted||lease.expiresAt<=Date.now())throw new BrowserActionNotDispatched('Browser action cancelled before native dispatch; nothing was executed')}
+              assertLease()
+              if(!bpm.executeAuthorizedAction||!bpm.cancelBrowserAction)throw new BrowserActionNotDispatched('Browser native authorization unavailable; nothing was executed')
+              const cancel=()=>{void Promise.resolve(bpm.cancelBrowserAction!(facts.browserId,lease.id)).catch(error=>sessionLog.warn('Native browser cancellation could not be delivered',error))}
+              lease.signal?.addEventListener('abort',cancel,{once:true})
+              try{
+                const instanceId=await resolveSessionBrowserInstance('browser_authorized_dispatch')
+                assertLease()
+                if(instanceId!==facts.browserId)throw new BrowserActionNotDispatched('Browser native authorization target changed; nothing was executed')
+                return await bpm.executeAuthorizedAction(instanceId,parts,facts,method,args,lease.id,lease.expiresAt)
+              }finally{lease.signal?.removeEventListener('abort',cancel)}
+            },
+            authorizeCommand: (parts, dispatch, context) => authorization.perform(parts, dispatch, context),
+            readBrowserPolicy: () => authorization.readPolicy(),
             openPanel: async (options) => {
               const instanceId = options?.background
                 ? await bpm.createForSessionAsync(sid, { show: false, workspaceId })
@@ -6196,6 +6558,44 @@ export class SessionManager implements ISessionManager {
         }
         mergeSessionScopedToolCallbacks(sid, {
           browserPaneFns: this.guardManagedCallbackRecord(managed, 'browserPaneFns', rawBrowserPaneFns.browserPaneFns),
+          // POO-113 fast layer: dual fast-model grounding for `browser_tool suggest`.
+          // Resolve the original ProductSpace exactly as the main model does.
+          // Local fast-layer paths cannot bypass Admin model/billing authority.
+          browserFastDecider: managed.browserFastDecider = this.ownBrowserFastDecider(createBrowserFastDecider({
+            resolveTransport: async () => {
+              const generation = managed.processingGeneration
+              const signal = managed.browserFastAbortController?.signal
+              const owner = managed.agent
+              const fence = getRuntimeFenceGeneration(), accountGeneration = getTrustedAccountGeneration()
+              if (!signal || signal.aborted || managed.stopRequested || !managed.isProcessing) throw new Error('Browser turn inactive')
+              const context = await this.resolveManagedAssistantBackendContext(managed)
+              const connection = context.connection
+              if (!connection || connection.managedBy !== 'admin') throw new Error('Managed browser connection unavailable')
+              const billing = this.assistantBillingFor(managed, connection)
+              return {
+                connection,
+                signal,
+                billing,
+                billingOwnedByDesktopProxy: !!this.cliAuthority?.desktopManaged,
+                assertCurrent: () => {
+                  if (signal.aborted || managed.stopRequested || !managed.isProcessing
+                    || managed.processingGeneration !== generation
+                    || this.sessions.get(sid) !== managed || managed.agent !== owner
+                    || managed.llmConnection !== connection.slug
+                    || JSON.stringify(getLlmConnection(connection.slug)) !== JSON.stringify(connection)
+                    || getRuntimeFenceGeneration() !== fence || getTrustedAccountGeneration() !== accountGeneration
+                    || isRuntimeOfflineReadOnly()) throw new Error('Browser compute scope changed')
+                  if (this.cliAuthority?.desktopManaged) this.cliAuthority.assertConnection(connection)
+                },
+              }
+            },
+            resolveApiKey: async (credentialKey) => {
+              const id = accountToCredentialId(credentialKey)
+              if (!id) return null
+              const stored = await getCredentialManager().get(id)
+              return stored?.value ?? null
+            },
+          })),
         }, this.runtimeOwnerTokenOf(managed))
       }
 
@@ -6209,7 +6609,7 @@ export class SessionManager implements ISessionManager {
         toolName: string;
         command?: string;
         description: string;
-        type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+        type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action';
         appName?: string;
         reason?: string;
         impact?: string;
@@ -6367,6 +6767,11 @@ export class SessionManager implements ISessionManager {
             sessionLog.info(`Interrupting for plan submission in session ${managed.id}`)
             managed.agent.interruptForHandoff(AbortReason.PlanSubmitted)
             this.setProcessing(managed, false)
+            // POO-134 F2: a plan review is part of the Goal run, not a
+            // failure — the goal stays running and the plan approval resumes
+            // the turn. Mark it so the goal's non-complete turn-end hook does
+            // not mis-attribute this interrupt as an error.
+            managed.goalPlanReviewPending = true
 
             // Release browser overlay + session binding because the agent is no longer running.
             // Plan submission pauses execution until user review, so browser ownership should not remain locked.
@@ -6429,6 +6834,20 @@ export class SessionManager implements ISessionManager {
           managed.agent.interruptForHandoff(AbortReason.AuthRequest)
           this.setProcessing(managed, false)
 
+          // POO-134 F2: a pending permission handoff pauses the Goal RIGHT
+          // NOW (clock folds immediately — never charges the time the user
+          // spends away). An already-paused goal keeps its first attribution;
+          // a successful auth result below resumes it.
+          if (managed.goal && !isGoalTerminal(managed.goal.status)) {
+            void this.goal.pause(
+              managed,
+              'awaiting_permission',
+              'Waiting for you to grant the permission. The clock is paused while you are away.',
+            ).catch((error: unknown) => {
+              sessionLog.error(`[goal] handoff pause failed for session ${managed.id}:`, error)
+            })
+          }
+
           // Release browser overlay + session binding because the agent is paused awaiting user auth.
           void releaseBrowserOwnershipOnForcedStop(
             (sid) => this.getBrowserPaneManagerForSession(sid),
@@ -6475,6 +6894,15 @@ export class SessionManager implements ISessionManager {
       managed.agent.onQuestionRequested = this.guardManagedCallback(managed, 'agent.onQuestionRequested', (questions, generationAtRequest) => {
         if (this.cliAuthority) throw new Error('CLI_INTERACTIVE_REQUEST_UNSUPPORTED')
         return this.routeAgentQuestionRequested(managed, questions, generationAtRequest)
+      })
+
+      // POO-134: goal_update report channel. The report is NOT authority — it
+      // is staged by the controller after the closure snapshot (this turn's
+      // generation) is validated, and applied only when the matching
+      // successful goal_update tool_result of the SAME turn is observed in the
+      // chat loop. A rejection surfaces to the model as a tool error.
+      managed.agent.onGoalUpdateReport = this.guardManagedCallback(managed, 'agent.onGoalUpdateReport', (report: GoalUpdateReport, generationAtRequest: number) => {
+        this.goal.stageReport(managed, report, generationAtRequest)
       })
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls.
@@ -7124,6 +7552,11 @@ export class SessionManager implements ISessionManager {
     if (managed.permissionMode === 'safe') {
       this.setSessionPermissionMode(sessionId, 'allow-all')
     }
+
+    // POO-134 F2: the plan is approved — the review wait is over, so the
+    // goal's non-complete turn-end hook must no longer treat the interrupt
+    // as pending-plan.
+    managed.goalPlanReviewPending = undefined
 
     await this.sendMessage(sessionId, PLAN_APPROVAL_MESSAGE)
   }
@@ -8189,17 +8622,43 @@ export class SessionManager implements ISessionManager {
     forceQueue?: boolean
   }): Promise<void> {
     const { managed, sessionId, message, attachments, storedAttachments, options, existingMessageId, onAck } = args
+    // Plan r2 B7: the mid-stream branch is a REAL entry for `goalIntent: start`
+    // too, and without this guard a start while a Goal owns the session was
+    // admitted as a SUPPLEMENT of the running Goal (admitSupplementFromQueue
+    // below) — exactly what the startGoal contract refuses. Reject here, at the
+    // mid-stream entrance and BEFORE the agent redirect/steer: the request is
+    // not steered, not queued, not admitted, creates no Goal turn, and nothing
+    // is persisted or acked — the throw surfaces as a pre-persist rejection
+    // with the SAME error text startGoal uses. Existing messages and files
+    // (including an existingMessageId's stored content) are untouched, and the
+    // running Goal's criteria/version/owner are unchanged.
+    if (options?.goalIntent?.action === 'start' && managed.goal && !isGoalTerminal(managed.goal.status)) {
+      throw new Error('a goal is already active on this session')
+    }
     const connection = resolveSessionConnection(managed.llmConnection, undefined)
     // Fallback to 'steer' when no connection is resolvable — preserves
     // today's exact behavior (call redirect, take whatever it returns).
     const behavior = args.forceQueue ? 'queue' : connection ? resolveMidStreamBehavior(connection) : 'steer'
 
+    // Review F3: a LEGAL start (no goal at all, or only terminal ones
+    // draining/loaded) must never be consumed by the live turn's redirect — a
+    // steer connection that accepts the message turned the start into an
+    // ordinary supplement of an UNRELATED turn and the Goal was silently never
+    // created. Skip the redirect for exactly this case and queue the send with
+    // its FULL original options: the FIFO replay reaches bindTurn/startGoal as
+    // a real new turn. Ordinary chat and Goal supplements keep steering; a
+    // start while a non-terminal goal owns the session is still refused above,
+    // before any of this runs.
+    const legalGoalStart = options?.goalIntent?.action === 'start'
+      && (!managed.goal || isGoalTerminal(managed.goal.status))
     const agent = managed.agent
     let steered = false
-    if (behavior === 'steer') {
+    if (behavior === 'steer' && !legalGoalStart) {
+      this.browserActionAuthorizations.get(sessionId)?.cancel()
       steered = agent?.redirect(message) ?? false
     }
-    // For 'queue': skip redirect entirely. The current turn is undisturbed.
+    // For 'queue' (and a legal goal start): skip redirect entirely. The
+    // current turn is undisturbed.
 
     sessionLog.info('mid-stream send', {
       sessionId,
@@ -8228,6 +8687,8 @@ export class SessionManager implements ISessionManager {
         // The KB reference snapshot rides the message on FIRST persistence —
         // steer and queue replays must not lose it (review #10).
         kbReferences: options?.kbReferences,
+        // POO-135: picked web element snapshots, same first-persistence rule.
+        elementReferences: options?.elementReferences,
       }
       managed.messages.push(userMessage)
     }
@@ -8243,6 +8704,19 @@ export class SessionManager implements ISessionManager {
     }, managed.workspace.id)
 
     userMessage.isQueued = !steered
+    // POO-134 F-R2-7: THIS is the real admission point of a message sent
+    // while a Goal turn runs (steered into the live turn or queued for FIFO
+    // replay). Binding it here (real persisted message id, deduped on
+    // replay) makes the added requirement part of the Goal immediately and
+    // BUMPS THE GOAL VERSION — so an independent verification verdict still
+    // in flight can no longer complete the Goal on the pre-supplement
+    // snapshot. A paused/terminal goal binds nothing: ordinary chat stays
+    // ordinary chat, and only the replayed turn (or an explicit resume)
+    // re-arms the Goal.
+    if (this.goal.admitSupplementFromQueue(managed, userMessage.id)) {
+      sessionLog.info(`[goal] supplement admitted at queue admission for goal ${managed.goal?.id} (message ${userMessage.id})`)
+    }
+
     if (!steered) {
       // Push for FIFO replay on next onProcessingStopped tick. Same shape
       // for both queue-direct (current turn still running) and
@@ -8288,10 +8762,38 @@ export class SessionManager implements ISessionManager {
      * directly (tests, intra-server flows) to leave the existing pin in place.
      */
     rpcContext?: { callerClientId?: string; forceQueue?: boolean },
+    /**
+     * POO-134 ICR-1: server-only continuation identity, carried PER CALL. Set
+     * exclusively by the GoalController host's sendInternalContinuation — it is
+     * NOT part of SendMessageOptions, so no client-reachable path can forge it.
+     * An internal send creates NO user message, broadcasts NO user_message
+     * event and takes none of the user-send side effects (ack, title,
+     * auto-label, supplement binding); it drives the same trusted send path,
+     * agent context and lease.
+     */
+    internalContinuation?: GoalInternalContinuationMeta,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
+    }
+    // ICR-1 entry validation: a continuation identity that no longer matches
+    // the session's Goal (ended, paused, superseded generation or another
+    // goal) must never start a turn. It converges silently — nothing was
+    // persisted, and an expected-cancellation of an internal send must not
+    // surface to a user.
+    if (internalContinuation) {
+      const goal = managed.goal
+      const valid = !!goal
+        && isGoalRunning(goal.status)
+        && goal.id === internalContinuation.goalId
+        && goal.runGeneration === internalContinuation.runGeneration
+      if (!valid) {
+        sessionLog.info(
+          `[goal] internal continuation for ${internalContinuation.goalId}/g${internalContinuation.runGeneration} refused for session ${sessionId}: the goal is no longer running that generation`,
+        )
+        return
+      }
     }
     // DELETE TURN-START GATE: the deletion's terminal tombstone is written
     // in its locked declaration (deleteSession → question-state lock), and
@@ -8415,6 +8917,7 @@ export class SessionManager implements ISessionManager {
       let droppedDuplicateRetry = false
       let queuedMidStream = false
       let turnAbandonedBeforeCommit = false
+      let internalContinuationConverged = false
       await this.withQuestionStateLock(sessionId, async () => {
         if (this.sessions.get(sessionId) !== managed) {
           // The delete/replace declaration won the linearization race.
@@ -8438,8 +8941,12 @@ export class SessionManager implements ISessionManager {
 
         // Clear any pending plan execution state when a new user message is sent.
         // This acts as a safety valve - if the user moves on, we don't want to
-        // auto-execute an old plan later.
-        await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
+        // auto-execute an old plan later. An internal continuation is NOT a
+        // user message: the "user moved on" valve must never discard a pending
+        // plan on the server's own scheduling.
+        if (!internalContinuation) {
+          await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
+        }
 
         // Ensure messages are loaded before we try to add new ones
         await this.ensureMessagesLoaded(managed)
@@ -8464,6 +8971,15 @@ export class SessionManager implements ISessionManager {
         // whose turn then failed pre-start finds the reservation freed here
         // and claims the fresh turn itself — exactly what the failed-turn-start
         // drain used to replay, now decided at a single linearized point.
+        // ICR-1: an internal continuation never steers or queues — it would
+        // land in someone else's turn as user content. The controller already
+        // checks canStartTurn; if the world changed anyway, the continuation
+        // converges silently (nothing persisted).
+        if (internalContinuation && (managed.isProcessing || !holdsReservation)) {
+          sessionLog.info(`[goal] internal continuation for session ${sessionId} converged silently: a turn is already active`)
+          internalContinuationConverged = true
+          return
+        }
         if (!holdsReservation && !managed.isProcessing && !managed.turnStartReserved) {
           managed.turnStartReserved = true
           holdsReservation = true
@@ -8506,8 +9022,15 @@ export class SessionManager implements ISessionManager {
 
         // Add user message with stored attachments for persistence
         // Skip if existingMessageId is provided (message was already created when queued)
-        let userMessage: Message
-        if (existingMessageId) {
+        // ICR-1: an internal continuation creates NO user message at all — no
+        // transcript write, no user_message broadcast, no ack, no auto-title,
+        // no last-user-message bookkeeping. The server-composed prompt reaches
+        // the agent as the turn's input (the SDK needs it) without ever
+        // becoming a product user utterance.
+        let userMessage: Message | undefined
+        if (internalContinuation) {
+          userMessage = undefined
+        } else if (existingMessageId) {
           userMessage = this.requireExistingMessage(managed, existingMessageId)
           if (userMessage.isQueued && userMessage.content.startsWith('[Task event]')) taskWakeMessage = userMessage
           // A replayed QUEUED message (not the answer's own resume call)
@@ -8541,6 +9064,8 @@ export class SessionManager implements ISessionManager {
             // by construction. Queue replays bypass the SEND_MESSAGE handler
             // and carry no staged context, so they simply inject nothing.
             kbReferences: options?.kbReferences,
+            // POO-135: picked web element snapshots (queue replays included).
+            elementReferences: options?.elementReferences,
           }
           managed.messages.push(userMessage)
 
@@ -8632,7 +9157,9 @@ export class SessionManager implements ISessionManager {
         // Evaluate auto-label rules against the user message (common path for both
         // fresh and queued messages). Scans regex patterns configured on labels,
         // then merges any new matches into the session's label array.
-        try {
+        // ICR-1: skipped for an internal continuation — a server-composed prompt
+        // is not user intent and must never create labels.
+        if (!internalContinuation) try {
           const labelTree = listLabels(managed.workspace.rootPath)
           const autoMatches = evaluateAutoLabels(message, labelTree)
 
@@ -8694,6 +9221,52 @@ export class SessionManager implements ISessionManager {
         // not whatever generation happens to be active at late execution.
         managed.agent?.setSessionTurnGeneration(managed.processingGeneration)
         managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
+        // POO-134: bind THIS turn to the session's Goal — or create the Goal
+        // when the send carries goalIntent=start. Captured in the SAME locked
+        // critical section as the generation claim so the binding's
+        // GoalID/runGeneration/generation triple can never drift from the turn
+        // that reports against it. Paused/terminal Goals bind NOTHING here:
+        // ordinary chat after a manual pause or Stop is ordinary chat, and
+        // only the explicit goalResume command re-arms the Goal.
+        // ICR-1: the continuation identity is THIS call's server-only meta —
+        // re-validated in-lock (the goal may have been paused/ended by the
+        // awaits above); a stale identity converges silently and never starts
+        // a turn carrying internal context as a user turn.
+        const isInternalContinuation = !!internalContinuation
+        if (isInternalContinuation) {
+          const goalNow = managed.goal
+          const stillValid = !!goalNow
+            && isGoalRunning(goalNow.status)
+            && goalNow.id === internalContinuation!.goalId
+            && goalNow.runGeneration === internalContinuation!.runGeneration
+          if (!stillValid) {
+            sessionLog.info(
+              `[goal] internal continuation for ${internalContinuation!.goalId}/g${internalContinuation!.runGeneration} refused at commit for session ${sessionId}: the goal moved on`,
+            )
+            internalContinuationConverged = true
+            return
+          }
+          // REAL turn-start provenance: pairs with the scheduling line above so
+          // an observer can match the scheduled continuation to the actual
+          // processing generation that runs it (never a driver-side claim).
+          sessionLog.info(
+            `[goal] internal continuation turn started (source=${internalContinuation!.source}-claim, goalId=${goalNow.id}, runGeneration=${goalNow.runGeneration}, generation=${managed.processingGeneration}, sessionId=${sessionId})`,
+          )
+        }
+        this.goal.bindTurn(managed, {
+          goalIntent: options?.goalIntent,
+          // ICR-1: an internal continuation carries NO user message id — there
+          // is nothing to anchor and nothing to bind as a supplement.
+          ...(userMessage ? { userMessageId: userMessage.id } : {}),
+          content: message,
+          generation: managed.processingGeneration,
+          internalContinuation: isInternalContinuation,
+          // POO-134 F4: only a STRUCTURED question answer (request_user_input
+          // metadata on the reused answer message) may resume a goal paused
+          // 'awaiting_permission'. Ordinary free-form chat after a
+          // manual/stop pause stays ordinary chat — no keyword guessing.
+          questionAnswer: userMessage?.questionResponse !== undefined,
+        })
       })
       if (droppedDuplicateRetry) {
         sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
@@ -8708,6 +9281,11 @@ export class SessionManager implements ISessionManager {
         // The turn-start reservation is released by the finally below — the
         // turn converges as silently deleted (the session no longer exists).
         sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted before commit (declaration won the race)`)
+        return
+      }
+      if (internalContinuationConverged) {
+        // ICR-1: the internal continuation found the session busy and
+        // converged silently — nothing was persisted, nothing to retry.
         return
       }
       // The turn has claimed its processing generation — the reservation is
@@ -8742,6 +9320,12 @@ export class SessionManager implements ISessionManager {
     managed.lastSentAttachments = attachments
     managed.lastSentStoredAttachments = storedAttachments
     managed.lastSentOptions = options
+    // ICR-1: the retry snapshot carries the send's own continuation identity,
+    // exactly like the rest of its parameters — an auth retry of an internal
+    // continuation must retry AS an internal continuation (no user message,
+    // no supplement binding), and the cleanup below must not delete a real
+    // user message that the failed send never created.
+    managed.lastSentInternalContinuation = internalContinuation
 
     // Capture the generation to detect if a new request supersedes this one.
     // This prevents the finally block from clobbering state when a follow-up message arrives.
@@ -8855,6 +9439,13 @@ export class SessionManager implements ISessionManager {
       )
       if (agent.allowGenerateApp !== allowGenerateAppNow) {
         agent.allowGenerateApp = allowGenerateAppNow
+      }
+      // POO-134: goal_update exists ONLY on a turn the controller bound to the
+      // session's running Goal — every other turn (ordinary chat, sub-agent,
+      // post-pause) fails closed without it.
+      const allowGoalUpdateNow = computeGoalUpdateEligibility(managed.goalRuntime?.turn !== undefined)
+      if (agent.allowGoalUpdate !== allowGoalUpdateNow) {
+        agent.allowGoalUpdate = allowGoalUpdateNow
       }
 
       // Always set all sources for context (even if none are enabled), including built-ins
@@ -9008,6 +9599,10 @@ export class SessionManager implements ISessionManager {
       cliChatOwnerToken = cliTurnOwnerToken
       const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
       sessionLog.info('Got chat iterator, starting iteration...')
+      // POO-134: the Goal binding captured at bind time — the chat loop judges
+      // goal_update tool_results against THIS snapshot, never against mutable
+      // current state (a stale report cannot ride a newer turn).
+      const goalTurnBinding = managed.goalRuntime?.turn
 
       for await (const event of chatIterator) {
         if (this.cliAuthority && (!this.isOwnedCliSession(managed) || managed.runtimeOwnerToken !== cliTurnOwnerToken)) throw new Error('CLI_EXECUTION_GENERATION_REVOKED')
@@ -9025,6 +9620,44 @@ export class SessionManager implements ISessionManager {
         // Process the event first
         await this.processEvent(managed, event)
         if (this.cliAuthority && (!this.isOwnedCliSession(managed) || managed.runtimeOwnerToken !== cliTurnOwnerToken)) return
+
+        // POO-134: same-turn Goal observation — records tool_starts and, on the
+        // matching successful goal_update tool_result, applies the staged
+        // report INSIDE this turn's lease. ICR-2: the same events are the
+        // server's execution-fact source — bounded parameter/result summaries
+        // and the sub-agent parent link ride along, captured here at the real
+        // execution point (never from a tool argument).
+        if (goalTurnBinding && (event.type === 'tool_start' || event.type === 'tool_result')) {
+          await this.goal.observeTurnEvent(
+            managed,
+            event.type === 'tool_start'
+              ? {
+                  type: 'tool_start',
+                  toolUseId: event.toolUseId,
+                  toolName: event.toolName,
+                  ...(event.parentToolUseId ? { parentToolUseId: event.parentToolUseId } : {}),
+                  // Plan r2 A.3: the fact copy carries a SEMANTIC summary of the
+                  // real input (path + size for writes, the whole command for
+                  // Bash, kind/note/todo-count for goal_update) instead of a
+                  // JSON echo, scrubbed of known secret shapes BEFORE the bound.
+                  // The raw input keeps feeding the agent path untouched — only
+                  // this auxiliary fact copy is transformed.
+                  ...(event.input && typeof event.input === 'object' && Object.keys(event.input as Record<string, unknown>).length > 0
+                    ? { inputSummary: summarizeGoalFactInput(event.toolName, event.input) }
+                    : {}),
+                }
+              : {
+                  type: 'tool_result',
+                  toolUseId: event.toolUseId,
+                  isError: event.isError === true,
+                  resultText: typeof event.result === 'string' ? event.result : '',
+                  ...(event.parentToolUseId ? { parentToolUseId: event.parentToolUseId } : {}),
+                  parseReport: parseGoalUpdateReportPayload,
+                },
+            goalTurnBinding,
+            myGeneration,
+          )
+        }
 
         // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
         // Primary capture happens in getOrCreateAgent() via onSdkSessionIdUpdate callback,
@@ -9119,6 +9752,32 @@ export class SessionManager implements ISessionManager {
           }
 
           sendSpan.mark('chat.complete')
+          // POO-134 ICR-4: settle a DEFERRED candidate verification HERE — the
+          // SDK turn has finished (no residual own-task execution) while
+          // isProcessing is still true and the execution/admission lease is
+          // still held, and before onProcessingStopped releases them. The
+          // independent query therefore runs inside the SAME authorization
+          // lease that ran the turn, never as a fire-and-forget past it. The
+          // controller re-validates the whole precondition set (same goal, same
+          // run generation, same version — no unprocessed supplement — same
+          // bound turn) and re-checks `stillCurrent` after the query, so a Stop,
+          // a cancel timeout or a superseding send during the query discards
+          // the verdict instead of completing a goal the user walked away from.
+          const pendingBinding: GoalTurnBinding | undefined = managed.goalRuntime?.turn
+          if (pendingBinding) {
+            try {
+              await this.goal.settlePendingVerification(managed, pendingBinding, {
+                generation: myGeneration,
+                stillCurrent: () =>
+                  managed.isProcessing
+                  && !managed.stopRequested
+                  && managed.processingGeneration === myGeneration
+                  && this.sessions.get(sessionId) === managed,
+              })
+            } catch (error) {
+              sessionLog.error(`[goal] deferred verification failed for session ${sessionId}:`, error)
+            }
+          }
           sendSpan.end()
           this.onProcessingStopped(sessionId, 'complete')
           return  // Exit function, skip finally block (onProcessingStopped handles cleanup)
@@ -9140,6 +9799,25 @@ export class SessionManager implements ISessionManager {
         this.onProcessingStopped(sessionId, 'interrupted')
       } else {
         sessionLog.info('Chat loop exited unexpectedly')
+        // ICR-4 fallback: the generator ended without a complete event while
+        // the lease is still ours — settle a pending candidate here too, before
+        // the finally releases the lease. The same preconditions apply; an
+        // abnormal exit still never verifies a stale snapshot.
+        const pendingBinding: GoalTurnBinding | undefined = managed.goalRuntime?.turn
+        if (pendingBinding) {
+          try {
+            await this.goal.settlePendingVerification(managed, pendingBinding, {
+              generation: myGeneration,
+              stillCurrent: () =>
+                managed.isProcessing
+                && !managed.stopRequested
+                && managed.processingGeneration === myGeneration
+                && this.sessions.get(sessionId) === managed,
+            })
+          } catch (error) {
+            sessionLog.error(`[goal] deferred verification failed for session ${sessionId}:`, error)
+          }
+        }
       }
     } catch (error) {
       if (this.cliAuthority && (error instanceof Error && error.message === 'CLI_EXECUTION_GENERATION_REVOKED' || managed.runtimeOwnerToken !== cliChatOwnerToken || this.sessions.get(managed.id) !== managed || managed.processingGeneration !== myGeneration || !this.isOwnedCliSession(managed))) return
@@ -9227,6 +9905,8 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       return // Session not found, nothing to cancel
     }
+    // Stop host-side model transport before awaiting durable question cleanup.
+    managed.browserFastAbortController?.abort()
 
     // A pending question cannot survive a user stop. This must run BEFORE the
     // isProcessing early-return: the QuestionRequested handoff already flipped
@@ -9269,6 +9949,30 @@ export class SessionManager implements ISessionManager {
     // Track interruption so the next user message gets a context note
     // telling the LLM the previous response was cut short
     managed.wasInterrupted = true
+
+    // POO-134 (F-R2-1, Plan-locked order): a USER stop on a running Goal turn
+    // pauses the Goal — it never ends it and never resumes by itself. The
+    // authoritative state is written and flushed (bounded) BEFORE the abort:
+    // the pause bumps the goal version (invalidating any in-flight verification
+    // verdict) and claims the FIRST pause attribution, so the turn-termination
+    // chain (onProcessingStopped → onTurnAborted, fire-and-forget) can neither
+    // re-attribute the pause as 'error' nor let a late verdict complete the
+    // goal inside this await window. Silent cancels (redirect / internal) do
+    // NOT touch the Goal: the turn continues under the same Goal. Either way
+    // execution stops — a failed durable flush is logged and the Goal stays
+    // paused in memory (fail-safe), and the in-memory clock is stopped
+    // regardless.
+    if (!silent && managed.goal && !isGoalTerminal(managed.goal.status)) {
+      const pauseOutcome = await this.goal.pause(managed, 'stop', 'Paused by the Stop button. Resume explicitly to continue.')
+      if (!pauseOutcome.flushed) {
+        this.sendEvent({
+          type: 'info',
+          sessionId,
+          message: 'The goal was paused, but its state could not be written to disk. The pause is kept in memory; resume or restart to make it durable.',
+          level: 'warning',
+        }, managed.workspace.id)
+      }
+    }
 
     // Force-abort via Query.close() - sends soft interrupt to the backend
     if (managed.agent) {
@@ -9329,6 +10033,130 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  // ==================================================================
+  // POO-134: Goal lifecycle commands (server-authoritative).
+  // Each fails closed against unknown/stale/terminal Goal states; the
+  // projection revision decides ordering for every consumer.
+  // ==================================================================
+
+  /**
+   * Explicit user pause. Plan-locked order (F-R2-1): the authoritative pause
+   * is written and durably flushed FIRST (it bumps the goal version — which
+   * invalidates any in-flight verification verdict — cancels the verification
+   * query and claims the FIRST pause attribution), and only then is the
+   * running turn aborted. The abort's fire-and-forget onTurnAborted chain
+   * finds an already-paused goal and cannot re-attribute it as 'error', and a
+   * verdict settling inside the cancelProcessing await window fails the CAS
+   * on the bumped version. Execution stops either way: a failed durable
+   * flush keeps the pause in memory (fail-safe) and still aborts.
+   */
+  async goalPause(sessionId: string): Promise<{ ok: boolean; flushed: boolean; error?: string }> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return { ok: false, flushed: false, error: 'session not found' }
+    const goal = managed.goal
+    if (!goal || isGoalTerminal(goal.status)) {
+      return { ok: false, flushed: false, error: 'no active goal on this session' }
+    }
+    sessionLog.info(`Goal pause requested for session ${sessionId} (${goal.id})`)
+    // The pause write below AWAITS (flush + notice). A new turn — same session,
+    // possibly for a NEW goal — may legally start inside that window. The abort
+    // that follows may only target the turn that was running when the pause was
+    // requested, never a newcomer, so the live turn identity is captured at
+    // ENTRY and re-validated after the await.
+    const turnAtEntry = managed.goalRuntime?.turn
+    const processingAtEntry = managed.isProcessing
+    const outcome = await this.goal.pause(managed, 'manual', 'Paused by you. Resume explicitly to continue.')
+    if (processingAtEntry && managed.isProcessing && !!turnAtEntry && managed.goalRuntime?.turn === turnAtEntry) {
+      await this.cancelProcessing(sessionId, true)
+    }
+    if (outcome.ok) {
+      await this.appendGoalNotice(sessionId, 'Goal paused. Elapsed working time is kept; paused time is not counted. Resume to continue.')
+    }
+    return outcome
+  }
+
+  /**
+   * Explicit user resume of a paused Goal: new runGeneration, clock restarts,
+   * then ONE internal continuation turn through the production send path.
+   * Ordinary chat can never reach this.
+   */
+  async goalResume(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return { ok: false, error: 'session not found' }
+    const goal = managed.goal
+    if (!goal) return { ok: false, error: 'no goal on this session' }
+    if (isGoalTerminal(goal.status)) return { ok: false, error: 'this goal has already ended' }
+    sessionLog.info(`Goal resume requested for session ${sessionId} (${goal.id}) from status ${goal.status}`)
+    const outcome = await this.goal.resume(managed)
+    if (outcome.ok) {
+      await this.appendGoalNotice(sessionId, 'Goal resumed — continuing where it left off.')
+    }
+    return outcome
+  }
+
+  /**
+   * Explicit user end of a Goal (terminal; the record moves to history).
+   * Plan-locked order (F-R2-1), same as goalPause: the terminal state is
+   * written and flushed FIRST — the record leaves the live slot entirely, so
+   * an in-flight verdict fails the CAS (goal removed) and the abort's
+   * onTurnAborted chain finds a terminal goal and does nothing — and the
+   * turn is aborted only afterwards.
+   */
+  async goalEnd(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return { ok: false, error: 'session not found' }
+    const goal = managed.goal
+    if (!goal) return { ok: false, error: 'no goal on this session' }
+    if (isGoalTerminal(goal.status)) return { ok: false, error: 'this goal has already ended' }
+    sessionLog.info(`Goal end requested for session ${sessionId} (${goal.id})`)
+    // Same late-stop protection as goalPause: the terminal write below awaits
+    // (flush + notice), and a newer turn may legally start inside that window.
+    // The abort may only target the turn captured at ENTRY — a session with no
+    // live turn at entry can never stop one that started afterwards.
+    const turnAtEntry = managed.goalRuntime?.turn
+    const processingAtEntry = managed.isProcessing
+    const outcome = await this.goal.end(managed, 'Ended by you. Files and messages produced so far are kept.')
+    if (processingAtEntry && managed.isProcessing && !!turnAtEntry && managed.goalRuntime?.turn === turnAtEntry) {
+      await this.cancelProcessing(sessionId, true)
+    }
+    return outcome
+  }
+
+  /** The current authoritative projection for a session (or undefined). */
+  goalProjection(sessionId: string): GoalProjection | undefined {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return undefined
+    const revision = managed.goalProjectionRevision ?? 0
+    if (!managed.goal && revision === 0) return undefined
+    return buildGoalProjection(managed.goal, revision, sessionId)
+  }
+
+  /**
+   * Append a server-composed Goal notice (summary / pause / resume) as a real
+   * persisted final assistant message. The controller's host and the lifecycle
+   * commands share this ONE implementation.
+   */
+  private async appendGoalNotice(sessionId: string, content: string): Promise<string> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+    const message: Message = {
+      id: generateMessageId(),
+      role: 'assistant',
+      content,
+      timestamp: this.monotonic(),
+      isIntermediate: false,
+    }
+    managed.messages.push(message)
+    managed.lastMessageRole = 'assistant'
+    managed.lastFinalMessageId = message.id
+    this.persistSession(managed)
+    await this.flushSession(sessionId)
+    // Same transport an agent-authored final assistant message travels on: the
+    // renderer upserts by messageId, so the notice renders like any reply.
+    this.sendEvent({ type: 'text_complete', sessionId, text: content, timestamp: message.timestamp, messageId: message.id }, managed.workspace.id)
+    return message.id
+  }
+
   /**
    * Attempt auth retry: refresh token, destroy agent, resend last message.
    * Shared by both typed_error and plain error auth-retry paths.
@@ -9373,6 +10201,10 @@ export class SessionManager implements ISessionManager {
         const retryAttachments = managed.lastSentAttachments
         const retryStoredAttachments = managed.lastSentStoredAttachments
         const retryOptions = managed.lastSentOptions
+        // ICR-1: retry the SAME kind of send. An internal continuation created
+        // no user message, so there is nothing to remove — and the cleanup
+        // below must never delete the user's real last message instead.
+        const retryInternalContinuation = managed.lastSentInternalContinuation
 
         if (retryMessage) {
           sessionLog.info(`[auth-retry] Retrying message for session ${sessionId}`)
@@ -9380,9 +10212,11 @@ export class SessionManager implements ISessionManager {
 
           // Remove the user message that was added for this failed attempt
           // so we don't get duplicate messages when retrying
-          const lastUserMsgIndex = managed.messages.findLastIndex(m => m.role === 'user')
-          if (lastUserMsgIndex !== -1) {
-            managed.messages.splice(lastUserMsgIndex, 1)
+          if (!retryInternalContinuation) {
+            const lastUserMsgIndex = managed.messages.findLastIndex(m => m.role === 'user')
+            if (lastUserMsgIndex !== -1) {
+              managed.messages.splice(lastUserMsgIndex, 1)
+            }
           }
 
           managed.authRetryInProgress = false
@@ -9394,7 +10228,10 @@ export class SessionManager implements ISessionManager {
             retryStoredAttachments,
             retryOptions,
             undefined,  // existingMessageId
-            true        // _isAuthRetry - prevents infinite retry loop
+            true,       // _isAuthRetry - prevents infinite retry loop
+            undefined,  // onAck
+            undefined,  // rpcContext
+            retryInternalContinuation,
           )
           sessionLog.info(`[auth-retry] Retry completed for session ${sessionId}`)
         } else {
@@ -9534,6 +10371,53 @@ export class SessionManager implements ISessionManager {
 
     // 6. Always persist
     this.persistSession(managed)
+
+    // 7. POO-134: Goal continuation. Only a normally-completed Goal turn
+    // continues the Goal — interrupts/errors/timeouts leave it as the Goal
+    // pause/error paths left it, and queued user messages replay first (each
+    // binds as a supplement of the SAME Goal). The continuation runs through
+    // the ONE production send path, deferred off this stack exactly like the
+    // queue replay above.
+    if (reason === 'complete' && managed.messageQueue.length === 0) {
+      const binding = managed.goalRuntime?.turn
+      if (binding) {
+        const goalBinding = binding
+        setImmediate(() => {
+          void this.goal.onTurnComplete(
+            managed,
+            goalBinding,
+            {
+              hasPendingHandoff: managed.pendingQuestion !== undefined || managed.pendingAuthRequestId !== undefined,
+              queuedMessages: managed.messageQueue.length,
+            },
+          ).catch((error: unknown) => {
+            sessionLog.error(`[goal] continuation decision failed for session ${sessionId}:`, error)
+          })
+        })
+      }
+      return
+    }
+
+    // 8. POO-134 F2: a Goal turn that died on error / timeout / interrupt
+    // must not keep its clock running with nobody driving it. A pending
+    // permission/question handoff pauses awaiting_permission (the explicit
+    // handoff sites above usually won the race — this is the fail-safe);
+    // a plan-review interrupt keeps the Goal running (approval continues it);
+    // anything else pauses with the real failure attribution.
+    if (managed.messageQueue.length === 0 && managed.goalRuntime?.turn) {
+      const goalBinding = managed.goalRuntime.turn
+      const handoff = managed.pendingQuestion !== undefined || managed.pendingAuthRequestId !== undefined
+      const planReview = managed.goalPlanReviewPending === true
+      if (planReview) {
+        managed.goalPlanReviewPending = undefined
+      } else {
+        setImmediate(() => {
+          void this.goal.onTurnAborted(managed, goalBinding, { handoff }).catch((error: unknown) => {
+            sessionLog.error(`[goal] turn-abort handling failed for session ${sessionId}:`, error)
+          })
+        })
+      }
+    }
   }
 
   /**
@@ -9759,6 +10643,15 @@ export class SessionManager implements ISessionManager {
     alwaysAllow: boolean,
     options?: import('@polo-ai/shared/protocol').PermissionResponseOptions,
   ): boolean {
+    const browserMeta = this.pendingPermissionRequests.get(requestId)
+    if (browserMeta?.type === 'browser_action' || requestId.startsWith('browser-action-')) {
+      if (!browserMeta || browserMeta.sessionId !== sessionId || !browserMeta.browserScope
+        || alwaysAllow || options?.rememberForMinutes !== undefined
+        || options?.browserActionDigest !== browserMeta.actionDigest) return false
+      const accepted = this.browserActionAuthorizations.get(sessionId)?.resolve(requestId,browserMeta.browserScope,{allowed,alwaysAllow:false,actionDigest:options!.browserActionDigest!}) ?? false
+      if (accepted) this.pendingPermissionRequests.delete(requestId)
+      return accepted
+    }
     const managed = this.sessions.get(sessionId)
     if (managed?.agent) {
       const requestMeta = this.pendingPermissionRequests.get(requestId)
@@ -10058,6 +10951,18 @@ export class SessionManager implements ISessionManager {
       sessionLog.info(`Interrupting for question request in session ${managed.id} (${request.requestId})`)
       managed.agent?.interruptForHandoff(AbortReason.QuestionRequested)
       this.setProcessing(managed, false)
+
+      // POO-134 F2: a structured-question handoff pauses the Goal RIGHT NOW
+      // (clock folds immediately). The structured answer below resumes it.
+      if (managed.goal && !isGoalTerminal(managed.goal.status)) {
+        void this.goal.pause(
+          managed,
+          'awaiting_permission',
+          'Waiting for you to answer a question. The clock is paused while you are away.',
+        ).catch((error: unknown) => {
+          sessionLog.error(`[goal] handoff pause failed for session ${managed.id}:`, error)
+        })
+      }
 
       // Release browser overlay + session binding because the agent is paused.
       // A release failure must not skip the complete event — the turn is
@@ -11553,6 +12458,29 @@ export class SessionManager implements ISessionManager {
           managed.lastMessageRole = 'assistant'
           managed.lastFinalMessageId = assistantMessage.id
 
+          // POO-134 F-R2-3/F-R2-4: capture the final assistant output as
+          // produced by the session's Goal — at the REAL persistence point,
+          // keyed to the turn binding (same goal id + run generation + the
+          // processing generation that is actually streaming). This is the
+          // only place a message becomes citable `message` evidence for the
+          // goal: server-captured, never client-claimed, and never inherited
+          // by a later same-named goal or an ordinary-chat turn.
+          //
+          // Review r1 F1: a SUB-AGENT's sidechain final (parent_tool_use_id
+          // set) is not the goal's own output — the same ownership rule the
+          // turn-event observer already applies to tool reports. Capturing it
+          // attributed another agent's words to this goal's evidence AND, with
+          // the main final following, double-counted the ledger bump that
+          // discarded good candidates. The message still persists to the
+          // transcript below; it just never becomes citable goal evidence.
+          const goalBinding = managed.goalRuntime?.turn
+          if (goalBinding && !event.parentToolUseId) {
+            const captured = this.goal.noteProducedAssistantMessage(managed, assistantMessage.id, managed.processingGeneration)
+            if (captured) {
+              sessionLog.info(`[goal] captured final assistant message ${assistantMessage.id} for goal ${goalBinding.goalId}`)
+            }
+          }
+
           const sessionPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, sessionId)
 
           // Claude branch-cutoff support: persist message UUID + SDK session lineage in sidecar.
@@ -12911,8 +13839,17 @@ export class SessionManager implements ISessionManager {
    * Clean up all resources held by the SessionManager.
    * Should be called on app shutdown to prevent resource leaks.
    */
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     sessionLog.info('Cleaning up resources...')
+    for (const managed of this.sessions.values()) managed.browserFastAbortController?.abort()
+    // Original receipt work remains owned until it is durably staged/settled.
+    // Shutdown must not exit while a timed-out suggest is still cleaning up.
+    const browserOwners = new Set(this.browserFastDeciders)
+    for (const managed of this.sessions.values()) if (managed.browserFastDecider) browserOwners.add(managed.browserFastDecider)
+    await Promise.all([...browserOwners].map(async decider => {
+      await decider.dispose()
+      this.browserFastDeciders.delete(decider)
+    }))
 
     // Stop all ConfigWatchers (file system watchers)
     for (const [path, watcher] of this.configWatchers) {

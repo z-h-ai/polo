@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
 import type { BillingRuntimeUsageInput } from '../admin/billing-runtime-contract'
 import { parseProviderObservation, type ProviderCorrelationV1 } from '../admin/provider-observation'
@@ -8,6 +8,7 @@ export interface ManagedBillingFacts {
   hostRequestId: string
   transportBaseUrl: string
   credentialFingerprint: string
+  requestBounds?: { maxInputTokens: number; maxOutputTokens: number; bodySha256: string }
 }
 export type ManagedBillingResult = Omit<BillingRuntimeUsageInput, 'productSpaceId' | 'runId' | 'requestId'>
 export interface ManagedBillingLease {
@@ -20,7 +21,7 @@ export interface ManagedBillingHooks {
   beforeSend(facts: ManagedBillingFacts): Promise<ManagedBillingLease>
 }
 
-export async function readManagedRequest(request: IncomingMessage, upstream: URL): Promise<{ body: Buffer; model: string }> {
+export async function readManagedRequest(request: IncomingMessage, upstream: URL): Promise<{ body: Buffer; model: string; requestBounds: NonNullable<ManagedBillingFacts['requestBounds']> }> {
   if (request.method !== 'POST' || !upstream.pathname.endsWith('/chat/completions') || upstream.search) {
     throw new Error('Managed billing requires OpenAI chat completions')
   }
@@ -34,7 +35,28 @@ export async function readManagedRequest(request: IncomingMessage, upstream: URL
   const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
   if (!body || typeof body.model !== 'string' || !body.model || body.model.length > 128) throw new Error('Managed model is required')
   if (body.stream) body.stream_options = { ...body.stream_options, include_usage: true }
-  return { model: body.model, body: Buffer.from(JSON.stringify(body)) }
+  // Hosted text requests carry a finite output limit on the actual wire.
+  // Remote media cannot be bounded by its URL bytes: refuse before admission.
+  const hasMedia = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object') return false
+    if (Array.isArray(value)) return value.some(hasMedia)
+    const row = value as Record<string, unknown>
+    return ['image_url', 'input_audio', 'audio', 'video', 'file', 'input_image', 'input_file'].includes(String(row.type))
+      || ['image_url', 'input_audio', 'audio', 'video_url', 'file_data', 'file_id'].some(key => row[key] !== undefined)
+      || Object.values(row).some(hasMedia)
+  }
+  if (hasMedia(body.messages) || body.modalities?.some((value: unknown) => value !== 'text')) throw new Error('Managed reservation requires bounded text input')
+  const limits = ['max_tokens', 'max_completion_tokens'].filter(key => body[key] !== undefined)
+  if (limits.length > 1) throw new Error('Managed output limit is ambiguous')
+  if (!limits.length) body.max_tokens = 8192
+  const output = body[limits[0] ?? 'max_tokens'], count = body.n ?? 1
+  if (!Number.isSafeInteger(output) || output <= 0 || !Number.isSafeInteger(count) || count < 1 || output * count > 1073741823) throw new Error('Managed output limit is invalid')
+  const wire = Buffer.from(JSON.stringify(body))
+  // UTF-8 bytes plus structural overhead deliberately overestimate ordinary
+  // text tokenization. Any supplier discrepancy is still capped at settlement.
+  const maxInputTokens = wire.length + 256 + (Array.isArray(body.messages) ? body.messages.length * 64 : 0)
+  const requestBounds = { maxInputTokens, maxOutputTokens: output * count, bodySha256: createHash('sha256').update(wire).digest('hex') }
+  return { model: body.model, body: wire, requestBounds }
 }
 
 /** Bounded in-memory wire observer. Prompts/output are never journaled. */

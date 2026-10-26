@@ -13,6 +13,9 @@ import { AlertTriangle } from 'lucide-react'
 export interface ChatInputStatusBanner {
   variant: 'info' | 'destructive'
   message: string
+  /** POO-144: optional explicit action (e.g. retry sync) — user-triggered only */
+  actionLabel?: string
+  onAction?: () => void
 }
 
 interface ChatInputZoneProps {
@@ -125,6 +128,16 @@ export function ChatInputZone({
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span>{statusBanner.message}</span>
+          {statusBanner.actionLabel && statusBanner.onAction && (
+            <button
+              type="button"
+              data-testid="chat-status-banner-action"
+              className="ml-auto shrink-0 rounded-md text-[13px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80"
+              onClick={statusBanner.onAction}
+            >
+              {statusBanner.actionLabel}
+            </button>
+          )}
         </div>
       )}
 

@@ -1,0 +1,22 @@
+## 页面快照
+URL: https://shop.example.com/cart
+Title: 购物车 - 示例电商
+Elements: 9 (button:2, link:4, text:2, heading:1)
+Focused ref: none, disabled: 0
+
+Elements (9):
+  @e1 [heading] "我的购物车 (3 件商品)"
+  @e2 [text] "罗技 M275 无线鼠标 x1"
+  @e3 [text] "合计: ¥259.00"
+  @e4 [button] "去结算"
+  @e5 [button] "清空购物车"
+  @e6 [link] "继续购物"
+  @e7 [link] "优惠券"
+  @e8 [link] "猜你喜欢"
+  @e9 [text] "已免运费"
+
+## 任务
+进入购物车结算流程
+
+## 已执行动作
+（空）

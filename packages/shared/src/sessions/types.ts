@@ -13,6 +13,7 @@ import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@polo-ai/core/types';
 import type { QuestionRequest, SessionOrigin } from '../protocol/dto.ts';
+import type { GoalRecord } from '../protocol/goal.ts';
 
 /**
  * Recoverable "answer committed, waiting for agent resume" state.
@@ -86,6 +87,12 @@ export const SESSION_PERSISTENT_FIELDS = [
   'transferredSessionSummaryApplied',
   // Automation origin
   'triggeredBy',
+  // POO-134 Goal: authoritative record for this session's current/last Goal,
+  // the bounded history of finished Goals, and the monotonic per-session
+  // projection revision. Old JSONL without them stays an ordinary chat.
+  'goal',
+  'goalHistory',
+  'goalProjectionRevision',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -266,6 +273,26 @@ export interface SessionConfig {
   transferredSessionSummaryApplied?: boolean;
   /** Metadata for sessions created by automations */
   triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
+  /**
+   * POO-134 authoritative Goal record for this session's CURRENT Goal (kept
+   * after it completes/ends so the anchor message can be decorated and old
+   * results are never overwritten). Absent on every pre-Goal session JSONL —
+   * those remain ordinary chats.
+   */
+  goal?: GoalRecord;
+  /**
+   * Finished Goals of this session, oldest first, bounded (the current record
+   * above is the newest entry once it reaches a terminal state). Immutable
+   * Goal IDs keep same-named Goals distinct across the session's lifetime.
+   */
+  goalHistory?: GoalRecord[];
+  /**
+   * Monotonic per-session Goal projection revision. Bumped on every Goal
+   * create/change/terminal-clear/recovery; clients reject any projection with
+   * a revision <= the highest they have seen, so a stale terminal event for
+   * one Goal can never clobber a newer Goal.
+   */
+  goalProjectionRevision?: number;
 }
 
 /**

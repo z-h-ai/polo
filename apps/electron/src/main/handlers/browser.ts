@@ -1,4 +1,5 @@
-import { RPC_CHANNELS, type BrowserPaneCreateOptions, type BrowserEmptyStateLaunchPayload } from '../../shared/types'
+import { BrowserWindow } from 'electron'
+import { RPC_CHANNELS, type BrowserPaneCreateOptions, type BrowserEmptyStateLaunchPayload, type BrowserEmbedBounds } from '../../shared/types'
 import type { BrowserScreenshotOptions } from '../browser-pane-manager'
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
@@ -21,6 +22,11 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.SCREENSHOT,
   RPC_CHANNELS.browserPane.EVALUATE,
   RPC_CHANNELS.browserPane.SCROLL,
+  RPC_CHANNELS.browserPane.EMBED,
+  RPC_CHANNELS.browserPane.DETACH_TO_POPUP,
+  RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS,
+  RPC_CHANNELS.browserPane.UNEMBED,
+  RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING,
 ] as const
 
 export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -98,6 +104,51 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
 
   server.handle(RPC_CHANNELS.browserPane.FOCUS, (_ctx, id: string) => {
     browserPaneManager.focus(id)
+  })
+
+  // POO-135: embed/restore. The embed host is the calling window itself — the
+  // sidebar lives in the main window's renderer, so the sender's
+  // webContentsId resolves to the target BrowserWindow.
+  const resolveHostWindow = (webContentsId?: number | null): BrowserWindow | null => {
+    if (!webContentsId) return null
+    return BrowserWindow.getAllWindows().find(
+      (win) => !win.isDestroyed() && win.webContents?.id === webContentsId,
+    ) ?? null
+  }
+
+  server.handle(RPC_CHANNELS.browserPane.EMBED, (ctx, id: string, bounds?: BrowserEmbedBounds) => {
+    const hostWindow = resolveHostWindow(ctx.webContentsId)
+    if (!hostWindow) {
+      throw new Error('[browser-pane] embed failed: host window not found for sender')
+    }
+    browserPaneManager.embedInstance(id, hostWindow, bounds)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.DETACH_TO_POPUP, (_ctx, id: string) => {
+    browserPaneManager.detachToPopup(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS, (ctx, id: string, bounds: BrowserEmbedBounds) => {
+    const hostWindow = resolveHostWindow(ctx.webContentsId)
+    if (!hostWindow) return
+    browserPaneManager.setEmbedBounds(id, bounds)
+  })
+
+  // POO-135 r1: the sidebar container unmounted — stop the native view from
+  // covering window content (it stays embedded; re-attaches on next bounds).
+  server.handle(RPC_CHANNELS.browserPane.UNEMBED, (ctx, id: string) => {
+    const hostWindow = resolveHostWindow(ctx.webContentsId)
+    if (!hostWindow) return
+    browserPaneManager.unembedInstance(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING, async (_ctx, id: string, active: boolean, options?: { targetSessionId?: string | null }) => {
+    try {
+      await browserPaneManager.setElementPicking(id, active, options)
+    } catch (err) {
+      platform.logger.error(`[browser-pane] set-element-picking(${active}) failed for ${id}:`, err)
+      throw err
+    }
   })
 
   server.handle(RPC_CHANNELS.browserPane.LAUNCH, async (ctx, payload: BrowserEmptyStateLaunchPayload) => {
@@ -203,5 +254,12 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
 
   browserPaneManager.onInteracted((id) => {
     pushTyped(server, RPC_CHANNELS.browserPane.INTERACTED, { to: 'all' }, id)
+  })
+
+  // POO-135: element picker outcomes — same broadcast + renderer-filter
+  // contract as the other browser events (the picking renderer may be the
+  // main window's sidebar, the popup toolbar, or a remote client).
+  browserPaneManager.onElementPickerEvent((event) => {
+    pushTyped(server, RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT, { to: 'all' }, event)
   })
 }

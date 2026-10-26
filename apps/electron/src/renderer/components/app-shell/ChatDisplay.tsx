@@ -43,6 +43,7 @@ import { clearGenUiToolInputDeltasForSession } from "@polo-ai/ui/chat/genuiToolI
 import { useFocusZone } from "@/hooks/keyboard"
 import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
+import type { WebElementReference } from "@polo-ai/core/types"
 import type { PermissionMode } from "@polo-ai/shared/agent/modes"
 import type { ThinkingLevel } from "@polo-ai/shared/agent/thinking-levels"
 import {
@@ -65,6 +66,7 @@ import {
 } from "@polo-ai/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { KbReferenceChips } from "@/components/chat/KbReferenceChips"
+import { ElementReferenceChips } from "@/components/chat/ElementReferenceChips"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { ChatInputZone, type ChatInputStatusBanner, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
@@ -142,7 +144,7 @@ function getTurnKey(turn: Turn): string {
 
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   // Current model is read-only in the input; admin-managed settings choose it.
@@ -195,6 +197,10 @@ interface ChatDisplayProps {
   attachmentsValue?: FileAttachment[]
   /** Callback when attachment draft changes (add, remove, clear on send) */
   onAttachmentsChange?: (attachments: FileAttachment[]) => void
+  /** POO-135: picked web element references queued for this session's composer */
+  elementReferencesValue?: WebElementReference[]
+  /** Callback when a draft reference is removed (send clears the rest) */
+  onElementReferencesChange?: (references: WebElementReference[]) => void
   // Source selection
   /** Available sources (enabled only) */
   sources?: LoadedSource[]
@@ -474,6 +480,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onInputChange,
   attachmentsValue,
   onAttachmentsChange,
+  elementReferencesValue,
+  onElementReferencesChange,
   // Sources
   sources,
   onSourcesChange,
@@ -1276,7 +1284,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
   // kbOptions mirrors the FreeFormInput onSubmit 4th parameter shape (POO-108)
-  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }) => {
+  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }, elementReferences?: WebElementReference[]) => {
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
       includeTopSeparator: hasBaseMessage,
@@ -1288,7 +1296,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
-    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds)
+    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds, elementReferences)
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
     // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
@@ -1386,7 +1394,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           pendingPermission.sessionId,
           pendingPermission.requestId,
           permResponse.allowed,
-          permResponse.alwaysAllow
+          permResponse.alwaysAllow,
+          permResponse.browserActionDigest ? {browserActionDigest:permResponse.browserActionDigest,browserActionPhase:permResponse.browserActionPhase} : undefined
         )
         return
       }
@@ -2079,6 +2088,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onInputChange,
               attachmentsValue,
               onAttachmentsChange,
+              elementReferencesValue,
+              onElementReferencesChange,
               sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
               onSourcesChange,
@@ -2382,6 +2393,12 @@ function MessageBubble({
         {message.kbReferences && message.kbReferences.length > 0 && (
           <KbReferenceChips references={message.kbReferences} workspaceId={workspaceId} />
         )}
+        {/* POO-135: point-in-time web element snapshots attached at send time. */}
+        {message.elementReferences && message.elementReferences.length > 0 && (
+          <div className="flex justify-end">
+            <ElementReferenceChips mode="message" references={message.elementReferences} />
+          </div>
+        )}
       </div>
     )
   }
@@ -2520,6 +2537,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.sessionId === next.sessionId &&
     prev.workspaceId === next.workspaceId &&
     prev.message.kbReferences === next.message.kbReferences &&
+    prev.message.elementReferences === next.message.elementReferences &&
     prev.compactMode === next.compactMode
   )
 })

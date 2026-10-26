@@ -1,0 +1,914 @@
+[
+ {
+  "caseId": "E01",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 931,
+  "content": "click @e2",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 348,
+   "completion_tokens": 4,
+   "total_tokens": 352,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 348
+  },
+  "error": null
+ },
+ {
+  "caseId": "E01",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 860,
+  "content": "click @e2",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 348,
+   "completion_tokens": 4,
+   "total_tokens": 352,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 348
+  },
+  "error": null
+ },
+ {
+  "caseId": "E02",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 836,
+  "content": "fill @e1 test@example.com",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 324,
+   "completion_tokens": 8,
+   "total_tokens": 332,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 324
+  },
+  "error": null
+ },
+ {
+  "caseId": "E02",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 927,
+  "content": "fill @e1 test@example.com",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 324,
+   "completion_tokens": 8,
+   "total_tokens": 332,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 324
+  },
+  "error": null
+ },
+ {
+  "caseId": "E03",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 880,
+  "content": "click @e4",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 350,
+   "completion_tokens": 4,
+   "total_tokens": 354,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 350
+  },
+  "error": null
+ },
+ {
+  "caseId": "E03",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 1222,
+  "content": "click @e4",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 350,
+   "completion_tokens": 4,
+   "total_tokens": 354,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 350
+  },
+  "error": null
+ },
+ {
+  "caseId": "E04",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 796,
+  "content": "select @e2 zh-CN",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 323,
+   "completion_tokens": 7,
+   "total_tokens": 330,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 323
+  },
+  "error": null
+ },
+ {
+  "caseId": "E04",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 897,
+  "content": "select @e2 zh-CN",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 323,
+   "completion_tokens": 7,
+   "total_tokens": 330,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 323
+  },
+  "error": null
+ },
+ {
+  "caseId": "E05",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 797,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 354,
+   "completion_tokens": 4,
+   "total_tokens": 358,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 354
+  },
+  "error": null
+ },
+ {
+  "caseId": "E05",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 797,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 354,
+   "completion_tokens": 4,
+   "total_tokens": 358,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 354
+  },
+  "error": null
+ },
+ {
+  "caseId": "E06",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 891,
+  "content": "navigate https://docs.example.com",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 304,
+   "completion_tokens": 7,
+   "total_tokens": 311,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 304
+  },
+  "error": null
+ },
+ {
+  "caseId": "E06",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 844,
+  "content": "navigate https://docs.example.com",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 304,
+   "completion_tokens": 7,
+   "total_tokens": 311,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 304
+  },
+  "error": null
+ },
+ {
+  "caseId": "E07",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 889,
+  "content": "click @e5",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 353,
+   "completion_tokens": 4,
+   "total_tokens": 357,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 353
+  },
+  "error": null
+ },
+ {
+  "caseId": "E07",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 793,
+  "content": "click @e5",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 353,
+   "completion_tokens": 4,
+   "total_tokens": 357,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 353
+  },
+  "error": null
+ },
+ {
+  "caseId": "E08",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 888,
+  "content": "upload @e3 /Users/me/report.pdf",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 335,
+   "completion_tokens": 11,
+   "total_tokens": 346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 335
+  },
+  "error": null
+ },
+ {
+  "caseId": "E08",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 840,
+  "content": "upload @e3 /Users/me/report.pdf",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 335,
+   "completion_tokens": 11,
+   "total_tokens": 346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 335
+  },
+  "error": null
+ },
+ {
+  "caseId": "M01",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 773,
+  "content": "click @e4",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 342,
+   "completion_tokens": 4,
+   "total_tokens": 346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 342
+  },
+  "error": null
+ },
+ {
+  "caseId": "M01",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 821,
+  "content": "click @e4",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 342,
+   "completion_tokens": 4,
+   "total_tokens": 346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 342
+  },
+  "error": null
+ },
+ {
+  "caseId": "M02",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 839,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 411,
+   "completion_tokens": 4,
+   "total_tokens": 415,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 411
+  },
+  "error": null
+ },
+ {
+  "caseId": "M02",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 782,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 411,
+   "completion_tokens": 4,
+   "total_tokens": 415,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 411
+  },
+  "error": null
+ },
+ {
+  "caseId": "M03",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 779,
+  "content": "click @e5",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 357,
+   "completion_tokens": 4,
+   "total_tokens": 361,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 357
+  },
+  "error": null
+ },
+ {
+  "caseId": "M03",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 839,
+  "content": "click @e5",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 357,
+   "completion_tokens": 4,
+   "total_tokens": 361,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 357
+  },
+  "error": null
+ },
+ {
+  "caseId": "M04",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1328,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 320,
+   "completion_tokens": 4,
+   "total_tokens": 324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 320
+  },
+  "error": null
+ },
+ {
+  "caseId": "M04",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 839,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 320,
+   "completion_tokens": 4,
+   "total_tokens": 324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 320
+  },
+  "error": null
+ },
+ {
+  "caseId": "M05",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 884,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 356,
+   "completion_tokens": 4,
+   "total_tokens": 360,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 356
+  },
+  "error": null
+ },
+ {
+  "caseId": "M05",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 881,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 356,
+   "completion_tokens": 4,
+   "total_tokens": 360,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 356
+  },
+  "error": null
+ },
+ {
+  "caseId": "M06",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 832,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 333,
+   "completion_tokens": 4,
+   "total_tokens": 337,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 333
+  },
+  "error": null
+ },
+ {
+  "caseId": "M06",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 881,
+  "content": "click @e3",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 333,
+   "completion_tokens": 4,
+   "total_tokens": 337,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 333
+  },
+  "error": null
+ },
+ {
+  "caseId": "M07",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 782,
+  "content": "click @e2",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 340,
+   "completion_tokens": 4,
+   "total_tokens": 344,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 340
+  },
+  "error": null
+ },
+ {
+  "caseId": "M07",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 881,
+  "content": "click @e2",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 340,
+   "completion_tokens": 4,
+   "total_tokens": 344,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 340
+  },
+  "error": null
+ },
+ {
+  "caseId": "M08",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 776,
+  "content": "fill @e1 test@example.com",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 360,
+   "completion_tokens": 8,
+   "total_tokens": 368,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 360
+  },
+  "error": null
+ },
+ {
+  "caseId": "M08",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 881,
+  "content": "fill @e1 test@example.com",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 360,
+   "completion_tokens": 8,
+   "total_tokens": 368,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 360
+  },
+  "error": null
+ },
+ {
+  "caseId": "H01",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 767,
+  "content": "done",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 413,
+   "completion_tokens": 1,
+   "total_tokens": 414,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 413
+  },
+  "error": null
+ },
+ {
+  "caseId": "H01",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 760,
+  "content": "done",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 413,
+   "completion_tokens": 1,
+   "total_tokens": 414,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 413
+  },
+  "error": null
+ },
+ {
+  "caseId": "H02",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 863,
+  "content": "fail: 当前页面无用户评论区入口或评论内容，仅有正文与“相关阅读/分享/回到顶部”等元素，无法完成阅读评论任务",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 361,
+   "completion_tokens": 33,
+   "total_tokens": 394,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 361
+  },
+  "error": null
+ },
+ {
+  "caseId": "H02",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 617,
+  "content": "fail: 当前页面仅有正文与“相关阅读/分享/回到顶部”，未发现用户评论入口或评论内容，无法完成“阅读评论”任务。",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 361,
+   "completion_tokens": 34,
+   "total_tokens": 395,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 361
+  },
+  "error": null
+ },
+ {
+  "caseId": "H03",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 873,
+  "content": "fill @e1 test@example.com",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 316,
+   "completion_tokens": 8,
+   "total_tokens": 324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 316
+  },
+  "error": null
+ },
+ {
+  "caseId": "H03",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 1197,
+  "content": "fill @e1 test@example.com",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 316,
+   "completion_tokens": 8,
+   "total_tokens": 324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 316
+  },
+  "error": null
+ },
+ {
+  "caseId": "H04",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 901,
+  "content": "fail: 页面为安全验证滑块+短信验证码，需人工完成滑块与短信验证码，无法仅凭快照自动登录。",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 334,
+   "completion_tokens": 30,
+   "total_tokens": 364,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 334
+  },
+  "error": null
+ },
+ {
+  "caseId": "H04",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 872,
+  "content": "fail: 页面为滑块与短信验证码安全验证，未提供账号密码登录入口，且短信验证码需用户手机接收，无法自动完成登录。",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 334,
+   "completion_tokens": 34,
+   "total_tokens": 368,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 334
+  },
+  "error": null
+ },
+ {
+  "caseId": "H05",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 825,
+  "content": "key Enter",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 336,
+   "completion_tokens": 2,
+   "total_tokens": 338,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 336
+  },
+  "error": null
+ },
+ {
+  "caseId": "H05",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 867,
+  "content": "key Enter",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 336,
+   "completion_tokens": 2,
+   "total_tokens": 338,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 336
+  },
+  "error": null
+ },
+ {
+  "caseId": "H06",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 964,
+  "content": "click @e4",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 365,
+   "completion_tokens": 4,
+   "total_tokens": 369,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 365
+  },
+  "error": null
+ },
+ {
+  "caseId": "H06",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 768,
+  "content": "click @e4",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 365,
+   "completion_tokens": 4,
+   "total_tokens": 369,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 365
+  },
+  "error": null
+ },
+ {
+  "caseId": "H07",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 868,
+  "content": "fail: 页面显示“暂无订单”，不存在可查看的最近订单详情",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 298,
+   "completion_tokens": 16,
+   "total_tokens": 314,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 298
+  },
+  "error": null
+ },
+ {
+  "caseId": "H07",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 824,
+  "content": "fail: 页面显示“暂无订单”，不存在可查看的最近订单详情",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 298,
+   "completion_tokens": 16,
+   "total_tokens": 314,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 298
+  },
+  "error": null
+ },
+ {
+  "caseId": "H08",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 764,
+  "content": "select @e2 CNAME",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 381,
+   "completion_tokens": 6,
+   "total_tokens": 387,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 381
+  },
+  "error": null
+ },
+ {
+  "caseId": "H08",
+  "sample": 2,
+  "http": 200,
+  "latencyMs": 859,
+  "content": "select @e2 CNAME",
+  "reasoning": null,
+  "usage": {
+   "prompt_tokens": 381,
+   "completion_tokens": 6,
+   "total_tokens": 387,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 381
+  },
+  "error": null
+ }
+]

@@ -88,6 +88,63 @@ describe('consumeLlmQueryMessages', () => {
     expect(result.warning).toBeUndefined();
   });
 
+  // POO-134 attempt-7 real-run gap: a completed goal whose verification
+  // receipt carried NO model/usage because the consumer never surfaced what
+  // the SDK result actually reported. Attribution must be passed through when
+  // present — real values only, never fabricated — and stay absent when the
+  // SDK omits them (asserted by the original happy-path test above).
+  //
+  // COMPATIBILITY PROBE ONLY (R2 §三): the authoritative SDK result fields are
+  // `usage`/`modelUsage`; `model` on a result message is NOT guaranteed by the
+  // SDK types (claude-llm-query reads it defensively OUTSIDE the type). These
+  // two tests inject that extra field via `as unknown as SDKMessage` to pin
+  // the defensive passthrough — the production Claude attribution chain is
+  // expected to run through the ADDRESSED-model fallback instead.
+  it('success result with model/usage — surfaces real attribution', async () => {
+    const result = await consumeLlmQueryMessages(
+      (async function* () {
+        yield assistantMsg('Verdict.');
+        yield {
+          type: 'result',
+          subtype: 'success',
+          structured_output: undefined,
+          model: 'glm-5.3-flash',
+          usage: { input_tokens: 1234, output_tokens: 567 },
+          num_turns: 2,
+        } as unknown as SDKMessage;
+      })(),
+    );
+
+    expect(result.text).toBe('Verdict.');
+    expect(result.model).toBe('glm-5.3-flash');
+    expect(result.inputTokens).toBe(1234);
+    expect(result.outputTokens).toBe(567);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('error result with model/usage — attribution still surfaced alongside the warning', async () => {
+    const iter = (async function* () {
+      yield assistantMsg('Partial.');
+      yield {
+        type: 'result',
+        subtype: 'error_max_turns',
+        is_error: true,
+        num_turns: 2,
+        stop_reason: null,
+        errors: [],
+        model: 'glm-5.3-flash',
+        usage: { input_tokens: 42, output_tokens: 7 },
+      } as unknown as SDKMessage;
+    })();
+
+    const result = await consumeLlmQueryMessages(iter);
+
+    expect(result.warning).toMatch(/Model stopped at max turns/i);
+    expect(result.model).toBe('glm-5.3-flash');
+    expect(result.inputTokens).toBe(42);
+    expect(result.outputTokens).toBe(7);
+  });
+
   it('max-turns thrown mid-stream — preserves partial text + warning', async () => {
     const { logs, onDebug } = collectDebug();
     const iter = scriptIterator(

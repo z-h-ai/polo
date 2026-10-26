@@ -7,6 +7,7 @@ export { registerCoreRpcHandlers }
 import { registerSystemGuiHandlers } from './system'
 import { registerWorkspaceGuiHandlers } from './workspace'
 import { registerBrowserHandlers } from './browser'
+import { registerCanvasPaneHandlers } from './canvas'
 import { registerSettingsGuiHandlers } from './settings'
 import { registerTabBrowserHandlers } from './tab-browser'
 import { registerGenUiHandlers } from './genui'
@@ -16,6 +17,7 @@ export function registerGuiRpcHandlers(server: RpcServer, deps: HandlerDeps): vo
   registerSystemGuiHandlers(server, deps)
   registerWorkspaceGuiHandlers(server, deps)
   registerBrowserHandlers(server, deps)
+  registerCanvasPaneHandlers(server, deps)
   registerSettingsGuiHandlers(server, deps)
   registerTabBrowserHandlers(server, deps)
   registerGenUiHandlers(server, deps)

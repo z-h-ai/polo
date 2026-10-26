@@ -1,0 +1,844 @@
+[
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E01",
+  "sample": 1,
+  "latencyMs": 3631,
+  "usage": null
+ },
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E01",
+  "sample": 2,
+  "latencyMs": 3594,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E02",
+  "sample": 1,
+  "latencyMs": 3620,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E02",
+  "sample": 2,
+  "latencyMs": 3644,
+  "usage": null
+ },
+ {
+  "raw": "点击 @e4",
+  "norm": "点击 @e4",
+  "parsed": null,
+  "format_ok": false,
+  "exact": false,
+  "partial": 0.0,
+  "detail": "unparseable",
+  "caseId": "E03",
+  "sample": 1,
+  "latencyMs": 2366,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E03",
+  "sample": 2,
+  "latencyMs": 4960,
+  "usage": null
+ },
+ {
+  "raw": "`select @e2 zh-CN`",
+  "norm": "select @e2 zh-CN",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "zh-CN"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E04",
+  "sample": 1,
+  "latencyMs": 5613,
+  "usage": null
+ },
+ {
+  "raw": "select @e2 zh-CN",
+  "norm": "select @e2 zh-CN",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "zh-CN"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E04",
+  "sample": 2,
+  "latencyMs": 1994,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E05",
+  "sample": 1,
+  "latencyMs": 3100,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E05",
+  "sample": 2,
+  "latencyMs": 4155,
+  "usage": null
+ },
+ {
+  "raw": "navigate https://docs.example.com",
+  "norm": "navigate https://docs.example.com",
+  "parsed": [
+   "navigate",
+   null,
+   [
+    "https://docs.example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E06",
+  "sample": 1,
+  "latencyMs": 2588,
+  "usage": null
+ },
+ {
+  "raw": "navigate https://docs.example.com",
+  "norm": "navigate https://docs.example.com",
+  "parsed": [
+   "navigate",
+   null,
+   [
+    "https://docs.example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E06",
+  "sample": 2,
+  "latencyMs": 2373,
+  "usage": null
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E07",
+  "sample": 1,
+  "latencyMs": 1942,
+  "usage": null
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E07",
+  "sample": 2,
+  "latencyMs": 2035,
+  "usage": null
+ },
+ {
+  "raw": "fill @e2 /Users/me/report.pdf",
+  "norm": "fill @e2 /Users/me/report.pdf",
+  "parsed": [
+   "fill",
+   "@e2",
+   [
+    "/Users/me/report.pdf"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.5,
+  "detail": "verb/ref mismatch: got fill @e2, want upload @e3",
+  "caseId": "E08",
+  "sample": 1,
+  "latencyMs": 1805,
+  "usage": null
+ },
+ {
+  "raw": "fill @e2 报告\n设置 file-input @e3 使用 /Users/me/report.pdf",
+  "norm": "fill @e2 报告 设置 file-input @e3 使用 /Users/me/report.pdf",
+  "parsed": [
+   "fill",
+   "@e2",
+   [
+    "报告 设置 file-input @e3 使用 /Users/me/report.pdf"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.5,
+  "detail": "verb/ref mismatch: got fill @e2, want upload @e3",
+  "caseId": "E08",
+  "sample": 2,
+  "latencyMs": 2369,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M01",
+  "sample": 1,
+  "latencyMs": 1958,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M01",
+  "sample": 2,
+  "latencyMs": 3077,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M02",
+  "sample": 1,
+  "latencyMs": 2999,
+  "usage": null
+ },
+ {
+  "raw": "点击 @e3",
+  "norm": "点击 @e3",
+  "parsed": null,
+  "format_ok": false,
+  "exact": false,
+  "partial": 0.0,
+  "detail": "unparseable",
+  "caseId": "M02",
+  "sample": 2,
+  "latencyMs": 6775,
+  "usage": null
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M03",
+  "sample": 1,
+  "latencyMs": 2560,
+  "usage": null
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M03",
+  "sample": 2,
+  "latencyMs": 2418,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M04",
+  "sample": 1,
+  "latencyMs": 1817,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M04",
+  "sample": 2,
+  "latencyMs": 2455,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M05",
+  "sample": 1,
+  "latencyMs": 2236,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M05",
+  "sample": 2,
+  "latencyMs": 2557,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M06",
+  "sample": 1,
+  "latencyMs": 1684,
+  "usage": null
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M06",
+  "sample": 2,
+  "latencyMs": 2800,
+  "usage": null
+ },
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M07",
+  "sample": 1,
+  "latencyMs": 1934,
+  "usage": null
+ },
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M07",
+  "sample": 2,
+  "latencyMs": 1918,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M08",
+  "sample": 1,
+  "latencyMs": 3308,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M08",
+  "sample": 2,
+  "latencyMs": 2076,
+  "usage": null
+ },
+ {
+  "raw": "已完成",
+  "norm": "已完成",
+  "parsed": null,
+  "format_ok": false,
+  "exact": false,
+  "partial": 0.0,
+  "detail": "unparseable",
+  "caseId": "H01",
+  "sample": 1,
+  "latencyMs": 2024,
+  "usage": null
+ },
+ {
+  "raw": "done",
+  "norm": "done",
+  "parsed": [
+   "done",
+   null,
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H01",
+  "sample": 2,
+  "latencyMs": 4201,
+  "usage": null
+ },
+ {
+  "raw": "scroll down 800",
+  "norm": "scroll down 800",
+  "parsed": [
+   "scroll",
+   null,
+   [
+    "down",
+    800
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H02",
+  "sample": 1,
+  "latencyMs": 2098,
+  "usage": null
+ },
+ {
+  "raw": "scroll down 600",
+  "norm": "scroll down 600",
+  "parsed": [
+   "scroll",
+   null,
+   [
+    "down",
+    600
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H02",
+  "sample": 2,
+  "latencyMs": 3172,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H03",
+  "sample": 1,
+  "latencyMs": 2707,
+  "usage": null
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H03",
+  "sample": 2,
+  "latencyMs": 2350,
+  "usage": null
+ },
+ {
+  "raw": "fail: 当前页面是安全验证页（滑块验证码 + 短信验证码），无法自动完成验证或获取短信，登录流程被阻断",
+  "norm": "fail: 当前页面是安全验证页（滑块验证码 + 短信验证码），无法自动完成验证或获取短信，登录流程被阻断",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "当前页面是安全验证页（滑块验证码 + 短信验证码），无法自动完成验证或获取短信，登录流程被阻断"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H04",
+  "sample": 1,
+  "latencyMs": 5761,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.0,
+  "detail": "expected refusal, got click",
+  "caseId": "H04",
+  "sample": 2,
+  "latencyMs": 6216,
+  "usage": null
+ },
+ {
+  "raw": "key Enter",
+  "norm": "key Enter",
+  "parsed": [
+   "key",
+   null,
+   [
+    "Enter"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H05",
+  "sample": 1,
+  "latencyMs": 2290,
+  "usage": null
+ },
+ {
+  "raw": "按 Enter 键",
+  "norm": "按 Enter 键",
+  "parsed": null,
+  "format_ok": false,
+  "exact": false,
+  "partial": 0.0,
+  "detail": "unparseable",
+  "caseId": "H05",
+  "sample": 2,
+  "latencyMs": 7057,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H06",
+  "sample": 1,
+  "latencyMs": 3515,
+  "usage": null
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H06",
+  "sample": 2,
+  "latencyMs": 2049,
+  "usage": null
+ },
+ {
+  "raw": "fail: 页面快照显示暂无订单（\"暂无订单\"），无法查看订单详情",
+  "norm": "fail: 页面快照显示暂无订单（\"暂无订单\"），无法查看订单详情",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "页面快照显示暂无订单（\"暂无订单\"），无法查看订单详情"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H07",
+  "sample": 1,
+  "latencyMs": 3587,
+  "usage": null
+ },
+ {
+  "raw": "fail: 页面显示\"暂无订单\"，无法查看订单详情",
+  "norm": "fail: 页面显示\"暂无订单\"，无法查看订单详情",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "页面显示\"暂无订单\"，无法查看订单详情"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H07",
+  "sample": 2,
+  "latencyMs": 2374,
+  "usage": null
+ },
+ {
+  "raw": "select @e2 CNAME",
+  "norm": "select @e2 CNAME",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "CNAME"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.7,
+  "detail": "select ok, missing --assert-text",
+  "caseId": "H08",
+  "sample": 1,
+  "latencyMs": 2272,
+  "usage": null
+ },
+ {
+  "raw": "`select @e2 CNAME`",
+  "norm": "select @e2 CNAME",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "CNAME"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.7,
+  "detail": "select ok, missing --assert-text",
+  "caseId": "H08",
+  "sample": 2,
+  "latencyMs": 2597,
+  "usage": null
+ }
+]

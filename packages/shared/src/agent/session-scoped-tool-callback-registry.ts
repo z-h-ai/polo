@@ -13,7 +13,8 @@
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
-import type { AuthRequest, RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
+import type { BrowserFastDeciderFn } from './browser-fast-decider.ts';
+import type { AuthRequest, GoalUpdateReport, RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core'
 import { createHash } from 'node:crypto';
 import { debug } from '../utils/debug.ts';
 
@@ -54,6 +55,16 @@ export interface SessionScopedToolCallbacks {
   onQuestionRequested?: (questions: RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>;
 
   /**
+   * POO-134: called when the agent files a structured goal_update report on a
+   * Goal turn. The report is NOT authority — the host's GoalController applies
+   * it only after matching a successful goal_update tool_result of the SAME
+   * turn against the GoalID/runGeneration captured at turn start.
+   * `generationAtRequest` is the issuing turn's generation, snapshotted at
+   * tool-call time and carried through immutably.
+   */
+  onGoalUpdateReport?: (report: GoalUpdateReport, generationAtRequest: number) => void | Promise<void>;
+
+  /**
    * Reader for the CURRENT processing generation, registered by each agent
    * backend. It is invoked by the tool handler AT TOOL-CALL INITIATION —
    * synchronously, before any await — and the returned value is bound
@@ -79,6 +90,13 @@ export interface SessionScopedToolCallbacks {
    * with the session's bound browser instance.
    */
   browserPaneFns?: BrowserPaneFns;
+
+  /**
+   * Browser fast decider for `browser_tool suggest` (POO-113 fast layer).
+   * Set by the session manager; resolves endpoints from the managed config
+   * + LLM connection credentials. Optional — suggest degrades gracefully.
+   */
+  browserFastDecider?: BrowserFastDeciderFn;
 
   /** Set labels on a session (defaults to current). */
   setSessionLabelsFn?: (sessionId: string | undefined, labels: string[]) => void | Promise<void>;

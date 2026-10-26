@@ -1,0 +1,1294 @@
+[
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E01",
+  "sample": 1,
+  "latencyMs": 931,
+  "usage": {
+   "prompt_tokens": 348,
+   "completion_tokens": 4,
+   "total_tokens": 352,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 348
+  }
+ },
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E01",
+  "sample": 2,
+  "latencyMs": 860,
+  "usage": {
+   "prompt_tokens": 348,
+   "completion_tokens": 4,
+   "total_tokens": 352,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 348
+  }
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E02",
+  "sample": 1,
+  "latencyMs": 836,
+  "usage": {
+   "prompt_tokens": 324,
+   "completion_tokens": 8,
+   "total_tokens": 332,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 324
+  }
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E02",
+  "sample": 2,
+  "latencyMs": 927,
+  "usage": {
+   "prompt_tokens": 324,
+   "completion_tokens": 8,
+   "total_tokens": 332,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 324
+  }
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E03",
+  "sample": 1,
+  "latencyMs": 880,
+  "usage": {
+   "prompt_tokens": 350,
+   "completion_tokens": 4,
+   "total_tokens": 354,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 350
+  }
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E03",
+  "sample": 2,
+  "latencyMs": 1222,
+  "usage": {
+   "prompt_tokens": 350,
+   "completion_tokens": 4,
+   "total_tokens": 354,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 350
+  }
+ },
+ {
+  "raw": "select @e2 zh-CN",
+  "norm": "select @e2 zh-CN",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "zh-CN"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E04",
+  "sample": 1,
+  "latencyMs": 796,
+  "usage": {
+   "prompt_tokens": 323,
+   "completion_tokens": 7,
+   "total_tokens": 330,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 323
+  }
+ },
+ {
+  "raw": "select @e2 zh-CN",
+  "norm": "select @e2 zh-CN",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "zh-CN"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E04",
+  "sample": 2,
+  "latencyMs": 897,
+  "usage": {
+   "prompt_tokens": 323,
+   "completion_tokens": 7,
+   "total_tokens": 330,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 323
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E05",
+  "sample": 1,
+  "latencyMs": 797,
+  "usage": {
+   "prompt_tokens": 354,
+   "completion_tokens": 4,
+   "total_tokens": 358,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 354
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E05",
+  "sample": 2,
+  "latencyMs": 797,
+  "usage": {
+   "prompt_tokens": 354,
+   "completion_tokens": 4,
+   "total_tokens": 358,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 354
+  }
+ },
+ {
+  "raw": "navigate https://docs.example.com",
+  "norm": "navigate https://docs.example.com",
+  "parsed": [
+   "navigate",
+   null,
+   [
+    "https://docs.example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E06",
+  "sample": 1,
+  "latencyMs": 891,
+  "usage": {
+   "prompt_tokens": 304,
+   "completion_tokens": 7,
+   "total_tokens": 311,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 304
+  }
+ },
+ {
+  "raw": "navigate https://docs.example.com",
+  "norm": "navigate https://docs.example.com",
+  "parsed": [
+   "navigate",
+   null,
+   [
+    "https://docs.example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E06",
+  "sample": 2,
+  "latencyMs": 844,
+  "usage": {
+   "prompt_tokens": 304,
+   "completion_tokens": 7,
+   "total_tokens": 311,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 304
+  }
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E07",
+  "sample": 1,
+  "latencyMs": 889,
+  "usage": {
+   "prompt_tokens": 353,
+   "completion_tokens": 4,
+   "total_tokens": 357,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 353
+  }
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E07",
+  "sample": 2,
+  "latencyMs": 793,
+  "usage": {
+   "prompt_tokens": 353,
+   "completion_tokens": 4,
+   "total_tokens": 357,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 353
+  }
+ },
+ {
+  "raw": "upload @e3 /Users/me/report.pdf",
+  "norm": "upload @e3 /Users/me/report.pdf",
+  "parsed": [
+   "upload",
+   "@e3",
+   [
+    "/Users/me/report.pdf"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E08",
+  "sample": 1,
+  "latencyMs": 888,
+  "usage": {
+   "prompt_tokens": 335,
+   "completion_tokens": 11,
+   "total_tokens": 346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 335
+  }
+ },
+ {
+  "raw": "upload @e3 /Users/me/report.pdf",
+  "norm": "upload @e3 /Users/me/report.pdf",
+  "parsed": [
+   "upload",
+   "@e3",
+   [
+    "/Users/me/report.pdf"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "E08",
+  "sample": 2,
+  "latencyMs": 840,
+  "usage": {
+   "prompt_tokens": 335,
+   "completion_tokens": 11,
+   "total_tokens": 346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 335
+  }
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M01",
+  "sample": 1,
+  "latencyMs": 773,
+  "usage": {
+   "prompt_tokens": 342,
+   "completion_tokens": 4,
+   "total_tokens": 346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 342
+  }
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M01",
+  "sample": 2,
+  "latencyMs": 821,
+  "usage": {
+   "prompt_tokens": 342,
+   "completion_tokens": 4,
+   "total_tokens": 346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 342
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M02",
+  "sample": 1,
+  "latencyMs": 839,
+  "usage": {
+   "prompt_tokens": 411,
+   "completion_tokens": 4,
+   "total_tokens": 415,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 411
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M02",
+  "sample": 2,
+  "latencyMs": 782,
+  "usage": {
+   "prompt_tokens": 411,
+   "completion_tokens": 4,
+   "total_tokens": 415,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 411
+  }
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M03",
+  "sample": 1,
+  "latencyMs": 779,
+  "usage": {
+   "prompt_tokens": 357,
+   "completion_tokens": 4,
+   "total_tokens": 361,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 357
+  }
+ },
+ {
+  "raw": "click @e5",
+  "norm": "click @e5",
+  "parsed": [
+   "click",
+   "@e5",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M03",
+  "sample": 2,
+  "latencyMs": 839,
+  "usage": {
+   "prompt_tokens": 357,
+   "completion_tokens": 4,
+   "total_tokens": 361,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 357
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M04",
+  "sample": 1,
+  "latencyMs": 1328,
+  "usage": {
+   "prompt_tokens": 320,
+   "completion_tokens": 4,
+   "total_tokens": 324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 320
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M04",
+  "sample": 2,
+  "latencyMs": 839,
+  "usage": {
+   "prompt_tokens": 320,
+   "completion_tokens": 4,
+   "total_tokens": 324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 320
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M05",
+  "sample": 1,
+  "latencyMs": 884,
+  "usage": {
+   "prompt_tokens": 356,
+   "completion_tokens": 4,
+   "total_tokens": 360,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 356
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M05",
+  "sample": 2,
+  "latencyMs": 881,
+  "usage": {
+   "prompt_tokens": 356,
+   "completion_tokens": 4,
+   "total_tokens": 360,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 356
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M06",
+  "sample": 1,
+  "latencyMs": 832,
+  "usage": {
+   "prompt_tokens": 333,
+   "completion_tokens": 4,
+   "total_tokens": 337,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 333
+  }
+ },
+ {
+  "raw": "click @e3",
+  "norm": "click @e3",
+  "parsed": [
+   "click",
+   "@e3",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M06",
+  "sample": 2,
+  "latencyMs": 881,
+  "usage": {
+   "prompt_tokens": 333,
+   "completion_tokens": 4,
+   "total_tokens": 337,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 333
+  }
+ },
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M07",
+  "sample": 1,
+  "latencyMs": 782,
+  "usage": {
+   "prompt_tokens": 340,
+   "completion_tokens": 4,
+   "total_tokens": 344,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 340
+  }
+ },
+ {
+  "raw": "click @e2",
+  "norm": "click @e2",
+  "parsed": [
+   "click",
+   "@e2",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M07",
+  "sample": 2,
+  "latencyMs": 881,
+  "usage": {
+   "prompt_tokens": 340,
+   "completion_tokens": 4,
+   "total_tokens": 344,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 340
+  }
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M08",
+  "sample": 1,
+  "latencyMs": 776,
+  "usage": {
+   "prompt_tokens": 360,
+   "completion_tokens": 8,
+   "total_tokens": 368,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 360
+  }
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "M08",
+  "sample": 2,
+  "latencyMs": 881,
+  "usage": {
+   "prompt_tokens": 360,
+   "completion_tokens": 8,
+   "total_tokens": 368,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 360
+  }
+ },
+ {
+  "raw": "done",
+  "norm": "done",
+  "parsed": [
+   "done",
+   null,
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H01",
+  "sample": 1,
+  "latencyMs": 767,
+  "usage": {
+   "prompt_tokens": 413,
+   "completion_tokens": 1,
+   "total_tokens": 414,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 413
+  }
+ },
+ {
+  "raw": "done",
+  "norm": "done",
+  "parsed": [
+   "done",
+   null,
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H01",
+  "sample": 2,
+  "latencyMs": 760,
+  "usage": {
+   "prompt_tokens": 413,
+   "completion_tokens": 1,
+   "total_tokens": 414,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 413
+  }
+ },
+ {
+  "raw": "fail: 当前页面无用户评论区入口或评论内容，仅有正文与“相关阅读/分享/回到顶部”等元素，无法完成阅读评论任务",
+  "norm": "fail: 当前页面无用户评论区入口或评论内容，仅有正文与“相关阅读/分享/回到顶部”等元素，无法完成阅读评论任务",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "当前页面无用户评论区入口或评论内容，仅有正文与“相关阅读/分享/回到顶部”等元素，无法完成阅读评论任务"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.0,
+  "detail": "refused but action expected",
+  "caseId": "H02",
+  "sample": 1,
+  "latencyMs": 863,
+  "usage": {
+   "prompt_tokens": 361,
+   "completion_tokens": 33,
+   "total_tokens": 394,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 361
+  }
+ },
+ {
+  "raw": "fail: 当前页面仅有正文与“相关阅读/分享/回到顶部”，未发现用户评论入口或评论内容，无法完成“阅读评论”任务。",
+  "norm": "fail: 当前页面仅有正文与“相关阅读/分享/回到顶部”，未发现用户评论入口或评论内容，无法完成“阅读评论”任务。",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "当前页面仅有正文与“相关阅读/分享/回到顶部”，未发现用户评论入口或评论内容，无法完成“阅读评论”任务。"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.0,
+  "detail": "refused but action expected",
+  "caseId": "H02",
+  "sample": 2,
+  "latencyMs": 617,
+  "usage": {
+   "prompt_tokens": 361,
+   "completion_tokens": 34,
+   "total_tokens": 395,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 361
+  }
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H03",
+  "sample": 1,
+  "latencyMs": 873,
+  "usage": {
+   "prompt_tokens": 316,
+   "completion_tokens": 8,
+   "total_tokens": 324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 316
+  }
+ },
+ {
+  "raw": "fill @e1 test@example.com",
+  "norm": "fill @e1 test@example.com",
+  "parsed": [
+   "fill",
+   "@e1",
+   [
+    "test@example.com"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H03",
+  "sample": 2,
+  "latencyMs": 1197,
+  "usage": {
+   "prompt_tokens": 316,
+   "completion_tokens": 8,
+   "total_tokens": 324,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 316
+  }
+ },
+ {
+  "raw": "fail: 页面为安全验证滑块+短信验证码，需人工完成滑块与短信验证码，无法仅凭快照自动登录。",
+  "norm": "fail: 页面为安全验证滑块+短信验证码，需人工完成滑块与短信验证码，无法仅凭快照自动登录。",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "页面为安全验证滑块+短信验证码，需人工完成滑块与短信验证码，无法仅凭快照自动登录。"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H04",
+  "sample": 1,
+  "latencyMs": 901,
+  "usage": {
+   "prompt_tokens": 334,
+   "completion_tokens": 30,
+   "total_tokens": 364,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 334
+  }
+ },
+ {
+  "raw": "fail: 页面为滑块与短信验证码安全验证，未提供账号密码登录入口，且短信验证码需用户手机接收，无法自动完成登录。",
+  "norm": "fail: 页面为滑块与短信验证码安全验证，未提供账号密码登录入口，且短信验证码需用户手机接收，无法自动完成登录。",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "页面为滑块与短信验证码安全验证，未提供账号密码登录入口，且短信验证码需用户手机接收，无法自动完成登录。"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H04",
+  "sample": 2,
+  "latencyMs": 872,
+  "usage": {
+   "prompt_tokens": 334,
+   "completion_tokens": 34,
+   "total_tokens": 368,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 334
+  }
+ },
+ {
+  "raw": "key Enter",
+  "norm": "key Enter",
+  "parsed": [
+   "key",
+   null,
+   [
+    "Enter"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H05",
+  "sample": 1,
+  "latencyMs": 825,
+  "usage": {
+   "prompt_tokens": 336,
+   "completion_tokens": 2,
+   "total_tokens": 338,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 336
+  }
+ },
+ {
+  "raw": "key Enter",
+  "norm": "key Enter",
+  "parsed": [
+   "key",
+   null,
+   [
+    "Enter"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H05",
+  "sample": 2,
+  "latencyMs": 867,
+  "usage": {
+   "prompt_tokens": 336,
+   "completion_tokens": 2,
+   "total_tokens": 338,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 336
+  }
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H06",
+  "sample": 1,
+  "latencyMs": 964,
+  "usage": {
+   "prompt_tokens": 365,
+   "completion_tokens": 4,
+   "total_tokens": 369,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 365
+  }
+ },
+ {
+  "raw": "click @e4",
+  "norm": "click @e4",
+  "parsed": [
+   "click",
+   "@e4",
+   []
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "",
+  "caseId": "H06",
+  "sample": 2,
+  "latencyMs": 768,
+  "usage": {
+   "prompt_tokens": 365,
+   "completion_tokens": 4,
+   "total_tokens": 369,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 365
+  }
+ },
+ {
+  "raw": "fail: 页面显示“暂无订单”，不存在可查看的最近订单详情",
+  "norm": "fail: 页面显示“暂无订单”，不存在可查看的最近订单详情",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "页面显示“暂无订单”，不存在可查看的最近订单详情"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H07",
+  "sample": 1,
+  "latencyMs": 868,
+  "usage": {
+   "prompt_tokens": 298,
+   "completion_tokens": 16,
+   "total_tokens": 314,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 298
+  }
+ },
+ {
+  "raw": "fail: 页面显示“暂无订单”，不存在可查看的最近订单详情",
+  "norm": "fail: 页面显示“暂无订单”，不存在可查看的最近订单详情",
+  "parsed": [
+   "fail",
+   null,
+   [
+    "页面显示“暂无订单”，不存在可查看的最近订单详情"
+   ]
+  ],
+  "format_ok": true,
+  "exact": true,
+  "partial": 1.0,
+  "detail": "fail-refusal",
+  "caseId": "H07",
+  "sample": 2,
+  "latencyMs": 824,
+  "usage": {
+   "prompt_tokens": 298,
+   "completion_tokens": 16,
+   "total_tokens": 314,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 298
+  }
+ },
+ {
+  "raw": "select @e2 CNAME",
+  "norm": "select @e2 CNAME",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "CNAME"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.7,
+  "detail": "select ok, missing --assert-text",
+  "caseId": "H08",
+  "sample": 1,
+  "latencyMs": 764,
+  "usage": {
+   "prompt_tokens": 381,
+   "completion_tokens": 6,
+   "total_tokens": 387,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 381
+  }
+ },
+ {
+  "raw": "select @e2 CNAME",
+  "norm": "select @e2 CNAME",
+  "parsed": [
+   "select",
+   "@e2",
+   [
+    "CNAME"
+   ]
+  ],
+  "format_ok": true,
+  "exact": false,
+  "partial": 0.7,
+  "detail": "select ok, missing --assert-text",
+  "caseId": "H08",
+  "sample": 2,
+  "latencyMs": 859,
+  "usage": {
+   "prompt_tokens": 381,
+   "completion_tokens": 6,
+   "total_tokens": 387,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "prompt_cache_hit_tokens": 0,
+   "prompt_cache_miss_tokens": 381
+  }
+ }
+]

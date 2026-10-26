@@ -7,6 +7,7 @@ import type {
   BrowserScreenshotRegionArgs,
   BrowserWaitArgs,
 } from './browser-tools.ts';
+import type { BrowserFastDeciderFn } from './browser-fast-decider.ts';
 
 export interface BrowserCommandImage {
   data: string;
@@ -47,6 +48,8 @@ export function getBrowserToolHelp(): string {
     '  navigate <url>',
     '  snapshot',
     '  find <query>                                   search elements by keyword (matches role, name, value)',
+    '  act <sub-step>                                 execute one complete two-model agreement through Host authorization (managed opt-in)',
+    '  suggest <sub-step>                             ask the fast decider to locate a planned sub-step (read-only suggestion)',
     '  click <ref> [none|navigation|network-idle] [timeoutMs]',
     '  click-at <x> <y>                               click at pixel coordinates (canvas elements)',
     '  drag <x1> <y1> <x2> <y2>                      drag from (x1,y1) to (x2,y2)',
@@ -135,6 +138,44 @@ function formatNodeLine(
   }
   if (node.description) line += ` — ${node.description}`;
   return line;
+}
+
+/**
+ * Format an accessibility snapshot into the text representation used by the
+ * `snapshot` command output and the fast-decider prompt (single source).
+ */
+export function formatSnapshotText(snapshot: {
+  url: string;
+  title: string;
+  nodes: Array<Parameters<typeof formatNodeLine>[0]>;
+}): string[] {
+  const roles = new Map<string, number>();
+  let focusedRef: string | null = null;
+  let disabledCount = 0;
+  for (const node of snapshot.nodes) {
+    roles.set(node.role, (roles.get(node.role) ?? 0) + 1);
+    if (node.focused && !focusedRef) focusedRef = node.ref;
+    if (node.disabled) disabledCount += 1;
+  }
+
+  const roleSummary = Array.from(roles.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([role, count]) => `${role}:${count}`)
+    .join(', ');
+
+  const lines: string[] = [
+    `URL: ${snapshot.url}`,
+    `Title: ${snapshot.title}`,
+    `Elements: ${snapshot.nodes.length}${roleSummary ? ` (${roleSummary})` : ''}`,
+    `Focused ref: ${focusedRef ?? 'none'}, disabled: ${disabledCount}`,
+    '',
+    `Elements (${snapshot.nodes.length}):`,
+  ];
+  for (const node of snapshot.nodes) {
+    lines.push(formatNodeLine(node));
+  }
+  return lines;
 }
 
 function formatBytes(bytes: number): string {
@@ -348,6 +389,24 @@ const NAVIGATION_COMMANDS = new Set([
   'back',
   'forward',
 ]);
+
+/**
+ * The action menu offered to the fast-decider layer (browser-fast-decider.ts).
+ * MUST stay in sync with the commands above in getBrowserToolHelp() — a missing
+ * verb makes the fast layer degrade systematically (the `upload` lesson from
+ * the POO-113 eval). Covered by a contract test.
+ */
+export const BROWSER_TOOL_ACTION_MENU: readonly string[] = [
+  'click @eN',
+  'fill @eN 值',
+  'select @eN 值',
+  'upload @eN 绝对路径',
+  'scroll down|up 像素',
+  'key 键名',
+  'navigate URL',
+  'done',
+  'fail: 原因',
+];
 
 function decodeEscapes(input: string): string {
   return input.replace(/\\(.)/g, (_match, ch: string) => {
@@ -624,6 +683,10 @@ export async function executeBrowserToolCommand(args: {
   fns: BrowserPaneFns;
   sessionId: string;
   platform?: NodeJS.Platform;
+  /** Lazy resolver for the browser fast decider (session callback). */
+  getFastDecider?: () => BrowserFastDeciderFn | undefined;
+  authorizationComplete?: boolean;
+  automatic?: boolean;
 }): Promise<BrowserCommandResult> {
   // Array mode: no batch splitting, pass directly to single command execution
   if (Array.isArray(args.command)) {
@@ -652,6 +715,9 @@ async function executeBatchCommands(args: {
   fns: BrowserPaneFns;
   sessionId: string;
   platform?: NodeJS.Platform;
+  getFastDecider?: () => BrowserFastDeciderFn | undefined;
+  authorizationComplete?: boolean;
+  automatic?: boolean;
 }): Promise<BrowserCommandResult> {
   const outputs: string[] = [];
   let lastImage: BrowserCommandImage | undefined;
@@ -684,18 +750,58 @@ async function executeSingleCommand(args: {
   fns: BrowserPaneFns;
   sessionId: string;
   platform?: NodeJS.Platform;
+  getFastDecider?: () => BrowserFastDeciderFn | undefined;
+  authorizationComplete?: boolean;
+  automatic?: boolean;
 }): Promise<BrowserCommandResult> {
   // Array mode: use parts directly, no parsing needed
   const parts = Array.isArray(args.command)
-    ? args.command
+    ? [...args.command]
     : tokenizeCommand(args.command.trim());
   const cmd = parts[0]?.toLowerCase();
+  if(cmd)parts[0]=cmd;
+  Object.freeze(parts); // Tool input cannot change while authorization awaits.
+
 
   if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
     return { output: getBrowserToolHelp(), appendReleaseHint: false };
   }
 
   const { fns } = args;
+  const effects = new Set(['navigate','back','forward','click','click-at','drag','fill','type','paste','select','key','upload','evaluate']);
+  if (effects.has(cmd) && !args.authorizationComplete) {
+    if (!fns.authorizeCommand) throw new Error('Browser action authorization is unavailable; nothing was executed');
+    return fns.authorizeCommand(parts, (facts, lease) => {
+      const guarded = {...fns};
+      if (fns.executeAuthorizedAction) {
+        for (const method of ['navigate','goBack','goForward','click','clickAt','drag','fill','type','select','sendKey','upload'] as const) {
+          (guarded as unknown as Record<string, unknown>)[method] = (...values: unknown[]) => fns.executeAuthorizedAction!(parts, facts, method, values, lease);
+        }
+      }
+      return executeSingleCommand({...args, command:parts, fns: guarded, authorizationComplete: true});
+    }, {automatic: args.automatic});
+  }
+  if (cmd === 'act') {
+    const policy = await fns.readBrowserPolicy?.();
+    if (!policy?.policy.autoAcceptEnabled) throw new Error('Browser automatic execution is disabled by managed policy');
+    const substep = parts.slice(1).join(' ').trim();
+    if (!substep) throw new Error('act requires a sub-step planned by the main model');
+    const decider = args.getFastDecider?.();
+    if (!decider) return { output: 'No fast decider; replan with the main model. Nothing was executed.', appendReleaseHint: true };
+    const original = await fns.snapshot();
+    if (original.nodes.length > 120) return { output: 'Snapshot too large; narrow the page first. Nothing was executed.', appendReleaseHint: true };
+    const result = await decider({ snapshotText: formatSnapshotText(original).join('\n'), substep });
+    const {fuseCommand, isExecutableCommand} = await import('./browser-fast-decider.ts');
+    const bothPaths = result.paths.length === 2 && new Set(result.paths.map(p => p.name)).size === 2
+      && result.paths.every(p => !p.error && fuseCommand(p.command) === result.suggestedCommand);
+    if (result.agreement !== 'both' || !result.suggestedCommand || !bothPaths
+      || !isExecutableCommand(result.suggestedCommand, formatSnapshotText(original).join('\n'))) return { output: 'No complete two-model agreement; replan with the main model. Nothing was executed.', appendReleaseHint: true };
+    const current = await fns.snapshot();
+    if (JSON.stringify(current) !== JSON.stringify(original)) return { output: 'Page changed while locating the action; re-observe. Nothing was executed.', appendReleaseHint: true };
+    if (result.suggestedCommand === 'done') return {output:'The two models reported this sub-step complete; no browser action was sent.',appendReleaseHint:true};
+    const action = await executeSingleCommand({ ...args, command: result.suggestedCommand, authorizationComplete: false, automatic: true });
+    return { ...action, output: 'Two-model action executed through browser authorization.\n' + action.output };
+  }
 
   if (cmd === 'open') {
     const foreground = parts.includes('--foreground') || parts.includes('-f');
@@ -782,32 +888,7 @@ async function executeSingleCommand(args: {
 
   if (cmd === 'snapshot') {
     const snapshot = await fns.snapshot();
-    const roles = new Map<string, number>();
-    let focusedRef: string | null = null;
-    let disabledCount = 0;
-    for (const node of snapshot.nodes) {
-      roles.set(node.role, (roles.get(node.role) ?? 0) + 1);
-      if (node.focused && !focusedRef) focusedRef = node.ref;
-      if (node.disabled) disabledCount += 1;
-    }
-
-    const roleSummary = Array.from(roles.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([role, count]) => `${role}:${count}`)
-      .join(', ');
-
-    const lines: string[] = [
-      `URL: ${snapshot.url}`,
-      `Title: ${snapshot.title}`,
-      `Elements: ${snapshot.nodes.length}${roleSummary ? ` (${roleSummary})` : ''}`,
-      `Focused ref: ${focusedRef ?? 'none'}, disabled: ${disabledCount}`,
-      '',
-      `Elements (${snapshot.nodes.length}):`,
-    ];
-    for (const node of snapshot.nodes) {
-      lines.push(formatNodeLine(node));
-    }
+    const lines = formatSnapshotText(snapshot);
 
     const actionableCount = countActionableNodes(snapshot.nodes);
     const nearEmpty = snapshot.nodes.length === 0 || actionableCount <= 2;
@@ -906,6 +987,51 @@ async function executeSingleCommand(args: {
       lines.push(`  ... and ${scored.length - 20} more. Narrow your search.`);
     }
     return { output: lines.join('\n'), appendReleaseHint: true };
+  }
+
+  if (cmd === 'suggest') {
+    const substep = parts.slice(1).join(' ').trim();
+    if (!substep) {
+      throw new Error('suggest requires a sub-step planned by the main model. Example: suggest 点击「登录」');
+    }
+    const fastDecider = args.getFastDecider?.();
+    if (!fastDecider) {
+      return {
+        output: 'Fast decider is not available in this runtime (no session callback registered). Use "find" + manual commands instead.',
+        appendReleaseHint: true,
+      };
+    }
+
+    const snapshot = await fns.snapshot();
+    if (snapshot.nodes.length > 120) {
+      return {
+        output: [
+          `Snapshot has ${snapshot.nodes.length} elements — too large for the fast decider.`,
+          'Narrow the page state first (e.g. "find <keyword>" or interact), then re-run suggest.',
+        ].join('\n'),
+        appendReleaseHint: true,
+      };
+    }
+
+    const snapshotText = formatSnapshotText(snapshot).join('\n');
+    const result = await fastDecider({ snapshotText, substep });
+
+    const pathLines = result.paths.map((p) =>
+      `  ${p.name}: ${p.command ?? '(none)'} ${p.error ? `[${p.error}]` : ''} (${p.latencyMs}ms)`,
+    );
+    const out: string[] = [`Sub-step: ${substep}`];
+    if (result.suggestedCommand) {
+      out.push(`Suggested command: ${result.suggestedCommand}`);
+      out.push(`Agreement: ${result.agreement}`);
+      if (result.dangerous) {
+        out.push('⚠ Dangerous-looking target (save/delete/submit/pay/…) — verify before executing.');
+      }
+      out.push('This is a suggestion only — nothing was executed. Verify the ref, then run the command yourself.');
+    } else {
+      out.push('No reliable suggestion (paths disagree, failed, or unconfigured). Decide the next command yourself (e.g. "find" to narrow).');
+    }
+    if (pathLines.length > 0) out.push('Paths:', ...pathLines);
+    return { output: out.join('\n'), appendReleaseHint: true };
   }
 
   if (cmd === 'click') {

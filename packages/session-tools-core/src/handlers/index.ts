@@ -46,6 +46,9 @@ export type { CredentialPromptArgs } from './credential-prompt.ts';
 // Request User Input
 export { handleRequestUserInput } from './request-user-input.ts';
 
+// Goal Update (POO-134 structured goal reporting)
+export { handleGoalUpdate } from './goal-update.ts';
+
 // Update Preferences
 export { handleUpdatePreferences } from './update-preferences.ts';
 export type { UpdatePreferencesArgs } from './update-preferences.ts';

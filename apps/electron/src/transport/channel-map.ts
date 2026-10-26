@@ -506,10 +506,22 @@ export const CHANNEL_MAP = {
   'browserPane.reload': invoke(RPC_CHANNELS.browserPane.RELOAD),
   'browserPane.stop': invoke(RPC_CHANNELS.browserPane.STOP),
   'browserPane.focus': invoke(RPC_CHANNELS.browserPane.FOCUS),
+  'browserPane.embed': invoke(RPC_CHANNELS.browserPane.EMBED),
+  'browserPane.detachToPopup': invoke(RPC_CHANNELS.browserPane.DETACH_TO_POPUP),
+  'browserPane.setEmbedBounds': invoke(RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS),
+  'browserPane.unembed': invoke(RPC_CHANNELS.browserPane.UNEMBED),
+  'browserPane.setElementPicking': invoke(RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING),
   'browserPane.emptyStateLaunch': invoke(RPC_CHANNELS.browserPane.LAUNCH),
   'browserPane.onStateChanged': listener(RPC_CHANNELS.browserPane.STATE_CHANGED),
   'browserPane.onRemoved': listener(RPC_CHANNELS.browserPane.REMOVED),
   'browserPane.onInteracted': listener(RPC_CHANNELS.browserPane.INTERACTED),
+  'browserPane.onElementPickerEvent': listener(RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT),
+
+  // Canvas pane popout (POO-135 验收修复 SB-CANVAS-OUT)
+  'canvasPane.detachToPopup': invoke(RPC_CHANNELS.canvasPane.DETACH_TO_POPUP),
+  'canvasPane.attachFromPopup': invoke(RPC_CHANNELS.canvasPane.ATTACH_FROM_POPUP),
+  'canvasPane.focus': invoke(RPC_CHANNELS.canvasPane.FOCUS),
+  'canvasPane.onStateChanged': listener(RPC_CHANNELS.canvasPane.STATE_CHANGED),
 
   // LLM Connections
   listLlmConnections: invoke(RPC_CHANNELS.llmConnections.LIST),

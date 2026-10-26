@@ -246,6 +246,13 @@ export interface SessionScopedToolsOptions {
    * rebuilds the toolset.
    */
   renderUiCatalog?: readonly GenUiComponentDescriptor[];
+  /**
+   * POO-134: register goal_update (structured goal reporting). Only turns that
+   * BELONG to the session's active Goal set this; ordinary chat turns fail
+   * closed. Participates in the cache key so a Goal turn and a chat turn never
+   * share a toolset.
+   */
+  allowGoalUpdate?: boolean;
 }
 
 /**
@@ -269,11 +276,12 @@ export function getSessionScopedTools(
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
   const allowRenderUi = options?.allowRenderUi ?? false;
   const allowGenerateApp = options?.allowGenerateApp ?? false;
+  const allowGoalUpdate = options?.allowGoalUpdate ?? false;
   const renderUiCatalog = options?.renderUiCatalog ?? getGenUiComponentCatalog().descriptors();
   // Catalog signature in the cache key: a catalog change (third-party install)
   // must rebuild the toolset so render_ui's description reflects it.
   const renderUiCatalogKey = renderUiCatalog.map(d => d.type).join(',');
-  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}::gap-${allowGenerateApp ? '1' : '0'}::cat-${renderUiCatalogKey}`;
+  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}::gap-${allowGenerateApp ? '1' : '0'}::goal-${allowGoalUpdate ? '1' : '0'}::cat-${renderUiCatalogKey}`;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -306,6 +314,13 @@ export function getSessionScopedTools(
         // the handler — forward it as-is.
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         return callbacks?.onQuestionRequested?.(questions, generationAtRequest);
+      },
+      onGoalUpdateReport: (report, generationAtRequest) => {
+        // Same discipline as onQuestionRequested: the handler awaits the
+        // host's durable accounting of the report, and the generation was
+        // snapshotted at tool-call initiation by the handler.
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        return callbacks?.onGoalUpdateReport?.(report, generationAtRequest);
       },
     });
 
@@ -340,6 +355,7 @@ export function getSessionScopedTools(
       allowRequestUserInput,
       allowRenderUi,
       allowGenerateApp,
+      allowGoalUpdate,
     })
       .filter(def => def.handler !== null) // Skip backend-specific tools (call_llm)
       .map(def => registryTool(def.name, def.inputSchema.shape));
@@ -377,6 +393,10 @@ export function getSessionScopedTools(
           getBrowserPaneFns: () => {
             const callbacks = getSessionScopedToolCallbacks(sessionId);
             return callbacks?.browserPaneFns;
+          },
+          getFastDecider: () => {
+            const callbacks = getSessionScopedToolCallbacks(sessionId);
+            return callbacks?.browserFastDecider;
           },
         }),
       );

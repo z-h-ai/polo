@@ -1,0 +1,2567 @@
+[
+ {
+  "caseId": "M001",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1462,
+  "content": "click @e42",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1776,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1782
+  },
+  "error": null
+ },
+ {
+  "caseId": "M002",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2420,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1429,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1435
+  },
+  "error": null
+ },
+ {
+  "caseId": "M003",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2448,
+  "content": "fill @e5 New York Knicks",
+  "usage": {
+   "completion_tokens": 9,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1388,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1397
+  },
+  "error": null
+ },
+ {
+  "caseId": "M004",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2874,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1528,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1534
+  },
+  "error": null
+ },
+ {
+  "caseId": "M005",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2665,
+  "content": "select @e11 Price: High - Low",
+  "usage": {
+   "completion_tokens": 11,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1680,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1691
+  },
+  "error": null
+ },
+ {
+  "caseId": "M006",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1408,
+  "content": "fill @e13 WD 1TB internal SSD 8GB DDR",
+  "usage": {
+   "completion_tokens": 16,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1740,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1756
+  },
+  "error": null
+ },
+ {
+  "caseId": "M007",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1361,
+  "content": "click @e13",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1483,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1489
+  },
+  "error": null
+ },
+ {
+  "caseId": "M008",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2617,
+  "content": "click @e5",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1428,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1434
+  },
+  "error": null
+ },
+ {
+  "caseId": "M009",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2622,
+  "content": "click @e9",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1373,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1379
+  },
+  "error": null
+ },
+ {
+  "caseId": "M010",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1502,
+  "content": "fill @e5 Ballet",
+  "usage": {
+   "completion_tokens": 7,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1402,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1409
+  },
+  "error": null
+ },
+ {
+  "caseId": "M011",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3212,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1495,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1501
+  },
+  "error": null
+ },
+ {
+  "caseId": "M012",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3366,
+  "content": "click @e41",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1409,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1415
+  },
+  "error": null
+ },
+ {
+  "caseId": "M013",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1260,
+  "content": "click @e2",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1333,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1339
+  },
+  "error": null
+ },
+ {
+  "caseId": "M014",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1412,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1432,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1438
+  },
+  "error": null
+ },
+ {
+  "caseId": "M015",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3129,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1425,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1431
+  },
+  "error": null
+ },
+ {
+  "caseId": "M016",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1392,
+  "content": "click @e38",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1568,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1574
+  },
+  "error": null
+ },
+ {
+  "caseId": "M017",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1550,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1417,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1423
+  },
+  "error": null
+ },
+ {
+  "caseId": "M018",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2408,
+  "content": "click @e30",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1442,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1448
+  },
+  "error": null
+ },
+ {
+  "caseId": "M019",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2409,
+  "content": "click @e70",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1615,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1621
+  },
+  "error": null
+ },
+ {
+  "caseId": "M020",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2312,
+  "content": "click @e55",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1538,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1544
+  },
+  "error": null
+ },
+ {
+  "caseId": "M021",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2508,
+  "content": "fill @e3 cough medicine",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1332,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1340
+  },
+  "error": null
+ },
+ {
+  "caseId": "M022",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1381,
+  "content": "click @e39",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1400,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1406
+  },
+  "error": null
+ },
+ {
+  "caseId": "M023",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1804,
+  "content": "click @e2",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1403,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1409
+  },
+  "error": null
+ },
+ {
+  "caseId": "M024",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1306,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1038,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1044
+  },
+  "error": null
+ },
+ {
+  "caseId": "M025",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3001,
+  "content": "click @e7",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1616,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1622
+  },
+  "error": null
+ },
+ {
+  "caseId": "M026",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1892,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1567,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1573
+  },
+  "error": null
+ },
+ {
+  "caseId": "M027",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3798,
+  "content": "fill @e7 Star Wars The Mandalorian statue",
+  "usage": {
+   "completion_tokens": 12,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1449,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1461
+  },
+  "error": null
+ },
+ {
+  "caseId": "M028",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1421,
+  "content": "click @e10",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1495,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1501
+  },
+  "error": null
+ },
+ {
+  "caseId": "M029",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1429,
+  "content": "click @e50",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1484,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1490
+  },
+  "error": null
+ },
+ {
+  "caseId": "M030",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2554,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1198,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1204
+  },
+  "error": null
+ },
+ {
+  "caseId": "M031",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1561,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1358,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1364
+  },
+  "error": null
+ },
+ {
+  "caseId": "M032",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2777,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1431,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1437
+  },
+  "error": null
+ },
+ {
+  "caseId": "M033",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2364,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1175,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1181
+  },
+  "error": null
+ },
+ {
+  "caseId": "M034",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1636,
+  "content": "click @e9",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1658,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1664
+  },
+  "error": null
+ },
+ {
+  "caseId": "M035",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2413,
+  "content": "click @e17",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1630,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1636
+  },
+  "error": null
+ },
+ {
+  "caseId": "M036",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1192,
+  "content": "fill @e3 Tim Stebee",
+  "usage": {
+   "completion_tokens": 9,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1521,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1530
+  },
+  "error": null
+ },
+ {
+  "caseId": "M037",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2885,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1529,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1535
+  },
+  "error": null
+ },
+ {
+  "caseId": "M038",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2435,
+  "content": "click @e46",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1502,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1508
+  },
+  "error": null
+ },
+ {
+  "caseId": "M039",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1417,
+  "content": "fill @e2 Star Wars",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1468,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1476
+  },
+  "error": null
+ },
+ {
+  "caseId": "M040",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1655,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1467,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1473
+  },
+  "error": null
+ },
+ {
+  "caseId": "M041",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1387,
+  "content": "click @e50",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1457,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1463
+  },
+  "error": null
+ },
+ {
+  "caseId": "M042",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1567,
+  "content": "select @e5 Gifts",
+  "usage": {
+   "completion_tokens": 7,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1476,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1483
+  },
+  "error": null
+ },
+ {
+  "caseId": "M043",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1323,
+  "content": "click @e12",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1392,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1398
+  },
+  "error": null
+ },
+ {
+  "caseId": "M044",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1112,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1552,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1558
+  },
+  "error": null
+ },
+ {
+  "caseId": "M045",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1376,
+  "content": "click @e10",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1632,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1638
+  },
+  "error": null
+ },
+ {
+  "caseId": "M046",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2645,
+  "content": "click @e5",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1025,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1031
+  },
+  "error": null
+ },
+ {
+  "caseId": "M047",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1597,
+  "content": "fill @e1 NIAGARA FALLS",
+  "usage": {
+   "completion_tokens": 11,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1571,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1582
+  },
+  "error": null
+ },
+ {
+  "caseId": "M048",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3396,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1639,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1645
+  },
+  "error": null
+ },
+ {
+  "caseId": "M049",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1160,
+  "content": "click @e11",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1347,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1353
+  },
+  "error": null
+ },
+ {
+  "caseId": "M050",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2361,
+  "content": "click @e2",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1384,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1390
+  },
+  "error": null
+ },
+ {
+  "caseId": "M051",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1269,
+  "content": "fill @e34 Chicago Bulls",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1584,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1592
+  },
+  "error": null
+ },
+ {
+  "caseId": "M052",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1274,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1411,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1417
+  },
+  "error": null
+ },
+ {
+  "caseId": "M053",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1228,
+  "content": "fill @e1 Membership tier",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1432,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1440
+  },
+  "error": null
+ },
+ {
+  "caseId": "M054",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1453,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1460,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1466
+  },
+  "error": null
+ },
+ {
+  "caseId": "M055",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2832,
+  "content": "fill @e16 recipe",
+  "usage": {
+   "completion_tokens": 7,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1363,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1370
+  },
+  "error": null
+ },
+ {
+  "caseId": "M056",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1176,
+  "content": "click @e12",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1369,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1375
+  },
+  "error": null
+ },
+ {
+  "caseId": "M057",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3202,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1444,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1450
+  },
+  "error": null
+ },
+ {
+  "caseId": "M058",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1642,
+  "content": "click @e21",
+  "usage": {
+   "completion_tokens": 13,
+   "completion_tokens_details": {
+    "reasoning_tokens": 7
+   },
+   "prompt_tokens": 1326,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1339
+  },
+  "error": null
+ },
+ {
+  "caseId": "M059",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1465,
+  "content": "click @e58",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1413,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1419
+  },
+  "error": null
+ },
+ {
+  "caseId": "M060",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2466,
+  "content": "fill @e10 wireless printer",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1714,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1722
+  },
+  "error": null
+ },
+ {
+  "caseId": "M061",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1593,
+  "content": "click @e7",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1527,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1533
+  },
+  "error": null
+ },
+ {
+  "caseId": "M062",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1302,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1599,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1605
+  },
+  "error": null
+ },
+ {
+  "caseId": "M063",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1327,
+  "content": "click @e6",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1502,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1508
+  },
+  "error": null
+ },
+ {
+  "caseId": "M064",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1494,
+  "content": "click @e56",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1629,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1635
+  },
+  "error": null
+ },
+ {
+  "caseId": "M065",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2947,
+  "content": "fill @e5 adele",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1407,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1415
+  },
+  "error": null
+ },
+ {
+  "caseId": "M066",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2873,
+  "content": "click @e13",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1709,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1715
+  },
+  "error": null
+ },
+ {
+  "caseId": "M067",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1472,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1550,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1556
+  },
+  "error": null
+ },
+ {
+  "caseId": "M068",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1391,
+  "content": "click @e20",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1363,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1369
+  },
+  "error": null
+ },
+ {
+  "caseId": "M069",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1310,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1361,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1367
+  },
+  "error": null
+ },
+ {
+  "caseId": "M070",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1864,
+  "content": "fill @e6 10000001",
+  "usage": {
+   "completion_tokens": 10,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 765,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 775
+  },
+  "error": null
+ },
+ {
+  "caseId": "M071",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1274,
+  "content": "click @e6",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1534,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1540
+  },
+  "error": null
+ },
+ {
+  "caseId": "M072",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1560,
+  "content": "click @e5",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1560,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1566
+  },
+  "error": null
+ },
+ {
+  "caseId": "M073",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1218,
+  "content": "fill @e1 Google Play",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1322,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1330
+  },
+  "error": null
+ },
+ {
+  "caseId": "M074",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2927,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1253,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1259
+  },
+  "error": null
+ },
+ {
+  "caseId": "M075",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2742,
+  "content": "click @e40",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1537,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1543
+  },
+  "error": null
+ },
+ {
+  "caseId": "M076",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1712,
+  "content": "select @e1 Aegean Airlines \"Aegean\" (AEE) (452)",
+  "usage": {
+   "completion_tokens": 23,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1482,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1505
+  },
+  "error": null
+ },
+ {
+  "caseId": "M077",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1507,
+  "content": "click @e36",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1284,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1290
+  },
+  "error": null
+ },
+ {
+  "caseId": "M078",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2937,
+  "content": "click @e51",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1497,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1503
+  },
+  "error": null
+ },
+ {
+  "caseId": "M079",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3841,
+  "content": "click @e70",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1483,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1489
+  },
+  "error": null
+ },
+ {
+  "caseId": "M080",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1037,
+  "content": "click @e28",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1463,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1469
+  },
+  "error": null
+ },
+ {
+  "caseId": "M081",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1131,
+  "content": "click @e12",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1598,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1604
+  },
+  "error": null
+ },
+ {
+  "caseId": "M082",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1255,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1468,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1474
+  },
+  "error": null
+ },
+ {
+  "caseId": "M083",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1194,
+  "content": "click @e5",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1435,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1441
+  },
+  "error": null
+ },
+ {
+  "caseId": "M084",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1552,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1552,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1558
+  },
+  "error": null
+ },
+ {
+  "caseId": "M085",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1721,
+  "content": "fill @e1 smartwatch",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1368,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1376
+  },
+  "error": null
+ },
+ {
+  "caseId": "M086",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1347,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1263,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1269
+  },
+  "error": null
+ },
+ {
+  "caseId": "M087",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1569,
+  "content": "click @e11",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1378,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1384
+  },
+  "error": null
+ },
+ {
+  "caseId": "M088",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1479,
+  "content": "click @e2",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1346,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1352
+  },
+  "error": null
+ },
+ {
+  "caseId": "M089",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1006,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1446,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1452
+  },
+  "error": null
+ },
+ {
+  "caseId": "M090",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1404,
+  "content": "click @e2",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1589,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1595
+  },
+  "error": null
+ },
+ {
+  "caseId": "M091",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1291,
+  "content": "fill @e1 COMFORTER",
+  "usage": {
+   "completion_tokens": 10,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1300,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1310
+  },
+  "error": null
+ },
+ {
+  "caseId": "M092",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2525,
+  "content": "click @e31",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1479,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1485
+  },
+  "error": null
+ },
+ {
+  "caseId": "M093",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1294,
+  "content": "click @e22",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1301,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1307
+  },
+  "error": null
+ },
+ {
+  "caseId": "M094",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1186,
+  "content": "click @e5",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1289,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1295
+  },
+  "error": null
+ },
+ {
+  "caseId": "M095",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1668,
+  "content": "click @e7",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1321,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1327
+  },
+  "error": null
+ },
+ {
+  "caseId": "M096",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3076,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 30,
+   "completion_tokens_details": {
+    "reasoning_tokens": 24
+   },
+   "prompt_tokens": 1466,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1496
+  },
+  "error": null
+ },
+ {
+  "caseId": "M097",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2863,
+  "content": "click @e34",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1386,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1392
+  },
+  "error": null
+ },
+ {
+  "caseId": "M098",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2714,
+  "content": "click @e64",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1430,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1436
+  },
+  "error": null
+ },
+ {
+  "caseId": "M099",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1341,
+  "content": "click @e35",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1390,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1396
+  },
+  "error": null
+ },
+ {
+  "caseId": "M100",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1583,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1445,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1451
+  },
+  "error": null
+ },
+ {
+  "caseId": "M101",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 5266,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1491,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1497
+  },
+  "error": null
+ },
+ {
+  "caseId": "M102",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1147,
+  "content": "click @e5",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1383,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1389
+  },
+  "error": null
+ },
+ {
+  "caseId": "M103",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2663,
+  "content": "click @e7",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1651,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1657
+  },
+  "error": null
+ },
+ {
+  "caseId": "M104",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 970,
+  "content": "click @e39",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1559,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1565
+  },
+  "error": null
+ },
+ {
+  "caseId": "M105",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1208,
+  "content": "click @e66",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1528,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1534
+  },
+  "error": null
+ },
+ {
+  "caseId": "M106",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2409,
+  "content": "fill @e1 Dota 2",
+  "usage": {
+   "completion_tokens": 9,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1415,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1424
+  },
+  "error": null
+ },
+ {
+  "caseId": "M107",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 3921,
+  "content": "fill @e3 addis ababa",
+  "usage": {
+   "completion_tokens": 10,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1498,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1508
+  },
+  "error": null
+ },
+ {
+  "caseId": "M108",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1045,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1513,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1519
+  },
+  "error": null
+ },
+ {
+  "caseId": "M109",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1232,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1487,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1493
+  },
+  "error": null
+ },
+ {
+  "caseId": "M110",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1300,
+  "content": "click @e65",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1372,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1378
+  },
+  "error": null
+ },
+ {
+  "caseId": "M111",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2375,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1429,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1435
+  },
+  "error": null
+ },
+ {
+  "caseId": "M112",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1392,
+  "content": "click @e14",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1476,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1482
+  },
+  "error": null
+ },
+ {
+  "caseId": "M113",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2386,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1489,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1495
+  },
+  "error": null
+ },
+ {
+  "caseId": "M114",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1049,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1469,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1475
+  },
+  "error": null
+ },
+ {
+  "caseId": "M115",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1327,
+  "content": "click @e65",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1313,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1319
+  },
+  "error": null
+ },
+ {
+  "caseId": "M116",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2622,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1389,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1395
+  },
+  "error": null
+ },
+ {
+  "caseId": "M117",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1358,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1587,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1593
+  },
+  "error": null
+ },
+ {
+  "caseId": "M118",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2438,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1418,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1424
+  },
+  "error": null
+ },
+ {
+  "caseId": "M119",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1222,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1457,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1463
+  },
+  "error": null
+ },
+ {
+  "caseId": "M120",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2193,
+  "content": "click @e7",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1326,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1332
+  },
+  "error": null
+ },
+ {
+  "caseId": "M121",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1181,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1600,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1606
+  },
+  "error": null
+ },
+ {
+  "caseId": "M122",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1497,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1322,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1328
+  },
+  "error": null
+ },
+ {
+  "caseId": "M123",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 2017,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1201,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1207
+  },
+  "error": null
+ },
+ {
+  "caseId": "M124",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1874,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1355,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1361
+  },
+  "error": null
+ },
+ {
+  "caseId": "M125",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1434,
+  "content": "click @e1",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1263,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1269
+  },
+  "error": null
+ },
+ {
+  "caseId": "M126",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1435,
+  "content": "fill @e1 bath towels",
+  "usage": {
+   "completion_tokens": 8,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1643,
+   "prompt_tokens_details": {
+    "cached_tokens": 128
+   },
+   "total_tokens": 1651
+  },
+  "error": null
+ },
+ {
+  "caseId": "M127",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1338,
+  "content": "fill @e62 FREESHIP3093",
+  "usage": {
+   "completion_tokens": 12,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1476,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1488
+  },
+  "error": null
+ },
+ {
+  "caseId": "M128",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1187,
+  "content": "click @e7",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1627,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1633
+  },
+  "error": null
+ },
+ {
+  "caseId": "M129",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1578,
+  "content": "click @e4",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1710,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1716
+  },
+  "error": null
+ },
+ {
+  "caseId": "M130",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1200,
+  "content": "click @e7",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1637,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1643
+  },
+  "error": null
+ },
+ {
+  "caseId": "M131",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1565,
+  "content": "click @e5",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1736,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1742
+  },
+  "error": null
+ },
+ {
+  "caseId": "M132",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1333,
+  "content": "click @e42",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1629,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1635
+  },
+  "error": null
+ },
+ {
+  "caseId": "M133",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1462,
+  "content": "click @e3",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1440,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1446
+  },
+  "error": null
+ },
+ {
+  "caseId": "M134",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1568,
+  "content": "click @e7",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1612,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1618
+  },
+  "error": null
+ },
+ {
+  "caseId": "M135",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1513,
+  "content": "click @e45",
+  "usage": {
+   "completion_tokens": 6,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   },
+   "prompt_tokens": 1509,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "total_tokens": 1515
+  },
+  "error": null
+ }
+]

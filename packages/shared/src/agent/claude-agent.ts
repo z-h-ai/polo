@@ -33,7 +33,7 @@ import {
 } from '../credentials/index.ts';
 import { loadPreferences, formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import type { FileAttachment } from '../utils/files.ts';
-import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
+import type { LLMQueryRequest, LLMQueryOptions, LLMQueryResult } from './llm-tool.ts';
 import { consumeLlmQueryMessages } from './claude-llm-query.ts';
 import { debug } from '../utils/debug.ts';
 import { guardLargeResult } from '../utils/large-response.ts';
@@ -770,6 +770,13 @@ export class ClaudeAgent extends BaseAgent {
         this.onDebug?.(`[ClaudeAgent] onQuestionRequested received: ${questions.length} question(s)`);
         return this.onQuestionRequested?.(questions, generationAtRequest);
       },
+      // POO-134: forward the goal report with the generation the handler
+      // snapshotted at tool-call initiation — this registration never re-reads
+      // the mutable current generation at execution time.
+      onGoalUpdateReport: (report, generationAtRequest) => {
+        this.onDebug?.(`[ClaudeAgent] onGoalUpdateReport received: ${report.kind}`);
+        return this.onGoalUpdateReport?.(report, generationAtRequest);
+      },
       getTurnGeneration: () => this.sessionTurnGeneration,
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
@@ -1328,7 +1335,7 @@ export class ClaudeAgent extends BaseAgent {
           undefined,
           this.sessionStorage,
           this.workingDirectory,
-          { allowRequestUserInput: this.allowRequestUserInput, allowRenderUi: this.allowRenderUi, allowGenerateApp: this.allowGenerateApp },
+          { allowRequestUserInput: this.allowRequestUserInput, allowRenderUi: this.allowRenderUi, allowGenerateApp: this.allowGenerateApp, allowGoalUpdate: this.allowGoalUpdate },
         ),
         // Polo AI documentation - always available for searching setup guides
         // This is a public Mintlify MCP server, no auth needed
@@ -3364,27 +3371,68 @@ This is a branched conversation. All prior messages in this conversation are par
   // queryLlm — Agent-native LLM query for call_llm tool (OAuth path)
   // ============================================================
 
-  async queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
+  async queryLlm(request: LLMQueryRequest, options?: LLMQueryOptions): Promise<LLMQueryResult> {
     const model = request.model ?? this.config.miniModel ?? getDefaultSummarizationModel();
 
-    const options = {
-      ...this.getInvocationDefaultOptions(),
-      model,
-      // Reasoning-model outputs (Opus 4.7 extended thinking) can span multiple SDK-counted
-      // turns even with no tools exposed. Tool surface here is empty, so no tool-use loop risk.
-      maxTurns: 10,
-      systemPrompt: request.systemPrompt ?? 'Reply with ONLY the requested text. No explanation.',
-      ...(request.maxTokens ? { maxTokens: request.maxTokens } : {}),
-      ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
-      ...(request.outputSchema ? {
-        outputFormat: { type: 'json_schema' as const, schema: request.outputSchema },
-      } : {}),
-    };
+    // POO-134 verification isolation: an isolated query is a bare completion.
+    // `tools: []` disables ALL built-in tools, `mcpServers: {}` detaches every
+    // MCP server, and `settingSources: []` puts the SDK in isolation mode (it
+    // would otherwise load the full filesystem/project settings cascade). The
+    // default path keeps today's behavior byte-for-byte.
+    // maxTurns stays on the SAME bounded default as a normal query (see
+    // below): the real zhipu/glm run (attempt-6) needed 2 SDK-counted turns
+    // for one structured-output verdict with NO tools in play — reasoning
+    // output alone spans turns. Capping the isolated path at 1 produced
+    // error_max_turns with salvageable partial text, which the verifier now
+    // fails closed on; the budget cap (error_max_budget_usd) and the
+    // abortController below still bound the query.
+    const isolationOverrides = options?.isolation === 'no-tools'
+      ? {
+          tools: [] as string[],
+          mcpServers: {} as Record<string, never>,
+          settingSources: [] as never[],
+        }
+      : {};
 
-    return consumeLlmQueryMessages(
-      query({ prompt: request.prompt, options }),
-      (msg) => this.debug(msg),
-    );
+    const queryAbortController = new AbortController();
+    let onAbort: (() => void) | undefined;
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        queryAbortController.abort(options.signal.reason);
+      } else {
+        onAbort = () => queryAbortController.abort(options.signal!.reason);
+        options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
+
+    try {
+      const queryOptions = {
+        ...this.getInvocationDefaultOptions(),
+        ...isolationOverrides,
+        model,
+        // Reasoning-model outputs (Opus 4.7 extended thinking) can span multiple SDK-counted
+        // turns even with no tools exposed. Tool surface here is empty, so no tool-use loop
+        // risk. The SAME bounded budget applies to the isolated verification path — the real
+        // zhipu/glm run needed 2 SDK-counted turns for one structured-output verdict.
+        maxTurns: 10,
+        systemPrompt: request.systemPrompt ?? 'Reply with ONLY the requested text. No explanation.',
+        ...(request.maxTokens ? { maxTokens: request.maxTokens } : {}),
+        ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+        ...(request.outputSchema ? {
+          outputFormat: { type: 'json_schema' as const, schema: request.outputSchema },
+        } : {}),
+        abortController: queryAbortController,
+      };
+
+      return await consumeLlmQueryMessages(
+        query({ prompt: request.prompt, options: queryOptions }),
+        (msg) => this.debug(msg),
+      );
+    } finally {
+      if (onAbort && options?.signal) {
+        options.signal.removeEventListener('abort', onAbort);
+      }
+    }
   }
 
   // ============================================================

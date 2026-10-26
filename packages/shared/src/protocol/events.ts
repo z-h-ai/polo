@@ -13,6 +13,8 @@ import type {
   UnreadSummary,
   UpdateInfo,
   BrowserInstanceInfo,
+  BrowserElementPickerEvent,
+  CanvasPanePopoutState,
   DeepLinkNavigation,
   NewWindowFailureReason,
 } from './dto'
@@ -55,6 +57,11 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.browserPane.STATE_CHANGED]: [info: BrowserInstanceInfo]
   [RPC_CHANNELS.browserPane.REMOVED]: [id: string]
   [RPC_CHANNELS.browserPane.INTERACTED]: [id: string]
+  // POO-135: element picker outcomes (picked / cancelled / unavailable)
+  [RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT]: [event: BrowserElementPickerEvent]
+
+  // Canvas pane popout events (POO-135 验收修复 SB-CANVAS-OUT, global)
+  [RPC_CHANNELS.canvasPane.STATE_CHANGED]: [state: CanvasPanePopoutState]
 
   // Navigation events (per-window)
   [RPC_CHANNELS.notification.NAVIGATE]: [data: { workspaceId: string; sessionId: string }]

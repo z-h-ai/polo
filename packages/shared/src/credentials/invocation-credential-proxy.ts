@@ -1,3 +1,4 @@
+import { setupI18n } from '../i18n'
 import {
   createServer,
   request as httpRequest,
@@ -424,7 +425,7 @@ export async function startInvocationCredentialProxy(
         body = parsed.body
         requestedModel = parsed.model
         if (!targetSnapshot.credential) throw new Error('Managed upstream credential is unavailable')
-        lease = await options.billing.beforeSend({ model: parsed.model, hostRequestId: newManagedHostRequestId(), transportBaseUrl: targetSnapshot.upstreamBaseUrl.replace(/\/$/, ''), credentialFingerprint: createHash('sha256').update(targetSnapshot.credential).digest('hex') })
+        lease = await options.billing.beforeSend({ model: parsed.model, requestBounds: parsed.requestBounds, hostRequestId: newManagedHostRequestId(), transportBaseUrl: targetSnapshot.upstreamBaseUrl.replace(/\/$/, ''), credentialFingerprint: createHash('sha256').update(targetSnapshot.credential).digest('hex') })
         const correlation = parseProviderCorrelation(lease.providerCorrelation)
         if (!correlation) throw new Error('Managed admission correlation is invalid')
         lease.assertCurrent()
@@ -451,14 +452,10 @@ export async function startInvocationCredentialProxy(
       finally { response.off('close', abortUpstream); await complete(false) }
     } catch (error) {
       await complete(false).catch(() => {})
-      if (!response.headersSent) {
-        response.writeHead(502, {
-          'content-type': 'text/plain; charset=utf-8',
-        })
-      }
       const code = (error as { errorCode?: string })?.errorCode
-      response.end(options.managedPolicy && ['insufficient_credit', 'insufficient_quota', 'budget_exceeded', 'INSUFFICIENT_BALANCE'].includes(code ?? '')
-        ? 'POLO_INSUFFICIENT_CREDIT' : 'Credential proxy upstream request failed')
+      const insufficientCredit = !!options.billing && ['insufficient_credit', 'INSUFFICIENT_BALANCE'].includes(code ?? '')
+      if (!response.headersSent) response.writeHead(insufficientCredit ? 402 : 502, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end(insufficientCredit ? `POLO_INSUFFICIENT_CREDIT: ${setupI18n().t('billing.insufficientCredit')}` : 'Credential proxy upstream request failed')
     } finally { done() }
   })
 

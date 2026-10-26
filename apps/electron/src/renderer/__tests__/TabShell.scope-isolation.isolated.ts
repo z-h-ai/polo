@@ -42,6 +42,14 @@ mock.module('@/context/ThemeContext', () => ({
   useOptionalTheme: () => undefined,
 }))
 
+// The `?url` worker import only resolves under Vite (POO-142 review: the
+// shell tree regressed into pulling the @polo-ai/ui pdf overlay at load
+// time, breaking the whole file under bun). Shared-process stub from
+// App.auth-success-journey.
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({
+  default: 'data:application/javascript,',
+}))
+
 // The TopBar's avatar menu (WorkbenchAccountMenu, POO-117) needs the App-level
 // ActionRegistryProvider for its hotkey labels; this reduced tree mounts
 // TabShell without it (adding the provider would add a second live window
@@ -142,6 +150,9 @@ Object.defineProperty(window, 'electronAPI', {
         deepLinkUnsubscribed += 1
       }
     },
+    // Module-level runtime probe in SessionFilesSection (pulled in through
+    // the TopBar → SessionInfoPopover import chain).
+    getRuntimeEnvironment: () => 'electron',
     productSpaceGetCatalog: async () => ({
       success: false as const,
       errorCode: 'request_failed',
@@ -183,7 +194,7 @@ const SCOPE_A = { key: 'scope-a', accountId: 'acct-r37-fixture', productSpaceId:
 const SCOPE_B = { key: 'scope-b', accountId: 'acct-r37-fixture', productSpaceId: 'organization-b' }
 type ProviderScope = typeof SCOPE_A
 
-const contextValueForScope = (scope: ProviderScope) => ({
+const contextValueForScope = (scope: ProviderScope, overrides: Record<string, unknown> = {}) => ({
   // Shape mirrors the production ProductSpaceContextValue consumers read;
   // asserted to the production contract type below (branded IDs are compile-
   // time projections of the string fixtures). A and B use DISTINCT real
@@ -199,6 +210,7 @@ const contextValueForScope = (scope: ProviderScope) => ({
   },
   productSpaces: [],
   allProductSpaces: [],
+  membershipListVerified: true,
   personalProductSpaceId: SCOPE_A.productSpaceId,
   productSpaceContextKey: createProductSpaceContextKey(scope.accountId, scope.productSpaceId),
   contextVersion: scope.productSpaceId === SCOPE_A.productSpaceId ? 3 : 4,
@@ -211,6 +223,7 @@ const contextValueForScope = (scope: ProviderScope) => ({
   onCancelSwitch: () => {},
   onDismissTargetAccessLost: () => {},
   onStopSwitchExecution: () => {},
+  ...overrides,
 })
 
 let layoutSnapshots: string[] = []
@@ -278,7 +291,7 @@ function WorkbenchProbe(): ReactNode {
   return createElement('div', { 'data-testid': 'polo-app-root' })
 }
 
-function buildShellTree(scope: ProviderScope): ReactNode {
+function buildShellTree(scope: ProviderScope, contextOverrides: Record<string, unknown> = {}): ReactNode {
   const { ProductSpaceProvider } =
     require('@/context/ProductSpaceContext') as typeof import('@/context/ProductSpaceContext')
   const { MemberCatalogProvider } =
@@ -314,7 +327,7 @@ function buildShellTree(scope: ProviderScope): ReactNode {
     I18nextProvider,
     { i18n },
     createElement(ProductSpaceProvider, {
-      value: contextValueForScope(scope) as unknown as ProductSpaceContextValue,
+      value: contextValueForScope(scope, contextOverrides) as unknown as ProductSpaceContextValue,
       children: createElement(MemberCatalogProvider, { children: shell }),
     }),
   )
@@ -624,4 +637,29 @@ it('R3FIX home tab keeps the real ClientPage stack inside TabShell (POO-100 pres
   expect(page.canGoBack).toBe(true)
   // POO-117 P117-01: the brand is a decorative mark — no button to click.
   expect(screen.getByTestId('app-topbar').querySelector('button[aria-label="' + i18n.t('topbar.brand.home') + '"]')).toBeNull()
+})
+
+// POO-142 review F2 (CL-TR-05): the shell-level regression the banner work
+// promised. A user WITH an affiliation never sees the "not joined yet"
+// banner — asserted here against the REAL TabShell tree (TopBar + TabContent
+// + the shared MemberCircleResourceProvider the banner mounts inside), not a
+// banner-only mount.
+describe('membership-transition banner scope regression (POO-142 F2)', () => {
+  it('an affiliated (own enterprise space in the verified list) scope never renders the banner', async () => {
+    render(buildShellTree(SCOPE_A, {
+      // The scope IS affiliated: the verified online list contains its own
+      // enterprise space. Derivation must answer `affiliated` — the banner
+      // stays silent for the whole hydration + tab lifecycle.
+      allProductSpaces: [
+        { id: SCOPE_A.productSpaceId, kind: 'enterprise', name: 'Organization A' },
+      ],
+    }))
+
+    await waitFor(() => {
+      if (!screen.getByTestId('app-topbar')) throw new Error('shell not restored')
+    })
+    // Hydrated home surface is up, and the banner is nowhere in the shell.
+    expect(screen.queryByTestId('membership-transition-banner')).toBeNull()
+    expect(screen.queryByTestId('membership-transition-refresh')).toBeNull()
+  }, 30_000)
 })

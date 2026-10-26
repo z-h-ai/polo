@@ -13,6 +13,7 @@ type FunctionKeys<T> = {
 
 type BrowserPaneKeys = `browserPane.${FunctionKeys<ElectronAPI['browserPane']>}`
 type LocalAppKeys = `localApps.${FunctionKeys<ElectronAPI['localApps']>}`
+type CanvasPaneKeys = `canvasPane.${FunctionKeys<ElectronAPI['canvasPane']>}`
 
 // Methods excluded from CHANNEL_MAP because they are implemented directly in the preload
 // (no IPC round-trip to the main process). Each reads local state or orchestrates client-side.
@@ -39,7 +40,7 @@ type ApiToChannelMapKeys = Exclude<
   | 'onCircleReturnCandidate' // preload-implemented listener over the WS client (POO-70 B1 circle-return bridge, bootstrap.ts)
   | 'changeLanguage' // direct IPC to main process — syncs i18n language
   | 'getFilePath' // renderer-local — webUtils.getPathForFile, no IPC round-trip
-> | BrowserPaneKeys | LocalAppKeys
+> | BrowserPaneKeys | LocalAppKeys | CanvasPaneKeys
 type ChannelMapKeys = keyof typeof CHANNEL_MAP & string
 
 type AssertNever<T extends never> = true

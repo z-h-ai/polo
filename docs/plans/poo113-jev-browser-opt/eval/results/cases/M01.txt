@@ -1,0 +1,23 @@
+## 页面快照
+URL: https://shop.example.com/
+Title: 首页 - 示例电商
+Elements: 10 (link:5, button:4, heading:1)
+Focused ref: none, disabled: 0
+
+Elements (10):
+  @e1 [heading] "示例电商"
+  @e2 [link] "秒杀会场"
+  @e3 [link] "领券中心"
+  @e4 [button] "登录"
+  @e5 [button] "免费注册"
+  @e6 [button] "扫码登录"
+  @e7 [button] "搜索"
+  @e8 [link] "订单查询"
+  @e9 [link] "会员中心"
+  @e10 [link] "帮助中心"
+
+## 任务
+点击登录按钮开始账号密码登录（不要注册、不要扫码）
+
+## 已执行动作
+（空）

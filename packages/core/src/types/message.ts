@@ -18,6 +18,33 @@ export interface KbReference {
 }
 
 /**
+ * Snapshot of one picked web element attached to a chat message (POO-135).
+ * Captured from the live page at pick time and never rewritten by later page
+ * changes — the reference is a point-in-time snapshot, like KbReference.
+ * Only user-visible summary fields are collected: no password/hidden field
+ * values, no script contents, no whole-page text.
+ */
+export interface WebElementReference {
+  id: string;
+  /** Browser pane instance the element was picked from. */
+  browserInstanceId: string;
+  /** Chat session the reference targets (owner session or pick-time session). */
+  sessionId: string;
+  /** Lowercased tag name, e.g. "a". */
+  tag: string;
+  /** Visible text summary (trimmed, ≤500 chars). Empty for form controls. */
+  text: string;
+  /** Accessible name / placeholder / aria-label (≤160 chars), when present. */
+  aria?: string;
+  /** tag:nth-child chain from the document root to the element. */
+  locator: string;
+  /** Page <title> (or first <h1>) at capture time. */
+  pageTitle: string;
+  /** Page URL at capture time. */
+  url: string;
+}
+
+/**
  * Message roles for display (runtime)
  */
 export type MessageRole =
@@ -292,6 +319,8 @@ export interface Message {
   badges?: ContentBadge[];
   /** Knowledge Base reference snapshot attached at send time (POO-108) */
   kbReferences?: KbReference[];
+  /** Picked web element reference snapshots attached at send time (POO-135) */
+  elementReferences?: WebElementReference[];
   /** Annotation payloads for this message */
   annotations?: AnnotationV1[];
   isError?: boolean;
@@ -402,6 +431,8 @@ export interface StoredMessage {
   badges?: ContentBadge[];
   /** Knowledge Base reference snapshot attached at send time (POO-108) */
   kbReferences?: KbReference[];
+  /** Picked web element reference snapshots attached at send time (POO-135) */
+  elementReferences?: WebElementReference[];
   /** Annotations persisted at message level */
   annotations?: AnnotationV1[];
   // Turn grouping - critical for TurnCard rendering after reload
@@ -538,12 +569,13 @@ export interface TypedError {
 /**
  * Permission request type categories
  */
-export type PermissionRequestType = 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+export type PermissionRequestType = 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action';
 
 /**
  * Permission request from agent (e.g., bash command approval)
  */
 export interface PermissionRequest {
+  browserAction?: { phase: 'awaiting_authorization' | 'invalidated_before_dispatch' | 'dispatched_outcome_unknown'; fields: Array<[string,string]>; actionDigest: string };
   requestId: string;
   toolName: string;
   command?: string;  // Optional: bash commands have it, MCP tools may not

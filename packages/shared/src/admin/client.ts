@@ -1,3 +1,4 @@
+import {browserPolicyResponseSchema,type BrowserPolicyResponse} from "./browser-policy-contract";
 import { SkillTurnBeginSchema, SkillTurnOperationSchema, SkillTurnReceiptSchema, type SkillTurnBegin, type SkillTurnReceipt } from './skill-turn-contract.ts';
 import {
   AdminError,
@@ -457,6 +458,13 @@ export class AdminClient {
       method: 'POST',
       accessToken,
     });
+  }
+
+  async getBrowserPolicy(accessToken: string, productSpaceId: string, options?: { signal?: AbortSignal }): Promise<BrowserPolicyResponse> {
+    const result = await this.request<unknown>(`/api/browser-policy?productSpaceId=${encodeURIComponent(productSpaceId)}`, {method:'GET',accessToken,signal:options?.signal});
+    const policy = browserPolicyResponseSchema.parse(result);
+    if (policy.productSpaceId !== productSpaceId) throw new AdminError('Browser policy changed ProductSpace','SERVER_ERROR');
+    return policy;
   }
 
   getLlmConnections(accessToken: string, productSpaceId?: string): Promise<AdminLlmConnectionsResponse> {
@@ -1365,6 +1373,10 @@ export class AdminClient {
     if (result.settlement === 'pending') {
       if (result.request?.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
       return { runId: input.runId, requestId: input.requestId, recorded: result.recorded, settlement: 'pending' };
+    }
+    if (result.resolution === 'platform_absorbed') {
+      if (result.request?.requestId !== input.requestId || result.settlement !== 'no_charge') throw new AdminError('Admin resolution identity is invalid', 'SERVER_ERROR');
+      return { runId: input.runId, requestId: input.requestId, recorded: result.recorded, settlement: 'no_charge', resolution: result.resolution };
     }
     if (result.receipt === null) throw new AdminError('requestId belongs to legacy usage', 'idempotency_conflict');
     if (result.receipt.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');

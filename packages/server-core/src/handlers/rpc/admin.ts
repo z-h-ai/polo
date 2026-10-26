@@ -1,4 +1,5 @@
 import { requireMemberCircleAppAdmission, MemberCircleAdmissionError } from '@polo-ai/shared/admin/member-circle-admission'
+import {setBrowserPolicyReader} from '../../runtime/browser-policy'
 import { paymentHandoffUrl } from './payment-handoff'
 import {
   AdminClient,
@@ -71,6 +72,7 @@ import {
   getAdminUrl,
   getLlmConnections,
   setAdminConfigVersion,
+  setBrowserFastDeciderEnabled,
   setDefaultLlmConnection,
   setGenerativeUiRemoteCapability,
   setWebAppArtifactPolicy,
@@ -923,6 +925,10 @@ export function registerAdminHandlers(
   })
   const billingSession = async (scope: { accountId: string; adminOrigin: string }) => installationSession(scope.accountId, scope.adminOrigin)
   const billingOptions = () => ({ signal: AbortSignal.timeout(5_000) })
+  setBrowserPolicyReader(async scope => {
+    const session = await billingSession(scope)
+    return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, billingOptions())
+  })
   setAssistantBillingTransport({
     start: async (scope, input) => { const s = await billingSession(scope); return s.client.startAssistantRun(s.accessToken, input, billingOptions()) },
     admit: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.admitAppRequest(s.accessToken, runId, input, billingOptions()) },
@@ -3980,6 +3986,10 @@ async function syncAdminConnections(args: {
           setDefaultLlmConnection(response.defaultConnection)
         }
         setAdminConfigVersion(response.configVersion)
+        // POO-113: consume the admin rollout switch for the browser fast
+        // decider. An absent field means enabled so an older admin keeps the
+        // new client on the managed path.
+        setBrowserFastDeciderEnabled(response.browserFastDecider?.enabled ?? true)
       }, { phase: 'compute-connection-commit', productSpaceId: requestedSpaceId }),
     )
     if (!applied.applied) throw new AdminSessionChangedError()

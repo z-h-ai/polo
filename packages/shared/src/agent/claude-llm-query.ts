@@ -42,6 +42,15 @@ export async function consumeLlmQueryMessages(
   let text = '';
   let structuredOutput: unknown = undefined;
   let warning: string | undefined;
+  // REAL attribution (POO-134 F8): surface whatever the SDK result actually
+  // reports — the model that answered and the tokens it consumed — so a Goal
+  // verification receipt can name what it paid for. Read defensively from the
+  // result message only; values are NEVER fabricated and stay absent when the
+  // SDK omits them (the attempt-7 real run exposed exactly this gap: a
+  // completed goal whose verification receipt carried no model/usage).
+  let model: string | undefined;
+  let inputTokens: number | undefined;
+  let outputTokens: number | undefined;
 
   try {
     for await (const msg of iter) {
@@ -54,6 +63,13 @@ export async function consumeLlmQueryMessages(
       }
       if (msg.type === 'result') {
         const resultMsg = msg as SDKResultSuccess | SDKResultError;
+        const reported = resultMsg as unknown as {
+          model?: unknown;
+          usage?: { input_tokens?: unknown; output_tokens?: unknown };
+        };
+        if (typeof reported.model === 'string' && reported.model) model = reported.model;
+        if (typeof reported.usage?.input_tokens === 'number') inputTokens = reported.usage.input_tokens;
+        if (typeof reported.usage?.output_tokens === 'number') outputTokens = reported.usage.output_tokens;
         if (resultMsg.subtype === 'success') {
           structuredOutput = (resultMsg as SDKResultSuccess).structured_output;
         } else {
@@ -77,8 +93,13 @@ export async function consumeLlmQueryMessages(
     warning = `Model stopped early: ${message}`;
   }
 
+  const attribution = {
+    ...(model ? { model } : {}),
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+  };
   if (structuredOutput !== undefined) {
-    return { text: JSON.stringify(structuredOutput, null, 2), warning };
+    return { text: JSON.stringify(structuredOutput, null, 2), warning, ...attribution };
   }
-  return { text: text.trim(), warning };
+  return { text: text.trim(), warning, ...attribution };
 }

@@ -37,9 +37,9 @@ async function fixture(billing: unknown, stream = true) {
   const base = `http://127.0.0.1:${address.port}/v1`
   const proxy = await startInvocationCredentialProxy({ upstreamBaseUrl: base, credential: 'private-upstream-key', credentialHeaders: [{ name: 'authorization', format: 'bearer' }] }, { billing } as any)
   proxies.push(proxy)
-  const send = (path = '/v1/chat/completions') => fetch(proxy.url + path, {
+  const send = (path = '/v1/chat/completions', extra: Record<string, unknown> = {}) => fetch(proxy.url + path, {
     method: 'POST', headers: { authorization: `Bearer ${proxy.capability}`, 'content-type': 'application/json', 'x-polo-request-id': 'forged-child-correlation' },
-    body: JSON.stringify({ model: 'deepseek-chat', stream, messages: [{ role: 'user', content: 'private prompt' }] }),
+    body: JSON.stringify({ model: 'deepseek-chat', stream, messages: [{ role: 'user', content: 'private prompt' }], ...extra }),
   })
   return { seen, send, base }
 }
@@ -63,6 +63,10 @@ test('each real request gets private admission and provider-final usage; cache t
   expect(admissions[0]).not.toHaveProperty('messages')
   expect(f.seen[0]!.headers).toMatchObject({ authorization: 'Bearer private-upstream-key', 'x-polo-request-id': correlation.nonce })
   expect(f.seen[0]!.body.stream_options.include_usage).toBe(true)
+  expect(f.seen[0]!.body.max_tokens).toBe(8192)
+  expect(admissions[0].requestBounds.maxOutputTokens).toBe(8192)
+  expect(admissions[0].requestBounds.bodySha256).toBe(createHash('sha256').update(JSON.stringify(f.seen[0]!.body)).digest('hex'))
+  expect(admissions[0].requestBounds.maxInputTokens).toBeGreaterThan(Buffer.byteLength(JSON.stringify(f.seen[0]!.body)))
   expect(receipts).toHaveLength(2)
   expect(receipts[0]).toMatchObject({ inputTokens: 60, outputTokens: 7, cacheReadTokens: 40, cacheWriteTokens: 0, actualModel: 'deepseek-chat', provenance: 'provider_final', outputDisposition: 'usable', providerObservation: { version: 1, state: 'observed', providerRequestId: 'provider-request-123', responseStatus: 200 } })
   expect(JSON.stringify(receipts)).not.toContain('private prompt')
@@ -86,4 +90,29 @@ test('non-stream utility/tool response uses the same billing boundary', async ()
   const f = await fixture({ beforeSend: async () => ({ providerCorrelation: correlation, assertCurrent() {}, complete: async (r: any) => { receipts.push(r) } }) }, false)
   const r = await f.send(); expect(r.ok).toBe(true); await r.text()
   expect(receipts[0]).toMatchObject({ inputTokens: 11, outputTokens: 3, outputDisposition: 'usable', provenance: 'provider_final' })
+})
+
+test.each([
+ { max_tokens: 0 }, { max_tokens: -1 }, { max_tokens: '100' },
+ { max_tokens: 10, max_completion_tokens: 20 }, { n: 0 },
+ { messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.invalid/private.png' } }] }] },
+])('unbounded requests are refused before admission and provider consumption: %j', async extra => {
+ let admissions = 0
+ const f = await fixture({ beforeSend: async () => { admissions++; throw new Error('unexpected admission') } })
+ const response = await f.send('/v1/chat/completions', extra); await response.text()
+ expect(response.ok).toBe(false); expect(admissions).toBe(0); expect(f.seen).toHaveLength(0)
+})
+test('explicit completion limit and choice count bind the forwarded body', async () => {
+ let facts: any
+ const f = await fixture({ beforeSend: async (value: any) => { facts = value; return { providerCorrelation: correlation, assertCurrent() {}, complete: async () => {} } } })
+ const response = await f.send('/v1/chat/completions', { max_completion_tokens: 31, n: 2 }); await response.text()
+ expect(response.ok).toBe(true); expect(facts.requestBounds.maxOutputTokens).toBe(62)
+ expect(f.seen[0]!.body.max_tokens).toBeUndefined(); expect(f.seen[0]!.body.max_completion_tokens).toBe(31)
+})
+
+test('insufficient balance returns a recharge prompt and consumes no upstream request',async()=>{
+ const {setupI18n}=await import('../../i18n');const locale=setupI18n(),previous=locale.language;await locale.changeLanguage('zh-Hans')
+ try {const f=await fixture({beforeSend:async()=>{throw Object.assign(new Error('Insufficient credit'),{errorCode:'insufficient_credit'})}})
+ const response=await f.send();expect(response.status).toBe(402);expect(await response.text()).toContain('余额不足，请充值后重试。');expect(f.seen).toHaveLength(0)
+ } finally {await locale.changeLanguage(previous)}
 })

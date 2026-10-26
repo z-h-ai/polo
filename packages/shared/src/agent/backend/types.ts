@@ -66,7 +66,7 @@ export type AgentProvider = ModelProvider;
 /**
  * Permission prompt types for different tool categories.
  */
-export type PermissionRequestType = 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+export type PermissionRequestType = 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action';
 
 /**
  * Permission request callback signature.
@@ -680,6 +680,14 @@ export interface AgentBackend {
   onQuestionRequested: QuestionRequestedCallback | null;
 
   /**
+   * POO-134: called when the agent files a structured goal_update report on a
+   * Goal turn. Stages the report for the server's GoalController — never
+   * applied directly; the matching successful goal_update tool_result of the
+   * SAME turn is what authorizes application.
+   */
+  onGoalUpdateReport: ((report: import('@polo-ai/session-tools-core').GoalUpdateReport, generationAtRequest: number) => void | Promise<void>) | null;
+
+  /**
    * Per-turn capability flag: whether the request_user_input tool is visible.
    * Set by the session layer before each turn (desktop interactive sessions
    * only); backends read it when building/registering their toolset.
@@ -701,6 +709,21 @@ export interface AgentBackend {
    * every other combination fails closed.
    */
   allowGenerateApp: boolean;
+
+  /**
+   * POO-134: per-turn capability flag: whether the goal_update report tool is
+   * visible. Set by the session layer before each turn — ONLY turns the
+   * GoalController bound to the session's running Goal; every other turn
+   * fails closed without it.
+   */
+  allowGoalUpdate: boolean;
+
+  /**
+   * Agent-native LLM query (also the call_llm transport). POO-134 uses it with
+   * `isolation: 'no-tools'` for the independent completion verification — a
+   * bare completion with no tools, MCP servers or settings.
+   */
+  queryLlm(request: import('../llm-tool.ts').LLMQueryRequest, options?: import('../llm-tool.ts').LLMQueryOptions): Promise<import('../llm-tool.ts').LLMQueryResult>;
 
   /** Called when a source config changes */
   onSourceChange: SourceChangeCallback | null;

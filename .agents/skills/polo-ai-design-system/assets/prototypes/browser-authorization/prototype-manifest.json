@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "confirmed-browser-authorization-reference",
+  "mode": "high_fidelity",
+  "revision": "poo113-confirmation-r1-approved-20261024",
+  "files": {
+    "prototype": "prototype.html"
+  },
+  "target": {
+    "languages": [
+      "zh-Hans",
+      "en"
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "viewports": [
+      {
+        "id": "desktop",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "id": "compact",
+        "width": 800,
+        "height": 600
+      },
+      {
+        "id": "mobile",
+        "width": 390,
+        "height": 844
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "id": "payment",
+      "title": "payment",
+      "state": "payment",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "amount-changed",
+      "title": "amount-changed",
+      "state": "amount-changed",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "send",
+      "title": "send",
+      "state": "send",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "expired",
+      "title": "expired",
+      "state": "expired",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "outcome-unknown",
+      "title": "outcome-unknown",
+      "state": "outcome-unknown",
+      "source_entry": "prototype.html"
+    }
+  ],
+  "design": {
+    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "sha256": "5f970abd0efee8e6074f6f0c904b9aafc96c9b746e4cd25affedf7484fdb17e8",
+    "sources": [
+      {
+        "path": "apps/electron/src/renderer/index.css",
+        "sha256": "b3dabc1562cf3a91e45f055935ff749183e87b75a0d9a8158a67948a1cf8eeeb"
+      }
+    ]
+  },
+  "confirmations": [
+    {
+      "id": "poo113-p2-confirmed-layout",
+      "status": "confirmed",
+      "source": "Notma POO-113 revision d353907f0af058aff3640be3c1e6e21648c40faa1c143507f96335cc2e46fb83 / current user instruction",
+      "quote": "ok，P2交给你了，处理吧，直到完成编码，完成e2e",
+      "scope": "Previously presented local confirmation layout only; all five states, zh/en, light/dark and three viewports."
+    }
+  ],
+  "provenance": {
+    "source": "Reviewed POO-113 ui-r1 actual component render, before implementation",
+    "source_manifest_sha256": "f0aadafa0f67994612a1570d0862d74bd612b566bedd60a4d11caa909887a2f5",
+    "reference_html_sha256": "15417dc3769c83b4d66ef13d0b64f991e6237beddaec31bd0375d64cbac12866",
+    "promotion": "Native HTML frozen from the approved candidate DOM; no new style values or global policy. Source editing for production remains BrowserActionPermissionRequest.tsx. Historical task/report copies retain their original version; this is the maintained Skill-container reference."
+  }
+}

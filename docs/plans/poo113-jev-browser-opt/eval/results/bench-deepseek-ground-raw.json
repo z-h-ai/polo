@@ -1,0 +1,2432 @@
+[
+ {
+  "caseId": "M001",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 848,
+  "content": "click @e42",
+  "usage": {
+   "prompt_tokens": 1773,
+   "completion_tokens": 4,
+   "total_tokens": 1777,
+   "prompt_tokens_details": {
+    "cached_tokens": 1536
+   },
+   "prompt_cache_hit_tokens": 1536,
+   "prompt_cache_miss_tokens": 237
+  },
+  "error": null
+ },
+ {
+  "caseId": "M002",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 758,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1406,
+   "completion_tokens": 4,
+   "total_tokens": 1410,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 254
+  },
+  "error": null
+ },
+ {
+  "caseId": "M003",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 852,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1370,
+   "completion_tokens": 4,
+   "total_tokens": 1374,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 218
+  },
+  "error": null
+ },
+ {
+  "caseId": "M004",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 851,
+  "content": "click @e61",
+  "usage": {
+   "prompt_tokens": 1531,
+   "completion_tokens": 4,
+   "total_tokens": 1535,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 251
+  },
+  "error": null
+ },
+ {
+  "caseId": "M005",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 749,
+  "content": "select @e11 Price: High - Low",
+  "usage": {
+   "prompt_tokens": 1663,
+   "completion_tokens": 9,
+   "total_tokens": 1672,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 255
+  },
+  "error": null
+ },
+ {
+  "caseId": "M006",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 716,
+  "content": "click @e13",
+  "usage": {
+   "prompt_tokens": 1759,
+   "completion_tokens": 4,
+   "total_tokens": 1763,
+   "prompt_tokens_details": {
+    "cached_tokens": 1536
+   },
+   "prompt_cache_hit_tokens": 1536,
+   "prompt_cache_miss_tokens": 223
+  },
+  "error": null
+ },
+ {
+  "caseId": "M007",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 754,
+  "content": "click @e13",
+  "usage": {
+   "prompt_tokens": 1502,
+   "completion_tokens": 4,
+   "total_tokens": 1506,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 222
+  },
+  "error": null
+ },
+ {
+  "caseId": "M008",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 716,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1435,
+   "completion_tokens": 4,
+   "total_tokens": 1439,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 283
+  },
+  "error": null
+ },
+ {
+  "caseId": "M009",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 723,
+  "content": "click @e9",
+  "usage": {
+   "prompt_tokens": 1363,
+   "completion_tokens": 4,
+   "total_tokens": 1367,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 211
+  },
+  "error": null
+ },
+ {
+  "caseId": "M010",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 848,
+  "content": "fill @e5 Ballet",
+  "usage": {
+   "prompt_tokens": 1382,
+   "completion_tokens": 5,
+   "total_tokens": 1387,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 230
+  },
+  "error": null
+ },
+ {
+  "caseId": "M011",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 850,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1481,
+   "completion_tokens": 4,
+   "total_tokens": 1485,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 201
+  },
+  "error": null
+ },
+ {
+  "caseId": "M012",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 707,
+  "content": "click @e41",
+  "usage": {
+   "prompt_tokens": 1391,
+   "completion_tokens": 4,
+   "total_tokens": 1395,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 239
+  },
+  "error": null
+ },
+ {
+  "caseId": "M013",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 711,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1341,
+   "completion_tokens": 4,
+   "total_tokens": 1345,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 189
+  },
+  "error": null
+ },
+ {
+  "caseId": "M014",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 846,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1440,
+   "completion_tokens": 4,
+   "total_tokens": 1444,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 288
+  },
+  "error": null
+ },
+ {
+  "caseId": "M015",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 708,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1435,
+   "completion_tokens": 4,
+   "total_tokens": 1439,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 155
+  },
+  "error": null
+ },
+ {
+  "caseId": "M016",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 709,
+  "content": "click @e38",
+  "usage": {
+   "prompt_tokens": 1593,
+   "completion_tokens": 4,
+   "total_tokens": 1597,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 185
+  },
+  "error": null
+ },
+ {
+  "caseId": "M017",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 845,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1415,
+   "completion_tokens": 4,
+   "total_tokens": 1419,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 135
+  },
+  "error": null
+ },
+ {
+  "caseId": "M018",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1004,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1475,
+   "completion_tokens": 4,
+   "total_tokens": 1479,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 323
+  },
+  "error": null
+ },
+ {
+  "caseId": "M019",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 705,
+  "content": "click @e70",
+  "usage": {
+   "prompt_tokens": 1629,
+   "completion_tokens": 4,
+   "total_tokens": 1633,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 221
+  },
+  "error": null
+ },
+ {
+  "caseId": "M020",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 708,
+  "content": "click @e55",
+  "usage": {
+   "prompt_tokens": 1552,
+   "completion_tokens": 4,
+   "total_tokens": 1556,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 144
+  },
+  "error": null
+ },
+ {
+  "caseId": "M021",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 714,
+  "content": "fill @e3 cough medicine",
+  "usage": {
+   "prompt_tokens": 1316,
+   "completion_tokens": 6,
+   "total_tokens": 1322,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 164
+  },
+  "error": null
+ },
+ {
+  "caseId": "M022",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 842,
+  "content": "click @e39",
+  "usage": {
+   "prompt_tokens": 1398,
+   "completion_tokens": 4,
+   "total_tokens": 1402,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 246
+  },
+  "error": null
+ },
+ {
+  "caseId": "M023",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 847,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1413,
+   "completion_tokens": 4,
+   "total_tokens": 1417,
+   "prompt_tokens_details": {
+    "cached_tokens": 1279
+   },
+   "prompt_cache_hit_tokens": 1279,
+   "prompt_cache_miss_tokens": 134
+  },
+  "error": null
+ },
+ {
+  "caseId": "M024",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 843,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1029,
+   "completion_tokens": 4,
+   "total_tokens": 1033,
+   "prompt_tokens_details": {
+    "cached_tokens": 768
+   },
+   "prompt_cache_hit_tokens": 768,
+   "prompt_cache_miss_tokens": 261
+  },
+  "error": null
+ },
+ {
+  "caseId": "M025",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 700,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1587,
+   "completion_tokens": 4,
+   "total_tokens": 1591,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 179
+  },
+  "error": null
+ },
+ {
+  "caseId": "M026",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 716,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1575,
+   "completion_tokens": 4,
+   "total_tokens": 1579,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 295
+  },
+  "error": null
+ },
+ {
+  "caseId": "M027",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 716,
+  "content": "fill @e7 Star Wars The Mandalorian statue",
+  "usage": {
+   "prompt_tokens": 1468,
+   "completion_tokens": 11,
+   "total_tokens": 1479,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 188
+  },
+  "error": null
+ },
+ {
+  "caseId": "M028",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 774,
+  "content": "click @e10",
+  "usage": {
+   "prompt_tokens": 1534,
+   "completion_tokens": 4,
+   "total_tokens": 1538,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 254
+  },
+  "error": null
+ },
+ {
+  "caseId": "M029",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 925,
+  "content": "click @e50",
+  "usage": {
+   "prompt_tokens": 1475,
+   "completion_tokens": 4,
+   "total_tokens": 1479,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 195
+  },
+  "error": null
+ },
+ {
+  "caseId": "M030",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 991,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1236,
+   "completion_tokens": 4,
+   "total_tokens": 1240,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 212
+  },
+  "error": null
+ },
+ {
+  "caseId": "M031",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 840,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1370,
+   "completion_tokens": 4,
+   "total_tokens": 1374,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 218
+  },
+  "error": null
+ },
+ {
+  "caseId": "M032",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 841,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1425,
+   "completion_tokens": 4,
+   "total_tokens": 1429,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 273
+  },
+  "error": null
+ },
+ {
+  "caseId": "M033",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 843,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1212,
+   "completion_tokens": 4,
+   "total_tokens": 1216,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 188
+  },
+  "error": null
+ },
+ {
+  "caseId": "M034",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 841,
+  "content": "click @e9",
+  "usage": {
+   "prompt_tokens": 1645,
+   "completion_tokens": 4,
+   "total_tokens": 1649,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 237
+  },
+  "error": null
+ },
+ {
+  "caseId": "M035",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 841,
+  "content": "click @e17",
+  "usage": {
+   "prompt_tokens": 1634,
+   "completion_tokens": 4,
+   "total_tokens": 1638,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 226
+  },
+  "error": null
+ },
+ {
+  "caseId": "M036",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 841,
+  "content": "fill @e3 Tim Stebee",
+  "usage": {
+   "prompt_tokens": 1554,
+   "completion_tokens": 7,
+   "total_tokens": 1561,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 274
+  },
+  "error": null
+ },
+ {
+  "caseId": "M037",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 842,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1556,
+   "completion_tokens": 4,
+   "total_tokens": 1560,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 148
+  },
+  "error": null
+ },
+ {
+  "caseId": "M038",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 839,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1507,
+   "completion_tokens": 4,
+   "total_tokens": 1511,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 227
+  },
+  "error": null
+ },
+ {
+  "caseId": "M039",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 841,
+  "content": "fill @e2 Star Wars",
+  "usage": {
+   "prompt_tokens": 1471,
+   "completion_tokens": 6,
+   "total_tokens": 1477,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 191
+  },
+  "error": null
+ },
+ {
+  "caseId": "M040",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 845,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1473,
+   "completion_tokens": 4,
+   "total_tokens": 1477,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 193
+  },
+  "error": null
+ },
+ {
+  "caseId": "M041",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 840,
+  "content": "click @e50",
+  "usage": {
+   "prompt_tokens": 1448,
+   "completion_tokens": 4,
+   "total_tokens": 1452,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 168
+  },
+  "error": null
+ },
+ {
+  "caseId": "M042",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 838,
+  "content": "select @e5 Gifts",
+  "usage": {
+   "prompt_tokens": 1461,
+   "completion_tokens": 6,
+   "total_tokens": 1467,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 309
+  },
+  "error": null
+ },
+ {
+  "caseId": "M043",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 972,
+  "content": "click @e12",
+  "usage": {
+   "prompt_tokens": 1410,
+   "completion_tokens": 4,
+   "total_tokens": 1414,
+   "prompt_tokens_details": {
+    "cached_tokens": 1276
+   },
+   "prompt_cache_hit_tokens": 1276,
+   "prompt_cache_miss_tokens": 134
+  },
+  "error": null
+ },
+ {
+  "caseId": "M044",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 971,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1582,
+   "completion_tokens": 4,
+   "total_tokens": 1586,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 302
+  },
+  "error": null
+ },
+ {
+  "caseId": "M045",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1114,
+  "content": "click @e10",
+  "usage": {
+   "prompt_tokens": 1628,
+   "completion_tokens": 4,
+   "total_tokens": 1632,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 220
+  },
+  "error": null
+ },
+ {
+  "caseId": "M046",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 920,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1024,
+   "completion_tokens": 4,
+   "total_tokens": 1028,
+   "prompt_tokens_details": {
+    "cached_tokens": 768
+   },
+   "prompt_cache_hit_tokens": 768,
+   "prompt_cache_miss_tokens": 256
+  },
+  "error": null
+ },
+ {
+  "caseId": "M047",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 842,
+  "content": "fill @e1 NIAGRA FALLS",
+  "usage": {
+   "prompt_tokens": 1562,
+   "completion_tokens": 10,
+   "total_tokens": 1572,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 154
+  },
+  "error": null
+ },
+ {
+  "caseId": "M048",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 943,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1608,
+   "completion_tokens": 4,
+   "total_tokens": 1612,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 328
+  },
+  "error": null
+ },
+ {
+  "caseId": "M049",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 845,
+  "content": "click @e11",
+  "usage": {
+   "prompt_tokens": 1353,
+   "completion_tokens": 4,
+   "total_tokens": 1357,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 201
+  },
+  "error": null
+ },
+ {
+  "caseId": "M050",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1221,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1401,
+   "completion_tokens": 4,
+   "total_tokens": 1405,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 249
+  },
+  "error": null
+ },
+ {
+  "caseId": "M051",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1114,
+  "content": "click @e34",
+  "usage": {
+   "prompt_tokens": 1592,
+   "completion_tokens": 4,
+   "total_tokens": 1596,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 184
+  },
+  "error": null
+ },
+ {
+  "caseId": "M052",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 935,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1439,
+   "completion_tokens": 4,
+   "total_tokens": 1443,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 287
+  },
+  "error": null
+ },
+ {
+  "caseId": "M053",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 979,
+  "content": "fill @e1 Membership tier",
+  "usage": {
+   "prompt_tokens": 1424,
+   "completion_tokens": 6,
+   "total_tokens": 1430,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 144
+  },
+  "error": null
+ },
+ {
+  "caseId": "M054",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1089,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1450,
+   "completion_tokens": 4,
+   "total_tokens": 1454,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 298
+  },
+  "error": null
+ },
+ {
+  "caseId": "M055",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 921,
+  "content": "fill @e16 recipe",
+  "usage": {
+   "prompt_tokens": 1340,
+   "completion_tokens": 5,
+   "total_tokens": 1345,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 188
+  },
+  "error": null
+ },
+ {
+  "caseId": "M056",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 975,
+  "content": "click @e12",
+  "usage": {
+   "prompt_tokens": 1346,
+   "completion_tokens": 4,
+   "total_tokens": 1350,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 322
+  },
+  "error": null
+ },
+ {
+  "caseId": "M057",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 974,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1433,
+   "completion_tokens": 4,
+   "total_tokens": 1437,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 153
+  },
+  "error": null
+ },
+ {
+  "caseId": "M058",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 837,
+  "content": "click @e21",
+  "usage": {
+   "prompt_tokens": 1324,
+   "completion_tokens": 4,
+   "total_tokens": 1328,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 172
+  },
+  "error": null
+ },
+ {
+  "caseId": "M059",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 948,
+  "content": "click @e58",
+  "usage": {
+   "prompt_tokens": 1409,
+   "completion_tokens": 4,
+   "total_tokens": 1413,
+   "prompt_tokens_details": {
+    "cached_tokens": 1275
+   },
+   "prompt_cache_hit_tokens": 1275,
+   "prompt_cache_miss_tokens": 134
+  },
+  "error": null
+ },
+ {
+  "caseId": "M060",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1017,
+  "content": "fill @e10 wireless printer",
+  "usage": {
+   "prompt_tokens": 1733,
+   "completion_tokens": 6,
+   "total_tokens": 1739,
+   "prompt_tokens_details": {
+    "cached_tokens": 1536
+   },
+   "prompt_cache_hit_tokens": 1536,
+   "prompt_cache_miss_tokens": 197
+  },
+  "error": null
+ },
+ {
+  "caseId": "M061",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 960,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1539,
+   "completion_tokens": 4,
+   "total_tokens": 1543,
+   "prompt_tokens_details": {
+    "cached_tokens": 1405
+   },
+   "prompt_cache_hit_tokens": 1405,
+   "prompt_cache_miss_tokens": 134
+  },
+  "error": null
+ },
+ {
+  "caseId": "M062",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 933,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1578,
+   "completion_tokens": 4,
+   "total_tokens": 1582,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 298
+  },
+  "error": null
+ },
+ {
+  "caseId": "M063",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 829,
+  "content": "click @e6",
+  "usage": {
+   "prompt_tokens": 1517,
+   "completion_tokens": 4,
+   "total_tokens": 1521,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 237
+  },
+  "error": null
+ },
+ {
+  "caseId": "M064",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 825,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1647,
+   "completion_tokens": 4,
+   "total_tokens": 1651,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 239
+  },
+  "error": null
+ },
+ {
+  "caseId": "M065",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 954,
+  "content": "fill @e5 adele",
+  "usage": {
+   "prompt_tokens": 1389,
+   "completion_tokens": 6,
+   "total_tokens": 1395,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 237
+  },
+  "error": null
+ },
+ {
+  "caseId": "M066",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 979,
+  "content": "click @e13",
+  "usage": {
+   "prompt_tokens": 1671,
+   "completion_tokens": 4,
+   "total_tokens": 1675,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 263
+  },
+  "error": null
+ },
+ {
+  "caseId": "M067",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 828,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1544,
+   "completion_tokens": 4,
+   "total_tokens": 1548,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 136
+  },
+  "error": null
+ },
+ {
+  "caseId": "M068",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 828,
+  "content": "click @e20",
+  "usage": {
+   "prompt_tokens": 1365,
+   "completion_tokens": 4,
+   "total_tokens": 1369,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 213
+  },
+  "error": null
+ },
+ {
+  "caseId": "M069",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 824,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1362,
+   "completion_tokens": 4,
+   "total_tokens": 1366,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 210
+  },
+  "error": null
+ },
+ {
+  "caseId": "M070",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 856,
+  "content": "click @e6",
+  "usage": {
+   "prompt_tokens": 751,
+   "completion_tokens": 4,
+   "total_tokens": 755,
+   "prompt_tokens_details": {
+    "cached_tokens": 512
+   },
+   "prompt_cache_hit_tokens": 512,
+   "prompt_cache_miss_tokens": 239
+  },
+  "error": null
+ },
+ {
+  "caseId": "M071",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 936,
+  "content": "click @e6",
+  "usage": {
+   "prompt_tokens": 1538,
+   "completion_tokens": 4,
+   "total_tokens": 1542,
+   "prompt_tokens_details": {
+    "cached_tokens": 1404
+   },
+   "prompt_cache_hit_tokens": 1404,
+   "prompt_cache_miss_tokens": 134
+  },
+  "error": null
+ },
+ {
+  "caseId": "M072",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 964,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1549,
+   "completion_tokens": 4,
+   "total_tokens": 1553,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 141
+  },
+  "error": null
+ },
+ {
+  "caseId": "M073",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 960,
+  "content": "fill @e1 Google Play",
+  "usage": {
+   "prompt_tokens": 1318,
+   "completion_tokens": 6,
+   "total_tokens": 1324,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 166
+  },
+  "error": null
+ },
+ {
+  "caseId": "M074",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 941,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1258,
+   "completion_tokens": 4,
+   "total_tokens": 1262,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 234
+  },
+  "error": null
+ },
+ {
+  "caseId": "M075",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 972,
+  "content": "click @e40",
+  "usage": {
+   "prompt_tokens": 1526,
+   "completion_tokens": 4,
+   "total_tokens": 1530,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 246
+  },
+  "error": null
+ },
+ {
+  "caseId": "M076",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 932,
+  "content": "select @e1 Aegean Airlines \"Aegean\" (AEE) (452)",
+  "usage": {
+   "prompt_tokens": 1473,
+   "completion_tokens": 19,
+   "total_tokens": 1492,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 321
+  },
+  "error": null
+ },
+ {
+  "caseId": "M077",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 824,
+  "content": "click @e36",
+  "usage": {
+   "prompt_tokens": 1284,
+   "completion_tokens": 4,
+   "total_tokens": 1288,
+   "prompt_tokens_details": {
+    "cached_tokens": 1150
+   },
+   "prompt_cache_hit_tokens": 1150,
+   "prompt_cache_miss_tokens": 134
+  },
+  "error": null
+ },
+ {
+  "caseId": "M078",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 961,
+  "content": "click @e51",
+  "usage": {
+   "prompt_tokens": 1507,
+   "completion_tokens": 4,
+   "total_tokens": 1511,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 227
+  },
+  "error": null
+ },
+ {
+  "caseId": "M079",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 950,
+  "content": "click @e70",
+  "usage": {
+   "prompt_tokens": 1488,
+   "completion_tokens": 4,
+   "total_tokens": 1492,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 208
+  },
+  "error": null
+ },
+ {
+  "caseId": "M080",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 937,
+  "content": "click @e28",
+  "usage": {
+   "prompt_tokens": 1466,
+   "completion_tokens": 4,
+   "total_tokens": 1470,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 186
+  },
+  "error": null
+ },
+ {
+  "caseId": "M081",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 815,
+  "content": "click @e12",
+  "usage": {
+   "prompt_tokens": 1609,
+   "completion_tokens": 4,
+   "total_tokens": 1613,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 201
+  },
+  "error": null
+ },
+ {
+  "caseId": "M082",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1059,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1468,
+   "completion_tokens": 4,
+   "total_tokens": 1472,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 316
+  },
+  "error": null
+ },
+ {
+  "caseId": "M083",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 920,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1429,
+   "completion_tokens": 4,
+   "total_tokens": 1433,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 149
+  },
+  "error": null
+ },
+ {
+  "caseId": "M084",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 813,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1562,
+   "completion_tokens": 4,
+   "total_tokens": 1566,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 282
+  },
+  "error": null
+ },
+ {
+  "caseId": "M085",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 904,
+  "content": "fill @e1 smartwatch",
+  "usage": {
+   "prompt_tokens": 1368,
+   "completion_tokens": 6,
+   "total_tokens": 1374,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 216
+  },
+  "error": null
+ },
+ {
+  "caseId": "M086",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 811,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1266,
+   "completion_tokens": 4,
+   "total_tokens": 1270,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 242
+  },
+  "error": null
+ },
+ {
+  "caseId": "M087",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1384,
+  "content": "click @e11",
+  "usage": {
+   "prompt_tokens": 1384,
+   "completion_tokens": 4,
+   "total_tokens": 1388,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 232
+  },
+  "error": null
+ },
+ {
+  "caseId": "M088",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 888,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1363,
+   "completion_tokens": 4,
+   "total_tokens": 1367,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 211
+  },
+  "error": null
+ },
+ {
+  "caseId": "M089",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 805,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1437,
+   "completion_tokens": 4,
+   "total_tokens": 1441,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 157
+  },
+  "error": null
+ },
+ {
+  "caseId": "M090",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 806,
+  "content": "click @e2",
+  "usage": {
+   "prompt_tokens": 1600,
+   "completion_tokens": 4,
+   "total_tokens": 1604,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 320
+  },
+  "error": null
+ },
+ {
+  "caseId": "M091",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 808,
+  "content": "fill @e1 COMFORTER",
+  "usage": {
+   "prompt_tokens": 1292,
+   "completion_tokens": 8,
+   "total_tokens": 1300,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 140
+  },
+  "error": null
+ },
+ {
+  "caseId": "M092",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1041,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1487,
+   "completion_tokens": 4,
+   "total_tokens": 1491,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 335
+  },
+  "error": null
+ },
+ {
+  "caseId": "M093",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 926,
+  "content": "click @e22",
+  "usage": {
+   "prompt_tokens": 1298,
+   "completion_tokens": 4,
+   "total_tokens": 1302,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 146
+  },
+  "error": null
+ },
+ {
+  "caseId": "M094",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 923,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1272,
+   "completion_tokens": 4,
+   "total_tokens": 1276,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 248
+  },
+  "error": null
+ },
+ {
+  "caseId": "M095",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 898,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1321,
+   "completion_tokens": 4,
+   "total_tokens": 1325,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 169
+  },
+  "error": null
+ },
+ {
+  "caseId": "M096",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 809,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1485,
+   "completion_tokens": 4,
+   "total_tokens": 1489,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 205
+  },
+  "error": null
+ },
+ {
+  "caseId": "M097",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 907,
+  "content": "click @e34",
+  "usage": {
+   "prompt_tokens": 1388,
+   "completion_tokens": 4,
+   "total_tokens": 1392,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 236
+  },
+  "error": null
+ },
+ {
+  "caseId": "M098",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 872,
+  "content": "click @e64",
+  "usage": {
+   "prompt_tokens": 1425,
+   "completion_tokens": 4,
+   "total_tokens": 1429,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 273
+  },
+  "error": null
+ },
+ {
+  "caseId": "M099",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 892,
+  "content": "click @e35",
+  "usage": {
+   "prompt_tokens": 1393,
+   "completion_tokens": 4,
+   "total_tokens": 1397,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 241
+  },
+  "error": null
+ },
+ {
+  "caseId": "M100",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1005,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1442,
+   "completion_tokens": 4,
+   "total_tokens": 1446,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 290
+  },
+  "error": null
+ },
+ {
+  "caseId": "M101",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 903,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1488,
+   "completion_tokens": 4,
+   "total_tokens": 1492,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 208
+  },
+  "error": null
+ },
+ {
+  "caseId": "M102",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 914,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1406,
+   "completion_tokens": 4,
+   "total_tokens": 1410,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 254
+  },
+  "error": null
+ },
+ {
+  "caseId": "M103",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 931,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1655,
+   "completion_tokens": 4,
+   "total_tokens": 1659,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 247
+  },
+  "error": null
+ },
+ {
+  "caseId": "M104",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 947,
+  "content": "click @e39",
+  "usage": {
+   "prompt_tokens": 1556,
+   "completion_tokens": 4,
+   "total_tokens": 1560,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 276
+  },
+  "error": null
+ },
+ {
+  "caseId": "M105",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 925,
+  "content": "click @e9",
+  "usage": {
+   "prompt_tokens": 1527,
+   "completion_tokens": 4,
+   "total_tokens": 1531,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 247
+  },
+  "error": null
+ },
+ {
+  "caseId": "M106",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 956,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1439,
+   "completion_tokens": 4,
+   "total_tokens": 1443,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 287
+  },
+  "error": null
+ },
+ {
+  "caseId": "M107",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 913,
+  "content": "fill @e3 addis ababa",
+  "usage": {
+   "prompt_tokens": 1496,
+   "completion_tokens": 8,
+   "total_tokens": 1504,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 216
+  },
+  "error": null
+ },
+ {
+  "caseId": "M108",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 881,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1539,
+   "completion_tokens": 4,
+   "total_tokens": 1543,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 259
+  },
+  "error": null
+ },
+ {
+  "caseId": "M109",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 882,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1511,
+   "completion_tokens": 4,
+   "total_tokens": 1515,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 231
+  },
+  "error": null
+ },
+ {
+  "caseId": "M110",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 907,
+  "content": "click @e66",
+  "usage": {
+   "prompt_tokens": 1376,
+   "completion_tokens": 4,
+   "total_tokens": 1380,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 224
+  },
+  "error": null
+ },
+ {
+  "caseId": "M111",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 912,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1450,
+   "completion_tokens": 4,
+   "total_tokens": 1454,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 170
+  },
+  "error": null
+ },
+ {
+  "caseId": "M112",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 892,
+  "content": "click @e14",
+  "usage": {
+   "prompt_tokens": 1502,
+   "completion_tokens": 4,
+   "total_tokens": 1506,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 222
+  },
+  "error": null
+ },
+ {
+  "caseId": "M113",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 942,
+  "content": "click @e23",
+  "usage": {
+   "prompt_tokens": 1480,
+   "completion_tokens": 4,
+   "total_tokens": 1484,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 200
+  },
+  "error": null
+ },
+ {
+  "caseId": "M114",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 929,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1464,
+   "completion_tokens": 4,
+   "total_tokens": 1468,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 312
+  },
+  "error": null
+ },
+ {
+  "caseId": "M115",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 944,
+  "content": "fill @e13 TEL AVIV",
+  "usage": {
+   "prompt_tokens": 1314,
+   "completion_tokens": 8,
+   "total_tokens": 1322,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 162
+  },
+  "error": null
+ },
+ {
+  "caseId": "M116",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 950,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1371,
+   "completion_tokens": 4,
+   "total_tokens": 1375,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 219
+  },
+  "error": null
+ },
+ {
+  "caseId": "M117",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 973,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1574,
+   "completion_tokens": 4,
+   "total_tokens": 1578,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 166
+  },
+  "error": null
+ },
+ {
+  "caseId": "M118",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 943,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1427,
+   "completion_tokens": 4,
+   "total_tokens": 1431,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 275
+  },
+  "error": null
+ },
+ {
+  "caseId": "M119",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 938,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1450,
+   "completion_tokens": 4,
+   "total_tokens": 1454,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 170
+  },
+  "error": null
+ },
+ {
+  "caseId": "M120",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 979,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1315,
+   "completion_tokens": 4,
+   "total_tokens": 1319,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 291
+  },
+  "error": null
+ },
+ {
+  "caseId": "M121",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 938,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1611,
+   "completion_tokens": 4,
+   "total_tokens": 1615,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 203
+  },
+  "error": null
+ },
+ {
+  "caseId": "M122",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 962,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1347,
+   "completion_tokens": 4,
+   "total_tokens": 1351,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 195
+  },
+  "error": null
+ },
+ {
+  "caseId": "M123",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 964,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1232,
+   "completion_tokens": 4,
+   "total_tokens": 1236,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 208
+  },
+  "error": null
+ },
+ {
+  "caseId": "M124",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 973,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1389,
+   "completion_tokens": 4,
+   "total_tokens": 1393,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 237
+  },
+  "error": null
+ },
+ {
+  "caseId": "M125",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 991,
+  "content": "click @e1",
+  "usage": {
+   "prompt_tokens": 1297,
+   "completion_tokens": 4,
+   "total_tokens": 1301,
+   "prompt_tokens_details": {
+    "cached_tokens": 1024
+   },
+   "prompt_cache_hit_tokens": 1024,
+   "prompt_cache_miss_tokens": 273
+  },
+  "error": null
+ },
+ {
+  "caseId": "M126",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 970,
+  "content": "fill @e1 bath towels",
+  "usage": {
+   "prompt_tokens": 1638,
+   "completion_tokens": 6,
+   "total_tokens": 1644,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 230
+  },
+  "error": null
+ },
+ {
+  "caseId": "M127",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1050,
+  "content": "click @e64",
+  "usage": {
+   "prompt_tokens": 1458,
+   "completion_tokens": 4,
+   "total_tokens": 1462,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 306
+  },
+  "error": null
+ },
+ {
+  "caseId": "M128",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 966,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1598,
+   "completion_tokens": 4,
+   "total_tokens": 1602,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 190
+  },
+  "error": null
+ },
+ {
+  "caseId": "M129",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1096,
+  "content": "click @e4",
+  "usage": {
+   "prompt_tokens": 1702,
+   "completion_tokens": 4,
+   "total_tokens": 1706,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 294
+  },
+  "error": null
+ },
+ {
+  "caseId": "M130",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 971,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1608,
+   "completion_tokens": 4,
+   "total_tokens": 1612,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 200
+  },
+  "error": null
+ },
+ {
+  "caseId": "M131",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 936,
+  "content": "click @e5",
+  "usage": {
+   "prompt_tokens": 1742,
+   "completion_tokens": 4,
+   "total_tokens": 1746,
+   "prompt_tokens_details": {
+    "cached_tokens": 1536
+   },
+   "prompt_cache_hit_tokens": 1536,
+   "prompt_cache_miss_tokens": 206
+  },
+  "error": null
+ },
+ {
+  "caseId": "M132",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 995,
+  "content": "click @e42",
+  "usage": {
+   "prompt_tokens": 1603,
+   "completion_tokens": 4,
+   "total_tokens": 1607,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 195
+  },
+  "error": null
+ },
+ {
+  "caseId": "M133",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 928,
+  "content": "click @e3",
+  "usage": {
+   "prompt_tokens": 1432,
+   "completion_tokens": 4,
+   "total_tokens": 1436,
+   "prompt_tokens_details": {
+    "cached_tokens": 1152
+   },
+   "prompt_cache_hit_tokens": 1152,
+   "prompt_cache_miss_tokens": 280
+  },
+  "error": null
+ },
+ {
+  "caseId": "M134",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 1171,
+  "content": "click @e7",
+  "usage": {
+   "prompt_tokens": 1593,
+   "completion_tokens": 4,
+   "total_tokens": 1597,
+   "prompt_tokens_details": {
+    "cached_tokens": 1408
+   },
+   "prompt_cache_hit_tokens": 1408,
+   "prompt_cache_miss_tokens": 185
+  },
+  "error": null
+ },
+ {
+  "caseId": "M135",
+  "sample": 1,
+  "http": 200,
+  "latencyMs": 995,
+  "content": "click @e45",
+  "usage": {
+   "prompt_tokens": 1512,
+   "completion_tokens": 4,
+   "total_tokens": 1516,
+   "prompt_tokens_details": {
+    "cached_tokens": 1280
+   },
+   "prompt_cache_hit_tokens": 1280,
+   "prompt_cache_miss_tokens": 232
+  },
+  "error": null
+ }
+]

@@ -1,0 +1,21 @@
+## 页面快照
+URL: https://app.example.com/orders
+Title: 订单管理 - 示例后台
+Elements: 8 (button:5, heading:1, textbox:1, link:1)
+Focused ref: none, disabled: 0
+
+Elements (8):
+  @e1 [heading] "订单管理"
+  @e2 [button] "今天"
+  @e3 [button] "最近 7 天"
+  @e4 [button] "最近 30 天"
+  @e5 [button] "自定义范围"
+  @e6 [textbox] "开始日期"
+  @e7 [textbox] "结束日期"
+  @e8 [link] "导出报表"
+
+## 任务
+把订单列表筛选为最近 7 天的订单
+
+## 已执行动作
+（空）

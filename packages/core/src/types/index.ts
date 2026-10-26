@@ -31,6 +31,7 @@ export type {
   StoredAttachment,
   ContentBadge,
   KbReference,
+  WebElementReference,
   AnnotationAuthor,
   AnnotationBody,
   AnnotationIntent,

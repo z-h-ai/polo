@@ -145,6 +145,15 @@ export function useProductSpaceContextState() {
    * ledger, which bootstrap itself overwrites via publishCommittedSelection. */
   const [spaceSelectionSource, setSpaceSelectionSource] = useState<ProductSpaceSelectionSource | null>(null)
   const [unavailableSpaceIds, setUnavailableSpaceIds] = useState<ReadonlySet<string>>(new Set())
+  /**
+   * POO-142: whether the CURRENT account scope's ProductSpace list was
+   * published from an authoritative ONLINE read. An offline/cached restore
+   * never sets it, so the membership-transition banner can never present a
+   * device snapshot as "no membership". Reset on every bootstrap start,
+   * clearAccount and the contract-blocked teardown; a plain network failure
+   * of a later refresh keeps the last verified fact of this scope.
+   */
+  const [membershipListVerified, setMembershipListVerified] = useState(false)
 
   const accountIdRef = useRef<string | null>(null)
   const accountScopeGenerationRef = useRef(0)
@@ -299,6 +308,7 @@ export function useProductSpaceContextState() {
     setActiveProductSpaceId(null)
     setPendingSwitch(null)
     setUnavailableSpaceIds(new Set())
+    setMembershipListVerified(false)
     setError({ code: 'product_space_contract_unsupported' })
     setContextVersion(version => version + 1)
     setFlowState('contract-blocked')
@@ -531,6 +541,11 @@ export function useProductSpaceContextState() {
     }
   }, [])
 
+  /** Marks the published list as an ONLINE-verified fact of this scope (POO-142). */
+  const markMembershipListVerified = useCallback((): void => {
+    setMembershipListVerified(true)
+  }, [])
+
   const fetchProductSpaces = useCallback(async (scope: AccountScope, options?: {
     /** Publish the fetched list into renderer state (default true). */
     publishList?: boolean
@@ -581,6 +596,7 @@ export function useProductSpaceContextState() {
     setPendingSwitch(null)
     setUnavailableSpaceIds(new Set())
     setSpaceSelectionSource(null)
+    setMembershipListVerified(false)
     setFlowState('loading')
     setError(null)
     restrictionFenceRef.current.clear()
@@ -683,6 +699,10 @@ export function useProductSpaceContextState() {
         restrictionFenceRef.current.delete(target)
       }
       await applySpaceSelection(accountId, fetched.list, fetched.personalId, target)
+      // POO-142: the selection above published THIS online fetch's list, so
+      // the account scope now holds an authoritative membership fact. The
+      // offline-restore path below must never reach this line.
+      markMembershipListVerified()
       return 'ready'
     } catch (caught) {
       if (!isCurrentAccountScope(scope)) return null
@@ -722,7 +742,7 @@ export function useProductSpaceContextState() {
       setFlowState('error')
       return 'error'
     }
-  }, [applyListResponse, applySpaceSelection, fetchProductSpaces, isCurrentAccountScope])
+  }, [applyListResponse, applySpaceSelection, fetchProductSpaces, isCurrentAccountScope, markMembershipListVerified])
 
   const refreshProductSpaces = useCallback(async (): Promise<ProductSpaceSummary[] | null> => {
     const accountId = accountIdRef.current
@@ -845,6 +865,7 @@ export function useProductSpaceContextState() {
         if (restrictionRecovery) setFlowState('ready')
         applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
         persistVerifiedContext(accountId, fetched.list, fetched.personalId, null)
+        markMembershipListVerified()
         return fetched.list
       }
       const active = fetched.list.find(space => space.id === activeId)
@@ -852,6 +873,7 @@ export function useProductSpaceContextState() {
         if (restrictionRecovery) setFlowState('ready')
         applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
         persistVerifiedContext(accountId, fetched.list, fetched.personalId, activeId)
+        markMembershipListVerified()
         return fetched.list
       }
 
@@ -877,12 +899,14 @@ export function useProductSpaceContextState() {
         if (restrictionRecovery) setFlowState('ready')
         applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
         persistVerifiedContext(accountId, fetched.list, fetched.personalId, fetched.personalId)
+        markMembershipListVerified()
         return fetched.list
       }
 
       if (restrictionRecovery) setFlowState('ready')
       applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
       persistVerifiedContext(accountId, fetched.list, fetched.personalId, activeId)
+      markMembershipListVerified()
       return fetched.list
     } catch (caught) {
       const record = (caught ?? {}) as Record<string, unknown>
@@ -893,7 +917,7 @@ export function useProductSpaceContextState() {
       // Refresh failures keep the current space and its member relationships.
       return null
     }
-  }, [applyListResponse, applySpaceSelection, enterContractBlocked, fetchProductSpaces, persistVerifiedContext])
+  }, [applyListResponse, applySpaceSelection, enterContractBlocked, fetchProductSpaces, markMembershipListVerified, persistVerifiedContext])
 
   // A Catalog403 revokes Main's committed scope while the denied renderer
   // keeps its explanatory snapshot. A later Catalog200 alone cannot restore
@@ -930,6 +954,7 @@ export function useProductSpaceContextState() {
       if (!live()) return false
       applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
       publishCommittedSelection(accountId, fetched.list, fetched.personalId, activeId)
+      markMembershipListVerified()
       return true
     } catch (caught) {
       if (isCurrentAccountScope(scope) && activeProductSpaceIdRef.current === activeId
@@ -950,7 +975,7 @@ export function useProductSpaceContextState() {
       }
     }
   }, [applyListResponse, beginSwitchOperation, cancelPreparedSwitch, commitPreparedSwitch, enterContractBlocked, fetchProductSpaces,
-    isCurrentAccountScope, isCurrentSwitchOperation, prepareTrustedSwitch, publishCommittedSelection, stopPreparedSwitchExecutions])
+    isCurrentAccountScope, isCurrentSwitchOperation, markMembershipListVerified, prepareTrustedSwitch, publishCommittedSelection, stopPreparedSwitchExecutions])
 
   const listActiveExecutions = useCallback(async (): Promise<ExecutionSummary[] | null> => {
     const accountId = accountIdRef.current
@@ -996,6 +1021,9 @@ export function useProductSpaceContextState() {
         parsed.personalProductSpaceId,
         activeProductSpaceIdRef.current,
       )
+      // The re-validated list was published by applyListResponse above: the
+      // scope again holds an online-verified membership fact (POO-142).
+      markMembershipListVerified()
       return 'ok'
     } catch (caught) {
       if (!isCurrentAccountScope(scope) || !isCurrentSwitchOperation(operation, generation)) return null
@@ -1011,7 +1039,7 @@ export function useProductSpaceContextState() {
       }
       return 'unavailable'
     }
-  }, [applyListResponse, enterContractBlocked, isCurrentAccountScope, isCurrentSwitchOperation, persistVerifiedContext])
+  }, [applyListResponse, enterContractBlocked, isCurrentAccountScope, isCurrentSwitchOperation, markMembershipListVerified, persistVerifiedContext])
 
   const finishSwitchAfterStop = useCallback(async (
     operation: SwitchOperation,
@@ -1463,6 +1491,7 @@ export function useProductSpaceContextState() {
     setActiveProductSpaceId(null)
     setPendingSwitch(null)
     setUnavailableSpaceIds(new Set())
+    setMembershipListVerified(false)
     setError(null)
     setContextVersion(version => version + 1)
     setFlowState('idle')
@@ -1497,6 +1526,7 @@ export function useProductSpaceContextState() {
     flowState,
     productSpaces: selectableSpaces,
     allProductSpaces: productSpaces,
+    membershipListVerified,
     personalProductSpaceId,
     activeProductSpace,
     activeProductSpaceId,
