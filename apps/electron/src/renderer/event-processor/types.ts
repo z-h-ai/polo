@@ -5,7 +5,7 @@
  * All agent events flow through a single pure function for consistent state transitions.
  */
 
-import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta, QuestionRequest } from '../../shared/types'
+import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta, QuestionRequest, GoalProjection } from '../../shared/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
@@ -502,6 +502,18 @@ export interface UsageUpdateEvent {
 }
 
 /**
+ * Goal projection event (POO-134) — the server's authoritative Goal state for
+ * a session. The payload is forwarded to the App layer as an effect; the
+ * revision monotonicity check (drop `revision <=` highest seen) lives with the
+ * projection store so events and the hydration pull path share ONE gate.
+ */
+export interface GoalProjectionEvent {
+  type: 'goal_projection'
+  sessionId: string
+  projection: GoalProjection
+}
+
+/**
  * Union of all agent events
  */
 export type AgentEvent =
@@ -549,6 +561,7 @@ export type AgentEvent =
   | QuestionRequestEvent
   | QuestionResolvedEvent
   | UsageUpdateEvent
+  | GoalProjectionEvent
 
 /**
  * Side effects that need to be handled outside the pure processor
@@ -562,6 +575,7 @@ export type Effect =
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: 'user' | 'system' | 'restore' | 'automation' | 'unknown' }
   | { type: 'restore_input'; text: string }
   | { type: 'toast_error'; message: string }
+  | { type: 'goal_projection'; sessionId: string; projection: GoalProjection }
 
 /**
  * Result of processing an event

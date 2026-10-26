@@ -2,9 +2,10 @@ import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId } from '@/components/ui/slash-command-menu'
-import { ChevronDown, Info } from 'lucide-react'
+import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId, type CommandGroup } from '@/components/ui/slash-command-menu'
+import { ChevronDown, Info, Target } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@polo-ai/shared/agent/modes'
+import { isGoalTerminal } from '@polo-ai/shared/protocol'
 import type { BackgroundTask } from './ActiveTasksBar'
 import { LabelIcon, LabelValueTypeIcon } from '@/components/ui/label-icon'
 import { LabelValuePopover } from '@/components/ui/label-value-popover'
@@ -45,6 +46,14 @@ export interface ActiveOptionBadgesProps {
   permissionMode?: PermissionMode
   /** Callback when permission mode changes */
   onPermissionModeChange?: (mode: PermissionMode) => void
+  /** POO-134: Goal mode armed, or a Goal owns the session — button reads "目标模式 · <mode>" */
+  goalModeActive?: boolean
+  /** POO-134: a non-terminal Goal currently owns the session */
+  goalRunning?: boolean
+  /** POO-134: toggle Goal mode (mode menu first item); no-op while a Goal runs */
+  onGoalModeToggle?: () => void
+  /** POO-134: end the running Goal (mode menu trailing action) */
+  onGoalEnd?: () => void
   /** Background tasks to display */
   tasks?: BackgroundTask[]
   /** Session ID for opening preview windows */
@@ -88,6 +97,10 @@ interface ResolvedLabelEntry {
 export function ActiveOptionBadges({
   permissionMode = 'ask',
   onPermissionModeChange,
+  goalModeActive = false,
+  goalRunning = false,
+  onGoalModeToggle,
+  onGoalEnd,
   tasks = [],
   sessionId,
   sessionFolderPath,
@@ -153,6 +166,10 @@ export function ActiveOptionBadges({
             <PermissionModeDropdown
               permissionMode={permissionMode}
               onPermissionModeChange={onPermissionModeChange}
+              goalModeActive={goalModeActive}
+              goalRunning={goalRunning}
+              onGoalModeToggle={onGoalModeToggle}
+              onGoalEnd={onGoalEnd}
               sessionId={sessionId}
             />
           </div>
@@ -422,10 +439,24 @@ function FilesPopoverButton({ sessionId, sessionFolderPath }: { sessionId?: stri
 interface PermissionModeDropdownProps {
   permissionMode: PermissionMode
   onPermissionModeChange?: (mode: PermissionMode) => void
+  /** POO-134: Goal mode armed, or a Goal owns the session */
+  goalModeActive?: boolean
+  /** POO-134: a non-terminal Goal currently owns the session */
+  goalRunning?: boolean
+  onGoalModeToggle?: () => void
+  onGoalEnd?: () => void
   sessionId?: string
 }
 
-function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessionId }: PermissionModeDropdownProps) {
+function PermissionModeDropdown({
+  permissionMode,
+  onPermissionModeChange,
+  goalModeActive = false,
+  goalRunning = false,
+  onGoalModeToggle,
+  onGoalEnd,
+  sessionId,
+}: PermissionModeDropdownProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   // Optimistic local state - updates immediately, syncs with prop
@@ -437,17 +468,53 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
   }, [permissionMode])
 
   const activeCommands = React.useMemo((): SlashCommandId[] => {
-    return [optimisticMode as SlashCommandId]
-  }, [optimisticMode])
+    // POO-134: Goal mode rides above permission modes — highlight it when armed/running
+    return goalModeActive ? ['goal', optimisticMode as SlashCommandId] : [optimisticMode as SlashCommandId]
+  }, [optimisticMode, goalModeActive])
+
+  // POO-134: menu opens with the Goal entry as its own first group, above the
+  // permission modes; while a Goal runs, the entry is disabled and a trailing
+  // group offers "End goal". Orthogonal to PermissionMode — nothing re-enumerated.
+  const commandGroups = React.useMemo((): CommandGroup[] => {
+    const groups: CommandGroup[] = [
+      {
+        id: 'goal-mode',
+        commands: [{
+          id: 'goal',
+          label: t('goal.modeMenuLabel'),
+          description: t('goal.modeMenuDescription'),
+          icon: <Target className="h-3.5 w-3.5" />,
+          disabled: goalRunning,
+        }],
+      },
+      ...DEFAULT_SLASH_COMMAND_GROUPS,
+    ]
+    if (goalRunning) {
+      groups.push({
+        id: 'goal-actions',
+        commands: [{
+          id: 'goal-end',
+          label: t('goal.endMenuLabel'),
+          description: t('goal.endMenuDescription'),
+          icon: <Target className="h-3.5 w-3.5" />,
+        }],
+      })
+    }
+    return groups
+  }, [t, goalRunning])
 
   // Handle command selection from dropdown
   const handleSelect = React.useCallback((commandId: SlashCommandId) => {
     if (commandId === 'safe' || commandId === 'ask' || commandId === 'allow-all') {
       setOptimisticMode(commandId)
       onPermissionModeChange?.(commandId)
+    } else if (commandId === 'goal') {
+      onGoalModeToggle?.()
+    } else if (commandId === 'goal-end') {
+      onGoalEnd?.()
     }
     setOpen(false)
-  }, [onPermissionModeChange])
+  }, [onPermissionModeChange, onGoalModeToggle, onGoalEnd])
 
   // Get config for current mode (use optimistic state for instant UI update)
   const config = PERMISSION_MODE_CONFIG[optimisticMode]
@@ -485,7 +552,11 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
           style={{ '--shadow-color': currentStyle.shadowVar } as React.CSSProperties}
         >
           <PermissionModeIcon mode={optimisticMode} className="h-3.5 w-3.5" />
-          <span>{t(`mode.${optimisticMode}`)}</span>
+          <span>
+            {goalModeActive
+              ? t('goal.activeButtonLabel', { mode: t(`mode.${optimisticMode}`) })
+              : t(`mode.${optimisticMode}`)}
+          </span>
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
         </button>
       </PopoverTrigger>
@@ -506,7 +577,7 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
         }}
       >
         <SlashCommandMenu
-          commandGroups={DEFAULT_SLASH_COMMAND_GROUPS}
+          commandGroups={commandGroups}
           activeCommands={activeCommands}
           onSelect={handleSelect}
           showFilter

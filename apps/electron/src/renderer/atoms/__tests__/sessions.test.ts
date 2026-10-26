@@ -11,6 +11,7 @@ import {
   refreshSessionsMetadataAtom,
   initializeSessionsAtom,
   replaceLoadedSessionAtom,
+  reduceGoalProjection,
 } from '../sessions'
 
 function msg(id: string, role: Message['role'] = 'user'): Message {
@@ -261,5 +262,76 @@ describe('refreshSessionsMetadataAtom', () => {
 
     // IDs are set
     expect(store.get(sessionIdsAtom)).toHaveLength(2)
+  })
+})
+
+describe('reduceGoalProjection (POO-134 revision gate)', () => {
+  const active = (revision: number, goalId = 'goal-a') => ({
+    revision,
+    sessionId: 's1',
+    currentGoalId: goalId,
+    goal: {
+      id: goalId,
+      sessionId: 's1',
+      anchorMessageId: 'm1',
+      objective: 'obj',
+      supplementMessageIds: [],
+      status: 'active' as const,
+      version: 1,
+      runGeneration: 1,
+      elapsedMs: 0,
+      criteria: [],
+      todos: [],
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  })
+  const terminal = (revision: number, goalId = 'goal-a') => ({
+    revision,
+    sessionId: 's1',
+    goal: {
+      id: goalId,
+      sessionId: 's1',
+      anchorMessageId: 'm1',
+      objective: 'obj',
+      supplementMessageIds: [],
+      status: 'completed' as const,
+      version: 9,
+      runGeneration: 1,
+      elapsedMs: 100,
+      criteria: [],
+      todos: [],
+      createdAt: 1,
+      updatedAt: 2,
+    },
+  })
+
+  it('accepts the first projection regardless of revision', () => {
+    const reduction = reduceGoalProjection(null, active(1))
+    expect(reduction).not.toBeNull()
+    expect(reduction?.next.revision).toBe(1)
+    expect(reduction?.collapsePanel).toBe(true)
+    expect(reduction?.disarm).toBe(false)
+  })
+
+  it('drops stale and equal revisions so late events never regress state', () => {
+    const current = active(7, 'goal-b')
+    expect(reduceGoalProjection(current, terminal(7))).toBeNull()
+    expect(reduceGoalProjection(current, terminal(3))).toBeNull()
+  })
+
+  it('keeps the panel open for same-goal progress and collapses on a new goal id', () => {
+    const current = active(2, 'goal-a')
+    const progress = reduceGoalProjection(current, active(3, 'goal-a'))
+    expect(progress?.collapsePanel).toBe(false)
+    const newGoal = reduceGoalProjection(current, active(4, 'goal-b'))
+    expect(newGoal?.collapsePanel).toBe(true)
+  })
+
+  it('disarms goal mode exactly when the projection turns terminal', () => {
+    const run = reduceGoalProjection(active(1), active(2))
+    expect(run?.disarm).toBe(false)
+    const done = reduceGoalProjection(active(1), terminal(2))
+    expect(done?.disarm).toBe(true)
   })
 })

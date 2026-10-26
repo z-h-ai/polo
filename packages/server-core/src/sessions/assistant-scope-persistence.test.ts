@@ -205,6 +205,82 @@ describe('assistant session account-scope persistence and enforcement (R32-2)', 
     expect(result.map(session => session.id)).toEqual(['s-b-new'])
     expect(getRuntimeActiveProductSpace()).toBe(personalId)
   })
+
+  // POO-134: the read-only goal projection hydration pull follows the same
+  // complete-scope fence as every other session boundary — disclose inside,
+  // null (never throw) outside.
+  it('serves sessions:goalProjection inside the active scope and null outside it', async () => {
+    await seedSession({ id: 's-goal', productSpaceId: personalId, accountId: accountA })
+    await seedSession({ id: 's-goal-b', productSpaceId: personalId, accountId: accountB })
+    const goal = {
+      id: 'goal-1',
+      sessionId: 's-goal',
+      anchorMessageId: 'm1',
+      objective: 'Ship the renderer',
+      supplementMessageIds: [],
+      status: 'active',
+      version: 1,
+      runGeneration: 1,
+      elapsedMs: 5000,
+      criteria: ['done'],
+      todos: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('s-goal') as Record<string, unknown>
+    managed.goal = goal
+    managed.goalProjectionRevision = 3
+
+    const inside = await invoke(RPC_CHANNELS.sessions.GET_GOAL_PROJECTION, 's-goal') as {
+      revision: number
+      sessionId: string
+      currentGoalId?: string
+    }
+    expect(inside).not.toBeNull()
+    expect(inside.revision).toBe(3)
+    expect(inside.currentGoalId).toBe('goal-1')
+    expect(inside.sessionId).toBe('s-goal')
+
+    // Quarantined (replaced account) — the read is disclosure, so null.
+    await expect(invoke(RPC_CHANNELS.sessions.GET_GOAL_PROJECTION, 's-goal-b')).resolves.toBeNull()
+    // Unknown session id — null.
+    await expect(invoke(RPC_CHANNELS.sessions.GET_GOAL_PROJECTION, 'missing')).resolves.toBeNull()
+  })
+
+  it('sessions:goalProjection returns null once the goal is terminal but keeps the record', async () => {
+    await seedSession({ id: 's-goal-done', productSpaceId: personalId, accountId: accountA })
+    const goal = {
+      id: 'goal-2',
+      sessionId: 's-goal-done',
+      anchorMessageId: 'm1',
+      objective: 'Wrap up',
+      supplementMessageIds: [],
+      status: 'completed',
+      version: 5,
+      runGeneration: 1,
+      elapsedMs: 9000,
+      criteria: [],
+      todos: [],
+      createdAt: 1,
+      updatedAt: 2,
+      completedAt: 3,
+    }
+    const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('s-goal-done') as Record<string, unknown>
+    managed.goal = goal
+    managed.goalProjectionRevision = 6
+
+    const projection = await invoke(RPC_CHANNELS.sessions.GET_GOAL_PROJECTION, 's-goal-done') as {
+      revision: number
+      currentGoalId?: string
+      goal?: { id: string }
+    }
+    expect(projection).not.toBeNull()
+    expect(projection.revision).toBe(6)
+    // Terminal: no currentGoalId (the renderer collapses/disarms off this).
+    expect(projection.currentGoalId).toBeUndefined()
+    // The record is retained for reference.
+    expect(projection.goal?.id).toBe('goal-2')
+  })
 })
 
 describe('assistant session complete-scope boundaries (R33-1)', () => {

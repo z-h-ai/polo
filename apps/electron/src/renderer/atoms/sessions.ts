@@ -701,6 +701,75 @@ export const backgroundTasksAtomFamily = atomFamily(
   (a, b) => a === b
 )
 
+// ===========================================================================
+// POO-134 Goal state (per session)
+// ===========================================================================
+
+/**
+ * The server's authoritative Goal projection per session (POO-134).
+ * Written by App.tsx from BOTH the goal_projection event stream and the
+ * sessions:goalProjection hydration pull — through the same revision gate
+ * (applyGoalProjection): a projection with `revision <=` the highest seen is
+ * dropped, so a stale terminal event for Goal A can never clobber Goal B.
+ */
+export const goalProjectionAtomFamily = atomFamily(
+  (_sessionId: string) => atom<import('../../shared/types').GoalProjection | null>(null),
+  (a, b) => a === b
+)
+
+/**
+ * Whether the Goal strip's todo panel is expanded, per session. Expansion
+ * state is session-scoped (Spec r3.5: 与草稿/权限一样归各自会话) and a NEW
+ * Goal (different goal id) resets to collapsed — App.tsx resets it in
+ * applyGoalProjection when the current goal id changes.
+ */
+export const goalExpandedAtomFamily = atomFamily(
+  (_sessionId: string) => atom<boolean>(false),
+  (a, b) => a === b
+)
+
+/**
+ * Whether the user armed "目标模式" from the mode menu but has not sent the
+ * starting message yet, per session. Pure renderer intent state — orthogonal
+ * to PermissionMode (the permission enum and backend mode management are
+ * untouched). Server acceptance flips the projection, which takes over the
+ * display; a terminal projection or an explicit toggle clears it.
+ */
+export const goalModeActiveAtomFamily = atomFamily(
+  (_sessionId: string) => atom<boolean>(false),
+  (a, b) => a === b
+)
+
+/**
+ * POO-134 revision gate, shared by the goal_projection event stream AND the
+ * sessions:goalProjection hydration pull. `revision` is MONOTONIC PER SESSION
+ * and the ONLY ordering consumers may trust: `revision <=` the highest seen is
+ * dropped (returns null), so a stale terminal event for Goal A can never
+ * clobber a newer Goal B. When accepted, the reduction reports the two derived
+ * transitions App.tsx applies to the other atoms:
+ * - `collapsePanel` — the current goal id changed (new/cleared Goal): the
+ *   panel resets to collapsed; same-Goal progress never closes it.
+ * - `disarm` — the projection became terminal/cleared: armed-but-unsent
+ *   目标模式 intent ends (完成自动回普通聊天).
+ */
+export interface GoalProjectionReduction {
+  next: import('../../shared/types').GoalProjection
+  collapsePanel: boolean
+  disarm: boolean
+}
+
+export function reduceGoalProjection(
+  current: import('../../shared/types').GoalProjection | null,
+  incoming: import('../../shared/types').GoalProjection,
+): GoalProjectionReduction | null {
+  if (current && incoming.revision <= current.revision) return null
+  return {
+    next: incoming,
+    collapsePanel: current?.currentGoalId !== incoming.currentGoalId,
+    disarm: incoming.currentGoalId === undefined,
+  }
+}
+
 /**
  * Window's current workspace ID — shared between Root (ThemeProvider) and App.
  * Written by App on workspace switch, read by Root to keep the theme in sync.
