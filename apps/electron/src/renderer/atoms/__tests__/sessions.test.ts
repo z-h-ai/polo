@@ -484,4 +484,34 @@ describe('sendFailure atom family (journey #8)', () => {
     expect(store.get(sendFailureAtomFamily('s2'))).toBeNull()
     expect(store.get(sendFailureAtomFamily('s1'))).toEqual(failure)
   })
+
+  // Journey #1 (review R2 N1): the billing latch only clears on a space
+  // transition — the exact sweep that used to destroy the blocked draft.
+  it('billing-blocked draft survives a space sweep with keepBillingDrafts; ordinary drafts do not', () => {
+    const store = createStore()
+    store.set(initializeSessionsAtom, [
+      makeSession({ id: 's1' }),
+      makeSession({ id: 's2' }),
+    ])
+    const billing = { ...failure, billingBlocked: true }
+    store.set(sendFailureAtomFamily('s1'), billing)
+    store.set(sendFailureAtomFamily('s2'), failure)
+
+    // Space switch: neither session exists in the target space's list.
+    store.set(initializeSessionsAtom, [makeSession({ id: 's9' })], { keepBillingDrafts: true })
+
+    expect(store.get(sendFailureAtomFamily('s1'))).toEqual(billing)
+    expect(store.get(sendFailureAtomFamily('s2'))).toBeNull()
+  })
+
+  it('billing-blocked draft does NOT leak across accounts: the account reset omits keepBillingDrafts', () => {
+    const store = createStore()
+    store.set(initializeSessionsAtom, [makeSession({ id: 's1' })])
+    store.set(sendFailureAtomFamily('s1'), { ...failure, billingBlocked: true })
+
+    // Account exit funnels through initializeSessions([]) without the flag.
+    store.set(initializeSessionsAtom, [])
+
+    expect(store.get(sendFailureAtomFamily('s1'))).toBeNull()
+  })
 })

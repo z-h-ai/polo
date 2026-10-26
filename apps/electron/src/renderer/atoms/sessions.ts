@@ -281,10 +281,20 @@ export const updateStreamingContentAtom = atom(
  */
 export const initializeSessionsAtom = atom(
   null,
-  (get, set, sessions: Session[]) => {
+  (
+    get,
+    set,
+    sessions: Session[],
+    opts?: { keepBillingDrafts?: boolean },
+  ) => {
     // Clean up stale atom family entries from previous workspace.
     // Without this, switching workspaces leaves orphaned atoms in memory
     // and components subscribed to old session IDs see stale/empty data.
+    // Journey #1 (review R2 N1): with `keepBillingDrafts` (space transitions
+    // via loadSessionsFromServer — the only paths that clear the billing
+    // block latch), a billing-blocked draft survives the sweep so the
+    // "restore draft" prompt is reachable once the latch lifts. Account
+    // exits omit the flag: nothing leaks across accounts.
     const oldIds = get(sessionIdsAtom)
     const newIdSet = new Set(sessions.map(s => s.id))
     for (const oldId of oldIds) {
@@ -294,7 +304,9 @@ export const initializeSessionsAtom = atom(
         goalProjectionAtomFamily.remove(oldId)
         goalExpandedAtomFamily.remove(oldId)
         goalModeActiveAtomFamily.remove(oldId)
-        sendFailureAtomFamily.remove(oldId)
+        if (!(opts?.keepBillingDrafts && get(sendFailureAtomFamily(oldId))?.billingBlocked)) {
+          sendFailureAtomFamily.remove(oldId)
+        }
       }
     }
     // Reset loaded sessions tracking — new workspace needs fresh lazy loading
@@ -766,6 +778,15 @@ export interface SessionSendFailure {
   detail: string
   /** The unsent draft captured from the failed attempt. */
   draft: string
+  /**
+   * Journey #1 (review R2 N1): set when the failure was a billing block. The
+   * block latch only clears on a space/account transition — exactly the
+   * transitions that sweep per-session atoms — so a billing draft must
+   * survive `initializeSessionsAtom`'s stale-entry cleanup (with
+   * `keepBillingDrafts`) to stay restorable after the block lifts. Account
+   * resets do NOT pass that flag: drafts never leak across accounts.
+   */
+  billingBlocked?: boolean
 }
 
 export const sendFailureAtomFamily = atomFamily(

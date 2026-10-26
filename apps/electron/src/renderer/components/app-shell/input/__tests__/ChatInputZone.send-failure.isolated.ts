@@ -112,4 +112,31 @@ describe('ChatInputZone 状态横幅折叠详情(journey #8)', () => {
     expect(screen.queryByTestId('chat-status-banner-detail')).toBeNull()
     expect(screen.getByTestId('chat-status-banner-action').textContent).toBe('Recharge')
   })
+
+  // Review R2 N2: the failed-send prompt is advisory — it carries an explicit
+  // discard action (review F4), fires once, and renders nothing when absent.
+  it('放弃草稿(dismiss):渲染显式动作,点击触发一次;未传时不渲染', () => {
+    let dismissals = 0
+    renderZone({
+      variant: 'destructive',
+      message: 'Message not sent — your draft was preserved',
+      detail: 'ECONNRESET',
+      actionLabel: 'Restore draft',
+      onAction: () => {},
+      dismissLabel: 'Discard draft',
+      onDismiss: () => { dismissals += 1 },
+    })
+    const dismiss = screen.getByTestId('chat-status-banner-dismiss')
+    expect(dismiss.textContent).toBe('Discard draft')
+    fireEvent.click(dismiss)
+    fireEvent.click(dismiss)
+    expect(dismissals).toBe(2)
+
+    cleanup()
+    renderZone({
+      variant: 'destructive',
+      message: 'hard block',
+    })
+    expect(screen.queryByTestId('chat-status-banner-dismiss')).toBeNull()
+  })
 })

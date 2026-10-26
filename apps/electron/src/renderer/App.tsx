@@ -834,7 +834,11 @@ export default function App() {
           loadedSessions = sessions
           // Initialize per-session atoms and metadata map
           // NOTE: No sessionsAtom used - sessions are only in per-session atoms
-          initializeSessions(loadedSessions)
+          // Journey #1 (review R2 N1): space transitions clear the billing
+          // block latch — the same sweep must preserve billing-blocked drafts
+          // so the restore prompt is reachable once the block lifts. Account
+          // resets (resetAccountScopedClientState) deliberately omit the flag.
+          initializeSessions(loadedSessions, { keepBillingDrafts: true })
 
           // Hydrate pending agent questions from the snapshot — fill holes
           // only: entries that already exist came from fresher realtime
@@ -2513,6 +2517,7 @@ export default function App() {
           title: i18n.t('chat.sendFailed.title'),
           detail: error instanceof Error ? error.message : String(error),
           draft: message,
+          billingBlocked: true,
         })
       } else if (outcome.kind === 'goal-start-failed') {
         // POO-134: a rejected Goal start (e.g. a non-terminal Goal already owns

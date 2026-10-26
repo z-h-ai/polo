@@ -106,11 +106,14 @@ export function useModalRegistry() {
 export function useRegisterModal(isOpen: boolean, onClose: () => void, priority = 0) {
   const context = useContext(ModalContext)
   const idRef = useRef(`modal-${Math.random().toString(36).slice(2)}`)
+  // Dependency stays the stable registerModal callback (not the context
+  // value object) so provider re-renders don't churn registration (review N3).
+  const registerModal = context?.registerModal
 
   React.useEffect(() => {
-    if (isOpen && context) {
-      const unregister = context.registerModal(idRef.current, onClose, priority)
+    if (isOpen && registerModal) {
+      const unregister = registerModal(idRef.current, onClose, priority)
       return unregister
     }
-  }, [isOpen, onClose, priority, context])
+  }, [isOpen, onClose, priority, registerModal])
 }
