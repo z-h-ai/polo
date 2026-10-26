@@ -3,6 +3,7 @@ import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import { useAtomValue, useStore } from "jotai"
 import { motion, AnimatePresence } from "motion/react"
+import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   Archive,
   ChevronRight,
@@ -543,6 +544,10 @@ function AppShellContent({
   } = contextValue
 
   const { t } = useTranslation()
+
+  // Journey #7: the force-delete ask for modified creator skills goes through
+  // the shared confirm dialog instead of a native window.confirm.
+  const { requestConfirm: requestDeleteConfirm, confirmElement: deleteConfirmElement } = useConfirmDialog()
 
   // Get hotkey labels from centralized action registry
   const newChatHotkey = useActionLabel('app.newChat').hotkey
@@ -1979,9 +1984,12 @@ function AppShellContent({
         workspaceId: activeWorkspace.id,
         slug: skillSlug,
         api: window.electronAPI,
-        confirmPermanentDelete: () => window.confirm(
-          t('creatorSkills.uninstall.confirmForceDeleteModified'),
-        ),
+        confirmPermanentDelete: () => requestDeleteConfirm({
+          testId: 'skill-force-delete-confirm',
+          title: t('creatorSkills.uninstall.forceDeleteTitle'),
+          description: t('creatorSkills.uninstall.confirmForceDeleteModified'),
+          confirmLabel: t('creatorSkills.uninstall.forceDeleteConfirm'),
+        }),
       })
       if (outcome.status === 'error') {
         toast.error(translateCreatorSkillError(t, outcome.result), {
@@ -2000,7 +2008,7 @@ function AppShellContent({
       console.error('[Chat] Failed to delete skill:', error)
       toast.error(t('toast.failedToDeleteSkill'))
     }
-  }, [activeWorkspace, t])
+  }, [activeWorkspace, t, requestDeleteConfirm])
 
   // Respond to menu bar "New Chat" trigger
   const menuTriggerRef = useRef(menuNewChatTrigger)
@@ -3628,6 +3636,9 @@ function AppShellContent({
       {/* Messaging dialogs (pairing-code + WA connect) — driven by messagingDialogAtom.
           Mounted here so they survive context-menu / dropdown close. */}
       <MessagingDialogHost />
+
+      {/* Journey #7: shared confirm host for creator-skill force delete. */}
+      {deleteConfirmElement}
 
     </AppShellProvider>
   )

@@ -2,8 +2,7 @@ import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId, type CommandGroup } from '@/components/ui/slash-command-menu'
 import { ChevronDown, Info, Target } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@polo-ai/shared/agent/modes'
@@ -461,8 +460,8 @@ function PermissionModeDropdown({
 }: PermissionModeDropdownProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
-  // Journey #5: goal-end asks for confirmation before the irreversible command.
-  const [goalEndConfirmOpen, setGoalEndConfirmOpen] = React.useState(false)
+  // Journey #5/#7: goal-end asks via the shared design-system confirm dialog.
+  const { requestConfirm, confirmElement } = useConfirmDialog()
   // Optimistic local state - updates immediately, syncs with prop
   const [optimisticMode, setOptimisticMode] = React.useState(permissionMode)
 
@@ -515,13 +514,21 @@ function PermissionModeDropdown({
     } else if (commandId === 'goal') {
       onGoalModeToggle?.()
     } else if (commandId === 'goal-end') {
-      // Journey #5: ending a goal is irreversible — ask first. The command
-      // only goes out from the dialog's explicit confirm; cancel/ESC sends
-      // nothing.
-      setGoalEndConfirmOpen(true)
+      // Journey #5: ending a goal is irreversible — ask first via the shared
+      // design-system confirm. The command only goes out from the dialog's
+      // explicit confirm; cancel/ESC sends nothing.
+      setOpen(false)
+      void requestConfirm({
+        testId: 'goal-end-confirm',
+        title: t('goal.endConfirmTitle'),
+        description: t('goal.endConfirmDescription'),
+        confirmLabel: t('goal.endConfirmAction'),
+        onConfirm: () => { onGoalEnd?.() },
+      })
+      return
     }
     setOpen(false)
-  }, [onPermissionModeChange, onGoalModeToggle])
+  }, [onPermissionModeChange, onGoalModeToggle, requestConfirm, t])
 
   // Get config for current mode (use optimistic state for instant UI update)
   const config = PERMISSION_MODE_CONFIG[optimisticMode]
@@ -593,44 +600,9 @@ function PermissionModeDropdown({
       </PopoverContent>
     </Popover>
 
-    {/* Journey #5: goal-end confirmation. Cancel/ESC close without sending
+    {/* Journey #5/#7: goal-end confirmation. Cancel/ESC close without sending
         anything; only the explicit confirm issues the goalEnd command. */}
-      <Dialog open={goalEndConfirmOpen} onOpenChange={setGoalEndConfirmOpen}>
-        <DialogContent
-          data-testid="goal-end-confirm"
-          className="max-w-[360px] gap-0 p-5"
-          showCloseButton={false}
-          onInteractOutside={(e) => e.preventDefault()}
-        >
-          <DialogTitle className="text-[15px] font-semibold text-foreground">
-            {t('goal.endConfirmTitle')}
-          </DialogTitle>
-          <DialogDescription className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
-            {t('goal.endConfirmDescription')}
-          </DialogDescription>
-          <DialogFooter className="mt-4 flex-row gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              data-testid="goal-end-cancel"
-              onClick={() => setGoalEndConfirmOpen(false)}
-            >
-              {t('common.cancel')}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              data-testid="goal-end-confirm-action"
-              onClick={() => {
-                setGoalEndConfirmOpen(false)
-                onGoalEnd?.()
-              }}
-            >
-              {t('goal.endConfirmAction')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+    {confirmElement}
     </>
   )
 }

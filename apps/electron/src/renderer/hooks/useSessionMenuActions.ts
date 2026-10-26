@@ -28,6 +28,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { navigate, routes } from '@/lib/navigate'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { extractLabelId, toggleLabelInList } from '@polo-ai/shared/labels'
 import type { SessionMeta } from '@/atoms/sessions'
 
@@ -42,6 +43,8 @@ export interface SessionMenuActions {
   /** Toggle a label (add if absent, remove all entries with this base ID if present). */
   toggleLabel: (labelId: string) => void
   share: () => Promise<void>
+  /** Journey #7: mount next to the host menu — renders the share confirm dialog. */
+  confirmElement: React.ReactNode
   showInFinder: () => void
   copySessionId: () => Promise<void>
   copyPath: () => Promise<void>
@@ -130,8 +133,18 @@ export function useSessionMenuActions({
     onLabelsChange(next)
   }, [onLabelsChange])
 
+  // Journey #7: sharing publishes the session — the warning (what becomes
+  // public) lives in locales, the ask uses the shared confirm dialog.
+  const { requestConfirm, confirmElement } = useConfirmDialog()
+
   const share = React.useCallback(async () => {
-    if (!window.confirm('Share this session publicly? It may contain file paths, prompts, tool output, or credentials. Anyone with the link can read it.')) {
+    const confirmed = await requestConfirm({
+      testId: 'share-confirm',
+      title: t('chat.shareConfirm.title'),
+      description: t('chat.shareConfirm.description'),
+      confirmLabel: t('chat.shareConfirm.confirm'),
+    })
+    if (!confirmed) {
       return
     }
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
@@ -147,7 +160,7 @@ export function useSessionMenuActions({
     } else {
       toast.error(t('toast.failedToShare'), { description: result?.error || t('toast.unknownError') })
     }
-  }, [sessionId, t])
+  }, [sessionId, t, requestConfirm])
 
   const showInFinder = React.useCallback(() => {
     window.electronAPI.sessionCommand(sessionId, { type: 'showInFinder' })
@@ -241,6 +254,8 @@ export function useSessionMenuActions({
     appliedLabelIds,
     toggleLabel,
     share,
+    /** Journey #7: mount next to the host menu — renders the share confirm dialog. */
+    confirmElement,
     showInFinder,
     copySessionId,
     copyPath,

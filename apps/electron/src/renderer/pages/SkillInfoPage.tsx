@@ -20,6 +20,7 @@ import { useActiveWorkspace } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
 import { creatorSkillConflictConfirmation } from '@/lib/creator-skill-conflicts'
 import { deleteWorkspaceSkillWithModifiedConfirmation } from '@/lib/creator-skill-delete'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   creatorSkillErrorDiagnostic,
   translateCreatorSkillError,
@@ -58,6 +59,9 @@ export default function SkillInfoPage({
   workingDirectory,
 }: SkillInfoPageProps) {
   const { t } = useTranslation()
+  // Journey #7: the force-delete ask for a modified creator skill uses the
+  // shared confirm dialog (async) instead of a native window.confirm.
+  const { requestConfirm: requestDeleteConfirm, confirmElement: deleteConfirmElement } = useConfirmDialog()
   const [skill, setSkill] = useState<LoadedSkill | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -314,9 +318,12 @@ export default function SkillInfoPage({
         workspaceId,
         slug: skillSlug,
         api: window.electronAPI,
-        confirmPermanentDelete: () => window.confirm(
-          t('creatorSkills.uninstall.confirmForceDeleteModified'),
-        ),
+        confirmPermanentDelete: () => requestDeleteConfirm({
+          testId: 'skill-force-delete-confirm',
+          title: t('creatorSkills.uninstall.forceDeleteTitle'),
+          description: t('creatorSkills.uninstall.confirmForceDeleteModified'),
+          confirmLabel: t('creatorSkills.uninstall.forceDeleteConfirm'),
+        }),
       })
       if (outcome.status === 'error') {
         toast.error(translateCreatorSkillError(t, outcome.result), {
@@ -339,7 +346,7 @@ export default function SkillInfoPage({
       console.error('[Creator Skills] Failed to delete Skill:', err)
       toast.error(translateCreatorSkillError(t, payload))
     }
-  }, [skill, workspaceId, skillSlug, t])
+  }, [skill, workspaceId, skillSlug, t, requestDeleteConfirm])
 
   // Handle opening in new window
   const handleOpenInNewWindow = useCallback(() => {
@@ -589,6 +596,8 @@ export default function SkillInfoPage({
 
         </Info_Page.Content>
       )}
+      {/* Journey #7: shared confirm host for creator-skill force delete. */}
+      {deleteConfirmElement}
     </Info_Page>
   )
 }

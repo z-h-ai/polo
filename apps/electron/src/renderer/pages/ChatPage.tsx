@@ -16,6 +16,7 @@ import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { SessionInfoPopover } from '@/components/app-shell/SessionInfoPopover'
 import { RenameDialog } from '@/components/ui/rename-dialog'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -518,9 +519,19 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
   }, [sessionId])
 
+  // Journey #7: sharing asks via the shared confirm dialog (same locales keys
+  // as the session menu) instead of a native window.confirm.
+  const { requestConfirm: requestShareConfirm, confirmElement: shareConfirmElement } = useConfirmDialog()
+
   // Share action handlers
   const handleShare = React.useCallback(async () => {
-    if (!window.confirm('Share this session publicly? It may contain file paths, prompts, tool output, or credentials. Anyone with the link can read it.')) {
+    const confirmed = await requestShareConfirm({
+      testId: 'share-confirm',
+      title: t('chat.shareConfirm.title'),
+      description: t('chat.shareConfirm.description'),
+      confirmLabel: t('chat.shareConfirm.confirm'),
+    })
+    if (!confirmed) {
       return
     }
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
@@ -533,7 +544,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     } else {
       toast.error(t('toast.failedToShare'), { description: result?.error || t('toast.unknownError') })
     }
-  }, [sessionId])
+  }, [sessionId, t, requestShareConfirm])
 
   const handleOpenInBrowser = React.useCallback(() => {
     if (sharedUrl) window.electronAPI.openUrl(sharedUrl)
@@ -877,6 +888,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {shareConfirmElement}
     </>
   )
 })
