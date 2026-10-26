@@ -58,10 +58,8 @@ import {
   loadedSessionsAtom,
   forceSessionMessagesReloadAtom,
   backgroundTasksAtomFamily,
-  goalProjectionAtomFamily,
-  goalExpandedAtomFamily,
-  goalModeActiveAtomFamily,
-  reduceGoalProjection,
+  applyGoalProjectionAtom,
+  goalStartIntentForSession,
   extractSessionMeta,
   windowWorkspaceIdAtom,
   type SessionMeta,
@@ -711,27 +709,16 @@ export default function App() {
   /**
    * Single revision gate for a session's Goal projection. BOTH the
    * goal_projection event stream and the sessions:goalProjection hydration
-   * pull land here: a projection with `revision <=` the highest seen is
-   * DROPPED, so a stale terminal event for Goal A can never clobber Goal B
-   * and a slow hydration receipt never regresses a fresher event. A new Goal
-   * (different id) resets the panel to collapsed; a terminal/cleared
-   * projection collapses the strip and ends an armed-but-unsent 目标模式
-   * intent (完成自动回普通聊天).
+   * pull land in applyGoalProjectionAtom: a projection with `revision <=`
+   * the highest seen is DROPPED, so a stale terminal event for Goal A can
+   * never clobber Goal B and a slow hydration receipt never regresses a
+   * fresher event. A new Goal (different id) resets the panel to collapsed;
+   * ANY accepted projection ends an armed-but-unsent 目标模式 intent — once
+   * the server authoritatively claims the session the start intent has done
+   * its job, and the menu keeps its selected look via `armed || !!goal`.
    */
   const applyGoalProjection = useCallback((sessionId: string, projection: GoalProjection) => {
-    const current = store.get(goalProjectionAtomFamily(sessionId))
-    const reduction = reduceGoalProjection(current, projection)
-    if (!reduction) return
-    store.set(goalProjectionAtomFamily(sessionId), reduction.next)
-    if (reduction.collapsePanel) {
-      // New (or no) Goal: 默认收起. Same-Goal pause/resume/progress updates
-      // never force the panel closed.
-      store.set(goalExpandedAtomFamily(sessionId), false)
-    }
-    if (reduction.disarm) {
-      // Terminal/cleared: the strip is gone, so armed goal-mode intent ends.
-      store.set(goalModeActiveAtomFamily(sessionId), false)
-    }
+    store.set(applyGoalProjectionAtom, sessionId, projection)
   }, [store])
 
   /** Hydration pull for late joiners (open/refresh/reconnect) — mirrors reconcilePermissionModeState. */
@@ -2486,9 +2473,9 @@ export default function App() {
         // server validates against the session's authoritative Goal state — a
         // start while a non-terminal Goal exists fails closed; the error text
         // is surfaced verbatim below and NEVER downgraded to an ordinary chat.
-        ...(store.get(goalModeActiveAtomFamily(sessionId))
-          ? { goalIntent: { action: 'start' as const } }
-          : {}),
+        // The accepted first projection disarms the intent (applyGoalProjectionAtom),
+        // so follow-up messages during the run carry NO goalIntent.
+        ...(goalStartIntentForSession(store.get, sessionId) ?? {}),
       })
       // The send was handed off: drop the composer's draft queue for this
       // session (FreeFormInput already cleared its copy).
@@ -2504,7 +2491,7 @@ export default function App() {
       // the session) surfaces the server's error text verbatim — the armed
       // goal-mode intent stays selected so the user can end the current Goal
       // or edit and resend; no automatic downgrade to an ordinary chat.
-      if (store.get(goalModeActiveAtomFamily(sessionId))) {
+      if (goalStartIntentForSession(store.get, sessionId)) {
         toast.error(i18n.t('goal.startFailed', {
           error: error instanceof Error ? error.message : String(error),
         }), { duration: 5000 })

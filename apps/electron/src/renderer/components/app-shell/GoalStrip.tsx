@@ -107,7 +107,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume }: GoalStripProps
       data-goal-status={goal.status}
       className={cn(
         'mb-1.5 overflow-hidden rounded-lg border border-foreground/10 bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)]',
-        'animate-[chat-status-slide-up_250ms_ease-out]',
+        'animate-[chat-status-slide-up_250ms_ease-out] motion-reduce:animate-none',
       )}
       onKeyDown={handleKeyDown}
     >
@@ -224,7 +224,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume }: GoalStripProps
                           td.status === 'in_progress' && running
                             // Execution pulse only while the Goal actually runs —
                             // a paused Goal never animates.
-                            && 'animate-[goal-todo-pulse_2s_ease-in-out_infinite]',
+                            && 'animate-[goal-todo-pulse_2s_ease-in-out_infinite] motion-reduce:animate-none',
                         )}
                       >
                         {meta.icon}

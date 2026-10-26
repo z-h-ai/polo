@@ -291,6 +291,9 @@ export const initializeSessionsAtom = atom(
       if (!newIdSet.has(oldId)) {
         sessionAtomFamily.remove(oldId)
         backgroundTasksAtomFamily.remove(oldId)
+        goalProjectionAtomFamily.remove(oldId)
+        goalExpandedAtomFamily.remove(oldId)
+        goalModeActiveAtomFamily.remove(oldId)
       }
     }
     // Reset loaded sessions tracking — new workspace needs fresh lazy loading
@@ -457,6 +460,9 @@ export const removeSessionAtom = atom(
     // Clean up additional atom families to prevent memory leaks
     // These store per-session UI state that should be garbage collected
     backgroundTasksAtomFamily.remove(sessionId)
+    goalProjectionAtomFamily.remove(sessionId)
+    goalExpandedAtomFamily.remove(sessionId)
+    goalModeActiveAtomFamily.remove(sessionId)
   }
 )
 
@@ -745,17 +751,22 @@ export const goalModeActiveAtomFamily = atomFamily(
  * sessions:goalProjection hydration pull. `revision` is MONOTONIC PER SESSION
  * and the ONLY ordering consumers may trust: `revision <=` the highest seen is
  * dropped (returns null), so a stale terminal event for Goal A can never
- * clobber a newer Goal B. When accepted, the reduction reports the two derived
- * transitions App.tsx applies to the other atoms:
+ * clobber a newer Goal B. When accepted, the reduction reports the derived
+ * panel transition App.tsx applies:
  * - `collapsePanel` — the current goal id changed (new/cleared Goal): the
  *   panel resets to collapsed; same-Goal progress never closes it.
- * - `disarm` — the projection became terminal/cleared: armed-but-unsent
- *   目标模式 intent ends (完成自动回普通聊天).
+ *
+ * Arming is NOT part of the reduction: every ACCEPTED projection disarms an
+ * armed-but-unsent 目标模式 intent (applyGoalProjectionAtom). Once the
+ * server-authoritative state reached the renderer, the start intent has done
+ * its job — the server owns the Goal lifecycle from there, and re-sending
+ * `goalIntent:start` mid-run would be rejected ("a goal is already active on
+ * this session"). The menu's selected look is preserved by the
+ * `armed || !!goal` combination in ChatInputZone.
  */
 export interface GoalProjectionReduction {
   next: import('../../shared/types').GoalProjection
   collapsePanel: boolean
-  disarm: boolean
 }
 
 export function reduceGoalProjection(
@@ -766,8 +777,54 @@ export function reduceGoalProjection(
   return {
     next: incoming,
     collapsePanel: current?.currentGoalId !== incoming.currentGoalId,
-    disarm: incoming.currentGoalId === undefined,
   }
+}
+
+/**
+ * Single application point for BOTH projection entrances (goal_projection
+ * event stream and sessions:goalProjection hydration pull): pass the incoming
+ * projection through the revision gate, then apply the derived transitions —
+ * a new/cleared Goal collapses the panel, and ANY accepted projection ends an
+ * armed-but-unsent 目标模式 intent (F1: after the server authoritatively
+ * claims the session, the start intent must not ride later messages, or the
+ * server rejects them while the Goal runs). Stale/duplicate projections are
+ * dropped before any state moves.
+ */
+export const applyGoalProjectionAtom = atom(
+  null,
+  (get, set, sessionId: string, incoming: import('../../shared/types').GoalProjection) => {
+    const reduction = reduceGoalProjection(get(goalProjectionAtomFamily(sessionId)), incoming)
+    if (!reduction) return
+    set(goalProjectionAtomFamily(sessionId), reduction.next)
+    if (reduction.collapsePanel) {
+      // New (or no) Goal: 默认收起. Same-Goal pause/resume/progress updates
+      // never force the panel closed.
+      set(goalExpandedAtomFamily(sessionId), false)
+    }
+    // Accepted projection ⇒ the server's Goal state is authoritative here:
+    // a claimed Goal takes over the menu's selected look (`armed || !!goal`),
+    // a terminal/cleared one removes the strip — either way the unsent start
+    // intent is spent.
+    set(goalModeActiveAtomFamily(sessionId), false)
+  }
+)
+
+/**
+ * POO-134 sendMessage extras for the composer's send chain: an armed
+ * 目标模式 session declares `goalIntent: { action: 'start' }`; anything else
+ * sends NO goal key at all (ordinary chat is never polluted). Reading through
+ * this helper (instead of inlining the atom read in App.tsx) keeps the send
+ * chain's decision testable against the same atoms applyGoalProjectionAtom
+ * writes — armed → send → projection → disarmed → next send carries no
+ * goalIntent.
+ */
+export function goalStartIntentForSession(
+  get: Getter,
+  sessionId: string,
+): { goalIntent: { action: 'start' } } | undefined {
+  return get(goalModeActiveAtomFamily(sessionId))
+    ? { goalIntent: { action: 'start' as const } }
+    : undefined
 }
 
 /**
