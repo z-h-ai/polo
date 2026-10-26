@@ -462,10 +462,13 @@ export function HomePage() {
             <Icons.UserRoundPlus className="size-4 text-accent" aria-hidden="true" />
             <span className="grid gap-[3px]">
               <strong className="text-[13px] font-semibold">{t('homeSpace.context.myCircles')}</strong>
-              <small className="text-[11px] text-foreground-50">
+              {/* Review #6: readable 11px metadata — muted token (AA-compliant). */}
+              <small className="text-[11px] text-muted-foreground">
                 {t('homeSpace.context.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
               </small>
             </span>
+            {/* Decorative affordance (aria-hidden) — fg-40 intentionally kept
+                below AA per the review's decorative-semantics exemption. */}
             <Icons.ChevronRight className="size-3.5 text-foreground-40" aria-hidden="true" />
           </button>
         )}

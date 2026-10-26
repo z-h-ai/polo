@@ -327,7 +327,8 @@ export function MyCirclesPage() {
             {t('poo70.c3.page.back')}
           </button>
           <div className="min-w-0 flex-1">
-            <p className="m-0 mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-foreground-50">
+            {/* Review #6: readable eyebrow — muted token (AA-compliant). */}
+            <p className="m-0 mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-muted-foreground">
               {t('poo70.c3.page.eyebrow')}
             </p>
             <h1

@@ -42,7 +42,9 @@ export function ProductSpaceSwitcher() {
         className={clientWorkbenchMenuClassName + " w-[min(306px,calc(100vw-24px))]"}
         minWidth="min-w-0"
       >
-        <div className="px-[9px] pb-[5px] pt-[8px] text-[11px] font-medium text-foreground-40">
+        {/* Review #6: readable section label — muted token (AA-compliant),
+            not the decorative fg-40. */}
+        <div className="px-[9px] pb-[5px] pt-[8px] text-[11px] font-medium text-muted-foreground">
           {t('productSpace.switcher.menuLabel')}
         </div>
         {space.productSpaces.map(item => {

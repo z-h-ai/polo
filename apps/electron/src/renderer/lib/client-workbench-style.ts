@@ -33,6 +33,14 @@ export function createClientWorkbenchStyle(base: string, review: string): Workbe
   if (!tokens['--surface'] || !tokens['--shadow-panel']) {
     throw new Error('Incomplete current workbench source tokens')
   }
+  // Review #6: muted body text must clear WCAG AA. The fg-50 mix measures
+  // ~3.3:1 on the workbench surface, so the semantic alias binds to the
+  // Spec §13.14 material muted foreground (#60636a), which measures 5.8:1
+  // against the #fbfbfa canvas. fg-40/fg-50 stay available for decorative
+  // and disabled semantics at their call sites.
+  if (!tokens['--client-material-fg-muted']) {
+    throw new Error('Missing workbench source muted foreground token')
+  }
 
   // Inherited custom properties have already resolved against the renderer
   // root. Rebind every consumed alias in THIS page/portal scope instead.
@@ -51,7 +59,7 @@ export function createClientWorkbenchStyle(base: string, review: string): Workbe
     '--foreground-dimmed': 'var(--foreground-80)',
     '--card': 'var(--surface)', '--card-foreground': 'var(--foreground)',
     '--popover': 'var(--surface)', '--popover-foreground': 'var(--foreground)',
-    '--muted': 'var(--fg-5)', '--muted-foreground': 'var(--fg-50)',
+    '--muted': 'var(--fg-5)', '--muted-foreground': 'var(--client-material-fg-muted)',
     '--secondary': 'var(--fg-5)', '--secondary-foreground': 'var(--foreground)',
     '--primary': 'var(--accent)', '--primary-foreground': 'var(--on-accent)',
     '--input': 'var(--border)', '--ring': 'var(--accent)',
