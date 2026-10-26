@@ -1,5 +1,5 @@
 import type { LocalAppAdmissionFailure } from '@polo-ai/shared/protocol'
-import type { BrowserEmbedBounds, BrowserElementPickerEvent } from '@polo-ai/shared/protocol'
+import type { BrowserEmbedBounds, BrowserElementPickerEvent, CanvasPaneApp, CanvasPanePopoutState } from '@polo-ai/shared/protocol'
 import type { WebElementReference } from '@polo-ai/core/types'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
@@ -8,6 +8,12 @@ export * from '@polo-ai/shared/protocol'
 // POO-135: explicit re-exports for the sidebar/picker types this file's API
 // surface references (WebElementReference is declared in core, not protocol).
 export type { BrowserEmbedBounds, BrowserElementPickerEvent, WebElementReference }
+
+// =============================================================================
+// POO-135 验收修复 (SB-CANVAS-OUT): canvas popout wire types live in protocol
+// dto.ts (CanvasPaneApp / CanvasPanePopoutState) and are re-exported above via
+// `export * from '@polo-ai/shared/protocol'`.
+// =============================================================================
 
 // =============================================================================
 // Package re-exports (convenience for renderer imports)
@@ -1583,6 +1589,19 @@ export interface ElectronAPI {
     onInteracted(callback: (id: string) => void): () => void
     /** POO-135: element picker outcome (picked / cancelled / unavailable). */
     onElementPickerEvent(callback: (event: BrowserElementPickerEvent) => void): () => void
+  }
+
+  /**
+   * POO-135 验收修复 (SB-CANVAS-OUT): the canvas app's dedicated popup window.
+   * Detaching moves the session's canvas out of the right sidebar (which shows
+   * a placeholder + return entry); closing that window by any route emits a
+   * popped-out=false broadcast so the canvas returns to the sidebar.
+   */
+  canvasPane: {
+    detachToPopup(sessionId: string, app: CanvasPaneApp): Promise<void>
+    attachFromPopup(sessionId: string): Promise<void>
+    focus(sessionId: string): Promise<void>
+    onStateChanged(callback: (state: CanvasPanePopoutState) => void): () => void
   }
 
   // LLM Connections (provider configurations)

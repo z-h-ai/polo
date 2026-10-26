@@ -829,6 +829,39 @@ export type BrowserElementPickerEvent =
   | { instanceId: string; kind: 'cancelled'; reason: 'user' | 'navigation' | 'host' | 'destroyed' }
   | { instanceId: string; kind: 'unavailable'; reason: 'iframe' | 'sensitive' | 'hidden' }
 
+/**
+ * POO-135 验收修复 (SB-CANVAS-OUT): where a session's canvas app currently
+ * lives. `poppedOut` means the dedicated canvas BrowserWindow hosts it (the
+ * sidebar shows a placeholder + return entry); a `false` broadcast — also
+ * emitted when the popup window closes by any route (explicit return, the
+ * system close button) — returns the canvas to the sidebar. The canvas app
+ * object itself (atoms/canvas-pane.ts) never moves: the sidebar and the
+ * popup are two carriers of the same logical canvas.
+ */
+export interface CanvasPanePopoutState {
+  sessionId: string
+  poppedOut: boolean
+  /** Whether the popup window is currently visible (focus/restore affordance). */
+  isVisible: boolean
+}
+
+/**
+ * POO-135 验收修复 (SB-CANVAS-OUT): the canvas app a sidebar tab / popup
+ * window hosts. Wire payload of `canvasPane.detachToPopup` — identified by
+ * its on-disk bundle (indexPath), the same shape the renderer's canvas-pane
+ * atom has always carried.
+ */
+export interface CanvasPaneApp {
+  appId: string
+  title: string
+  /**
+   * Absolute bundle path. The pane only hosts real bundles — cards built from
+   * a data: fallback have no identity and never get a canvas entry.
+   */
+  indexPath: string
+  version?: number
+}
+
 export interface DeepLinkNavigation {
   view?: string
   tabType?: string

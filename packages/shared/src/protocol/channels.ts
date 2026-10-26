@@ -557,6 +557,16 @@ export const RPC_CHANNELS = {
     INTERACTED: 'browser-pane:interacted',
     ELEMENT_PICKER_EVENT: 'browser-pane:element-picker',
   },
+  // POO-135 验收修复 (SB-CANVAS-OUT): the canvas app can pop out to its own
+  // BrowserWindow and return — same sidebar-collaboration semantics as the
+  // browser pane (mutual exclusion with the in-pane card, placeholder +
+  // return entry while popped out, automatic return when the window closes).
+  canvasPane: {
+    DETACH_TO_POPUP: 'canvas-pane:detach-to-popup',
+    ATTACH_FROM_POPUP: 'canvas-pane:attach-from-popup',
+    FOCUS: 'canvas-pane:focus',
+    STATE_CHANGED: 'canvas-pane:state-changed',
+  },
   automations: {
     GET: 'automations:get',
     TEST: 'automations:test',

@@ -262,6 +262,13 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING,
   RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT,
 
+  // canvasPane — POO-135 验收修复 (SB-CANVAS-OUT): the canvas popup BrowserWindow
+  // is local to this desktop; nothing here is workspace-server routable
+  RPC_CHANNELS.canvasPane.DETACH_TO_POPUP,
+  RPC_CHANNELS.canvasPane.ATTACH_FROM_POPUP,
+  RPC_CHANNELS.canvasPane.FOCUS,
+  RPC_CHANNELS.canvasPane.STATE_CHANGED,
+
   // gitbash — Windows-specific local
   RPC_CHANNELS.gitbash.CHECK,
   RPC_CHANNELS.gitbash.BROWSE,

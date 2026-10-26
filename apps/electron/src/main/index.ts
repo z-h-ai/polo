@@ -117,6 +117,7 @@ import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
 import { findDeepLinkArgument } from './deep-link-argv'
 import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import { BrowserPaneManager } from './browser-pane-manager'
+import { CanvasPopupManager } from './canvas-popup-manager'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
 import log, { isDebugMode, mainLog, getLogFilePath, getMessagingGatewayLogFilePath, messagingGatewayLog } from './logger'
@@ -296,6 +297,7 @@ const DEEPLINK_SCHEME = process.env.POLO_AI_DEEPLINK_SCHEME || 'poloai'
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
 let browserPaneManager: BrowserPaneManager | null = null
+let canvasPopupManager: CanvasPopupManager | null = null
 let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
@@ -758,6 +760,11 @@ app.whenReady().then(async () => {
     browserPaneManager.registerToolbarIpc()
     browserPaneManager.registerCapabilityIpc()
 
+    // POO-135 验收修复 (SB-CANVAS-OUT): canvas popup host. Created always (deps
+    // wiring); it only opens real windows on an explicit renderer detach.
+    canvasPopupManager = new CanvasPopupManager()
+    canvasPopupManager.setWindowManager(windowManager)
+
     // Build real PlatformServices from Electron APIs
     const platform: PlatformServices = createElectronPlatform({
       app,
@@ -1000,6 +1007,7 @@ app.whenReady().then(async () => {
             managedSkillsRoot: join(app.getPath('userData'), 'managed-skills'),
             windowManager: windowManager ?? undefined,
             browserPaneManager: browserPaneManager ?? undefined,
+            canvasPopupManager: canvasPopupManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
             onAdminSessionEnding: (accountId: string) => {
@@ -1703,6 +1711,12 @@ app.on('before-quit', (event) => {
       // Clean up browser pane instances
       if (browserPaneManager) {
         browserPaneManager.destroyAll()
+      }
+
+      // POO-135 验收修复 (SB-CANVAS-OUT): close canvas popups so the closed
+      // broadcasts reconcile every renderer before teardown.
+      if (canvasPopupManager) {
+        canvasPopupManager.destroyAll()
       }
 
       // Clean up OAuth flow store (stop periodic cleanup timer)

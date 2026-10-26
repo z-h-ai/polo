@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* wss:; font-src 'self' data: https://fonts.gstatic.com;">
+  <title>Polo AI Canvas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500&display=swap" rel="stylesheet">
+  <script>
+    // Resolve the theme class BEFORE first paint. Mirrors ThemeContext's
+    // resolution order (stored explicit mode → system preference) with the
+    // same `craft-theme` storage payload; the base light/dark variables from
+    // index.css are all the carrier chrome needs.
+    (function () {
+      var mode = null
+      try {
+        var raw = window.localStorage.getItem('craft-theme')
+        if (raw) {
+          var stored = JSON.parse(raw)
+          if (stored && (stored.mode === 'light' || stored.mode === 'dark' || stored.mode === 'system')) {
+            mode = stored.mode
+          }
+        }
+      } catch (err) { /* fall through to system preference */ }
+      var dark = mode === 'dark' || ((mode === null || mode === 'system') &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches)
+      if (dark) document.documentElement.classList.replace('light', 'dark')
+    })()
+  </script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    #root { height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="./canvas-popout.tsx"></script>
+</body>
+</html>
