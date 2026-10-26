@@ -97,6 +97,7 @@ function AppHomeHarness() {
     && context.productSpaceContextKey
   ) ? {
       accountId,
+      membershipListVerified: context.membershipListVerified,
       activeProductSpaceId: context.activeProductSpaceId,
       activeProductSpace: context.activeProductSpace,
       productSpaces: context.productSpaces,
