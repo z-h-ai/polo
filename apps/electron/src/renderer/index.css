@@ -1695,3 +1695,24 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   cursor: not-allowed;
   color: var(--client-material-disabled-fg);
 }
+
+/* =============================================================================
+   REDUCED MOTION (review #4)
+
+   System "reduce motion" must actually consume everything the app animates,
+   including pseudo-elements, and must survive the client-workbench token
+   extraction (lib/client-workbench-style.ts only lifts :root{} custom
+   properties from the design-system sources — rules never travel with it).
+   So the fallback lives HERE in the document stylesheet, mirroring the
+   design-system rule (workbench-review.css @media(prefers-reduced-motion)).
+   Framer Motion is handled separately via MotionConfig in main.tsx.
+============================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}

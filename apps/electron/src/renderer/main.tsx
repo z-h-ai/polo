@@ -4,6 +4,7 @@ import { init as sentryInit } from '@sentry/electron/renderer'
 import * as Sentry from '@sentry/react'
 import { captureConsoleIntegration } from '@sentry/react'
 import { Provider as JotaiProvider, useAtomValue } from 'jotai'
+import { MotionConfig } from 'motion/react'
 import App from './App'
 import { ThemeProvider } from './context/ThemeContext'
 import { windowWorkspaceIdAtom } from './atoms/sessions'
@@ -121,9 +122,14 @@ function Root() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Sentry.ErrorBoundary fallback={<CrashFallback />}>
-      <JotaiProvider>
-        <Root />
-      </JotaiProvider>
+      {/* Review #4: consume the OS "reduce motion" setting for Framer Motion
+          too — "user" disables transform/layout animations (they finish
+          instantly) while the media query in index.css handles the CSS side. */}
+      <MotionConfig reducedMotion="user">
+        <JotaiProvider>
+          <Root />
+        </JotaiProvider>
+      </MotionConfig>
     </Sentry.ErrorBoundary>
   </React.StrictMode>
 )
