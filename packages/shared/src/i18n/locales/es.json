@@ -1181,6 +1181,7 @@
   "onboarding.adminLogin.agreement": "Aceptar los Términos del servicio y la Política de privacidad",
   "onboarding.adminLogin.ariaLabel": "Inicio de sesión de administrador",
   "onboarding.adminLogin.challengeFailed": "La comprobación de verificación falló. Inténtalo de nuevo.",
+  "onboarding.adminLogin.challengeWindowTitle": "Verificación de seguridad",
   "onboarding.adminLogin.code": "Código de verificación",
   "onboarding.adminLogin.codeExpires": "El código es válido durante 5 minutos.",
   "onboarding.adminLogin.codePlaceholder": "Código de 6 dígitos",

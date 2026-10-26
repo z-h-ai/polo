@@ -1181,6 +1181,7 @@
   "onboarding.adminLogin.agreement": "Agree to the Terms of Service and Privacy Policy",
   "onboarding.adminLogin.ariaLabel": "Admin login",
   "onboarding.adminLogin.challengeFailed": "Verification challenge failed. Please try again.",
+  "onboarding.adminLogin.challengeWindowTitle": "Security verification",
   "onboarding.adminLogin.code": "Verification code",
   "onboarding.adminLogin.codeExpires": "The code is valid for 5 minutes.",
   "onboarding.adminLogin.codePlaceholder": "6-digit code",

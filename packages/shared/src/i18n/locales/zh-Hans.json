@@ -1181,6 +1181,7 @@
   "onboarding.adminLogin.agreement": "同意协议与隐私政策",
   "onboarding.adminLogin.ariaLabel": "管理员登录",
   "onboarding.adminLogin.challengeFailed": "安全验证失败，请重新验证后再试。",
+  "onboarding.adminLogin.challengeWindowTitle": "安全验证",
   "onboarding.adminLogin.code": "验证码",
   "onboarding.adminLogin.codeExpires": "验证码 5 分钟内有效。",
   "onboarding.adminLogin.codePlaceholder": "6 位验证码",

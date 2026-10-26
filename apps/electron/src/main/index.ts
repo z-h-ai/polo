@@ -118,6 +118,7 @@ import { findDeepLinkArgument } from './deep-link-argv'
 import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import { BrowserPaneManager } from './browser-pane-manager'
 import { CanvasPopupManager } from './canvas-popup-manager'
+import { PhoneAuthChallengeWindowManager, validatePhoneAuthChallengeOpenRequest } from './phone-auth-challenge-window'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
 import log, { isDebugMode, mainLog, getLogFilePath, getMessagingGatewayLogFilePath, messagingGatewayLog } from './logger'
@@ -167,6 +168,10 @@ import { TERMINAL_INTEGRATION_ERROR_KEYS } from '../shared/terminal-integration'
 import type {
   TerminalIntegrationOperation,
   TerminalIntegrationResult,
+} from '../shared/types'
+import {
+  PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL,
+  PHONE_AUTH_CHALLENGE_OPEN_CHANNEL,
 } from '../shared/types'
 
 // Initialize electron-log for renderer process support
@@ -298,6 +303,10 @@ let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
 let browserPaneManager: BrowserPaneManager | null = null
 let canvasPopupManager: CanvasPopupManager | null = null
+// POO-151: hosts the SMS-login challenge issuer page in-app (never the
+// system browser). Created always; opens a real window only when the
+// renderer's phone-auth flow asks.
+const phoneAuthChallengeWindowManager = new PhoneAuthChallengeWindowManager()
 let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
@@ -844,6 +853,21 @@ app.whenReady().then(async () => {
       if (!response.ok) {
         throw new Error(`Phone auth challenge browser returned ${response.status}`)
       }
+    })
+    // POO-151: host the SMS-login challenge issuer page inside an app-owned
+    // window (无感 unless the provider demands interaction). The requester's
+    // URL is re-validated here: the renderer is an untrusted boundary. open()
+    // resolves to the challenge id that scopes the CLOSED notification and
+    // close() to exactly the flow that opened it.
+    ipcMain.handle(PHONE_AUTH_CHALLENGE_OPEN_CHANNEL, (event, url: unknown) => {
+      const issuerUrl = validatePhoneAuthChallengeOpenRequest(url)
+      return phoneAuthChallengeWindowManager.open(event.sender, issuerUrl.toString())
+    })
+    ipcMain.handle(PHONE_AUTH_CHALLENGE_CLOSE_CHANNEL, (event, challengeId: unknown) => {
+      phoneAuthChallengeWindowManager.close(
+        event.sender,
+        typeof challengeId === 'number' ? challengeId : undefined,
+      )
     })
     ipcMain.handle('terminal-integration:get-status', () =>
       terminalIntegrationIpcResult('status', () =>
@@ -1718,6 +1742,9 @@ app.on('before-quit', (event) => {
       if (canvasPopupManager) {
         canvasPopupManager.destroyAll()
       }
+
+      // POO-151: no challenge window may outlive the app.
+      phoneAuthChallengeWindowManager.destroyAll()
 
       // Clean up OAuth flow store (stop periodic cleanup timer)
       if (oauthFlowStore) {

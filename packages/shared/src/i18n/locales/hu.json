@@ -1181,6 +1181,7 @@
   "onboarding.adminLogin.agreement": "Elfogadom a Felhasználási feltételeket és az Adatvédelmi irányelveket",
   "onboarding.adminLogin.ariaLabel": "Admin bejelentkezés",
   "onboarding.adminLogin.challengeFailed": "Az ellenőrzési kihívás sikertelen. Próbáld újra.",
+  "onboarding.adminLogin.challengeWindowTitle": "Biztonsági ellenőrzés",
   "onboarding.adminLogin.code": "Ellenőrző kód",
   "onboarding.adminLogin.codeExpires": "A kód 5 percig érvényes.",
   "onboarding.adminLogin.codePlaceholder": "6 jegyű kód",

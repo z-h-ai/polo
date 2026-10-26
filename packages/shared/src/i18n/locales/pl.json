@@ -1183,6 +1183,7 @@
   "onboarding.adminLogin.agreement": "Zaakceptuj Warunki korzystania i Politykę prywatności",
   "onboarding.adminLogin.ariaLabel": "Logowanie administratora",
   "onboarding.adminLogin.challengeFailed": "Weryfikacja zabezpieczenia nie powiodła się. Spróbuj ponownie.",
+  "onboarding.adminLogin.challengeWindowTitle": "Weryfikacja zabezpieczeń",
   "onboarding.adminLogin.code": "Kod weryfikacyjny",
   "onboarding.adminLogin.codeExpires": "Kod jest ważny przez 5 minut.",
   "onboarding.adminLogin.codePlaceholder": "6-cyfrowy kod",
