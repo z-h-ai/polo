@@ -7,6 +7,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import { i18n } from '@polo-ai/shared/i18n'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AlertCircle, Globe, Copy, RefreshCw, Link2Off, Info } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
@@ -24,6 +25,10 @@ import { rendererPerf } from '@/lib/perf'
 import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
+import { decideChatAccessBanner } from '@/lib/chat-access-banner'
+import { formatQuotaResetTime } from '@/lib/quota-reset-time'
+import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
 import { getSessionTitle } from '@/utils/session'
@@ -40,6 +45,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   React.useLayoutEffect(() => {
     rendererPerf.markSessionSwitch(sessionId, 'panel.mounted')
   }, [sessionId])
+
+  // Journey #1: the insufficient-credit banner's recharge action reuses the
+  // SAME trusted handoff as the TopBar (one-at-a-time, scope-fenced); the
+  // member variant is decided by the shared role gate.
+  const productSpace = useOptionalProductSpaceContext()
+  const { canOpenPayment, openPayment } = useAdminPaymentHandoff()
 
   const {
     activeWorkspaceId,
@@ -305,41 +316,31 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     [session?.llmConnection, llmConnections]
   )
 
+  // Journey #1: the banner decision (billing semantics + role split) is a
+  // pure function; this component only translates keys and wires actions.
+  const bannerDecision = React.useMemo(
+    () => decideChatAccessBanner(chatAccessStatus, { canOpenPayment }),
+    [chatAccessStatus, canOpenPayment],
+  )
+
   const inputStatusBanner = React.useMemo(() => {
-    switch (chatAccessStatus?.issue) {
-      case 'no-ai-service':
-        return {
-          variant: 'info' as const,
-          message: t('chat.statusBanner.noAiService'),
-        }
-      case 'quota-exhausted':
-        return {
-          variant: 'destructive' as const,
-          message: t('chat.statusBanner.quotaExhausted'),
-        }
-      case 'account-disabled':
-        return {
-          variant: 'destructive' as const,
-          message: t('chat.statusBanner.accountDisabled'),
-        }
-      // POO-144: the space AI-config sync states shadow the empty-list banner —
-      // syncing is informational, failed offers an explicit user-triggered retry.
-      case 'ai-config-syncing':
-        return {
-          variant: 'info' as const,
-          message: t('chat.statusBanner.aiConfigSyncing'),
-        }
-      case 'ai-config-sync-failed':
-        return {
-          variant: 'destructive' as const,
-          message: t('chat.statusBanner.aiConfigSyncFailed'),
-          actionLabel: t('chat.statusBanner.retrySync'),
-          onAction: onRetryAiConfigSync,
-        }
-      default:
-        return null
+    if (!bannerDecision) return null
+    return {
+      variant: bannerDecision.variant,
+      message: t(
+        bannerDecision.messageKey,
+        bannerDecision.quotaResetAt !== undefined
+          ? { reset: formatQuotaResetTime(bannerDecision.quotaResetAt, i18n.resolvedLanguage) }
+          : {},
+      ),
+      ...(bannerDecision.action === 'recharge'
+        ? { actionLabel: t('chat.statusBanner.recharge'), onAction: openPayment }
+        : {}),
+      ...(bannerDecision.action === 'retry-ai-config-sync'
+        ? { actionLabel: t('chat.statusBanner.retrySync'), onAction: onRetryAiConfigSync }
+        : {}),
     }
-  }, [chatAccessStatus?.issue, onRetryAiConfigSync, t])
+  }, [bannerDecision, onRetryAiConfigSync, openPayment, t])
 
   const isChatInputDisabled = !!inputStatusBanner
 
