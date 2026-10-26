@@ -1716,6 +1716,8 @@
   "preview.markdownPreview": "Markdownプレビュー",
   "preview.parseError": "解析エラー",
   "preview.pdfPreview": "PDFプレビュー",
+  "productSpace.avatar.enterprise": "Org",
+  "productSpace.avatar.personal": "Me",
   "productSpace.contract.downloadingDesc": "ダウンロード完了後、Polo は再起動してスペースと認証を再検証します。",
   "productSpace.contract.downloadingTitle": "更新をダウンロード中",
   "productSpace.contract.failedDesc": "ネットワークが中断され、このバージョンは変更されていません。再試行できますが、業務画面は閉じたままです。",

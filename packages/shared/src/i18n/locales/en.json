@@ -1716,6 +1716,8 @@
   "preview.markdownPreview": "Markdown Preview",
   "preview.parseError": "Parse Error",
   "preview.pdfPreview": "PDF Preview",
+  "productSpace.avatar.enterprise": "Org",
+  "productSpace.avatar.personal": "Me",
   "productSpace.contract.downloadingDesc": "Polo restarts after the download and re-validates your spaces and authorizations.",
   "productSpace.contract.downloadingTitle": "Downloading the update",
   "productSpace.contract.failedDesc": "The network was interrupted and this version has not changed. You can retry; business surfaces stay closed.",

@@ -1716,6 +1716,8 @@
   "preview.markdownPreview": "Markdown-Vorschau",
   "preview.parseError": "Analysefehler",
   "preview.pdfPreview": "PDF-Vorschau",
+  "productSpace.avatar.enterprise": "Org",
+  "productSpace.avatar.personal": "Me",
   "productSpace.contract.downloadingDesc": "Polo startet nach dem Download neu und überprüft deine Bereiche und Berechtigungen erneut.",
   "productSpace.contract.downloadingTitle": "Update wird heruntergeladen",
   "productSpace.contract.failedDesc": "Das Netzwerk wurde unterbrochen, diese Version hat sich nicht geändert. Du kannst es erneut versuchen; geschäftliche Bereiche bleiben geschlossen.",

@@ -1718,6 +1718,8 @@
   "preview.markdownPreview": "Podgląd Markdown",
   "preview.parseError": "Błąd analizy",
   "preview.pdfPreview": "Podgląd PDF",
+  "productSpace.avatar.enterprise": "Org",
+  "productSpace.avatar.personal": "Me",
   "productSpace.contract.downloadingDesc": "Po pobraniu Polo uruchomi się ponownie i ponownie zweryfikuje przestrzenie i autoryzacje.",
   "productSpace.contract.downloadingTitle": "Pobieranie aktualizacji",
   "productSpace.contract.failedDesc": "Sieć została przerwana, a ta wersja się nie zmieniła. Możesz spróbować ponownie; ekrany biznesowe pozostaną zamknięte.",

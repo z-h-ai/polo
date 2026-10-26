@@ -1716,6 +1716,8 @@
   "preview.markdownPreview": "Markdown előnézet",
   "preview.parseError": "Elemzési hiba",
   "preview.pdfPreview": "PDF előnézet",
+  "productSpace.avatar.enterprise": "Org",
+  "productSpace.avatar.personal": "Me",
   "productSpace.contract.downloadingDesc": "A letöltés után a Polo újraindul, és újra ellenőrzi a tereidet és a jogosultságokat.",
   "productSpace.contract.downloadingTitle": "Frissítés letöltése folyamatban",
   "productSpace.contract.failedDesc": "A hálózat megszakadt, és ez a verzió nem változott. Újrapróbálhatod; az üzleti felületek zárva maradnak.",

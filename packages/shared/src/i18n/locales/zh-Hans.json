@@ -1716,6 +1716,8 @@
   "preview.markdownPreview": "Markdown 预览",
   "preview.parseError": "解析错误",
   "preview.pdfPreview": "PDF 预览",
+  "productSpace.avatar.enterprise": "企",
+  "productSpace.avatar.personal": "我",
   "productSpace.contract.downloadingDesc": "下载完成后 Polo 会重新启动，并重新验证你的空间和授权。",
   "productSpace.contract.downloadingTitle": "正在下载更新",
   "productSpace.contract.failedDesc": "网络中断，当前版本仍未改变。你可以重试，业务界面会继续保持关闭。",
