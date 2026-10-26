@@ -96,9 +96,10 @@ describe('GoalStrip 单一动作区（POO-134）', () => {
     expect(onResume).toHaveBeenCalledTimes(1)
   })
 
-  it('verifying：按钮位显示进行中文案，无任何动作按钮', () => {
+  it('verifying：按钮位显示验证中文案，无任何动作按钮', () => {
     render(tree(goal({ status: 'verifying', runningSince: Date.now() - 1000 })))
-    expect(screen.getByTestId('goal-strip-verifying').textContent).toBe('Running')
+    expect(screen.getByTestId('goal-strip-verifying').textContent).toBe('Verifying')
+    expect(screen.getByTestId('goal-strip-status').textContent).toBe('Verifying')
     expect(screen.queryByTestId('goal-strip-pause')).toBeNull()
     expect(screen.queryByTestId('goal-strip-resume')).toBeNull()
   })
@@ -177,6 +178,128 @@ describe('GoalStrip 展开面板（只读 Todo）', () => {
     const list = screen.getByTestId('goal-todo-list') as HTMLElement
     expect(list.className).toContain('overflow-y-auto')
     expect(list.children.length).toBe(30)
+  })
+})
+
+describe('GoalStrip 徽标状态区分（journey #5）', () => {
+  it('awaiting_user：高亮「回复即可继续」徽标并带提示；仍有继续按钮', () => {
+    const onResume = mock(() => {})
+    render(tree(goal({ status: 'paused', pauseReason: 'awaiting_user' }), () => {}, onResume))
+    const badge = screen.getByTestId('goal-strip-status')
+    expect(badge.textContent).toBe('Reply to continue')
+    expect(badge.className).toContain('ring-accent/40')
+    expect(screen.getByTestId('goal-strip-status').getAttribute('title')).toBe('Reply to this goal to continue it')
+    fireEvent.click(screen.getByTestId('goal-strip-resume'))
+    expect(onResume).toHaveBeenCalledTimes(1)
+  })
+
+  it('error / no_progress / restart_required 各自独立徽标，不再是笼统「已暂停」', () => {
+    const cases: Array<[GoalRecord['pauseReason'], string]> = [
+      ['error', 'Paused · error'],
+      ['no_progress', 'Paused · no progress'],
+      ['restart_required', 'Paused · restart required'],
+    ]
+    for (const [pauseReason, label] of cases) {
+      const { unmount } = render(tree(goal({ status: 'paused', pauseReason })))
+      expect(screen.getByTestId('goal-strip-status').textContent).toBe(label)
+      unmount()
+    }
+  })
+
+  it('completed / ended 终态：只读徽标，无任何动作按钮', () => {
+    const { unmount } = render(tree(goal({ status: 'completed', elapsedMs: 42000 })))
+    expect(screen.getByTestId('goal-strip-status').textContent).toBe('Completed')
+    expect(screen.queryByTestId('goal-strip-pause')).toBeNull()
+    expect(screen.queryByTestId('goal-strip-resume')).toBeNull()
+    expect(screen.getByTestId('goal-strip-elapsed').textContent).toBe('0:42')
+    unmount()
+    render(tree(goal({ status: 'ended' })))
+    expect(screen.getByTestId('goal-strip-status').textContent).toBe('Ended')
+    expect(screen.queryByTestId('goal-strip-resume')).toBeNull()
+  })
+
+  it('终态空拆解：空态文案不再冒充「等待目标细节」', () => {
+    render(tree(goal({ status: 'ended', todos: [] })))
+    fireEvent.click(screen.getByTestId('goal-strip-trigger'))
+    expect(screen.getByTestId('goal-todos-empty').textContent).toBe('This goal has no recorded breakdown')
+  })
+})
+
+describe('GoalStrip 独立验收回看（journey #5）', () => {
+  const receiptGoal = (overrides: Partial<GoalRecord> = {}): GoalRecord => goal({
+    status: 'completed',
+    verification: {
+      status: 'not_satisfied',
+      verifiedAt: 1735689600000,
+      criteria: [
+        { criterion: 'tests pass', passed: true, evidenceIds: [0] },
+        { criterion: 'docs updated', passed: false, evidenceIds: [1, 7] },
+      ],
+      model: 'glm-5.3-flash',
+    },
+    candidate: {
+      summary: 'done',
+      reportedAt: 1,
+      evidence: [
+        { kind: 'file', path: 'reports/x.md' },
+        { kind: 'message', messageId: 'm-42', note: 'summary reply' },
+      ],
+    },
+    ...overrides,
+  })
+
+  it('无验收记录：不渲染验收区块', () => {
+    render(tree(goal({ status: 'active' })))
+    fireEvent.click(screen.getByTestId('goal-strip-trigger'))
+    expect(screen.queryByTestId('goal-verification')).toBeNull()
+  })
+
+  it('展开面板显示 receipt 状态/判据/证据；file 证据可打开,message 证据展示', () => {
+    const onOpenFile = mock(() => {})
+    sessionSeq += 1
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(GoalStrip, {
+        sessionId: `vs-${sessionSeq}`,
+        goal: receiptGoal(),
+        onOpenFile,
+      }),
+    ))
+    fireEvent.click(screen.getByTestId('goal-strip-trigger'))
+    expect(screen.getByTestId('goal-verification').getAttribute('data-verification-status')).toBe('not_satisfied')
+    expect(screen.getByTestId('goal-verification-status').textContent).toContain('Not satisfied')
+    expect(screen.getByTestId('goal-verification-model').textContent).toContain('glm-5.3-flash')
+    const criteria = screen.getByTestId('goal-criterion-list').children
+    expect(criteria.length).toBe(2)
+    expect(criteria[0].getAttribute('data-criterion-passed')).toBe('true')
+    expect(criteria[1].getAttribute('data-criterion-passed')).toBe('false')
+
+    fireEvent.click(screen.getByTestId('goal-evidence-file-0'))
+    expect(onOpenFile).toHaveBeenCalledWith('reports/x.md')
+    expect(screen.getByTestId('goal-evidence-message-0').textContent).toContain('summary reply')
+    // 越界证据 id（7）→ 未知,不编造
+    expect(screen.getByTestId('goal-evidence-unknown-1').textContent).toContain('Unknown')
+  })
+
+  it('缺失验证模型显示「未知」,不显示编造的验证耗时', () => {
+    sessionSeq += 1
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(GoalStrip, {
+        sessionId: `vs-${sessionSeq}`,
+        goal: receiptGoal({
+          verification: {
+            status: 'passed', verifiedAt: 1735689600000, criteria: [], model: undefined,
+          },
+        }),
+      }),
+    ))
+    fireEvent.click(screen.getByTestId('goal-strip-trigger'))
+    expect(screen.getByTestId('goal-verification-model').textContent).toContain('Unknown')
+    const meta = screen.getByTestId('goal-verification-meta').textContent!
+    expect(meta.toLowerCase()).not.toContain('duration')
   })
 })
 

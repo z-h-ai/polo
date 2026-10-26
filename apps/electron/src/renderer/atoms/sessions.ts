@@ -294,6 +294,7 @@ export const initializeSessionsAtom = atom(
         goalProjectionAtomFamily.remove(oldId)
         goalExpandedAtomFamily.remove(oldId)
         goalModeActiveAtomFamily.remove(oldId)
+        sendFailureAtomFamily.remove(oldId)
       }
     }
     // Reset loaded sessions tracking — new workspace needs fresh lazy loading
@@ -463,6 +464,7 @@ export const removeSessionAtom = atom(
     goalProjectionAtomFamily.remove(sessionId)
     goalExpandedAtomFamily.remove(sessionId)
     goalModeActiveAtomFamily.remove(sessionId)
+    sendFailureAtomFamily.remove(sessionId)
   }
 )
 
@@ -746,6 +748,31 @@ export const goalModeActiveAtomFamily = atomFamily(
   (a, b) => a === b
 )
 
+// ===========================================================================
+// Journey #8: send-failure transient state (per session)
+// ===========================================================================
+
+/**
+ * A local send failure's transient prompt. This is SESSION state, not a
+ * message: nothing lands in `messages`, nothing persists server-side. The
+ * captured draft is what the explicit "restore draft" action puts back into
+ * the composer — re-sending stays a deliberate user act (a failed send's
+ * server receipt is unknown, so the renderer never auto-resends).
+ */
+export interface SessionSendFailure {
+  /** Localized heading (what happened). */
+  title: string
+  /** Technical detail from the transport error — rendered collapsed. */
+  detail: string
+  /** The unsent draft captured from the failed attempt. */
+  draft: string
+}
+
+export const sendFailureAtomFamily = atomFamily(
+  (_sessionId: string) => atom<SessionSendFailure | null>(null),
+  (a, b) => a === b
+)
+
 /**
  * POO-134 revision gate, shared by the goal_projection event stream AND the
  * sessions:goalProjection hydration pull. `revision` is MONOTONIC PER SESSION
@@ -803,8 +830,9 @@ export const applyGoalProjectionAtom = atom(
     }
     // Accepted projection ⇒ the server's Goal state is authoritative here:
     // a claimed Goal takes over the menu's selected look (`armed || !!goal`),
-    // a terminal/cleared one removes the strip — either way the unsent start
-    // intent is spent.
+    // and a terminal one keeps its record readable (journey #5 — the strip
+    // stays as a read-only receipt; currentGoalId is cleared while `goal` is
+    // retained). Either way the unsent start intent is spent.
     set(goalModeActiveAtomFamily(sessionId), false)
   }
 )

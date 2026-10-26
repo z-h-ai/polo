@@ -7,6 +7,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import { i18n } from '@polo-ai/shared/i18n'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AlertCircle, Globe, Copy, RefreshCw, Link2Off, Info } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
@@ -15,6 +16,7 @@ import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { SessionInfoPopover } from '@/components/app-shell/SessionInfoPopover'
 import { RenameDialog } from '@/components/ui/rename-dialog'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -24,8 +26,13 @@ import { rendererPerf } from '@/lib/perf'
 import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
-import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
+import { decideChatAccessBanner } from '@/lib/chat-access-banner'
+import { formatQuotaResetTime } from '@/lib/quota-reset-time'
+import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sendFailureAtomFamily, sessionMetaMapAtom } from '@/atoms/sessions'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
+import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
@@ -40,6 +47,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   React.useLayoutEffect(() => {
     rendererPerf.markSessionSwitch(sessionId, 'panel.mounted')
   }, [sessionId])
+
+  // Journey #1: the insufficient-credit banner's recharge action reuses the
+  // SAME trusted handoff as the TopBar (one-at-a-time, scope-fenced); the
+  // member variant is decided by the shared role gate.
+  const productSpace = useOptionalProductSpaceContext()
+  const { canOpenPayment, openPayment } = useAdminPaymentHandoff()
 
   const {
     activeWorkspaceId,
@@ -299,47 +312,70 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     store.set(elementDraftRefsAtomFamily(sessionId), refs)
   }, [sessionId, store])
 
+  // Journey #8: a failed local send leaves a session-scoped prompt (not a
+  // message). The explicit action restores the preserved draft into the
+  // composer and focuses it — re-sending stays a deliberate user act, so a
+  // send whose server receipt is unknown is never blindly re-issued, and a
+  // double click settles on the first tap (the prompt is consumed).
+  const sendFailure = useAtomValue(
+    React.useMemo(() => sendFailureAtomFamily(sessionId), [sessionId]),
+  )
+
+  const handleRestoreSendFailureDraft = React.useCallback(() => {
+    const failure = store.get(sendFailureAtomFamily(sessionId))
+    if (!failure) return
+    store.set(sendFailureAtomFamily(sessionId), null)
+    window.dispatchEvent(new CustomEvent('craft:restore-input', {
+      detail: { sessionId, text: failure.draft },
+    }))
+    dispatchFocusInputEvent({ sessionId })
+  }, [sessionId, store])
+
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>
     isSessionConnectionUnavailable(session?.llmConnection, llmConnections),
     [session?.llmConnection, llmConnections]
   )
 
+  // Journey #1: the banner decision (billing semantics + role split) is a
+  // pure function; this component only translates keys and wires actions.
+  const bannerDecision = React.useMemo(
+    () => decideChatAccessBanner(chatAccessStatus, { canOpenPayment }),
+    [chatAccessStatus, canOpenPayment],
+  )
+
   const inputStatusBanner = React.useMemo(() => {
-    switch (chatAccessStatus?.issue) {
-      case 'no-ai-service':
-        return {
-          variant: 'info' as const,
-          message: t('chat.statusBanner.noAiService'),
-        }
-      case 'quota-exhausted':
-        return {
-          variant: 'destructive' as const,
-          message: t('chat.statusBanner.quotaExhausted'),
-        }
-      case 'account-disabled':
-        return {
-          variant: 'destructive' as const,
-          message: t('chat.statusBanner.accountDisabled'),
-        }
-      // POO-144: the space AI-config sync states shadow the empty-list banner —
-      // syncing is informational, failed offers an explicit user-triggered retry.
-      case 'ai-config-syncing':
-        return {
-          variant: 'info' as const,
-          message: t('chat.statusBanner.aiConfigSyncing'),
-        }
-      case 'ai-config-sync-failed':
-        return {
-          variant: 'destructive' as const,
-          message: t('chat.statusBanner.aiConfigSyncFailed'),
-          actionLabel: t('chat.statusBanner.retrySync'),
-          onAction: onRetryAiConfigSync,
-        }
-      default:
-        return null
+    // Journey #1 billing block wins: under a hard access block a draft
+    // prompt would be noise — the banner owns the messaging and the input.
+    if (bannerDecision) {
+      return {
+        variant: bannerDecision.variant,
+        message: t(
+          bannerDecision.messageKey,
+          bannerDecision.quotaResetAt !== undefined
+            ? { reset: formatQuotaResetTime(bannerDecision.quotaResetAt, i18n.resolvedLanguage) }
+            : {},
+        ),
+        ...(bannerDecision.action === 'recharge'
+          ? { actionLabel: t('chat.statusBanner.recharge'), onAction: openPayment }
+          : {}),
+        ...(bannerDecision.action === 'retry-ai-config-sync'
+          ? { actionLabel: t('chat.statusBanner.retrySync'), onAction: onRetryAiConfigSync }
+          : {}),
+      }
     }
-  }, [chatAccessStatus?.issue, onRetryAiConfigSync, t])
+    // Journey #8: the failed-send prompt (title + collapsed detail + restore).
+    if (sendFailure) {
+      return {
+        variant: 'destructive' as const,
+        message: sendFailure.title,
+        detail: sendFailure.detail,
+        actionLabel: t('chat.sendFailed.restoreDraft'),
+        onAction: handleRestoreSendFailureDraft,
+      }
+    }
+    return null
+  }, [bannerDecision, onRetryAiConfigSync, openPayment, t, sendFailure, handleRestoreSendFailureDraft])
 
   const isChatInputDisabled = !!inputStatusBanner
 
@@ -517,9 +553,19 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
   }, [sessionId])
 
+  // Journey #7: sharing asks via the shared confirm dialog (same locales keys
+  // as the session menu) instead of a native window.confirm.
+  const { requestConfirm: requestShareConfirm, confirmElement: shareConfirmElement } = useConfirmDialog()
+
   // Share action handlers
   const handleShare = React.useCallback(async () => {
-    if (!window.confirm('Share this session publicly? It may contain file paths, prompts, tool output, or credentials. Anyone with the link can read it.')) {
+    const confirmed = await requestShareConfirm({
+      testId: 'share-confirm',
+      title: t('chat.shareConfirm.title'),
+      description: t('chat.shareConfirm.description'),
+      confirmLabel: t('chat.shareConfirm.confirm'),
+    })
+    if (!confirmed) {
       return
     }
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
@@ -532,7 +578,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     } else {
       toast.error(t('toast.failedToShare'), { description: result?.error || t('toast.unknownError') })
     }
-  }, [sessionId])
+  }, [sessionId, t, requestShareConfirm])
 
   const handleOpenInBrowser = React.useCallback(() => {
     if (sharedUrl) window.electronAPI.openUrl(sharedUrl)
@@ -876,6 +922,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {shareConfirmElement}
     </>
   )
 })

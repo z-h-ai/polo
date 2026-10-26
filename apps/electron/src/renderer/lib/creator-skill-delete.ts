@@ -12,7 +12,8 @@ export type CreatorSkillDeleteOutcome =
 export async function deleteWorkspaceSkillWithModifiedConfirmation(args: {
   workspaceId: string
   slug: string
-  confirmPermanentDelete: () => boolean
+  /** Journey #7: may be async — the shared confirm dialog resolves a promise. */
+  confirmPermanentDelete: () => boolean | Promise<boolean>
   api: Pick<
     Window['electronAPI'],
     'deleteSkill' | 'creatorSkillUninstall'
@@ -41,7 +42,7 @@ export async function deleteWorkspaceSkillWithModifiedConfirmation(args: {
     }
   }
   if (!initial.detached) return { status: 'deleted' }
-  if (!args.confirmPermanentDelete()) return { status: 'detached' }
+  if (!(await args.confirmPermanentDelete())) return { status: 'detached' }
   if (!initial.forceDeleteCredential) {
     return {
       status: 'error',

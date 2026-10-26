@@ -4,18 +4,13 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchButtonClassName, clientWorkbenchPrimaryClassName } from '@/components/ui/client-workbench'
 import { cn } from '@/lib/utils'
+import { productSpaceAvatarGlyph } from '@/lib/space-initial'
 import type { ProductSpaceSelectionSource } from '@/hooks/useProductSpaceContext'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 
 export type ProductSpaceSelectAccount = {
   displayName: string
   username: string
-}
-
-function spaceInitial(name: string, kind: 'personal' | 'enterprise'): string {
-  if (kind === 'personal') return '我'
-  const trimmed = name.trim()
-  return trimmed ? trimmed[0]!.toUpperCase() : '企'
 }
 
 function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
@@ -171,7 +166,12 @@ export function ProductSpaceSelectScreen({
                   )}
                   aria-hidden="true"
                 >
-                  {spaceInitial(space.name, space.kind)}
+                  {(() => {
+                    // Journey #9: the glyph is localized (never hardcoded CJK)
+                    // — zh-Hans renders 我/企, other locales their own word.
+                    const glyph = productSpaceAvatarGlyph(space.name, space.kind)
+                    return glyph.kind === 'letter' ? glyph.letter : t(glyph.key)
+                  })()}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className={cn('block truncate text-[13px] font-semibold leading-[1.3]', !isSelected && 'text-foreground')}>

@@ -9,12 +9,7 @@ import {
 } from '@/components/ui/styled-dropdown'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { cn } from '@/lib/utils'
-
-function spaceInitial(name: string, kind: 'personal' | 'enterprise'): string {
-  if (kind === 'personal') return '我'
-  const trimmed = name.trim()
-  return trimmed ? trimmed[0]!.toUpperCase() : '企'
-}
+import { productSpaceAvatarGlyph } from '@/lib/space-initial'
 
 function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
   return kind === 'personal'
@@ -68,7 +63,12 @@ export function ProductSpaceSwitcher() {
                   'bg-[var(--accent-soft)]',
                 )}
               >
-                {spaceInitial(item.name, item.kind)}
+                {(() => {
+                  // Journey #9: the glyph is localized (never hardcoded CJK)
+                  // — zh-Hans renders 我/企, other locales their own word.
+                  const glyph = productSpaceAvatarGlyph(item.name, item.kind)
+                  return glyph.kind === 'letter' ? glyph.letter : t(glyph.key)
+                })()}
               </span>
               <span className="min-w-0 flex-1 truncate">
                 {item.name}

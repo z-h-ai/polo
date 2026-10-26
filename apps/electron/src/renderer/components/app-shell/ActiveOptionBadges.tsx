@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId, type CommandGroup } from '@/components/ui/slash-command-menu'
 import { ChevronDown, Info, Target } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@polo-ai/shared/agent/modes'
@@ -459,6 +460,8 @@ function PermissionModeDropdown({
 }: PermissionModeDropdownProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
+  // Journey #5/#7: goal-end asks via the shared design-system confirm dialog.
+  const { requestConfirm, confirmElement } = useConfirmDialog()
   // Optimistic local state - updates immediately, syncs with prop
   const [optimisticMode, setOptimisticMode] = React.useState(permissionMode)
 
@@ -511,10 +514,21 @@ function PermissionModeDropdown({
     } else if (commandId === 'goal') {
       onGoalModeToggle?.()
     } else if (commandId === 'goal-end') {
-      onGoalEnd?.()
+      // Journey #5: ending a goal is irreversible — ask first via the shared
+      // design-system confirm. The command only goes out from the dialog's
+      // explicit confirm; cancel/ESC sends nothing.
+      setOpen(false)
+      void requestConfirm({
+        testId: 'goal-end-confirm',
+        title: t('goal.endConfirmTitle'),
+        description: t('goal.endConfirmDescription'),
+        confirmLabel: t('goal.endConfirmAction'),
+        onConfirm: () => { onGoalEnd?.() },
+      })
+      return
     }
     setOpen(false)
-  }, [onPermissionModeChange, onGoalModeToggle, onGoalEnd])
+  }, [onPermissionModeChange, onGoalModeToggle, requestConfirm, t])
 
   // Get config for current mode (use optimistic state for instant UI update)
   const config = PERMISSION_MODE_CONFIG[optimisticMode]
@@ -540,6 +554,7 @@ function PermissionModeDropdown({
   const currentStyle = modeStyles[optimisticMode]
 
   return (
+    <>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
@@ -584,6 +599,11 @@ function PermissionModeDropdown({
         />
       </PopoverContent>
     </Popover>
+
+    {/* Journey #5/#7: goal-end confirmation. Cancel/ESC close without sending
+        anything; only the explicit confirm issues the goalEnd command. */}
+    {confirmElement}
+    </>
   )
 }
 

@@ -33,6 +33,7 @@ import { sessionMetaMapAtom } from "@/atoms/sessions"
 import { useOptionalAppShellContext } from "@/context/AppShellContext"
 import { useOptionalClientPage } from "@/context/ClientPageContext"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
+import { useAdminPaymentHandoff } from "@/hooks/useAdminPaymentHandoff"
 import { useTabShell } from "@/context/TabShellContext"
 import { navigate, routes } from "@/lib/navigate"
 import { cn } from "@/lib/utils"
@@ -98,35 +99,16 @@ export function TopBar() {
   // tickets).
   // POO-119: the same lifetime argument applies to the enterprise-console
   // entries — their click-time lease check must read a mirror that is updated
-  // for the WHOLE bar lifetime, not a per-open menu mount.
+  // for the WHOLE bar lifetime, not a per-open menu mount. The PAYMENT
+  // mirror/in-flight refs moved to useAdminPaymentHandoff (journey #1: the
+  // chat banner's 「去充值」 mints tickets under the SAME fences); the
+  // enterprise console keeps its own bar-lifetime mirror here.
+  const { canOpenPayment, openPayment } = useAdminPaymentHandoff()
   const visibleProductSpaceRef = useRef(productSpace)
   useInsertionEffect(() => {
     visibleProductSpaceRef.current = productSpace
     return () => { visibleProductSpaceRef.current = null }
   }, [productSpace])
-  const canOpenPayment = productSpace && !productSpace.pendingSwitch && (
-    productSpace.activeProductSpace.kind === 'personal' || productSpace.activeProductSpace.role === 'owner'
-  )
-  // One handoff at a time: every click would otherwise mint another ticket,
-  // superseding the one the user is about to redeem. Re-entry is dropped
-  // silently — the first click still owns the outcome.
-  const paymentHandoffInFlight = useRef(false)
-  const openPayment = async () => {
-    const scope = visibleProductSpaceRef.current
-    if (!scope || scope.pendingSwitch || paymentHandoffInFlight.current) return
-    paymentHandoffInFlight.current = true
-    try {
-      const result = await window.electronAPI.adminPaymentHandoff()
-      const current = visibleProductSpaceRef.current
-      if (!current || current.accountId !== scope.accountId || current.activeProductSpaceId !== scope.activeProductSpaceId
-        || current.contextVersion !== scope.contextVersion || current.pendingSwitch) return
-      if (!result.success || result.accountId !== current.accountId || result.productSpaceId !== current.activeProductSpaceId) {
-        toast.error(t("topbar.account.paymentError")); return
-      }
-      await window.electronAPI.openUrl(result.url)
-    } catch { if (visibleProductSpaceRef.current === scope) toast.error(t("topbar.account.paymentError")) }
-    finally { paymentHandoffInFlight.current = false }
-  }
 
   // POO-119 ENTMENU-01/02: the enterprise admin console and creator center
   // live in the account menu, gated to enterprise spaces whose role may manage
