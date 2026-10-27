@@ -239,7 +239,7 @@ export function createWebApi(options: WebApiOptions): {
 
     // Relaunch — reload page
     relaunchApp: () => { window.location.reload(); return Promise.resolve() },
-    removeWorkspace: () => Promise.resolve(false), // not supported in web UI
+    removeWorkspace: () => Promise.resolve({ removed: false }), // not supported in web UI
     invokeOnServer: () => Promise.reject(new Error('Cross-server RPC not available in web UI')),
   }
 

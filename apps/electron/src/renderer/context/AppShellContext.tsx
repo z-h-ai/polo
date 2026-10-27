@@ -75,6 +75,9 @@ export interface AppShellContextType {
   chatAccessStatus?: ChatAccessStatus | null
   /** POO-144: user-triggered retry of a failed space AI-config sync (never automatic) */
   onRetryAiConfigSync?: () => void
+  /** U2: banner "I've recharged — recheck" — clears a balance-shaped latch
+   * (insufficient-credit only); hard blocks are not clearable from the client. */
+  onRecheckBilling?: () => void
   /** Signed-in Admin user, when Admin auth is configured */
   currentAdminUser?: Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null
   /** Log out the current Admin user and return to login */

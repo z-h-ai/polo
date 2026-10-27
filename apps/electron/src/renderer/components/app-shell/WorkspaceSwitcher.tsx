@@ -8,6 +8,8 @@ import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { fullscreenOverlayOpenAtom } from "@/atoms/overlay"
+import { useConfirmDialog } from "@/components/ui/confirm-dialog"
+import { presentWorkspaceRemoval } from "@/lib/workspace-delete"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -56,6 +58,12 @@ export function WorkspaceSwitcher({
   const [showCreationScreen, setShowCreationScreen] = useState(false)
   const [reconnectTarget, setReconnectTarget] = useState<Workspace | null>(null)
   const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
+  // U1 (product-closure 2026-10-27): deleting a workspace rmSync's its whole
+  // data directory — that ask goes through the shared confirm dialog (cancel
+  // focused, busy-guarded, dismissals never write), exactly like skill
+  // force-delete. One ask at a time; a superseded ask resolves as cancel.
+  const { requestConfirm: requestDeleteConfirm, confirmElement: deleteConfirmElement } = useConfirmDialog()
+  const removalInFlightRef = useRef(false)
   const selectedWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
   const workspaceIconMap = useWorkspaceIcons(workspaces)
   const connectionState = useTransportConnectionState()
@@ -142,12 +150,34 @@ export function WorkspaceSwitcher({
       toast.error(t('toast.cannotRemoveActiveWorkspace'))
       return
     }
-    const removed = await window.electronAPI.removeWorkspace(workspace.id)
-    if (removed) {
-      toast.success(t('toast.removedWorkspace', { name: workspace.name }))
-      onWorkspaceRemoved?.()
+    // U1: busy-guard the trash icon itself — a double click must not stack
+    // two confirms or two deletes.
+    if (removalInFlightRef.current) return
+    removalInFlightRef.current = true
+    try {
+      const confirmed = await requestDeleteConfirm({
+        testId: 'workspace-delete-confirm',
+        title: t('workspaceDelete.confirmTitle', { name: workspace.name }),
+        description: t('workspaceDelete.confirmDescription'),
+        confirmLabel: t('workspaceDelete.confirmAction'),
+      })
+      // Cancellation (button, Esc, outside) has zero side effects.
+      if (!confirmed) return
+      const outcome = await window.electronAPI.removeWorkspace(workspace.id)
+      // U1: success, already-gone (another window) and partial data-cleanup
+      // failure all speak honestly — a swallowed rmSync failure must never
+      // read as "deleted".
+      const presentation = presentWorkspaceRemoval(workspace.name, outcome)
+      if (presentation.toast === 'success') {
+        toast.success(t(presentation.messageKey, presentation.params))
+      } else {
+        toast.error(t(presentation.messageKey, presentation.params))
+      }
+      if (presentation.refreshList) onWorkspaceRemoved?.()
+    } finally {
+      removalInFlightRef.current = false
     }
-  }, [activeWorkspaceId, onWorkspaceRemoved])
+  }, [activeWorkspaceId, onWorkspaceRemoved, requestDeleteConfirm, t])
 
   const handleCloseCreationScreen = useCallback(() => {
     setShowCreationScreen(false)
@@ -333,6 +363,8 @@ export function WorkspaceSwitcher({
           </StyledDropdownMenuItem>
         </StyledDropdownMenuContent>
       </DropdownMenu>
+      {/* U1: shared confirm host — portal-free, survives the dropdown close. */}
+      {deleteConfirmElement}
     </>
   )
 }

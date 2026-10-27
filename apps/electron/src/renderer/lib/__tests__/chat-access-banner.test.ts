@@ -15,15 +15,21 @@ describe('decideChatAccessBanner (journey #1 classification matrix)', () => {
       variant: 'destructive',
       messageKey: 'chat.statusBanner.insufficientCredit',
       action: 'recharge',
+      // U2: both role variants carry the latch-clearing recheck as the
+      // SECOND action — the recharge handoff stays primary.
+      secondaryAction: 'recheck-billing',
     })
     expect(decision?.quotaResetAt).toBeUndefined()
   })
 
-  test('insufficient credit: non-owner member gets contact-an-admin copy and NO action', () => {
+  test('insufficient credit: non-owner member gets contact-an-admin copy and NO recharge action', () => {
     const decision = decideChatAccessBanner({ issue: 'insufficient-credit' }, { canOpenPayment: false })
     expect(decision).toMatchObject({
       variant: 'destructive',
       messageKey: 'chat.statusBanner.insufficientCreditMember',
+      // U2: the member still gets the recheck — the latch yields to the next
+      // server answer even though the member cannot recharge themselves.
+      secondaryAction: 'recheck-billing',
     })
     expect(decision?.action).toBeUndefined()
   })
@@ -40,6 +46,8 @@ describe('decideChatAccessBanner (journey #1 classification matrix)', () => {
       quotaResetAt: 1735689600000,
     })
     expect(decision?.action).toBeUndefined()
+    // U2: a recharge cannot lift a period quota — no recheck either.
+    expect(decision?.secondaryAction).toBeUndefined()
   })
 
   test('plain 429 (no reset fact) stays promise-free', () => {
@@ -51,7 +59,7 @@ describe('decideChatAccessBanner (journey #1 classification matrix)', () => {
     expect(decision?.quotaResetAt).toBeUndefined()
   })
 
-  test('non-billing issues keep their existing semantics', () => {
+  test('non-billing issues keep their existing semantics (U2: no recheck on hard blocks)', () => {
     expect(decideChatAccessBanner({ issue: 'no-ai-service' }, { canOpenPayment: true }))
       .toMatchObject({ variant: 'info', messageKey: 'chat.statusBanner.noAiService' })
     expect(decideChatAccessBanner({ issue: 'account-disabled' }, { canOpenPayment: true }))
@@ -60,6 +68,20 @@ describe('decideChatAccessBanner (journey #1 classification matrix)', () => {
       .toMatchObject({ variant: 'info', messageKey: 'chat.statusBanner.aiConfigSyncing' })
     expect(decideChatAccessBanner({ issue: 'ai-config-sync-failed' }, { canOpenPayment: false }))
       .toMatchObject({ variant: 'destructive', messageKey: 'chat.statusBanner.aiConfigSyncFailed', action: 'retry-ai-config-sync' })
+    for (const issue of ['account-disabled', 'ai-config-syncing', 'ai-config-sync-failed'] as const) {
+      expect(decideChatAccessBanner({ issue }, { canOpenPayment: true })?.secondaryAction).toBeUndefined()
+    }
+  })
+
+  test('U10: no-ai-service in a PERSONAL space drops the misleading "admin" copy', () => {
+    const decision = decideChatAccessBanner({ issue: 'no-ai-service' }, { canOpenPayment: true, isPersonalSpace: true })
+    expect(decision).toMatchObject({ variant: 'info', messageKey: 'noAiService.personalBanner' })
+    // The enterprise/shared variant is unchanged.
+    expect(decideChatAccessBanner({ issue: 'no-ai-service' }, { canOpenPayment: true, isPersonalSpace: false }))
+      .toMatchObject({ variant: 'info', messageKey: 'chat.statusBanner.noAiService' })
+    // Playground / no-provider scope defaults to the shared variant.
+    expect(decideChatAccessBanner({ issue: 'no-ai-service' }, { canOpenPayment: true }))
+      .toMatchObject({ variant: 'info', messageKey: 'chat.statusBanner.noAiService' })
   })
 
   test('no status renders no banner', () => {
