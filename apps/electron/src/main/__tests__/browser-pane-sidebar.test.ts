@@ -499,3 +499,57 @@ describe('BrowserPaneManager sidebar/popup state machine (POO-135)', () => {
     expect(unavailables.map((e) => e.reason)).toEqual(['iframe', 'hidden'])
   })
 })
+
+
+describe('POO-157 sidebar-first presentation requests', () => {
+  it('focus requests the main sidebar instead of showing a popup, including deferred create(show:true)', async () => {
+    const manager = new BrowserPaneManager()
+    const host = createMockWindow()
+    manager.setWindowManager({ getFocusedWindow: () => host, getWorkspaceForWindow: () => 'ws-a', getWindowByWorkspace: () => host } as any)
+    const requests: any[] = []
+    manager.onOpenRequested((info, target, reason) => { requests.push({ info, target, reason }) })
+    const id = manager.createInstance('sidebar-first', { show: true, workspaceId: 'ws-a' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const popup = createdWindows.at(-1)
+    expect(requests.some((r) => r.info.id === id && r.target === host && r.reason === 'focus')).toBe(true)
+    expect(popup.show).not.toHaveBeenCalled()
+    manager.focus(id)
+    expect(requests.at(-1).reason).toBe('focus')
+    expect(popup.show).not.toHaveBeenCalled()
+    manager.destroyInstance(id)
+  })
+
+  it('explicit detach alone opens the popup; hiding requests return to the ORIGINAL host', async () => {
+    const manager = new BrowserPaneManager()
+    const original = createMockWindow()
+    const other = createMockWindow()
+    manager.setWindowManager({ getFocusedWindow: () => other, getWorkspaceForWindow: () => 'ws-b', getWindowByWorkspace: () => other } as any)
+    const requests: any[] = []
+    manager.onOpenRequested((info, target, reason) => { requests.push({ info, target, reason }) })
+    const id = manager.createInstance('return-host', { workspaceId: 'ws-a' })
+    manager.embedInstance(id, original as any)
+    manager.detachToPopup(id)
+    const popup = createdWindows.at(-1)
+    expect(popup.show).toHaveBeenCalledTimes(1)
+    manager.hide(id)
+    await Promise.resolve()
+    expect(requests.at(-1).target).toBe(original)
+    expect(requests.at(-1).reason).toBe('return')
+    expect(manager.getInstance(id)).toBeDefined()
+    manager.destroyInstance(id)
+  })
+
+  it('focus of an embedded browser never opens its empty backing window', async () => {
+    const manager = new BrowserPaneManager()
+    const host = createMockWindow()
+    const requests: any[] = []
+    manager.onOpenRequested((info, target, reason) => { requests.push({ info, target, reason }) })
+    const id = manager.createInstance('already-embedded')
+    manager.embedInstance(id, host as any)
+    manager.focus(id)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(requests.at(-1).target).toBe(host)
+    expect(createdWindows.at(-1).show).not.toHaveBeenCalled()
+    manager.destroyInstance(id)
+  })
+})
