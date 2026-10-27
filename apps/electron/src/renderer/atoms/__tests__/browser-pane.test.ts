@@ -58,7 +58,10 @@ describe('browser pane atoms', () => {
   })
 
   describe('filterInstancesForWorkspace', () => {
-    it('returns only the active workspace + unbound entries (single id)', () => {
+    // product-closure U12: unbound (workspaceId-less) instances no longer
+    // leak across workspaces — a workspace-scoped viewer sees only instances
+    // stamped with one of ITS ids.
+    it('returns only instances bound to the active workspace (single id)', () => {
       const all = [
         makeInstance('ws-a-bound', { workspaceId: 'ws-a' }),
         makeInstance('ws-b-bound', { workspaceId: 'ws-b' }),
@@ -66,10 +69,10 @@ describe('browser pane atoms', () => {
       ]
 
       const visibleInWsA = filterInstancesForWorkspace(all, 'ws-a', null)
-      expect(visibleInWsA.map((i) => i.id).sort()).toEqual(['unbound', 'ws-a-bound'])
+      expect(visibleInWsA.map((i) => i.id)).toEqual(['ws-a-bound'])
 
       const visibleInWsB = filterInstancesForWorkspace(all, 'ws-b', null)
-      expect(visibleInWsB.map((i) => i.id).sort()).toEqual(['unbound', 'ws-b-bound'])
+      expect(visibleInWsB.map((i) => i.id)).toEqual(['ws-b-bound'])
     })
 
     it('matches against BOTH local and remote workspace ids (remote-mirror case)', () => {
@@ -97,14 +100,15 @@ describe('browser pane atoms', () => {
       ])
     })
 
-    it('treats undefined workspaceId on an instance as unbound (old-server compat)', () => {
+    it('hides instances without workspaceId from a workspace-scoped viewer (U12 convergence)', () => {
       // Simulate an older main process that doesn't emit workspaceId yet.
+      // product-closure U12: such instances used to pass every workspace's
+      // filter (cross-workspace leak); they are now scoped out — a workspace
+      // viewer only sees instances carrying one of its own workspace ids.
       const legacyInstance: BrowserInstanceInfo = makeInstance('legacy')
       delete legacyInstance.workspaceId
 
-      expect(filterInstancesForWorkspace([legacyInstance], 'ws-a', null).map((i) => i.id)).toEqual([
-        'legacy',
-      ])
+      expect(filterInstancesForWorkspace([legacyInstance], 'ws-a', null)).toEqual([])
     })
 
     it('works with only the remote id (local id null)', () => {

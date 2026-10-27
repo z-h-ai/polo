@@ -68,7 +68,8 @@ import {
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
 import { extractBadges } from '@/lib/mentions'
-import { classifySendFailure, stripFailedOptimisticMessage } from '@/lib/send-failure'
+import { stripFailedOptimisticMessage } from '@/lib/send-failure'
+import { applySendBlockedByLatch, applySendFailure } from '@/lib/send-failure-apply'
 import { getDefaultStore } from 'jotai'
 import {
   ShikiThemeProvider,
@@ -494,6 +495,12 @@ export default function App() {
     return null
   }, [aiConfigSyncPhase, llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue, runtimeQuotaResetAt])
 
+  // U4: a stable mirror for callbacks that must test the CURRENT access
+  // block at fire time (the deep-link auto-send fires from a setTimeout —
+  // a render-closure value would be stale by then).
+  const chatAccessStatusRef = useRef<ChatAccessStatus | null>(chatAccessStatus)
+  chatAccessStatusRef.current = chatAccessStatus
+
   // Journey #1: a billing block belongs to the space whose admission surface
   // produced it. A committed PRODUCT-SPACE switch discards it (the new space
   // re-adjudicates on its own first send); account exits clear the whole latch
@@ -636,6 +643,16 @@ export default function App() {
     // A stale committed-switch record of the previous account must never
     // drive the next account's rollback window.
     lastCommittedSwitchRef.current = null
+    // U12 (product-closure 2026-10-27): embedded browser panes are account-
+    // scoped surfaces — a pane kept alive across a logout/account switch would
+    // carry the previous account's pages into the next one. The IPC method is
+    // delivered by the B batch (preload + main); the optional call tolerates
+    // bundles where it does not exist yet. The clear-storage step may rethrow
+    // after instances are already destroyed — logout must not surface that
+    // as an unhandled rejection.
+    ;(window.electronAPI as { browserPaneDestroyAll?: () => Promise<void> } | undefined)
+      ?.browserPaneDestroyAll?.()
+      ?.catch(() => undefined)
   }, [
     applyPendingQuestions,
     initializeSessions,
@@ -2499,46 +2516,20 @@ export default function App() {
       // optimistic user bubble is ALWAYS stripped — the server receipt is
       // unknown, so no half-confirmed message lingers and no raw
       // "Failed to send message: …" text is persisted into the conversation.
-      const outcome = classifySendFailure(error, {
+      // U4: the classify+apply pair is the SHARED pipeline — the deep-link
+      // `send=true` and `send-message` action paths funnel through the same
+      // applier below, so all three entry points speak identical failure.
+      applySendFailure(error, {
+        sessionId,
+        draft: message,
         hadGoalStartIntent: !!goalStartIntentForSession(store.get, sessionId),
+      }, {
+        store,
+        setBillingLatch: (issue, quotaResetAt) => {
+          setRuntimeChatAccessIssue(issue)
+          setRuntimeQuotaResetAt(quotaResetAt)
+        },
       })
-      if (outcome.kind === 'billing-block') {
-        // Journey #1: the latch records WHICH billing class blocked the send —
-        // insufficient credit (recharge/member copy) vs period quota (reset
-        // copy only with the server's own reset fact). A reset fact the
-        // server did not send is never invented here.
-        setRuntimeChatAccessIssue(outcome.issue)
-        setRuntimeQuotaResetAt(outcome.issue === 'quota-exhausted' ? outcome.quotaResetAt : undefined)
-        // Journey #8 (review F1): the block banner outranks the draft prompt,
-        // but the draft itself must survive the block — it rides in the same
-        // session-scoped prompt atom and becomes restorable once the latch
-        // clears. Losing the text entirely was the bug.
-        store.set(sendFailureAtomFamily(sessionId), {
-          title: i18n.t('chat.sendFailed.title'),
-          detail: error instanceof Error ? error.message : String(error),
-          draft: message,
-          billingBlocked: true,
-        })
-      } else if (outcome.kind === 'goal-start-failed') {
-        // POO-134: a rejected Goal start (e.g. a non-terminal Goal already owns
-        // the session) surfaces the server's error text verbatim — the armed
-        // goal-mode intent stays selected so the user can end the current Goal
-        // or edit and resend; no automatic downgrade to an ordinary chat.
-        toast.error(i18n.t('goal.startFailed', {
-          error: error instanceof Error ? error.message : String(error),
-        }), { duration: 5000 })
-      } else {
-        // Journey #8: session-scoped transient prompt (localized title +
-        // collapsed technical detail + explicit restore-draft action). The
-        // draft is preserved here — re-sending stays a deliberate user act,
-        // never an automatic resend of a message whose server receipt is
-        // unknown.
-        store.set(sendFailureAtomFamily(sessionId), {
-          title: i18n.t('chat.sendFailed.title'),
-          detail: outcome.detail,
-          draft: message,
-        })
-      }
       updateSessionById(sessionId, (s) => ({
         isProcessing: false,
         messages: optimisticUserMessageId
@@ -2547,6 +2538,47 @@ export default function App() {
       }))
     }
   }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, store, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
+
+  // U2 (product-closure 2026-10-27): the banner's "I've recharged — recheck"
+  // action. Only a balance-shaped block (insufficient-credit) is clearable by
+  // a payment the user claims to have made; hard blocks (no service, disabled
+  // account, exhausted quota) keep standing until the server says otherwise.
+  // quotaResetAt is intentionally left alone — it only surfaces under a
+  // quota-exhausted latch, which this action can never clear.
+  const handleRecheckBilling = useCallback(() => {
+    setRuntimeChatAccessIssue(prev => (prev === 'insufficient-credit') ? null : prev)
+  }, [])
+
+  // U4 (product-closure 2026-10-27): the deep-link send paths (send=true and
+  // send-message) funnel their failures through the SAME applier as the
+  // manual send above, so billing answers latch the banner and the draft is
+  // recoverable no matter which entry point tripped.
+  const applyDeepLinkSendFailure = useCallback((sessionId: string, error: unknown, draft: string) => {
+    applySendFailure(error, {
+      sessionId,
+      draft,
+      hadGoalStartIntent: !!goalStartIntentForSession(store.get, sessionId),
+    }, {
+      store,
+      setBillingLatch: (issue, quotaResetAt) => {
+        setRuntimeChatAccessIssue(issue)
+        setRuntimeQuotaResetAt(quotaResetAt)
+      },
+    })
+    // Deep-link sends carry no renderer-side optimistic bubble (the manual
+    // path's strip above is manual-only); just clear the processing flag.
+    updateSessionById(sessionId, (s) => ({ isProcessing: false }))
+  }, [store, updateSessionById])
+
+  // U4: asked at fire time (the deep-link auto-send runs from a setTimeout —
+  // a render closure would be stale) so a latched block stops the send before
+  // any network call, mirroring the manual-send guard.
+  const isChatSendBlocked = useCallback(() => chatAccessStatusRef.current != null, [])
+
+  const handleApplySendBlocked = useCallback((sessionId: string, draft: string) => {
+    applySendBlockedByLatch(sessionId, draft, { store })
+    updateSessionById(sessionId, (s) => ({ isProcessing: false }))
+  }, [store, updateSessionById])
 
   /**
    * Unified handler for all session option changes.
@@ -3188,6 +3220,7 @@ export default function App() {
     workspaceDefaultLlmConnection,
     chatAccessStatus,
     onRetryAiConfigSync: runScopedAiConfigSync,
+    onRecheckBilling: handleRecheckBilling,
     currentAdminUser,
     onAdminLogout: handleAdminLogout,
     refreshLlmConnections,
@@ -3243,6 +3276,7 @@ export default function App() {
     workspaceDefaultLlmConnection,
     chatAccessStatus,
     runScopedAiConfigSync,
+    handleRecheckBilling,
     currentAdminUser,
     handleAdminLogout,
     refreshLlmConnections,
@@ -3769,6 +3803,9 @@ export default function App() {
                   isReady={appState === 'ready'}
                   isSessionsReady={sessionsLoaded}
                   remoteWorkspaceId={windowRemoteWorkspaceId}
+                  onApplySendFailure={applyDeepLinkSendFailure}
+                  isSendBlocked={isChatSendBlocked}
+                  onApplySendBlocked={handleApplySendBlocked}
                 >
                   <div data-testid="polo-app-root" className="flex h-full min-h-0 flex-col text-foreground">
                     {showTransportConnectionBanner && connectionState && (

@@ -20,6 +20,8 @@ const CHANNELS = {
   DESTROY: 'browser-toolbar:destroy',
   STATE_UPDATE: 'browser-toolbar:state-update',
   THEME_COLOR: 'browser-toolbar:theme-color',
+  // product-closure U6: main→renderer UI-language sync for this entry.
+  LANGUAGE_CHANGED: 'browser-toolbar:language-changed',
 } as const
 
 // Instance ID is passed via query parameter by BrowserPaneManager
@@ -49,5 +51,10 @@ contextBridge.exposeInMainWorld('browserToolbar', {
     const handler = (_event: Electron.IpcRendererEvent, payload: { reason?: string }) => callback(payload)
     ipcRenderer.on(CHANNELS.FORCE_CLOSE_MENU, handler)
     return () => { ipcRenderer.removeListener(CHANNELS.FORCE_CLOSE_MENU, handler) }
+  },
+  onLanguageChanged: (callback: (lang: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, lang: string) => callback(lang)
+    ipcRenderer.on(CHANNELS.LANGUAGE_CHANGED, handler)
+    return () => { ipcRenderer.removeListener(CHANNELS.LANGUAGE_CHANGED, handler) }
   },
 })

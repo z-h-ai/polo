@@ -13,6 +13,8 @@ mock.module('electron', () => ({
   app: {
     isPackaged: false,
     getAppPath: () => '/',
+    // local-app-runtime resolves its bundle root via app.getPath('userData').
+    getPath: () => '/tmp/polo-registration-test',
     quit: () => {},
     dock: { setIcon: () => {}, setBadge: () => {} },
   },
@@ -34,6 +36,13 @@ mock.module('electron', () => ({
     fromWebContents: () => null,
     getFocusedWindow: () => null,
     getAllWindows: () => [],
+  },
+  // deep-link-callback-bridge imports `webContents` at module load; without
+  // this stub the whole registration suite died on a named-export error
+  // before a single assertion ran.
+  webContents: {
+    fromId: () => undefined,
+    getAllWebContents: () => [],
   },
   BrowserView: class {},
   Menu: {
@@ -74,6 +83,8 @@ function createMockDeps(): HandlerDeps {
       onStateChange: () => {},
       onRemoved: () => {},
       onInteracted: () => {},
+      onElementPickerEvent: () => {},
+      onDownloadEvent: () => {},
     } as unknown as NonNullable<HandlerDeps['browserPaneManager']>,
     oauthFlowStore: {
       store: () => {},
@@ -108,6 +119,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
     productSpace,
     resources,
     transfer,
+    knowledgeBase,
   ] = await Promise.all([
     import('@polo-ai/server-core/handlers/rpc/auth'),
     import('@polo-ai/server-core/handlers/rpc/automations'),
@@ -128,16 +140,18 @@ async function getExpectedChannels(): Promise<Set<string>> {
     import('@polo-ai/server-core/handlers/rpc/product-space'),
     import('@polo-ai/server-core/handlers/rpc/resources'),
     import('@polo-ai/server-core/handlers/rpc/transfer'),
+    import('@polo-ai/server-core/handlers/rpc/knowledge-base'),
   ])
 
   // GUI handler channels (remain in electron)
-  const [browser, guiSystem, guiWorkspace, guiSettings, tabBrowser, localApps] = await Promise.all([
+  const [browser, guiSystem, guiWorkspace, guiSettings, tabBrowser, localApps, genui] = await Promise.all([
     import('../browser'),
     import('../system'),
     import('../workspace'),
     import('../settings'),
     import('../tab-browser'),
     import('../local-apps'),
+    import('../genui'),
   ])
 
   return new Set([
@@ -160,12 +174,14 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...productSpace.HANDLED_CHANNELS,
     ...resources.HANDLED_CHANNELS,
     ...transfer.HANDLED_CHANNELS,
+    ...knowledgeBase.HANDLED_CHANNELS,
     ...browser.HANDLED_CHANNELS,
     ...guiSystem.GUI_HANDLED_CHANNELS,
     ...guiWorkspace.GUI_HANDLED_CHANNELS,
     ...guiSettings.GUI_HANDLED_CHANNELS,
     ...tabBrowser.HANDLED_CHANNELS,
     ...localApps.HANDLED_CHANNELS,
+    ...genui.HANDLED_CHANNELS,
   ])
 }
 

@@ -9,7 +9,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
 import { EyeOff, X, XCircle } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { BrowserControls } from '@polo-ai/ui'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n'
+import { initReactI18next } from 'react-i18next'
 import { HeaderIconButton } from '@/components/ui/HeaderIconButton'
 import {
   DropdownMenu,
@@ -18,6 +21,26 @@ import {
   StyledDropdownMenuItem,
 } from '@/components/ui/styled-dropdown'
 import './index.css'
+
+/* ------------------------------------------------------------------ */
+/*  i18n (product-closure U6)                                          */
+/* ------------------------------------------------------------------ */
+
+// The toolbar is an independent renderer entry: without this init every
+// BrowserControls useTranslation call warns「You will need to pass in an
+// i18next instance」and the embedded strings degrade to raw keys (LV-E01).
+// Init must complete BEFORE the first React render (synchronous init, same
+// discipline as main.tsx / canvas-popout.tsx).
+//
+// Language source: the toolbar window lives in the persist:browser-pane
+// partition, so its localStorage is NOT shared with the main window — the
+// language cannot be read from localStorage here. Main passes the resolved
+// UI language (the same singleton the main window syncs through
+// i18n:changeLanguage) via the ?lang= query param, and later pushes changes
+// through the toolbar preload's onLanguageChanged channel.
+setupI18n([initReactI18next])
+const TOOLBAR_QUERY_LANG = new URLSearchParams(window.location.search).get('lang')
+void i18n.changeLanguage(TOOLBAR_QUERY_LANG ?? 'zh-Hans')
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -49,6 +72,8 @@ declare global {
       onStateUpdate: (callback: (state: ToolbarState) => void) => () => void
       onThemeColor: (callback: (color: string | null) => void) => () => void
       onForceCloseMenu: (callback: (payload: { reason?: string }) => void) => () => void
+      /** product-closure U6: main pushes UI-language changes so the toolbar follows the main window. */
+      onLanguageChanged: (callback: (lang: string) => void) => () => void
     }
   }
 }
@@ -58,6 +83,7 @@ declare global {
 /* ------------------------------------------------------------------ */
 
 function BrowserToolbarApp() {
+  const { t } = useTranslation()
   const [state, setState] = useState<ToolbarState>({
     url: 'about:blank',
     title: 'New Tab',
@@ -70,6 +96,15 @@ function BrowserToolbarApp() {
   const menuContentRef = useRef<HTMLDivElement | null>(null)
 
   const api = window.browserToolbar
+
+  // Follow main-window language changes live (AppearanceSettingsPage →
+  // i18n:changeLanguage → Main broadcasts to every open toolbar).
+  useEffect(() => {
+    if (!api?.onLanguageChanged) return
+    return api.onLanguageChanged((lang) => {
+      void i18n.changeLanguage(lang)
+    })
+  }, [api])
 
   useEffect(() => {
     if (!api) return
@@ -199,7 +234,7 @@ function BrowserToolbarApp() {
               <DropdownMenuTrigger asChild>
                 <HeaderIconButton
                   icon={<X className="h-3.5 w-3.5" />}
-                  aria-label="Browser window options"
+                  aria-label={t('toolbar.windowOptions')}
                   className={themeColor ? '' : 'bg-background shadow-minimal hover:bg-foreground/5'}
                   style={themeColor ? { color: 'var(--tb-fg)' } : undefined}
                 />
@@ -215,11 +250,11 @@ function BrowserToolbarApp() {
               >
                 <StyledDropdownMenuItem onSelect={handleHideWindow}>
                   <EyeOff className="h-3.5 w-3.5" />
-                  Hide Window
+                  {t('toolbar.hideWindow')}
                 </StyledDropdownMenuItem>
                 <StyledDropdownMenuItem variant="destructive" onSelect={handleCloseWindowEntirely}>
                   <XCircle className="h-3.5 w-3.5" />
-                  Close Window Entirely
+                  {t('toolbar.closeWindowEntirely')}
                 </StyledDropdownMenuItem>
               </StyledDropdownMenuContent>
             </DropdownMenu>

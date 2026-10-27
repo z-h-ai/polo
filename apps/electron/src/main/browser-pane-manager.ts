@@ -21,6 +21,7 @@ import {
   type BrowserEmbedBounds,
   type BrowserElementPickerEvent,
   type BrowserInstanceInfo,
+  type BrowserDownloadUiEvent,
   type WebElementReference,
 } from '../shared/types'
 import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@polo-ai/shared/config'
@@ -314,6 +315,8 @@ const TOOLBAR_CHANNELS = {
   DESTROY: 'browser-toolbar:destroy',
   STATE_UPDATE: 'browser-toolbar:state-update',
   THEME_COLOR: 'browser-toolbar:theme-color',
+  /** product-closure U6: main→toolbar UI-language sync. */
+  LANGUAGE_CHANGED: 'browser-toolbar:language-changed',
 } as const
 export const BROWSER_PANE_SESSION_PARTITION = 'persist:browser-pane'
 const SESSION_PARTITION = BROWSER_PANE_SESSION_PARTITION
@@ -560,6 +563,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   private sessionPathResolver: ((sessionId: string) => string | null) | null = null
   private sessionNameResolver: ((sessionId: string) => string | null) | null = null
   private elementPickerCallback: ((event: BrowserElementPickerEvent) => void) | null = null
+  // product-closure U11: terminal download outcome for the renderer toast.
+  private downloadEventCallback: ((event: BrowserDownloadUiEvent) => void) | null = null
 
   setWindowManager(windowManager: WindowManager): void {
     this.windowManager = windowManager
@@ -582,6 +587,20 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   /** POO-135: subscribe to element picker outcomes (picked/cancelled/unavailable). */
   onElementPickerEvent(callback: (event: BrowserElementPickerEvent) => void): void {
     this.elementPickerCallback = callback
+  }
+
+  /**
+   * product-closure U11: subscribe to terminal download outcomes. Exactly one
+   * event per finished download — `completed` or `failed`; a user-cancelled
+   * download stays silent. The automation wait consumers read `getDownloads`
+   * and are untouched by this callback.
+   */
+  onDownloadEvent(callback: (event: BrowserDownloadUiEvent) => void): void {
+    this.downloadEventCallback = callback
+  }
+
+  private emitDownloadEvent(event: BrowserDownloadUiEvent): void {
+    this.downloadEventCallback?.(event)
   }
 
   private emitElementPickerEvent(event: BrowserElementPickerEvent): void {
@@ -2805,6 +2824,42 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
   }
 
+  /**
+   * product-closure U12: explicit logout/teardown semantics, reachable ONLY
+   * through the `browser-pane:destroy-all` IPC — never wired into quit or
+   * relaunch paths. Two distinct effects, both required:
+   *  1. destroy every live instance (same as destroyAll);
+   *  2. clear the shared `persist:browser-pane` partition's storage data
+   *     (cookies, localStorage, cache) so the NEXT login starts clean.
+   * Destroying instances alone does NOT clear cookies — the partition
+   * outlives its windows. Storage clearing is best-effort: a failure is
+   * logged and reported as false, never thrown past the IPC boundary.
+   */
+  async destroyAllAndClearStorage(): Promise<void> {
+    this.destroyAll()
+    try {
+      const ses = session.fromPartition(SESSION_PARTITION)
+      await ses.clearStorageData()
+      mainLog.info('[browser-pane] destroy-all cleared partition storage data')
+    } catch (error) {
+      mainLog.warn(`[browser-pane] destroy-all clearStorageData failed: ${error instanceof Error ? error.message : String(error)}`)
+      throw error
+    }
+  }
+
+  /**
+   * product-closure U6: push a UI-language change to every live toolbar page
+   * so the independent renderer entry follows the main window immediately
+   * (AppearanceSettingsPage → i18n:changeLanguage → here). New toolbars pick
+   * the language up via the ?lang= query param at load time.
+   */
+  broadcastToolbarLanguage(lang: string): void {
+    for (const instance of this.instances.values()) {
+      if (instance.window.isDestroyed() || instance.toolbarView.webContents.isDestroyed()) continue
+      instance.toolbarView.webContents.send(TOOLBAR_CHANNELS.LANGUAGE_CHANGED, lang)
+    }
+  }
+
   private finalizeDestroyedInstance(instance: BrowserInstance, source: 'destroy' | 'closed'): void {
     if (!this.instances.has(instance.id)) {
       return
@@ -2871,12 +2926,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   }
 
   private async loadEmptyStatePage(instance: BrowserInstance): Promise<void> {
+    // product-closure U6: same partition isolation as loadToolbarPage — the
+    // pageView cannot read the main window's localStorage language cache, so
+    // the resolved UI language rides the query param.
+    const lang = i18n.resolvedLanguage ?? i18n.language ?? 'zh-Hans'
     if (VITE_DEV_SERVER_URL) {
-      await instance.pageView.webContents.loadURL(`${VITE_DEV_SERVER_URL}/${BROWSER_EMPTY_STATE_PAGE}`)
+      await instance.pageView.webContents.loadURL(`${VITE_DEV_SERVER_URL}/${BROWSER_EMPTY_STATE_PAGE}?lang=${encodeURIComponent(lang)}`)
       return
     }
 
-    await instance.pageView.webContents.loadFile(join(__dirname, `renderer/${BROWSER_EMPTY_STATE_PAGE}`))
+    await instance.pageView.webContents.loadFile(join(__dirname, `renderer/${BROWSER_EMPTY_STATE_PAGE}`), { query: { lang } })
   }
 
   private async handleDeepLinkUrl(url: string, sourceWebContentsId?: number): Promise<void> {
@@ -2947,7 +3006,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   }
 
   private async loadToolbarPage(instance: BrowserInstance): Promise<void> {
-    const query = `instanceId=${encodeURIComponent(instance.id)}`
+    // product-closure U6: the toolbar window sits in the persist:browser-pane
+    // partition, so it cannot read the main window's localStorage language
+    // cache — the resolved UI language rides the query instead (the same
+    // singleton the main window keeps in sync via i18n:changeLanguage).
+    const lang = i18n.resolvedLanguage ?? i18n.language ?? 'zh-Hans'
+    const query = `instanceId=${encodeURIComponent(instance.id)}&lang=${encodeURIComponent(lang)}`
     let lastError: unknown = null
 
     for (let attempt = 0; attempt <= TOOLBAR_LOAD_MAX_RETRIES; attempt++) {
@@ -2957,7 +3021,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         } else {
           await instance.toolbarView.webContents.loadFile(
             join(__dirname, 'renderer/browser-toolbar.html'),
-            { query: { instanceId: instance.id } },
+            { query: { instanceId: instance.id, lang } },
           )
         }
 
@@ -3972,6 +4036,19 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         latest.totalBytes = item.getTotalBytes()
         latest.savePath = item.getSavePath()
         latest.state = state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'interrupted'
+        // product-closure U11: push the terminal outcome to the renderer for
+        // the toast. `cancelled` was the user's own choice — silent. The
+        // automation wait consumers keep reading `getDownloads`, unchanged.
+        if (latest.state === 'completed' || latest.state === 'interrupted') {
+          this.emitDownloadEvent({
+            instanceId: instance.id,
+            downloadId,
+            filename,
+            savePath: item.getSavePath() || savePath,
+            state: latest.state === 'completed' ? 'completed' : 'failed',
+            ownerType: instance.ownerType,
+          })
+        }
       })
     })
   }

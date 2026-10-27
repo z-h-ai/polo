@@ -49,6 +49,7 @@ import {
 } from '../../shared/route-parser'
 import { routes, type Route, type ViewRoute } from '../../shared/routes'
 import { parsePermissionMode } from '@polo-ai/shared/agent/mode-types'
+import { isInsufficientCreditError, isPeriodQuotaError } from '@/lib/quota-error'
 import { NAVIGATE_EVENT, type NavigateOptions } from '../lib/navigate'
 import { normalizePanelRouteForReconcile } from './navigation-reconcile'
 import { buildSemanticHistoryKey, canRunInitialRestore } from './navigation-history'
@@ -88,6 +89,17 @@ import {
 // Re-export routes for convenience
 export { routes }
 export type { Route }
+
+/**
+ * U4: map a failed send onto the deep-link action error code. Billing-shaped
+ * rejections surface as `rate_limited` (the protocol has no billing code);
+ * everything else stays `internal_error`.
+ */
+function classifyActionCode(error: unknown): 'rate_limited' | 'internal_error' {
+  return (isInsufficientCreditError(error) || isPeriodQuotaError(error))
+    ? 'rate_limited'
+    : 'internal_error'
+}
 
 // Re-export navigation state types for consumers
 export type { NavigationState, SessionFilter }
@@ -146,6 +158,16 @@ interface NavigationProviderProps {
   isSessionsReady?: boolean
   /** Remote workspace ID — when set, sessions with this ID are also considered part of the workspace */
   remoteWorkspaceId?: string | null
+  /** U4: apply a failed deep-link send through the shared failure pipeline
+   * (user-visible feedback + billing latch + draft recovery) — the SAME
+   * applier the manual send path uses. */
+  onApplySendFailure?: (sessionId: string, error: unknown, draft: string) => void
+  /** U4: asked at fire time — a latched access block stops the send before any
+   * network call (a render-time closure would be stale inside the setTimeout). */
+  isSendBlocked?: () => boolean
+  /** U4: apply a send that was stopped by the access latch (billing prompt
+   * preserved, never auto-sent once the block clears). */
+  onApplySendBlocked?: (sessionId: string, draft: string) => void
 }
 
 export function NavigationProvider({
@@ -160,6 +182,9 @@ export function NavigationProvider({
   isReady = true,
   isSessionsReady = true,
   remoteWorkspaceId,
+  onApplySendFailure,
+  isSendBlocked,
+  onApplySendBlocked,
 }: NavigationProviderProps) {
   const { t } = useTranslation()
   const [, setSession] = useSession()
@@ -680,11 +705,15 @@ export function NavigationProvider({
         if (!callbackId) return
         window.electronAPI.sendDeepLinkActionResult({ callbackId, ...result })
       }
-      const reportActionError = (code: NonNullable<DeepLinkActionResult['error']>['code'], error: unknown) => {
+      const reportActionError = (code: NonNullable<DeepLinkActionResult['error']>['code'], error?: unknown) => {
         reportActionResult({
           error: {
             code,
-            message: error instanceof Error ? error.message : String(error),
+            // U4: a latch-blocked send has no thrown error — the code speaks
+            // for itself.
+            message: error instanceof Error
+              ? error.message
+              : error != null ? String(error) : code,
           },
         })
       }
@@ -776,6 +805,18 @@ export function NavigationProvider({
               const shouldSend = parsed.params.send === 'true'
               if (shouldSend) {
                 setTimeout(() => {
+                  // U4: a latched access block (billing etc.) stops the send
+                  // BEFORE any request — same guard as the composer — and the
+                  // action callback still resolves exactly once.
+                  if (isSendBlocked?.()) {
+                    onApplySendBlocked?.(session.id, parsed.params.input!)
+                    if (callbackId) {
+                      reportActionError('rate_limited')
+                    } else {
+                      console.warn('[Navigation] Deep-link send blocked by chat access status')
+                    }
+                    return
+                  }
                   void window.electronAPI.sendMessage(
                     session.id,
                     parsed.params.input!,
@@ -783,8 +824,11 @@ export function NavigationProvider({
                     undefined,
                     badges ? { badges, invocationSource: 'desktop' } : { invocationSource: 'desktop' }
                   ).catch(error => {
+                    // U4: same failure pipeline as the composer — billing
+                    // answers latch the banner, the draft stays recoverable.
+                    onApplySendFailure?.(session.id, error, parsed.params.input!)
                     if (callbackId) {
-                      reportActionError('internal_error', error)
+                      reportActionError(classifyActionCode(error), error)
                     } else {
                       console.warn('[Navigation] Failed to send initial deep-link message:', error)
                     }
@@ -820,15 +864,31 @@ export function NavigationProvider({
             break
           }
 
+          // U4: a latched access block stops the send BEFORE any request —
+          // same guard as the composer — and the action callback still
+          // resolves exactly once.
+          if (isSendBlocked?.()) {
+            onApplySendBlocked?.(parsed.id, parsed.params.input)
+            reportActionError('rate_limited')
+            break
+          }
+
           try {
             await window.electronAPI.sendMessage(parsed.id, parsed.params.input, undefined, undefined, { invocationSource: 'desktop' })
             reportActionResult({ sessionId: parsed.id })
           } catch (error) {
+            // U4: same failure pipeline as the composer — billing answers
+            // latch the banner, the draft stays recoverable in-session.
+            onApplySendFailure?.(parsed.id, error, parsed.params.input)
             // SessionManager rejects with `Session ${id} not found` for missing
-            // sessions; anything else (transport, persistence, …) is internal.
+            // sessions; a billing rejection maps to the rate-limit action code;
+            // anything else (transport, persistence, …) is internal.
             const message = error instanceof Error ? error.message : String(error)
             const isSessionNotFound = /session\b[^]*\bnot found/i.test(message)
-            reportActionError(isSessionNotFound ? 'session_not_found' : 'internal_error', error)
+            reportActionError(
+              isSessionNotFound ? 'session_not_found' : classifyActionCode(error),
+              error,
+            )
           }
           break
         }

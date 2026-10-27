@@ -518,6 +518,12 @@ export const CHANNEL_MAP = {
   'browserPane.onInteracted': listener(RPC_CHANNELS.browserPane.INTERACTED),
   'browserPane.onOpenRequested': listener(RPC_CHANNELS.browserPane.OPEN_REQUESTED),
   'browserPane.onElementPickerEvent': listener(RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT),
+  // product-closure U11: terminal download outcome for the renderer toast.
+  'browserPane.onDownloadEvent': listener(RPC_CHANNELS.browserPane.DOWNLOAD_EVENT),
+  // product-closure U12: explicit logout/teardown — destroy every browser
+  // pane instance AND clear the shared partition's storage data. Top-level
+  // key (no dot) so electronAPI exposes `browserPaneDestroyAll()` directly.
+  browserPaneDestroyAll: invoke(RPC_CHANNELS.browserPane.DESTROY_ALL),
 
   // Canvas pane popout (POO-135 验收修复 SB-CANVAS-OUT)
   'canvasPane.detachToPopup': invoke(RPC_CHANNELS.canvasPane.DETACH_TO_POPUP),
