@@ -10,6 +10,7 @@
  * Anything not carrying the sentinel is returned untouched.
  */
 import { i18n } from '@polo-ai/shared/i18n'
+import type { Message } from '@polo-ai/core/types'
 
 export const POLO_INSUFFICIENT_CREDIT_PREFIX = 'POLO_INSUFFICIENT_CREDIT:'
 
@@ -20,7 +21,9 @@ export interface LocalizedChatBillingError {
 }
 
 export function isKnownChatBillingErrorText(raw: string): boolean {
-  return raw.trimStart().startsWith(POLO_INSUFFICIENT_CREDIT_PREFIX)
+  // Pi includes the HTTP status before the proxy's plain-text body. Match
+  // that observed wrapper only; a generic 402 is not a Polo balance fact.
+  return raw.trimStart().replace(/^402[\t ]+/, '').startsWith(POLO_INSUFFICIENT_CREDIT_PREFIX)
 }
 
 export function localizeChatBillingError(raw: string): LocalizedChatBillingError {
@@ -29,5 +32,23 @@ export function localizeChatBillingError(raw: string): LocalizedChatBillingError
     content: i18n.t('billing.insufficientCredit'),
     errorTitle: i18n.t('chat.billingError.title'),
     errorOriginal: raw,
+  }
+}
+
+/**
+ * Present live typed_error messages and persisted transcripts consistently.
+ * Keep stored diagnostics intact and translate at render time so reopening a
+ * session (or changing language) does not revive the old English copy/actions.
+ * Recharge remains on the existing role- and space-aware payment surface.
+ */
+export function localizeChatBillingMessage(message: Message): Message {
+  if (message.role !== 'error') return message
+  const raw = message.errorOriginal ?? message.content
+  if (!isKnownChatBillingErrorText(raw)) return message
+  return {
+    ...message,
+    ...localizeChatBillingError(raw),
+    errorActions: [],
+    errorCanRetry: false,
   }
 }

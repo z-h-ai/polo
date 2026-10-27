@@ -102,6 +102,7 @@ mock.module('@/components/app-shell/input/focus-input-events', () => ({
 
 // --- electronAPI.browserPane capture ----------------------------------------
 
+let openHandler: ((info: any, reason: 'focus' | 'return') => void) | null = null
 let stateHandler: ((info: any) => void) | null = null
 let removedHandler: ((id: string) => void) | null = null
 let pickerHandler: ((event: any) => void) | null = null
@@ -121,6 +122,7 @@ Object.defineProperty(window, 'electronAPI', {
     isChannelAvailable: (_channel: string) => true,
     browserPane: {
       list: async () => [...listedInstances],
+      onOpenRequested: (cb: any) => { openHandler = cb; return () => { openHandler = null } },
       onStateChanged: (cb: (info: any) => void) => { stateHandler = cb; return () => { stateHandler = null } },
       onRemoved: (cb: (id: string) => void) => { removedHandler = cb; return () => { removedHandler = null } },
       onElementPickerEvent: (cb: (event: any) => void) => { pickerHandler = cb; return () => { pickerHandler = null } },
@@ -194,6 +196,7 @@ function resetAll() {
   defaultStore.values.clear()
   contextStore.values.clear()
   stateHandler = null
+  openHandler = null
   removedHandler = null
   pickerHandler = null
   focusQueued.length = 0
@@ -438,5 +441,69 @@ describe('useSidebarBrowserSync (POO-135)', () => {
     // the draft landed THERE, the reader above saw [], and this is the
     // assertion that fails.
     expect(getDefaultStore().get(elementDraftRefsAtomFamily('sess-a'))).toHaveLength(0)
+  })
+})
+
+
+describe('POO-157 browser open/return requests', () => {
+  it('opens a closed sidebar on the browser tab and embeds the requested stable instance', () => {
+    mount('sess-a')
+    openHandler!(makeInstance({ id: 'requested', workspaceId: null }), 'focus')
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(true)
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('requested')
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
+    expect(apiCalls.embed).toEqual(['requested'])
+  })
+
+  it('closing a popup returns even if the sidebar was collapsed or another browser was selected', () => {
+    mount('sess-a')
+    contextStore.set(sidebarBrowserOpenAtom, false)
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'other')
+    openHandler!(makeInstance({ id: 'returning', ownerSessionId: 'sess-a' }), 'return')
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(true)
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('returning')
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
+    expect(apiCalls.embed).toEqual(['returning'])
+  })
+
+  it('returning session A while viewing B does not switch chats or occupy B', () => {
+    const select = mock((_id: string) => {})
+    mount('sess-b', select)
+    openHandler!(makeInstance({ id: 'a', ownerSessionId: 'sess-a' }), 'return')
+    expect(select).not.toHaveBeenCalled()
+    expect(apiCalls.embed).toHaveLength(0)
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(false)
+  })
+
+  it('an explicit open can select its owning session; return from another workspace is ignored', () => {
+    const select = mock((_id: string) => {})
+    mount('sess-b', select)
+    openHandler!(makeInstance({ id: 'a', ownerSessionId: 'sess-a' }), 'focus')
+    expect(select).toHaveBeenCalledWith('sess-a')
+    expect(apiCalls.embed).toEqual(['a'])
+  })
+})
+
+
+describe('POO-157 targeted popup return', () => {
+  it('does not reclaim another main window browser from a global state notification', () => {
+    mount('sess-a')
+    contextStore.set(sidebarBrowserOpenAtom, true)
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'inst-1')
+    stateHandler!(makeInstance({ id: 'inst-1', sidebarHostWindowId: 42, hostMode: 'popup', isVisible: false }))
+    expect(apiCalls.embed).toEqual([])
+  })
+})
+
+
+describe('POO-157 deferred return to owning chat', () => {
+  it('returns A when the user next selects A, preserving B until then', () => {
+    const { rerender } = mount('sess-b')
+    openHandler!(makeInstance({ id: 'a', ownerSessionId: 'sess-a' }), 'return')
+    expect(apiCalls.embed).toEqual([])
+    rerender(createElement(Harness, { currentSessionId: 'sess-a', onSelectSession: () => {} }))
+    expect(apiCalls.embed).toEqual(['a'])
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('a')
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
   })
 })

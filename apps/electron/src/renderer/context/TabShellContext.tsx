@@ -28,6 +28,7 @@ import { GenUiAppPinBridge } from '@/components/tab-browser/GenUiAppPinBridge'
 import { GenUiAppPublishBridge } from '@/components/tab-browser/GenUiAppPublishBridge'
 import { GenUiCardRegistryBridge } from '@/components/tab-browser/GenUiCardRegistryBridge'
 import { GenUiCanvasBridge } from '@/components/tab-browser/GenUiCanvasBridge'
+import { GENUI_PINNED_APP_ID_PREFIX } from '../../shared/types'
 import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
 
 export interface WebAppNavigationControls {
@@ -159,12 +160,18 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
       // ProductSpace member windows never hydrate the legacy External App
       // sideload store. Keeping the old records on disk is migration-safe,
       // but they cannot restore a launcher or tab and bypass the Catalog.
-      const persistedApps = isProductSpaceWindow
-        ? []
-        : await window.electronAPI.getTabBrowserApps().catch(() => [])
+      // POO-154: the pinned canvas apps (gen-ui-app-*) are the one exception
+      // — they are session-local artifacts the user pinned themselves, not
+      // sideloaded works, and their Home entry must survive a restart or the
+      // pinned tab becomes permanently unreachable after it is closed.
+      const persistedApps = await window.electronAPI.getTabBrowserApps().catch(() => [])
+      const apps = normalizeInstalledApps(
+        isProductSpaceWindow
+          ? persistedApps.filter((app) => app.id.startsWith(GENUI_PINNED_APP_ID_PREFIX))
+          : persistedApps,
+      )
       if (cancelled) return
 
-      const apps = normalizeInstalledApps(persistedApps)
       const rawTabs = getLocalStorage<TabInstance[]>(KEYS.tabs, [POLO_TAB], storageScope)
       const tabs = restoreTabs(rawTabs, apps)
       setInstalledApps(apps)

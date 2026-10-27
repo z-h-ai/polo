@@ -805,6 +805,8 @@ export interface BrowserInstanceInfo {
    * window's right sidebar. Optional so older managers stay compatible.
    */
   hostMode?: 'popup' | 'embedded'
+  /** Main window that owns sidebar presentation; absent for legacy/headless instances. */
+  sidebarHostWindowId?: number
 }
 
 /**

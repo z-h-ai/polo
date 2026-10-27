@@ -516,6 +516,7 @@ export const CHANNEL_MAP = {
   'browserPane.onStateChanged': listener(RPC_CHANNELS.browserPane.STATE_CHANGED),
   'browserPane.onRemoved': listener(RPC_CHANNELS.browserPane.REMOVED),
   'browserPane.onInteracted': listener(RPC_CHANNELS.browserPane.INTERACTED),
+  'browserPane.onOpenRequested': listener(RPC_CHANNELS.browserPane.OPEN_REQUESTED),
   'browserPane.onElementPickerEvent': listener(RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT),
 
   // Canvas pane popout (POO-135 验收修复 SB-CANVAS-OUT)

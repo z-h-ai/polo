@@ -559,6 +559,7 @@ export const RPC_CHANNELS = {
     STATE_CHANGED: 'browser-pane:state-changed',
     REMOVED: 'browser-pane:removed',
     INTERACTED: 'browser-pane:interacted',
+    OPEN_REQUESTED: 'browser-pane:open-requested',
     ELEMENT_PICKER_EVENT: 'browser-pane:element-picker',
   },
   // POO-135 验收修复 (SB-CANVAS-OUT): the canvas app can pop out to its own

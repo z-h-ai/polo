@@ -805,7 +805,7 @@ function PopupStatusBar({ instance }: { instance: BrowserInstanceInfo }) {
         type="button"
         data-testid="sidebar-browser-show-window"
         title={t('browserPane.sidebar.showWindow')}
-        onClick={() => void window.electronAPI?.browserPane?.focus?.(instance.id)}
+        onClick={() => void window.electronAPI?.browserPane?.detachToPopup?.(instance.id)}
         className="shrink-0 inline-flex items-center gap-1 rounded-[6px] border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground-80 transition-colors hover:text-foreground"
       >
         <ExternalLink className="w-3 h-3" />

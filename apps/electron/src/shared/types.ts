@@ -1605,6 +1605,7 @@ export interface ElectronAPI {
     onStateChanged(callback: (info: BrowserInstanceInfo) => void): () => void
     onRemoved(callback: (id: string) => void): () => void
     onInteracted(callback: (id: string) => void): () => void
+    onOpenRequested(callback: (info: BrowserInstanceInfo, reason: 'focus' | 'return') => void): () => void
     /** POO-135: element picker outcome (picked / cancelled / unavailable). */
     onElementPickerEvent(callback: (event: BrowserElementPickerEvent) => void): () => void
   }
