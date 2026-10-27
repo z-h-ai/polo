@@ -24,13 +24,16 @@ import { BatchAutomationMenu } from './BatchAutomationMenu'
 import { AutomationAvatar } from './AutomationAvatar'
 import { SendResourceToWorkspaceDialog } from '@/components/app-shell/SendResourceToWorkspaceDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
+import { presentBatchResult, runBatchOp, showBatchResultToast } from '@/lib/batch-ops'
 import { automationSelection } from '@/hooks/useEntitySelection'
 import { APP_EVENTS, AGENT_EVENTS, getEventDisplayName, type AutomationListItem, type AutomationListFilter } from './types'
 import { formatShortRelativeTime } from './utils'
 
 const {
   useSelection: useAutomationSelection,
+  useSelectedIds: useAutomationSelectedIds,
 } = automationSelection
 
 
@@ -61,6 +64,9 @@ interface AutomationItemProps {
   onTest: () => void
   onDuplicate: () => void
   onSendToWorkspace?: () => void
+  /** U3: panel-owned batch intents (confirm + execution + honest counts). */
+  onBatchToggle?: () => void
+  onBatchDelete?: () => void
 }
 
 function AutomationItem({
@@ -77,6 +83,8 @@ function AutomationItem({
   onTest,
   onDuplicate,
   onSendToWorkspace,
+  onBatchToggle,
+  onBatchDelete,
 }: AutomationItemProps) {
   const { t } = useTranslation()
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -151,7 +159,11 @@ function AutomationItem({
           onSendToWorkspace={onSendToWorkspace}
         />
       }
-      contextMenuContent={isMultiSelectActive && isInMultiSelect ? <BatchAutomationMenu /> : undefined}
+      contextMenuContent={
+        isMultiSelectActive && isInMultiSelect
+          ? <BatchAutomationMenu onBatchToggle={onBatchToggle} onBatchDelete={onBatchDelete} />
+          : undefined
+      }
     />
   )
 }
@@ -202,7 +214,9 @@ export function AutomationsListPanel({
     selectRange,
     isMultiSelectActive,
     isSelected: isInSelection,
+    clearMultiSelect,
   } = useAutomationSelection()
+  const selectedIds = useAutomationSelectedIds()
 
   const isSearchMode = searchActive && searchQuery.length >= 2
 
@@ -250,6 +264,72 @@ export function AutomationsListPanel({
     const allIds = filteredAutomations.map(a => a.id)
     selectRange(toIndex, allIds)
   }, [filteredAutomations, selectRange])
+
+  // U3 (product-closure 2026-10-27): the batch menu lives inside Radix menu
+  // content — unmounted the instant an item is clicked — so the confirm ask
+  // and the execution run HERE on the stable panel. Deletion confirms first
+  // (busy-guarded by the shared dialog contract); toggles run straight away
+  // (mirroring the single-item toggle, which never asks). Both collect real
+  // per-item outcomes — no more swallowed failures behind an unconditional
+  // success toast.
+  const batchInFlightRef = React.useRef(false)
+  const { requestConfirm: requestBatchConfirm, confirmElement: batchConfirmElement } = useConfirmDialog()
+
+  const resolveSelectedAutomations = useCallback(() => {
+    return [...selectedIds]
+      .map(id => automations.find(a => a.id === id))
+      .filter((a): a is AutomationListItem => a != null)
+  }, [selectedIds, automations])
+
+  const handleBatchToggle = useCallback(async () => {
+    if (!activeWorkspaceId || batchInFlightRef.current) return
+    const selected = resolveSelectedAutomations()
+    if (selected.length === 0) return
+    const targetEnabled = !selected.every(a => a.enabled)
+    batchInFlightRef.current = true
+    clearMultiSelect()
+    try {
+      // Sequential IPC to avoid read-modify-write races on automations.json.
+      const counts = await runBatchOp(selected, a =>
+        window.electronAPI.setAutomationEnabled(activeWorkspaceId, a.event, a.matcherIndex, targetEnabled))
+      showBatchResultToast(presentBatchResult(counts, {
+        allSuccessKey: targetEnabled ? 'automations.batchEnabled' : 'automations.batchDisabled',
+        partialKey: 'batchOps.partialResult',
+        allFailedKey: 'batchOps.allFailed',
+      }))
+    } finally {
+      batchInFlightRef.current = false
+    }
+  }, [activeWorkspaceId, clearMultiSelect, resolveSelectedAutomations])
+
+  const handleBatchDelete = useCallback(async () => {
+    if (!activeWorkspaceId || batchInFlightRef.current) return
+    const selected = resolveSelectedAutomations()
+    if (selected.length === 0) return
+    // U3: destructive — ask first (the count names the blast radius).
+    const confirmed = await requestBatchConfirm({
+      testId: 'automations-batch-delete-confirm',
+      title: t('batchOps.confirmTitle', { total: selected.length }),
+      description: t('batchOps.confirmDescription'),
+      confirmLabel: t('common.delete'),
+    })
+    if (!confirmed) return
+    batchInFlightRef.current = true
+    clearMultiSelect()
+    try {
+      // Reverse matcherIndex order so earlier indices stay valid mid-run.
+      const sorted = [...selected].sort((a, b) => b.matcherIndex - a.matcherIndex)
+      const counts = await runBatchOp(sorted, a =>
+        window.electronAPI.deleteAutomation(activeWorkspaceId, a.event, a.matcherIndex))
+      showBatchResultToast(presentBatchResult(counts, {
+        allSuccessKey: 'automations.batchDeleted',
+        partialKey: 'batchOps.partialResult',
+        allFailedKey: 'batchOps.allFailed',
+      }))
+    } finally {
+      batchInFlightRef.current = false
+    }
+  }, [activeWorkspaceId, clearMultiSelect, requestBatchConfirm, resolveSelectedAutomations, t])
 
   // Empty state
   if (automations.length === 0) {
@@ -332,6 +412,8 @@ export function AutomationsListPanel({
                     setSendResourceLabel(automation.name)
                     setSendDialogOpen(true)
                   } : undefined}
+                  onBatchToggle={() => { void handleBatchToggle() }}
+                  onBatchDelete={() => { void handleBatchDelete() }}
                 />
               ))}
             </div>
@@ -351,6 +433,9 @@ export function AutomationsListPanel({
           activeWorkspaceId={activeWorkspaceId}
         />
       )}
+
+      {/* U3: batch confirm host — stable-mounted, survives the menu close. */}
+      {batchConfirmElement}
     </div>
   )
 }
