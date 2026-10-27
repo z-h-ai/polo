@@ -55,7 +55,7 @@ export function presentBatchResult(
     return { toast: 'success', messageKey: keys.allSuccessKey, params: { count: counts.ok } }
   }
   if (counts.ok === 0) {
-    return { toast: 'error', messageKey: keys.allFailedKey, params: { count: counts.failed } }
+    return { toast: 'error', messageKey: keys.allFailedKey, params: { failed: counts.failed } }
   }
   return {
     toast: 'warning',

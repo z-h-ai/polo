@@ -3,7 +3,7 @@
  * Lists remote server workspaces and allows selection or creation.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, RefreshCw } from 'lucide-react'
 import { Spinner } from '@polo-ai/ui'
@@ -28,9 +28,13 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
 
   // U9 (product-closure 2026-10-27): the load is a retryable callback, not a
   // run-once effect — a failed load used to leave one red line and an empty
-  // list with no way forward short of restarting the app. `loading` doubles
-  // as the busy guard: a retry click while a load is in flight is a no-op.
+  // list with no way forward short of restarting the app. The in-flight ref
+  // (not state — the callback closes over stale values) is the busy guard:
+  // a retry click while a load is in flight is a no-op.
+  const loadInFlightRef = useRef(false)
   const loadWorkspaces = useCallback(() => {
+    if (loadInFlightRef.current) return
+    loadInFlightRef.current = true
     setLoading(true)
     setError(null)
     window.electronAPI.getServerWorkspaces()
@@ -41,6 +45,9 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
       .catch(err => {
         setError(err instanceof Error ? err.message : 'Failed to load workspaces')
         setLoading(false)
+      })
+      .finally(() => {
+        loadInFlightRef.current = false
       })
   }, [])
 
@@ -86,7 +93,8 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
               type="button"
               data-testid="workspace-picker-retry"
               onClick={loadWorkspaces}
-              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50 disabled:pointer-events-none"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               {t("pickerRetry.retry")}

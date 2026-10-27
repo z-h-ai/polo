@@ -57,6 +57,6 @@ describe('presentBatchResult (U3 honest toast matrix)', () => {
     const p = presentBatchResult({ ok: 0, failed: 5 }, keys)
     expect(p.toast).toBe('error')
     expect(p.messageKey).toBe('batchOps.allFailed')
-    expect(p.params).toEqual({ count: 5 })
+    expect(p.params).toEqual({ failed: 5 })
   })
 })
