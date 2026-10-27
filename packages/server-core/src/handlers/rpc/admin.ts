@@ -275,6 +275,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_DOWNLOAD_GRANT,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS,
   RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
+  // Registered inline below but previously missing from this manifest —
+  // the registration coverage test (registration.test.ts) counts them.
+  RPC_CHANNELS.admin.PAYMENT_HANDOFF,
+  RPC_CHANNELS.productSpace.LIST_SKILLS,
 ] as const
 
 const CreatorAppPublishRpcInputSchema = z.object({

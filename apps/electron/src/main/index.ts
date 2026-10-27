@@ -1381,6 +1381,10 @@ app.whenReady().then(async () => {
       // Language change: sync from renderer to main process and rebuild native menu
       ipcMain.handle('i18n:changeLanguage', async (_event, lang: string) => {
         i18n.changeLanguage(lang)
+        // product-closure U6: independent browser-toolbar entries follow the
+        // main window's language live (their persist:browser-pane partition
+        // isolates them from the main window's localStorage language cache).
+        browserPaneManager?.broadcastToolbarLanguage(lang)
         const { rebuildMenu } = await import('./menu')
         await rebuildMenu()
       })

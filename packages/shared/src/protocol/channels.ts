@@ -530,6 +530,10 @@ export const RPC_CHANNELS = {
   browserPane: {
     CREATE: 'browser-pane:create',
     DESTROY: 'browser-pane:destroy',
+    // product-closure U12: explicit logout/teardown — destroy every instance
+    // and clear the shared `persist:browser-pane` partition's storage data.
+    // Explicit IPC only; never wired into generic quit/relaunch paths.
+    DESTROY_ALL: 'browser-pane:destroy-all',
     LIST: 'browser-pane:list',
     NAVIGATE: 'browser-pane:navigate',
     GO_BACK: 'browser-pane:go-back',
@@ -561,6 +565,9 @@ export const RPC_CHANNELS = {
     INTERACTED: 'browser-pane:interacted',
     OPEN_REQUESTED: 'browser-pane:open-requested',
     ELEMENT_PICKER_EVENT: 'browser-pane:element-picker',
+    // product-closure U11: terminal download outcome pushed for the
+    // renderer toast (completed / failed; cancelled stays silent).
+    DOWNLOAD_EVENT: 'browser-pane:download-event',
   },
   // POO-135 验收修复 (SB-CANVAS-OUT): the canvas app can pop out to its own
   // BrowserWindow and return — same sidebar-collaboration semantics as the

@@ -33,12 +33,13 @@ export const browserInstanceCountAtom = atom<number>(
  *   through the WS bridge). Read from `activeWorkspace.remoteServer.remoteWorkspaceId`.
  *
  * An instance is visible when:
- *   - its `workspaceId` is null/undefined (truly unbound, visible everywhere), OR
  *   - its `workspaceId` matches the local workspace, OR
  *   - its `workspaceId` matches the remote-mirror workspace.
  *
- * When both context IDs are null (no workspace resolved yet), returns the
- * unfiltered list — safe default.
+ * product-closure U12: unbound instances (`workspaceId` null) no longer pass
+ * every workspace's filter — they used to leak across workspaces. When both
+ * context IDs are null (no workspace resolved yet), returns the unfiltered
+ * list — safe default (nothing to scope against).
  */
 export function filterInstancesForWorkspace(
   all: BrowserInstanceInfo[],
@@ -48,9 +49,11 @@ export function filterInstancesForWorkspace(
   if (!activeWorkspaceId && !remoteWorkspaceId) return all
   return all.filter(
     (i) =>
-      !i.workspaceId ||
-      i.workspaceId === activeWorkspaceId ||
-      i.workspaceId === remoteWorkspaceId,
+      // An unbound instance must not slip through via `null === null` when
+      // one of the context ids is also null — only real ids match.
+      !!i.workspaceId &&
+      (i.workspaceId === activeWorkspaceId ||
+        i.workspaceId === remoteWorkspaceId),
   )
 }
 

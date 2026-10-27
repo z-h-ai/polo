@@ -55,6 +55,13 @@ export const elementDraftRefsAtomFamily = atomFamily((_sessionId: string) =>
  * (same filter as the tab strip) plus ownership — a session-owned browser is
  * only visible in its own session; workspace (manual) browsers are visible
  * everywhere in their workspace.
+ *
+ * product-closure U12: an instance WITHOUT a workspaceId no longer leaks
+ * across workspaces. It previously passed every workspace's filter (legacy
+ * compatibility); now a workspace-scoped viewer only sees instances stamped
+ * with one of ITS workspace ids. When no workspace context is resolved at
+ * all (both ids null) the list stays unfiltered — there is nothing to scope
+ * against.
  */
 export function filterSidebarBrowserInstances(
   all: BrowserInstanceInfo[],
@@ -66,9 +73,11 @@ export function filterSidebarBrowserInstances(
   if (activeWorkspaceId || remoteWorkspaceId) {
     visible = visible.filter(
       (i) =>
-        !i.workspaceId ||
-        i.workspaceId === activeWorkspaceId ||
-        i.workspaceId === remoteWorkspaceId,
+        // An unbound instance must not slip through via `null === null` when
+        // one of the context ids is also null — only real ids match.
+        !!i.workspaceId &&
+        (i.workspaceId === activeWorkspaceId ||
+          i.workspaceId === remoteWorkspaceId),
     )
   }
   if (sessionId) {

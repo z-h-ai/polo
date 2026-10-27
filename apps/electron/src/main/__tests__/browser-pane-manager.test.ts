@@ -8,7 +8,15 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test'
 
 const createdWindows: any[] = []
+const createdViews: any[] = []
+// product-closure U11: will-download callbacks captured from the mocked
+// session, so tests can drive the DownloadItem lifecycle.
+const willDownloadHandlers: Array<(...args: any[]) => void> = []
+let mockWebContentsIdCounter = 0
 let toolbarLoadFailuresRemaining = 0
+// product-closure U12: shared counter for partition storage clears — the
+// destroy-all-with-clear semantics assert on exactly one clear call.
+const clearStorageDataCalls = { count: 0 }
 const mockShellOpenExternal = mock(async () => {})
 const mockIpcMainHandle = mock(() => {})
 const mainLogEntries: unknown[][] = []
@@ -29,6 +37,7 @@ function createMockWebContents() {
   const listeners: Record<string, Function[]> = {}
   let currentUrl = 'about:blank'
   return {
+    id: ++mockWebContentsIdCounter,
     userAgent: 'Mock Chrome Electron/99.0.0',
     session: {},
     isDestroyed: mock(() => false),
@@ -172,6 +181,7 @@ mock.module('electron', () => ({
     webContents: any
     constructor(_opts?: any) {
       const view = createMockBrowserView()
+      createdViews.push(view)
       this.webContents = view.webContents
       Object.assign(this, view)
     }
@@ -197,12 +207,17 @@ mock.module('electron', () => ({
     fromPartition: mock(() => ({
       setPermissionCheckHandler: mock(() => {}),
       setPermissionRequestHandler: mock(() => {}),
+      clearStorageData: mock(async () => {
+        clearStorageDataCalls.count++
+      }),
       webRequest: {
         onBeforeRequest: mock((_cb: any) => {}),
         onCompleted: mock((_cb: any) => {}),
         onErrorOccurred: mock((_cb: any) => {}),
       },
-      on: mock((_event: string, _cb: any) => {}),
+      on: (event: string, cb: any) => {
+        if (event === 'will-download') willDownloadHandlers.push(cb)
+      },
     })),
   },
 }))
@@ -378,6 +393,135 @@ describe('BrowserPaneManager', () => {
     manager.createInstance('d1')
     manager.destroyInstance('d1')
     expect(manager.listInstances()).toHaveLength(0)
+  })
+
+  // product-closure U11: the renderer toast is driven by exactly one UI
+  // event per finished download — completed / failed; a user-cancelled
+  // download stays silent. The automation wait consumers read getDownloads.
+  describe('download UI events (U11)', () => {
+    function driveDownload(state: 'completed' | 'cancelled' | 'interrupted'): any[] {
+      const events: any[] = []
+      manager.onDownloadEvent((event) => events.push(event))
+      manager.createInstance('dl-inst')
+      expect(createdViews.length).toBeGreaterThan(0)
+
+      const doneCallbacks: Array<(...args: any[]) => void> = []
+      const item = {
+        getFilename: () => 'report.pdf',
+        getURL: () => 'https://example.com/report.pdf',
+        getMimeType: () => 'application/pdf',
+        getReceivedBytes: () => 100,
+        getTotalBytes: () => 200,
+        getSavePath: () => '/tmp/mock-downloads/report.pdf',
+        setSavePath: mock(() => {}),
+        on: mock((_e: string, _cb: any) => {}),
+        once: (event: string, cb: (...args: any[]) => void) => {
+          if (event === 'done') doneCallbacks.push(cb)
+        },
+        removeListener: mock(() => {}),
+      }
+      for (const handler of [...willDownloadHandlers]) {
+        // The manager matches by pageView webContents id; the toolbar/window
+        // webContents have different ids and are ignored by the manager, so
+        // probing every recent view is safe (only the pageView lands).
+        for (const candidate of createdViews.slice(-4)) {
+          handler({}, item, candidate.webContents)
+        }
+      }
+      for (const done of doneCallbacks) done({}, state)
+      return events
+    }
+
+    it('completed → one completed event with savePath and ownership', () => {
+      const events = driveDownload('completed')
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        instanceId: 'dl-inst',
+        filename: 'report.pdf',
+        savePath: '/tmp/mock-downloads/report.pdf',
+        state: 'completed',
+        ownerType: 'manual',
+      })
+    })
+
+    it('interrupted → one failed event', () => {
+      const events = driveDownload('interrupted')
+      expect(events).toHaveLength(1)
+      expect(events[0].state).toBe('failed')
+    })
+
+    it('cancelled → silent (no event)', () => {
+      const events = driveDownload('cancelled')
+      expect(events).toHaveLength(0)
+    })
+  })
+
+  // product-closure U12: logout teardown — destroying every instance AND
+  // clearing the shared partition's storage data are two distinct effects;
+  // both are required, and plain destroyAll must stay storage-preserving.
+  describe('destroyAllAndClearStorage (U12 logout teardown)', () => {
+    it('destroys every instance and clears the partition storage exactly once', async () => {
+      manager.createInstance('u12-a')
+      manager.createInstance('u12-b')
+      clearStorageDataCalls.count = 0
+
+      await manager.destroyAllAndClearStorage()
+
+      expect(manager.listInstances()).toHaveLength(0)
+      expect(clearStorageDataCalls.count).toBe(1)
+    })
+
+    it('plain destroyAll does NOT clear partition storage', async () => {
+      manager.createInstance('u12-keep')
+      clearStorageDataCalls.count = 0
+
+      manager.destroyAll()
+
+      expect(manager.listInstances()).toHaveLength(0)
+      expect(clearStorageDataCalls.count).toBe(0)
+    })
+
+    it('still destroys instances when the storage clear rejects, and rethrows', async () => {
+      manager.createInstance('u12-fail')
+      clearStorageDataCalls.count = 0
+      // Simulate a partition-level failure after the instances are destroyed.
+      const originalFromPartition = (await import('electron')).session.fromPartition as unknown as { mockImplementation: (fn: () => unknown) => void }
+      originalFromPartition.mockImplementation(() => ({
+        setPermissionCheckHandler: () => {},
+        setPermissionRequestHandler: () => {},
+        clearStorageData: async () => {
+          clearStorageDataCalls.count++
+          throw new Error('partition busy')
+        },
+        webRequest: {
+          onBeforeRequest: () => {},
+          onCompleted: () => {},
+          onErrorOccurred: () => {},
+        },
+        on: () => {},
+      }))
+
+      try {
+        await expect(manager.destroyAllAndClearStorage()).rejects.toThrow('partition busy')
+        expect(manager.listInstances()).toHaveLength(0)
+        expect(clearStorageDataCalls.count).toBe(1)
+      } finally {
+        // Restore the shared factory mock for the remaining tests.
+        originalFromPartition.mockImplementation(() => ({
+          setPermissionCheckHandler: mock(() => {}),
+          setPermissionRequestHandler: mock(() => {}),
+          clearStorageData: mock(async () => {
+            clearStorageDataCalls.count++
+          }),
+          webRequest: {
+            onBeforeRequest: mock((_cb: any) => {}),
+            onCompleted: mock((_cb: any) => {}),
+            onErrorOccurred: mock((_cb: any) => {}),
+          },
+          on: mock((_event: string, _cb: any) => {}),
+        }))
+      }
+    })
   })
 
   it('destroys instance via toolbar destroy IPC handler', async () => {

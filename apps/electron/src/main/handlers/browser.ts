@@ -7,6 +7,9 @@ import type { HandlerDeps } from './handler-deps'
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.CREATE,
   RPC_CHANNELS.browserPane.DESTROY,
+  // product-closure U12: explicit logout teardown (destroy all + clear
+  // partition storage). Only ever invoked from the renderer's logout flow.
+  RPC_CHANNELS.browserPane.DESTROY_ALL,
   RPC_CHANNELS.browserPane.LIST,
   RPC_CHANNELS.browserPane.NAVIGATE,
   RPC_CHANNELS.browserPane.GO_BACK,
@@ -55,6 +58,15 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
 
   server.handle(RPC_CHANNELS.browserPane.DESTROY, (_ctx, id: string) => {
     browserPaneManager.destroyInstance(id)
+  })
+
+  // product-closure U12: logout teardown — destroy every instance AND clear
+  // the shared partition's storage data (cookies, localStorage). Deliberately
+  // an explicit renderer-initiated IPC: quitting or relaunching the app must
+  // never wipe browser storage on its own. Awaiting the promise keeps the
+  // caller synchronized (no re-login race against a still-clearing storage).
+  server.handle(RPC_CHANNELS.browserPane.DESTROY_ALL, () => {
+    return browserPaneManager.destroyAllAndClearStorage()
   })
 
   server.handle(RPC_CHANNELS.browserPane.LIST, () => {
@@ -266,5 +278,12 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
   // main window's sidebar, the popup toolbar, or a remote client).
   browserPaneManager.onElementPickerEvent((event) => {
     pushTyped(server, RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT, { to: 'all' }, event)
+  })
+
+  // product-closure U11: terminal download outcomes — broadcast-only (no
+  // request channel), same contract as the other browser events. The
+  // renderer filters by workspace and toasts with a reveal-in-folder action.
+  browserPaneManager.onDownloadEvent((event) => {
+    pushTyped(server, RPC_CHANNELS.browserPane.DOWNLOAD_EVENT, { to: 'all' }, event)
   })
 }

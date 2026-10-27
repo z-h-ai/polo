@@ -18,6 +18,27 @@ export function getHomeAppErrorCode(error: unknown): string | null {
   return null
 }
 
+/**
+ * product-closure U5: structured server codes that mean "the INSTALLATION
+ * ARTIFACT cannot be served" — a platform/admin-side condition (POL-277:
+ * resolve-launch 200 but download 409 `bundle_bytes_unavailable` because the
+ * bundle store volume was missing). Matching is by the code the client
+ * ACTUALLY received — never inferred from an HTTP status. Add codes here as
+ * the server surfaces them; the mapping turns an endless user-retry loop
+ * into the honest next step: contact the enterprise admin, with the real
+ * code copyable for the report.
+ */
+export const BUNDLE_UNAVAILABLE_CODES = new Set([
+  'bundle_bytes_unavailable',
+  'BUNDLE_BYTES_UNAVAILABLE',
+  'bundle_not_found',
+  'BUNDLE_NOT_FOUND',
+])
+
+export function isBundleUnavailableCode(code: string | null): boolean {
+  return code !== null && BUNDLE_UNAVAILABLE_CODES.has(code)
+}
+
 export function homeAppOperationErrorText(
   t: TFunction,
   error: unknown,
@@ -25,6 +46,11 @@ export function homeAppOperationErrorText(
   spaceKind: HomeAppSpaceKind = null,
 ): string {
   const code = getHomeAppErrorCode(error)
+  // product-closure U5: infrastructure-side artifact unavailability. The fix
+  // belongs to the enterprise admin/platform, not to another user retry.
+  if (isBundleUnavailableCode(code)) {
+    return t('infraError.installBundleUnavailable')
+  }
   if (code === 'NOT_FOUND') return t('homeApps.status.unavailableGeneric')
   if (code === 'CIRCLE_ENTITLEMENT_REQUIRED') return t('homeApps.errors.circleEntitlementRequired')
   if (
@@ -107,4 +133,35 @@ export function catalogStateMessage(
   return spaceKind === 'enterprise'
     ? t('homeApps.organization.loadError')
     : t('homeApps.space.loadError')
+}
+
+export interface HomeAppErrorPresentation {
+  /** Localized, user-facing text (same as homeAppOperationErrorText). */
+  text: string
+  /**
+   * The structured server code worth surfacing for a report — set ONLY for
+   * infrastructure-side conditions (U5: `bundle_bytes_unavailable` family).
+   * Business errors keep their regular copy without a code badge.
+   */
+  copyableCode: string | null
+}
+
+/**
+ * product-closure U5: presentation wrapper around homeAppOperationErrorText.
+ * The toast description renders `copyableCode` as a copyable badge so the
+ * user can hand the REAL server code to their admin instead of retyping a
+ * paraphrase. Never includes credentials or internal paths — the code is the
+ * same string the server put on the wire.
+ */
+export function homeAppErrorPresentation(
+  t: TFunction,
+  error: unknown,
+  operation: HomeAppOperation,
+  spaceKind: HomeAppSpaceKind = null,
+): HomeAppErrorPresentation {
+  const code = getHomeAppErrorCode(error)
+  return {
+    text: homeAppOperationErrorText(t, error, operation, spaceKind),
+    copyableCode: isBundleUnavailableCode(code) ? code : null,
+  }
 }
