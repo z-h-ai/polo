@@ -20,7 +20,6 @@ import { platform } from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
 import { mainLog } from './logger'
-import { getAppVersion } from '@polo-ai/shared/version'
 import {
   getDismissedUpdateVersion,
   clearDismissedUpdateVersion,
@@ -56,7 +55,10 @@ function getUpdateCacheDir(): string {
 // Module state — keeps track of update info for IPC queries
 let updateInfo: UpdateInfo = {
   available: false,
-  currentVersion: getAppVersion(),
+  // Anchor to the app identity (electron-builder writes the same value into
+  // Info.plist) so the settings About page always matches the app menu, and
+  // matches what electron-updater compares against (POO-160).
+  currentVersion: app.getVersion(),
   latestVersion: null,
   downloadState: 'idle',
   downloadProgress: 0,
