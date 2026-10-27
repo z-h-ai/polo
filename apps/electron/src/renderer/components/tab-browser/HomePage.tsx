@@ -24,6 +24,7 @@ import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { ProductSpaceSkillsDialog } from '@/components/product-space/ProductSpaceSkillsDialog'
 import { useTabShell } from '@/context/TabShellContext'
 import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
+import { PinnedCanvasApps } from './PinnedCanvasApps'
 import { KNOWLEDGE_BASE_APP_DEFINITION, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
   catalogStateMessage,
@@ -483,6 +484,12 @@ export function HomePage() {
           spaceKey={catalog.productSpace.productSpaceContextKey}
         />
       )}
+
+      {/* POO-154: 本机固定的画布应用 — the always-available re-open entry for
+      pinned canvas apps. Device-local truth, independent of the catalog
+      phases below (a closed pinned tab must never orphan its app). Renders
+      nothing while nothing is pinned. */}
+      <PinnedCanvasApps />
 
       {/* Prototype `.r14-toolbar`: search + source filter + sort. Hidden when
       the directory cannot be verified AND nothing cached is retained (a

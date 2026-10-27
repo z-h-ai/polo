@@ -14,7 +14,10 @@
  * package stays decoupled from the Electron renderer's contexts. POO-104 adds
  * the publish action (发布为 Web App Artifact) on the same pattern: Main
  * packages the session-local bundle and the Electron-side bridge hands it to
- * the existing CreatorArtifact upload chain.
+ * the existing CreatorArtifact upload chain. POO-154: pinning became a
+ * toggle — the bridge mirrors the installed canvas-app ids back
+ * (craft:genui-pin-state) so a remounted card offers 取消固定 instead of a
+ * second pin, and an unpin request removes the launcher entry again.
  *
  * POO-103: the card's webview registers itself with the Main-owned
  * UiCardRegistry on attach (CustomEvent bridge, same decoupling), which is
@@ -31,7 +34,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AppWindow, Globe, PanelRight, Pin } from 'lucide-react'
+import { AppWindow, Globe, PanelRight, Pin, PinOff } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 // <webview> JSX typing comes from @types/react's WebViewHTMLAttributes
@@ -159,6 +162,68 @@ export function onGenUiAppPinResult(
   return () => window.removeEventListener(GENUI_APP_PIN_RESULT_EVENT, listener)
 }
 
+// ── Unpin bridge (POO-154: a pinned app must be un-pinnable) ─────────────────
+//
+// The card asks the Electron bridge to remove the launcher entry (and close
+// its tab); the bridge answers on the same result shape as pinning.
+
+export const GENUI_APP_UNPIN_EVENT = 'craft:unpin-genui-app'
+export const GENUI_APP_UNPIN_RESULT_EVENT = 'craft:unpin-genui-app-result'
+
+export interface GenUiAppUnpinRequest {
+  requestId: string
+  sessionId: string
+  appId: string
+}
+
+export function dispatchGenUiAppUnpin(request: GenUiAppUnpinRequest): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppUnpinRequest>(GENUI_APP_UNPIN_EVENT, { detail: request }))
+}
+
+/** Electron-side bridge replies through this (same shape as the pin result). */
+export function dispatchGenUiAppUnpinResult(result: GenUiAppPinResult): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppPinResult>(GENUI_APP_UNPIN_RESULT_EVENT, { detail: result }))
+}
+
+/** Subscribe to the unpin result for one requestId; returns an unsubscribe. */
+export function onGenUiAppUnpinResult(
+  requestId: string,
+  handler: (result: GenUiAppPinResult) => void,
+): () => void {
+  const listener = (event: Event) => {
+    const detail = (event as CustomEvent<GenUiAppPinResult>).detail
+    if (detail?.requestId !== requestId) return
+    handler(detail)
+  }
+  window.addEventListener(GENUI_APP_UNPIN_RESULT_EVENT, listener)
+  return () => window.removeEventListener(GENUI_APP_UNPIN_RESULT_EVENT, listener)
+}
+
+// ── Pinned-state mirror (bridge → cards) ─────────────────────────────────────
+//
+// A pinned fact must survive the card's remount (transcript virtualization,
+// app restart): the bridge broadcasts the installed canvas-app ids and a
+// remounting card queries before it renders its pin action. Fire-and-forget —
+// the broadcast is the acknowledgment, exactly like the canvas pane state.
+
+export const GENUI_APP_PIN_STATE_EVENT = 'craft:genui-pin-state'
+export const GENUI_APP_PIN_STATE_QUERY_EVENT = 'craft:query-genui-pin-state'
+
+/** Bare canvas app ids (no launcher-id prefix) currently installed as tabs. */
+export interface GenUiAppPinState {
+  pinnedAppIds: string[]
+}
+
+/** Electron-side bridge broadcasts pin state through this. */
+export function dispatchGenUiAppPinState(state: GenUiAppPinState): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppPinState>(GENUI_APP_PIN_STATE_EVENT, { detail: state }))
+}
+
+/** A card asking for the current pin state (e.g. after a remount). */
+export function dispatchGenUiAppPinStateQuery(): void {
+  window.dispatchEvent(new CustomEvent(GENUI_APP_PIN_STATE_QUERY_EVENT))
+}
+
 function createPinRequestId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -177,6 +242,7 @@ function createPinRequestId(): string {
 export const GENUI_APP_PUBLISH_EVENT = 'craft:publish-genui-app'
 export const GENUI_APP_PUBLISH_RESULT_EVENT = 'craft:publish-genui-app-result'
 export const GENUI_APP_PUBLISH_TARGET_EVENT = 'craft:genui-publish-target'
+export const GENUI_APP_PUBLISH_TARGET_QUERY_EVENT = 'craft:query-genui-publish-target'
 
 export interface GenUiAppPublishRequest {
   requestId: string
@@ -185,10 +251,18 @@ export interface GenUiAppPublishRequest {
   title: string
 }
 
+/**
+ * Stable failure class of a publish attempt. The card localizes from this —
+ * the raw `error` text stays diagnostics-only (it may be a server message in
+ * any language) and travels in the detail tooltip.
+ */
+export type GenUiAppPublishErrorCode = 'packaging-failed' | 'no-publish-target' | 'publish-failed'
+
 export interface GenUiAppPublishResult {
   requestId: string
   ok: boolean
   error?: string
+  errorCode?: GenUiAppPublishErrorCode
   /** Display name of the organization the artifact was published into. */
   organizationName?: string
 }
@@ -227,6 +301,16 @@ export function onGenUiAppPublishResult(
   }
   window.addEventListener(GENUI_APP_PUBLISH_RESULT_EVENT, listener)
   return () => window.removeEventListener(GENUI_APP_PUBLISH_RESULT_EVENT, listener)
+}
+
+/** A card asking the bridge to (re-)announce the publish target. */
+export function dispatchGenUiAppPublishTargetQuery(): void {
+  window.dispatchEvent(new CustomEvent(GENUI_APP_PUBLISH_TARGET_QUERY_EVENT))
+}
+
+/** Electron-side bridge announces the resolved publish target through this. */
+export function dispatchGenUiAppPublishTarget(target: GenUiAppPublishTarget): void {
+  window.dispatchEvent(new CustomEvent<GenUiAppPublishTarget>(GENUI_APP_PUBLISH_TARGET_EVENT, { detail: target }))
 }
 
 // ── Card registration bridge (POO-103, CustomEvent → Electron bridge) ────────
@@ -466,16 +550,46 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
     onLoadFailed: React.useCallback(() => setLoadFailed(true), []),
   })
 
+  // Structural probe for every CustomEvent bridge (pin/unpin, pin-state
+  // mirror, canvas pane, publish): packages/ui cannot import the Electron
+  // contexts, so an Electron shell is detected by the contextBridge global.
+  const hasElectronBridge = typeof (window as { electronAPI?: unknown }).electronAPI === 'object'
+    && (window as { electronAPI?: unknown }).electronAPI !== null
+
+  // ── POO-154: pinned-state mirror ───────────────────────────────────────────
+  //
+  // `pinState` alone forgets the pinned fact on every remount (and the button
+  // then re-offers a pin that already happened). The bridge owns the truth;
+  // the card mirrors it and queries BEFORE rendering so a remounted card
+  // offers 取消固定 instead of a second pin. `null` = unknown (no bridge) —
+  // the button falls back to the local pin outcome only.
+  const [pinnedAppIds, setPinnedAppIds] = React.useState<readonly string[] | null>(null)
+
+  React.useEffect(() => {
+    if (!hasElectronBridge) return
+    // Subscribe BEFORE dispatching: the bridge answers the query
+    // synchronously, so the replay must land on a registered listener.
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<GenUiAppPinState>).detail
+      if (!detail || !Array.isArray(detail.pinnedAppIds)) return
+      setPinnedAppIds(detail.pinnedAppIds)
+    }
+    window.addEventListener(GENUI_APP_PIN_STATE_EVENT, listener)
+    dispatchGenUiAppPinStateQuery()
+    return () => window.removeEventListener(GENUI_APP_PIN_STATE_EVENT, listener)
+  }, [hasElectronBridge])
+
+  const bridgeReportsPinned = pinnedAppIds?.includes(appId) ?? null
+  const isPinned = pinState === 'pinned' || bridgeReportsPinned === true
+
   // ── POO-115: right-side canvas pane ────────────────────────────────────────
   //
   // The pane state lives Electron-renderer-side (per-session atom); the card
-  // mirrors it. `hasCanvasBridge` keeps the entry out of shells where no
+  // mirrors it. `hasElectronBridge` keeps the entry out of shells where no
   // bridge serves the CustomEvents (webui) — same structural probe as the
-  // publish action. Gating matches the pin action: only a real bundle in a
+  // pin action. Gating matches the pin action: only a real bundle in a
   // real session can move to the pane, because the pane hosts the same file.
-  const hasCanvasBridge = typeof (window as { electronAPI?: unknown }).electronAPI === 'object'
-    && (window as { electronAPI?: unknown }).electronAPI !== null
-  const canOpenCanvas = canBridge && hasCanvasBridge
+  const canOpenCanvas = canBridge && hasElectronBridge
   const [canvasOpen, setCanvasOpen] = React.useState(false)
 
   React.useEffect(() => {
@@ -514,6 +628,8 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       unsubscribe()
       if (result.ok) {
         setPinState('pinned')
+        // Optimistic mirror update: the bridge's broadcast reconciles this.
+        setPinnedAppIds((ids) => (ids && !ids.includes(appId) ? [...ids, appId] : ids))
       } else {
         setPinState('error')
         setPinError(result.error ?? t('genui.app.pinFailed'))
@@ -529,6 +645,31 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
     })
   }, [appId, indexPath, pinState, sessionId, t, title, version])
 
+  // POO-154: unpinning removes the launcher entry (and closes its tab). The
+  // bridge's broadcast is the authoritative state; the local mirror update
+  // keeps the button on 取消固定→固定 without waiting for it.
+  const handleUnpin = React.useCallback(() => {
+    if (pinState === 'pending') return
+    const requestId = createPinRequestId()
+    setPinState('pending')
+    setPinError(null)
+    const unsubscribe = onGenUiAppUnpinResult(requestId, (result) => {
+      unsubscribe()
+      if (result.ok) {
+        setPinState('idle')
+        setPinnedAppIds((ids) => (ids ? ids.filter(id => id !== appId) : ids))
+      } else {
+        setPinState('error')
+        setPinError(result.error ?? t('genui.app.unpinFailed'))
+      }
+    })
+    dispatchGenUiAppUnpin({
+      requestId,
+      sessionId: sessionId ?? '',
+      appId,
+    })
+  }, [appId, pinState, sessionId, t])
+
   // POO-104 publish: Main packages the bundle and the Electron bridge pushes
   // it through the CreatorArtifact upload chain. Only a real bundle file in a
   // real session can publish — the same gating as the pin action — and the
@@ -542,6 +683,8 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
   const canPublish = Boolean(indexPath && sessionId && hasElectronPublishBridge)
   const [publishState, setPublishState] = React.useState<'idle' | 'pending' | 'published' | 'error'>('idle')
   const [publishError, setPublishError] = React.useState<string | null>(null)
+  /** Raw (possibly server-language) failure text, surfaced as a tooltip only. */
+  const [publishErrorDetail, setPublishErrorDetail] = React.useState<string | null>(null)
   // Publish target from the bridge's announcement: hasActiveTarget=false
   // disables the button (no active organization — the bridge has no inactive
   // fallback); null = unknown, the button stays enabled and a click surfaces
@@ -550,6 +693,11 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
   const [publishedOrg, setPublishedOrg] = React.useState<string | null>(null)
 
   React.useEffect(() => {
+    if (!hasElectronPublishBridge) return
+    // Subscribe BEFORE dispatching: the bridge answers the query with a
+    // broadcast, so the replay must land on a registered listener. (The
+    // bridge also announces once per its own mount, but cards mount after
+    // it — the query is what makes the gated state actually reachable.)
     const listener = (event: Event) => {
       const detail = (event as CustomEvent<GenUiAppPublishTarget>).detail
       if (!detail || typeof detail.hasActiveTarget !== 'boolean') return
@@ -557,14 +705,16 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       if (!detail.hasActiveTarget) setPublishedOrg(null)
     }
     window.addEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, listener)
+    dispatchGenUiAppPublishTargetQuery()
     return () => window.removeEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, listener)
-  }, [])
+  }, [hasElectronPublishBridge])
 
   const handlePublish = React.useCallback(() => {
     if (!canPublish || publishState === 'pending') return
     const requestId = createPinRequestId()
     setPublishState('pending')
     setPublishError(null)
+    setPublishErrorDetail(null)
     const unsubscribe = onGenUiAppPublishResult(requestId, (result) => {
       unsubscribe()
       if (result.ok) {
@@ -574,7 +724,16 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
         setPublishedOrg(result.organizationName ?? publishTarget?.organizationName ?? null)
       } else {
         setPublishState('error')
-        setPublishError(result.error ?? t('genui.app.publishFailed'))
+        // The raw error text may be a server-language diagnostic; the stable
+        // error code localizes, the raw text stays in the tooltip.
+        setPublishError(
+          result.errorCode === 'no-publish-target'
+            ? t('genui.app.publishErrorNoTarget')
+            : result.errorCode === 'packaging-failed'
+              ? t('genui.app.publishErrorPackage')
+              : t('genui.app.publishFailed'),
+        )
+        if (result.error) setPublishErrorDetail(result.error)
       }
     })
     dispatchGenUiAppPublish({
@@ -641,20 +800,20 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
             {t('genui.app.openInCanvas')}
           </button>
         )}
-        {indexPath && (
+        {indexPath && hasElectronBridge && (
           <button
             type="button"
-            onClick={handlePin}
-            disabled={pinState === 'pending' || pinState === 'pinned'}
+            onClick={isPinned ? handleUnpin : handlePin}
+            disabled={pinState === 'pending'}
             className={cn(
               'shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border transition-colors',
-              pinState === 'pinned'
-                ? 'border-success/30 text-success bg-success/[0.06]'
+              isPinned
+                ? 'border-success/30 text-success bg-success/[0.06] hover:border-success/50'
                 : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted',
             )}
           >
-            <Pin className="w-3 h-3" />
-            {pinState === 'pinned' ? t('genui.app.pinned') : t('genui.app.pin')}
+            {isPinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+            {isPinned ? t('genui.app.unpin') : t('genui.app.pin')}
           </button>
         )}
         {canPublish && (
@@ -680,7 +839,20 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
         )}
       </div>
       {(pinError || publishError) && (
-        <div className="px-3 py-1.5 text-[11px] text-destructive/80 bg-destructive/[0.04] border-b">{publishError ?? pinError}</div>
+        <div
+          className="px-3 py-1.5 text-[11px] text-destructive/80 bg-destructive/[0.04] border-b"
+          title={publishErrorDetail ?? undefined}
+        >
+          {publishError ?? pinError}
+        </div>
+      )}
+      {!pinError && !publishError && publishUnavailable && (
+        // POO-154: a disabled button with only a hover tooltip reads as a dead
+        // control. When the bridge knows there is no publish target, say so
+        // inline — the state must be visible, not merely discoverable.
+        <div className="px-3 py-1.5 text-[11px] text-muted-foreground/80 bg-muted/30 border-b">
+          {t('genui.app.publishNoTargetHint')}
+        </div>
       )}
       {loadFailed ? (
         <div className="h-[320px] flex items-center justify-center text-[12px] text-muted-foreground/70">

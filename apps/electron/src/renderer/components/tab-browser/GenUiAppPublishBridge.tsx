@@ -22,16 +22,31 @@
  * 3. `admin.PUBLISH_CREATOR_APP` (mode "upload"): analyze → canonical bundle
  *    (writes the platform-owned polo-app.json) → platform release (checksum)
  *    → upload → completeAndPublish.
+ *
+ * Every failure answers with a stable `errorCode` (POO-154) so the card can
+ * localize; the raw message stays diagnostics-only in the error tooltip.
  */
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import {
   GENUI_APP_PUBLISH_EVENT,
   GENUI_APP_PUBLISH_TARGET_EVENT,
+  GENUI_APP_PUBLISH_TARGET_QUERY_EVENT,
   dispatchGenUiAppPublishResult,
+  dispatchGenUiAppPublishTarget,
+  type GenUiAppPublishErrorCode,
   type GenUiAppPublishRequest,
   type GenUiAppPublishTarget,
 } from '@polo-ai/ui/chat/GenUiAppCard'
+
+/** A failed publish step carrying its stable, localizable failure class. */
+class PublishStepError extends Error {
+  readonly errorCode: GenUiAppPublishErrorCode
+  constructor(message: string, errorCode: GenUiAppPublishErrorCode) {
+    super(message)
+    this.errorCode = errorCode
+  }
+}
 
 export function GenUiAppPublishBridge() {
   const handlePublish = useCallback(async (request: GenUiAppPublishRequest) => {
@@ -44,7 +59,7 @@ export function GenUiAppPublishBridge() {
         title: request.title,
       })
       if (!packaged.ok || !packaged.payloadBase64) {
-        throw new Error(packaged.error || 'Packaging failed')
+        throw new PublishStepError(packaged.error || 'Packaging failed', 'packaging-failed')
       }
 
       // 2. Publish target: the first ACTIVE organization — no inactive
@@ -54,11 +69,11 @@ export function GenUiAppPublishBridge() {
       //    this re-check stays authoritative.
       const orgs = await window.electronAPI.organizationList()
       if (!orgs.success) {
-        throw new Error(orgs.message || 'Could not list organizations for publish')
+        throw new PublishStepError(orgs.message || 'Could not list organizations for publish', 'no-publish-target')
       }
       const target = orgs.organizations.find(org => org.status === 'active' && org.membership.status === 'active')
       if (!target) {
-        throw new Error('No active organization available to publish into')
+        throw new PublishStepError('No active organization available to publish into', 'no-publish-target')
       }
 
       // 3. Hand the payload to the existing CreatorArtifact upload chain.
@@ -71,14 +86,14 @@ export function GenUiAppPublishBridge() {
         selectedEntry: packaged.entry ?? { runtime: 'static', path: 'index.html' },
       })
       if (!published.success) {
-        throw new Error(published.message || 'Publish failed')
+        throw new PublishStepError(published.message || 'Publish failed', 'publish-failed')
       }
       // Defensive: packaging always supplies the analyzed static entry, so
       // the chain has no reason to ask for entry selection. Anything that is
       // not a concrete publication means the contract drifted — fail the
       // publish instead of reporting success.
       if (!('publication' in published) || !published.publication) {
-        throw new Error('Publish chain did not return a publication (unexpected entry-selection round-trip)')
+        throw new PublishStepError('Publish chain did not return a publication (unexpected entry-selection round-trip)', 'publish-failed')
       }
 
       dispatchGenUiAppPublishResult({
@@ -91,6 +106,7 @@ export function GenUiAppPublishBridge() {
         requestId: request.requestId,
         ok: false,
         error: error instanceof Error ? error.message : String(error),
+        errorCode: error instanceof PublishStepError ? error.errorCode : 'publish-failed',
       })
     }
   }, [])
@@ -105,33 +121,52 @@ export function GenUiAppPublishBridge() {
     return () => window.removeEventListener(GENUI_APP_PUBLISH_EVENT, listener)
   }, [handlePublish])
 
-  // Announce the publish target once per mount so cards can gate the button:
-  // no active organization → hasActiveTarget=false → disabled (publishing
-  // has no fallback target). A failed organization RPC is UNKNOWN, not
-  // absent — no announcement, the button stays enabled and a click surfaces
-  // the precise error from the publish chain.
-  useEffect(() => {
-    let cancelled = false
-    const announce = async () => {
-      let target: { name: string } | null = null
-      try {
-        const orgs = await window.electronAPI.organizationList()
-        if (orgs.success) {
-          target = orgs.organizations.find(org => org.status === 'active' && org.membership.status === 'active') ?? null
-        }
-      } catch {
-        // Leave target null → unknown, not absent.
-      }
-      if (cancelled) return
-      const detail: GenUiAppPublishTarget = {
-        hasActiveTarget: target != null,
-        organizationName: target?.name ?? null,
-      }
-      window.dispatchEvent(new CustomEvent<GenUiAppPublishTarget>(GENUI_APP_PUBLISH_TARGET_EVENT, { detail }))
+  // Announce the publish target so cards can gate the button: no active
+  // organization → hasActiveTarget=false → disabled (publishing has no
+  // fallback target). A failed organization RPC is UNKNOWN, not absent — no
+  // announcement, the button stays enabled and a click surfaces the precise
+  // error from the publish chain.
+  //
+  // POO-154: the cards mount AFTER this bridge, so the mount announcement
+  // alone never reaches them; a card's `craft:query-genui-publish-target`
+  // request (re)broadcasts the resolved state. The first resolution is
+  // memoized so a transcript of many cards costs one org RPC; a resolution
+  // that is still in flight is awaited by later queries rather than
+  // refetched.
+  const resolvedTargetRef = useRef<GenUiAppPublishTarget | null>(null)
+  const resolvingRef = useRef<Promise<void> | null>(null)
+
+  const resolveAndAnnounce = useCallback(() => {
+    if (resolvedTargetRef.current) {
+      dispatchGenUiAppPublishTarget(resolvedTargetRef.current)
+      return
     }
-    void announce()
-    return () => { cancelled = true }
+    if (!resolvingRef.current) {
+      resolvingRef.current = (async () => {
+        let target: { name: string } | null = null
+        try {
+          const orgs = await window.electronAPI.organizationList()
+          if (orgs.success) {
+            target = orgs.organizations.find(org => org.status === 'active' && org.membership.status === 'active') ?? null
+          }
+        } catch {
+          // Leave target null → unknown, not absent.
+        }
+        resolvedTargetRef.current = {
+          hasActiveTarget: target != null,
+          organizationName: target?.name ?? null,
+        }
+        dispatchGenUiAppPublishTarget(resolvedTargetRef.current)
+      })()
+    }
   }, [])
+
+  useEffect(() => {
+    void resolveAndAnnounce()
+    const queryListener = () => { resolveAndAnnounce() }
+    window.addEventListener(GENUI_APP_PUBLISH_TARGET_QUERY_EVENT, queryListener)
+    return () => window.removeEventListener(GENUI_APP_PUBLISH_TARGET_QUERY_EVENT, queryListener)
+  }, [resolveAndAnnounce])
 
   return null
 }
