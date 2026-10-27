@@ -494,3 +494,16 @@ describe('POO-157 targeted popup return', () => {
     expect(apiCalls.embed).toEqual([])
   })
 })
+
+
+describe('POO-157 deferred return to owning chat', () => {
+  it('returns A when the user next selects A, preserving B until then', () => {
+    const { rerender } = mount('sess-b')
+    openHandler!(makeInstance({ id: 'a', ownerSessionId: 'sess-a' }), 'return')
+    expect(apiCalls.embed).toEqual([])
+    rerender(createElement(Harness, { currentSessionId: 'sess-a', onSelectSession: () => {} }))
+    expect(apiCalls.embed).toEqual(['a'])
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('a')
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
+  })
+})
