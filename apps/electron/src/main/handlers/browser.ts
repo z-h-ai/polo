@@ -40,18 +40,17 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
     // harness), the window stays globally visible (legacy behavior).
     const workspaceId = ctx.workspaceId ?? null
 
-    if (typeof input === 'string') {
-      return browserPaneManager.createInstance(input, { workspaceId })
+    // Show requests share FOCUS routing, with the caller's main window as
+    // the host. Creating the backing window never makes it visible.
+    const id = typeof input === 'string'
+      ? browserPaneManager.createInstance(input, { workspaceId })
+      : input?.bindToSessionId
+        ? browserPaneManager.createForSession(input.bindToSessionId, { show: false, workspaceId })
+        : browserPaneManager.createInstance(input?.id, { show: false, workspaceId })
+    if (typeof input !== 'string' && input?.show) {
+      browserPaneManager.focus(id, resolveHostWindow(ctx.webContentsId) ?? undefined)
     }
-
-    if (input?.bindToSessionId) {
-      return browserPaneManager.createForSession(input.bindToSessionId, {
-        show: input.show ?? false,
-        workspaceId,
-      })
-    }
-
-    return browserPaneManager.createInstance(input?.id, { show: input?.show, workspaceId })
+    return id
   })
 
   server.handle(RPC_CHANNELS.browserPane.DESTROY, (_ctx, id: string) => {
@@ -102,8 +101,8 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
     browserPaneManager.stop(id)
   })
 
-  server.handle(RPC_CHANNELS.browserPane.FOCUS, (_ctx, id: string) => {
-    browserPaneManager.focus(id)
+  server.handle(RPC_CHANNELS.browserPane.FOCUS, (ctx, id: string) => {
+    browserPaneManager.focus(id, resolveHostWindow(ctx.webContentsId) ?? undefined)
   })
 
   // POO-135: embed/restore. The embed host is the calling window itself — the
@@ -244,6 +243,12 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
   // silently fail to reach the renderer. Broadcast to all + filter in the
   // renderer is the contract that actually works in both local-only and
   // remote-mirror deployments.
+  browserPaneManager.onOpenRequested?.((info, host, reason) => {
+    const clientId = deps.windowManager?.getClientIdForWindow(host.webContents.id)
+    if (!clientId) throw new Error('[browser-pane] sidebar renderer is not connected')
+    pushTyped(server, RPC_CHANNELS.browserPane.OPEN_REQUESTED, { to: 'client', clientId }, info, reason)
+  })
+
   browserPaneManager.onStateChange((info) => {
     pushTyped(server, RPC_CHANNELS.browserPane.STATE_CHANGED, { to: 'all' }, info)
   })

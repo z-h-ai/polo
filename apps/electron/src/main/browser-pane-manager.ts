@@ -381,7 +381,9 @@ interface BrowserInstance {
    * popup window; only the page view migrates.
    */
   hostMode: 'popup' | 'embedded'
-  /** POO-135: host window while embedded (null in popup mode). */
+  /** Last sidebar host, retained while popped out so hide returns to the same window. */
+  sidebarHostWindow: BrowserWindow | null
+  /** Host window while embedded (null in popup mode). */
   embeddedHostWindow: BrowserWindow | null
   /**
    * POO-135 r1: whether the page view is actually attached to the embed host.
@@ -545,6 +547,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   private instances: Map<string, BrowserInstance> = new Map()
   private destroyingIds: Set<string> = new Set()
   private stateChangeCallback: ((info: BrowserInstanceInfo) => void) | null = null
+  private openRequestedCallback: ((info: BrowserInstanceInfo, host: BrowserWindow, reason: 'focus' | 'return') => void) | null = null
   private removedCallback: ((id: string) => void) | null = null
   private interactedCallback: ((id: string) => void) | null = null
   private partitionPermissionsInitialized = false
@@ -591,6 +594,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   onRemoved(callback: (id: string) => void): void {
     this.removedCallback = callback
+  }
+
+  onOpenRequested(callback: (info: BrowserInstanceInfo, host: BrowserWindow, reason: 'focus' | 'return') => void): void {
+    this.openRequestedCallback = callback
   }
 
   onInteracted(callback: (id: string) => void): void {
@@ -722,6 +729,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       downloads: [],
       lastLaunchToken: null,
       hostMode: 'popup',
+      sidebarHostWindow: null,
       embeddedHostWindow: null,
       embeddedViewsAttached: false,
       elementPicking: false,
@@ -1044,7 +1052,43 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     instance.pageView.webContents.stop()
   }
 
-  focus(id: string): void {
+  // Ordinary open/focus always asks the owning workbench to present its sidebar.
+  // Only detachToPopup may show a separate window in the desktop runtime.
+  focus(id: string, hostWindow?: BrowserWindow): void {
+    const instance = this.instances.get(id)
+    if (!instance || instance.window.isDestroyed()) return
+    if (this.openRequestedCallback) {
+      this.requestSidebarOpen(instance, 'focus', hostWindow)
+      return
+    }
+    // Standalone/headless embedders without a workbench retain their API.
+    this.focusPopup(id)
+  }
+
+  private requestSidebarOpen(instance: BrowserInstance, reason: 'focus' | 'return', requestedHost?: BrowserWindow): void {
+    const wm = this.windowManager
+    const focused = wm?.getFocusedWindow()
+    const focusedWorkspace = focused && wm?.getWorkspaceForWindow(focused.webContents.id)
+    const host = requestedHost ??
+      (instance.sidebarHostWindow && !instance.sidebarHostWindow.isDestroyed() ? instance.sidebarHostWindow : null) ??
+      (focusedWorkspace && (!instance.workspaceId || focusedWorkspace === instance.workspaceId) ? focused : null) ??
+      (instance.workspaceId ? wm?.getWindowByWorkspace(instance.workspaceId) : null)
+    if (!host || host.isDestroyed()) {
+      throw new Error(`[browser-pane] sidebar host unavailable (instance: ${instance.id})`)
+    }
+    instance.sidebarHostWindow = host
+    instance.showOnCreate = false
+    instance.pendingShowOnReady = false
+    instance.pendingShowToken += 1
+    this.openRequestedCallback?.(this.toInfo(instance), host, reason)
+    if (reason === 'focus') {
+      if (host.isMinimized()) host.restore()
+      host.show()
+      host.focus()
+    }
+  }
+
+  private focusPopup(id: string): void {
     const instance = this.instances.get(id)
     if (!instance) return
 
@@ -1117,6 +1161,13 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     queueMicrotask(() => {
       instance.isHiding = false
       this.emitStateChange(instance)
+      if (instance.hostMode === 'popup' && this.openRequestedCallback && this.instances.has(id)) {
+        try {
+          this.requestSidebarOpen(instance, 'return')
+        } catch (error) {
+          mainLog.warn(`[browser-pane] sidebar return failed id=${id}: ${String(error)}`)
+        }
+      }
     })
   }
 
@@ -1153,6 +1204,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
 
     hostWindow.addBrowserView(instance.pageView)
+    // Do not cover the workbench before the renderer measures its sidebar.
+    if (!bounds) instance.pageView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+    instance.sidebarHostWindow = hostWindow
+    instance.showOnCreate = false
+    instance.pendingShowOnReady = false
+    instance.pendingShowToken += 1
     // Bounds are driven by the sidebar renderer; auto-resize would fight it.
     instance.pageView.setAutoResize({ width: false, height: false })
     instance.embeddedHostWindow = hostWindow
@@ -1173,8 +1230,11 @@ export class BrowserPaneManager implements IBrowserPaneManager {
    */
   detachToPopup(id: string): void {
     const instance = this.requireAliveInstance(id)
+    instance.showOnCreate = false
+    instance.pendingShowOnReady = false
+    instance.pendingShowToken += 1
     if (instance.hostMode !== 'embedded') {
-      this.focus(id)
+      this.focusPopup(id)
       return
     }
 
@@ -3063,8 +3123,9 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   /** Register the `__browser:invoke` IPC handler. Call once at app startup. */
   registerCapabilityIpc(): void {
-    ipcMain.handle('__browser:invoke', async (_event, req: BrowserCapabilityRequest) => {
-      return await this.dispatchCapability(req)
+    ipcMain.handle('__browser:invoke', async (event, req: BrowserCapabilityRequest) => {
+      const host = this.windowManager?.getWindowByWebContentsId(event.sender.id) ?? undefined
+      return await this.dispatchCapability(req, host)
     })
     mainLog.info('[browser-pane] Capability IPC handler registered')
   }
@@ -3159,7 +3220,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   }
 
   /** Main dispatcher. Strongly-typed `switch` over `IBrowserPaneManager` methods. */
-  private async dispatchCapability(req: BrowserCapabilityRequest): Promise<unknown> {
+  private async dispatchCapability(req: BrowserCapabilityRequest, hostWindow?: BrowserWindow): Promise<unknown> {
     if (!req || req.v !== 1) {
       throw new CodedError('HANDLER_ERROR',
         `Unsupported browser capability request shape (v=${(req as { v?: unknown })?.v}).`)
@@ -3167,37 +3228,25 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     const ownerKey = this.toOwnerKey(req.workspaceId, req.sessionId)
     const args = req.args ?? []
 
+    // The remote workspace id differs from the local mirror id. Preserve
+    // the actual capability sender instead of guessing from the focused window.
+    const createSessionBrowser = (show: boolean): string => {
+      const id = this.createForSession(ownerKey, { show: false, allowReuseManual: false, workspaceId: req.workspaceId })
+      const instance = this.instances.get(id)
+      if (instance && hostWindow) instance.sidebarHostWindow = hostWindow
+      if (show) this.focus(id, hostWindow)
+      return id
+    }
+
     switch (req.method) {
-      // -- Session-scoped (no instanceId arg, takes a sessionId) ----------------
       case 'createForSession': {
         const [, options] = args as [string, { show?: boolean } | undefined]
-        return this.createForSession(ownerKey, {
-          show: options?.show ?? false,
-          allowReuseManual: false,
-          workspaceId: req.workspaceId,
-        })
+        return createSessionBrowser(options?.show ?? false)
       }
-      // Remote agents must NEVER reuse an existing manual / unbound window —
-      // even one that was previously bound to a local session. The
-      // workspaceId-aware reuse filter is best-effort (it can still match
-      // legacy windows stamped with workspaceId=null), so we belt-and-brace
-      // by disabling manual reuse on every remote lifecycle path. Each remote
-      // session-id namespace gets a fresh window unless it already owns one.
       case 'getOrCreateForSession':
-        return this.createForSession(ownerKey, {
-          show: false,
-          allowReuseManual: false,
-          workspaceId: req.workspaceId,
-        })
-      case 'focusBoundForSession': {
-        const id = this.createForSession(ownerKey, {
-          show: true,
-          allowReuseManual: false,
-          workspaceId: req.workspaceId,
-        })
-        this.focus(id)
-        return id
-      }
+        return createSessionBrowser(false)
+      case 'focusBoundForSession':
+        return createSessionBrowser(true)
       case 'destroyForSession':
         this.destroyForSession(ownerKey)
         return undefined
@@ -3248,7 +3297,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       case 'focus': {
         const [instanceId] = args as [string]
         this.requireOwnedInstance(instanceId, ownerKey)
-        this.focus(instanceId)
+        this.focus(instanceId, hostWindow)
         return undefined
       }
       case 'hide': {
@@ -3433,16 +3482,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     if (!shouldShowNow) return
 
     const tokenAtReady = instance.pendingShowToken
+    const explicitPopup = instance.pendingShowOnReady
     instance.pendingShowOnReady = false
 
     if (instance.window.isDestroyed()) return
     if (instance.pendingShowToken !== tokenAtReady) return
 
-    instance.window.show()
-    instance.window.focus()
-    instance.isVisible = true
-    this.emitStateChange(instance)
-
+    instance.showOnCreate = false
+    if (explicitPopup) this.focusPopup(instance.id)
+    else this.focus(instance.id)
   }
 
   // ---------------------------------------------------------------------------
@@ -4320,7 +4368,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   }
 
   private toInfo(instance: BrowserInstance): BrowserInstanceInfo {
-    return {
+    return this.stripOwnerKeysInPlace({
       id: instance.id,
       url: instance.currentUrl,
       title: instance.title,
@@ -4336,7 +4384,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       themeColor: instance.themeColor,
       workspaceId: instance.workspaceId,
       hostMode: instance.hostMode,
-    }
+      sidebarHostWindowId: instance.sidebarHostWindow?.id,
+    })
   }
 
   private emitStateChange(instance: BrowserInstance): void {

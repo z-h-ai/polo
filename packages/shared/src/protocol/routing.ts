@@ -253,6 +253,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.browserPane.STATE_CHANGED,
   RPC_CHANNELS.browserPane.REMOVED,
   RPC_CHANNELS.browserPane.INTERACTED,
+  RPC_CHANNELS.browserPane.OPEN_REQUESTED,
   // POO-135 — sidebar embed/popup transitions and element picking (all local
   // window/view operations; the embed host is the sender's own BrowserWindow)
   RPC_CHANNELS.browserPane.EMBED,
