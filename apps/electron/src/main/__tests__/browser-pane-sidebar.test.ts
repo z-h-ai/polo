@@ -570,3 +570,20 @@ describe('POO-157 remote browser presentation', () => {
     manager.destroyInstance(id)
   })
 })
+
+
+describe('POO-157 explicit popup while toolbar loads', () => {
+  it('keeps an explicit popup request separate from ordinary sidebar focus', async () => {
+    const manager = new BrowserPaneManager()
+    const host = createMockWindow()
+    manager.setWindowManager({ getFocusedWindow: () => host, getWorkspaceForWindow: () => 'ws-a' } as any)
+    const requests: any[] = []
+    manager.onOpenRequested((...args) => { requests.push(args) })
+    const id = manager.createInstance('deferred-popup', { workspaceId: 'ws-a' })
+    manager.detachToPopup(id)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(createdWindows.at(-1).show).toHaveBeenCalledTimes(1)
+    expect(requests).toHaveLength(0)
+    manager.destroyInstance(id)
+  })
+})
