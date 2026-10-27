@@ -52,6 +52,7 @@ import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpac
 import { PoloAiSymbol } from "../icons/PoloAiSymbol"
 import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
 import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
+import { localizedTabTitle } from "@/lib/tab-display-name"
 import poloAppIcon from "../../../../resources/icon.png"
 
 const MAX_NOTIFICATION_ITEMS = 6
@@ -269,7 +270,7 @@ export function TopBar() {
               }}
             >
               <TabIcon tab={tab} />
-              <span className="min-w-0 flex-1 truncate whitespace-nowrap">{tab.title}</span>
+              <span className="min-w-0 flex-1 truncate whitespace-nowrap">{localizedTabTitle(tab, t)}</span>
               {/* POO-104: the assistant is a permanent entry — no close
                   control, so a mis-click next door can never yank the
                   workbench back to Home. Regular webapp tabs keep theirs.
@@ -278,7 +279,7 @@ export function TopBar() {
                 <button
                   type="button"
                   className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 client-material-fg-hover hover:text-foreground client-material-fg-muted"
-                  aria-label={t("topbar.tabs.close", { title: tab.title })}
+                  aria-label={t("topbar.tabs.close", { title: localizedTabTitle(tab, t) })}
                   onClick={(event) => {
                     event.stopPropagation()
                     closeTab(tab.id)

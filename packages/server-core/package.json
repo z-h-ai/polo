@@ -21,6 +21,7 @@
     "./handlers/rpc/automations": "./src/handlers/rpc/automations.ts",
     "./handlers/rpc/client-active-session": "./src/handlers/rpc/client-active-session.ts",
     "./handlers/rpc/files": "./src/handlers/rpc/files.ts",
+    "./handlers/rpc/knowledge-base": "./src/handlers/rpc/knowledge-base.ts",
     "./handlers/rpc/labels": "./src/handlers/rpc/labels.ts",
     "./handlers/rpc/llm-connections": "./src/handlers/rpc/llm-connections.ts",
     "./handlers/rpc/member-circles": "./src/handlers/rpc/member-circles.ts",

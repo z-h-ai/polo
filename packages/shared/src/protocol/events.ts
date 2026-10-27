@@ -14,6 +14,7 @@ import type {
   UpdateInfo,
   BrowserInstanceInfo,
   BrowserElementPickerEvent,
+  BrowserDownloadUiEvent,
   CanvasPanePopoutState,
   DeepLinkNavigation,
   NewWindowFailureReason,
@@ -60,6 +61,8 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.browserPane.OPEN_REQUESTED]: [info: BrowserInstanceInfo, reason: 'focus' | 'return']
   // POO-135: element picker outcomes (picked / cancelled / unavailable)
   [RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT]: [event: BrowserElementPickerEvent]
+  // product-closure U11: terminal download outcome for the renderer toast
+  [RPC_CHANNELS.browserPane.DOWNLOAD_EVENT]: [event: BrowserDownloadUiEvent]
 
   // Canvas pane popout events (POO-135 验收修复 SB-CANVAS-OUT, global)
   [RPC_CHANNELS.canvasPane.STATE_CHANGED]: [state: CanvasPanePopoutState]

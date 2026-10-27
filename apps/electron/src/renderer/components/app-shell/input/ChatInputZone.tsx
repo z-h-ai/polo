@@ -24,6 +24,9 @@ export interface ChatInputStatusBanner {
   /** POO-144: optional explicit action (e.g. retry sync) — user-triggered only */
   actionLabel?: string
   onAction?: () => void
+  /** U2: optional second, lower-emphasis action (e.g. "I've recharged — recheck"). */
+  secondaryActionLabel?: string
+  onSecondaryAction?: () => void
   /** Journey #8 (review F4): optional dismiss (e.g. discard preserved draft). */
   dismissLabel?: string
   onDismiss?: () => void
@@ -193,6 +196,19 @@ export function ChatInputZone({
               onClick={statusBanner.onAction}
             >
               {statusBanner.actionLabel}
+            </button>
+          )}
+          {statusBanner.secondaryActionLabel && statusBanner.onSecondaryAction && (
+            <button
+              type="button"
+              data-testid="chat-status-banner-secondary-action"
+              className={cn(
+                'shrink-0 rounded-md text-[13px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80',
+                statusBanner.actionLabel && statusBanner.onAction ? '' : 'ml-auto',
+              )}
+              onClick={statusBanner.onSecondaryAction}
+            >
+              {statusBanner.secondaryActionLabel}
             </button>
           )}
           {statusBanner.dismissLabel && statusBanner.onDismiss && (

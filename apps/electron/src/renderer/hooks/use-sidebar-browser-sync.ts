@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useSetAtom, useStore } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { BrowserInstanceInfo, BrowserElementPickerEvent } from '../../shared/types'
+import type { BrowserInstanceInfo, BrowserElementPickerEvent, BrowserDownloadUiEvent } from '../../shared/types'
 import {
   browserInstancesMapAtom,
   removeBrowserInstanceAtom,
@@ -42,6 +42,24 @@ interface UseSidebarBrowserSyncOptions {
   remoteWorkspaceId: string | null
   /** Switch the app's selected chat session (used when a pick lands elsewhere). */
   onSelectSession: (sessionId: string) => void
+}
+
+/**
+ * product-closure U11: the download toast. Success and failure both carry the
+ *「打开所在文件夹」action; the file path is the exact one Main reported.
+ */
+function showDownloadToast(t: (key: string, options?: Record<string, unknown>) => string, event: BrowserDownloadUiEvent): void {
+  const reveal = {
+    label: t('browserDownload.showInFolder'),
+    onClick: () => {
+      void window.electronAPI?.showInFolder?.(event.savePath).catch(() => {})
+    },
+  }
+  if (event.state === 'completed') {
+    toast.success(t('browserDownload.completed', { filename: event.filename }), { action: reveal })
+    return
+  }
+  toast.error(t('browserDownload.failed', { filename: event.filename }), { action: reveal })
 }
 
 export interface SidebarBrowserSyncControls {
@@ -148,12 +166,26 @@ export function useSidebarBrowserSync({
       handlePickerEvent(event)
     }) ?? (() => {})
 
+    // product-closure U11: terminal download outcomes → toast with a
+    // reveal-in-folder action. Both persistence paths toast the same way:
+    // session-bound instances (sessions/<id>/downloads/) and manual windows
+    // (OS Downloads folder) — the savePath in the event is authoritative.
+    // Workspace scoping mirrors onOpenRequested: an instance owned by another
+    // workspace is not toasted here (unknown/legacy instances still pass).
+    const offDownload = api.onDownloadEvent?.((event) => {
+      const instance = storeRef.current.get(browserInstancesMapAtom).get(event.instanceId)
+      if ((activeWorkspaceId || remoteWorkspaceId) && instance?.workspaceId &&
+          instance.workspaceId !== activeWorkspaceId && instance.workspaceId !== remoteWorkspaceId) return
+      showDownloadToast(t, event)
+    }) ?? (() => {})
+
     return () => {
       disposed = true
       offState()
       offOpen()
       offRemoved()
       offPicker()
+      offDownload()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceId, remoteWorkspaceId, removeInstance, setInstances, t, updateInstance])

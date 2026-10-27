@@ -100,6 +100,8 @@ function makeDeps(opts: {
       // POO-135: handler unconditionally subscribes to element-picker events;
       // no test in this file dispatches one, so a no-op subscription stubs it.
       onElementPickerEvent: () => {},
+      // product-closure U11: same broadcast-only subscription contract.
+      onDownloadEvent: () => {},
     } as unknown as NonNullable<HandlerDeps['browserPaneManager']>,
     oauthFlowStore: {} as HandlerDeps['oauthFlowStore'],
   }

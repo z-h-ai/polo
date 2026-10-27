@@ -28,8 +28,9 @@ import { PinnedCanvasApps } from './PinnedCanvasApps'
 import { KNOWLEDGE_BASE_APP_DEFINITION, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
   catalogStateMessage,
-  homeAppOperationErrorText,
+  homeAppErrorPresentation,
 } from '@/lib/home-app-errors'
+import { HomeAppErrorToastDescription } from './HomeAppErrorToastDescription'
 import {
   hasOnlyLostCircleSources,
   selectHomeAppDirectory,
@@ -363,7 +364,8 @@ export function HomePage() {
       toast.success(t('homeApps.toast.uninstalled', { name: app.name }))
     } catch (error) {
       toast.error(t('homeApps.errors.uninstallTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'uninstall', spaceKind),
+        // product-closure U5: copyable code badge on artifact-unavailability.
+        description: <HomeAppErrorToastDescription presentation={homeAppErrorPresentation(t, error, 'uninstall', spaceKind)} />,
       })
     } finally {
       setPreserveData(true)

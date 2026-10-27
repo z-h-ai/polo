@@ -1064,7 +1064,20 @@ export function syncWorkspaces(): void {
   });
 }
 
-export async function removeWorkspace(workspaceId: string): Promise<boolean> {
+/**
+ * Outcome of a workspace removal (product-closure U1, 2026-10-27):
+ * - `removed: false` — the id was not in the config (e.g. another window
+ *   already removed it). Nothing was written.
+ * - `removed: true` — the config entry is gone. `dataCleanupFailure` is set
+ *   ONLY when the on-disk data directory could not be deleted: the caller
+ *   must surface the partial failure instead of a fake full success.
+ */
+export interface RemoveWorkspaceOutcome {
+  removed: boolean
+  dataCleanupFailure?: { path: string; message: string }
+}
+
+export async function removeWorkspace(workspaceId: string): Promise<RemoveWorkspaceOutcome> {
   const removed = updateStoredConfig(config => {
     const index = config.workspaces.findIndex(w => w.id === workspaceId);
     if (index === -1) return false;
@@ -1074,7 +1087,7 @@ export async function removeWorkspace(workspaceId: string): Promise<boolean> {
     }
     return true;
   }) ?? false;
-  if (!removed) return false;
+  if (!removed) return { removed: false };
 
   // Clean up credential store credentials for this workspace
   const manager = getCredentialManager();
@@ -1087,10 +1100,19 @@ export async function removeWorkspace(workspaceId: string): Promise<boolean> {
       rmSync(workspaceDataDir, { recursive: true });
     } catch (error) {
       console.error(`[storage] Failed to delete workspace data directory: ${workspaceDataDir}`, error);
+      // U1: a swallowed failure read as "deleted" while every session on
+      // disk survived. Report the partial failure so the UI can say so.
+      return {
+        removed: true,
+        dataCleanupFailure: {
+          path: workspaceDataDir,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
     }
   }
 
-  return true;
+  return { removed: true };
 }
 
 // Note: renameWorkspace() was removed - workspace names are now stored only in folder config

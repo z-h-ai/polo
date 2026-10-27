@@ -88,6 +88,34 @@ function isKbError(error: unknown, code: string): boolean {
   return readRpcErrorCode(error) === code
 }
 
+/**
+ * product-closure U5: infrastructure-side structured codes for the KB
+ * surface. Only codes the client ACTUALLY receives are classified — network
+ * / server / timeout families and bare 5xx markers. HTTP statuses are never
+ * guessed from messages, and the copy never promises an automatic recovery.
+ */
+const KB_INFRASTRUCTURE_CODES = new Set([
+  'NETWORK_ERROR',
+  'SERVER_ERROR',
+  'SERVICE_UNAVAILABLE',
+  'TIMEOUT',
+  'INTERNAL',
+  'BAD_GATEWAY',
+  'GATEWAY_TIMEOUT',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ENOTFOUND',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+])
+
+function isKbInfrastructureCode(code: string | null): boolean {
+  if (!code) return false
+  if (KB_INFRASTRUCTURE_CODES.has(code)) return true
+  // Explicit structured 5xx markers (e.g. HTTP_503 / numeric server codes).
+  return /^HTTP_5\d\d$/.test(code) || /^5\d\d$/.test(code)
+}
+
 function kbErrorText(t: (key: string, options?: Record<string, unknown>) => string, error: unknown): string {
   const code = readRpcErrorCode(error)
   if (code === 'kb_manage_required') return t('knowledgeBase.errors.manageRequired')
@@ -105,6 +133,10 @@ function kbErrorText(t: (key: string, options?: Record<string, unknown>) => stri
   // stays neutral — never the storage vendor, a URI or a raw response.
   if (code === 'kb_service_unavailable') return t('knowledgeBase.errors.serviceUnavailable')
   if (code === 'OFFLINE_READ_ONLY') return t('knowledgeBase.errors.offline')
+  // product-closure U5: a structured infrastructure failure reads differently
+  // from a business error — the action points at the admin/report channel
+  // instead of looping the user on「请重试」.
+  if (isKbInfrastructureCode(code)) return t('infraError.kbUnavailable')
   return t('knowledgeBase.errors.generic')
 }
 

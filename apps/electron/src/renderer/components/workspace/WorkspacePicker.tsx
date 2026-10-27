@@ -3,9 +3,9 @@
  * Lists remote server workspaces and allows selection or creation.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus } from 'lucide-react'
+import { Plus, RefreshCw } from 'lucide-react'
 import { Spinner } from '@polo-ai/ui'
 import type { WorkspaceInfo } from '../../../shared/types'
 import {
@@ -26,8 +26,17 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
 
-  // Load workspaces from server
-  useEffect(() => {
+  // U9 (product-closure 2026-10-27): the load is a retryable callback, not a
+  // run-once effect — a failed load used to leave one red line and an empty
+  // list with no way forward short of restarting the app. The in-flight ref
+  // (not state — the callback closes over stale values) is the busy guard:
+  // a retry click while a load is in flight is a no-op.
+  const loadInFlightRef = useRef(false)
+  const loadWorkspaces = useCallback(() => {
+    if (loadInFlightRef.current) return
+    loadInFlightRef.current = true
+    setLoading(true)
+    setError(null)
     window.electronAPI.getServerWorkspaces()
       .then(ws => {
         setWorkspaces(ws)
@@ -37,7 +46,14 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
         setError(err instanceof Error ? err.message : 'Failed to load workspaces')
         setLoading(false)
       })
+      .finally(() => {
+        loadInFlightRef.current = false
+      })
   }, [])
+
+  useEffect(() => {
+    loadWorkspaces()
+  }, [loadWorkspaces])
 
   const handleCreate = useCallback(async () => {
     if (!newName.trim()) return
@@ -71,7 +87,19 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
         />
 
         {error && (
-          <p className="mt-3 w-full text-center text-sm text-destructive">{error}</p>
+          <div className="mt-3 w-full flex flex-col items-center gap-1.5">
+            <p className="text-center text-sm text-destructive">{error}</p>
+            <button
+              type="button"
+              data-testid="workspace-picker-retry"
+              onClick={loadWorkspaces}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50 disabled:pointer-events-none"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              {t("pickerRetry.retry")}
+            </button>
+          </div>
         )}
 
         {/* Workspace list */}

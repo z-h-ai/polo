@@ -60,6 +60,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     workspaceDefaultLlmConnection,
     chatAccessStatus,
     onRetryAiConfigSync,
+    onRecheckBilling,
     onSendMessage,
     onOpenFile,
     onOpenUrl,
@@ -346,9 +347,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   // Journey #1: the banner decision (billing semantics + role split) is a
   // pure function; this component only translates keys and wires actions.
+  // U10: the space kind feeds the no-ai-service split (a personal space has
+  // no "admin" to point at); playground (no provider) counts as non-personal.
   const bannerDecision = React.useMemo(
-    () => decideChatAccessBanner(chatAccessStatus, { canOpenPayment }),
-    [chatAccessStatus, canOpenPayment],
+    () => decideChatAccessBanner(chatAccessStatus, {
+      canOpenPayment,
+      isPersonalSpace: productSpace?.activeProductSpace?.kind === 'personal',
+    }),
+    [chatAccessStatus, canOpenPayment, productSpace?.activeProductSpace?.kind],
   )
 
   const inputStatusBanner = React.useMemo(() => {
@@ -369,6 +375,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         ...(bannerDecision.action === 'retry-ai-config-sync'
           ? { actionLabel: t('chat.statusBanner.retrySync'), onAction: onRetryAiConfigSync }
           : {}),
+        // U2: the "I've recharged — recheck" second action. It only clears
+        // the client latch; the NEXT explicit send re-adjudicates (never an
+        // automatic resend).
+        ...(bannerDecision.secondaryAction === 'recheck-billing' && onRecheckBilling
+          ? { secondaryActionLabel: t('billingRecheck.action'), onSecondaryAction: onRecheckBilling }
+          : {}),
       }
     }
     // Journey #8: the failed-send prompt (title + collapsed detail + restore).
@@ -387,7 +399,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       }
     }
     return null
-  }, [bannerDecision, onRetryAiConfigSync, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
+  }, [bannerDecision, onRetryAiConfigSync, onRecheckBilling, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
 
   // Only the hard billing block disables the composer (review F4); the
   // failed-send prompt is advisory.

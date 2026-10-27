@@ -584,6 +584,28 @@ async function getDocumentOrNull(space: KbOpenVikingSpace, docId: string): Promi
   }
 }
 
+/**
+ * Manifest of every channel this module registers. Previously the kb
+ * handlers registered without a manifest, so the registration coverage test
+ * (registration.test.ts) counted them as unexpected; keep this in sync with
+ * the `server.handle` calls below.
+ */
+export const HANDLED_CHANNELS = [
+  RPC_CHANNELS.kb.LIST_COLLECTIONS,
+  RPC_CHANNELS.kb.CREATE_COLLECTION,
+  RPC_CHANNELS.kb.LIST_DOCUMENTS,
+  RPC_CHANNELS.kb.UPLOAD_DOCUMENT,
+  RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW,
+  RPC_CHANNELS.kb.PUBLISH_DOCUMENT,
+  RPC_CHANNELS.kb.REJECT_DOCUMENT,
+  RPC_CHANNELS.kb.REVERT_TO_DRAFT,
+  RPC_CHANNELS.kb.DELETE_DOCUMENT,
+  RPC_CHANNELS.kb.GET_DOCUMENT,
+  RPC_CHANNELS.kb.SEARCH,
+  RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS,
+  RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS,
+] as const
+
 export function registerKnowledgeBaseHandlers(
   server: RpcServer,
   deps: HandlerDeps<ISessionManager>,
