@@ -483,3 +483,14 @@ describe('POO-157 browser open/return requests', () => {
     expect(apiCalls.embed).toEqual(['a'])
   })
 })
+
+
+describe('POO-157 targeted popup return', () => {
+  it('does not reclaim another main window browser from a global state notification', () => {
+    mount('sess-a')
+    contextStore.set(sidebarBrowserOpenAtom, true)
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'inst-1')
+    stateHandler!(makeInstance({ id: 'inst-1', sidebarHostWindowId: 42, hostMode: 'popup', isVisible: false }))
+    expect(apiCalls.embed).toEqual([])
+  })
+})

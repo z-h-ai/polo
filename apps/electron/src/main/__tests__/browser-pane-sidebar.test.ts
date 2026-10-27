@@ -553,3 +553,20 @@ describe('POO-157 sidebar-first presentation requests', () => {
     manager.destroyInstance(id)
   })
 })
+
+
+describe('POO-157 remote browser presentation', () => {
+  it('uses the capability sender as host and exposes the actual session id to the sidebar', async () => {
+    const manager = new BrowserPaneManager()
+    const host = createMockWindow()
+    const requests: any[] = []
+    manager.onOpenRequested((info, target, reason) => { requests.push({ info, target, reason }) })
+    const id = await (manager as any).dispatchCapability({ v: 1, method: 'focusBoundForSession', workspaceId: 'remote-ws', sessionId: 'chat-a', args: ['chat-a'] }, host)
+    expect(requests.at(-1)?.target).toBe(host)
+    expect(requests.at(-1)?.info.ownerSessionId).toBe('chat-a')
+    expect(manager.listInstances().find((i) => i.id === id)?.ownerSessionId).toBe('chat-a')
+    expect((manager.getInstance(id) as any).ownerSessionId).toBe('remote:remote-ws:chat-a')
+    expect(createdWindows.at(-1).show).not.toHaveBeenCalled()
+    manager.destroyInstance(id)
+  })
+})
