@@ -647,9 +647,12 @@ export default function App() {
     // scoped surfaces — a pane kept alive across a logout/account switch would
     // carry the previous account's pages into the next one. The IPC method is
     // delivered by the B batch (preload + main); the optional call tolerates
-    // bundles where it does not exist yet.
+    // bundles where it does not exist yet. The clear-storage step may rethrow
+    // after instances are already destroyed — logout must not surface that
+    // as an unhandled rejection.
     ;(window.electronAPI as { browserPaneDestroyAll?: () => Promise<void> } | undefined)
       ?.browserPaneDestroyAll?.()
+      ?.catch(() => undefined)
   }, [
     applyPendingQuestions,
     initializeSessions,
