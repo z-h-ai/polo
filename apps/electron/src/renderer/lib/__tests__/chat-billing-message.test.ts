@@ -19,7 +19,14 @@ beforeEach(async () => {
 
 function liveError(): Message {
   const state: SessionState = {
-    session: { id: '261027-vital-oak', messages: [], isProcessing: true } as SessionState['session'],
+    session: {
+      id: '261027-vital-oak',
+      workspaceId: 'p155-fixture',
+      workspaceName: 'P155 fixture',
+      lastMessageAt: 0,
+      messages: [],
+      isProcessing: true,
+    },
     streaming: null,
   }
   return handleTypedError(state, {
