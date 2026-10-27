@@ -69,6 +69,7 @@ export function useSidebarBrowserSync({
   storeRef.current = store
   const onSelectSessionRef = useRef(onSelectSession)
   onSelectSessionRef.current = onSelectSession
+  const pendingReturnsRef = useRef(new Map<string, BrowserInstanceInfo>())
   const currentSessionIdRef = useRef(currentSessionId)
   currentSessionIdRef.current = currentSessionId
 
@@ -96,6 +97,9 @@ export function useSidebarBrowserSync({
       // alive; URL, history and draft references are untouched.
       const store = storeRef.current
       if (
+        !info.sidebarHostWindowId &&
+        (!info.ownerSessionId || info.ownerSessionId === currentSessionIdRef.current) &&
+        (!info.workspaceId || info.workspaceId === activeWorkspaceId || info.workspaceId === remoteWorkspaceId) &&
         info.hostMode !== 'embedded' &&
         !info.isVisible &&
         store.get(sidebarBrowserOpenAtom) &&
@@ -107,7 +111,30 @@ export function useSidebarBrowserSync({
       }
     })
 
+    const offOpen = api.onOpenRequested?.((info, reason) => {
+      updateInstance(info)
+      // Closing A's window must not replace B's content. An explicit open
+      // may select the owning chat, while a return never changes chats.
+      const current = currentSessionIdRef.current
+      if (activeWorkspaceId || remoteWorkspaceId) {
+        if (info.workspaceId && info.workspaceId !== activeWorkspaceId && info.workspaceId !== remoteWorkspaceId) return
+      }
+      if (info.ownerSessionId && info.ownerSessionId !== current) {
+        if (reason === 'return') {
+          pendingReturnsRef.current.set(info.id, info)
+          return
+        }
+        onSelectSessionRef.current(info.ownerSessionId)
+      }
+      const store = storeRef.current
+      store.set(sidebarBrowserInstanceIdAtom, info.id)
+      store.set(sidebarBrowserOpenAtom, true)
+      store.set(rightPaneTabAtom, 'browser')
+      void api.embed(info.id).catch(() => toast.error(t('toast.failedToEmbedBrowser')))
+    }) ?? (() => {})
+
     const offRemoved = api.onRemoved((id) => {
+      pendingReturnsRef.current.delete(id)
       removeInstance(id)
       const store = storeRef.current
       if (store.get(sidebarBrowserInstanceIdAtom) === id) {
@@ -124,11 +151,28 @@ export function useSidebarBrowserSync({
     return () => {
       disposed = true
       offState()
+      offOpen()
       offRemoved()
       offPicker()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [removeInstance, setInstances, t, updateInstance])
+  }, [activeWorkspaceId, remoteWorkspaceId, removeInstance, setInstances, t, updateInstance])
+
+  // A popup closed while B was active returns when its owner A is selected;
+  // it neither switches chats nor steals B's right pane during close.
+  useEffect(() => {
+    for (const [id, info] of pendingReturnsRef.current) {
+      if (info.ownerSessionId !== currentSessionId) continue
+      if ((activeWorkspaceId || remoteWorkspaceId) && info.workspaceId &&
+          info.workspaceId !== activeWorkspaceId && info.workspaceId !== remoteWorkspaceId) continue
+      pendingReturnsRef.current.delete(id)
+      const store = storeRef.current
+      store.set(sidebarBrowserInstanceIdAtom, id)
+      store.set(sidebarBrowserOpenAtom, true)
+      store.set(rightPaneTabAtom, 'browser')
+      void window.electronAPI?.browserPane?.embed(id).catch(() => toast.error(t('toast.failedToEmbedBrowser')))
+    }
+  }, [currentSessionId, activeWorkspaceId, remoteWorkspaceId, t])
 
   const appendDraftReference = useCallback((sessionId: string, event: Extract<BrowserElementPickerEvent, { kind: 'picked' }>) => {
     const store = storeRef.current
