@@ -12,6 +12,12 @@ export const VERSION_FILES = [
   // system-prompt version tag); keeping it out of this list let it drift and
   // made the About page show a different version than the app identity (POO-160).
   'packages/shared/package.json',
+  // Ruling (POO-160 review): the remaining workspace packages (apps/webui,
+  // apps/viewer, apps/public-api, packages/core/ui/server-core/pi-agent-server,
+  // sdk, messaging-*, session-tools-core) are independently versioned and
+  // intentionally NOT synced by a client release — none of them exposes a
+  // version string to users today. If a new package ever starts surfacing its
+  // version to users, it MUST be added to this list in the same change.
 ] as const
 
 const LOCKFILE = 'bun.lock'

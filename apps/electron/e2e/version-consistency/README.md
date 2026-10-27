@@ -24,6 +24,9 @@ POO-160：用户报告设置页「关于-版本」与左上角 Polo AI 版本不
   `apps/electron/package.json`），`app.getVersion()` 因此等于打包应用的身份版本；
   defaultApp 模式（直接跑 main.cjs）会拿到 Electron 运行时版本，不可用。
 - 除 update 链路外的 electronAPI 是 canned fixture（见 `preload.ts`）。
+- 本 harness 只钉**显示一致性**：`probe-check-updates` 接了真实 `checkForUpdates()`
+  但主流程不触发它——更新可用性判定由 electron-updater 内部完成（比较基于
+  `app.getVersion()`，依赖网络 feed），不属于本钉子的运行期断言范围。
 
 ## Checks（PASS 线：6/6）
 
