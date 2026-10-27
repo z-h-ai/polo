@@ -10,6 +10,7 @@
  * Anything not carrying the sentinel is returned untouched.
  */
 import { i18n } from '@polo-ai/shared/i18n'
+import type { Message } from '@polo-ai/core/types'
 
 export const POLO_INSUFFICIENT_CREDIT_PREFIX = 'POLO_INSUFFICIENT_CREDIT:'
 
@@ -30,4 +31,9 @@ export function localizeChatBillingError(raw: string): LocalizedChatBillingError
     errorTitle: i18n.t('chat.billingError.title'),
     errorOriginal: raw,
   }
+}
+
+/** Present both live and persisted billing errors without changing storage. */
+export function localizeChatBillingMessage(message: Message): Message {
+  return message
 }
