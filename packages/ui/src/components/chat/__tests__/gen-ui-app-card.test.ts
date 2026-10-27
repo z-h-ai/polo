@@ -5,14 +5,26 @@ import {
   GENUI_APP_CANVAS_OPEN_EVENT,
   GENUI_APP_CANVAS_QUERY_EVENT,
   GENUI_APP_CANVAS_STATE_EVENT,
+  GENUI_APP_PIN_EVENT,
+  GENUI_APP_PIN_STATE_EVENT,
+  GENUI_APP_PIN_STATE_QUERY_EVENT,
   GENUI_APP_PUBLISH_EVENT,
+  GENUI_APP_PUBLISH_TARGET_EVENT,
+  GENUI_APP_PUBLISH_TARGET_QUERY_EVENT,
+  GENUI_APP_UNPIN_EVENT,
   buildGenUiAppSrc,
   dispatchGenUiAppCanvasClose,
   dispatchGenUiAppCanvasOpen,
   dispatchGenUiAppCanvasQuery,
   dispatchGenUiAppCanvasState,
+  dispatchGenUiAppPin,
+  dispatchGenUiAppPinState,
+  dispatchGenUiAppPinStateQuery,
   dispatchGenUiAppPublish,
   dispatchGenUiAppPublishResult,
+  dispatchGenUiAppPublishTarget,
+  dispatchGenUiAppPublishTargetQuery,
+  dispatchGenUiAppUnpin,
   getGenUiAppPartition,
   mergeGenUiAppCalls,
   onGenUiAppPublishResult,
@@ -170,6 +182,136 @@ describe('publish bridge events (POO-104)', () => {
       unsubscribe()
       dispatchGenUiAppPublishResult({ requestId: 'r2', ok: false })
       expect(seen).toEqual([true])
+    } finally {
+      restoreWindow()
+    }
+  })
+})
+
+describe('pin/unpin bridge events (POO-154)', () => {
+  const globalScope = globalThis as { window?: EventTarget }
+  const originalWindow = globalScope.window
+  let fakeWindow: EventTarget
+
+  function useFakeWindow(): void {
+    fakeWindow = new EventTarget()
+    globalScope.window = fakeWindow
+  }
+
+  function restoreWindow(): void {
+    globalScope.window = originalWindow
+  }
+
+  it('unpin requests carry their payload on a distinct event from pin', () => {
+    useFakeWindow()
+    try {
+      const seen: Array<{ event: string; detail: unknown }> = []
+      for (const type of [GENUI_APP_PIN_EVENT, GENUI_APP_UNPIN_EVENT]) {
+        fakeWindow.addEventListener(type, (event) => {
+          seen.push({ event: type, detail: (event as CustomEvent).detail })
+        })
+      }
+      dispatchGenUiAppPin({ requestId: 'p1', sessionId: 'sess-1', appId: 'app-1', title: 'Demo' })
+      dispatchGenUiAppUnpin({ requestId: 'u1', sessionId: 'sess-1', appId: 'app-1' })
+      expect(seen.map((s) => s.event)).toEqual([GENUI_APP_PIN_EVENT, GENUI_APP_UNPIN_EVENT])
+      expect(seen[0]!.detail).toEqual({ requestId: 'p1', sessionId: 'sess-1', appId: 'app-1', title: 'Demo' })
+      expect(seen[1]!.detail).toEqual({ requestId: 'u1', sessionId: 'sess-1', appId: 'app-1' })
+    } finally {
+      restoreWindow()
+    }
+  })
+
+  it('the pinned-state broadcast carries bare launcher ids without the prefix', () => {
+    useFakeWindow()
+    try {
+      let received: unknown = null
+      fakeWindow.addEventListener(GENUI_APP_PIN_STATE_EVENT, (event) => {
+        received = (event as CustomEvent).detail
+      })
+      dispatchGenUiAppPinState({ pinnedAppIds: ['app-1', 'app-2'] })
+      expect(received).toEqual({ pinnedAppIds: ['app-1', 'app-2'] })
+    } finally {
+      restoreWindow()
+    }
+  })
+
+  it('a pin-state query carries no payload (CustomEvent detail stays null)', () => {
+    useFakeWindow()
+    try {
+      let queryCount = 0
+      let received: unknown = null
+      fakeWindow.addEventListener(GENUI_APP_PIN_STATE_QUERY_EVENT, (event) => {
+        queryCount += 1
+        received = (event as CustomEvent).detail
+      })
+      dispatchGenUiAppPinStateQuery()
+      expect(queryCount).toBe(1)
+      expect(received).toBeNull()
+    } finally {
+      restoreWindow()
+    }
+  })
+})
+
+describe('publish target discovery (POO-154)', () => {
+  const globalScope = globalThis as { window?: EventTarget }
+  const originalWindow = globalScope.window
+  let fakeWindow: EventTarget
+
+  function useFakeWindow(): void {
+    fakeWindow = new EventTarget()
+    globalScope.window = fakeWindow
+  }
+
+  function restoreWindow(): void {
+    globalScope.window = originalWindow
+  }
+
+  it('a target query carries no payload and the broadcast may report no active target', () => {
+    useFakeWindow()
+    try {
+      let queryDetail: unknown = 'sentinel'
+      let received: unknown = null
+      fakeWindow.addEventListener(GENUI_APP_PUBLISH_TARGET_QUERY_EVENT, (event) => {
+        queryDetail = (event as CustomEvent).detail
+      })
+      fakeWindow.addEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, (event) => {
+        received = (event as CustomEvent).detail
+      })
+      dispatchGenUiAppPublishTargetQuery()
+      dispatchGenUiAppPublishTarget({ hasActiveTarget: false, organizationName: null })
+      expect(queryDetail).toBeNull()
+      expect(received).toEqual({ hasActiveTarget: false, organizationName: null })
+    } finally {
+      restoreWindow()
+    }
+  })
+
+  it('a resolved target carries the organization name', () => {
+    useFakeWindow()
+    try {
+      let received: unknown = null
+      fakeWindow.addEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, (event) => {
+        received = (event as CustomEvent).detail
+      })
+      dispatchGenUiAppPublishTarget({ hasActiveTarget: true, organizationName: 'Acme' })
+      expect(received).toEqual({ hasActiveTarget: true, organizationName: 'Acme' })
+    } finally {
+      restoreWindow()
+    }
+  })
+
+  it('publish results carry the stable errorCode class for localization', () => {
+    useFakeWindow()
+    try {
+      const seen: Array<string | undefined> = []
+      const unsubscribe = onGenUiAppPublishResult('r9', (result) => {
+        seen.push(result.errorCode)
+      })
+      dispatchGenUiAppPublishResult({ requestId: 'r9', ok: false, error: 'No active organization available to publish into', errorCode: 'no-publish-target' })
+      dispatchGenUiAppPublishResult({ requestId: 'r9', ok: true, organizationName: 'Acme' })
+      unsubscribe()
+      expect(seen).toEqual(['no-publish-target', undefined])
     } finally {
       restoreWindow()
     }
