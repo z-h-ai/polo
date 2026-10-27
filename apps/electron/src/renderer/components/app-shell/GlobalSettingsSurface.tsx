@@ -100,7 +100,7 @@ export function GlobalSettingsSurface({ subpage, onSelectSubpage, onClose }: Glo
     return (
       <div
         data-testid="global-settings-surface"
-        className="absolute inset-x-0 bottom-0 flex min-h-0 flex-col bg-background"
+        className="absolute inset-x-0 bottom-0 z-panel flex min-h-0 flex-col bg-background"
         style={{ top: 'var(--topbar-height)' }}
       >
         {header}
@@ -117,10 +117,23 @@ export function GlobalSettingsSurface({ subpage, onSelectSubpage, onClose }: Glo
 
   // Desktop: navigator column + details panel, same panel materials as the
   // in-tab surface (POO-105 list/reading surfaces, interior corner radius).
+  //
+  // POO-153: this surface mounts as a SIBLING after TabContent but carries no
+  // z-index of its own, so it only covered tab bodies by DOM paint order. Tab
+  // surfaces that create their own stacking level (the Polo assistant's
+  // `relative z-panel` panel columns) then painted ABOVE the open settings
+  // surface — the two UIs rendered on top of each other. Pin the surface to
+  // the same panel level: with an equal z-index the later DOM order (TabShell
+  // renders it after TabContent) wins, over every tab, TopBar geometry is
+  // untouched (the surface starts below the bar), and dropdowns (z-dropdown)
+  // still sit above. The root also paints an opaque background so the layout
+  // gutters and the panels' rounded corners never show the tab body through
+  // (review feedback: same-level stacking alone still lets content bleed
+  // through the 6px gutters).
   return (
     <div
       data-testid="global-settings-surface"
-      className="absolute inset-x-0 bottom-0 flex min-h-0 gap-[6px] px-[6px] pb-[6px]"
+      className="absolute inset-x-0 bottom-0 z-panel flex min-h-0 gap-[6px] bg-background px-[6px] pb-[6px]"
       style={{ top: 'var(--topbar-height)' }}
     >
       <div
