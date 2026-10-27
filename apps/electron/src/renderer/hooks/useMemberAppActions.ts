@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, createElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { CatalogApp } from '@polo-ai/shared/admin'
@@ -8,8 +8,9 @@ import type { ProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext
 import type { AppCatalogInstance } from '@/hooks/useAppCatalog'
 import {
   getHomeAppErrorCode,
-  homeAppOperationErrorText,
+  homeAppErrorPresentation,
 } from '@/lib/home-app-errors'
+import { HomeAppErrorToastDescription } from '@/components/tab-browser/HomeAppErrorToastDescription'
 import { createHomeQuickAccessContextKey } from '@/lib/home-quick-access'
 import { recordHomeAppUsage } from '@/lib/home-app-usage'
 
@@ -180,7 +181,12 @@ export function useMemberAppActions({
       }
     } catch (error) {
       toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'open', spaceKind),
+        // product-closure U5: infrastructure-side failures carry a copyable
+        // server-code badge so「联系企业管理」has the real code attached.
+        // createElement (not JSX): this file stays .ts.
+        description: createElement(HomeAppErrorToastDescription, {
+          presentation: homeAppErrorPresentation(t, error, 'open', spaceKind),
+        }),
       })
     } finally {
       endOperation(identityKey)
@@ -213,7 +219,10 @@ export function useMemberAppActions({
     } catch (error) {
       if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
         toast.error(t('homeApps.errors.installTitle', { name: app.name }), {
-          description: homeAppOperationErrorText(t, error, 'install', spaceKind),
+          // product-closure U5: copyable code badge on artifact-unavailability.
+          description: createElement(HomeAppErrorToastDescription, {
+            presentation: homeAppErrorPresentation(t, error, 'install', spaceKind),
+          }),
         })
       }
     } finally {

@@ -62,6 +62,10 @@ export default function SkillInfoPage({
   // Journey #7: the force-delete ask for a modified creator skill uses the
   // shared confirm dialog (async) instead of a native window.confirm.
   const { requestConfirm: requestDeleteConfirm, confirmElement: deleteConfirmElement } = useConfirmDialog()
+  // product-closure U8: the update CONFLICT overwrite ask rides the same
+  // shared dialog contract (separate instance so a delete ask can never
+  // swallow a concurrent conflict ask).
+  const { requestConfirm: requestConflictConfirm, confirmElement: conflictConfirmElement } = useConfirmDialog()
   const [skill, setSkill] = useState<LoadedSkill | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -267,16 +271,38 @@ export default function SkillInfoPage({
       }
       let result = await runInstall()
       if (!result.success && result.conflicts?.length) {
-        const accepted = window.confirm(creatorSkillConflictConfirmation(t, {
-          conflicts: result.conflicts,
-          conflictDetails: result.conflictDetails,
-        }))
-        if (!accepted) return
-        result = await runInstall({
-          replaceExisting: true,
-          confirmGlobalOverride: true,
-          backupLocalChanges: true,
+        // product-closure U8: shared confirm dialog instead of the native
+        // window.confirm. The overwrite itself runs as the dialog's
+        // onConfirm — so a confirmed attempt is busy-guarded against double
+        // fire, and a failed overwrite KEEPS the dialog open with the error
+        // inline for a deliberate retry (the ask is never consumed by a
+        // failed attempt). Cancel/Esc/outside resolve false without writing.
+        const overwriteAttempt = result
+        const accepted = await requestConflictConfirm({
+          testId: 'creator-skill-conflict-confirm',
+          title: t('skillConflict.title'),
+          description: (
+            <span className="block whitespace-pre-line">
+              {creatorSkillConflictConfirmation(t, {
+                conflicts: overwriteAttempt.conflicts ?? [],
+                conflictDetails: overwriteAttempt.conflictDetails,
+              })}
+            </span>
+          ),
+          confirmLabel: t('skillConflict.confirmReplace'),
+          onConfirm: async () => {
+            const retry = await runInstall({
+              replaceExisting: true,
+              confirmGlobalOverride: true,
+              backupLocalChanges: true,
+            })
+            if (!retry.success) {
+              throw new Error(translateCreatorSkillError(t, retry))
+            }
+            result = retry
+          },
         })
+        if (!accepted) return
       }
       if (!result.success) {
         toast.error(translateCreatorSkillError(t, result), {
@@ -293,7 +319,7 @@ export default function SkillInfoPage({
       setUpdatingCreatorSkill(false)
       setUpdateOperationId(null)
     }
-  }, [availableVersion, creatorInstallation, sessionId, t, workspaceId])
+  }, [availableVersion, creatorInstallation, sessionId, requestConflictConfirm, t, workspaceId])
 
   // Handle open in finder
   const handleOpenInFinder = useCallback(async () => {
@@ -598,6 +624,8 @@ export default function SkillInfoPage({
       )}
       {/* Journey #7: shared confirm host for creator-skill force delete. */}
       {deleteConfirmElement}
+      {/* product-closure U8: shared confirm host for the update conflict overwrite. */}
+      {conflictConfirmElement}
     </Info_Page>
   )
 }

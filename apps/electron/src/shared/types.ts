@@ -1,5 +1,5 @@
 import type { LocalAppAdmissionFailure } from '@polo-ai/shared/protocol'
-import type { BrowserEmbedBounds, BrowserElementPickerEvent, CanvasPaneApp, CanvasPanePopoutState } from '@polo-ai/shared/protocol'
+import type { BrowserEmbedBounds, BrowserElementPickerEvent, BrowserDownloadUiEvent, CanvasPaneApp, CanvasPanePopoutState } from '@polo-ai/shared/protocol'
 import type { WebElementReference } from '@polo-ai/core/types'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
@@ -786,6 +786,14 @@ export interface ElectronAPI {
   openUrl(url: string): Promise<void>
   openFile(path: string): Promise<void>
   showInFolder(path: string): Promise<void>
+
+  /**
+   * product-closure U12: logout teardown — destroy every browser pane
+   * instance and clear the shared `persist:browser-pane` partition's storage
+   * data (cookies, localStorage). Resolves once both steps finished; only
+   * ever invoked from the explicit logout flow.
+   */
+  browserPaneDestroyAll(): Promise<void>
 
   // Menu event listeners
   onMenuNewChat(callback: () => void): () => void
@@ -1614,6 +1622,8 @@ export interface ElectronAPI {
     onOpenRequested(callback: (info: BrowserInstanceInfo, reason: 'focus' | 'return') => void): () => void
     /** POO-135: element picker outcome (picked / cancelled / unavailable). */
     onElementPickerEvent(callback: (event: BrowserElementPickerEvent) => void): () => void
+    /** product-closure U11: terminal download outcome for the renderer toast. */
+    onDownloadEvent(callback: (event: BrowserDownloadUiEvent) => void): () => void
   }
 
   /**

@@ -344,6 +344,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.creatorSkills.DELETE_BACKUPS,
   RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS,
   RPC_CHANNELS.creatorSkills.IGNORE_VERSION,
+  // Registered below but previously missing from this manifest — the
+  // registration coverage test (registration.test.ts) counts them.
+  RPC_CHANNELS.productSpace.INSTALL_SKILL,
+  RPC_CHANNELS.productSpace.UNINSTALL_SKILL,
 ] as const
 
 /** Stable business-RPC error for an uncommitted (null) runtime fence. */

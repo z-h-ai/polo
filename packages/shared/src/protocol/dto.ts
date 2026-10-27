@@ -832,6 +832,25 @@ export type BrowserElementPickerEvent =
   | { instanceId: string; kind: 'unavailable'; reason: 'iframe' | 'sensitive' | 'hidden' }
 
 /**
+ * product-closure U11: terminal state of a browser download, pushed to the
+ * renderer so it can toast the outcome (with a reveal-in-folder action).
+ * Emitted once per download, only for `completed` / `failed` — a `cancelled`
+ * download was the user's own choice and stays silent. `savePath` powers the
+ * reveal action; `ownerType` distinguishes the session-bound instance path
+ * (`sessions/<id>/downloads/`) from a manual window's user Downloads folder,
+ * though both toast the same way.
+ */
+export interface BrowserDownloadUiEvent {
+  instanceId: string
+  downloadId: string
+  filename: string
+  savePath: string
+  state: 'completed' | 'failed'
+  /** Mirrors the manager's instance ownership: session-bound vs manual window. */
+  ownerType: 'session' | 'manual'
+}
+
+/**
  * POO-135 验收修复 (SB-CANVAS-OUT): where a session's canvas app currently
  * lives. `poppedOut` means the dedicated canvas BrowserWindow hosts it (the
  * sidebar shows a placeholder + return entry); a `false` broadcast — also
