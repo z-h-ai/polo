@@ -8,6 +8,16 @@ export const VERSION_FILES = [
   'apps/electron/package.json',
   'apps/cli/package.json',
   'packages/server/package.json',
+  // packages/shared exposes APP_VERSION (settings About page, User-Agent,
+  // system-prompt version tag); keeping it out of this list let it drift and
+  // made the About page show a different version than the app identity (POO-160).
+  'packages/shared/package.json',
+  // Ruling (POO-160 review): the remaining workspace packages (apps/webui,
+  // apps/viewer, apps/public-api, packages/core/ui/server-core/pi-agent-server,
+  // sdk, messaging-*, session-tools-core) are independently versioned and
+  // intentionally NOT synced by a client release — none of them exposes a
+  // version string to users today. If a new package ever starts surfacing its
+  // version to users, it MUST be added to this list in the same change.
 ] as const
 
 const LOCKFILE = 'bun.lock'
@@ -98,7 +108,7 @@ export function readLockfileVersions(root: string): LockfileVersions {
   if (!existsSync(path)) fail('bun.lock is missing')
   const lockfile = readFileSync(path, 'utf8')
   return Object.fromEntries(VERSION_FILES.map((relativePath) => {
-    // Bun does not record the root package's version in bun.lock; the three
+    // Bun does not record the root package's version in bun.lock; the
     // non-root workspace entries do carry it and are checked below.
     if (relativePath === 'package.json') return undefined
     const workspace = dirname(relativePath)
@@ -176,7 +186,7 @@ export function setReleaseVersion(rootInput: string, expectedTag: string, option
     for (const relativePath of VERSION_FILES) writePackageVersion(packagePath(root, relativePath), version)
     ;(options.refreshLockfile ?? defaultRefreshLockfile)(root)
     // Bun regenerates dependency data but may retain stale workspace metadata;
-    // synchronize the three workspace version records before the final check.
+    // synchronize the workspace version records before the final check.
     synchronizeLockfileWorkspaceVersions(root, version)
     checkReleaseVersion(root, tag)
   } catch (error) {
