@@ -41,6 +41,10 @@ function fixture(): string {
       "name": "@polo-ai/server",
       "version": "0.1.0",
     },
+    "packages/shared": {
+      "name": "@polo-ai/shared",
+      "version": "0.1.0",
+    },
   },
 }\n`)
   return root
@@ -51,7 +55,7 @@ afterEach(() => {
 })
 
 describe('release version commands', () => {
-  it('synchronizes the four release packages and the lockfile without touching other packages', () => {
+  it('synchronizes the five release packages and the lockfile without touching other packages', () => {
     const root = fixture()
     const untouched = readFileSync(join(root, 'packages/core/package.json'), 'utf8')
     setReleaseVersion(root, `v${targetVersion}`, {
