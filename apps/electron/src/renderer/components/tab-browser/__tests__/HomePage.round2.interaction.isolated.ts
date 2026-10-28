@@ -21,6 +21,7 @@ mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined
 
 
 GlobalRegistrator.register()
+HTMLElement.prototype.scrollIntoView ??= () => {}
 setupI18n()
 
 const toastErrorSpy = jest.fn()
@@ -467,12 +468,14 @@ describe('HomePage complete directory (POO-70 H3)', () => {
       expect(screen.getAllByTestId('home-directory-app')).toHaveLength(3)
     })
 
-    const sourceSelect = screen.getByTestId('home-directory-source') as HTMLSelectElement
-    const options = Array.from(sourceSelect.options).map(option => option.value)
+    const sourceSelect = screen.getByTestId('home-directory-source')
+    fireEvent.keyDown(sourceSelect, { key: 'Enter' })
+    const list = await screen.findByRole('listbox')
+    const options = Array.from(list.querySelectorAll<HTMLElement>('[role=option]')).map(option => option.dataset.value)
     // Include the real built-in assistant alongside catalog-derived sources.
     expect(options).toEqual(['all', 'builtin:polo-assistant', 'catalog:Growth App Source', 'catalog:Design Circle', 'catalog:Organization A'])
 
-    fireEvent.change(sourceSelect, { target: { value: 'catalog:Design Circle' } })
+    fireEvent.click(screen.getByRole('option', { name: 'Design Circle' }))
     await waitFor(() => {
       expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
     })
@@ -516,9 +519,7 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     })
 
     // Name sort is locale-ordered regardless of usage or Catalog order.
-    fireEvent.change(screen.getByTestId('home-directory-sort'), {
-      target: { value: 'name' },
-    })
+    await chooseOption(screen.getByTestId('home-directory-sort'), 'name')
     await waitFor(() => {
       const cards = screen.getAllByTestId('home-directory-app')
       if (!cards[0]?.textContent?.includes('alpha App')) throw new Error('name sort pending')
@@ -765,16 +766,17 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     renderHome()
     await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
     const source = screen.getByTestId('home-directory-source')
-    const builtin = within(source).getByRole('option', { name: i18n.t('homeApps.home.poloSource') }) as HTMLOptionElement
-    fireEvent.change(source, { target: { value: builtin.value } })
+    await chooseOption(source, 'builtin:polo-assistant')
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
     expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
     expect(screen.queryByTestId('home-directory-no-match') === null).toBe(true)
     expect(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button', { name: i18n.t('productSpaceSkills.title') })).toBeTruthy()
     fireEvent.click(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button', { name: i18n.t('homeApps.home.openAssistant') }))
     expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
-    const workSource = Array.from(source.querySelectorAll('option')).find(option => option.value !== 'all' && option.value !== builtin.value)!
-    fireEvent.change(source, { target: { value: workSource.value } })
+    fireEvent.keyDown(source, { key: 'Enter' })
+    const list = await screen.findByRole('listbox')
+    const workSource = Array.from(list.querySelectorAll<HTMLElement>('[role=option]')).find(option => option.dataset.value !== 'all' && option.dataset.value !== 'builtin:polo-assistant')!
+    fireEvent.click(workSource)
     expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
   })
@@ -785,10 +787,10 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     renderHome()
     await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
     const source = screen.getByTestId('home-directory-source')
-    fireEvent.change(source, { target: { value: 'builtin:polo-assistant' } })
+    await chooseOption(source, 'builtin:polo-assistant')
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
     expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
-    fireEvent.change(source, { target: { value: 'catalog:builtin:polo-assistant' } })
+    await chooseOption(source, 'catalog:builtin:polo-assistant')
     expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
   })
@@ -800,12 +802,12 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     renderHome()
     await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2))
     const source = screen.getByTestId('home-directory-source')
-    fireEvent.change(source, { target: { value: 'catalog:all' } })
+    await chooseOption(source, 'catalog:all')
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
     expect(screen.getByText('Literal All App')).toBeTruthy()
     expect(screen.queryByText('Other Source App') === null).toBe(true)
     expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
-    fireEvent.change(source, { target: { value: 'all' } })
+    await chooseOption(source, 'all')
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
   })
@@ -1265,3 +1267,11 @@ describe('HomePage copy and formatting', () => {
     expect(formatBytes(i18n.t.bind(i18n), 1)).toBe('1 Byte')
   })
 })
+
+async function chooseOption(trigger: HTMLElement, value: string) {
+  fireEvent.keyDown(trigger, { key: 'Enter' })
+  const list = await screen.findByRole('listbox')
+  const option = Array.from(list.querySelectorAll<HTMLElement>('[role="option"]')).find(item => item.dataset.value === value)
+  if (!option) throw new Error(`Missing option: ${value}`)
+  fireEvent.click(option)
+}

@@ -33,6 +33,7 @@
 
 Settings 分类注册（`registry/settings.tsx`，与本文联动校验；id 集合必须与下面列表一致）：
 
+- `settings-unified-controls` — OptionSelect / WorkbenchSelect（共享键盘选择、工作台与 renderer 主题、长文本与禁用态）
 - `settings-page-preview` — 整页拼装（registry `PageDemo` 组合展示示例，import `@/components/settings` 真组件；非直接 import `pages/settings`）：Section + divided Card + 行控件 + danger 区 + Footer
 - `settings-section` — SettingsSection（default/danger 变体）
 - `settings-toggle` — SettingsToggle（含禁用态）
@@ -84,3 +85,14 @@ Settings 分类注册（`registry/settings.tsx`，与本文联动校验；id 集
 4. 禁止把生产组件实现复制进 Skill assets 或任何展示 HTML。
 
 原生候选继续 import 原模块；任务内叶子副本的 alias、providers、fixture 和导出命令见 [native-reuse.md](native-reuse.md)。样式来源/预览见 [style-usage.md](style-usage.md)。
+
+
+## POO-162 选择控件与菜单复用（2026-10-27）
+
+- 复选框复用 `@polo-ai/ui/ui/checkbox`：原生 input 保留 label、表单、checked/onChange/ref 语义，外观由当前主题统一；登录同意、卸载保留数据和 Markdown 只读清单共用。只读清单点击不改动选中状态。
+
+- 单值选择复用 `@polo-ai/ui/ui/select` 的 Radix 基元；简单 options/value 场景用 `@polo-ai/ui/ui/option-select`。支持空值、禁用项、键盘导航、Escape 取消与焦点返回；对外值与内部 Radix key 分离。设置现有 Select 导入路径是兼容再导出，不维护第二实现。
+- 首页/圈子使用 `components/ui/workbench-controls.tsx` 的 `WorkbenchSelect`。账号菜单根层和所有子层分别使用 `WorkbenchMenuContent` / `WorkbenchMenuSubContent`，每个 portal 都消费既有工作台 token adapter、44px 行、14px 面板圆角和相同焦点/悬停样式。空间切换保留身份、角色、当前项和不可切换语义。
+- 助手表单、浏览器实例选择、日期年月下拉复用 renderer 主题，不向助手或第三方 App 全局注入工作台配色。日期控件的 hidden select 只保留 DayPicker change-event 契约，不展示原生弹出菜单；开发 playground 参数编辑器的原生 select 不属于客户端产品面。
+- 普通下拉动作菜单与右键菜单保留各自 Radix 语义，统一间距、悬停、子菜单间隔和可滚动高度。命令搜索、提及、模型搜索保留适用的搜索/树形交互；OS 菜单、文件选择和第三方应用内部不替换。
+- 展示：`settings-unified-controls` 注册卡（启用/禁用）及 `workspace-home` 的账号多级菜单。验证应打开各级 portal，检查同主题字体/行高/颜色、键盘选择/取消、长标签与 800×600 边界；截图不等于真实空间切换或支付验收。

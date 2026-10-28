@@ -1,3 +1,4 @@
+import { OptionSelect } from '@polo-ai/ui/ui/option-select'
 /**
  * POO-135: the unified right sidebar — canvas apps and the browser pane share
  * ONE container (the pane shell CanvasPane owned: motion width, drag sash,
@@ -545,26 +546,21 @@ function SidebarBrowserSection({
           {ownershipTitle}
         </span>
         {visible.length > 1 && (
-          <select
+          <OptionSelect
             aria-label={t('browserPane.sidebar.selectInstance')}
             data-testid="sidebar-browser-instance-select"
             value={instance.id}
-            onChange={(e) => {
-              // POO-135 r1: switching instances disarms the armed picker —
-              // the page-side picking never silently re-points.
+            onValueChange={(value) => {
+              // Switching instances must disarm the page-side picker first.
               onSwitchAway()
-              setSelectedId(e.target.value)
+              setSelectedId(value)
             }}
-            className="shrink-0 max-w-[110px] rounded-[6px] border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground-80 outline-none"
-          >
-            {visible.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.ownerSessionId ? t('browserPane.sidebar.thisSession') : t('browserPane.sidebar.workspaceTitle')}
-                {' · '}
-                {item.id}
-              </option>
-            ))}
-          </select>
+            className="h-auto w-auto shrink-0 max-w-[110px] rounded-[6px] border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground-80"
+            options={visible.map(item => ({
+              value: item.id,
+              label: `${item.ownerSessionId ? t('browserPane.sidebar.thisSession') : t('browserPane.sidebar.workspaceTitle')} · ${item.id}`,
+            }))}
+          />
         )}
         {instance.hostMode === 'popup' ? (
           <button

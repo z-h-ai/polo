@@ -22,6 +22,7 @@ mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined
 // -------------------------------------------------------------------------
 
 GlobalRegistrator.register()
+HTMLElement.prototype.scrollIntoView ??= () => {}
 setupI18n()
 
 let productSpaceContextState: unknown = {
@@ -576,7 +577,7 @@ describe('MyCirclesPage search and entitlement filter (P70-CIRCLE-LIST-02)', () 
   it('filters by entitlement state; 待恢复 rows drop out of 有效 and vice versa', async () => {
     await renderReadyPage()
     const filter = screen.getByTestId('my-circles-filter')
-    fireEvent.change(filter, { target: { value: 'valid' } })
+    await chooseOption(filter, 'valid')
     await waitFor(() => {
       expect(screen.getAllByTestId('circle-row').length).toBe(3)
     })
@@ -584,7 +585,7 @@ describe('MyCirclesPage search and entitlement filter (P70-CIRCLE-LIST-02)', () 
       screen.getAllByTestId('circle-row').every(row => row.getAttribute('data-entitlement-state') === 'valid'),
     ).toBe(true)
 
-    fireEvent.change(filter, { target: { value: 'restore' } })
+    await chooseOption(filter, 'restore')
     await waitFor(() => {
       expect(screen.getAllByTestId('circle-row').length).toBe(2)
     })
@@ -715,7 +716,7 @@ describe('MyCirclesPage navigation and toolbar restore (P70-CIRCLE-LIST-03)', ()
       expect(screen.getByTestId('my-circles-list')).toBeTruthy()
     })
     fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
-    fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+    await chooseOption(screen.getByTestId('my-circles-filter'), 'valid')
     await waitFor(() => {
       expect(screen.getAllByTestId('circle-row').length).toBe(1)
     })
@@ -727,7 +728,7 @@ describe('MyCirclesPage navigation and toolbar restore (P70-CIRCLE-LIST-03)', ()
     await waitFor(() => {
       expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
     })
-    expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+    expect(screen.getByTestId('my-circles-filter').getAttribute('data-value')).toBe('valid')
     expect(screen.getAllByTestId('circle-row').length).toBe(1)
   })
 
@@ -771,12 +772,12 @@ it('R3FIX retains toolbar through route-only unmount with the live relations pro
   const view = render(pageTree({ accountId: 'account-a-fixture' }))
   await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
   fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
-  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  await chooseOption(screen.getByTestId('my-circles-filter'), 'valid')
   view.rerender(pageTree({ accountId: 'account-a-fixture', withPage: false }))
   expect(screen.queryByTestId('my-circles-page')).toBeNull()
   view.rerender(pageTree({ accountId: 'account-a-fixture' }))
   await waitFor(() => expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design'))
-  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+  expect(screen.getByTestId('my-circles-filter').getAttribute('data-value')).toBe('valid')
   // A second visit must not have persisted the initial empty render over the saved view.
   view.rerender(pageTree({ accountId: 'account-a-fixture', withPage: false }))
   view.rerender(pageTree({ accountId: 'account-a-fixture' }))
@@ -791,11 +792,11 @@ it('R3FIX restores the toolbar on a route remount under production StrictMode', 
   const view = render(tree(true))
   await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
   fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
-  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  await chooseOption(screen.getByTestId('my-circles-filter'), 'valid')
   view.rerender(tree(false))
   view.rerender(tree(true))
   expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
-  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+  expect(screen.getByTestId('my-circles-filter').getAttribute('data-value')).toBe('valid')
 })
 
 
@@ -806,7 +807,7 @@ it('R4FIX restores main scroll after route return under StrictMode, preserving q
   const view = render(tree(true))
   await waitFor(() => expect(screen.getByTestId('my-circles-list')).toBeTruthy())
   fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
-  fireEvent.change(screen.getByTestId('my-circles-filter'), { target: { value: 'valid' } })
+  await chooseOption(screen.getByTestId('my-circles-filter'), 'valid')
   const scroller = screen.getByTestId('my-circles-page').parentElement!
   scroller.scrollTop = 180
   fireEvent.scroll(scroller)
@@ -814,7 +815,7 @@ it('R4FIX restores main scroll after route return under StrictMode, preserving q
   view.rerender(tree(true))
   expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(180)
   expect((screen.getByTestId('my-circles-search') as HTMLInputElement).value).toBe('design')
-  expect((screen.getByTestId('my-circles-filter') as HTMLSelectElement).value).toBe('valid')
+  expect(screen.getByTestId('my-circles-filter').getAttribute('data-value')).toBe('valid')
   view.rerender(pageTree({ accountId: 'account-b-fixture', contextVersion: 2 }))
   await waitFor(() => expect(screen.getAllByTestId('circle-row')).toHaveLength(1))
   expect(screen.getByTestId('my-circles-page').parentElement!.scrollTop).toBe(0)
@@ -874,3 +875,11 @@ describe('R5FIX-05 real partial receipt refresh', () => {
     }, 15_000)
   }
 })
+
+async function chooseOption(trigger: HTMLElement, value: string) {
+  fireEvent.keyDown(trigger, { key: 'Enter' })
+  const list = await screen.findByRole('listbox')
+  const option = Array.from(list.querySelectorAll<HTMLElement>('[role="option"]')).find(item => item.dataset.value === value)
+  if (!option) throw new Error(`Missing option: ${value}`)
+  fireEvent.click(option)
+}

@@ -109,6 +109,7 @@ export const StyledDropdownMenuContent = React.forwardRef<
 >(({ className, minWidth = 'min-w-40', light = false, sideOffset = 4, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.Content
+      data-slot="dropdown-menu-content"
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
@@ -144,6 +145,7 @@ export const StyledDropdownMenuItem = React.forwardRef<
   StyledDropdownMenuItemProps
 >(({ className, variant = 'default', ...props }, ref) => (
   <DropdownMenuPrimitive.Item
+    data-slot="dropdown-menu-item"
     ref={ref}
     className={cn(
       // shadcn base layer
@@ -168,6 +170,7 @@ export const StyledDropdownMenuSeparator = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
 >(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Separator
+    data-slot="dropdown-menu-separator"
     ref={ref}
     className={cn('bg-foreground/10 -mx-1 my-1 h-px', className)}
     {...props}
@@ -182,11 +185,12 @@ export const StyledDropdownMenuSubTrigger = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger>
 >(({ className, children, ...props }, ref) => (
   <DropdownMenuPrimitive.SubTrigger
+    data-slot="dropdown-menu-sub-trigger"
     ref={ref}
     className={cn(
       'relative flex cursor-default items-center gap-2 px-2 py-1.5 text-sm outline-hidden select-none',
       '[&_svg]:pointer-events-none [&_svg]:shrink-0',
-      'pr-1.5 rounded-[4px] hover:bg-foreground/10 focus:bg-foreground/10 data-[state=open]:bg-foreground/10',
+      'pr-1.5 rounded-[4px] hover:bg-foreground/[0.03] focus:bg-foreground/[0.03] data-[state=open]:bg-foreground/[0.03]',
       '[&>svg]:h-3.5 [&>svg]:w-3.5 [&>svg]:shrink-0',
       className,
     )}
@@ -208,9 +212,10 @@ interface StyledDropdownMenuSubContentProps
 export const StyledDropdownMenuSubContent = React.forwardRef<
   React.ComponentRef<typeof DropdownMenuPrimitive.SubContent>,
   StyledDropdownMenuSubContentProps
->(({ className, minWidth = 'min-w-36', sideOffset = -4, ...props }, ref) => (
+>(({ className, minWidth = 'min-w-36', sideOffset = 4, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.SubContent
+      data-slot="dropdown-menu-sub-content"
       ref={ref}
       sideOffset={sideOffset}
       className={cn(

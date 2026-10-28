@@ -7,7 +7,8 @@
 
 import * as React from 'react'
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
-import { DayButton, DayPicker, getDefaultClassNames } from 'react-day-picker'
+import { DayButton, DayPicker, getDefaultClassNames, type DropdownProps } from 'react-day-picker'
+import { OptionSelect } from '@polo-ai/ui/ui/option-select'
 
 import { cn } from '@/lib/utils'
 import { buttonVariants } from '@/components/ui/button'
@@ -71,8 +72,6 @@ function Calendar({
           'relative rounded-[5px] shadow-minimal',
           defaultClassNames.dropdown_root
         ),
-        // The native <select> is visually hidden; the caption_label shows the displayed value
-        dropdown: cn('absolute inset-0 opacity-0 cursor-pointer', defaultClassNames.dropdown),
         caption_label: cn(
           'select-none font-medium',
           captionLayout === 'label'
@@ -107,6 +106,7 @@ function Calendar({
         ...classNames,
       }}
       components={{
+        Dropdown: CalendarDropdown,
         Chevron: ({ className, orientation, ...props }) => {
           if (orientation === 'left') {
             return <ChevronLeftIcon className={cn('size-4', className)} {...props} />
@@ -122,6 +122,30 @@ function Calendar({
       {...props}
     />
   )
+}
+
+/** Keep DayPicker's native change-event contract, while the visible control and
+ * popup use the same keyboard/focus implementation as all other selects. */
+function CalendarDropdown({ options = [], value, onChange, disabled, 'aria-label': label }: DropdownProps) {
+  const nativeRef = React.useRef<HTMLSelectElement>(null)
+  return <>
+    <select hidden aria-hidden tabIndex={-1} ref={nativeRef} value={value} onChange={onChange} disabled={disabled}>
+      {options.map(option => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}
+    </select>
+    <OptionSelect
+      aria-label={label}
+      value={String(value ?? '')}
+      disabled={disabled}
+      className="h-7 w-auto gap-1 rounded-md border-border px-2 py-0 text-sm"
+      options={options.map(option => ({ ...option, value: String(option.value) }))}
+      onValueChange={next => {
+        const select = nativeRef.current
+        if (!select) return
+        select.value = next
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      }}
+    />
+  </>
 }
 
 /**

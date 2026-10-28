@@ -1,3 +1,4 @@
+import { WorkbenchSelect } from '@/components/ui/workbench-controls'
 import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -477,16 +478,17 @@ export function MyCirclesPage() {
             </label>
             <label className="grid gap-[6px] text-[12px] text-muted-foreground">
               <span>{t('poo70.c3.filter.label')}</span>
-              <select
+              <WorkbenchSelect<MyCirclesEntitlementFilter>
                 value={filter}
-                onChange={event => setFilter(event.target.value as MyCirclesEntitlementFilter)}
+                onValueChange={setFilter}
+                aria-label={t('poo70.c3.filter.label')}
                 data-testid="my-circles-filter"
-                className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[3px]"
-              >
-                <option value="all">{t('poo70.c3.filter.all')}</option>
-                <option value="valid">{t('poo70.c3.filter.valid')}</option>
-                <option value="restore">{t('poo70.c3.filter.restore')}</option>
-              </select>
+                options={[
+                  { value: 'all', label: t('poo70.c3.filter.all') },
+                  { value: 'valid', label: t('poo70.c3.filter.valid') },
+                  { value: 'restore', label: t('poo70.c3.filter.restore') },
+                ]}
+              />
             </label>
           </div>
         )}
