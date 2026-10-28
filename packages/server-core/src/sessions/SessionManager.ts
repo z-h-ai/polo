@@ -77,7 +77,6 @@ import {
   migrateLegacyCredentials,
   migrateLegacyLlmConnectionsConfig,
   migrateOrphanedDefaultConnections,
-  MODEL_REGISTRY,
   type Workspace,
   type WorkspaceInfo,
 } from '@polo-ai/shared/config'
@@ -121,7 +120,7 @@ import { getCredentialManager, accountToCredentialId } from '@polo-ai/shared/cre
 import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId, GENUI_MODEL_CONTEXT_MAX_QUEUE } from '@polo-ai/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@polo-ai/shared/utils'
+import { perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@polo-ai/shared/utils'
 import { invalidateSkillsCache, type LoadedSkill } from '@polo-ai/shared/skills'
 import { invalidateContextFileCache } from '@polo-ai/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@polo-ai/shared/config'
@@ -12544,29 +12543,26 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'tool_start': {
-        // Format tool input paths to relative for better readability
-        const formattedToolInput = formatToolInputPaths(event.input)
-
-        // Resolve call_llm model for TurnCard badge display.
-        // Resolve call_llm model short names to full IDs for display.
-        // Note: Pi sessions override the model in PiEventAdapter (call_llm always uses miniModel).
-        if (event.toolName === 'mcp__session__call_llm' && formattedToolInput?.model) {
-          const shortName = String(formattedToolInput.model)
-          const modelDef = MODEL_REGISTRY.find(m => m.id === shortName)
-            || MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === shortName.toLowerCase())
-            || MODEL_REGISTRY.find(m => m.name.toLowerCase() === shortName.toLowerCase())
-          if (modelDef) {
-            formattedToolInput.model = modelDef.id
-          }
-        }
+        // Tool inputs are executable/protocol data, not display text. Preserve
+        // paths and embedded HTML/commands exactly.
+        // Accepted tradeoff (R1-P3-3): the former call_llm shortName→fullId
+        // rewrite used to live here; model aliases now display as-is in the
+        // TurnCard badge. Pi sessions are unaffected (PiEventAdapter always
+        // pins miniModel). Renderer-side resolution IS feasible — models.ts
+        // is a zero-import constant table — but requires a './config/models'
+        // exports subpath in shared and couples the UI bundle to the config
+        // layer; until that's wanted, the alias display stays unresolved.
+        // Shallow-copy: managed.messages[].toolInput must not alias the live
+        // event object, so later in-place edits cannot corrupt the source event.
+        const toolInput = event.input ? { ...event.input } : event.input
 
         // Resolve tool display metadata (icon, displayName) for skills/sources
         // Only resolve when we have input (second event for SDK dual-event pattern)
         const workspaceRootPath = managed.workspace.rootPath
         let toolDisplayMeta: ToolDisplayMeta | undefined
-        if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
+        if (toolInput && Object.keys(toolInput).length > 0) {
           const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
-          toolDisplayMeta = await resolveToolDisplayMeta(event.toolName, formattedToolInput, workspaceRootPath, allSources)
+          toolDisplayMeta = await resolveToolDisplayMeta(event.toolName, toolInput, workspaceRootPath, allSources)
           assertCurrent()
         }
 
@@ -12587,9 +12583,9 @@ export class SessionManager implements ISessionManager {
 
         if (existingStartMsg) {
           // Update existing message with complete input (second event has full input)
-          if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
+          if (toolInput && Object.keys(toolInput).length > 0) {
             const hadInputBefore = existingStartMsg.toolInput && Object.keys(existingStartMsg.toolInput).length > 0
-            existingStartMsg.toolInput = formattedToolInput
+            existingStartMsg.toolInput = toolInput
             // Send update event if we're adding input that wasn't there before
             if (!hadInputBefore) {
               shouldSendEvent = true
@@ -12621,7 +12617,7 @@ export class SessionManager implements ISessionManager {
             timestamp: this.monotonic(),
             toolName: event.toolName,
             toolUseId: event.toolUseId,
-            toolInput: formattedToolInput,
+            toolInput: toolInput,
             toolStatus: 'executing',
             toolIntent: event.intent,
             toolDisplayName: event.displayName,
@@ -12636,7 +12632,7 @@ export class SessionManager implements ISessionManager {
         // Skip browser_tool help/release commands to avoid pointless overlay flashes.
         const shouldActivateOverlay = shouldActivateBrowserOverlay(
           event.toolName,
-          formattedToolInput,
+          toolInput,
         )
 
         const overlayBpm = this.getBrowserPaneManagerForSession(sessionId)
@@ -12662,7 +12658,7 @@ export class SessionManager implements ISessionManager {
             sessionId,
             toolName: event.toolName,
             toolUseId: event.toolUseId,
-            toolInput: formattedToolInput ?? {},
+            toolInput: toolInput ?? {},
             toolIntent: event.intent,
             toolDisplayName: event.displayName,
             toolDisplayMeta,  // Includes base64 icon for viewer compatibility
@@ -12678,18 +12674,19 @@ export class SessionManager implements ISessionManager {
         // toolName comes directly from PoloAi (resolved via ToolIndex)
         const toolName = event.toolName || 'unknown'
 
-        // Format absolute paths to relative paths for better readability
-        const rawFormattedResult = event.result ? formatPathsToRelative(event.result) : ''
+        // Preserve protocol payloads (including generate_app absolute paths).
+        // Display shortening must never rewrite persisted or emitted data.
+        const rawResult = event.result ?? ''
 
         // Safety net: prevent massive tool results from bloating session JSONL (protects all backends)
         const MAX_PERSISTED_RESULT_CHARS = 200_000 // ~50K tokens
-        const formattedResult = rawFormattedResult.length > MAX_PERSISTED_RESULT_CHARS
-          ? rawFormattedResult.slice(0, MAX_PERSISTED_RESULT_CHARS) +
-            `\n\n[Truncated for storage: ${rawFormattedResult.length.toLocaleString()} chars total]`
-          : rawFormattedResult
+        const storedResult = rawResult.length > MAX_PERSISTED_RESULT_CHARS
+          ? rawResult.slice(0, MAX_PERSISTED_RESULT_CHARS) +
+            `\n\n[Truncated for storage: ${rawResult.length.toLocaleString()} chars total]`
+          : rawResult
 
         // Some backends omit explicit isError but still prefix with [ERROR].
-        const inferredError = event.isError === true || /^\s*(\[ERROR\]|Error:|error:)/.test(formattedResult)
+        const inferredError = event.isError === true || /^\s*(\[ERROR\]|Error:|error:)/.test(storedResult)
 
         // Update existing tool message (created on tool_start) instead of creating new one
         const existingToolMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
@@ -12703,7 +12700,7 @@ export class SessionManager implements ISessionManager {
 
         if (existingToolMsg) {
           // Keep lightweight status text in `content` and store full payload in `toolResult` only.
-          existingToolMsg.toolResult = formattedResult
+          existingToolMsg.toolResult = storedResult
           existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
           existingToolMsg.isError = inferredError
           // If message doesn't have parent set, use event's parentToolUseId
@@ -12728,7 +12725,7 @@ export class SessionManager implements ISessionManager {
             timestamp: this.monotonic(),
             toolName: toolName,
             toolUseId: event.toolUseId,
-            toolResult: formattedResult,
+            toolResult: storedResult,
             toolStatus: inferredError ? 'error' : 'completed',
             toolDisplayMeta: fallbackToolDisplayMeta,
             parentToolUseId,
@@ -12739,7 +12736,7 @@ export class SessionManager implements ISessionManager {
 
         // Send event to renderer if: (a) first completion, or (b) result content changed
         // (e.g., safety net auto-completed with empty result, then real result arrived later)
-        const resultChanged = wasAlreadyComplete && formattedResult && existingToolMsg?.toolResult !== formattedResult
+        const resultChanged = wasAlreadyComplete && storedResult && existingToolMsg?.toolResult !== storedResult
         if (!wasAlreadyComplete || resultChanged) {
           // Use existing tool message timestamp, or fallback message timestamp for ordering
           const toolResultTimestamp = existingToolMsg?.timestamp ?? (managed.messages.find(m => m.toolUseId === event.toolUseId)?.timestamp)
@@ -12748,7 +12745,7 @@ export class SessionManager implements ISessionManager {
             sessionId,
             toolUseId: event.toolUseId,
             toolName: toolName,
-            result: formattedResult,
+            result: storedResult,
             turnId: event.turnId,
             parentToolUseId,
             isError: inferredError,

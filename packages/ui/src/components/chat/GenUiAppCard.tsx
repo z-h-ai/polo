@@ -458,14 +458,15 @@ export function useGenUiGuestWebview({ webviewRef, src, partition, registration,
     const webview = webviewRef.current
     if (!webview) return
     const blockNavigation = (event: Event) => {
-      const detail = (event as CustomEvent<string>).detail
-      if (typeof detail === 'string' && detail.startsWith('poloai://')) return
+      // Electron webview events expose properties directly, not in detail.
+      const url = (event as Event & { url?: string }).url ?? ''
+      if (url.startsWith('poloai://')) return
       event.preventDefault()
-      console.warn('[GenUiAppCard] blocked guest navigation:', detail)
+      console.warn('[GenUiAppCard] blocked guest navigation:', url)
     }
     const failLoad = (event: Event) => {
-      const detail = (event as CustomEvent<{ isMainFrame?: boolean }>).detail
-      if (detail && detail.isMainFrame === false) return
+      // Electron webview events expose properties directly, not in detail.
+      if ((event as Event & { isMainFrame?: boolean }).isMainFrame === false) return
       onLoadFailedRef.current()
     }
     webview.addEventListener('will-navigate', blockNavigation)
@@ -483,7 +484,7 @@ export function useGenUiGuestWebview({ webviewRef, src, partition, registration,
     const webview = webviewRef.current
     if (!webview || !registration) return
     let registeredGuestId: number | null = null
-    const handleDidAttach = () => {
+    const handleDomReady = () => {
       const guestId = (webview as GenUiWebviewElement).getWebContentsId?.()
       if (typeof guestId !== 'number' || guestId <= 0) return
       registeredGuestId = guestId
@@ -493,9 +494,11 @@ export function useGenUiGuestWebview({ webviewRef, src, partition, registration,
         guestWebContentsId: guestId,
       })
     }
-    webview.addEventListener('did-attach', handleDidAttach)
+    // getWebContentsId throws before dom-ready in Electron. did-attach only
+    // establishes Main's ownership; it does not make the element API usable.
+    webview.addEventListener('dom-ready', handleDomReady)
     return () => {
-      webview.removeEventListener('did-attach', handleDidAttach)
+      webview.removeEventListener('dom-ready', handleDomReady)
       if (registeredGuestId != null) {
         dispatchGenUiCardUnregister({
           sessionId: registration.sessionId,
