@@ -1,3 +1,4 @@
+import { Checkbox } from '../ui/Checkbox'
 import * as React from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
@@ -361,11 +362,10 @@ function createComponents(
       input: ({ type, checked }) => {
         if (type === 'checkbox') {
           return (
-            <input
-              type="checkbox"
+            <Checkbox
               checked={checked}
               readOnly
-              className="mr-2 rounded border-muted-foreground align-middle"
+              className="mr-2"
             />
           )
         }
@@ -531,11 +531,10 @@ function createComponents(
     input: ({ type, checked }) => {
       if (type === 'checkbox') {
         return (
-          <input
-            type="checkbox"
+          <Checkbox
             checked={checked}
             readOnly
-            className="mr-2 rounded border-muted-foreground"
+            className="mr-2"
           />
         )
       }

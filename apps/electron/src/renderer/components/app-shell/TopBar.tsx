@@ -1,4 +1,5 @@
-import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchMenuClassName } from '@/components/ui/client-workbench'
+import { WorkbenchMenuContent } from '@/components/ui/workbench-controls'
+import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
 /**
  * TopBar - The single global workbench bar (frozen POO-41 `.workbench-bar`
  * semantics, unified with the tab strip per the POO-70 hifi prototype).
@@ -45,7 +46,6 @@ import { ChevronRight, UserRound } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
-  StyledDropdownMenuContent,
   StyledDropdownMenuItem,
 } from "@/components/ui/styled-dropdown"
 import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
@@ -346,7 +346,7 @@ export function TopBar() {
               )}
             </button>
           </DropdownMenuTrigger>
-          <StyledDropdownMenuContent style={workbenchStyle} className={clientWorkbenchMenuClassName + " w-[min(294px,calc(100vw-24px))]"} align="end" minWidth="min-w-0">
+          <WorkbenchMenuContent className="w-[min(294px,calc(100vw-24px))]" align="end" minWidth="min-w-0">
             {visibleUnreadSessions.length === 0 ? (
               <div className="px-2 py-1.5 text-[12px] text-muted-foreground">
                 {t("topbar.notifications.empty")}
@@ -364,7 +364,7 @@ export function TopBar() {
                 </StyledDropdownMenuItem>
               ))
             )}
-          </StyledDropdownMenuContent>
+          </WorkbenchMenuContent>
         </DropdownMenu>
 
         <DropdownMenu>
@@ -378,7 +378,7 @@ export function TopBar() {
               {userInitial || <UserRound className="size-3.5" strokeWidth={1.7} />}
             </button>
           </DropdownMenuTrigger>
-          <StyledDropdownMenuContent style={workbenchStyle} className={clientWorkbenchMenuClassName + " w-[min(294px,calc(100vw-24px))]"} align="end" minWidth="min-w-0">
+          <WorkbenchMenuContent className="w-[min(294px,calc(100vw-24px))]" align="end" minWidth="min-w-0">
             {/* POO-117 P117-02/P117-03: the single workbench menu — account
                 entries plus the migrated app menu, in one place. The bar sits
                 above NavigationProvider, so new chat routes through the global
@@ -391,7 +391,7 @@ export function TopBar() {
               canOpenEnterpriseWorkflows={canOpenEnterpriseWorkflows}
               onOpenEnterpriseWorkflow={(workflow) => { void openEnterpriseWorkflow(workflow) }}
             />
-          </StyledDropdownMenuContent>
+          </WorkbenchMenuContent>
         </DropdownMenu>
       </div>
     </div>

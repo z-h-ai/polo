@@ -14,6 +14,7 @@
  */
 
 import * as React from 'react'
+import { OptionSelect } from '../ui/OptionSelect'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, TrendingDown, TrendingUp, Minus } from 'lucide-react'
 import { cn } from '../../lib/utils'
@@ -894,16 +895,13 @@ function ActionButtonsView({ component, sessionId }: { component: GenUiActionBut
                   {param.required && <span className="text-destructive/80">*</span>}
                 </span>
                 {param.type === 'select' ? (
-                  <select
+                  <OptionSelect
                     className={FORM_FIELD_STYLES}
+                    aria-label={param.label}
                     value={paramValues[openPanelButton.id]?.[param.key] ?? ''}
-                    onChange={event => handleParamChange(openPanelButton.id, param.key, event.target.value)}
-                  >
-                    <option value=""></option>
-                    {(param.options ?? []).map(option => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
+                    onValueChange={value => handleParamChange(openPanelButton.id, param.key, value)}
+                    options={[{ value: '', label: '' }, ...(param.options ?? []).filter(Boolean).map(value => ({ value, label: value }))]}
+                  />
                 ) : (
                   <input
                     type={param.type === 'number' ? 'number' : 'text'}
@@ -1015,17 +1013,14 @@ function FormView({ component, sessionId }: { component: GenUiForm; sessionId?: 
               {field.required && <span className="text-destructive/80">*</span>}
             </span>
             {field.type === 'select' ? (
-              <select
+              <OptionSelect
                 className={FORM_FIELD_STYLES}
+                aria-label={field.label}
                 value={values[field.key] ?? ''}
-                onChange={event => setValue(field.key, event.target.value)}
+                onValueChange={value => setValue(field.key, value)}
                 disabled={!sessionId}
-              >
-                <option value=""></option>
-                {(field.options ?? []).map(option => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
+                options={[{ value: '', label: '' }, ...(field.options ?? []).filter(Boolean).map(value => ({ value, label: value }))]}
+              />
             ) : (
               <input
                 type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}

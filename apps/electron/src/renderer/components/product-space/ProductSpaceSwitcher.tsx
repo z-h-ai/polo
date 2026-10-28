@@ -1,10 +1,9 @@
-import { useClientWorkbenchStyle, clientWorkbenchMenuClassName } from '@/components/ui/client-workbench'
+import { WorkbenchMenuSubContent } from '@/components/ui/workbench-controls'
 import { Check, Building2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   DropdownMenuSub,
   StyledDropdownMenuSubTrigger,
-  StyledDropdownMenuSubContent,
   StyledDropdownMenuItem,
 } from '@/components/ui/styled-dropdown'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
@@ -19,7 +18,6 @@ function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
 
 export function ProductSpaceSwitcher() {
   const { t } = useTranslation()
-  const workbenchStyle = useClientWorkbenchStyle()
   const space = useOptionalProductSpaceContext()
   if (!space) return null
 
@@ -32,9 +30,8 @@ export function ProductSpaceSwitcher() {
         <Building2 className="size-3.5" />
         <span className="flex-1">{t('productSpace.switcher.label')}</span>
       </StyledDropdownMenuSubTrigger>
-      <StyledDropdownMenuSubContent
-        style={workbenchStyle}
-        className={clientWorkbenchMenuClassName + " w-[min(306px,calc(100vw-24px))]"}
+      <WorkbenchMenuSubContent
+        className="w-[min(306px,calc(100vw-24px))]"
         minWidth="min-w-0"
       >
         {/* Review #6: readable section label — muted token (AA-compliant),
@@ -85,7 +82,7 @@ export function ProductSpaceSwitcher() {
             </StyledDropdownMenuItem>
           )
         })}
-      </StyledDropdownMenuSubContent>
+      </WorkbenchMenuSubContent>
     </DropdownMenuSub>
   )
 }

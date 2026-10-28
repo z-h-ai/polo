@@ -1,3 +1,4 @@
+import { Checkbox } from '@polo-ai/ui/ui/checkbox'
 import { useTranslation } from "react-i18next"
 import type { ReactNode } from "react"
 
@@ -29,13 +30,12 @@ export function LoginTrustRow({
   return (
     <div className="mt-[18px] rounded-[9px] bg-foreground-3 px-[12px] py-[10px] text-[10px] leading-[1.5] text-foreground-50">
       <label className="flex cursor-pointer items-center gap-[6px]">
-        <input
+        <Checkbox
           data-testid="login-trust-consent"
-          type="checkbox"
           checked={checked}
           onChange={(event) => onCheckedChange(event.target.checked)}
           disabled={disabled}
-          className="size-[14px] shrink-0 accent-[var(--accent)]"
+          className="size-[14px]"
         />
         <span>{children}</span>
       </label>

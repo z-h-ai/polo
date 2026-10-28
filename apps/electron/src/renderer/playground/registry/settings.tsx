@@ -1,4 +1,7 @@
 import React from 'react'
+import { Checkbox } from '@polo-ai/ui/ui/checkbox'
+import { OptionSelect } from '@polo-ai/ui/ui/option-select'
+import { WorkbenchSelect } from '@/components/ui/workbench-controls'
 import type { ComponentEntry } from './types'
 import {
   SettingsSection,
@@ -183,7 +186,37 @@ function PageDemo() {
   )
 }
 
+
+function UnifiedSelectDemo({ disabled = false }: { disabled?: boolean }) {
+  const [value, setValue] = React.useState('all')
+  const [checked, setChecked] = React.useState(true)
+  const options = [
+    { value: 'all', label: '全部来源' },
+    { value: 'circle', label: '设计圈子' },
+    { value: 'long', label: '名称较长的团队空间与应用来源' },
+  ]
+  return <div className="grid w-full max-w-sm gap-4">
+    <label className="flex items-center gap-2"><Checkbox checked={checked} onChange={event => setChecked(event.target.checked)} disabled={disabled} />保留应用数据</label>
+    <label className="grid gap-2">工作台筛选
+      <WorkbenchSelect aria-label="工作台筛选" value={value} onValueChange={setValue} options={options} disabled={disabled} />
+    </label>
+    <label className="grid gap-2">设置与助手表单
+      <OptionSelect aria-label="设置与助手表单" value={value} onValueChange={setValue} options={options} disabled={disabled} />
+    </label>
+  </div>
+}
+
 export const settingsComponents: ComponentEntry[] = [
+  {
+    id: 'settings-unified-controls',
+    name: 'OptionSelect / WorkbenchSelect / Checkbox',
+    category: 'Settings',
+    description: 'Shared selection with renderer and workbench token scopes; real controlled values',
+    component: UnifiedSelectDemo,
+    layout: 'top',
+    props: [{ name: 'disabled', control: { type: 'boolean' }, defaultValue: false }],
+    variants: [{ name: 'Enabled', props: {} }, { name: 'Disabled', props: { disabled: true } }],
+  },
   {
     id: 'settings-page-preview',
     name: 'Settings Page Assembly',

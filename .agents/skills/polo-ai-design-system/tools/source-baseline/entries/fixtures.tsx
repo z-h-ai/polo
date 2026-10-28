@@ -33,6 +33,7 @@ export const fixtureProductSpace: ProductSpaceSummary = ProductSpaceSummarySchem
 
 export const productSpaceFixture: ProductSpaceContextValue = {
   accountId: 'baseline-account',
+  membershipListVerified: true,
   activeProductSpaceId: 'personal-space',
   activeProductSpace: fixtureProductSpace,
   productSpaces: [fixtureProductSpace],

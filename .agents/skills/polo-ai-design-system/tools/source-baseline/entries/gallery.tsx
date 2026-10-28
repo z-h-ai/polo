@@ -65,6 +65,7 @@ export interface GalleryGroup {
 }
 
 const SETTINGS_SOURCE: Record<string, string> = {
+  'settings-unified-controls': 'components/ui/workbench-controls.tsx + @polo-ai/ui/ui/option-select',
   // PageDemo is the registry's own composition example: it imports the real
   // @/components/settings parts — it is NOT a direct import of pages/settings.
   'settings-page-preview': 'playground/registry/settings.tsx PageDemo（组合展示示例，import @/components/settings 真组件）',

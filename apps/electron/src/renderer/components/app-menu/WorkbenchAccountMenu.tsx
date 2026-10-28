@@ -1,3 +1,4 @@
+import { WorkbenchMenuSubContent } from '@/components/ui/workbench-controls'
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import * as Icons from "lucide-react"
@@ -12,7 +13,6 @@ import {
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
   StyledDropdownMenuSubTrigger,
-  StyledDropdownMenuSubContent,
 } from "@/components/ui/styled-dropdown"
 import { ProductSpaceSwitcher } from "@/components/product-space/ProductSpaceSwitcher"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
@@ -158,9 +158,9 @@ function renderMenuSection(
         {Icon && <Icon className="h-3.5 w-3.5" />}
         {t(section.labelKey)}
       </StyledDropdownMenuSubTrigger>
-      <StyledDropdownMenuSubContent>
+      <WorkbenchMenuSubContent>
         {section.items.map((item, index) => renderSubmenuItem(item, index, actionHandlers, t))}
-      </StyledDropdownMenuSubContent>
+      </WorkbenchMenuSubContent>
     </DropdownMenuSub>
   )
 }
@@ -178,7 +178,7 @@ function renderDebugSubmenu(t: (key: string) => string): React.ReactNode {
         {SectionIcon && <SectionIcon className="h-3.5 w-3.5" />}
         {t(DEBUG_MENU.labelKey)}
       </StyledDropdownMenuSubTrigger>
-      <StyledDropdownMenuSubContent>
+      <WorkbenchMenuSubContent>
         {DEBUG_MENU.items.map((item, index) => {
           if (item.type === 'separator') {
             return <StyledDropdownMenuSeparator key={`sep-${index}`} />
@@ -199,7 +199,7 @@ function renderDebugSubmenu(t: (key: string) => string): React.ReactNode {
             </StyledDropdownMenuItem>
           )
         })}
-      </StyledDropdownMenuSubContent>
+      </WorkbenchMenuSubContent>
     </DropdownMenuSub>
   )
 }
@@ -290,7 +290,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
           <Icons.Sparkles className="h-3.5 w-3.5" />
           {t("menu.poloAiGroup")}
         </StyledDropdownMenuSubTrigger>
-        <StyledDropdownMenuSubContent>
+        <WorkbenchMenuSubContent>
           <StyledDropdownMenuItem onClick={onNewChat} data-testid="menu-new-chat">
             <SquarePenRounded className="h-3.5 w-3.5" />
             {t(ROOT_MENU.newChat.labelKey)}
@@ -307,7 +307,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
           {renderMenuSection(EDIT_MENU, actionHandlers, t)}
           {renderMenuSection(VIEW_MENU, actionHandlers, t)}
           {renderMenuSection(WINDOW_MENU, actionHandlers, t)}
-        </StyledDropdownMenuSubContent>
+        </WorkbenchMenuSubContent>
       </DropdownMenuSub>
 
       <DropdownMenuSub>
@@ -315,7 +315,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
           <Icons.HelpCircle className="h-3.5 w-3.5" />
           {t("menu.help")}
         </StyledDropdownMenuSubTrigger>
-        <StyledDropdownMenuSubContent>
+        <WorkbenchMenuSubContent>
           {HELP_LINKS.map((link) => {
             const Icon = getIcon(link.icon)
             return (
@@ -336,7 +336,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
             {t(ROOT_MENU.keyboardShortcuts.labelKey)}
             {keyboardShortcutsHotkey && <DropdownMenuShortcut className="pl-6">{keyboardShortcutsHotkey}</DropdownMenuShortcut>}
           </StyledDropdownMenuItem>
-        </StyledDropdownMenuSubContent>
+        </WorkbenchMenuSubContent>
       </DropdownMenuSub>
 
       {isDebugMode && renderDebugSubmenu(t)}

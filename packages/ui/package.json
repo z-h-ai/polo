@@ -19,7 +19,10 @@
     "./ui/drawer": "./src/components/ui/drawer.tsx",
     "./ui/styled-dropdown": "./src/components/ui/StyledDropdown.tsx",
     "./context": "./src/context/index.ts",
-    "./styles": "./src/styles/index.css"
+    "./styles": "./src/styles/index.css",
+    "./ui/select": "./src/components/ui/Select.tsx",
+    "./ui/option-select": "./src/components/ui/OptionSelect.tsx",
+    "./ui/checkbox": "./src/components/ui/Checkbox.tsx"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.69",
@@ -59,7 +62,8 @@
     "react-pdf": ">=10.0.0",
     "i18next": ">=26.0.0",
     "react-i18next": ">=17.0.0",
-    "vaul": ">=1.0.0"
+    "vaul": ">=1.0.0",
+    "@radix-ui/react-select": ">=2.0.0"
   },
   "peerDependenciesMeta": {
     "@radix-ui/react-context-menu": {
