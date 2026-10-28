@@ -49,5 +49,5 @@ export function validQuery(value: unknown): value is QueryInput {
     && (v.systemPrompt === undefined || typeof v.systemPrompt === 'string' && bytes(v.systemPrompt) <= 524_288)
     && (v.responseFormat === undefined || v.responseFormat === 'text' || v.responseFormat === 'json_object')
     && (v.maxOutputTokens === undefined || Number.isInteger(v.maxOutputTokens) && (v.maxOutputTokens as number) >= 1 && (v.maxOutputTokens as number) <= 65_536)
-    && (v.timeoutMs === undefined || Number.isInteger(v.timeoutMs) && (v.timeoutMs as number) >= 1000 && (v.timeoutMs as number) <= 600_000)
+    && (v.timeoutMs === undefined || Number.isInteger(v.timeoutMs) && (v.timeoutMs as number) >= 1000 && (v.timeoutMs as number) <= 3_600_000)
 }

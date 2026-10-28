@@ -98,7 +98,7 @@ export const AppAiQuerySchema = z.object({
   responseFormat: z.enum(['text', 'json_object']).optional(),
   /** Omitted = the selected model's own output limit (per-model cap, resolved by the host worker). */
   maxOutputTokens: z.number().int().min(1).max(65_536).optional(),
-  timeoutMs: z.number().int().min(1000).max(600_000),
+  timeoutMs: z.number().int().min(1000).max(3_600_000),
 }).strict()
 export const AppApiRunFinishSchema = z.object({
   runId: appApiUuid,

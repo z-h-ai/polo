@@ -61,7 +61,9 @@ export const polo = Object.freeze({
         off = host.onStatus(event => { if (event.callId === callId) notify({ phase: event.phase }) })
         submitted = true
         // Omitted maxOutputTokens resolves to the selected model's own output limit host-side.
-        const response = host.start(callId, { timeoutMs: 300_000, ...input })
+        // 600s default covers full-budget generation on measured ~31-57 tok/s models; callers
+        // needing more pass an explicit timeoutMs (schema cap 3600s).
+        const response = host.start(callId, { timeoutMs: 600_000, ...input })
         if (cancelled) void sendCancel().catch(() => {})
         const value = unwrap(await response)
         // A late cancel cannot overwrite a completed, metered provider outcome.

@@ -441,11 +441,11 @@ describe('parent-side limits are strict subset of wire protocol', () => {
     expect(parentMax).toBeLessThan(wireMax + 1);
   });
 
-  it('timeoutMs parent range 1000..TIMEOUT_MS_MAX is within wire 100..600000', () => {
+  it('timeoutMs parent range 1000..TIMEOUT_MS_MAX is within wire 100..3600000', () => {
     const parentMin = 1000;
     const parentMax = TIMEOUT_MS_MAX;
     const wireMin = 100;
-    const wireMax = 600_000;
+    const wireMax = 3_600_000;
     expect(wireMin).toBeLessThan(parentMin);
     expect(parentMax).toBeLessThanOrEqual(wireMax);
   });

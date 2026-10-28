@@ -46,8 +46,9 @@ describe('host completion protocol validation', () => {
     expect(validateHostRequest(baseRequest({ maxOutputTokens: 1.5 }))).toEqual({ kind: 'invalid' })
     expect(validateHostRequest(baseRequest({ maxOutputTokens: 65_536 })).kind).toBe('valid')
     expect(validateHostRequest(baseRequest({ timeoutMs: 99 }))).toEqual({ kind: 'invalid' })
-    expect(validateHostRequest(baseRequest({ timeoutMs: 600_001 }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ timeoutMs: 3_600_001 }))).toEqual({ kind: 'invalid' })
     expect(validateHostRequest(baseRequest({ timeoutMs: 100 })).kind).toBe('valid')
+    expect(validateHostRequest(baseRequest({ timeoutMs: 3_600_000 })).kind).toBe('valid')
   })
 
   it('maps every over-limit field byte boundary to result_too_large, not invalid', () => {
