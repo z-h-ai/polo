@@ -1,6 +1,6 @@
 import { types } from 'node:util'
 // Single responsibility: bounded, descriptor-safe reading of inert JSON-data shapes and bounded
-// structural comparison. This kernel never applies Host policy (512KiB, slots, claims, tool
+// structural comparison. This kernel never applies Host policy (TEXT_LIMIT, slots, claims, tool
 // max-or-double); it returns structured outcomes and explicit comparison reasons (R12 §6.2).
 
 export interface ComparisonBudget {

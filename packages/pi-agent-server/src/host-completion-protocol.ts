@@ -2,7 +2,21 @@ import { parseProviderCorrelation, type ProviderCorrelationV1, type ProviderObse
 import { Type } from '@sinclair/typebox'
 import { Value } from '@sinclair/typebox/value'
 export const HOST_PARENT_MARKER = 'sessionless-host-llm-executor.v1'
-export const ID_LIMIT = 8192, TEXT_LIMIT = 524_288
+export const ID_LIMIT = 8192
+/** Worker wire cap on a single retained result text. 2 MiB covers the maxOutputTokens hard cap
+ *  (131_072 tokens) at worst-case UTF-8 density (CJK ~3 B/char, ~8-16 B/token), so a full-budget
+ *  generation can never trip result_too_large. Sync obligation: apps/electron's
+ *  QUERY_TEXT_RESERVATION_BYTES (apps/electron/src/main/local-app-runtime/app-api-run-state.ts)
+ *  must stay >= this limit — the invariant "admission reservation >= final retained bytes". The
+ *  two packages must not depend on each other; the contract is pinned by that package's
+ *  __tests__/app-api-run-state.reservation.test.ts importing both constants. */
+export const TEXT_LIMIT = 2 * 1024 * 1024
+/** Upper bound of the wire timeoutMs range below. Exported so the worker deadline armer
+ *  (host-completion.ts armDeadline) gates on the SAME value: an explicit timeoutMs the wire
+ *  accepts must always arm the deadline, otherwise the stream's ~9e15 timeoutRemainingMs
+ *  fallback reaches the provider SDK's setTimeout, which Node/Bun clamp to 1ms — the request
+ *  aborts instantly (POL-280 P1). */
+export const TIMEOUT_MS_WIRE_MAX = 3_600_000
 const PROMPT_LIMIT = 1_048_576
 const SYSTEM_LIMIT = 524_288
 const CRED_LIMIT = 65_536
@@ -52,12 +66,14 @@ const routeSchema = Type.Union([
   Type.Object({ kind: Type.Literal('catalog'), provider: Type.String(), transportBaseUrl: Type.String() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('custom'), provider: Type.Union([Type.Literal('openai'), Type.Literal('anthropic')]), api: Type.Union([Type.Literal('openai-completions'), Type.Literal('anthropic-messages')]), baseUrl: Type.String() }, { additionalProperties: false }),
 ])
-const requestSchema = Type.Object({
+/** Exported for cross-package contract tests: the real wire bounds are read straight off the
+ *  TypeBox schema (properties.*.minimum/maximum) instead of hand-copied literals. */
+export const requestSchema = Type.Object({
   providerCorrelation: Type.Optional(Type.Unknown()),
   type: Type.Literal('host_completion'), version: Type.Literal(1), parentValidation: Type.Literal(HOST_PARENT_MARKER),
   requestId: Type.String(), route: routeSchema, model: Type.String(), prompt: Type.String(), systemPrompt: Type.Optional(Type.String()),
   responseFormat: Type.Optional(Type.Union([Type.Literal('text'), Type.Literal('json_object')])),
-  maxOutputTokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 131_072 })), timeoutMs: Type.Integer({ minimum: 100, maximum: 3_600_000 }), credential: credentialSchema,
+  maxOutputTokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 131_072 })), timeoutMs: Type.Integer({ minimum: 100, maximum: TIMEOUT_MS_WIRE_MAX }), credential: credentialSchema,
 }, { additionalProperties: false })
 function byteOver(value: string, limit: number): boolean { return Buffer.byteLength(value, 'utf8') > limit }
 export function canonicalTransportHref(value: string): string | null {

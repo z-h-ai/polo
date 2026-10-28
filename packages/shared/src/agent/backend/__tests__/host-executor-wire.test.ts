@@ -16,6 +16,7 @@ import {
 } from '../../host-llm-contract.ts';
 import {
   HOST_ERRORS, HOST_PARENT_MARKER as PROTOCOL_MARKER, ID_LIMIT as PROTOCOL_ID_LIMIT, TEXT_LIMIT as PROTOCOL_TEXT_LIMIT,
+  requestSchema,
   validateHostRequest, canonicalTransportHref, unsafeSegments, serializeHostResult, failureResult,
   RESULT_TOO_LARGE_LINE,
 } from '../../../../../pi-agent-server/src/host-completion-protocol.ts';
@@ -428,26 +429,27 @@ describe('serializeHostResult upper limits', () => {
 });
 
 // ============================================================
-// 8. Parent-side extreme subset declaration
+// 8. Parent-side within-wire declaration
 // ============================================================
 
-describe('parent-side limits are strict subset of wire protocol', () => {
-  it('maxOutputTokens parent range 1..MAX_OUTPUT_TOKENS_MAX is within wire 1..131072', () => {
-    const parentMax = MAX_OUTPUT_TOKENS_MAX;
-    const wireMin = 1;
-    const wireMax = 131_072;
-    expect(parentMax).toBeLessThanOrEqual(wireMax);
-    expect(wireMin).toBeLessThanOrEqual(1);
-    expect(parentMax).toBeLessThan(wireMax + 1);
+describe('parent-side limits are within wire protocol', () => {
+  // Read the REAL wire bounds off the worker's TypeBox schema instead of hand-copied literals,
+  // so a wire-side change (not just a shared-side change) is caught by this test.
+  const wireBoundOf = (key: string, bound: 'minimum' | 'maximum'): number => {
+    const property = (requestSchema as { properties: Record<string, { minimum?: unknown; maximum?: unknown }> }).properties[key];
+    if (property === undefined) throw new Error(`wire schema has no ${key} property`);
+    const value = property[bound];
+    if (typeof value !== 'number') throw new Error(`wire schema ${key} has no numeric ${bound}`);
+    return value;
+  };
+
+  it('maxOutputTokens parent range 1..MAX_OUTPUT_TOKENS_MAX is within the wire schema maximum', () => {
+    expect(MAX_OUTPUT_TOKENS_MAX).toBeLessThanOrEqual(wireBoundOf('maxOutputTokens', 'maximum'));
   });
 
-  it('timeoutMs parent range 1000..TIMEOUT_MS_MAX is within wire 100..3600000', () => {
-    const parentMin = 1000;
-    const parentMax = TIMEOUT_MS_MAX;
-    const wireMin = 100;
-    const wireMax = 3_600_000;
-    expect(wireMin).toBeLessThan(parentMin);
-    expect(parentMax).toBeLessThanOrEqual(wireMax);
+  it('timeoutMs parent range 1000..TIMEOUT_MS_MAX is within the wire schema range', () => {
+    expect(wireBoundOf('timeoutMs', 'minimum')).toBeLessThan(1000);
+    expect(TIMEOUT_MS_MAX).toBeLessThanOrEqual(wireBoundOf('timeoutMs', 'maximum'));
   });
 });
 

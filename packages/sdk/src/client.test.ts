@@ -25,6 +25,14 @@ test('unsupported bridge and forbidden identity fields never start', async () =>
   for (const options of [{ prompt: '', accountId: 'foreign' }, { prompt: '你好'.repeat(400000) }, { prompt: 'x', timeoutMs: 1 }, { prompt: 'x', provider: 'owned' }]) await expect(polo.prompt(options as any)).rejects.toBeInstanceOf(PoloError)
   expect(starts).toBe(0)
 })
+test('validQuery pins the hand-written budget bounds: wire maximum accepted, first byte over rejected', async () => {
+  install()
+  await expect(polo.prompt({ prompt: 'x', maxOutputTokens: 131_072 })).resolves.toBe(value)
+  await expect(polo.prompt({ prompt: 'x', timeoutMs: 3_600_000 })).resolves.toBe(value)
+  await expect(polo.prompt({ prompt: 'x', maxOutputTokens: 131_073 })).rejects.toMatchObject({ code: 'invalid_request' })
+  await expect(polo.prompt({ prompt: 'x', timeoutMs: 3_600_001 })).rejects.toMatchObject({ code: 'invalid_request' })
+  expect(starts).toBe(2)
+})
 test('one query preserves partial/pending and unsubscribes all listeners', async () => {
   install({ start: async id => { starts++; for (const l of listeners) { l({ callId: 'other', phase: 'failed' }); l({ callId: id, phase: 'running' }) } return { ok: true, data: { ...value, status: 'partial' } } } })
   const task = polo.run({ prompt: 'quote' }); const statuses: string[] = []; task.onStatus(s => statuses.push(s.phase))
