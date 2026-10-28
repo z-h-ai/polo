@@ -60,7 +60,8 @@ export const polo = Object.freeze({
         callId = crypto.randomUUID()
         off = host.onStatus(event => { if (event.callId === callId) notify({ phase: event.phase }) })
         submitted = true
-        const response = host.start(callId, { maxOutputTokens: 4096, timeoutMs: 60_000, ...input })
+        // Omitted maxOutputTokens resolves to the selected model's own output limit host-side.
+        const response = host.start(callId, { timeoutMs: 300_000, ...input })
         if (cancelled) void sendCancel().catch(() => {})
         const value = unwrap(await response)
         // A late cancel cannot overwrite a completed, metered provider outcome.

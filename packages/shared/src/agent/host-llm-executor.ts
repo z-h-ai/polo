@@ -22,7 +22,7 @@ const PROMPT_LIMIT = 1_048_576, SYSTEM_LIMIT = 524_288, STDOUT_LIMIT = 4 * 1024 
 
 function validateExecuteInput(input: HostLlmExecuteInput, m: string): HostLlmPublicResult | null {
   if (typeof input.prompt !== 'string' || !input.prompt || Buffer.byteLength(input.prompt, 'utf8') > PROMPT_LIMIT) return makePublicError('invalid_request', 'invalid_input', '', m)
-  if (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens < 1 || input.maxOutputTokens > MAX_OUTPUT_TOKENS_MAX) return makePublicError('invalid_request', 'invalid_input', '', m)
+  if (input.maxOutputTokens !== undefined && (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens < 1 || input.maxOutputTokens > MAX_OUTPUT_TOKENS_MAX)) return makePublicError('invalid_request', 'invalid_input', '', m)
   if (!Number.isInteger(input.timeoutMs) || input.timeoutMs < 1000 || input.timeoutMs > TIMEOUT_MS_MAX) return makePublicError('invalid_request', 'invalid_input', '', m)
   if (input.responseFormat !== undefined && input.responseFormat !== 'text' && input.responseFormat !== 'json_object') return makePublicError('invalid_request', 'invalid_input', '', m)
   if (input.systemPrompt !== undefined && (typeof input.systemPrompt !== 'string' || Buffer.byteLength(input.systemPrompt, 'utf8') > SYSTEM_LIMIT)) return makePublicError('invalid_request', 'invalid_input', '', m)
@@ -30,7 +30,7 @@ function validateExecuteInput(input: HostLlmExecuteInput, m: string): HostLlmPub
 }
 
 function encodeRequestLine(requestId: string, model: string, input: HostLlmExecuteInput, route: HostSpawnDescriptor['wireRoute'], cred: WireCredential, providerCorrelation?: import('../admin/provider-observation.ts').ProviderCorrelationV1): { ok: true; line: string } | { ok: false } {
-  const w: Record<string, unknown> = { type: 'host_completion', version: 1, parentValidation: HOST_PARENT_MARKER, requestId, model, route, prompt: input.prompt, maxOutputTokens: input.maxOutputTokens, timeoutMs: input.timeoutMs, responseFormat: input.responseFormat ?? 'text', credential: cred }
+  const w: Record<string, unknown> = { type: 'host_completion', version: 1, parentValidation: HOST_PARENT_MARKER, requestId, model, route, prompt: input.prompt, ...(input.maxOutputTokens !== undefined ? { maxOutputTokens: input.maxOutputTokens } : {}), timeoutMs: input.timeoutMs, responseFormat: input.responseFormat ?? 'text', credential: cred }
   if (providerCorrelation) w['providerCorrelation'] = providerCorrelation
   if (input.systemPrompt) w['systemPrompt'] = input.systemPrompt
   const line = JSON.stringify(w)

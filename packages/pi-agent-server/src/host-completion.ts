@@ -185,6 +185,21 @@ export async function loadHostPiRuntime(importers: HostPiImporters, context: Hos
   }
   return { ok: true, runtime }
 }
+/** Conservative budget when no model-specific limit is discoverable (matches the synthetic
+ *  custom-endpoint default; the caller could always pass an explicit value before this change). */
+const UNKNOWN_MODEL_OUTPUT_BUDGET = 8_192
+/** Resolves the output budget ONCE, shared by the usage tracker and the provider stream:
+ *  an explicit caller value wins; omission takes the selected model's own catalog limit
+ *  (per-model cap, e.g. pi-ai Model.maxTokens) so new models inherit their real ceiling
+ *  instead of a hardcoded global one. */
+export function resolveHostOutputBudget(request: Pick<ValidatedHostRequest, 'maxOutputTokens' | 'routeKind' | 'provider' | 'model'>, runtime: HostPiRuntime): number {
+  if (request.maxOutputTokens !== undefined) return request.maxOutputTokens
+  const model = request.routeKind === 'catalog'
+    ? runtime.bindings.module.getModels(request.provider).find((entry) => entry.id === stripPiPrefix(request.model))
+    : buildCustomEndpointModelDef(stripPiPrefix(request.model))
+  const max = (model as Record<string, unknown> | undefined)?.['maxTokens']
+  return typeof max === 'number' && Number.isInteger(max) && max >= 1 ? max : UNKNOWN_MODEL_OUTPUT_BUDGET
+}
 // Phase 3 (synchronous): exact catalog hit or custom construction → Copilot/ordinary href
 // comparison → setBedrockProviderModule exactly once → streamSimple exactly once, with stop
 // probes before model, register and stream (R14 §3.2). Failures before registration leave zero
@@ -317,10 +332,11 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     // The tracker's expected response model must equal the SENT clone id the seam constructs:
     // bare id, plus one stripped MiniMax- prefix for the minimax-cn catalog route.
     const expectedModel = request.provider === 'minimax-cn' ? stripPiPrefix(request.model).replace(/^MiniMax-/, '') : stripPiPrefix(request.model)
-    const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, route: { kind: request.routeKind, api: request.api }, claim: (kind) => failWith(kind) })
+    const outputBudget = resolveHostOutputBudget(request, runtime)
+    const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: outputBudget, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, route: { kind: request.routeKind, api: request.api }, claim: (kind) => failWith(kind) })
     const started = startHostPiStream(runtime, {
       ...phaseContext, onResponse: providerResponse.onResponse, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
-      maxOutputTokens: request.maxOutputTokens, apiKey, signal: controller.signal,
+      maxOutputTokens: outputBudget, apiKey, signal: controller.signal,
       timeoutRemainingMs: Math.max(1, deadlineAt - Date.now()),
     })
     if (settled) return

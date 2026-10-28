@@ -29,7 +29,8 @@ export type HostWorkerCredential = { type: 'api_key'; value: string } | { type: 
 export interface ValidatedHostRequest {
   providerCorrelation?: ProviderCorrelationV1
   requestId: string; model: string; prompt: string; systemPrompt: string; responseFormat: 'text' | 'json_object'
-  maxOutputTokens: number; timeoutMs: number; routeKind: 'catalog' | 'custom'; provider: string; api: 'openai-completions' | 'anthropic-messages'
+  /** Omitted resolves to the selected model's own catalog limit inside the worker. */
+  maxOutputTokens?: number; timeoutMs: number; routeKind: 'catalog' | 'custom'; provider: string; api: 'openai-completions' | 'anthropic-messages'
   transportHref: string; credential: HostWorkerCredential
 }
 export type HostRequestVerdict = { kind: 'valid'; request: ValidatedHostRequest } | { kind: 'invalid' } | { kind: 'oversize' }
@@ -56,7 +57,7 @@ const requestSchema = Type.Object({
   type: Type.Literal('host_completion'), version: Type.Literal(1), parentValidation: Type.Literal(HOST_PARENT_MARKER),
   requestId: Type.String(), route: routeSchema, model: Type.String(), prompt: Type.String(), systemPrompt: Type.Optional(Type.String()),
   responseFormat: Type.Optional(Type.Union([Type.Literal('text'), Type.Literal('json_object')])),
-  maxOutputTokens: Type.Integer({ minimum: 1, maximum: 65_536 }), timeoutMs: Type.Integer({ minimum: 100, maximum: 600_000 }), credential: credentialSchema,
+  maxOutputTokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 65_536 })), timeoutMs: Type.Integer({ minimum: 100, maximum: 600_000 }), credential: credentialSchema,
 }, { additionalProperties: false })
 function byteOver(value: string, limit: number): boolean { return Buffer.byteLength(value, 'utf8') > limit }
 export function canonicalTransportHref(value: string): string | null {
@@ -64,7 +65,7 @@ export function canonicalTransportHref(value: string): string | null {
 }
 export function validateHostRequest(raw: unknown): HostRequestVerdict {
   if (!Value.Check(requestSchema, raw)) return { kind: 'invalid' }
-  const r = raw as { providerCorrelation?: unknown; requestId: string; model: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens: number; timeoutMs: number; route: { kind: 'catalog'; provider: string; transportBaseUrl: string } | { kind: 'custom'; provider: 'openai' | 'anthropic'; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string }; credential: HostWorkerCredential }
+  const r = raw as { providerCorrelation?: unknown; requestId: string; model: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens?: number; timeoutMs: number; route: { kind: 'catalog'; provider: string; transportBaseUrl: string } | { kind: 'custom'; provider: 'openai' | 'anthropic'; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string }; credential: HostWorkerCredential }
   const providerCorrelation = r.providerCorrelation === undefined ? undefined : parseProviderCorrelation(r.providerCorrelation)
   if (providerCorrelation === null) return { kind: 'invalid' }
   const credential = r.credential

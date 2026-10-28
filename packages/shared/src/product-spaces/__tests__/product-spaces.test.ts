@@ -807,10 +807,13 @@ describe('product-space app runtime contract (POO-54)', () => {
       timeoutMs: 5_000,
     }
     expect(AppAiQuerySchema.safeParse(query).success).toBe(true)
+    // POL-280: an omitted budget resolves host-side to the selected model's own output limit.
+    const { maxOutputTokens: _omitted, ...queryWithoutBudget } = query
+    expect(AppAiQuerySchema.safeParse(queryWithoutBudget).success).toBe(true)
     expect(AppAiQuerySchema.safeParse({ ...query, workspaceId: 'ws' }).success).toBe(false)
     expect(AppAiQuerySchema.safeParse({ ...query, payer: 'enterprise' }).success).toBe(false)
     expect(AppAiQuerySchema.safeParse({ ...query, price: 1 }).success).toBe(false)
-    expect(AppAiQuerySchema.safeParse({ ...query, maxOutputTokens: 8193 }).success).toBe(false)
+    expect(AppAiQuerySchema.safeParse({ ...query, maxOutputTokens: 65_537 }).success).toBe(false)
     expect(AppAiQuerySchema.safeParse({ ...query, timeoutMs: 999 }).success).toBe(false)
     expect(AppApiRunFinishSchema.safeParse({ runId: query.runId, status: 'completed' }).success).toBe(true)
     expect(AppApiRunFinishSchema.safeParse({ runId: query.runId, status: 'running' }).success).toBe(false)

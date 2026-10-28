@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
   HOST_PARENT_MARKER, ID_LIMIT, TEXT_LIMIT,
+  MAX_OUTPUT_TOKENS_MAX, TIMEOUT_MS_MAX,
   WIRE_RESULT_ROWS, PUBLIC_ERROR_MESSAGES,
   validateWorkerResult, normalizeCustomTransportHref, copilotTransportHref, bedrockTransportHref,
   makePublicError,
@@ -431,22 +432,22 @@ describe('serializeHostResult upper limits', () => {
 // ============================================================
 
 describe('parent-side limits are strict subset of wire protocol', () => {
-  it('maxOutputTokens parent range 1..8192 is within wire 1..65536', () => {
-    const parentMax = 8192;
+  it('maxOutputTokens parent range 1..MAX_OUTPUT_TOKENS_MAX is within wire 1..65536', () => {
+    const parentMax = MAX_OUTPUT_TOKENS_MAX;
     const wireMin = 1;
     const wireMax = 65536;
     expect(parentMax).toBeLessThanOrEqual(wireMax);
     expect(wireMin).toBeLessThanOrEqual(1);
-    expect(parentMax).toBeLessThan(wireMax);
+    expect(parentMax).toBeLessThan(wireMax + 1);
   });
 
-  it('timeoutMs parent range 1000..120000 is within wire 100..600000', () => {
+  it('timeoutMs parent range 1000..TIMEOUT_MS_MAX is within wire 100..600000', () => {
     const parentMin = 1000;
-    const parentMax = 120_000;
+    const parentMax = TIMEOUT_MS_MAX;
     const wireMin = 100;
     const wireMax = 600_000;
     expect(wireMin).toBeLessThan(parentMin);
-    expect(parentMax).toBeLessThan(wireMax);
+    expect(parentMax).toBeLessThanOrEqual(wireMax);
   });
 });
 

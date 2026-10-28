@@ -5,7 +5,7 @@ import http from 'node:http'
 import { checkDescriptor, codexStreamExtras, isLoopback, JSON_OBJECT_SYSTEM_CONSTRAINT, sanitizeEnvironment, SANITIZED_ENV_KEYS } from '../host-completion.ts'
 import { HOST_PARENT_MARKER, TEXT_LIMIT, validateHostRequest, type ValidatedHostRequest } from '../host-completion-protocol.ts'
 import { createHostStreamTracker, type StreamVerdict } from '../host-completion-stream.ts'
-import { loadHostPiRuntime, resolveHostPiRoute, startHostPiStream, type HostPiImportStage, type HostPiImporters, type HostPiPhaseContext, type HostPiRuntime, type HostPiStreamInputs } from '../host-completion.ts'
+import { loadHostPiRuntime, resolveHostOutputBudget, resolveHostPiRoute, startHostPiStream, type HostPiImportStage, type HostPiImporters, type HostPiPhaseContext, type HostPiRuntime, type HostPiStreamInputs } from '../host-completion.ts'
 import type { InstalledTransportObservation } from '../host-completion-policy.ts'
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime'
 
@@ -173,6 +173,51 @@ describe('host worker credential descriptor matrix', () => {
     expect(isLoopback('http://localhost:1/')).toBe(true)
     expect(isLoopback('http://[::1]:1/')).toBe(true)
     expect(isLoopback('http://localhost.attacker/')).toBe(false)
+  })
+})
+
+describe('resolveHostOutputBudget', () => {
+  const budgetRuntime = (models: Array<Record<string, any>>): HostPiRuntime => ({
+    bindings: {
+      module: {
+        getModels: (_provider: string) => models,
+        setBedrockProviderModule: () => {},
+        getGitHubCopilotBaseUrl: () => { throw new Error('unused') },
+        streamSimple: (() => { throw new Error('unused') }) as never,
+      },
+      bedrockProviderModule: null,
+      getGitHubCopilotBaseUrl: () => '',
+      setBedrockProviderModule: () => {},
+      streamSimple: (() => { throw new Error('unused') }) as never,
+    },
+    events: [],
+    registrationCount: 0,
+    streamCount: 0,
+  })
+  const budgetRequest = (overrides: Record<string, unknown>): Parameters<typeof resolveHostOutputBudget>[0] => {
+    const validated = mustValidate(request(overrides))
+    return validated as never
+  }
+
+  it('an explicit caller budget always wins, regardless of the catalog limit', () => {
+    const runtime = budgetRuntime([{ id: 'good-model', maxTokens: 64_000 }])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: 4096 }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(4096)
+  })
+
+  it('an omitted budget takes the selected model own catalog limit (per-model cap)', () => {
+    const runtime = budgetRuntime([{ id: 'good-model', maxTokens: 64_000 }])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(64_000)
+  })
+
+  it('an omitted budget falls back conservatively when the catalog entry lacks a usable maxTokens', () => {
+    const runtime = budgetRuntime([{ id: 'good-model' }, { id: 'bad-model', maxTokens: 0 }])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(8_192)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/bad-model' }, runtime)).toBe(8_192)
+  })
+
+  it('a custom endpoint without catalog metadata keeps the synthetic conservative default', () => {
+    const runtime = budgetRuntime([])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'pi/my-model' }, runtime)).toBe(8_192)
   })
 })
 

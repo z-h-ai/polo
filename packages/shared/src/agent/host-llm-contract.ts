@@ -4,7 +4,7 @@ export type { BackendHostRuntimeContext }
 
 export const HOST_PARENT_MARKER = 'sessionless-host-llm-executor.v1'
 export const ID_LIMIT = 8192, TEXT_LIMIT = 524_288, PROMPT_LIMIT = 1_048_576, SYSTEM_LIMIT = 524_288
-export const AGGREGATE_BYTE_LIMIT = 2_097_152, MAX_OUTPUT_TOKENS_MAX = 8192, TIMEOUT_MS_MAX = 120_000
+export const AGGREGATE_BYTE_LIMIT = 2_097_152, MAX_OUTPUT_TOKENS_MAX = 65_536, TIMEOUT_MS_MAX = 600_000
 
 export type HostLlmErrorCode = 'invalid_request' | 'connection_not_found' | 'connection_changed' | 'invalid_connection' | 'model_not_allowed'
   | 'credential_unavailable' | 'auth_failed' | 'provider_failed' | 'provider_protocol_error' | 'invalid_usage' | 'invalid_structured_output'
@@ -21,7 +21,8 @@ export type HostLlmPublicResult = (
   | { status: 'completed' | 'partial'; text: string; usage: HostLlmPublicUsage; requestId: string; model: string; provider: string }
   | { status: 'no_output' | 'timed_out' | 'failed' | 'cancelled'; error: HostLlmPublicError; requestId: string; model: string; usage?: HostLlmPublicUsage }
 ) & { providerObservation?: ProviderObservationV1 }
-export interface HostLlmExecuteInput { model?: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens: number; timeoutMs: number; signal?: AbortSignal }
+/** maxOutputTokens omitted resolves to the selected model's own catalog limit (per-model cap). */
+export interface HostLlmExecuteInput { model?: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens?: number; timeoutMs: number; signal?: AbortSignal }
 export interface HostLlmBeforeSendFacts { hostRequestId: string; model: string; transportBaseUrl: string; credentialFingerprint: string; requestBounds?: { maxInputTokens: number; maxOutputTokens: number; bodySha256: string } }
 /** Server-authenticated request correlation. It stays only in Host transport memory. */
 export interface HostLlmAdmissionDecision { providerCorrelation?: ProviderCorrelationV1 }
