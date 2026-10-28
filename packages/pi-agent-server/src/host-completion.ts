@@ -1,5 +1,5 @@
 import { parseProviderObservation, type ProviderObservationV1 } from './generated/provider-observation.ts'
-import { stripPiPrefix, buildCustomEndpointModelDef } from './custom-endpoint-models.ts'
+import { stripPiPrefix, buildCustomEndpointModelDef, supplementalOutputLimit } from './custom-endpoint-models.ts'
 import { canonicalTransportHref, failureResult, serializeHostResult, validateHostRequest, writeHostResultLine, type HostCompletionResultV1, type HostFailureKind, type HostWorkerCredential, type ValidatedHostRequest } from './host-completion-protocol.ts'
 import { classifyTransportFailure, type InstalledTransportObservation } from './host-completion-policy.ts'
 
@@ -186,17 +186,18 @@ export async function loadHostPiRuntime(importers: HostPiImporters, context: Hos
   return { ok: true, runtime }
 }
 /** Budget when no model-specific limit is discoverable — the protocol hard cap, matching
- *  ZCode's stance of never clamping unknown models to a small default. */
-const UNKNOWN_MODEL_OUTPUT_BUDGET = 65_536
+ *  ZCode's builtin-catalog stance of giving unknown models a full-size default (its `.*`
+ *  fallback moved 32K → 128K for the same reason). */
+const UNKNOWN_MODEL_OUTPUT_BUDGET = 131_072
 /** Resolves the output budget ONCE, shared by the usage tracker and the provider stream:
  *  an explicit caller value wins; omission takes the selected model's own catalog limit
  *  (per-model cap, e.g. pi-ai Model.maxTokens) so new models inherit their real ceiling
- *  instead of a hardcoded global one. Custom endpoints have no catalog metadata at all,
- *  so they take the hard cap (the synthetic def's 8192 is session-side metadata, not a
- *  real provider limit — glm-style endpoints accept far more). */
+ *  instead of a hardcoded global one. Custom endpoints have no catalog metadata, so they
+ *  consult the polo supplemental table (vendor ceilings like glm-5.3 at 128K) before the
+ *  hard cap (the synthetic def's 8192 is session-side metadata, not a provider limit). */
 export function resolveHostOutputBudget(request: Pick<ValidatedHostRequest, 'maxOutputTokens' | 'routeKind' | 'provider' | 'model'>, runtime: HostPiRuntime): number {
   if (request.maxOutputTokens !== undefined) return request.maxOutputTokens
-  if (request.routeKind !== 'catalog') return UNKNOWN_MODEL_OUTPUT_BUDGET
+  if (request.routeKind !== 'catalog') return supplementalOutputLimit(request.model) ?? UNKNOWN_MODEL_OUTPUT_BUDGET
   const hit = runtime.bindings.module.getModels(request.provider).find((entry) => entry.id === stripPiPrefix(request.model))
   const max = (hit as Record<string, unknown> | undefined)?.['maxTokens']
   return typeof max === 'number' && Number.isInteger(max) && max >= 1 ? max : UNKNOWN_MODEL_OUTPUT_BUDGET

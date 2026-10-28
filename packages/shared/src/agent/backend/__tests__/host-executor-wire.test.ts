@@ -432,10 +432,10 @@ describe('serializeHostResult upper limits', () => {
 // ============================================================
 
 describe('parent-side limits are strict subset of wire protocol', () => {
-  it('maxOutputTokens parent range 1..MAX_OUTPUT_TOKENS_MAX is within wire 1..65536', () => {
+  it('maxOutputTokens parent range 1..MAX_OUTPUT_TOKENS_MAX is within wire 1..131072', () => {
     const parentMax = MAX_OUTPUT_TOKENS_MAX;
     const wireMin = 1;
-    const wireMax = 65536;
+    const wireMax = 131_072;
     expect(parentMax).toBeLessThanOrEqual(wireMax);
     expect(wireMin).toBeLessThanOrEqual(1);
     expect(parentMax).toBeLessThan(wireMax + 1);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   buildCustomEndpointModelDef,
   normalizeCustomEndpointModelEntry,
+  supplementalOutputLimit,
   stripPiPrefix,
 } from './custom-endpoint-models.ts'
 
@@ -64,5 +65,24 @@ describe('buildCustomEndpointModelDef', () => {
     const model = buildCustomEndpointModelDef('vision-model', undefined, { supportsImages: true, contextWindow: 262_144 })
     expect(model.input).toEqual(['text', 'image'])
     expect(model.contextWindow).toBe(262_144)
+  })
+})
+
+describe('supplementalOutputLimit', () => {
+  it('resolves registered family ids and strips pi/ prefixes', () => {
+    expect(supplementalOutputLimit('glm-5.3-flash')).toBe(131_072)
+    expect(supplementalOutputLimit('pi/glm-5.3-flash')).toBe(131_072)
+    expect(supplementalOutputLimit('glm-5.3')).toBe(131_072)
+    expect(supplementalOutputLimit('glm-5.2')).toBe(131_072)
+  })
+
+  it('resolves suffixed variants to their longest registered family base', () => {
+    expect(supplementalOutputLimit('glm-5.3-flash-0203')).toBe(131_072)
+  })
+
+  it('returns undefined for unknown models and non-descendant ids', () => {
+    expect(supplementalOutputLimit('my-model')).toBeUndefined()
+    expect(supplementalOutputLimit('glm-4.5-air')).toBeUndefined()
+    expect(supplementalOutputLimit('xglm-5.3')).toBeUndefined()
   })
 })

@@ -42,9 +42,9 @@ describe('host completion protocol validation', () => {
 
   it('enforces integer ranges for maxOutputTokens and timeoutMs as invalid', () => {
     expect(validateHostRequest(baseRequest({ maxOutputTokens: 0 }))).toEqual({ kind: 'invalid' })
-    expect(validateHostRequest(baseRequest({ maxOutputTokens: 65_537 }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ maxOutputTokens: 131_073 }))).toEqual({ kind: "invalid" })
     expect(validateHostRequest(baseRequest({ maxOutputTokens: 1.5 }))).toEqual({ kind: 'invalid' })
-    expect(validateHostRequest(baseRequest({ maxOutputTokens: 65_536 })).kind).toBe('valid')
+    expect(validateHostRequest(baseRequest({ maxOutputTokens: 131_072 })).kind).toBe("valid")
     expect(validateHostRequest(baseRequest({ timeoutMs: 99 }))).toEqual({ kind: 'invalid' })
     expect(validateHostRequest(baseRequest({ timeoutMs: 3_600_001 }))).toEqual({ kind: 'invalid' })
     expect(validateHostRequest(baseRequest({ timeoutMs: 100 })).kind).toBe('valid')

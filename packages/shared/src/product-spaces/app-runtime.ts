@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { MAX_OUTPUT_TOKENS_MAX } from '../agent/host-llm-contract.ts'
+
 export const PRODUCT_SPACE_APP_RUNTIME_IDENTITY_CONTRACT =
   'product-space-app-runtime-identity.v1' as const
 export const LOCAL_APP_API_CONTRACT = 'local-app-api.v1' as const
@@ -97,7 +99,7 @@ export const AppAiQuerySchema = z.object({
   systemPrompt: byteBoundedString(524_288, 0).optional(),
   responseFormat: z.enum(['text', 'json_object']).optional(),
   /** Omitted = the selected model's own output limit (per-model cap, resolved by the host worker). */
-  maxOutputTokens: z.number().int().min(1).max(65_536).optional(),
+  maxOutputTokens: z.number().int().min(1).max(MAX_OUTPUT_TOKENS_MAX).optional(),
   timeoutMs: z.number().int().min(1000).max(3_600_000),
 }).strict()
 export const AppApiRunFinishSchema = z.object({

@@ -211,13 +211,24 @@ describe('resolveHostOutputBudget', () => {
 
   it('an omitted budget falls back to the protocol hard cap when the catalog entry lacks a usable maxTokens', () => {
     const runtime = budgetRuntime([{ id: 'good-model' }, { id: 'bad-model', maxTokens: 0 }])
-    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(65_536)
-    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/bad-model' }, runtime)).toBe(65_536)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(131_072)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/bad-model' }, runtime)).toBe(131_072)
   })
 
-  it('a custom endpoint without catalog metadata takes the protocol hard cap, not the synthetic def default', () => {
+  it('a custom endpoint without catalog metadata takes the supplemental table then the protocol hard cap', () => {
     const runtime = budgetRuntime([])
-    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'pi/my-model' }, runtime)).toBe(65_536)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'pi/my-model' }, runtime)).toBe(131_072)
+  })
+
+  it('a custom glm-5.3-flash request resolves through the supplemental table (exact id and suffixed variant)', () => {
+    const runtime = budgetRuntime([])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'pi/glm-5.3-flash' }, runtime)).toBe(131_072)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'glm-5.3-flash-0203' }, runtime)).toBe(131_072)
+  })
+
+  it('an explicit caller budget still wins over the supplemental table', () => {
+    const runtime = budgetRuntime([])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: 4096 }), routeKind: 'custom', provider: 'anthropic', model: 'pi/glm-5.3-flash' }, runtime)).toBe(4096)
   })
 })
 
