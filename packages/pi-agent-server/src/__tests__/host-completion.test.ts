@@ -209,15 +209,15 @@ describe('resolveHostOutputBudget', () => {
     expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(64_000)
   })
 
-  it('an omitted budget falls back conservatively when the catalog entry lacks a usable maxTokens', () => {
+  it('an omitted budget falls back to the protocol hard cap when the catalog entry lacks a usable maxTokens', () => {
     const runtime = budgetRuntime([{ id: 'good-model' }, { id: 'bad-model', maxTokens: 0 }])
-    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(8_192)
-    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/bad-model' }, runtime)).toBe(8_192)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(65_536)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/bad-model' }, runtime)).toBe(65_536)
   })
 
-  it('a custom endpoint without catalog metadata keeps the synthetic conservative default', () => {
+  it('a custom endpoint without catalog metadata takes the protocol hard cap, not the synthetic def default', () => {
     const runtime = budgetRuntime([])
-    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'pi/my-model' }, runtime)).toBe(8_192)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'pi/my-model' }, runtime)).toBe(65_536)
   })
 })
 

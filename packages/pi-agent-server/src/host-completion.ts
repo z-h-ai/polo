@@ -185,19 +185,20 @@ export async function loadHostPiRuntime(importers: HostPiImporters, context: Hos
   }
   return { ok: true, runtime }
 }
-/** Conservative budget when no model-specific limit is discoverable (matches the synthetic
- *  custom-endpoint default; the caller could always pass an explicit value before this change). */
-const UNKNOWN_MODEL_OUTPUT_BUDGET = 8_192
+/** Budget when no model-specific limit is discoverable — the protocol hard cap, matching
+ *  ZCode's stance of never clamping unknown models to a small default. */
+const UNKNOWN_MODEL_OUTPUT_BUDGET = 65_536
 /** Resolves the output budget ONCE, shared by the usage tracker and the provider stream:
  *  an explicit caller value wins; omission takes the selected model's own catalog limit
  *  (per-model cap, e.g. pi-ai Model.maxTokens) so new models inherit their real ceiling
- *  instead of a hardcoded global one. */
+ *  instead of a hardcoded global one. Custom endpoints have no catalog metadata at all,
+ *  so they take the hard cap (the synthetic def's 8192 is session-side metadata, not a
+ *  real provider limit — glm-style endpoints accept far more). */
 export function resolveHostOutputBudget(request: Pick<ValidatedHostRequest, 'maxOutputTokens' | 'routeKind' | 'provider' | 'model'>, runtime: HostPiRuntime): number {
   if (request.maxOutputTokens !== undefined) return request.maxOutputTokens
-  const model = request.routeKind === 'catalog'
-    ? runtime.bindings.module.getModels(request.provider).find((entry) => entry.id === stripPiPrefix(request.model))
-    : buildCustomEndpointModelDef(stripPiPrefix(request.model))
-  const max = (model as Record<string, unknown> | undefined)?.['maxTokens']
+  if (request.routeKind !== 'catalog') return UNKNOWN_MODEL_OUTPUT_BUDGET
+  const hit = runtime.bindings.module.getModels(request.provider).find((entry) => entry.id === stripPiPrefix(request.model))
+  const max = (hit as Record<string, unknown> | undefined)?.['maxTokens']
   return typeof max === 'number' && Number.isInteger(max) && max >= 1 ? max : UNKNOWN_MODEL_OUTPUT_BUDGET
 }
 // Phase 3 (synchronous): exact catalog hit or custom construction → Copilot/ordinary href
