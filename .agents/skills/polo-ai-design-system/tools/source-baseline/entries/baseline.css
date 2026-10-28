@@ -10,6 +10,7 @@
 @source './scenes.tsx';
 @source './gallery.tsx';
 @source './interview-input.tsx';
+@source './interview-conversation.tsx';
 
 /* Browsing-shell override, scoped to this baseline document only.
    The renderer ships `overflow: hidden` on html/body because the Electron

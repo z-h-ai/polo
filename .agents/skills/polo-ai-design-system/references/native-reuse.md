@@ -19,6 +19,7 @@
 - `entries/fixtures.tsx`：只替代 IPC/后端数据，不代表真实服务、支付或持久化。新增本地交互结果需明确内存 fixture 边界。
 - `entries/gallery.tsx`：复用生产注册的 component/wrapper/props/mockData，不复制生产组件库。
 - `interview-input` 场景只挂载真实 `RichTextInput`，本地受控文本用于 POO-169 输入与占位复验；不模拟发送结果、不提供新的助手设计方向。
+- `interview-scroll` 复用真实 `ChatDisplay`、Focus/Navigation providers 与固定长会话，发送只追加本地用户消息；`interview-status-*` 复用真实状态选择器、共享桌面菜单项与紧凑菜单。`?lang=en` 仅为原生场景切换真实 i18n 资源，默认仍为中文。
 - `entries/baseline.css`：真实 renderer index.css + 任务布局的 Tailwind 扫描。设置使用 renderer 体系；圈子组件自行装配 workbench 样式。新增任务文件要加入扫描，不能只把类名粘入无扫描的 JSX。
 
 ## 环境和现有导出（cwd：仓库根）
@@ -38,6 +39,13 @@ POO-169 的任务 smoke 引用由同一原生输出派生，不能手改副本�
 该 manifest 的 D-ASSISTANT-REUSE 仅继承当前生产组件/样式，不声称新布局或修复结果已获视觉确认。
 smoke plan/runtime 仅驱动本地真实组件可见性与布局检查，不进行目标像素 parity；
 完整 Electron 输入法、草稿、发送与真实后端仍由任务独立验收承担。
+
+POO-170/179 使用 `tools/export-conversation-references.py --evidence <任务忽略目录>`
+从真实 Chromium 运行采集长会话 latest/history、三类菜单中英文状态，各覆盖1280×800、1440×900、800×600；
+`--check` 会真实重放并逐字节核对生成物。导出在 `assets/prototypes/interview-conversation/`。
+引用HTML冻结实际DOM并提取复用CSS，只回放采集的滚动位置；移除的产品脚本仅属于不可交互的reference；
+runtime仍运行原生React组件，保留真实按键/菜单交互。此分离避免第三方动态import使严格native引用检查无法闭合，
+不修改框架、不把静态快照当产品runtime。快照只代表当前状态覆盖，不是bug前后对照或已接受的新设计。
 
 共享包构建生成忽略的 `packages/shared/dist` 浏览器 exports，缺失时 Vite 无法解析 `@polo-ai/shared/product-spaces`。
 `build.py` 先 tsc，再求值真实注册表，最后 Vite 打包；输出在 `assets/source-baseline/`。`--check` 到临时目录真实再生成并逐字节比较输入记录/输出，不能只重写 hash。

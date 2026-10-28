@@ -37,7 +37,7 @@ import './baseline.css'
 setupI18n([initReactI18next])
 // Same default the product entry resolves (main.tsx: stored ?? 'zh-Hans');
 // production i18n resources stay untouched.
-void i18n.changeLanguage('zh-Hans')
+void i18n.changeLanguage(new URLSearchParams(window.location.search).get('lang') === 'en' ? 'en' : 'zh-Hans')
 
 /** Read ?scene= from search or hash (either works, mirroring the prototype). */
 function requestScene(): string | null {

@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "kind": "frozen-native-conversation-reference",
+  "mode": "high_fidelity",
+  "revision": "poo170-poo179-native-reuse-r1",
+  "files": {
+    "prototype": "prototype.html",
+    "asset_1": "styles/088c433398e7b0688aa97b36bfb34a098e4ccdd47d82ee93b62309ac3c36f406.css",
+    "asset_2": "styles/55ec4263cfdd75f197f3a4efc916ea2a76e4bf3a5eb53de6ae063e2f354a4139.css",
+    "asset_3": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
+    "asset_4": "styles/9f34e06335d80cd7ba0401e2888ecd3657caf27fdabae380861dadf7662fb97a.css",
+    "asset_5": "styles/bc641d85825b4ee17e33c8829f5219087a5d922202a1c5870eae2a9d0178463c.css",
+    "asset_6": "styles/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.css",
+    "asset_7": "styles/f8f616f50b927b825b3314bfc82809909c6432ceff002ac4d6280b29f8312c28.css",
+    "asset_8": "views/scroll-history-compact-800x600.html",
+    "asset_9": "views/scroll-history-desktop-1280x800.html",
+    "asset_10": "views/scroll-history-desktop-1440x900.html",
+    "asset_11": "views/scroll-latest-compact-800x600.html",
+    "asset_12": "views/scroll-latest-desktop-1280x800.html",
+    "asset_13": "views/scroll-latest-desktop-1440x900.html",
+    "asset_14": "views/status-compact-en-compact-800x600.html",
+    "asset_15": "views/status-compact-en-desktop-1280x800.html",
+    "asset_16": "views/status-compact-en-desktop-1440x900.html",
+    "asset_17": "views/status-compact-zh-Hans-compact-800x600.html",
+    "asset_18": "views/status-compact-zh-Hans-desktop-1280x800.html",
+    "asset_19": "views/status-compact-zh-Hans-desktop-1440x900.html",
+    "asset_20": "views/status-desktop-en-compact-800x600.html",
+    "asset_21": "views/status-desktop-en-desktop-1280x800.html",
+    "asset_22": "views/status-desktop-en-desktop-1440x900.html",
+    "asset_23": "views/status-desktop-zh-Hans-compact-800x600.html",
+    "asset_24": "views/status-desktop-zh-Hans-desktop-1280x800.html",
+    "asset_25": "views/status-desktop-zh-Hans-desktop-1440x900.html",
+    "asset_26": "views/status-picker-en-compact-800x600.html",
+    "asset_27": "views/status-picker-en-desktop-1280x800.html",
+    "asset_28": "views/status-picker-en-desktop-1440x900.html",
+    "asset_29": "views/status-picker-zh-Hans-compact-800x600.html",
+    "asset_30": "views/status-picker-zh-Hans-desktop-1280x800.html",
+    "asset_31": "views/status-picker-zh-Hans-desktop-1440x900.html"
+  },
+  "target": {
+    "languages": [
+      "zh-Hans",
+      "en"
+    ],
+    "themes": [
+      "light"
+    ],
+    "viewports": [
+      {
+        "id": "desktop-1280x800",
+        "width": 1280,
+        "height": 800
+      },
+      {
+        "id": "desktop-1440x900",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "id": "compact-800x600",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "id": "scroll-latest",
+      "state": "latest",
+      "title": "scroll-latest",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "scroll-history",
+      "state": "history",
+      "title": "scroll-history",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "status-picker-zh-Hans",
+      "state": "status",
+      "title": "status-picker-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "status-picker-en",
+      "state": "status",
+      "title": "status-picker-en",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "status-desktop-zh-Hans",
+      "state": "status",
+      "title": "status-desktop-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "status-desktop-en",
+      "state": "status",
+      "title": "status-desktop-en",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "status-compact-zh-Hans",
+      "state": "status",
+      "title": "status-compact-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "status-compact-en",
+      "state": "status",
+      "title": "status-compact-en",
+      "source_entry": "prototype.html"
+    }
+  ],
+  "design": {
+    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "sha256": "201511460517afa3d682626e78ab34d142871b0698529e755458e465dd0412af",
+    "sources": [
+      {
+        "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
+        "sha256": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d"
+      }
+    ]
+  },
+  "confirmations": [
+    {
+      "id": "D-ASSISTANT-REUSE",
+      "status": "confirmed",
+      "source": ".agents/skills/polo-ai-design-system/references/policy-alignment.json#D-ASSISTANT-REUSE",
+      "scope": "Preserve current renderer components/styles only; no new layout or fix outcome is visually approved."
+    }
+  ],
+  "provenance": {
+    "generator": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
+    "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
+    "source_input_fingerprint": "92415ba715c02bda76b26c1e92c8b89e0a7a092bab6b234f3fd555e6e116bbea",
+    "source_export_sha256": "9096bb5840be880b2ed10e6d9770ec1c7f8dfbc098c5e47ebc6743555b20550d",
+    "method": "Actual Chromium render and native click/key replay; cloned DOM with product scripts removed only from reference. Reference-only script restores observed scroll offsets. Live React runtime remains unchanged.",
+    "fixed_reference_clock": "2026-10-28T12:00:00Z",
+    "scope": "Component smoke references; not Electron/backend acceptance and not bug before/after proof."
+  }
+}

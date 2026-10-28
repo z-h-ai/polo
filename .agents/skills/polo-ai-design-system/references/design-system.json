@@ -142,13 +142,13 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx",
-      "sha256": "ff38a5bc0d91f481f544e0ec97affbac962347de06217acb80560860050ff8f2",
+      "sha256": "6fddafbaf54a41bd229a38bb6c52d41a14c528487c9a3fb47cb0b4493440e065",
       "role": "implementation",
       "scope": "基线入口：Provider 栈+材质作用域+场景路由（?scene/#scene/pure），导出运行时场景 ID 清单供再生核对"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-      "sha256": "f9bfae4a12dd52a05b782d882b0129dc3a1c3a957cdc9e51113d6b92f6a6045d",
+      "sha256": "ee7bc70dddc9eac6a744b6b56f11010794aff9b19fd29237fb79006e87ba7d86",
       "role": "implementation",
       "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
@@ -172,7 +172,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css",
-      "sha256": "f4df6fb3755297daec4b1b9912990649794db22ed9e65afd200d6739b692b947",
+      "sha256": "bc7c838e4fe3ea3ec7b172534d2e5b856ccd0040cb6e103684fe46dc2990e6bc",
       "role": "implementation",
       "scope": "基线浏览壳样式：@import renderer index.css + 本目录入口/场景/画廊的 Tailwind @source 扫描声明 + 仅基线文档的滚动覆盖"
     },
@@ -184,7 +184,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-      "sha256": "54e5f42a2e610bfe438edb83d8aa03413f5b112ec06f974e846067a21f550cea",
+      "sha256": "5f445bfe930d12469fccd3ab8fa4c70c53bddd618bdea1f250cd3c90df169c10",
       "role": "implementation",
       "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
     },
@@ -217,6 +217,18 @@
       "sha256": "c30fbc8836954dbdd98c8fb89b91614a93f320575f541a96ebefb03f8744e861",
       "role": "implementation",
       "scope": "isolated native editor reference entry; current components and CSS only; no new target design"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx",
+      "sha256": "3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08",
+      "role": "implementation",
+      "scope": "implementation; real ChatDisplay and status-menu compositions with local data only"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
+      "sha256": "2a9b1d21b210a1124c2535120e3d60162fd2c485f2c273ca9d65c9ce128f860f",
+      "role": "implementation",
+      "scope": "implementation; reproducible native render to static smoke reference; runtime remains React"
     }
   ],
   "themes": [

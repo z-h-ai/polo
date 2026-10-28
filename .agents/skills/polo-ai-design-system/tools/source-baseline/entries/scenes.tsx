@@ -20,6 +20,7 @@ import { ActionRegistryProvider } from '@/actions/registry'
 import { chatComponents } from '@/playground/registry/chat'
 import { ComponentGallery } from './gallery'
 import { InterviewInputScene } from './interview-input'
+import { InterviewScrollScene, InterviewStatusPickerScene, InterviewStatusDesktopScene, InterviewStatusCompactScene } from './interview-conversation'
 import { productSpaceFixture } from './fixtures'
 
 /**
@@ -242,6 +243,14 @@ const chatScenes = [
 ].filter((s): s is BaselineScene => s !== null)
 
 export const baselineScenes: BaselineScene[] = [
+  { id: 'interview-scroll', region: '助手', title: 'ChatDisplay（长对话阅读）', fullBleed: true,
+    note: '真实对话显示组件及固定长会话；发送仅改变内存数据，不代表服务端或计费。', render: () => <InterviewScrollScene /> },
+  { id: 'interview-status-picker', region: '助手', title: 'SessionStatusMenu（状态选择与搜索）',
+    note: '真实状态选择器；包含系统默认状态与用户自定义英文名，选择仅改变本地状态。', render: () => <InterviewStatusPickerScene /> },
+  { id: 'interview-status-desktop', region: '助手', title: 'StatusMenuItems（桌面状态菜单）',
+    note: '真实共享状态菜单项与Radix菜单容器。', render: () => <InterviewStatusDesktopScene /> },
+  { id: 'interview-status-compact', region: '助手', title: 'CompactSessionMenu（紧凑状态菜单）',
+    note: '真实紧凑菜单；授权/分享/文件操作不连接后端。', render: () => <InterviewStatusCompactScene /> },
   {
     id: 'interview-input',
     region: '助手',
