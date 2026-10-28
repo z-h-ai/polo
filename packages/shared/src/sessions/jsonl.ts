@@ -49,6 +49,34 @@ export function expandSessionPath(jsonLine: string, sessionDir: string): string 
   return jsonLine.replaceAll(SESSION_PATH_TOKEN, normalizePath(sessionDir));
 }
 
+/**
+ * POO-161: older SessionManager versions shortened protocol paths using the
+ * process cwd. A Finder launch at / turned /Users/... into ./Users/..., stored
+ * as .{{SESSION_PATH}}/... . Recover only this exact, session-owned app marker
+ * on read; never guess paths in arbitrary payloads or rewrite the source file.
+ * Scope note: only the cwd=/ (Finder/Dock launch) corruption form is precisely
+ * verifiable and therefore recoverable here; sessions corrupted under other
+ * launch cwds (cwd=$HOME etc. produced ./Users/...-style paths without the
+ * .{sessionDir} prefix) cannot be attributed safely and stay unrecovered.
+ * The Electron guest gate remains responsible for authorizing the file load.
+ */
+function recoverLegacyGenUiAppPath(message: StoredMessage, sessionDir: string): StoredMessage {
+  if (message.type !== 'tool' || message.isError
+    || !['generate_app', 'mcp__session__generate_app'].includes(message.toolName ?? '')
+    || typeof message.toolResult !== 'string') return message;
+
+  const toolResult = message.toolResult.replace(
+    /\[genui-app id="([A-Za-z0-9][A-Za-z0-9_-]*)" version="([1-9]\d*)" path="([^"]+)"\]/g,
+    (marker, appId: string, version: string, indexPath: string) => {
+      const expected = `${normalizePath(sessionDir)}/data/genui-apps/${appId}/index.html`;
+      return indexPath === `.${expected}`
+        ? `[genui-app id="${appId}" version="${version}" path="${expected}"]`
+        : marker;
+    },
+  );
+  return toolResult === message.toolResult ? message : { ...message, toolResult };
+}
+
 function normalizePermissionMode(value: unknown): PermissionMode | undefined {
   if (typeof value !== 'string') return undefined;
   return parsePermissionMode(value) ?? undefined;
@@ -172,7 +200,8 @@ export function readSessionJsonl(sessionFile: string): StoredSession | null {
     // rather than losing the entire session's messages.
     // Expand session path tokens before parsing so embedded paths resolve correctly.
     const expandedMessageLines = lines.slice(1).map(line => expandSessionPath(line, sessionDir));
-    const messages = parseMessagesResilient(expandedMessageLines);
+    const messages = parseMessagesResilient(expandedMessageLines)
+      .map(message => recoverLegacyGenUiAppPath(message, sessionDir));
 
     // Migration: For sessions created before sdkCwd was added, use workingDirectory as fallback.
     // This is correct because the old code used workingDirectory for SDK's cwd parameter.
@@ -336,7 +365,8 @@ export function readSessionMessages(sessionFile: string): StoredMessage[] {
     // Skip first line (header), expand session path tokens, parse rest as messages resiliently
     const sessionDir = dirname(sessionFile);
     const expandedLines = lines.slice(1).map(line => expandSessionPath(line, sessionDir));
-    return parseMessagesResilient(expandedLines);
+    return parseMessagesResilient(expandedLines)
+      .map(message => recoverLegacyGenUiAppPath(message, sessionDir));
   } catch (error) {
     debug('[jsonl] Failed to read session messages:', sessionFile, error);
     return [];

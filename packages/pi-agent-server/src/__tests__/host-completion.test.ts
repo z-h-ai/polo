@@ -2,10 +2,10 @@ import { describe, expect, it, beforeAll, afterAll } from 'bun:test'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import http from 'node:http'
-import { checkDescriptor, codexStreamExtras, isLoopback, JSON_OBJECT_SYSTEM_CONSTRAINT, sanitizeEnvironment, SANITIZED_ENV_KEYS } from '../host-completion.ts'
-import { HOST_PARENT_MARKER, TEXT_LIMIT, validateHostRequest, type ValidatedHostRequest } from '../host-completion-protocol.ts'
+import { armDeadline, checkDescriptor, codexStreamExtras, isLoopback, JSON_OBJECT_SYSTEM_CONSTRAINT, sanitizeEnvironment, SANITIZED_ENV_KEYS, type HostDeadlineState } from '../host-completion.ts'
+import { HOST_PARENT_MARKER, TEXT_LIMIT, TIMEOUT_MS_WIRE_MAX, validateHostRequest, type ValidatedHostRequest } from '../host-completion-protocol.ts'
 import { createHostStreamTracker, type StreamVerdict } from '../host-completion-stream.ts'
-import { loadHostPiRuntime, resolveHostPiRoute, startHostPiStream, type HostPiImportStage, type HostPiImporters, type HostPiPhaseContext, type HostPiRuntime, type HostPiStreamInputs } from '../host-completion.ts'
+import { loadHostPiRuntime, resolveHostOutputBudget, resolveHostPiRoute, startHostPiStream, type HostPiImportStage, type HostPiImporters, type HostPiPhaseContext, type HostPiRuntime, type HostPiStreamInputs } from '../host-completion.ts'
 import type { InstalledTransportObservation } from '../host-completion-policy.ts'
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime'
 
@@ -173,6 +173,90 @@ describe('host worker credential descriptor matrix', () => {
     expect(isLoopback('http://localhost:1/')).toBe(true)
     expect(isLoopback('http://[::1]:1/')).toBe(true)
     expect(isLoopback('http://localhost.attacker/')).toBe(false)
+  })
+})
+
+describe('resolveHostOutputBudget', () => {
+  const budgetRuntime = (models: Array<Record<string, any>>): HostPiRuntime => ({
+    bindings: {
+      module: {
+        getModels: (_provider: string) => models,
+        setBedrockProviderModule: () => {},
+        getGitHubCopilotBaseUrl: () => { throw new Error('unused') },
+        streamSimple: (() => { throw new Error('unused') }) as never,
+      },
+      bedrockProviderModule: null,
+      getGitHubCopilotBaseUrl: () => '',
+      setBedrockProviderModule: () => {},
+      streamSimple: (() => { throw new Error('unused') }) as never,
+    },
+    events: [],
+    registrationCount: 0,
+    streamCount: 0,
+  })
+  const budgetRequest = (overrides: Record<string, unknown>): Parameters<typeof resolveHostOutputBudget>[0] => {
+    const validated = mustValidate(request(overrides))
+    return validated as never
+  }
+
+  it('an explicit caller budget always wins, regardless of the catalog limit', () => {
+    const runtime = budgetRuntime([{ id: 'good-model', maxTokens: 64_000 }])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: 4096 }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(4096)
+  })
+
+  it('an omitted budget takes the selected model own catalog limit (per-model cap)', () => {
+    const runtime = budgetRuntime([{ id: 'good-model', maxTokens: 64_000 }])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(64_000)
+  })
+
+  it('an omitted budget falls back to the protocol hard cap when the catalog entry lacks a usable maxTokens', () => {
+    const runtime = budgetRuntime([{ id: 'good-model' }, { id: 'bad-model', maxTokens: 0 }])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/good-model' }, runtime)).toBe(131_072)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'catalog', provider: 'anthropic', model: 'pi/bad-model' }, runtime)).toBe(131_072)
+  })
+
+  it('a custom endpoint without catalog metadata takes the supplemental table then the protocol hard cap', () => {
+    const runtime = budgetRuntime([])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'pi/my-model' }, runtime)).toBe(131_072)
+  })
+
+  it('a custom glm-5.3-flash request resolves through the supplemental table (exact id and suffixed variant)', () => {
+    const runtime = budgetRuntime([])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'pi/glm-5.3-flash' }, runtime)).toBe(131_072)
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: undefined }), routeKind: 'custom', provider: 'anthropic', model: 'glm-5.3-flash-0203' }, runtime)).toBe(131_072)
+  })
+
+  it('an explicit caller budget still wins over the supplemental table', () => {
+    const runtime = budgetRuntime([])
+    expect(resolveHostOutputBudget({ ...budgetRequest({ maxOutputTokens: 4096 }), routeKind: 'custom', provider: 'anthropic', model: 'pi/glm-5.3-flash' }, runtime)).toBe(4096)
+  })
+})
+
+describe('worker deadline arming gate', () => {
+  const arm = (requestLine: string): HostDeadlineState => {
+    const state: HostDeadlineState = { deadlineAt: Number.MAX_SAFE_INTEGER, timer: null }
+    armDeadline(state, () => {}, requestLine, 1_000)
+    if (state.timer) { clearTimeout(state.timer); state.timer = null }
+    return state
+  }
+  const timeoutLine = (timeoutMs: unknown): string => JSON.stringify({ timeoutMs })
+
+  it('arms the wire-maximum explicit timeoutMs (3_600_000) with a finite deadlineAt', () => {
+    const state = arm(timeoutLine(TIMEOUT_MS_WIRE_MAX))
+    expect(state.deadlineAt).toBe(1_000 + TIMEOUT_MS_WIRE_MAX)
+    expect(Number.isFinite(state.deadlineAt)).toBe(true)
+  })
+
+  it('arms just above the legacy 600_000 gate (600_001) — the old cap no longer truncates', () => {
+    expect(arm(timeoutLine(600_001)).deadlineAt).toBe(1_000 + 600_001)
+  })
+
+  it('leaves the deadline unarmed beyond the wire maximum, below the minimum, or on malformed JSON', () => {
+    for (const line of [timeoutLine(TIMEOUT_MS_WIRE_MAX + 1), timeoutLine(99), '{not-json']) {
+      const state = arm(line)
+      expect(state.deadlineAt).toBe(Number.MAX_SAFE_INTEGER)
+      expect(state.timer).toBeNull()
+    }
   })
 })
 
@@ -491,6 +575,19 @@ describe('host worker single-request JSONL fixtures', () => {
       expect(result).toMatchObject({ requestId: 'req-1', model: 'test-model', status: 'timed_out' })
       expect(result.error).toMatchObject({ code: 'timed_out', reason: 'deadline_exceeded', message: 'Host LLM request timed out' })
       expect(result.text).toBeUndefined()
+    } finally {
+      mock.close()
+    }
+  }, 60000)
+
+  it('completes normally with an explicit timeoutMs just above the legacy 600s gate (601_000 arms)', async () => {
+    const mock = await startMockSse({ chunks: textChunks('test-model', 'Hello', { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 }) })
+    try {
+      const outcome = await runWorker(request({ route: { kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: mock.url }, model: 'test-model', credential: { type: 'none' }, timeoutMs: 601_000 }))
+      expect(outcome.code).toBe(0)
+      const result = parseSingleResult(outcome.stdout)
+      expect(result).toMatchObject({ requestId: 'req-1', model: 'test-model', status: 'completed', text: 'Hello', usage: { inputTokens: 5, outputTokens: 4 } })
+      expect(outcome.stderr).not.toContain('TimeoutOverflowWarning')
     } finally {
       mock.close()
     }

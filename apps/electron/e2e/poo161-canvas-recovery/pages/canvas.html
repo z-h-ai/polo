@@ -1,0 +1,19 @@
+<!--
+ * POO-161 canvas-recovery harness page. ?mode=all|popout&phase=create|recover
+ * mounts the production canvas entries against a bundle produced by the REAL
+ * SessionManager/handleGenerateApp pipeline in main.ts. ?bundle= takes
+ * JSON-encoded { main: CardPayload, legacy?: CardPayload }.
+ * Renderer-level webview event listeners complement the production
+ * useGenUiGuestWebview hook and report to window.__poo161 for main to assert.
+-->
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="UTF-8" />
+    <title>POO-161 canvas recovery harness</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./canvas.tsx"></script>
+  </body>
+</html>

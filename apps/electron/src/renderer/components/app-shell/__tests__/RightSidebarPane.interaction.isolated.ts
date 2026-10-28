@@ -21,6 +21,8 @@ if (typeof window === 'undefined') {
   })
 }
 
+HTMLElement.prototype.scrollIntoView ??= () => {}
+
 // EmbeddedBrowserContainer observes its rect; happy-dom rects are 0-sized and
 // ResizeObserver may be absent — a stub keeps the effect inert but exercised.
 if (typeof (globalThis as any).ResizeObserver === 'undefined') {
@@ -157,7 +159,7 @@ Object.defineProperty(window, 'electronAPI', {
   },
 })
 
-const { render, cleanup, fireEvent, waitFor } = await import('@testing-library/react')
+const { render, cleanup, fireEvent, waitFor, screen } = await import('@testing-library/react')
 const { createElement } = await import('react')
 const { RightSidebarPane } = await import('../RightSidebarPane')
 const {
@@ -368,9 +370,10 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     ])
     const { getByTestId } = mountPane({ currentSessionId: 'sess-a' })
 
-    const select = getByTestId('sidebar-browser-instance-select') as HTMLSelectElement
-    expect(select.value).toBe('inst-1')
-    fireEvent.change(select, { target: { value: 'inst-2' } })
+    const select = getByTestId('sidebar-browser-instance-select')
+    expect(select.getAttribute('data-value')).toBe('inst-1')
+    fireEvent.keyDown(select, { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('option', { name: /inst-2/ }))
     expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
   })
 
@@ -442,8 +445,9 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     })
     const { getByTestId } = mountPane({ currentSessionId: 'sess-a' })
 
-    const select = getByTestId('sidebar-browser-instance-select') as HTMLSelectElement
-    fireEvent.change(select, { target: { value: 'inst-2' } })
+    const select = getByTestId('sidebar-browser-instance-select')
+    fireEvent.keyDown(select, { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('option', { name: /inst-2/ }))
 
     expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
     expect(contextStore.get(activeElementPickingAtom)).toBeNull()

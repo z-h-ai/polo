@@ -13,6 +13,7 @@ import { Provider as JotaiProvider } from 'jotai'
 import { setupI18n } from '@polo-ai/shared/i18n'
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
+import { ActionRegistryProvider } from '@/actions'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { EscapeInterruptProvider } from '@/context/EscapeInterruptContext'
 import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
@@ -157,6 +158,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <JotaiProvider>
       <TooltipProvider>
         <ThemeProvider>
+          <ActionRegistryProvider>
           <EscapeInterruptProvider>
             {/* App.tsx mounts this above ModalProvider; TopBar/AppMenu need it. */}
             <DismissibleLayerProvider>
@@ -180,6 +182,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             </BaselineMaterialScope>
             </DismissibleLayerProvider>
           </EscapeInterruptProvider>
+          </ActionRegistryProvider>
         </ThemeProvider>
       </TooltipProvider>
     </JotaiProvider>

@@ -51,10 +51,20 @@ export interface QueryRecord {
 }
 
 export const PER_CAPABILITY_QUERY_SLOTS = 16
-export const PER_CAPABILITY_TEXT_BUDGET_BYTES = 8 * 1024 * 1024
 export const GLOBAL_QUERY_SLOTS = 256
-export const GLOBAL_TEXT_BUDGET_BYTES = 128 * 1024 * 1024
-export const QUERY_TEXT_RESERVATION_BYTES = 512 * 1024
+/**
+ * Per-query admission reservation for retained result text. Sync obligation: this MUST stay
+ * >= TEXT_LIMIT in packages/pi-agent-server/src/host-completion-protocol.ts (the worker wire
+ * cap on a completed result's text) so admission always reserves at least the bytes the worker
+ * may retain — the invariant "reservation >= final retained bytes". The two packages must not
+ * depend on each other, so the contract is pinned by
+ * __tests__/app-api-run-state.reservation.test.ts importing both constants.
+ */
+export const QUERY_TEXT_RESERVATION_BYTES = 2 * 1024 * 1024
+/** Admission byte budgets stay exactly slots x reservation so the slot caps (16 / 256) — not
+ *  the byte budgets — remain the binding concurrency limit, as designed. */
+export const PER_CAPABILITY_TEXT_BUDGET_BYTES = PER_CAPABILITY_QUERY_SLOTS * QUERY_TEXT_RESERVATION_BYTES
+export const GLOBAL_TEXT_BUDGET_BYTES = GLOBAL_QUERY_SLOTS * QUERY_TEXT_RESERVATION_BYTES
 
 /**
  * Deterministic coordinator-wide cap on retained runId ownership
@@ -85,7 +95,7 @@ const queryKey = (
 /**
  * Capability-local Run/request state machine with an atomic admission budget.
  * Run keys are `(capabilityGeneration, runId)` — never a bare runId. Every
- * admitted query atomically reserves one slot and the 512 KiB text budget;
+ * admitted query atomically reserves one slot and the query text reservation;
  * slots stay reserved across replayable states so a provider can never be
  * re-run past a bounded cache. Only whole-run and whole-capability release
  * lanes exist: a terminal Run clears exactly its own slots/bytes.
@@ -209,7 +219,7 @@ export class AppApiRunState {
    * Stores the unique Host terminal outcome. Trusted provider-final usage
    * (on success, no_output, or a terminal failure), or the owner-accepted
    * no_output sentinel, requires a receipt. Canonical pending receipts preserve
-   * output and financial responsibility; the 512 KiB reservation shrinks to the
+   * output and financial responsibility; the query text reservation shrinks to the
    * retained bytes (0 for error/no_output).
    */
   noteHostTerminal(

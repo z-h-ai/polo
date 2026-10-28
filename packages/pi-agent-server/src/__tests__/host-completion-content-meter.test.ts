@@ -39,7 +39,12 @@ function meterHarness(): MeterHarness {
     },
   }
 }
-describe('content meter: dedup and the 512KiB gate', () => {
+// Fixture payload sizes derive from the live TEXT_LIMIT so the gate semantics stay pinned no
+// matter the constant's value: one ~60% slot stays under the gate, two or more distinct slots
+// jointly exceed it (the old baked-in 300KiB pairs played exactly this role under 512KiB).
+const SLOT_OVER_GATE = Math.floor((TEXT_LIMIT * 3) / 5)
+const SLOT_AT_LIMIT_HALF = Math.floor(TEXT_LIMIT / 2)
+describe('content meter: dedup and the TEXT_LIMIT gate', () => {
   it('counts delta and end of the same logical string exactly once, even at 400KiB each', () => {
     const h = meterHarness()
     const body = 'a'.repeat(400_000)
@@ -49,7 +54,7 @@ describe('content meter: dedup and the 512KiB gate', () => {
     expect(h.probe().over).toBe(false)
     expect(h.finish()?.text).toBe(body)
   })
-  it('passes exactly 512KiB and latches the gate on the first byte over', () => {
+  it('passes exactly TEXT_LIMIT and latches the gate on the first byte over', () => {
     const exact = meterHarness()
     const body = 'a'.repeat(TEXT_LIMIT)
     exact.meter.onEvent(exact.delta(0, body))
@@ -62,31 +67,32 @@ describe('content meter: dedup and the 512KiB gate', () => {
     expect(over.finish()).toBeNull()
   })
   it('counts UTF-8 bytes, not JS characters, across multi-byte chunks', () => {
+    const threeByteCharsToLimit = Math.floor(TEXT_LIMIT / 3)
     const over = meterHarness()
-    over.meter.onEvent(over.delta(0, '字'.repeat(174_763)))
+    over.meter.onEvent(over.delta(0, '字'.repeat(threeByteCharsToLimit + 1)))
     expect(over.probe()).toMatchObject({ over: true })
     const under = meterHarness()
-    const body = '字'.repeat(174_762) + 'a'
+    const body = '字'.repeat(threeByteCharsToLimit) + 'a'
     under.meter.onEvent(under.delta(0, body))
     under.meter.onEvent(under.done('stop', finalMessage(body)))
     expect(under.finish()?.text).toBe(body)
   })
   it('keeps a surrogate pair split across deltas intact and flushes the unpaired tail as a replacement', () => {
     const atLimit = meterHarness()
-    const full = 'a'.repeat(524_284) + '\uD83D\uDE00'
-    atLimit.meter.onEvent(atLimit.delta(0, 'a'.repeat(524_284) + '\uD83D'))
+    const full = 'a'.repeat(TEXT_LIMIT - 4) + '\uD83D\uDE00'
+    atLimit.meter.onEvent(atLimit.delta(0, 'a'.repeat(TEXT_LIMIT - 4) + '\uD83D'))
     expect(atLimit.probe()).toMatchObject({ over: false })
     atLimit.meter.onEvent(atLimit.delta(0, '\uDE00'))
     expect(atLimit.probe()).toMatchObject({ over: false })
     atLimit.meter.onEvent(atLimit.done('stop', finalMessage(full)))
     expect(atLimit.finish()?.text).toBe(full)
     const over = meterHarness()
-    over.meter.onEvent(over.delta(0, 'a'.repeat(524_285) + '\uD83D'))
+    over.meter.onEvent(over.delta(0, 'a'.repeat(TEXT_LIMIT - 3) + '\uD83D'))
     expect(over.probe()).toMatchObject({ over: false })
     over.meter.onEvent(over.delta(0, '\uDE00'))
     expect(over.probe()).toMatchObject({ over: true })
     const orphan = meterHarness()
-    const held = 'y'.repeat(524_286) + '\uD83D'
+    const held = 'y'.repeat(TEXT_LIMIT - 2) + '\uD83D'
     orphan.meter.onEvent(orphan.thinkDelta(0, held))
     orphan.meter.onEvent(orphan.delta(1, 'ab'))
     expect(orphan.probe()).toMatchObject({ over: false })
@@ -112,15 +118,15 @@ describe('content meter: dedup and the 512KiB gate', () => {
   })
   it('adds text and thinking slots jointly across content kinds', () => {
     const over = meterHarness()
-    over.meter.onEvent(over.thinkDelta(0, 'a'.repeat(300_000)))
-    over.meter.onEvent(over.delta(1, 'b'.repeat(300_000)))
+    over.meter.onEvent(over.thinkDelta(0, 'a'.repeat(SLOT_OVER_GATE)))
+    over.meter.onEvent(over.delta(1, 'b'.repeat(SLOT_OVER_GATE)))
     expect(over.probe()).toMatchObject({ over: true })
     const atLimit = meterHarness()
-    atLimit.meter.onEvent(atLimit.thinkDelta(0, 'a'.repeat(262_144)))
-    atLimit.meter.onEvent(atLimit.delta(1, 'b'.repeat(262_144)))
-    const joined = assistantMessage([{ type: 'thinking', thinking: 'a'.repeat(262_144) }, { type: 'text', text: 'b'.repeat(262_144) }], { usage: GOOD_USAGE, model: 'm' })
+    atLimit.meter.onEvent(atLimit.thinkDelta(0, 'a'.repeat(SLOT_AT_LIMIT_HALF)))
+    atLimit.meter.onEvent(atLimit.delta(1, 'b'.repeat(SLOT_AT_LIMIT_HALF)))
+    const joined = assistantMessage([{ type: 'thinking', thinking: 'a'.repeat(SLOT_AT_LIMIT_HALF) }, { type: 'text', text: 'b'.repeat(SLOT_AT_LIMIT_HALF) }], { usage: GOOD_USAGE, model: 'm' })
     atLimit.meter.onEvent(atLimit.done('stop', joined))
-    expect(atLimit.finish()?.text).toBe('b'.repeat(262_144))
+    expect(atLimit.finish()?.text).toBe('b'.repeat(SLOT_AT_LIMIT_HALF))
   })
   it('counts final-only text and thinking signatures carried by the done message', () => {
     const h = meterHarness()
@@ -169,7 +175,7 @@ describe('content meter: tool representations', () => {
   })
   it('charges the aggregate parsed tool tree across field paths before the tool rejection', () => {
     const h = meterHarness()
-    const args = { a: 'x'.repeat(300_000), b: { c: 'y'.repeat(300_000) } }
+    const args = { a: 'x'.repeat(SLOT_OVER_GATE), b: { c: 'y'.repeat(SLOT_OVER_GATE) } }
     const message = assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: args }], { usage: GOOD_USAGE, model: 'm' })
     h.meter.onEvent(h.done('toolUse', message))
     expect(h.probe()).toMatchObject({ over: true })
@@ -184,20 +190,21 @@ describe('content meter: typed structural identity', () => {
   it('meters array-index and object-property paths as distinct slots end to end', () => {
     // Each representation alone stays under the gate...
     const alone = meterHarness()
-    const payload = 'x'.repeat(300_000)
+    const payload = 'x'.repeat(SLOT_OVER_GATE)
     alone.meter.onEvent(alone.done('stop', assistantMessage([{ type: 'providerBlock', payload: [payload] }], { usage: GOOD_USAGE, model: 'm' })))
     expect(alone.probe()).toMatchObject({ over: false })
     // ...but the same identical payload under array-index 0 AND object property "0" must occupy
-    // two distinct slots: 2x300KiB latches result_too_large, while an alias would dedupe to 300KiB.
+    // two distinct slots: the doubled charge latches result_too_large, while an alias would
+    // dedupe back under the gate.
     const both = meterHarness()
-    const identical = 'x'.repeat(300_000)
+    const identical = 'x'.repeat(SLOT_OVER_GATE)
     const combined = assistantMessage([{ type: 'providerBlock', payload: [identical], extra: { '0': identical } }], { usage: GOOD_USAGE, model: 'm' })
     both.meter.onEvent(both.done('stop', combined))
     expect(both.probe()).toMatchObject({ over: true })
   })
   it('keeps adversarial property names, separators, and Unicode in distinct slots', () => {
     const h = meterHarness()
-    const payload = 'x'.repeat(200_000)
+    const payload = 'x'.repeat(SLOT_OVER_GATE)
     const message = assistantMessage([{ type: 'text', text: 'ok' }], { usage: GOOD_USAGE, model: 'm' })
     message.a = { b: payload }
     ;(message as Record<string, unknown>)['a.b'] = payload
@@ -215,7 +222,7 @@ describe('content meter: typed structural identity', () => {
   })
   it('keeps the same content index across different block kinds in distinct slots', () => {
     const h = meterHarness()
-    const payload = 'x'.repeat(300_000)
+    const payload = 'x'.repeat(SLOT_OVER_GATE)
     const message = assistantMessage([{ type: 'text', text: payload }, { type: 'thinking', thinking: payload }], { usage: GOOD_USAGE, model: 'm' })
     h.meter.onEvent(h.delta(0, payload.slice(0, 1000)))
     h.meter.onEvent(h.done('stop', message))
@@ -233,7 +240,7 @@ describe('content meter: hostile block kinds and bounded snapshots', () => {
     expect(h.finish()?.text).toBe('')
     // An oversized hostile-kind block still latches the gate through the unknown-block walker.
     const over = meterHarness()
-    const overBlocks = kinds.map((kind) => ({ type: kind, v: 'x'.repeat(120_000) }))
+    const overBlocks = kinds.map((kind) => ({ type: kind, v: 'x'.repeat(SLOT_OVER_GATE) }))
     over.meter.onEvent(over.done('stop', assistantMessage(overBlocks, { usage: GOOD_USAGE, model: 'm' })))
     expect(over.probe()).toMatchObject({ over: true })
   })
@@ -254,13 +261,13 @@ describe('content meter: hostile block kinds and bounded snapshots', () => {
   })
   it('adopts the conservative double representation on pair exhaustion and hits result_too_large first', () => {
     const equal = meterHarness()
-    const equalArgs = { big: 'x'.repeat(300_000), items: Array.from({ length: 8189 }, (_, i) => i) }
-    equal.meter.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: JSON.stringify({ big: 'x'.repeat(300_000), items: Array.from({ length: 8189 }, (_, i) => i) }), partial: assistantMessage([]) } as AssistantMessageEvent)
+    const equalArgs = { big: 'x'.repeat(SLOT_OVER_GATE), items: Array.from({ length: 8189 }, (_, i) => i) }
+    equal.meter.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: JSON.stringify({ big: 'x'.repeat(SLOT_OVER_GATE), items: Array.from({ length: 8189 }, (_, i) => i) }), partial: assistantMessage([]) } as AssistantMessageEvent)
     equal.meter.onEvent(equal.done('toolUse', assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: equalArgs }], { usage: GOOD_USAGE, model: 'm' })))
     expect(equal.probe()).toMatchObject({ over: false, inconsistent: false, tool: true })
     const exhausted = meterHarness()
-    const exhaustArgs = { big: 'x'.repeat(300_000), items: Array.from({ length: 8190 }, (_, i) => i) }
-    exhausted.meter.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: JSON.stringify({ big: 'x'.repeat(300_000), items: Array.from({ length: 8190 }, (_, i) => i) }), partial: assistantMessage([]) } as AssistantMessageEvent)
+    const exhaustArgs = { big: 'x'.repeat(SLOT_OVER_GATE), items: Array.from({ length: 8190 }, (_, i) => i) }
+    exhausted.meter.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: JSON.stringify({ big: 'x'.repeat(SLOT_OVER_GATE), items: Array.from({ length: 8190 }, (_, i) => i) }), partial: assistantMessage([]) } as AssistantMessageEvent)
     exhausted.meter.onEvent(exhausted.done('toolUse', assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: exhaustArgs }], { usage: GOOD_USAGE, model: 'm' })))
     expect(exhausted.probe()).toMatchObject({ over: true, inconsistent: true })
   })

@@ -154,7 +154,9 @@ export class AppSdkBridge {
     if (doc.calls.size) return failure('request_in_progress')
     if (doc.used.size >= 256) return failure('run_registry_full')
     const runId = randomUUID(), requestId = randomUUID(), callId = request.callId
-    const query = AppAiQuerySchema.safeParse({ maxOutputTokens: 4096, timeoutMs: 60_000, ...request.input, runId, requestId })
+    // Omitted maxOutputTokens resolves to the selected model's own output limit (per-model cap).
+    // 600s default covers full-budget generation at measured ~31-57 tok/s.
+    const query = AppAiQuerySchema.safeParse({ timeoutMs: 600_000, ...request.input, runId, requestId })
     if (!query.success) return failure('invalid_request')
     const controller = new AbortController()
     const call = { controller, generation }

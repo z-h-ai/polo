@@ -1,6 +1,6 @@
 import { parseProviderObservation, type ProviderObservationV1 } from './generated/provider-observation.ts'
-import { stripPiPrefix, buildCustomEndpointModelDef } from './custom-endpoint-models.ts'
-import { canonicalTransportHref, failureResult, serializeHostResult, validateHostRequest, writeHostResultLine, type HostCompletionResultV1, type HostFailureKind, type HostWorkerCredential, type ValidatedHostRequest } from './host-completion-protocol.ts'
+import { stripPiPrefix, buildCustomEndpointModelDef, supplementalOutputLimit } from './custom-endpoint-models.ts'
+import { canonicalTransportHref, failureResult, serializeHostResult, TIMEOUT_MS_WIRE_MAX, validateHostRequest, writeHostResultLine, type HostCompletionResultV1, type HostFailureKind, type HostWorkerCredential, type ValidatedHostRequest } from './host-completion-protocol.ts'
 import { classifyTransportFailure, type InstalledTransportObservation } from './host-completion-policy.ts'
 
 
@@ -185,6 +185,27 @@ export async function loadHostPiRuntime(importers: HostPiImporters, context: Hos
   }
   return { ok: true, runtime }
 }
+/** Budget when no model-specific limit is discoverable — the protocol hard cap, matching
+ *  ZCode's builtin-catalog stance of giving unknown models a full-size default (its `.*`
+ *  fallback moved 32K → 128K for the same reason). */
+const UNKNOWN_MODEL_OUTPUT_BUDGET = 131_072
+/** Resolves the output budget ONCE, shared by the usage tracker and the provider stream:
+ *  an explicit caller value wins; omission takes the selected model's own catalog limit
+ *  (per-model cap, e.g. pi-ai Model.maxTokens) so new models inherit their real ceiling
+ *  instead of a hardcoded global one. Custom endpoints have no catalog metadata, so they
+ *  consult the polo supplemental table (vendor ceilings like glm-5.3 at 128K) before the
+ *  hard cap (the synthetic def's 8192 is session-side metadata, not a provider limit). */
+export function resolveHostOutputBudget(request: Pick<ValidatedHostRequest, 'maxOutputTokens' | 'routeKind' | 'provider' | 'model'>, runtime: HostPiRuntime): number {
+  if (request.maxOutputTokens !== undefined) return request.maxOutputTokens
+  if (request.routeKind !== 'catalog') return supplementalOutputLimit(request.model) ?? UNKNOWN_MODEL_OUTPUT_BUDGET
+  const hit = runtime.bindings.module.getModels(request.provider).find((entry) => entry.id === stripPiPrefix(request.model))
+  const max = (hit as Record<string, unknown> | undefined)?.['maxTokens']
+  // A sealed-catalog maxTokens is trusted provider metadata (pi-ai's catalog is sealed and
+  // Model.maxTokens is required): it is validated as an integer >= 1 but deliberately NOT
+  // clamped to the wire hard cap — the same "the model's own ceiling wins" declaration as an
+  // explicit maxOutputTokens, so new catalog entries keep their real per-model limit.
+  return typeof max === 'number' && Number.isInteger(max) && max >= 1 ? max : UNKNOWN_MODEL_OUTPUT_BUDGET
+}
 // Phase 3 (synchronous): exact catalog hit or custom construction → Copilot/ordinary href
 // comparison → setBedrockProviderModule exactly once → streamSimple exactly once, with stop
 // probes before model, register and stream (R14 §3.2). Failures before registration leave zero
@@ -230,6 +251,26 @@ export function startHostPiStream(runtime: HostPiRuntime, context: HostPiPhaseCo
   })
   return { ok: true, stream, expectedModel: model.id }
 }
+/** Deadline-arming state shared between the exported armDeadline and runHostCompletion's
+ *  settle path (timer cleared on settle, deadlineAt read for the stream timeout and finish). */
+export interface HostDeadlineState { deadlineAt: number; timer: NodeJS.Timeout | null }
+/** Arms the worker deadline from the request line's timeoutMs. The gate's upper bound is the
+ *  SAME TIMEOUT_MS_WIRE_MAX the wire schema accepts: every in-range explicit timeoutMs must
+ *  arm. A non-armed deadline leaves deadlineAt at MAX_SAFE_INTEGER, so the stream's
+ *  timeoutRemainingMs fallback (~9e15) reaches the provider SDK's setTimeout — Node/Bun clamp
+ *  delays above 2^31-1 to 1ms and the request aborts instantly (POL-280 P1; the gate stayed at
+ *  the baseline 600_000 when the wire max moved to 3_600_000 in 9cf0a26a). */
+export function armDeadline(state: HostDeadlineState, onDeadline: () => void, line: string, firstByteAt: number): void {
+  try {
+    const timeout = (JSON.parse(line) as { timeoutMs?: unknown }).timeoutMs
+    if (typeof timeout === 'number' && Number.isInteger(timeout) && timeout >= 100 && timeout <= TIMEOUT_MS_WIRE_MAX) {
+      state.deadlineAt = firstByteAt + timeout
+      state.timer = setTimeout(onDeadline, Math.max(0, state.deadlineAt - Date.now()))
+    }
+  } catch {
+    // framing gate owns the post-EOF failure
+  }
+}
 async function readRequestThroughEof(armDeadline: (line: string, firstByteAt: number) => void): Promise<{ ok: true; line: string; firstByteAt: number } | { ok: false; oversize: boolean }> {
   const decoder = new TextDecoder('utf-8', { fatal: true })
   let buffer = '', bytes = 0, firstByteAt = 0, announced = false
@@ -247,33 +288,24 @@ async function readRequestThroughEof(armDeadline: (line: string, firstByteAt: nu
 }
 export async function runHostCompletion(argvInvalid = false): Promise<void> {
   const providerResponse = createProviderResponseObserver()
-  let settled = false, activeRequestId = 'invalid', activeModel = 'invalid', timer: NodeJS.Timeout | null = null, installed: InstalledTransportObservation | null = null, deadlineAt = Number.MAX_SAFE_INTEGER
+  const deadlineState: HostDeadlineState = { deadlineAt: Number.MAX_SAFE_INTEGER, timer: null }
+  let settled = false, activeRequestId = 'invalid', activeModel = 'invalid', installed: InstalledTransportObservation | null = null
   const controller = new AbortController()
   let settlePromise = Promise.resolve(true)
   const settle = (result: HostCompletionResultV1): void => {
     if (settled) return
     settled = true
-    if (timer) clearTimeout(timer)
+    if (deadlineState.timer) clearTimeout(deadlineState.timer)
     controller.abort()
     process.stdin.destroy()
     settlePromise = writeHostResultLine(serializeHostResult({ ...result, providerObservation: providerResponse.snapshot() })).then((flushed) => { process.exitCode = flushed ? 0 : 1; return flushed })
   }
   const failWith = (kind: HostFailureKind): void => settle(failureResult(activeRequestId, activeModel, kind))
   const crash = (): void => failWith('provider_error_terminal'); process.on('uncaughtException', crash); process.on('unhandledRejection', crash)
-  const armDeadline = (line: string, firstByteAt: number): void => {
-    try {
-      const timeout = (JSON.parse(line) as { timeoutMs?: unknown }).timeoutMs
-      if (typeof timeout === 'number' && Number.isInteger(timeout) && timeout >= 100 && timeout <= 600_000) {
-        deadlineAt = firstByteAt + timeout
-        timer = setTimeout(() => failWith('deadline_exceeded'), Math.max(0, deadlineAt - Date.now()))
-      }
-    } catch {
-      // framing gate owns the post-EOF failure
-    }
-  }
+  const armRequestDeadline = (line: string, firstByteAt: number): void => armDeadline(deadlineState, () => failWith('deadline_exceeded'), line, firstByteAt)
   if (argvInvalid) return failWith('invalid_worker_message')
   try {
-    const read = await readRequestThroughEof(armDeadline)
+    const read = await readRequestThroughEof(armRequestDeadline)
     if (!read.ok) return failWith(read.oversize ? 'result_too_large' : 'invalid_worker_message')
     let parsed: unknown
     try { parsed = JSON.parse(read.line) } catch { return failWith('invalid_worker_message') }
@@ -317,11 +349,12 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     // The tracker's expected response model must equal the SENT clone id the seam constructs:
     // bare id, plus one stripped MiniMax- prefix for the minimax-cn catalog route.
     const expectedModel = request.provider === 'minimax-cn' ? stripPiPrefix(request.model).replace(/^MiniMax-/, '') : stripPiPrefix(request.model)
-    const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, route: { kind: request.routeKind, api: request.api }, claim: (kind) => failWith(kind) })
+    const outputBudget = resolveHostOutputBudget(request, runtime)
+    const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: outputBudget, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, route: { kind: request.routeKind, api: request.api }, claim: (kind) => failWith(kind) })
     const started = startHostPiStream(runtime, {
       ...phaseContext, onResponse: providerResponse.onResponse, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
-      maxOutputTokens: request.maxOutputTokens, apiKey, signal: controller.signal,
-      timeoutRemainingMs: Math.max(1, deadlineAt - Date.now()),
+      maxOutputTokens: outputBudget, apiKey, signal: controller.signal,
+      timeoutRemainingMs: Math.max(1, deadlineState.deadlineAt - Date.now()),
     })
     if (settled) return
     if (!started.ok) {
@@ -334,7 +367,7 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
       if (!settled) failWith(installed ? (classifyTransportFailure(installed.observation, { deadlineExpired: false, providerFailed: true }) ?? 'provider_error_terminal') : 'provider_error_terminal')
     }
     if (!settled) {
-      const verdict = tracker.finish(installed.observation, Date.now() >= deadlineAt)
+      const verdict = tracker.finish(installed.observation, Date.now() >= deadlineState.deadlineAt)
       if (verdict.kind === 'release') settle({ type: 'host_completion_result', version: 1, requestId: request.requestId, model: request.model, status: verdict.status, text: verdict.text, usage: verdict.usage })
       else settle(failureResult(request.requestId, request.model, verdict.failure, verdict.usage))
     }

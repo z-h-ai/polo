@@ -455,7 +455,7 @@
   "default_story": "UI-refinement",
   "design": {
     "revision": "native-materials-r5-lifecycle-candidate-20261023",
-    "sha256": "9fb138ef305dd4f74dc3e2086ad213cd921db73a4f41e6887eed88ee2c80eda2",
+    "sha256": "26a10c4bdfeccc10d0222ff5cc9d58cbd6f1ffce8fb508bca64f56a1b14ba32e",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {
@@ -476,7 +476,7 @@
       },
       {
         "path": "apps/electron/src/renderer/index.css",
-        "sha256": "b3dabc1562cf3a91e45f055935ff749183e87b75a0d9a8158a67948a1cf8eeeb"
+        "sha256": "018a4b1deebbda05b79da843b598cf5055a04c8623528fc4124f07b57a5c87f1"
       },
       {
         "path": "docs/mvp-complete-flow-hifi/sources/g4-product.css",
@@ -516,7 +516,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/references/component-usage.md",
-        "sha256": "571019ba393a2d1d1bb6f13cffed31704ac03697a7faa83a94c965b78986edbe"
+        "sha256": "1378d84b106cb79d373de46ec0edef8cc33bf276c74accdd9e4b087541170988"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/vite.config.mjs",
@@ -540,7 +540,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx",
-        "sha256": "6033e00e1aa89a0e267b84b2df2e8a73117827d0db4bea703e32e149ae81b855"
+        "sha256": "ff38a5bc0d91f481f544e0ec97affbac962347de06217acb80560860050ff8f2"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
@@ -548,7 +548,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx",
-        "sha256": "3973d12d5b6356c1c3f7c3adcd3aaf805f7351dde4a1e0dbb098b0e4d5c3e227"
+        "sha256": "3718396018601dae4af76f4fb9b9820dfc29628e748fd83f9d8c3c54208163fc"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scene-ids.ts",
@@ -556,7 +556,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/fixtures.tsx",
-        "sha256": "d5c4761835f8a6a48425169e27abf2a50c518feabd6ecfbb8070705a40c4ee07"
+        "sha256": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css",
@@ -45649,7 +45649,7 @@
       "path": ".agents/skills/polo-ai-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
       "revision": "native-materials-r5-lifecycle-candidate-20261023",
-      "sha256": "3b8045dfa458fef9388412df6be60c18cdea5d34eaa038fcb58fce68880d57cd"
+      "sha256": "c1c62b9edf0e504d57a73424fc3cfa1756c22fc0271c7e24e6eb0653718f1bbc"
     },
     {
       "id": "client-design-foundations",

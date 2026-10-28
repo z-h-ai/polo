@@ -1,3 +1,5 @@
+import { Checkbox } from '@polo-ai/ui/ui/checkbox'
+import { WorkbenchSelect } from '@/components/ui/workbench-controls'
 import { clientWorkbenchFocusClassName, useClientWorkbenchStyle, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName, clientWorkbenchPrimaryClassName, clientWorkbenchButtonClassName, clientWorkbenchDestructiveClassName } from '@/components/ui/client-workbench'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
@@ -515,30 +517,27 @@ export function HomePage() {
           </label>
           <label className="grid gap-[6px] text-[12px] text-muted-foreground">
             <span>{t('homeApps.allApps.sourceLabel')}</span>
-            <select
+            <WorkbenchSelect
               value={sourceFilter}
-              onChange={event => setSourceFilter(event.target.value)}
+              onValueChange={setSourceFilter}
+              aria-label={t('homeApps.allApps.sourceLabel')}
               data-testid="home-directory-source"
-              className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[3px]"
-            >
-              <option value="all">{t('poo70.h3.home.sourceAll')}</option>
-              {sourceOptions.map(option => (
-                <option key={option.key} value={option.key}>{option.label}</option>
-              ))}
-            </select>
+              options={[{ value: 'all', label: t('poo70.h3.home.sourceAll') }, ...sourceOptions.map(option => ({ value: option.key, label: option.label }))]}
+            />
           </label>
           <label className="grid gap-[6px] text-[12px] text-muted-foreground">
             <span>{t('poo70.h3.home.sortLabel')}</span>
-            <select
+            <WorkbenchSelect<HomeAppSortMode>
               value={sortMode}
-              onChange={event => setSortMode(event.target.value as HomeAppSortMode)}
+              onValueChange={setSortMode}
+              aria-label={t('poo70.h3.home.sortLabel')}
               data-testid="home-directory-sort"
-              className="min-h-[38px] rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[3px]"
-            >
-              <option value="recent">{t('poo70.h3.home.sortRecent')}</option>
-              <option value="frequent">{t('poo70.h3.home.sortFrequent')}</option>
-              <option value="name">{t('poo70.h3.home.sortName')}</option>
-            </select>
+              options={[
+                { value: 'recent', label: t('poo70.h3.home.sortRecent') },
+                { value: 'frequent', label: t('poo70.h3.home.sortFrequent') },
+                { value: 'name', label: t('poo70.h3.home.sortName') },
+              ]}
+            />
           </label>
         </div>
       )}
@@ -992,8 +991,7 @@ export function HomePage() {
           </DialogHeader>
           <div className="px-[20px] pb-[18px]">
           <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-foreground/10 p-3 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               className="mt-0.5"
               checked={preserveData}
               onChange={event => setPreserveData(event.target.checked)}
