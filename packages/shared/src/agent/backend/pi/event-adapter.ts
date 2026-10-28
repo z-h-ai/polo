@@ -780,19 +780,6 @@ export class PiEventAdapter extends BaseEventAdapter {
 
     if (typeof result === 'string') return result;
 
-    // The Pi SDK fires tool_execution_end with the BARE content-block array —
-    // the AgentToolResult wrapper ({ content, details }) is stripped before the
-    // event. JSON.stringify-ing that array (the old fallback) escapes the
-    // quotes of any embedded protocol marker — e.g. generate_app's
-    // [genui-app id="…" …] line — so downstream parsers never match it and the
-    // canvas entry points silently vanish. Extract text parts instead.
-    if (Array.isArray(result)) {
-      const texts = (result as Array<{ type: string; text?: string }>)
-        .filter((c) => c?.type === 'text' && c.text)
-        .map((c) => c.text!);
-      if (texts.length > 0) return texts.join('\n');
-    }
-
     // Pi tool results follow the AgentToolResult shape: { content: [...], details: ... }
     const typed = result as {
       content?: Array<{ type: string; text?: string }>;

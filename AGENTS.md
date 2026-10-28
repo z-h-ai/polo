@@ -22,6 +22,7 @@
 - CLI managed：`bun test apps/cli/src/managed-controlled.integration.test.ts apps/cli/src/managed-lifecycle.integration.test.ts packages/shared/src/credentials/__tests__/desktop-managed-proxy.test.ts`（真实 Broker/proxy/Admin client + HTTP fixtures；应为 0 fail，不能作为真实计费验收）。
 - 类型检查：`bun run typecheck:all`。
 - Lint：`bun run lint`。
+- 画布数据链路回归：`bun test packages/server-core/src/sessions/tool-payload-integrity.test.ts packages/server-core/src/sessions/genui-generation.integration.test.ts packages/shared/src/sessions/__tests__/jsonl-genui-path-recovery.test.ts apps/electron/src/renderer/components/app-shell/__tests__/genui-webview-lifecycle.test.ts`（应为 4 pass、0 fail；真实 Electron 渲染另行验证）。
 
 ## 来源与验证
 
@@ -30,6 +31,7 @@
   `.agents/skills/polo-ai-design-system/SKILL.md` 并核对适用范围与来源绑定。
 - 在最终 main 集成候选锁定验收之前、依赖设计素材的新任务锁定依据之前，调用项目设计系统 Skill 的维护入口（`references/usage-playbook.md`）。只读检查；过期才在候选修源再生。维护不自动提交、push、tag 或发版。
 - 按改动范围运行检查，分别报告代码检查、实际运行和产品验收结果。
+- 工具输入与结果属于协议数据，包含可执行 HTML、命令与文件地址；会话层不得为了显示而改写其中的路径或模型标识。路径缩短只用于展示副本，不进入持久化或事件载荷。存储便携化与有明确旧格式边界的读取迁移由会话存储层统一处理，不能靠前端猜路径或放宽主进程安全门恢复。
 
 ## 基础设施与域名（z-h-ai.com）
 

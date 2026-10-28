@@ -11,7 +11,7 @@ describe('tool payload integrity (POO-161)', () => {
     const cwd = process.cwd()
     try {
       const manager = new SessionManager()
-      const workspace = { id: 'test', name: 'test', rootPath: root, createdAt: 0 }
+      const workspace = { id: 'test', slug: 'test', name: 'test', rootPath: root, createdAt: 0 }
       const managed = createManagedSession({ id: '261027-quick-moor' }, workspace, { messagesLoaded: true })
       const events: any[] = []
       const harness = manager as unknown as {

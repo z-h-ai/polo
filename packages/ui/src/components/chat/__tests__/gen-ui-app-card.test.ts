@@ -69,27 +69,6 @@ describe('parseGenUiAppResult', () => {
     expect(parseGenUiAppResult('no marker here')).toBeNull()
     expect(parseGenUiAppResult('[genui-app id="a" version="x" path="/p"]')).toBeNull()
   })
-
-  it('unwraps a persisted JSON content-block array and finds the marker', () => {
-    // Sessions persisted while the Pi adapter serialized results as a raw
-    // content-block array keep the marker's quotes JSON-escaped — POO-161.
-    const persisted = JSON.stringify([{
-      type: 'text',
-      text: 'Generative UI app "Demo" created (v1).\n'
-        + '[genui-app id="app-abc" version="1" path="/sessions/s1/data/genui-apps/app-abc/index.html"]',
-    }])
-    expect(parseGenUiAppResult(persisted)).toEqual({
-      appId: 'app-abc',
-      version: 1,
-      indexPath: '/sessions/s1/data/genui-apps/app-abc/index.html',
-    })
-  })
-
-  it('returns null for JSON arrays without text blocks or unparseable JSON', () => {
-    expect(parseGenUiAppResult(JSON.stringify([{ type: 'image', data: 'x' }]))).toBeNull()
-    expect(parseGenUiAppResult('[not valid json')).toBeNull()
-    expect(parseGenUiAppResult(JSON.stringify({ content: [] }))).toBeNull()
-  })
 })
 
 describe('parseGenUiAppInput', () => {

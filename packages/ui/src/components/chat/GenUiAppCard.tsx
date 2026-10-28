@@ -52,23 +52,10 @@ export interface GenUiAppCall {
  * Parse the stable marker line the generate_app tool appends to its result:
  * `[genui-app id="<id>" version="<n>" path="<abs>"]`. Returns null for
  * anything that does not match — callers must tolerate partial tool output.
- *
- * Sessions persisted while the Pi event adapter serialized results as a raw
- * content-block array keep the marker inside a JSON string, where its quotes
- * are escaped (`id=\"app-…\"`) and the plain regex can never match. Unwrap
- * persisted `[{type:'text',text}]` blocks and retry so those sessions regain
- * their canvas entry points.
  */
 export function parseGenUiAppResult(resultText: string | null | undefined): GenUiAppCall | null {
   if (!resultText) return null
-  const direct = matchGenUiAppMarker(resultText)
-  if (direct) return direct
-  const unwrapped = unwrapContentBlockJson(resultText)
-  return unwrapped ? matchGenUiAppMarker(unwrapped) : null
-}
-
-function matchGenUiAppMarker(text: string): GenUiAppCall | null {
-  const match = text.match(/\[genui-app id="([^"]+)" version="(\d+)" path="([^"]+)"\]/)
+  const match = resultText.match(/\[genui-app id="([^"]+)" version="(\d+)" path="([^"]+)"\]/)
   if (!match) return null
   const appId = match[1]
   const versionRaw = match[2]
@@ -77,25 +64,6 @@ function matchGenUiAppMarker(text: string): GenUiAppCall | null {
   const version = Number.parseInt(versionRaw, 10)
   if (!Number.isFinite(version) || version < 1) return null
   return { appId, version, indexPath }
-}
-
-/** Join the text parts of a persisted JSON content-block array, or null. */
-function unwrapContentBlockJson(resultText: string): string | null {
-  const trimmed = resultText.trim()
-  if (!trimmed.startsWith('[')) return null
-  try {
-    const parsed = JSON.parse(trimmed) as unknown
-    if (!Array.isArray(parsed)) return null
-    const texts = parsed
-      .filter((c): c is { type: 'text'; text: string } =>
-        Boolean(c) && typeof c === 'object' &&
-        (c as { type?: unknown }).type === 'text' &&
-        typeof (c as { text?: unknown }).text === 'string')
-      .map((c) => c.text)
-    return texts.length > 0 ? texts.join('\n') : null
-  } catch {
-    return null
-  }
 }
 
 /** Tolerant parse of the tool input; silently rejects unusable payloads. */
@@ -496,8 +464,8 @@ export function useGenUiGuestWebview({ webviewRef, src, partition, registration,
       console.warn('[GenUiAppCard] blocked guest navigation:', detail)
     }
     const failLoad = (event: Event) => {
-      const detail = (event as CustomEvent<{ isMainFrame?: boolean }>).detail
-      if (detail && detail.isMainFrame === false) return
+      // Electron webview events expose properties directly, not in detail.
+      if ((event as Event & { isMainFrame?: boolean }).isMainFrame === false) return
       onLoadFailedRef.current()
     }
     webview.addEventListener('will-navigate', blockNavigation)
@@ -515,7 +483,7 @@ export function useGenUiGuestWebview({ webviewRef, src, partition, registration,
     const webview = webviewRef.current
     if (!webview || !registration) return
     let registeredGuestId: number | null = null
-    const handleDidAttach = () => {
+    const handleDomReady = () => {
       const guestId = (webview as GenUiWebviewElement).getWebContentsId?.()
       if (typeof guestId !== 'number' || guestId <= 0) return
       registeredGuestId = guestId
@@ -525,9 +493,11 @@ export function useGenUiGuestWebview({ webviewRef, src, partition, registration,
         guestWebContentsId: guestId,
       })
     }
-    webview.addEventListener('did-attach', handleDidAttach)
+    // getWebContentsId throws before dom-ready in Electron. did-attach only
+    // establishes Main's ownership; it does not make the element API usable.
+    webview.addEventListener('dom-ready', handleDomReady)
     return () => {
-      webview.removeEventListener('did-attach', handleDidAttach)
+      webview.removeEventListener('dom-ready', handleDomReady)
       if (registeredGuestId != null) {
         dispatchGenUiCardUnregister({
           sessionId: registration.sessionId,
