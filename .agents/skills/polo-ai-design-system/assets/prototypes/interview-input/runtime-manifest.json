@@ -1,0 +1,10 @@
+{
+  "services": {
+    "frontend": {
+      "url": "http://127.0.0.1:43169",
+      "cwd": ".agents/skills/polo-ai-design-system/tools/source-baseline",
+      "start": "../../../../../node_modules/.bin/vite --config vite.interview-input.config.mjs --host 127.0.0.1 --port 43169 --strictPort",
+      "health_check": "/entries/interview-input.html"
+    }
+  }
+}

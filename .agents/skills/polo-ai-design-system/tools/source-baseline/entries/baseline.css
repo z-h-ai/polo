@@ -9,6 +9,7 @@
    (renderer/index.css is source(none) + an explicit production scan list). */
 @source './scenes.tsx';
 @source './gallery.tsx';
+@source './interview-input.tsx';
 
 /* Browsing-shell override, scoped to this baseline document only.
    The renderer ships `overflow: hidden` on html/body because the Electron

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "native-renderer-preservation-reference",
+  "mode": "high_fidelity",
+  "revision": "poo169-native-input-reuse-r1",
+  "files": {
+    "prototype": "prototype.html"
+  },
+  "target": {
+    "languages": [
+      "zh-Hans"
+    ],
+    "themes": [
+      "light"
+    ],
+    "viewports": [
+      {
+        "id": "desktop-1280x800",
+        "width": 1280,
+        "height": 800
+      },
+      {
+        "id": "desktop-1440x900",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "id": "compact-800x600",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "id": "interview-input",
+      "title": "Production RichTextInput",
+      "state": "default",
+      "source_entry": "prototype.html"
+    }
+  ],
+  "design": {
+    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "sha256": "7f946ac9404324d68cbda14bce45a60b3c1630db49875a6dd57177f428cd6711",
+    "sources": [
+      {
+        "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
+        "sha256": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d"
+      }
+    ]
+  },
+  "confirmations": [
+    {
+      "id": "D-ASSISTANT-REUSE",
+      "status": "confirmed",
+      "source": ".agents/skills/polo-ai-design-system/references/policy-alignment.json#D-ASSISTANT-REUSE",
+      "quote": "助手：既有聊天、输入、附件及会话导航以当前 `apps/electron/src/renderer/` 为准",
+      "scope": "Preserve current renderer components and styles only. No new layout or bug-fix outcome is visually approved by this record. POO-169 smoke verifies the authorized functional correction separately."
+    }
+  ],
+  "provenance": {
+    "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
+    "source_input_fingerprint": "2b7988c2359b1089e991631d90f883bf97da96e6cce159bb2659b1f863305b3a",
+    "reference_html_sha256": "90e2998be14ec9b5b1fc2f41a7028ac5f35f9fcf481ba7e7bf09f27100c8bc94",
+    "source_entry": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-input-entry.tsx",
+    "generator": ".agents/skills/polo-ai-design-system/tools/export-interview-reference.py",
+    "role": "Existing production component reference, not a newly accepted target design"
+  }
+}
