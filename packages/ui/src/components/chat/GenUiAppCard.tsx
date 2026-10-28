@@ -52,10 +52,23 @@ export interface GenUiAppCall {
  * Parse the stable marker line the generate_app tool appends to its result:
  * `[genui-app id="<id>" version="<n>" path="<abs>"]`. Returns null for
  * anything that does not match — callers must tolerate partial tool output.
+ *
+ * Sessions persisted while the Pi event adapter serialized results as a raw
+ * content-block array keep the marker inside a JSON string, where its quotes
+ * are escaped (`id=\"app-…\"`) and the plain regex can never match. Unwrap
+ * persisted `[{type:'text',text}]` blocks and retry so those sessions regain
+ * their canvas entry points.
  */
 export function parseGenUiAppResult(resultText: string | null | undefined): GenUiAppCall | null {
   if (!resultText) return null
-  const match = resultText.match(/\[genui-app id="([^"]+)" version="(\d+)" path="([^"]+)"\]/)
+  const direct = matchGenUiAppMarker(resultText)
+  if (direct) return direct
+  const unwrapped = unwrapContentBlockJson(resultText)
+  return unwrapped ? matchGenUiAppMarker(unwrapped) : null
+}
+
+function matchGenUiAppMarker(text: string): GenUiAppCall | null {
+  const match = text.match(/\[genui-app id="([^"]+)" version="(\d+)" path="([^"]+)"\]/)
   if (!match) return null
   const appId = match[1]
   const versionRaw = match[2]
@@ -64,6 +77,25 @@ export function parseGenUiAppResult(resultText: string | null | undefined): GenU
   const version = Number.parseInt(versionRaw, 10)
   if (!Number.isFinite(version) || version < 1) return null
   return { appId, version, indexPath }
+}
+
+/** Join the text parts of a persisted JSON content-block array, or null. */
+function unwrapContentBlockJson(resultText: string): string | null {
+  const trimmed = resultText.trim()
+  if (!trimmed.startsWith('[')) return null
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!Array.isArray(parsed)) return null
+    const texts = parsed
+      .filter((c): c is { type: 'text'; text: string } =>
+        Boolean(c) && typeof c === 'object' &&
+        (c as { type?: unknown }).type === 'text' &&
+        typeof (c as { text?: unknown }).text === 'string')
+      .map((c) => c.text)
+    return texts.length > 0 ? texts.join('\n') : null
+  } catch {
+    return null
+  }
 }
 
 /** Tolerant parse of the tool input; silently rejects unusable payloads. */
