@@ -3,7 +3,7 @@ import type { AssistantMessage, AssistantMessageEvent } from '@mariozechner/pi-a
 import { TEXT_LIMIT } from './host-completion-protocol.ts'
 import { compareJsonData, createComparisonBudget, forEachOwnEnumerableDataProperty, isInertJsonDataArray, isInertJsonDataObject, readArrayElement, readArrayLength, readOwnDescriptor, readOwnEnumerableDataDescriptor } from './host-completion-json-data.ts'
 // Single responsibility: map Host/Pi message semantics onto an auditable body-metering result
-// (R12 §6.3). Owns typed slot identity, semantic/projection budgets, the 512KiB UTF-8 meter,
+// (R12 §6.3). Owns typed slot identity, semantic/projection budgets, the TEXT_LIMIT UTF-8 meter,
 // Unicode pending-surrogate handling, tool raw/tree group bookkeeping with max-or-double
 // representation strategy, the fail-fast content latch, and the immutable safe terminal snapshot
 // so `finish()` never re-reads provider-controlled objects. Does not own route/credential policy,
@@ -47,7 +47,7 @@ interface SemanticBudget { nodes: number; projectionWork: number; dead: boolean 
 // Unicode pending invariant: only a delta working string holds back a trailing unpaired high
 // surrogate (the next delta's low surrogate joins it into one 4-byte code point); absolute
 // snapshots and terminal reconciliation pass pending=false, settling it as a 3-byte replacement
-// before the 512KiB gate.
+// before the TEXT_LIMIT gate.
 function countedBytes(value: string, pending: boolean): number {
   const last = value.charCodeAt(value.length - 1)
   return pending && last >= 0xD800 && last <= 0xDBFF ? Buffer.byteLength(value.slice(0, -1), 'utf8') : Buffer.byteLength(value, 'utf8')

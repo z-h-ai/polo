@@ -48,6 +48,6 @@ export function validQuery(value: unknown): value is QueryInput {
   return typeof v.prompt === 'string' && !!v.prompt.trim() && bytes(v.prompt) <= 1_048_576
     && (v.systemPrompt === undefined || typeof v.systemPrompt === 'string' && bytes(v.systemPrompt) <= 524_288)
     && (v.responseFormat === undefined || v.responseFormat === 'text' || v.responseFormat === 'json_object')
-    && (v.maxOutputTokens === undefined || Number.isInteger(v.maxOutputTokens) && (v.maxOutputTokens as number) >= 1 && (v.maxOutputTokens as number) <= 8192)
-    && (v.timeoutMs === undefined || Number.isInteger(v.timeoutMs) && (v.timeoutMs as number) >= 1000 && (v.timeoutMs as number) <= 120_000)
+    && (v.maxOutputTokens === undefined || Number.isInteger(v.maxOutputTokens) && (v.maxOutputTokens as number) >= 1 && (v.maxOutputTokens as number) <= 131_072)
+    && (v.timeoutMs === undefined || Number.isInteger(v.timeoutMs) && (v.timeoutMs as number) >= 1000 && (v.timeoutMs as number) <= 3_600_000)
 }

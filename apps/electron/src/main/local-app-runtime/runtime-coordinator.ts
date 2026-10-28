@@ -55,7 +55,8 @@ export interface CoordinatorExecutor {
     prompt: string
     systemPrompt?: string
     responseFormat?: 'text' | 'json_object'
-    maxOutputTokens: number
+    /** Omitted = the selected model's own output limit (resolved host-side per model). */
+    maxOutputTokens?: number
     timeoutMs: number
     signal?: AbortSignal
   }): Promise<HostLlmPublicResult>
