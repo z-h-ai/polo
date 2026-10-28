@@ -12544,8 +12544,17 @@ export class SessionManager implements ISessionManager {
 
       case 'tool_start': {
         // Tool inputs are executable/protocol data, not display text. Preserve
-        // paths and embedded HTML/commands exactly; presentation belongs in UI.
-        const toolInput = event.input
+        // paths and embedded HTML/commands exactly.
+        // Accepted tradeoff (R1-P3-3): the former call_llm shortName→fullId
+        // rewrite used to live here; model aliases now display as-is in the
+        // TurnCard badge. Pi sessions are unaffected (PiEventAdapter always
+        // pins miniModel). Renderer-side resolution IS feasible — models.ts
+        // is a zero-import constant table — but requires a './config/models'
+        // exports subpath in shared and couples the UI bundle to the config
+        // layer; until that's wanted, the alias display stays unresolved.
+        // Shallow-copy: managed.messages[].toolInput must not alias the live
+        // event object, so later in-place edits cannot corrupt the source event.
+        const toolInput = event.input ? { ...event.input } : event.input
 
         // Resolve tool display metadata (icon, displayName) for skills/sources
         // Only resolve when we have input (second event for SDK dual-event pattern)

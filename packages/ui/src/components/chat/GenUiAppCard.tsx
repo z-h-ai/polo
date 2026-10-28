@@ -458,10 +458,11 @@ export function useGenUiGuestWebview({ webviewRef, src, partition, registration,
     const webview = webviewRef.current
     if (!webview) return
     const blockNavigation = (event: Event) => {
-      const detail = (event as CustomEvent<string>).detail
-      if (typeof detail === 'string' && detail.startsWith('poloai://')) return
+      // Electron webview events expose properties directly, not in detail.
+      const url = (event as Event & { url?: string }).url ?? ''
+      if (url.startsWith('poloai://')) return
       event.preventDefault()
-      console.warn('[GenUiAppCard] blocked guest navigation:', detail)
+      console.warn('[GenUiAppCard] blocked guest navigation:', url)
     }
     const failLoad = (event: Event) => {
       // Electron webview events expose properties directly, not in detail.

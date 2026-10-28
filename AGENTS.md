@@ -22,7 +22,7 @@
 - CLI managed：`bun test apps/cli/src/managed-controlled.integration.test.ts apps/cli/src/managed-lifecycle.integration.test.ts packages/shared/src/credentials/__tests__/desktop-managed-proxy.test.ts`（真实 Broker/proxy/Admin client + HTTP fixtures；应为 0 fail，不能作为真实计费验收）。
 - 类型检查：`bun run typecheck:all`。
 - Lint：`bun run lint`。
-- 画布数据链路回归：`bun test packages/server-core/src/sessions/tool-payload-integrity.test.ts packages/server-core/src/sessions/genui-generation.integration.test.ts packages/shared/src/sessions/__tests__/jsonl-genui-path-recovery.test.ts apps/electron/src/renderer/components/app-shell/__tests__/genui-webview-lifecycle.test.ts`（应为 4 pass、0 fail；真实 Electron 渲染另行验证）。
+- 画布数据链路回归：`bun test packages/server-core/src/sessions/tool-payload-integrity.test.ts packages/server-core/src/sessions/genui-generation.integration.test.ts packages/shared/src/sessions/__tests__/jsonl-genui-path-recovery.test.ts apps/electron/src/renderer/components/app-shell/__tests__/genui-webview-lifecycle.test.ts`（应为 4 pass、0 fail；真实 Electron 渲染验证：`bun apps/electron/e2e/poo161-canvas-recovery/run.mjs`，cwd=/ 下写端完整性/读端恢复/三入口渲染/重启恢复，ALL PASS 为通过线）。
 
 ## 来源与验证
 

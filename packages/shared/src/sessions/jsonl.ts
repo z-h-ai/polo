@@ -54,6 +54,10 @@ export function expandSessionPath(jsonLine: string, sessionDir: string): string 
  * process cwd. A Finder launch at / turned /Users/... into ./Users/..., stored
  * as .{{SESSION_PATH}}/... . Recover only this exact, session-owned app marker
  * on read; never guess paths in arbitrary payloads or rewrite the source file.
+ * Scope note: only the cwd=/ (Finder/Dock launch) corruption form is precisely
+ * verifiable and therefore recoverable here; sessions corrupted under other
+ * launch cwds (cwd=$HOME etc. produced ./Users/...-style paths without the
+ * .{sessionDir} prefix) cannot be attributed safely and stay unrecovered.
  * The Electron guest gate remains responsible for authorizing the file load.
  */
 function recoverLegacyGenUiAppPath(message: StoredMessage, sessionDir: string): StoredMessage {

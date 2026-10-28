@@ -9,7 +9,13 @@ import type { SessionToolContext } from '../../../session-tools-core/src/context
 import type { AgentEvent } from '@polo-ai/core/types'
 import type { SessionEvent } from '@polo-ai/shared/protocol'
 
-test('generate_app → Pi wrapper → live event → production persistence → session API preserves the bundle', async () => {
+// Coverage note: this test drives handleGenerateApp directly and hand-builds
+// the tool_execution_end event, so the real proxy wrapper layer
+// (buildProxyTools/routeToolCall AgentToolResult shaping) is NOT exercised
+// here — that layer was manually verified to always return
+// {content:[{type:'text',...}],details}. The persistence→reload segment below
+// IS the production path.
+test('generate_app → live event → production persistence → session API preserves the bundle', async () => {
   const root = mkdtempSync(join(tmpdir(), 'genui-generation-'))
   const cwd = process.cwd()
   const manager = new SessionManager()

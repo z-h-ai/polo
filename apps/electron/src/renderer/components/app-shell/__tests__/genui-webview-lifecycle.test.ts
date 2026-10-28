@@ -31,6 +31,14 @@ test('guest registers only when Electron APIs are ready and ignores subframe fai
     expect(failures).toBe(0)
     guest.dispatchEvent(Object.assign(new Event('did-fail-load'), { isMainFrame: true }))
     expect(failures).toBe(1)
+    // will-navigate reads event.url (Electron exposes properties directly, not in detail):
+    // poloai:// deep links pass through to Main's authoritative gate, everything else is blocked.
+    const poloaiDeepLink = Object.assign(new Event('will-navigate', { cancelable: true }), { url: 'poloai://ui-event?payload=x' })
+    guest.dispatchEvent(poloaiDeepLink)
+    expect(poloaiDeepLink.defaultPrevented).toBe(false)
+    const externalNavigation = Object.assign(new Event('will-navigate', { cancelable: true }), { url: 'https://evil.example/next' })
+    guest.dispatchEvent(externalNavigation)
+    expect(externalNavigation.defaultPrevented).toBe(true)
   } finally {
     await act(async () => root.unmount())
     container.remove()
