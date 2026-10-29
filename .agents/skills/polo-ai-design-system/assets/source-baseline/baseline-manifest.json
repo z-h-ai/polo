@@ -41,7 +41,7 @@
       "localization-functional-cases.json": "222b46309acdb2d68fbfb7593b53ba6ae6112a593a64d322076e9dcabeec66c6",
       "scene-ids-runner.cjs": "4af8277faaf90e266f9a5051f5379d8abde722fb0f9c187f598fd969de9f2975",
       "tsconfig.json": "fe55756c85d43c98d8776a79b18188dc89dbe873ebf6eb9b5e79ffc8b3f6e0e4",
-      "verify-interview-localization.py": "e8f6541cd7e53f497423e0395edf69eb53e97dae503d939494c8516cea49ae16",
+      "verify-interview-localization.py": "d05ec9f83983748d97a82007d61b658f78dbff1d12554b6d7d0df09e4dd05449",
       "vite.config.mjs": "8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4",
       "vite.interview-input.config.mjs": "c30fbc8836954dbdd98c8fb89b91614a93f320575f541a96ebefb03f8744e861",
       "vite.scene-ids.config.mjs": "eff52dc6b1854c66cddd6242ad42735092cece0c77a2b197b160caf5e6b03252"
@@ -50,7 +50,7 @@
     "typecheck_exit": 0,
     "vite_exit": 0
   },
-  "input_fingerprint": "78adb762afd41954687093fc6a70175399703372dc51fb28dedd018777c4aab4",
+  "input_fingerprint": "e58b3d38a491323ae9557af891597fa14e20df2e6c0e241b6373071fea4d8387",
   "inputs": {
     "lockfiles": {
       "bun.lock": "a5d2f45992a02c75fc365647cb6bf5a60125ec65caeadb250db2b21eff446398",
@@ -1554,12 +1554,8 @@
   ],
   "schema_version": 2,
   "snapshot": {
-    "head": "8987fd6f506fd3cd591952253e211e15dd3db8fb",
+    "head": "812f07e0b0d7d428886480ef6063b22858a1a2d2",
     "head_dirty": [
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-localization.tsx",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/localization-functional-cases.json",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/verify-interview-localization.py"
     ],
     "note": "Input state at the time the inputs LAST changed (git head plus uncommitted/untracked input paths of THIS build). Currency is proven by inputs hashes + regeneration, not by comparing this snapshot to the current git state."

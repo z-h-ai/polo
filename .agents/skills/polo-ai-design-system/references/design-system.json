@@ -230,7 +230,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-      "sha256": "e709f3ff70bca2cbc841bd9ed7fcfa7e269d5aa752464eb2fdb3aca791112846",
+      "sha256": "e17ce93590ef6c2e926e7b7ca506950124753dcea7a032a95444577e59b5bc08",
       "role": "implementation",
       "scope": "implementation; reproducible native render to static smoke reference; runtime remains React"
     },
@@ -242,7 +242,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/verify-interview-localization.py",
-      "sha256": "e8f6541cd7e53f497423e0395edf69eb53e97dae503d939494c8516cea49ae16",
+      "sha256": "d05ec9f83983748d97a82007d61b658f78dbff1d12554b6d7d0df09e4dd05449",
       "role": "implementation",
       "scope": "Source-bound native interaction driver and explicit coverage gaps; baseline is not Acceptance"
     },

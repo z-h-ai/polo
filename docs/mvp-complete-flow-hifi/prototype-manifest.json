@@ -455,7 +455,7 @@
   "default_story": "UI-refinement",
   "design": {
     "revision": "native-materials-r5-lifecycle-candidate-20261023",
-    "sha256": "359b04e4a4aaf791f0adac66603038f0ccb4eeb972c16fa6ea498d2e1f66247e",
+    "sha256": "24f0193fd46f8c5aeacb5cf4e0d2a6922fa6ef56855b5b59d2ca0108dadf9cdf",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {
@@ -596,7 +596,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-        "sha256": "e709f3ff70bca2cbc841bd9ed7fcfa7e269d5aa752464eb2fdb3aca791112846"
+        "sha256": "e17ce93590ef6c2e926e7b7ca506950124753dcea7a032a95444577e59b5bc08"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-localization.tsx",
@@ -604,7 +604,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/verify-interview-localization.py",
-        "sha256": "e8f6541cd7e53f497423e0395edf69eb53e97dae503d939494c8516cea49ae16"
+        "sha256": "d05ec9f83983748d97a82007d61b658f78dbff1d12554b6d7d0df09e4dd05449"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/localization-functional-cases.json",
@@ -45685,7 +45685,7 @@
       "path": ".agents/skills/polo-ai-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
       "revision": "native-materials-r5-lifecycle-candidate-20261023",
-      "sha256": "c3b588d41b96b8982070871154b4bb714753c5c4db88c844eb320a58b9c56229"
+      "sha256": "d6e5a6e819b7dd2931a928ee1629cc1c15c1ba33b9d9e390cb3f02d12bd65dff"
     },
     {
       "id": "client-design-foundations",

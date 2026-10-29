@@ -171,6 +171,9 @@ def main():
     args=parser.parse_args();plan=json.loads(args.input.read_text());out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
     selected=[c for c in plan['cases'] if not args.case or c['id'] in args.case]
     if args.case and {c['id'] for c in selected}!=set(args.case):raise ValueError('unknown case requested')
+    declared_ids=[c['id'] for c in plan['cases']]
+    selected_ids=[c['id'] for c in selected]
+    selection_complete=not args.case and len(selected_ids)==len(declared_ids)
     rows=[];proc=None;log=None;browser=None
     try:
         if args.mode!='inventory' and any(c['execution']['kind']=='native' for c in selected):
@@ -229,9 +232,14 @@ def main():
             try:proc.wait(timeout=15)
             except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait(timeout=10)
         if log:log.close()
-        report={'mode':args.mode,'input_sha256':hashlib.sha256(args.input.read_bytes()).hexdigest(),'cases':rows,'browser_closed':browser is None,'owned_service_exit':None if proc is None else proc.poll(),'scope':'real native interaction and case inventory; no Electron/backend/permission-memory Acceptance claim','verdict':'inconclusive' if args.mode!='verify' or any(r['status']!='passed' for r in rows) else 'passed'}
+        if args.mode!='verify' or any(r['status']!='passed' for r in rows):verdict='inconclusive'
+        elif selection_complete:verdict='passed'
+        else:verdict='passed_selected_cases'
+        report={'mode':args.mode,'input_sha256':hashlib.sha256(args.input.read_bytes()).hexdigest(),'cases':rows,'browser_closed':browser is None,'owned_service_exit':None if proc is None else proc.poll(),'scope':'real native interaction and case inventory; no Electron/backend/permission-memory Acceptance claim','verdict':verdict,
+            'selection_scope':{'declared_case_ids':declared_ids,'selected_case_ids':selected_ids,'selection_complete':selection_complete,
+                'verdict_scope':('all declared cases in this input' if selection_complete else 'selected_cases only; a partial-selection receipt never counts as a whole-card PASS and full business acceptance stays with the formal process')}}
         (out/'receipt.json').write_text(encode(report))
-    print(json.dumps({'verdict':report['verdict'],'statuses':{s:sum(r['status']==s for r in rows) for s in sorted({r['status'] for r in rows})}}))
-    return 0 if args.mode!='verify' else 0 if report['verdict']=='passed' else 2
+    print(json.dumps({'verdict':report['verdict'],'selection_complete':selection_complete,'declared':len(declared_ids),'selected':len(selected_ids),'statuses':{s:sum(r['status']==s for r in rows) for s in sorted({r['status'] for r in rows})}}))
+    return 0 if args.mode!='verify' else 0 if report['verdict'] in ('passed','passed_selected_cases') else 2
 
 if __name__=='__main__':raise SystemExit(main())

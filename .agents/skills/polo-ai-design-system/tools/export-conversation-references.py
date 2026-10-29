@@ -208,6 +208,42 @@ def expected_outputs(evidence: Path | None):
                           if (!window.__referenceCalm) window.__referenceCalm = performance.now()
                           return performance.now() - window.__referenceCalm > 200
                         }''', timeout=20000)
+                        if case['state'] in ('tool-path-menu', 'turn-executing'):
+                            # The global quiet window only observes mid-flight inline
+                            # opacities. Measured on the real overlay target, the TurnCard
+                            # expand runs its whole height animation (height 0.2/0.25s vs
+                            # opacity 0.15s, TurnCard.tsx:1371-1376/3065-3070) with the
+                            # inline opacity pinned at '0', so that window can pass while
+                            # the expand height is still growing. These two targets are
+                            # therefore additionally held to their own terminal state:
+                            # inline opacity at its final value, a stable rendered height,
+                            # and no running Web Animations. When reduced motion skips
+                            # the animation the targets are already terminal, so this
+                            # returns at the same moment as the global window.
+                            page.wait_for_function('''wrapper => {
+                              const root = document.querySelector('[data-localization-case="' + wrapper + '"]')
+                              if (!root) return false
+                              const targets = [...root.querySelectorAll('.overflow-hidden')]
+                                .filter(node => node.style && (node.style.height !== '' || node.style.opacity !== ''))
+                              if (!targets.length) return false
+                              for (const node of targets) {
+                                const opacity = node.style.opacity
+                                if (!(opacity === '' || opacity === '1')) return false
+                                if (!(node.getBoundingClientRect().height > 0)) return false
+                                const animations = typeof node.getAnimations === 'function'
+                                  ? node.getAnimations({subtree: true}) : []
+                                if (animations.some(item => item.playState === 'running')) return false
+                              }
+                              const signature = targets.map(node => node.style.opacity + ':' +
+                                Math.round(node.getBoundingClientRect().height * 100) / 100).join('|')
+                              if (window.__referenceTargetTerminal === signature &&
+                                  performance.now() - window.__referenceTargetSince > 100) return true
+                              if (window.__referenceTargetTerminal !== signature) {
+                                window.__referenceTargetTerminal = signature
+                                window.__referenceTargetSince = performance.now()
+                              }
+                              return false
+                            }''', arg=case['state'], timeout=10000)
                         if errors:
                             raise ValueError(f'{case["id"]}: actual component failed: {errors}')
                         metrics = None
