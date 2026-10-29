@@ -629,6 +629,11 @@ export class ClaudeAgent extends BaseAgent {
     rememberForMinutes?: number;
     commandHash?: string;
     approvalTtlSeconds?: number;
+    /**
+     * POO-179 read-only presentation metadata: whether "Always Allow" would
+     * remember this request for the session. Not an authorization credential.
+     */
+    canRememberForSession?: boolean;
   }) => void) | null = null;
 
   // Debug callback for status messages
@@ -1158,16 +1163,18 @@ export class ClaudeAgent extends BaseAgent {
 
       // If "always allow" was selected, remember it (with special handling for curl/wget)
       if (alwaysAllow && allowed) {
-        if (['curl', 'wget'].includes(pending.baseCommand)) {
-          // For curl/wget, whitelist the domain instead of the command
-          const domain = this.permissionManager.extractDomainFromNetworkCommand(pending.command);
-          if (domain) {
-            this.permissionManager.whitelistDomain(domain);
-            this.debug(`Added domain "${domain}" to always-allowed domains`);
-          }
-        } else if (!this.permissionManager.isDangerousCommand(pending.baseCommand)) {
-          this.permissionManager.whitelistCommand(pending.baseCommand);
-          this.debug(`Added "${pending.baseCommand}" to always-allowed commands`);
+        // POO-179: the write target comes from the single legacy resolution
+        // source; this is a mechanical reuse of the historical branch and does
+        // NOT filter the response by presentation eligibility. Mismatched
+        // legacy targets (file_write filepath base, api method-only) are still
+        // written exactly as before.
+        const legacyTarget = this.permissionManager.resolveLegacyAlwaysAllowTarget(pending.baseCommand, pending.command);
+        if (legacyTarget?.kind === 'domain') {
+          this.permissionManager.whitelistDomain(legacyTarget.key);
+          this.debug(`Added domain "${legacyTarget.key}" to always-allowed domains`);
+        } else if (legacyTarget?.kind === 'command') {
+          this.permissionManager.whitelistCommand(legacyTarget.key);
+          this.debug(`Added "${legacyTarget.key}" to always-allowed commands`);
         }
       }
 
@@ -1708,6 +1715,15 @@ export class ClaudeAgent extends BaseAgent {
                   });
 
                   if (this.onPermissionRequest) {
+                    // POO-179: read-only presentation metadata resolved at the
+                    // prompt origin from the ORIGINAL pending base/command —
+                    // never from catalog, model name or requestId.
+                    const canRememberForSession = this.permissionManager.canRememberForSession({
+                      promptType: checkResult.promptType,
+                      toolName: input.tool_name,
+                      command,
+                      baseCommand,
+                    });
                     this.onPermissionRequest({
                       requestId,
                       toolName: input.tool_name,
@@ -1721,6 +1737,7 @@ export class ClaudeAgent extends BaseAgent {
                       rememberForMinutes: checkResult.rememberForMinutes,
                       commandHash: checkResult.commandHash,
                       approvalTtlSeconds: checkResult.approvalTtlSeconds,
+                      canRememberForSession,
                     });
                   } else {
                     this.pendingPermissions.delete(requestId);
