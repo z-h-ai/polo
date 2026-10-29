@@ -1554,10 +1554,8 @@
   ],
   "schema_version": 2,
   "snapshot": {
-    "head": "812f07e0b0d7d428886480ef6063b22858a1a2d2",
-    "head_dirty": [
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/verify-interview-localization.py"
-    ],
+    "head": "f20083e2bc7c8a3f756ddcd3f0a4cf9a4f211969",
+    "head_dirty": [],
     "note": "Input state at the time the inputs LAST changed (git head plus uncommitted/untracked input paths of THIS build). Currency is proven by inputs hashes + regeneration, not by comparing this snapshot to the current git state."
   }
 }
