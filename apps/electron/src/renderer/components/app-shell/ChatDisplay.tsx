@@ -557,10 +557,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const [latestFeedback, setLatestFeedback] = useState<{ sessionId: string; turnKey: string } | null>(null)
   const latestFeedbackTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   // Last viewport geometry observed by the scroll handler and the resize
-  // observer. Content that grows while the viewport stays parked at that
-  // geometry is streaming appending — the sticky-bottom follow is about to
-  // close the gap — so it is not the user reading away (POO170-R1-01). It
-  // also tells an upward user scroll apart from the follow moving downward.
+  // observer. It tells an upward user scroll apart from the sticky-bottom
+  // follow moving downward through a temporary growth gap (POO170-R1-01).
   const settledScrollGeometryRef = React.useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const clearLatestFeedback = useCallback(() => {
     if (latestFeedbackTimerRef.current !== null) clearTimeout(latestFeedbackTimerRef.current)
@@ -1166,31 +1164,21 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   }, [pendingFollowUpAnnotations])
 
   // Resize can change whether the shortcut is needed without changing the
-  // user's sticky-bottom preference (e.g. while reading history). A pure
-  // geometry sync never ends the arrival feedback: feedback only ends when
-  // the user leaves the latest position (an upward scroll below), Recap,
-  // session/panel changes, the 1500ms expiry or unmount. Content growth while
-  // the viewport is parked is streaming appending — the sticky-bottom follow
-  // is about to close that gap, so the in-between geometry must neither
-  // reveal the entry nor cancel the feedback (POO170-R1-01).
-  const updateLatestShortcut = useCallback((options?: { contentGrewWhileParked?: boolean }) => {
+  // user's sticky-bottom preference (e.g. while reading history). The sync is
+  // a pure geometry read: it never ends the arrival feedback (POO170-R1-01 —
+  // feedback only ends on an upward user scroll below, Recap, session/panel
+  // changes, the 1500ms expiry or unmount), and it never assumes that a
+  // parked viewport will be scrolled by a pending follow. Growth can land
+  // while the 500ms session-switch guard skips that follow, so skipping the
+  // entry sync on growth would leave real distance unsurfaced
+  // (POO170-R2-01); the entry simply reflects the geometry and the follow
+  // clears it again if it does run.
+  const updateLatestShortcut = useCallback(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
     const away = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight >= 20
-    if (options?.contentGrewWhileParked && away) return
     setAwayFromBottomSessionId(away ? session?.id ?? null : null)
   }, [session?.id])
-
-  // Compare a resize against the last settled geometry and record the new one.
-  // Growth without viewport movement means content was appended (streaming)
-  // while the sticky-bottom follow is still about to close the gap.
-  const readContentGrewWhileParked = useCallback((viewport: HTMLDivElement) => {
-    const settled = settledScrollGeometryRef.current
-    settledScrollGeometryRef.current = { scrollHeight: viewport.scrollHeight, scrollTop: viewport.scrollTop }
-    return settled !== null
-      && viewport.scrollHeight > settled.scrollHeight
-      && viewport.scrollTop === settled.scrollTop
-  }, [])
 
   // Track scroll position to toggle sticky-bottom behavior
   // - User scrolls up → unstick (stop auto-scrolling)
@@ -1273,7 +1261,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const stickyBottomScrollGate = stickyBottomScrollGateRef.current
 
     const resizeObserver = new ResizeObserver(() => {
-      updateLatestShortcut({ contentGrewWhileParked: readContentGrewWhileParked(viewport) })
+      // Refresh the settled baseline so a follow-on scroll event compares
+      // against post-resize geometry instead of stale pre-resize values.
+      settledScrollGeometryRef.current = { scrollHeight: viewport.scrollHeight, scrollTop: viewport.scrollTop }
+      updateLatestShortcut()
       // Unfocused panels: always scroll to bottom instantly (user isn't reading them)
       if (!isFocusedPanelRef.current) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
@@ -1302,7 +1293,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       resizeObserver.disconnect()
       stickyBottomScrollGate?.cancel()
     }
-  }, [session?.id, updateLatestShortcut, readContentGrewWhileParked])
+  }, [session?.id, updateLatestShortcut])
 
   // Commit-time auto-scroll for new user messages.
   // This complements submit-time scrolling and covers cases where attachments delay

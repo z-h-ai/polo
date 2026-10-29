@@ -162,10 +162,13 @@ describe('POO-170 jump to latest', () => {
     expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
     expect(view.getByRole('status').textContent).toBe('chat.latestReached')
     expect(view.viewport().contains(document.activeElement)).toBe(true)
-    expect(view.jump()).toBeNull()
+    // The gap is real distance: the entry reflects it (POO170-R2-01) and the
+    // sticky-bottom follow clears it again when it lands.
+    expect(view.jump()).not.toBeNull()
     await tick(250) // Follow lands.
     expect(view.viewport().scrollTop).toBe(900)
     expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
+    expect(view.jump()).toBeNull()
     // Continuous chunks must not end it either.
     Object.defineProperty(view.viewport(), 'scrollHeight', { value: 1600, configurable: true })
     await act(async () => { for (const observer of observers) observer.callback() })
@@ -173,6 +176,42 @@ describe('POO-170 jump to latest', () => {
     await tick(1700)
     expect(view.container.querySelector('[data-latest-highlight="true"]')).toBeNull()
     expect(view.queryByRole('status')?.textContent ?? '').toBe('')
+  })
+  it('POO170-R2-01: syncs the entry when growth lands inside the session-switch guard with no follow', async () => {
+    const view = await mount(baseSession('a'))
+    view.rerender(h(ChatDisplay, props(baseSession('b', 2))))
+    // The switched-to session mounts exactly filling the viewport: no
+    // overflow, no entry, viewport parked at the bottom.
+    view.geometry(0, 411, 411)
+    expect(view.jump()).toBeNull()
+    // Content appends asynchronously while the 500ms session-switch smooth
+    // guard is still armed: the gate's follow is skipped, so the observer's
+    // real-geometry sync is the only chance to surface the entry. Neither the
+    // timer arming nor a guessed follow counts — the entry must appear and
+    // really work, or the viewport must really arrive at the latest.
+    Object.defineProperty(view.viewport(), 'scrollHeight', { value: 2102, configurable: true })
+    await act(async () => { for (const observer of observers) observer.callback() })
+    await tick(700) // Both the 200ms gate and the 500ms guard have fired.
+    const viewport = view.viewport()
+    const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+    if (distance >= 20) {
+      const entry = view.jump()
+      expect(entry).not.toBeNull()
+      fireEvent.click(entry!)
+      expect(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight).toBeLessThan(20)
+    }
+  })
+  it('POO170-R2-01 control: still follows growth arriving after the session-switch guard', async () => {
+    const view = await mount(baseSession('a'))
+    view.rerender(h(ChatDisplay, props(baseSession('b', 2))))
+    view.geometry(0, 411, 411)
+    await tick(550) // The session-switch smooth guard has expired.
+    Object.defineProperty(view.viewport(), 'scrollHeight', { value: 2102, configurable: true })
+    await act(async () => { for (const observer of observers) observer.callback() })
+    await tick(300) // The gate follow runs and really lands on the latest.
+    const viewport = view.viewport()
+    expect(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight).toBeLessThan(20)
+    expect(view.jump()).toBeNull()
   })
   it('ends arrival feedback on an upward user scroll, not on the follow passing a gap', async () => {
     const view = await mount(); view.geometry(300)
