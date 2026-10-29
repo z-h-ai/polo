@@ -19,7 +19,7 @@ import { MarkdownLatexBlock } from './MarkdownLatexBlock'
 import { MarkdownPdfBlock } from './MarkdownPdfBlock'
 import { MarkdownDocBlock } from './MarkdownDocBlock'
 import { preprocessLinks } from './linkify'
-import { resolveMarkdownLinkTarget } from './link-target'
+import { isOpenableMarkdownLinkText, resolveMarkdownLinkTarget } from './link-target'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
@@ -204,15 +204,22 @@ function createComponents(
       const sanitized = trimmedHref ? defaultUrlTransform(trimmedHref) : ''
       const safeHref = sanitized ? sanitized : undefined
 
+      // Some AI outputs include raw HTML anchors with empty href but path text content.
+      // Fallback to the anchor text when href is missing/empty — but only when that
+      // text actually resolves to something openable. Plain-text citation
+      // references must render as plain text, never as a fake link (POO-172/CITE-02).
+      const fallbackText = trimmedHref
+        ? ''
+        : React.Children.toArray(children)
+            .map((child) => (typeof child === 'string' ? child : ''))
+            .join('')
+            .trim()
+      if (!trimmedHref && !isOpenableMarkdownLinkText(fallbackText)) {
+        return <span>{children}</span>
+      }
+
       const handleClick = (e: React.MouseEvent) => {
         e.preventDefault()
-
-        // Some AI outputs include raw HTML anchors with empty href but path text content.
-        // Fallback to the anchor text when href is missing/empty.
-        const fallbackText = React.Children.toArray(children)
-          .map((child) => (typeof child === 'string' ? child : ''))
-          .join('')
-          .trim()
 
         const target = trimmedHref || fallbackText
         if (!target) return

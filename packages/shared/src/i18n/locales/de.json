@@ -2589,6 +2589,7 @@
   "toast.cannotRemoveActiveWorkspace": "Aktiver Workspace kann nicht entfernt werden",
   "toast.cannotSendRightNow": "Senden derzeit nicht möglich",
   "toast.cannotStopAgentTask": "Hintergrund-Agents können noch nicht gestoppt werden",
+  "toast.citationSourceBlocked": "Diese Quelle kann nicht als Link geöffnet werden",
   "toast.copied": "In die Zwischenablage kopiert",
   "toast.copyFailed": "Kopieren fehlgeschlagen",
   "toast.couldNotCreateBranch": "Branch konnte nicht erstellt werden",

@@ -115,8 +115,15 @@ const MemoizedBlock = React.memo(function Block({
     </Markdown>
   )
 }, (prev, next) => {
-  // Only re-render if content actually changed
-  return prev.content === next.content && prev.mode === next.mode
+  // Only re-render if content actually changed — callback identity counts too,
+  // or a completed block would keep a stale click handler (POO-172: the
+  // citation-source channel swaps in after mount).
+  return (
+    prev.content === next.content &&
+    prev.mode === next.mode &&
+    prev.onUrlClick === next.onUrlClick &&
+    prev.onFileClick === next.onFileClick
+  )
 })
 MemoizedBlock.displayName = 'MemoizedBlock'
 
