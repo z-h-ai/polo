@@ -18,6 +18,8 @@ const { render, renderHook, screen, cleanup, waitFor, act } = await import('@tes
 const userEvent = (await import('@testing-library/user-event')).default
 const { I18nextProvider } = await import('react-i18next')
 const { SessionStatusMenu } = await import('../session-status-menu')
+const { SessionListProvider } = await import('@/context/SessionListContext')
+const { SessionStatusIcon } = await import('../../app-shell/SessionStatusIcon')
 const { StatusMenuItems } = await import('../../app-shell/SessionMenuParts')
 const { InlineLabelMenu, useInlineLabelMenu, filterSessionStatuses } = await import('../label-menu')
 
@@ -64,6 +66,19 @@ describe('status menu localization', () => {
     await user.type(input, 'Cancelled')
     await waitFor(() => expect(screen.getAllByRole('option').length).toBe(1))
     expect(screen.getByRole('option', { name: /已取消/ })).toBeTruthy()
+  })
+
+  it('localizes the session-list status trigger accessibly without restarting', async () => {
+    const noop = () => {}
+    render(createElement(I18nextProvider, { i18n }, createElement(SessionListProvider, { value: {
+      sessionStatuses: states, flatLabels: [], labels: [], isMultiSelectActive: false,
+      contentSearchResults: new Map(), onRenameClick: noop, onSessionStatusChange: noop,
+      onMarkUnread: noop, onDelete: async () => true, onSelectSessionById: noop,
+      onOpenInNewWindow: noop, onFocusZone: noop, onKeyDown: noop,
+    } }, createElement(SessionStatusIcon, { item: { id: 'test-session', workspaceId: 'test-workspace', sessionStatus: 'todo' } }))))
+    expect(screen.getByRole('button', { name: '更改状态' })).toBeTruthy()
+    await act(async () => { await i18n.changeLanguage('en') })
+    expect(screen.getByRole('button', { name: 'Change Status' })).toBeTruthy()
   })
 
   it('distinguishes a custom archive status from the archive action', async () => {

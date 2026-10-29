@@ -386,6 +386,7 @@ function FilterRow({
   onTap?: () => void
   onModeTap?: () => void
 }) {
+  const { t } = useTranslation()
   const renderedIcon = bareIcon
     ? (
       <span className="shrink-0 h-5 w-5 flex items-center justify-center" style={iconColor ? { color: iconColor } : undefined}>
@@ -431,7 +432,7 @@ function FilterRow({
               ? ({ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties)
               : undefined
           }
-          aria-label={mode === 'include' ? 'Switch to exclude' : 'Switch to include'}
+          aria-label={mode === 'include' ? t('filter.exclude') : t('filter.include')}
         >
           {mode === 'include' ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
         </button>
