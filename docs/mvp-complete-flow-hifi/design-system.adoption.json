@@ -184,7 +184,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-      "sha256": "5f445bfe930d12469fccd3ab8fa4c70c53bddd618bdea1f250cd3c90df169c10",
+      "sha256": "0ec43a8823d9cf2e913e975d67ebf20094f9b3da79f4734f8db7671e3077db07",
       "role": "implementation",
       "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
     },
@@ -226,9 +226,63 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-      "sha256": "2a9b1d21b210a1124c2535120e3d60162fd2c485f2c273ca9d65c9ce128f860f",
+      "sha256": "09194d191e720d28a73a12c0010ada62ee46377a89c9cd7ccf43d9693ad3737c",
       "role": "implementation",
       "scope": "implementation; reproducible native render to static smoke reference; runtime remains React"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/export-sidebar-reference.py",
+      "sha256": "7eff812f20e90e979acff43ddb8f3d2d1112783d78a3ffba62445daa2a68addb",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/vite.config.mjs",
+      "sha256": "0a426033f45e2f3bc41e4c5e83055355db57d6bc7851e1acbadce700cf84d69d",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/README.md",
+      "sha256": "792250219cdfcad790ad3c86c56fad49da67603c278c7c3bdabbd545552e3358",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/reference-source.json",
+      "sha256": "8f0d8e49cb9e85751885e9180b5dc4371fe871e59412566cc99bb406bb2c314e",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/tsconfig.json",
+      "sha256": "d44587d2e842fbba853fe2f3e50054579d27fbfebb050d6948ac5d3c253e4eb8",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/entries/baseline.css",
+      "sha256": "1f2b0ad31447d637453a6adad05af5241b356b2b1d6af6d50e9c42e8024b26a7",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/entries/fixtures.ts",
+      "sha256": "16d112a8ecf51088bae3a5a49a220da399f5c7e872e9c16ea28aa0dcf5f9324c",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/entries/baseline.tsx",
+      "sha256": "89dd945ef29966348ee60dbe28d44eae1d375022924a06bf399129c9f4233817",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/entries/baseline.html",
+      "sha256": "4b1e55d7e66a3814cf5ae36e345be8b98921e568e4c2e848adc9f7db7307b791",
+      "role": "implementation",
+      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
     }
   ],
   "themes": [

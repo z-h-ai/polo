@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "frozen-native-sidebar-reference",
+  "mode": "high_fidelity",
+  "revision": "poo178-adopted-native-r1",
+  "files": {
+    "prototype": "prototype.html",
+    "asset_1": "styles/088c433398e7b0688aa97b36bfb34a098e4ccdd47d82ee93b62309ac3c36f406.css",
+    "asset_2": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
+    "asset_3": "styles/a40fbce70a9c5c8a809922b4bc23c9b70bb1f1577fbcce12a4000043b067c6cc.css",
+    "asset_4": "styles/bc641d85825b4ee17e33c8829f5219087a5d922202a1c5870eae2a9d0178463c.css",
+    "asset_5": "styles/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.css",
+    "asset_6": "styles/f8f616f50b927b825b3314bfc82809909c6432ceff002ac4d6280b29f8312c28.css",
+    "asset_7": "views/sidebar-collapsed-desktop-1280x800.html",
+    "asset_8": "views/sidebar-collapsed-desktop-1440x900.html",
+    "asset_9": "views/sidebar-expanded-desktop-1280x800.html",
+    "asset_10": "views/sidebar-expanded-desktop-1440x900.html"
+  },
+  "target": {
+    "languages": [
+      "zh-Hans"
+    ],
+    "themes": [
+      "light"
+    ],
+    "viewports": [
+      {
+        "id": "desktop-1280x800",
+        "width": 1280,
+        "height": 800
+      },
+      {
+        "id": "desktop-1440x900",
+        "width": 1440,
+        "height": 900
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "id": "sidebar-collapsed",
+      "state": "collapsed",
+      "title": "sidebar-collapsed",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "sidebar-expanded",
+      "state": "expanded",
+      "title": "sidebar-expanded",
+      "source_entry": "prototype.html"
+    }
+  ],
+  "design": {
+    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "sha256": "88981e350ea5bc22c2c3a5d9d4b81df34be0283c9d6011f78d0f52e6ae6fa83f",
+    "sources": [
+      {
+        "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/reference-source.json",
+        "sha256": "8f0d8e49cb9e85751885e9180b5dc4371fe871e59412566cc99bb406bb2c314e"
+      }
+    ]
+  },
+  "confirmations": [
+    {
+      "id": "POO-178-native-sidebar-adopted-r1",
+      "status": "confirmed",
+      "source": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/reference-source.json#confirmation",
+      "scope": "default180px and sources/skills More disclosure; preserve saved user width; current entry placement unchanged. Font14 integration requires new actual captures."
+    }
+  ],
+  "provenance": {
+    "generator": ".agents/skills/polo-ai-design-system/tools/export-sidebar-reference.py",
+    "source_export_sha256": "e6dd2b22de189e14bc77eb0d91bd2db556fb1cd9edd3ae76ecdf051eaef52e21",
+    "source_baseline": "4f9e6e6fdf6bbd1fb1d69e82c618c97aeafa27ca",
+    "source_manifest": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/reference-source.json",
+    "method": "Real archived native candidate rendered in Chromium, DOM/CSS frozen without product scripts; runtime imports current production AppShell.",
+    "scope": "Previously adopted sidebar layout only, original typography. Fixed clock/seeded entropy stabilize the existing randomized input hint. POO-168 integration must recapture14px. Not product completion, Electron/backend proof, or same-state bug before/after."
+  }
+}

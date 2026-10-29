@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "model_sha256": "d411865f167d496fe255099a47e25e4b580d8148912a853c84a5d3b407e69b95",
+  "model_sha256": "b3cd5da0dc04bbaec0b11d63e9bd163452e8180e1a00b2eba22d935630384eb0",
   "decisions": [
     {
       "id": "D-CURRENT-STYLE",

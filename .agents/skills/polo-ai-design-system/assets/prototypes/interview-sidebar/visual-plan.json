@@ -1,0 +1,58 @@
+{
+  "e2e": {
+    "visual": {
+      "mode": "smoke",
+      "viewports": [
+        {
+          "name": "desktop-1280x800",
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "name": "desktop-1440x900",
+          "width": 1440,
+          "height": 900
+        }
+      ],
+      "routes": [
+        {
+          "name": "sidebar-collapsed",
+          "state": "collapsed",
+          "actual": "/entries/baseline.html?route=allSessions/session/read-1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "button:has-text(\"更多\")"
+            }
+          ]
+        },
+        {
+          "name": "sidebar-expanded",
+          "state": "expanded",
+          "actual": "/entries/baseline.html?route=allSessions/session/read-1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "click",
+              "selector": "button:has-text(\"更多\")"
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "button:has-text(\"更多\")"
+            },
+            {
+              "type": "visible",
+              "selector": "[data-tutorial=\"sources-nav\"]"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

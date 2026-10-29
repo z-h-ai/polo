@@ -67,6 +67,42 @@ def assertions(case):
     return [{'type': 'visible', 'selector': '[role="dialog"]' if '-compact-' in case['id'] else '[role="menu"]'}]
 
 
+def freeze_native_reference(page):
+    """Read a clone of an actual native page; retain CSS and observed scrolls."""
+    frozen = page.locator('html').evaluate('''element => {
+      const clone = element.cloneNode(true), styles = [], scrolls = [];
+      const original = element.querySelectorAll('*'), copies = clone.querySelectorAll('*');
+      original.forEach((node, index) => {
+        if (node.scrollTop || node.scrollLeft) {
+          const id = String(scrolls.length);
+          copies[index].setAttribute('data-reference-scroll', id);
+          scrolls.push({id, top:node.scrollTop, left:node.scrollLeft});
+        }
+      });
+      clone.querySelectorAll('script').forEach(node => node.remove());
+      clone.querySelectorAll('style').forEach(node => {
+        styles.push(node.textContent || '');
+        const link = document.createElement('link');
+        link.rel = 'stylesheet'; link.href = `__STYLE_${styles.length - 1}__`;
+        node.replaceWith(link);
+      });
+      return {html:'<!doctype html>' + clone.outerHTML,styles,scrolls,window:[scrollX,scrollY]};
+    }''')
+    text = frozen['html']
+    restore = '<script>const observed=' + json.dumps({'nodes': frozen['scrolls'], 'window': frozen['window']}) + ''';
+const restore=()=>requestAnimationFrame(()=>{
+  for(const item of observed.nodes){const node=document.querySelector('[data-reference-scroll="'+item.id+'"]');if(node){node.scrollTop=item.top;node.scrollLeft=item.left;}}
+  window.scrollTo(...observed.window);
+});window.addEventListener('load',()=>document.fonts.ready.then(restore));</script>'''
+    text = text.replace('</body>', restore + '</body>')
+    styles = {}
+    for index, style in enumerate(frozen['styles']):
+        data = style.encode(); name = f'styles/{sha(data)}.css'
+        styles[name] = data
+        text = text.replace(f'__STYLE_{index}__', '../' + name)
+    return text.encode(), styles
+
+
 def expected_outputs(evidence: Path | None):
     baseline = json.loads((BASELINE / 'baseline-manifest.json').read_text())
     html = BASELINE / 'entries/baseline.html'
@@ -101,39 +137,10 @@ def expected_outputs(evidence: Path | None):
                             distance = metrics['total'] - metrics['height'] - metrics['top']
                             if (case['state'] == 'latest' and distance > 20) or (case['state'] == 'history' and distance <= 20):
                                 raise ValueError(f'{case["id"]}: native keyboard replay did not arrange state: {metrics}')
-                        # Clone only. The actual runtime DOM and handlers remain untouched.
-                        frozen = page.locator('html').evaluate('''element => {
-                          const clone = element.cloneNode(true), styles = [], scrolls = [];
-                          const original = element.querySelectorAll('*'), copies = clone.querySelectorAll('*');
-                          original.forEach((node, index) => {
-                            if (node.scrollTop || node.scrollLeft) {
-                              const id = String(scrolls.length);
-                              copies[index].setAttribute('data-reference-scroll', id);
-                              scrolls.push({id, top:node.scrollTop, left:node.scrollLeft});
-                            }
-                          });
-                          clone.querySelectorAll('script').forEach(node => node.remove());
-                          clone.querySelectorAll('style').forEach(node => {
-                            styles.push(node.textContent || '');
-                            const link = document.createElement('link');
-                            link.rel = 'stylesheet'; link.href = `__STYLE_${styles.length - 1}__`;
-                            node.replaceWith(link);
-                          });
-                          return {html:'<!doctype html>' + clone.outerHTML,styles,scrolls,window:[scrollX,scrollY]};
-                        }''')
-                        text = frozen['html']
-                        restore = '<script>const observed=' + json.dumps({'nodes': frozen['scrolls'], 'window': frozen['window']}) + ''';
-const restore=()=>requestAnimationFrame(()=>{
-  for(const item of observed.nodes){const node=document.querySelector('[data-reference-scroll="'+item.id+'"]');if(node){node.scrollTop=item.top;node.scrollLeft=item.left;}}
-  window.scrollTo(...observed.window);
-});window.addEventListener('load',()=>document.fonts.ready.then(restore));</script>'''
-                        text = text.replace('</body>', restore + '</body>')
-                        for index, style in enumerate(frozen['styles']):
-                            data = style.encode(); name = f'styles/{sha(data)}.css'
-                            files[name] = data
-                            text = text.replace(f'__STYLE_{index}__', '../' + name)
+                        text, styles = freeze_native_reference(page)
+                        files.update(styles)
                         name = f'views/{case["id"]}-{viewport["name"]}.html'
-                        files[name] = text.encode()
+                        files[name] = text
                         record = {'case': case['id'], 'viewport': viewport['name'], 'page_errors': [], 'scroll': metrics,
                                   'horizontal_overflow': page.evaluate('document.documentElement.scrollWidth > innerWidth')}
                         if evidence:

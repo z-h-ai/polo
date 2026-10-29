@@ -123,3 +123,12 @@ POLO_REVIEW_EVIDENCE="$(mktemp -d /tmp/polo-navigation.XXXXXX)" python3 docs/mvp
 
 最终集成 main 前、创建新任务前均回到本 Skill，按 [使用手册的维护步骤](usage-playbook.md#维护时机与-git-边界)
 检查三层素材。检查只读，过期才修源再生。维护不自动提交、push、tag 或发版；源码未变则复用素材。
+
+## 已采用的 POO-178 局部侧栏布局
+
+`tools/sidebar-runtime/` 独立装配真实 AppShell，继承生产样式/provider，只替换后端数据；
+其 README 给出运行、宽度持久化 fixture 和来源边界。`reference-source.json` 固定已存在的
+root 工程采用记录及原候选hash。`tools/export-sidebar-reference.py --source-export <已归档候选>`
+真实重放既有180px+More候选后提取小型 DOM/CSS，`--check` 重放校验；不重复入库原21MB bundle。
+`assets/prototypes/interview-sidebar/` 只为该已采用局部布局提供 smoke 引用，runtime 直接消费当前生产 AppShell。
+这不批准 POO-180 的其他设计；原候选字号不代表14px，POO-168集成后必须重采真实同状态证据。
