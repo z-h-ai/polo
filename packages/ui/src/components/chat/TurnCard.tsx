@@ -338,6 +338,9 @@ export interface TurnCardProps {
   onOpenFile?: (path: string) => void
   /** Callback when URL is clicked */
   onOpenUrl?: (url: string) => void
+  /** POO-172: dedicated channel for assistant-markdown citation sources
+   *  (opens in the built-in browser). Falls back to `onOpenUrl`. */
+  onOpenSourceUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
   onPopOut?: (text: string) => void
   /** Callback to open turn details in a new window */
@@ -1418,6 +1421,9 @@ export interface ResponseCardProps {
   onOpenFile?: (path: string) => void
   /** Callback to open URL */
   onOpenUrl?: (url: string) => void
+  /** POO-172: dedicated channel for assistant-markdown citation sources
+   *  (opens in the built-in browser). Falls back to `onOpenUrl`. */
+  onOpenSourceUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
   onPopOut?: () => void
   /** Card variant - 'response' for AI messages, 'plan' for plan messages */
@@ -1676,6 +1682,7 @@ export function ResponseCard({
   streamStartTime,
   onOpenFile,
   onOpenUrl,
+  onOpenSourceUrl,
   onPopOut,
   variant = 'response',
   sessionId,
@@ -2472,7 +2479,7 @@ export function ResponseCard({
             <div ref={contentLayerRef} className="relative">
               <Markdown
                 mode="minimal"
-                onUrlClick={onOpenUrl}
+                onUrlClick={onOpenSourceUrl ?? onOpenUrl}
                 onFileClick={onOpenFile}
               >
                 {text}
@@ -2577,7 +2584,7 @@ export function ResponseCard({
           isOpen={isFullscreen}
           onClose={() => setIsFullscreen(false)}
           variant={isPlan ? 'plan' : undefined}
-          onOpenUrl={onOpenUrl}
+          onOpenUrl={onOpenSourceUrl ?? onOpenUrl}
           onOpenFile={onOpenFile}
           sessionId={sessionId}
           messageId={messageId}
@@ -2609,7 +2616,7 @@ export function ResponseCard({
           <div ref={contentLayerRef} className="relative">
             <Markdown
               mode="minimal"
-              onUrlClick={onOpenUrl}
+              onUrlClick={onOpenSourceUrl ?? onOpenUrl}
               onFileClick={onOpenFile}
             >
               {displayedText}
@@ -2739,6 +2746,7 @@ export const TurnCard = React.memo(function TurnCard({
   onExpandedActivityGroupsChange,
   onOpenFile,
   onOpenUrl,
+  onOpenSourceUrl,
   onPopOut,
   onOpenDetails,
   onOpenActivityDetails,
@@ -3231,6 +3239,7 @@ export const TurnCard = React.memo(function TurnCard({
             sessionId={sessionId}
             onOpenFile={onOpenFile}
             onOpenUrl={onOpenUrl}
+            onOpenSourceUrl={onOpenSourceUrl}
             onPopOut={onPopOut ? () => onPopOut(planActivity.content || '') : undefined}
             variant="plan"
             messageId={planActivity.messageId}
@@ -3270,6 +3279,7 @@ export const TurnCard = React.memo(function TurnCard({
                 sessionId={sessionId}
                 onOpenFile={onOpenFile}
                 onOpenUrl={onOpenUrl}
+                onOpenSourceUrl={onOpenSourceUrl}
                 onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
                 variant={response.isPlan ? 'plan' : 'response'}
                 messageId={response.messageId}
@@ -3302,6 +3312,7 @@ export const TurnCard = React.memo(function TurnCard({
             sessionId={sessionId}
             onOpenFile={onOpenFile}
             onOpenUrl={onOpenUrl}
+            onOpenSourceUrl={onOpenSourceUrl}
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
             variant={response.isPlan ? 'plan' : 'response'}
             messageId={response.messageId}
@@ -3361,6 +3372,10 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render when active follow-up annotation state changes (plan CTA label)
   if (prev.hasActiveFollowUpAnnotations !== next.hasActiveFollowUpAnnotations) return false
+
+  // Re-render when a callback changed — e.g. POO-172 swaps in the dedicated
+  // citation-source channel after mount; a cached card would keep the old one.
+  if (prev.onOpenSourceUrl !== next.onOpenSourceUrl) return false
 
   // For complete, non-streaming turns: skip re-render only when both
   // session and turn identities match. Prevents stale local UI state from
