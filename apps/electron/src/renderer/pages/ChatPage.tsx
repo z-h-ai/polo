@@ -41,6 +41,14 @@ export interface ChatPageProps {
   sessionId: string
 }
 
+/**
+ * POO-179: the self-produced "no messages" failure is stored verbatim in
+ * state and only resolved to display copy at render time, so an error visible
+ * across a language switch re-renders in the active language. Raw server
+ * error strings (formatSessionLoadFailure) pass through untouched.
+ */
+const MESSAGES_UNAVAILABLE_SENTINEL = 'Session messages are not available'
+
 const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const { t } = useTranslation()
   // Diagnostic: mark when component runs
@@ -136,7 +144,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setMessagesRetrying(false)
 
     if (shouldForceInitialMessagesReload && autoForcedReloadSessionRef.current === sessionId) {
-      setMessagesLoadError('Session messages are not available')
+      setMessagesLoadError(MESSAGES_UNAVAILABLE_SENTINEL)
       return () => {
         cancelled = true
       }
@@ -154,7 +162,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     loadPromise
       .then((loadedSession) => {
         if (!cancelled && !loadedSession) {
-          setMessagesLoadError('Session messages are not available')
+          setMessagesLoadError(MESSAGES_UNAVAILABLE_SENTINEL)
         }
       })
       .catch((error: unknown) => {
@@ -175,7 +183,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     try {
       const loadedSession = await forceMessagesReload(sessionId)
       if (!loadedSession) {
-        setMessagesLoadError('Session messages are not available')
+        setMessagesLoadError(MESSAGES_UNAVAILABLE_SENTINEL)
       }
     } catch (error) {
       setMessagesLoadError(formatSessionLoadFailure(error))
@@ -845,7 +853,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 workingDirectory={sessionMeta.workingDirectory}
                 onWorkingDirectoryChange={handleWorkingDirectoryChange}
                 messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-                messagesLoadError={messageLoadState.error}
+                messagesLoadError={messageLoadState.error === MESSAGES_UNAVAILABLE_SENTINEL ? t('chat.messagesUnavailable') : messageLoadState.error}
                 messagesRetrying={messagesRetrying}
                 onRetryMessagesLoad={handleRetryMessagesLoad}
                 searchQuery={sessionListSearchQuery}
@@ -926,7 +934,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onWorkingDirectoryChange={handleWorkingDirectoryChange}
             sessionFolderPath={session?.sessionFolderPath}
             messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-            messagesLoadError={messageLoadState.error}
+            messagesLoadError={messageLoadState.error === MESSAGES_UNAVAILABLE_SENTINEL ? t('chat.messagesUnavailable') : messageLoadState.error}
             messagesRetrying={messagesRetrying}
             onRetryMessagesLoad={handleRetryMessagesLoad}
             searchQuery={sessionListSearchQuery}

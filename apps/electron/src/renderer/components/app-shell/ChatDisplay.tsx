@@ -119,7 +119,12 @@ interface MultiDiffOverlayState {
 interface MarkdownOverlayState {
   type: 'markdown'
   content: string
-  title: string
+  /**
+   * POO-179: overlay titles are stored as i18n keys and resolved at render
+   * time, so an open overlay re-renders with the current language instead of
+   * freezing a translation captured at open time. Content stays verbatim.
+   */
+  titleKey: string
   /** When true, show raw markdown source in code viewer instead of rendered preview */
   forceCodeView?: boolean
 }
@@ -1088,7 +1093,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     setOverlayState({
       type: 'markdown',
       content: message.content,
-      title: 'Message Preview',
+      titleKey: 'chat.messagePreview',
     })
   }, [session])
 
@@ -1348,7 +1353,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     if (isInputDisabled || disableSend || connectionUnavailable) {
       toast.error(t('toast.cannotSendRightNow'), {
-        description: 'Sending is currently disabled for this session.',
+        description: t('chat.sendingDisabled'),
       })
       return
     }
@@ -1688,7 +1693,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           } as React.CSSProperties}
                         >
                           <AlertTriangle className="mx-auto mb-2 h-4 w-4 text-destructive/70" />
-                          <div className="text-sm font-medium text-destructive">Failed to load conversation</div>
+                          <div className="text-sm font-medium text-destructive">{t('chat.loadConversationFailed')}</div>
                           <p className="mt-1 break-words text-xs text-destructive/70">{messagesLoadError}</p>
                           {onRetryMessagesLoad && (
                             <button
@@ -1697,7 +1702,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                               disabled={messagesRetrying}
                               className="mt-3 rounded border border-destructive/20 px-2 py-0.5 text-xs text-destructive/70 transition-colors hover:border-destructive/40 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {messagesRetrying ? 'Retrying…' : 'Retry'}
+                              {messagesRetrying ? t('chat.retrying') : t('common.retry')}
                             </button>
                           )}
                         </div>
@@ -1733,8 +1738,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     <div className="flex h-64 items-center justify-center px-4 text-center">
                       <div className="max-w-sm rounded-[8px] border border-border/50 bg-foreground/[0.03] px-4 py-3">
                         <CircleAlert className="mx-auto mb-2 h-4 w-4 text-foreground/50" />
-                        <div className="text-sm font-medium text-foreground/70">Conversation loaded, but no renderable messages were found.</div>
-                        <p className="mt-1 text-xs text-foreground/50">Try reloading the session. If this persists, the message history may contain an unsupported format.</p>
+                        <div className="text-sm font-medium text-foreground/70">{t('chat.noRenderableMessages')}</div>
+                        <p className="mt-1 text-xs text-foreground/50">{t('chat.reloadUnsupportedHistory')}</p>
                       </div>
                     </div>
                   )}
@@ -1880,7 +1885,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                               {
                                 branchFromMessageId: messageId,
                                 branchFromSessionId: session.id,
-                                name: `Branch of ${session.name || 'Untitled'}`,
+                                name: t('chat.branchOf', { name: session.name || t('chat.untitledSession') }),
                                 // Keep branch on the same backend/provider by inheriting parent session settings.
                                 llmConnection: session.llmConnection,
                                 model: session.model,
@@ -1891,10 +1896,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             )
                             navigate(routes.view.allSessions(child.id), { newPanel: resolveBranchNewPanelOption(options) })
                           } catch (error) {
-                            const rawMessage = error instanceof Error ? error.message : 'Failed to create branch'
+                            const rawMessage = error instanceof Error ? error.message : t('chat.failedToCreateBranch')
+                            // Matching stays on the raw server error text; only the
+                            // replacement guidance copy is localized.
                             const message = rawMessage.includes('source and target providers must match')
                               || rawMessage.includes('same provider/backend')
-                              ? 'Branching is only supported within the same provider/backend. Switch this panel connection and try again.'
+                              ? t('chat.branchProviderMismatch')
                               : rawMessage
                             toast.error(t('toast.couldNotCreateBranch'), { description: message })
                           }
@@ -1909,7 +1916,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             })
                           } catch (error) {
                             toast.error(t('toast.couldNotSaveHighlight'), {
-                              description: error instanceof Error ? error.message : 'Unknown error',
+                              description: error instanceof Error ? error.message : t('chat.unknownError'),
                             })
                             throw error
                           }
@@ -1924,7 +1931,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             })
                           } catch (error) {
                             toast.error(t('toast.couldNotRemoveHighlight'), {
-                              description: error instanceof Error ? error.message : 'Unknown error',
+                              description: error instanceof Error ? error.message : t('chat.unknownError'),
                             })
                           }
                         }}
@@ -1939,7 +1946,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             })
                           } catch (error) {
                             toast.error(t('toast.couldNotUpdateHighlight'), {
-                              description: error instanceof Error ? error.message : 'Unknown error',
+                              description: error instanceof Error ? error.message : t('chat.unknownError'),
                             })
                             throw error
                           }
@@ -1976,7 +1983,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           setOverlayState({
                             type: 'markdown',
                             content: text,
-                            title: 'Response Preview',
+                            titleKey: 'chat.responsePreview',
                             forceCodeView: true,
                           })
                         }}
@@ -1986,7 +1993,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           setOverlayState({
                             type: 'markdown',
                             content: markdown,
-                            title: 'Turn Details',
+                            titleKey: 'chat.turnDetails',
                           })
                         }}
                         onOpenActivityDetails={(activity) => {
