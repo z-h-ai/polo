@@ -223,7 +223,7 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "24f0193fd46f8c5aeacb5cf4e0d2a6922fa6ef56855b5b59d2ca0108dadf9cdf",
+    "sha256": "6d63260a7a60a373c8d6c8206812b58b8d81f57be964ab17702bbb83dcdbb09b",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -248,7 +248,7 @@
   "provenance": {
     "generator": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "78adb762afd41954687093fc6a70175399703372dc51fb28dedd018777c4aab4",
+    "source_input_fingerprint": "e58b3d38a491323ae9557af891597fa14e20df2e6c0e241b6373071fea4d8387",
     "source_export_sha256": "802e508a026bf266fdaa2e9310e65300ff7081501d3336699992cdaa494718e1",
     "method": "Actual Chromium render and native click/key replay; cloned DOM with product scripts removed only from reference. Reference-only script restores observed scroll offsets. Live React runtime remains unchanged.",
     "fixed_reference_clock": "2026-10-28T12:00:00Z",

@@ -4,7 +4,7 @@
   "revision": "poo70-workbench-r15-closure",
   "design_revision": "native-materials-r5-lifecycle-candidate-20261023",
   "source_manifest": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
-  "source_manifest_sha256": "0ebe55d11a24c83b74159266bb96f087bb4709eebb119c6bd86e3631c6a97d56",
+  "source_manifest_sha256": "1fc618d73012bbcb5d98bf24688a7461240b50ad4575ba96358caa08a15ea67f",
   "product_export": "docs/mvp-complete-flow-hifi/prototype.html",
   "target": {
     "languages": [

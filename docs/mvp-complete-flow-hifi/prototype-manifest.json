@@ -455,7 +455,7 @@
   "default_story": "UI-refinement",
   "design": {
     "revision": "native-materials-r5-lifecycle-candidate-20261023",
-    "sha256": "24f0193fd46f8c5aeacb5cf4e0d2a6922fa6ef56855b5b59d2ca0108dadf9cdf",
+    "sha256": "6d63260a7a60a373c8d6c8206812b58b8d81f57be964ab17702bbb83dcdbb09b",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {
@@ -596,7 +596,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-        "sha256": "e17ce93590ef6c2e926e7b7ca506950124753dcea7a032a95444577e59b5bc08"
+        "sha256": "7313d54b193d04883311a21157d7fb070321e1b8c5e0a6a297e7c7802bf3d467"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-localization.tsx",
@@ -45685,7 +45685,7 @@
       "path": ".agents/skills/polo-ai-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
       "revision": "native-materials-r5-lifecycle-candidate-20261023",
-      "sha256": "d6e5a6e819b7dd2931a928ee1629cc1c15c1ba33b9d9e390cb3f02d12bd65dff"
+      "sha256": "589d0ac497ba0985ab545c3df459e574733bebb362c9cab0435e9856cd299d37"
     },
     {
       "id": "client-design-foundations",

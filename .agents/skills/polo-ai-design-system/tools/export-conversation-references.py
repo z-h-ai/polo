@@ -192,58 +192,106 @@ def expected_outputs(evidence: Path | None):
                             page.wait_for_timeout(300)
                         page.evaluate('document.fonts.ready')
                         assert_native_state(page, case)
-                        # Settle entry/fade animations before freezing. Entry animations
-                        # emit a mid-flight inline opacity on every frame and never loop,
-                        # so requiring a 200ms window with none of them (the product also
-                        # keeps a few permanently hidden opacity:0 spans) means the clone
-                        # captures a resting state, never a random frame.
-                        page.wait_for_function('''() => {
-                          const mid = [...document.querySelectorAll('*')].some(node => {
-                            const value = node.style && node.style.opacity
-                            if (!value) return false
-                            const opacity = parseFloat(value)
-                            return opacity > 0 && opacity < 1
-                          })
-                          if (mid) { window.__referenceCalm = 0; return false }
-                          if (!window.__referenceCalm) window.__referenceCalm = performance.now()
-                          return performance.now() - window.__referenceCalm > 200
-                        }''', timeout=20000)
-                        if case['state'] in ('tool-path-menu', 'turn-executing'):
-                            # The global quiet window only observes mid-flight inline
-                            # opacities. Measured on the real overlay target, the TurnCard
-                            # expand runs its whole height animation (height 0.2/0.25s vs
-                            # opacity 0.15s, TurnCard.tsx:1371-1376/3065-3070) with the
-                            # inline opacity pinned at '0', so that window can pass while
-                            # the expand height is still growing. These two targets are
-                            # therefore additionally held to their own terminal state:
-                            # inline opacity at its final value, a stable rendered height,
-                            # and no running Web Animations. When reduced motion skips
-                            # the animation the targets are already terminal, so this
-                            # returns at the same moment as the global window.
+                        if case['state'] == 'tool-path-menu':
+                            # The overlay target is the expanded TurnCard container
+                            # (TurnCard.tsx:1371-1376): framer-motion drives it with Web
+                            # Animations, which never touch the inline style mid-flight —
+                            # measured on the real render, the inline opacity stays '0'
+                            # and the inline height stays 'auto' for the whole animation
+                            # and only the finished values ('1'/'auto') are written back.
+                            # A global mid-opacity quiet window therefore cannot see this
+                            # animation at all, so this state waits on the target itself:
+                            # the selector requires a direct 'group select-none' parent,
+                            # which the input container (also .overflow-hidden, but with
+                            # a fixed pixel inline height like 130.25px and a plain
+                            # relative parent) does not have; requiring inline height
+                            # 'auto' excludes it a second time. Terminal means inline
+                            # opacity '1', a positive rendered height, no running
+                            # animations on the target itself (subtree animations are not
+                            # awaited, so permanent decorations can never block), and a
+                            # stable signature for a bounded 100ms window.
                             page.wait_for_function('''wrapper => {
                               const root = document.querySelector('[data-localization-case="' + wrapper + '"]')
                               if (!root) return false
-                              const targets = [...root.querySelectorAll('.overflow-hidden')]
-                                .filter(node => node.style && (node.style.height !== '' || node.style.opacity !== ''))
+                              const targets = [...root.querySelectorAll('.group.select-none > .overflow-hidden')]
+                                .filter(node => node.style && node.style.height === 'auto')
                               if (!targets.length) return false
                               for (const node of targets) {
-                                const opacity = node.style.opacity
-                                if (!(opacity === '' || opacity === '1')) return false
+                                if (node.style.opacity !== '1') return false
                                 if (!(node.getBoundingClientRect().height > 0)) return false
-                                const animations = typeof node.getAnimations === 'function'
-                                  ? node.getAnimations({subtree: true}) : []
+                                const animations = typeof node.getAnimations === 'function' ? node.getAnimations() : []
                                 if (animations.some(item => item.playState === 'running')) return false
                               }
-                              const signature = targets.map(node => node.style.opacity + ':' +
-                                Math.round(node.getBoundingClientRect().height * 100) / 100).join('|')
-                              if (window.__referenceTargetTerminal === signature &&
-                                  performance.now() - window.__referenceTargetSince > 100) return true
-                              if (window.__referenceTargetTerminal !== signature) {
-                                window.__referenceTargetTerminal = signature
-                                window.__referenceTargetSince = performance.now()
+                              const signature = targets.map(node => node.style.opacity + ':' + node.style.height +
+                                ':' + Math.round(node.getBoundingClientRect().height * 100) / 100).join('|')
+                              if (window.__referenceOverlayTerminal === signature &&
+                                  performance.now() - window.__referenceOverlaySince > 100) return true
+                              if (window.__referenceOverlayTerminal !== signature) {
+                                window.__referenceOverlayTerminal = signature
+                                window.__referenceOverlaySince = performance.now()
                               }
                               return false
                             }''', arg=case['state'], timeout=10000)
+                        elif case['state'] == 'turn-executing':
+                            # The turn state shows the ProcessingIndicator, not an
+                            # expanded tool group. Its real animated target is the label
+                            # crossfade (ChatDisplay.tsx:408-419): a motion.span rendered
+                            # as a plain classless <span style="opacity: …"> inside the
+                            # exact 'relative h-5 flex items-center' holder, animated via
+                            # Web Animations — the inline opacity reads '0' mid-flight and
+                            # '1' only once finished. The exact className match excludes
+                            # the other h-5 holder (a 6-class variant) and its children;
+                            # the inline-opacity filter keeps the elapsed counter out.
+                            # The label animates opacity only — there is no height
+                            # expansion to wait for, and the decorative w-3 h-3 Spinner
+                            # (ChatDisplay.tsx:404-406) rotates forever by design and is
+                            # deliberately never awaited. Terminal means inline opacity
+                            # '1', no running animations on the target itself, and a
+                            # stable signature (opacity, label text, height) for a
+                            # bounded 100ms window.
+                            page.wait_for_function('''wrapper => {
+                              const root = document.querySelector('[data-localization-case="' + wrapper + '"]')
+                              if (!root) return false
+                              const targets = [...root.querySelectorAll('span.relative.h-5.flex.items-center')]
+                                .filter(node => node.className === 'relative h-5 flex items-center')
+                                .flatMap(node => [...node.children])
+                                .filter(node => node.style && node.style.opacity !== '')
+                              if (!targets.length) return false
+                              for (const node of targets) {
+                                if (node.style.opacity !== '1') return false
+                                const animations = typeof node.getAnimations === 'function' ? node.getAnimations() : []
+                                if (animations.some(item => item.playState === 'running')) return false
+                              }
+                              const signature = targets.map(node => node.style.opacity + ':' + node.textContent +
+                                ':' + Math.round(node.getBoundingClientRect().height * 100) / 100).join('|')
+                              if (window.__referenceTurnTerminal === signature &&
+                                  performance.now() - window.__referenceTurnSince > 100) return true
+                              if (window.__referenceTurnTerminal !== signature) {
+                                window.__referenceTurnTerminal = signature
+                                window.__referenceTurnSince = performance.now()
+                              }
+                              return false
+                            }''', arg=case['state'], timeout=10000)
+                        else:
+                            # Settle entry/fade animations before freezing. Entry animations
+                            # emit a mid-flight inline opacity on every frame and never loop,
+                            # so requiring a 200ms window with none of them (the product also
+                            # keeps a few permanently hidden opacity:0 spans) means the clone
+                            # captures a resting state, never a random frame. The two states
+                            # handled above are waited on via their real targets instead,
+                            # because their animations are Web Animations driven and leave
+                            # the inline style untouched mid-flight.
+                            page.wait_for_function('''() => {
+                              const mid = [...document.querySelectorAll('*')].some(node => {
+                                const value = node.style && node.style.opacity
+                                if (!value) return false
+                                const opacity = parseFloat(value)
+                                return opacity > 0 && opacity < 1
+                              })
+                              if (mid) { window.__referenceCalm = 0; return false }
+                              if (!window.__referenceCalm) window.__referenceCalm = performance.now()
+                              return performance.now() - window.__referenceCalm > 200
+                            }''', timeout=20000)
                         if errors:
                             raise ValueError(f'{case["id"]}: actual component failed: {errors}')
                         metrics = None
