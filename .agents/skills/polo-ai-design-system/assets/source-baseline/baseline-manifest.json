@@ -3,7 +3,7 @@
   "entry": "entries/baseline.html",
   "entry_self_contained": "entries/baseline.html inlines its JS and CSS (vite inlineDynamicImports + single-file transform), so it opens and runs directly from file:// with no server and no external request.",
   "files": {
-    "entries/baseline.html": "9096bb5840be880b2ed10e6d9770ec1c7f8dfbc098c5e47ebc6743555b20550d"
+    "entries/baseline.html": "8283e5362f5a9a1e5a69bb2439b43c4829e9c3eaa9fcbe512999ace84bd0337a"
   },
   "fixture_scope": "Fixtures replace BACKEND DATA only (playground mock + baseline fixtures); every rendered element comes from the renderer sources consumed by this build. They do not represent real backend behavior.",
   "generator": {
@@ -26,7 +26,7 @@
     "scene_extraction_exit": 0,
     "sources": {
       "build.py": "aa3f8aeeb445244037df2da327bba32ac21323082de2c7096ae3916515837f36",
-      "entries/baseline.css": "bc7c838e4fe3ea3ec7b172534d2e5b856ccd0040cb6e103684fe46dc2990e6bc",
+      "entries/baseline.css": "25f962fa35b37376ce1552d7ae1c352281eeaf0bb0515a8fc6b4c3dfcd04b53d",
       "entries/baseline.html": "262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc",
       "entries/baseline.tsx": "6fddafbaf54a41bd229a38bb6c52d41a14c528487c9a3fb47cb0b4493440e065",
       "entries/fixtures.tsx": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820",
@@ -35,8 +35,9 @@
       "entries/interview-input-entry.tsx": "b929dd09a07d6e758bea7588f507b6ee1a4c9aea72b530107b51d10b2e749023",
       "entries/interview-input.html": "1867cbe345ecdc2c1c1016770729115a95cce8ac01e63fff84ba784d86fcc816",
       "entries/interview-input.tsx": "ebba4dbd16c4989a09c13e7410c58cbf0df5b0d440bab5ddb8b4aa05813c3152",
+      "entries/interview-table.tsx": "2fb492db89e6a5f1142481b97dc65a7ccdefd202bef68c5506a24d7f33eece19",
       "entries/scene-ids.ts": "95ce8fbb7474bdb0fc408c7cc23ab6dd710f24374d794f896dea824e2b477b9f",
-      "entries/scenes.tsx": "ee7bc70dddc9eac6a744b6b56f11010794aff9b19fd29237fb79006e87ba7d86",
+      "entries/scenes.tsx": "25d071de969bb26641b437d2e9d9fe583777d041662e7178c5027109f354f124",
       "scene-ids-runner.cjs": "4af8277faaf90e266f9a5051f5379d8abde722fb0f9c187f598fd969de9f2975",
       "tsconfig.json": "fe55756c85d43c98d8776a79b18188dc89dbe873ebf6eb9b5e79ffc8b3f6e0e4",
       "vite.config.mjs": "8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4",
@@ -47,7 +48,7 @@
     "typecheck_exit": 0,
     "vite_exit": 0
   },
-  "input_fingerprint": "92415ba715c02bda76b26c1e92c8b89e0a7a092bab6b234f3fd555e6e116bbea",
+  "input_fingerprint": "4cedf9552088f76bc4236efecfb81b425d697c6c7ebb294702e2a93fecb0af2a",
   "inputs": {
     "lockfiles": {
       "bun.lock": "a5d2f45992a02c75fc365647cb6bf5a60125ec65caeadb250db2b21eff446398",
@@ -369,14 +370,15 @@
     "repo_files": {
       ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
       ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css": "be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css": "bc7c838e4fe3ea3ec7b172534d2e5b856ccd0040cb6e103684fe46dc2990e6bc",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css": "25f962fa35b37376ce1552d7ae1c352281eeaf0bb0515a8fc6b4c3dfcd04b53d",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.html": "262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx": "6fddafbaf54a41bd229a38bb6c52d41a14c528487c9a3fb47cb0b4493440e065",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/fixtures.tsx": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx": "3718396018601dae4af76f4fb9b9820dfc29628e748fd83f9d8c3c54208163fc",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx": "3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-input.tsx": "ebba4dbd16c4989a09c13e7410c58cbf0df5b0d440bab5ddb8b4aa05813c3152",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx": "ee7bc70dddc9eac6a744b6b56f11010794aff9b19fd29237fb79006e87ba7d86",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-table.tsx": "2fb492db89e6a5f1142481b97dc65a7ccdefd202bef68c5506a24d7f33eece19",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx": "25d071de969bb26641b437d2e9d9fe583777d041662e7178c5027109f354f124",
       "apps/electron/package.json": "77a358dae4c7fb9096706bacf2b378a2d9fbadbf4b074238b9d8b2d0bf592f7a",
       "apps/electron/resources/icon.png": "5fe6f3ac7876d19aaf0f1080833a9dba4ea91a5ffe0d9833666a370ff7837005",
       "apps/electron/resources/themes/catppuccin.json": "a3c8cc47ba1fcdf284ff7a3c23b108ecd39640b2a43edd6545b6095a6c43cf02",
@@ -1318,6 +1320,31 @@
   "scenes": [
     {
       "fullBleed": true,
+      "id": "interview-table-terminal",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-table-minimal",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-table-full",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-table-datatable",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-table-genui",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
       "id": "interview-scroll",
       "region": "助手"
     },
@@ -1479,11 +1506,10 @@
   ],
   "schema_version": 2,
   "snapshot": {
-    "head": "0ecb0fc1887bc9341eedbaed530783f74fbf0cac",
+    "head": "66215ac7a85f8548eafd085be027baa8a8cb9517",
     "head_dirty": [
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-table.tsx",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx"
     ],
     "note": "Input state at the time the inputs LAST changed (git head plus uncommitted/untracked input paths of THIS build). Currency is proven by inputs hashes + regeneration, not by comparing this snapshot to the current git state."

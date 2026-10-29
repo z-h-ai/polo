@@ -1,0 +1,129 @@
+{
+  "e2e": {
+    "visual": {
+      "mode": "smoke",
+      "viewports": [
+        {
+          "name": "desktop-1280x800",
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "name": "desktop-1440x900",
+          "width": 1440,
+          "height": 900
+        },
+        {
+          "name": "compact-800x600",
+          "width": 800,
+          "height": 600
+        }
+      ],
+      "routes": [
+        {
+          "name": "table-terminal",
+          "state": "long",
+          "actual": "/entries/baseline.html?scene=interview-table-terminal&pure=1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "table"
+            }
+          ]
+        },
+        {
+          "name": "table-minimal",
+          "state": "long",
+          "actual": "/entries/baseline.html?scene=interview-table-minimal&pure=1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "table"
+            }
+          ]
+        },
+        {
+          "name": "table-full",
+          "state": "long",
+          "actual": "/entries/baseline.html?scene=interview-table-full&pure=1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "table"
+            }
+          ]
+        },
+        {
+          "name": "table-short",
+          "state": "short",
+          "actual": "/entries/baseline.html?scene=interview-table-full&pure=1&short=1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "table"
+            }
+          ]
+        },
+        {
+          "name": "table-datatable",
+          "state": "inline",
+          "actual": "/entries/baseline.html?scene=interview-table-datatable&pure=1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "table"
+            }
+          ]
+        },
+        {
+          "name": "table-expanded",
+          "state": "expanded",
+          "actual": "/entries/baseline.html?scene=interview-table-datatable&pure=1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "click",
+              "selector": "button[title=\"全屏查看\"]"
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[role=\"dialog\"] table"
+            }
+          ]
+        },
+        {
+          "name": "table-genui",
+          "state": "file-backed",
+          "actual": "/entries/baseline.html?scene=interview-table-genui&pure=1",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "table"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

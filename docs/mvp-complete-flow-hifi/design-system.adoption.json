@@ -8,13 +8,18 @@
       "apps/electron/src/main",
       "apps/electron/src/preload",
       "docs/mvp-complete-flow-hifi",
-      ".agents/skills/polo-ai-design-system"
+      ".agents/skills/polo-ai-design-system",
+      "packages/ui/src/components/markdown/Markdown.tsx",
+      "packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx",
+      "packages/ui/src/components/overlay/DataTableOverlay.tsx",
+      "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx"
     ],
     "platforms": [
       "desktop-electron"
     ],
     "modules": [
-      "登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉"
+      "登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉",
+      "助手消息表格的共享Markdown/datatable/展开容器；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范"
     ]
   },
   "mode": "extracted",
@@ -148,7 +153,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-      "sha256": "ee7bc70dddc9eac6a744b6b56f11010794aff9b19fd29237fb79006e87ba7d86",
+      "sha256": "25d071de969bb26641b437d2e9d9fe583777d041662e7178c5027109f354f124",
       "role": "implementation",
       "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
@@ -172,7 +177,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css",
-      "sha256": "bc7c838e4fe3ea3ec7b172534d2e5b856ccd0040cb6e103684fe46dc2990e6bc",
+      "sha256": "25f962fa35b37376ce1552d7ae1c352281eeaf0bb0515a8fc6b4c3dfcd04b53d",
       "role": "implementation",
       "scope": "基线浏览壳样式：@import renderer index.css + 本目录入口/场景/画廊的 Tailwind @source 扫描声明 + 仅基线文档的滚动覆盖"
     },
@@ -184,7 +189,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-      "sha256": "0ec43a8823d9cf2e913e975d67ebf20094f9b3da79f4734f8db7671e3077db07",
+      "sha256": "1aa292bd6867306661436a566bf770db70ee3fb8eae04089c9d3383bbb9bb25f",
       "role": "implementation",
       "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
     },
@@ -283,6 +288,18 @@
       "sha256": "4b1e55d7e66a3814cf5ae36e345be8b98921e568e4c2e848adc9f7db7307b791",
       "role": "implementation",
       "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-table.tsx",
+      "sha256": "2fb492db89e6a5f1142481b97dc65a7ccdefd202bef68c5506a24d7f33eece19",
+      "role": "implementation",
+      "scope": "POO-171 real Markdown/datatable/GenUI fixture and observed smoke export; current styles only, no sticky fix or new design approval"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/export-table-reference.py",
+      "sha256": "1815f4523e712a98d409676d349bae5be69be1cc51b73886a4ffe1904852ee61",
+      "role": "implementation",
+      "scope": "POO-171 real Markdown/datatable/GenUI fixture and observed smoke export; current styles only, no sticky fix or new design approval"
     }
   ],
   "themes": [

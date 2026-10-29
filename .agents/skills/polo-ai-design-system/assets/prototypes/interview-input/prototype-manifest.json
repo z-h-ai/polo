@@ -41,7 +41,7 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "88981e350ea5bc22c2c3a5d9d4b81df34be0283c9d6011f78d0f52e6ae6fa83f",
+    "sha256": "ca9c7fa69619572572d983d68790c17cf31224354aa12846f47fa586f3b57810",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -60,7 +60,7 @@
   ],
   "provenance": {
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "92415ba715c02bda76b26c1e92c8b89e0a7a092bab6b234f3fd555e6e116bbea",
+    "source_input_fingerprint": "4cedf9552088f76bc4236efecfb81b425d697c6c7ebb294702e2a93fecb0af2a",
     "reference_html_sha256": "90e2998be14ec9b5b1fc2f41a7028ac5f35f9fcf481ba7e7bf09f27100c8bc94",
     "source_entry": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-input-entry.tsx",
     "generator": ".agents/skills/polo-ai-design-system/tools/export-interview-reference.py",

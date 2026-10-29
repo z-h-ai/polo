@@ -115,7 +115,7 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "88981e350ea5bc22c2c3a5d9d4b81df34be0283c9d6011f78d0f52e6ae6fa83f",
+    "sha256": "ca9c7fa69619572572d983d68790c17cf31224354aa12846f47fa586f3b57810",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -134,8 +134,8 @@
   "provenance": {
     "generator": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "92415ba715c02bda76b26c1e92c8b89e0a7a092bab6b234f3fd555e6e116bbea",
-    "source_export_sha256": "9096bb5840be880b2ed10e6d9770ec1c7f8dfbc098c5e47ebc6743555b20550d",
+    "source_input_fingerprint": "4cedf9552088f76bc4236efecfb81b425d697c6c7ebb294702e2a93fecb0af2a",
+    "source_export_sha256": "8283e5362f5a9a1e5a69bb2439b43c4829e9c3eaa9fcbe512999ace84bd0337a",
     "method": "Actual Chromium render and native click/key replay; cloned DOM with product scripts removed only from reference. Reference-only script restores observed scroll offsets. Live React runtime remains unchanged.",
     "fixed_reference_clock": "2026-10-28T12:00:00Z",
     "scope": "Component smoke references; not Electron/backend acceptance and not bug before/after proof."

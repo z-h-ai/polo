@@ -132,3 +132,20 @@ root 工程采用记录及原候选hash。`tools/export-sidebar-reference.py --s
 真实重放既有180px+More候选后提取小型 DOM/CSS，`--check` 重放校验；不重复入库原21MB bundle。
 `assets/prototypes/interview-sidebar/` 只为该已采用局部布局提供 smoke 引用，runtime 直接消费当前生产 AppShell。
 这不批准 POO-180 的其他设计；原候选字号不代表14px，POO-168集成后必须重采真实同状态证据。
+
+## POO-171 原生消息表格
+
+`entries/interview-table.tsx` 只提供20列100行（`?short=1`为3列2行）数据和文件读取fixture。
+三个 `interview-table-{terminal,minimal,full}` 场景直接复用生产 Markdown，
+`interview-table-datatable` 复用 MarkdownDatatableBlock 并可点其真实全屏入口；
+`interview-table-genui` 通过真正 GenUICard→DataTableView→MarkdownDatatableBlock 加载同一文件数据、筛选与行操作。
+外层仅模拟会话阅读viewport，表格高度、overflow、thead与overlay均由生产组件负责，没有fixture sticky CSS。
+GenUI 文件读取为受控 PlatformProvider，按钮事件不向后端发送；这些证据不证明真实文件系统/执行/完整消息页。
+
+`tools/export-table-reference.py --evidence <忽略目录>` 真实采集三模式、短表、datatable内嵌/展开、GenUI，共7态×3视口；
+`--check` 重放后逐字节核对。`assets/prototypes/interview-table/` 为冻结DOM/CSS，runtime仍是原生React。
+当前表头未sticky的事实如实保留；本引用只继承 D-ASSISTANT-REUSE 的既有样式，不宣称修复前后或新目标设计已通过。
+纵横滚动、排序/筛选、row-action头、overlay关闭及长短表几何须由171实际实现卡按同数据/视口/状态验证。
+
+设计policy对共享源码仅覆盖这次真实消费者 Markdown.tsx、MarkdownDatatableBlock.tsx、DataTableOverlay.tsx及对应新增测试路径。
+它沿助手当前renderer组件/样式复用语义，不向packages/ui其他组件或WebUI整页授予工作台目标规范。

@@ -20,6 +20,7 @@ import { ActionRegistryProvider } from '@/actions/registry'
 import { chatComponents } from '@/playground/registry/chat'
 import { ComponentGallery } from './gallery'
 import { InterviewInputScene } from './interview-input'
+import { InterviewMarkdownTableScene, InterviewDatatableScene, InterviewGenUiTableScene } from './interview-table'
 import { InterviewScrollScene, InterviewStatusPickerScene, InterviewStatusDesktopScene, InterviewStatusCompactScene } from './interview-conversation'
 import { productSpaceFixture } from './fixtures'
 
@@ -243,6 +244,15 @@ const chatScenes = [
 ].filter((s): s is BaselineScene => s !== null)
 
 export const baselineScenes: BaselineScene[] = [
+  ...(['terminal', 'minimal', 'full'] as const).map(mode => ({
+    id: `interview-table-${mode}`, region: '助手', title: `Markdown · ${mode} 宽长表格`, fullBleed: true,
+    note: '真实 Markdown；20列100行固定数据，?short=1为3列2行。表格布局与滚动由生产组件处理。',
+    render: () => <InterviewMarkdownTableScene mode={mode} />,
+  })),
+  { id: 'interview-table-datatable', region: '助手', title: 'MarkdownDatatableBlock · 宽长表格', fullBleed: true,
+    note: '真实 datatable 的内部滚动/排序/展开；仅固定表格数据。', render: () => <InterviewDatatableScene /> },
+  { id: 'interview-table-genui', region: '助手', title: 'GenUICard · 文件数据表及行操作', fullBleed: true,
+    note: '真实 GenUI→MarkdownDatatableBlock，保留筛选/行操作；文件读取为本地fixture，不向服务发送。', render: () => <InterviewGenUiTableScene /> },
   { id: 'interview-scroll', region: '助手', title: 'ChatDisplay（长对话阅读）', fullBleed: true,
     note: '真实对话显示组件及固定长会话；发送仅改变内存数据，不代表服务端或计费。', render: () => <InterviewScrollScene /> },
   { id: 'interview-status-picker', region: '助手', title: 'SessionStatusMenu（状态选择与搜索）',
