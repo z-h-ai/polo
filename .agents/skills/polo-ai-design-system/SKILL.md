@@ -67,7 +67,7 @@ Maintenance can create local Git changes but never authorizes commit, push, vers
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-input-entry.tsx` — implementation; isolated native editor reference entry; current components and CSS only; no new target design; SHA-256 `b929dd09a07d6e758bea7588f507b6ee1a4c9aea72b530107b51d10b2e749023`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.interview-input.config.mjs` — implementation; isolated native editor reference entry; current components and CSS only; no new target design; SHA-256 `c30fbc8836954dbdd98c8fb89b91614a93f320575f541a96ebefb03f8744e861`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx` — implementation; implementation; real ChatDisplay and status-menu compositions with local data only; SHA-256 `3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08`
-- `.agents/skills/polo-ai-design-system/tools/export-conversation-references.py` — implementation; implementation; reproducible native render to static smoke reference; runtime remains React; SHA-256 `2a9b1d21b210a1124c2535120e3d60162fd2c485f2c273ca9d65c9ce128f860f`
+- `.agents/skills/polo-ai-design-system/tools/export-conversation-references.py` — implementation; implementation; reproducible native render to static smoke reference; runtime remains React; SHA-256 `c85bd0753e9103523e8bac00888f097a0d665e7cb7f5ee9aca417170d4c33fb4`
 
 ## Reuse
 

@@ -42,6 +42,9 @@ def encode(value) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + '\n').encode()
 
 
+ENTRY = '[data-focus-zone="chat"] button:has-text("跳到最新")'
+
+
 def steps(case):
     if case['task'] == 'POO-170':
         result = [{'action': 'press', 'selector': '[data-radix-scroll-area-viewport]', 'key': 'End'}]
@@ -59,9 +62,27 @@ def steps(case):
     return []
 
 
+def settle_steps(case):
+    """Wait for the jump entry itself to settle the keyboard replay (POO170-R1-02).
+
+    The entry is hidden while parked at the bottom and visible after scrolling
+    into history. PageUp replays as a smooth scroll across frames, so a state
+    asserted immediately after the keypress can observe the mid-flight geometry
+    (the frozen gate captured 571px still to go). These steps are only written
+    into the generated visual plan for the b03 runner to execute; the replay
+    below keeps rendering the cedfb baseline, which predates the entry and
+    would time out waiting for it.
+    """
+    if case['task'] != 'POO-170':
+        return []
+    state = 'visible' if case['state'] == 'history' else 'hidden'
+    return [{'action': 'waitForSelector', 'selector': ENTRY, 'state': state}]
+
+
 def assertions(case):
     if case['task'] == 'POO-170':
-        return [{'type': 'visible', 'selector': '[data-radix-scroll-area-viewport]'}]
+        return [{'type': 'visible', 'selector': '[data-radix-scroll-area-viewport]'},
+                {'type': 'visible' if case['state'] == 'history' else 'hidden', 'selector': ENTRY}]
     if '-picker-' in case['id']:
         return [{'type': 'visible', 'selector': '[cmdk-root]'}]
     return [{'type': 'visible', 'selector': '[role="dialog"]' if '-compact-' in case['id'] else '[role="menu"]'}]
@@ -181,7 +202,8 @@ document.getElementById('reference').src=scenes[scene][viewport];
     for task, port in [('POO-170', 43170), ('POO-179', 43179)]:
         routes = [{'name': case['id'], 'state': case['state'],
                    'actual': f'/entries/baseline.html?scene={case["scene"]}&pure=1&lang={case["lang"]}',
-                   'whole_page': True, 'capture_full_page': True, 'actual_steps': steps(case), 'state_assertions': assertions(case)}
+                   'whole_page': True, 'capture_full_page': True,
+                   'actual_steps': steps(case) + settle_steps(case), 'state_assertions': assertions(case)}
                   for case in CASES if case['task'] == task]
         files[f'{task}-visual-plan.json'] = encode({'e2e': {'visual': {'mode': 'smoke', 'viewports': VIEWPORTS, 'routes': routes}}})
         files[f'{task}-runtime-manifest.json'] = encode({'services': {'frontend': {

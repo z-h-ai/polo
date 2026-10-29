@@ -31,12 +31,21 @@
               "action": "press",
               "selector": "[data-radix-scroll-area-viewport]",
               "key": "End"
+            },
+            {
+              "action": "waitForSelector",
+              "selector": "[data-focus-zone=\"chat\"] button:has-text(\"跳到最新\")",
+              "state": "hidden"
             }
           ],
           "state_assertions": [
             {
               "type": "visible",
               "selector": "[data-radix-scroll-area-viewport]"
+            },
+            {
+              "type": "hidden",
+              "selector": "[data-focus-zone=\"chat\"] button:has-text(\"跳到最新\")"
             }
           ]
         },
@@ -56,12 +65,21 @@
               "action": "press",
               "selector": "[data-radix-scroll-area-viewport]",
               "key": "PageUp"
+            },
+            {
+              "action": "waitForSelector",
+              "selector": "[data-focus-zone=\"chat\"] button:has-text(\"跳到最新\")",
+              "state": "visible"
             }
           ],
           "state_assertions": [
             {
               "type": "visible",
               "selector": "[data-radix-scroll-area-viewport]"
+            },
+            {
+              "type": "visible",
+              "selector": "[data-focus-zone=\"chat\"] button:has-text(\"跳到最新\")"
             }
           ]
         }

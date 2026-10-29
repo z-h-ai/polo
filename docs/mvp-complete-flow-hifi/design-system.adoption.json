@@ -226,7 +226,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-      "sha256": "2a9b1d21b210a1124c2535120e3d60162fd2c485f2c273ca9d65c9ce128f860f",
+      "sha256": "c85bd0753e9103523e8bac00888f097a0d665e7cb7f5ee9aca417170d4c33fb4",
       "role": "implementation",
       "scope": "implementation; reproducible native render to static smoke reference; runtime remains React"
     }
