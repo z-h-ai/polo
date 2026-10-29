@@ -11,7 +11,7 @@ setupI18n()
 let themeMode: 'light' | 'dark' = 'light'
 mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => ({ resolvedMode: themeMode, setMode: () => {} }) }))
 mock.module('@/atoms/sessions', () => ({ sessionMetaMapAtom: {} }))
-mock.module('jotai', () => ({ useAtomValue: () => new Map() }))
+mock.module('jotai', () => ({ useAtomValue: () => new Map(), atom: () => ({}) }))
 const selectLocalWorkspace = mock(() => {})
 mock.module('@/context/AppShellContext', () => ({ useOptionalAppShellContext: () => ({
   currentAdminUser: { displayName: '本账号', username: 'owner' },
