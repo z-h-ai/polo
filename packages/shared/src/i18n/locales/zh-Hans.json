@@ -2507,6 +2507,7 @@
   "status.done": "完成",
   "status.filterStatuses": "筛选状态...",
   "status.needs-review": "待审查",
+  "status.noStatusFound": "未找到状态",
   "status.todo": "待办",
   "tabName.knowledgeBase": "知识库",
   "tabName.poloAssistant": "Polo 助手",

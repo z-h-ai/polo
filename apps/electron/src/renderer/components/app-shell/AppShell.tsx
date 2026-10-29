@@ -96,7 +96,7 @@ import {
   creatorSkillSafetyIdentityKey,
 } from "@/atoms/creator-skill-safety"
 import { panelStackAtom, panelCountAtom, focusedPanelIdAtom, focusedSessionIdAtom, focusNextPanelAtom, focusPrevPanelAtom, parseSessionIdFromRoute } from "@/atoms/panel-stack"
-import { type SessionStatusId, type SessionStatus, statusConfigsToSessionStatuses } from "@/config/session-status-config"
+import { getStatusLabel, type SessionStatusId, type SessionStatus, statusConfigsToSessionStatuses } from "@/config/session-status-config"
 import { useStatuses } from "@/hooks/useStatuses"
 import { useLabels } from "@/hooks/useLabels"
 import { useViews } from "@/hooks/useViews"
@@ -1055,10 +1055,10 @@ function AppShellContent({
   const filterDropdownResults = useMemo(() => {
     if (!filterDropdownQuery.trim()) return { states: [] as SessionStatus[], labels: [] as LabelMenuItem[] }
     return {
-      states: filterLabelMenuStates(effectiveSessionStatuses, filterDropdownQuery),
+      states: filterLabelMenuStates(effectiveSessionStatuses, filterDropdownQuery, t),
       labels: filterLabelMenuItems(flatLabelMenuItems, filterDropdownQuery),
     }
-  }, [filterDropdownQuery, effectiveSessionStatuses, flatLabelMenuItems])
+  }, [filterDropdownQuery, effectiveSessionStatuses, flatLabelMenuItems, t])
 
   // Reset selected index when query changes
   React.useEffect(() => {
@@ -2197,7 +2197,7 @@ function AppShellContent({
         return t("sidebar.flagged")
       case 'state': {
         const state = effectiveSessionStatuses.find(s => s.id === sessionFilter.stateId)
-        return state ? t(`status.${state.id}`, state.label) : t("sidebar.allSessions")
+        return state ? getStatusLabel(state, t) : t("sidebar.allSessions")
       }
       case 'label':
         return sessionFilter.labelId === '__all__' ? t("sidebar.labels") : getLabelDisplayName(labelConfigs, sessionFilter.labelId)
@@ -2372,7 +2372,7 @@ function AppShellContent({
                         // Status items (sortable via SortableStatusList)
                         ...effectiveSessionStatuses.map(state => ({
                           id: `nav:state:${state.id}`,
-                          title: t(`status.${state.id}`, state.label),
+                          title: getStatusLabel(state, t),
                           label: String(sessionStatusCounts[state.id] || 0),
                           icon: state.icon,
                           iconColor: state.resolvedColor,
@@ -2750,7 +2750,7 @@ function AppShellContent({
                                     <StyledDropdownMenuItem disabled key={`pinned-status-${state.id}`}>
                                       <FilterMenuRow
                                         icon={state.icon}
-                                        label={state.label}
+                                        label={getStatusLabel(state, t)}
                                         accessory={<Check className="h-3 w-3 text-muted-foreground" />}
                                         iconStyle={state.iconColorable ? { color: state.resolvedColor } : undefined}
                                         noIconContainer
@@ -2782,7 +2782,7 @@ function AppShellContent({
                                       <StyledDropdownMenuSubTrigger onClick={(e) => { e.preventDefault(); setListFilter(prev => { const next = new Map(prev); next.delete(state.id); return next }) }}>
                                         <FilterMenuRow
                                           icon={state.icon}
-                                          label={state.label}
+                                          label={getStatusLabel(state, t)}
                                           accessory={<FilterModeBadge mode={mode} />}
                                           iconStyle={applyColor ? { color: state.resolvedColor } : undefined}
                                           noIconContainer
@@ -2860,7 +2860,7 @@ function AppShellContent({
                                         <StyledDropdownMenuSubTrigger onClick={(e) => { e.preventDefault(); setListFilter(prev => { const next = new Map(prev); next.delete(state.id); return next }) }}>
                                           <FilterMenuRow
                                             icon={state.icon}
-                                            label={state.label}
+                                            label={getStatusLabel(state, t)}
                                             accessory={<FilterModeBadge mode={currentMode} />}
                                             iconStyle={applyColor ? { color: state.resolvedColor } : undefined}
                                             noIconContainer
@@ -2902,7 +2902,7 @@ function AppShellContent({
                                       >
                                         <FilterMenuRow
                                           icon={state.icon}
-                                          label={state.label}
+                                          label={getStatusLabel(state, t)}
                                           accessory={isPinned ? <Check className="h-3 w-3 text-muted-foreground" /> : null}
                                           iconStyle={applyColor ? { color: state.resolvedColor } : undefined}
                                           noIconContainer
@@ -3013,7 +3013,7 @@ function AppShellContent({
                                             >
                                               <FilterMenuRow
                                                 icon={state.icon}
-                                                label={state.label}
+                                                label={getStatusLabel(state, t)}
                                                 accessory={<FilterModeBadge mode={currentMode} />}
                                                 iconStyle={applyColor ? { color: state.resolvedColor } : undefined}
                                                 noIconContainer
@@ -3062,7 +3062,7 @@ function AppShellContent({
                                           >
                                             <FilterMenuRow
                                               icon={state.icon}
-                                              label={state.label}
+                                              label={getStatusLabel(state, t)}
                                               accessory={isPinned ? <Check className="h-3 w-3 text-muted-foreground" /> : null}
                                               iconStyle={applyColor ? { color: state.resolvedColor } : undefined}
                                               noIconContainer

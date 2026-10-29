@@ -2509,6 +2509,7 @@
   "status.done": "Ukończone",
   "status.filterStatuses": "Filtruj statusy...",
   "status.needs-review": "Wymaga przeglądu",
+  "status.noStatusFound": "Nie znaleziono statusu",
   "status.todo": "Do zrobienia",
   "tabName.knowledgeBase": "Baza wiedzy",
   "tabName.poloAssistant": "Asystent Polo",

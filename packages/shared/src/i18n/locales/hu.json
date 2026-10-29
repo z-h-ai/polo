@@ -2507,6 +2507,7 @@
   "status.done": "Kész",
   "status.filterStatuses": "Állapotok szűrése...",
   "status.needs-review": "Felülvizsgálatra vár",
+  "status.noStatusFound": "Nem található állapot",
   "status.todo": "Teendő",
   "tabName.knowledgeBase": "Tudásbázis",
   "tabName.poloAssistant": "Polo asszisztens",

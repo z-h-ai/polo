@@ -52,7 +52,7 @@ import {
 } from '@/components/ui/label-menu-utils'
 import { findLabelById } from '@polo-ai/shared/labels'
 import type { LabelConfig } from '@polo-ai/shared/labels'
-import { type SessionStatus, type SessionStatusId } from '@/config/session-status-config'
+import { getStatusLabel, type SessionStatus, type SessionStatusId } from '@/config/session-status-config'
 import type { ChatGroupingMode } from './SessionList'
 
 type FilterMode = 'include' | 'exclude'
@@ -119,13 +119,13 @@ export function CompactSessionListFilter({
   const results = React.useMemo(() => {
     return {
       states: isSearching
-        ? filterSessionStatuses(effectiveSessionStatuses, trimmedQuery)
+        ? filterSessionStatuses(effectiveSessionStatuses, trimmedQuery, t)
         : effectiveSessionStatuses,
       labels: isSearching
         ? filterLabelMenuItems(flatLabelItems, trimmedQuery)
         : flatLabelItems,
     }
-  }, [isSearching, trimmedQuery, effectiveSessionStatuses, flatLabelItems])
+  }, [isSearching, trimmedQuery, effectiveSessionStatuses, flatLabelItems, t])
 
   const hasUserFilter = listFilter.size > 0 || labelFilter.size > 0
   const hasAnyFilter =
@@ -255,7 +255,7 @@ export function CompactSessionListFilter({
                     icon={state.icon}
                     iconColor={colorize ? state.resolvedColor : undefined}
                     bareIcon
-                    label={state.label}
+                    label={getStatusLabel(state, t)}
                     mode={mode}
                     pinned={isPinned}
                     onTap={() => toggleStatus(state.id)}

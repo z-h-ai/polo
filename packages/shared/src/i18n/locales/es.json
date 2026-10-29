@@ -2507,6 +2507,7 @@
   "status.done": "Hecho",
   "status.filterStatuses": "Filtrar estados...",
   "status.needs-review": "Necesita revisión",
+  "status.noStatusFound": "No se encontraron estados",
   "status.todo": "Por hacer",
   "tabName.knowledgeBase": "Base de conocimiento",
   "tabName.poloAssistant": "Asistente Polo",

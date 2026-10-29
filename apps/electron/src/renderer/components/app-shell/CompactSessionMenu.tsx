@@ -67,6 +67,7 @@ import {
 } from '@/components/ui/label-menu-utils'
 import type { LabelConfig } from '@polo-ai/shared/labels'
 import {
+  getStatusLabel,
   getStateColor,
   getStateIcon,
   getStatusIconStyle,
@@ -545,6 +546,7 @@ function StatusPane({
   activeStateId?: SessionStatusId | null
   onSelect: (id: SessionStatusId) => void
 }) {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col">
       {sessionStatuses.map((state) => {
@@ -555,7 +557,7 @@ function StatusPane({
           <Row
             key={state.id}
             icon={<span style={getStatusIconStyle(state)}>{bareStateIcon}</span>}
-            label={state.label}
+            label={getStatusLabel(state, t)}
             radioSelected={activeStateId === state.id}
             onTap={() => onSelect(state.id)}
           />

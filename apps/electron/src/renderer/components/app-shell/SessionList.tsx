@@ -29,7 +29,7 @@ import { useNavigation, useNavigationState, routes, isSessionsNavigation } from 
 import { useFocusContext } from "@/context/FocusContext"
 import { sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@polo-ai/shared/views"
-import type { SessionStatusId, SessionStatus } from "@/config/session-status-config"
+import { getStatusLabel, type SessionStatusId, type SessionStatus } from "@/config/session-status-config"
 import { buildCollapsedGroupsScopeSuffix } from "@/utils/session-list-collapse"
 
 export interface SessionListRow {
@@ -361,7 +361,7 @@ export function SessionList({
         const collapsedMeta = collapsedGroupsMeta.find(m => m.key === key)
         orderedGroups.push({
           key,
-          label: t(`status.${state.id}`, state.label),
+          label: getStatusLabel(state, t),
           items: groupRows,
           collapsible: true,
           ...(collapsedMeta ? { collapsedCount: collapsedMeta.count } : {}),
