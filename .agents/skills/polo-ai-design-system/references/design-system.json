@@ -153,7 +153,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-      "sha256": "25d071de969bb26641b437d2e9d9fe583777d041662e7178c5027109f354f124",
+      "sha256": "cfd58dda1fb21efefcba534915662fa916d67bc2d0e2f4f7605c9897085e5fbd",
       "role": "implementation",
       "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
@@ -300,6 +300,18 @@
       "sha256": "1815f4523e712a98d409676d349bae5be69be1cc51b73886a4ffe1904852ee61",
       "role": "implementation",
       "scope": "POO-171 real Markdown/datatable/GenUI fixture and observed smoke export; current styles only, no sticky fix or new design approval"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-quota-banner.tsx",
+      "sha256": "6f1acb1b282ee44a347ebf33677999506648ecb296db25dfb5a53b7616c27e2f",
+      "role": "implementation",
+      "scope": "POO-177 current billing-banner states (member/owner insufficient-credit, U2 recheck secondary action); actions are local no-ops; refresh behaviour belongs to the implementation card"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/export-quota-banner-references.py",
+      "sha256": "0e745732553916d2e06631176b32b430e741cdf379981d0ee2c8c58719321a20",
+      "role": "implementation",
+      "scope": "POO-177 reproducible native render to static smoke reference; single destructive banner asserted per case; runtime remains React"
     }
   ],
   "themes": [

@@ -22,6 +22,7 @@ import { ComponentGallery } from './gallery'
 import { InterviewInputScene } from './interview-input'
 import { InterviewMarkdownTableScene, InterviewDatatableScene, InterviewGenUiTableScene } from './interview-table'
 import { InterviewScrollScene, InterviewStatusPickerScene, InterviewStatusDesktopScene, InterviewStatusCompactScene } from './interview-conversation'
+import { InterviewQuotaMemberScene, InterviewQuotaOwnerScene } from './interview-quota-banner'
 import { productSpaceFixture } from './fixtures'
 
 /**
@@ -261,6 +262,10 @@ export const baselineScenes: BaselineScene[] = [
     note: '真实共享状态菜单项与Radix菜单容器。', render: () => <InterviewStatusDesktopScene /> },
   { id: 'interview-status-compact', region: '助手', title: 'CompactSessionMenu（紧凑状态菜单）',
     note: '真实紧凑菜单；授权/分享/文件操作不连接后端。', render: () => <InterviewStatusCompactScene /> },
+  { id: 'interview-quota-member', region: '助手', title: '额度提醒（成员）',
+    note: '真实 ChatInputZone 状态横幅与 ChatPage 决策映射（insufficient-credit 成员态：成员文案+U2 重新检查动作）；动作仅本地空操作，不发起 GET/清 latch/充值。', render: () => <InterviewQuotaMemberScene /> },
+  { id: 'interview-quota-owner', region: '助手', title: '额度提醒（所有者）',
+    note: '真实 ChatInputZone 状态横幅与 ChatPage 决策映射（insufficient-credit 所有者态：充值交接+U2 重新检查）；动作仅本地空操作，不发起 GET/清 latch/充值。', render: () => <InterviewQuotaOwnerScene /> },
   {
     id: 'interview-input',
     region: '助手',

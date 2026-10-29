@@ -149,3 +149,17 @@ GenUI 文件读取为受控 PlatformProvider，按钮事件不向后端发送；
 
 设计policy对共享源码仅覆盖这次真实消费者 Markdown.tsx、MarkdownDatatableBlock.tsx、DataTableOverlay.tsx及对应新增测试路径。
 它沿助手当前renderer组件/样式复用语义，不向packages/ui其他组件或WebUI整页授予工作台目标规范。
+
+## POO-177 额度提醒区域
+
+`entries/interview-quota-banner.tsx` 复刻 ChatPage 决策映射（`decideChatAccessBanner`）驱动的
+真实 ChatDisplay→ChatInputZone 状态横幅：`interview-quota-member`（成员文案+U2 重新检查动作，无充值按钮）、
+`interview-quota-owner`（充值交接+U2 重新检查）。动作仅本地空操作；不发起 GET、不清 latch、不模拟充值。
+刷新 pending/完成/失败是 POO-177 实现后的行为态，本基线不渲染也不预批。
+
+`tools/export-quota-banner-references.py --evidence <忽略目录>` 真实采集两态×zh-Hans/en×三视口共4态12视图，
+每 case 断言恰好一个 `data-testid="chat-status-banner"` 且 variant=destructive、无横向溢出；`--check` 逐字节重放核对。
+`assets/prototypes/interview-quota-banner/` 为冻结DOM/CSS，runtime仍是原生React。
+基线路由 `lang` 仅支持 en/zh-Hans（baseline.tsx 二元映射）；Plan 要求的 de/hu/pl 窄宽文案检查属验收 fixture 范围，
+不在本基线虚报。本引用只继承 D-ASSISTANT-REUSE 的既有样式；QUOTA-01/02 的刷新入口、busy/完成反馈
+须由 177 实际实现卡按同数据/视口/状态验证。
