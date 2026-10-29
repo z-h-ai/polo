@@ -20,9 +20,13 @@
  *
  * Scope discipline: every async step re-checks the session/workspace the
  * click started in. A late response for session A must not steal the browser
- * pane from session B, and a freshly created instance is only destroyed when
- * it was created by this call AND never delivered — a user's existing browser
- * is never torn down because a navigation into it failed.
+ * pane from session B. Reuse is workspace-scoped first (a session id is only
+ * unique within its workspace; both local and remote-mirror aliases of the
+ * citing workspace count). Opens sharing one scope are serialized because
+ * `api.create` is get-or-create, and an instance is only ever destroyed while
+ * the call can still prove it obtained it from `create` AND never delivered
+ * it — a user's existing browser is never torn down because a navigation
+ * into it failed.
  */
 
 import { classifyExternalUrl } from '@polo-ai/shared/utils/url-safety'
@@ -81,6 +85,14 @@ export function resolveCitationSourceTarget(rawUrl: string): CitationSourceTarge
 export interface CitationSourceScope {
   sessionId: string | null
   workspaceId: string | null
+  /**
+   * The remote-mirror workspace id of the SAME conceptual workspace (read
+   * from `activeWorkspace.remoteServer.remoteWorkspaceId` — the same
+   * authoritative alias `filterInstancesForWorkspace` consumes). A remote
+   * agent stamps its tabs with this id, so an instance of this workspace may
+   * legitimately carry either id. Optional/nullable = unknown.
+   */
+  remoteWorkspaceId?: string | null
 }
 
 /** Terminal outcome of one `openCitationSource` call (assertion-friendly). */
@@ -127,23 +139,112 @@ function getBrowserPaneApi(): BrowserPaneApi | null {
 }
 
 function sameScope(a: CitationSourceScope, b: CitationSourceScope): boolean {
-  return a.sessionId === b.sessionId && a.workspaceId === b.workspaceId
+  return (
+    a.sessionId === b.sessionId &&
+    a.workspaceId === b.workspaceId &&
+    (a.remoteWorkspaceId ?? null) === (b.remoteWorkspaceId ?? null)
+  )
 }
 
 /**
- * Ownership filter for reusing an existing browser for a citation: only an
- * instance bound to the citing session, or a workspace-level window of the
- * citing workspace, qualifies. Another session's bound browser and another
- * workspace's window are never reused (and never detached).
+ * Workspace ids that count as "ours" for reuse: the local workspace id plus
+ * the remote-mirror alias of the same conceptual workspace, when known.
+ */
+function ownedWorkspaceIds(scope: CitationSourceScope): string[] {
+  return [scope.workspaceId, scope.remoteWorkspaceId ?? null].filter(
+    (id): id is string => !!id
+  )
+}
+
+/**
+ * Ownership filter for reusing an existing browser for a citation.
+ *
+ * Workspace ownership is checked FIRST, for session-bound and unbound
+ * instances alike: a session id is only unique WITHIN its workspace, so the
+ * same id can legally exist in two workspaces (`storage.ts` dedupes per
+ * workspace) — a name match alone must never adopt another workspace's
+ * window. Both aliases of the citing workspace count; an instance with no
+ * workspace stamp, a scope with no workspace context, or a stamp outside the
+ * alias set is of unknown/foreign ownership and is NEVER reused.
  */
 export function canReuseForCitationSource(
   info: BrowserInstanceInfo,
   scope: CitationSourceScope,
 ): boolean {
   if (!info) return false
+
+  const ourWorkspaces = ownedWorkspaceIds(scope)
+  if (!info.workspaceId || ourWorkspaces.length === 0) return false
+  if (!ourWorkspaces.includes(info.workspaceId)) return false
+
   if (scope.sessionId && info.ownerSessionId === scope.sessionId) return true
-  if (!info.ownerSessionId && scope.workspaceId && info.workspaceId === scope.workspaceId) return true
-  return false
+  // A workspace-level (unbound) window of OUR workspace may be adopted.
+  return !info.ownerSessionId
+}
+
+/**
+ * One open-at-a-time per citation scope, shared by every opener in this
+ * renderer process. `api.create` is get-or-create (Main's `createForSession`
+ * returns an already-bound instance or adopts an existing manual one), so
+ * two interleaved opens for the same scope resolve to the SAME instance id —
+ * interleaved create/navigate/focus/destroy steps could then recycle a
+ * browser another call had already delivered. Serializing per scope removes
+ * that race inside this renderer; the ownership checks below cover what
+ * remains across windows.
+ */
+const scopeOpenQueues = new Map<string, Promise<CitationSourceOutcome>>()
+
+/**
+ * Instance ids THIS renderer obtained from `create` and has not delivered
+ * yet. An id that was already present in the `list()` snapshot taken before
+ * the call (adopted via get-or-create) is never registered here, and a
+ * registered id leaves the set the moment it is delivered (focused) — so an
+ * instance is only ever destroyed while this call can still prove it created
+ * it AND never presented it to the user.
+ */
+const undeliveredOwnCreations = new Set<string>()
+
+function scopeQueueKey(scope: CitationSourceScope): string {
+  return `${scope.sessionId ?? ''}|${scope.workspaceId ?? ''}|${scope.remoteWorkspaceId ?? ''}`
+}
+
+function enqueueScopedOpen(
+  key: string,
+  run: () => Promise<CitationSourceOutcome>,
+): Promise<CitationSourceOutcome> {
+  const previous = scopeOpenQueues.get(key)
+  // A failed predecessor must not block the next open for the same scope.
+  const next = (previous ?? Promise.resolve()).then(run, run)
+  scopeOpenQueues.set(key, next)
+  void next.catch(() => {}).finally(() => {
+    if (scopeOpenQueues.get(key) === next) scopeOpenQueues.delete(key)
+  })
+  return next
+}
+
+/**
+ * Destroy an instance ONLY while this call can still prove it (a) obtained
+ * it from `create` in THIS renderer and (b) never delivered it. Every proof
+ * is re-checked after each await — `create` is get-or-create, another window
+ * may have presented the same id in the meantime, and a visible instance is
+ * by definition already the user's — and any doubt leaves it alone.
+ */
+async function recycleUndeliveredCreation(api: BrowserPaneApi, id: string): Promise<void> {
+  if (!undeliveredOwnCreations.has(id)) return
+  try {
+    const info = (await api.list()).find((candidate) => candidate?.id === id)
+    if (!undeliveredOwnCreations.has(id)) return
+    if (info?.isVisible) {
+      // Already presented to the user somewhere — ownership is lost.
+      undeliveredOwnCreations.delete(id)
+      return
+    }
+  } catch {
+    // Cannot verify state — never destroy on doubt.
+    return
+  }
+  undeliveredOwnCreations.delete(id)
+  await api.destroy(id).catch(() => {})
 }
 
 /**
@@ -154,7 +255,7 @@ export function canReuseForCitationSource(
 export function createCitationSourceOpener(options: CitationSourceOpenerOptions): CitationSourceOpener {
   const optionsRef = { current: options }
 
-  const opener = async (url: string): Promise<CitationSourceOutcome> => {
+  const openNow = async (url: string, startScope: CitationSourceScope): Promise<CitationSourceOutcome> => {
     const target = resolveCitationSourceTarget(url)
 
     if (target.kind === 'blocked') {
@@ -179,7 +280,6 @@ export function createCitationSourceOpener(options: CitationSourceOpenerOptions)
       return { status: 'failed', reason: 'Browser pane API is unavailable.' }
     }
 
-    const startScope = optionsRef.current.getSessionScope()
     if (!startScope.sessionId && !startScope.workspaceId) {
       return { status: 'failed', reason: 'No session or workspace context for this citation.' }
     }
@@ -232,15 +332,23 @@ export function createCitationSourceOpener(options: CitationSourceOpenerOptions)
     // startup race on an instance THIS call created; anything still failing
     // afterwards falls through to the recycle below. A pre-existing browser
     // (the reuse path above) is never retried.
+    //
+    // `create` is get-or-create: the id it resolves with may be an instance
+    // that ALREADY existed (already bound, or an adopted manual window). The
+    // `instances` snapshot above is the pre-create list, so a returned id
+    // that is already in it was adopted, NOT created by this call — an
+    // adopted instance is never registered as ours and never destroyed.
+    const preCreateIds = new Set(instances.map((info) => info.id))
     let createdId: string | null = null
     try {
       createdId = await api.create({
         show: false,
         bindToSessionId: startScope.sessionId ?? undefined,
       })
+      if (!preCreateIds.has(createdId)) undeliveredOwnCreations.add(createdId)
       if (!sameScope(optionsRef.current.getSessionScope(), startScope)) {
         // Never navigated, never delivered — recycle immediately.
-        await api.destroy(createdId).catch(() => {})
+        await recycleUndeliveredCreation(api, createdId)
         return { status: 'stale' }
       }
       try {
@@ -248,7 +356,7 @@ export function createCitationSourceOpener(options: CitationSourceOpenerOptions)
       } catch (startupError) {
         await new Promise((resolve) => setTimeout(resolve, 700))
         if (!sameScope(optionsRef.current.getSessionScope(), startScope)) {
-          await api.destroy(createdId).catch(() => {})
+          await recycleUndeliveredCreation(api, createdId)
           return { status: 'stale' }
         }
         optionsRef.current.onStartupRetry?.(
@@ -259,22 +367,36 @@ export function createCitationSourceOpener(options: CitationSourceOpenerOptions)
       if (!sameScope(optionsRef.current.getSessionScope(), startScope)) {
         // Never delivered — the user moved on mid-flight. Recycle ONLY this
         // not-yet-delivered instance so no hidden orphan survives.
-        await api.destroy(createdId).catch(() => {})
+        await recycleUndeliveredCreation(api, createdId)
         return { status: 'stale' }
       }
       await api.focus(createdId)
+      // Delivered: the sidebar sync now presents this instance to the user.
+      // Ownership is released — a delivered browser is never torn down by
+      // this module, whatever fails later.
+      undeliveredOwnCreations.delete(createdId)
       return { status: 'opened-in-browser', instanceId: createdId, reused: false }
     } catch (error) {
       if (createdId) {
-        // Creation/navigate/focus failed before delivery — recycle this
-        // call's own instance; a user-facing browser is never touched here.
-        await api.destroy(createdId).catch(() => {})
+        // Creation/navigate/focus failed before delivery — recycle it ONLY
+        // while this call can still prove it created and never delivered it.
+        await recycleUndeliveredCreation(api, createdId)
       }
       return {
         status: 'failed',
         reason: error instanceof Error ? error.message : String(error),
       }
     }
+  }
+
+  const opener: CitationSourceOpener = (url: string) => {
+    // Serialize opens that share the click's scope (double-clicks, a burst of
+    // citations in one chat) so their get-or-create calls cannot interleave.
+    // The scope is captured SYNCHRONOUSLY at the click: it is both the queue
+    // key and the stale-check baseline, so a switch that happens before the
+    // queued open runs is still detected as stale.
+    const startScope = optionsRef.current.getSessionScope()
+    return enqueueScopedOpen(scopeQueueKey(startScope), () => openNow(url, startScope))
   }
 
   return opener

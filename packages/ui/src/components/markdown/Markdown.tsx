@@ -199,6 +199,12 @@ function createComponents(
     //   through `resolveMarkdownLinkTarget` so file URLs land in `onFileClick`
     //   and blocked URLs surface a meaningful error via `onUrlClick` →
     //   `classifyExternalUrl`.
+    // - Middle-click (auxclick button=1) is routed through the SAME handler.
+    //   Left alone it would fall through to Electron's default window-open
+    //   path (`setWindowOpenHandler` → `openExternalFromRenderer`), sending a
+    //   citation outside the built-in browser (POO-172/CITE-01). This is a
+    //   renderer-side interaction change only — Main's security policy and the
+    //   business `onOpenUrl` channel are untouched.
     a: ({ href, children }) => {
       const trimmedHref = href?.trim() ?? ''
       const sanitized = trimmedHref ? defaultUrlTransform(trimmedHref) : ''
@@ -218,7 +224,7 @@ function createComponents(
         return <span>{children}</span>
       }
 
-      const handleClick = (e: React.MouseEvent) => {
+      const dispatchLinkTarget = (e: { preventDefault: () => void }) => {
         e.preventDefault()
 
         const target = trimmedHref || fallbackText
@@ -232,10 +238,34 @@ function createComponents(
         }
       }
 
+      const handleClick = (e: React.MouseEvent) => dispatchLinkTarget(e)
+
+      const handleAuxClick = (e: React.MouseEvent) => {
+        // Only the middle button needs intercepting; other auxclicks
+        // (right-click context menu, etc.) keep their default behavior.
+        if (e.button !== 1) return
+        dispatchLinkTarget(e)
+      }
+
+      // Keyboard parity. With a real `href` Chromium activates the link on
+      // Enter by synthesizing a click — `dispatchLinkTarget` preventDefault-s
+      // that first, so the callback fires exactly once either way. Space is
+      // only claimed for the URL-fallback anchor (no href): without it that
+      // anchor is not focusable/activatable at all, while a real link keeps
+      // the browser's native Space (page scroll) behavior.
+      const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key !== 'Enter' && (safeHref || e.key !== ' ')) return
+        dispatchLinkTarget(e)
+      }
+
       return (
         <a
           href={safeHref}
           onClick={handleClick}
+          onAuxClick={handleAuxClick}
+          onKeyDown={handleKeyDown}
+          tabIndex={safeHref ? undefined : 0}
+          role={safeHref ? undefined : 'link'}
           className="text-accent hover:underline cursor-pointer"
         >
           {children}

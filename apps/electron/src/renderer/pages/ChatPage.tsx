@@ -27,7 +27,7 @@ import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
 import { decideChatAccessBanner } from '@/lib/chat-access-banner'
-import { createCitationSourceOpener } from '@/lib/open-citation-source'
+import { createCitationSourceOpener, type CitationSourceScope } from '@/lib/open-citation-source'
 import { formatQuotaResetTime } from '@/lib/quota-reset-time'
 import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
@@ -493,11 +493,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // are rejected without any external fallback. Business URLs (error-card
   // open_url, user messages, settings handoffs) keep using handleOpenUrl.
   // The scope is read live so a click that races a session switch never
-  // steals another session's browser pane.
-  const citationScopeRef = React.useRef({ sessionId: null as string | null, workspaceId: null as string | null })
+  // steals another session's browser pane. `remoteWorkspaceId` is the same
+  // authoritative alias the browser tab strip filters by — a remote agent's
+  // instance carries the mirror id, not the local one.
+  const citationScopeRef = React.useRef<CitationSourceScope>({ sessionId: null, workspaceId: null, remoteWorkspaceId: null })
   citationScopeRef.current = {
     sessionId: session?.id ?? null,
     workspaceId: session?.workspaceId ?? activeWorkspaceId ?? null,
+    remoteWorkspaceId: activeWorkspace?.remoteServer?.remoteWorkspaceId ?? null,
   }
   const openSourceUrl = React.useMemo(
     () =>
