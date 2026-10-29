@@ -3,7 +3,7 @@
   "entry": "entries/baseline.html",
   "entry_self_contained": "entries/baseline.html inlines its JS and CSS (vite inlineDynamicImports + single-file transform), so it opens and runs directly from file:// with no server and no external request.",
   "files": {
-    "entries/baseline.html": "9096bb5840be880b2ed10e6d9770ec1c7f8dfbc098c5e47ebc6743555b20550d"
+    "entries/baseline.html": "802e508a026bf266fdaa2e9310e65300ff7081501d3336699992cdaa494718e1"
   },
   "fixture_scope": "Fixtures replace BACKEND DATA only (playground mock + baseline fixtures); every rendered element comes from the renderer sources consumed by this build. They do not represent real backend behavior.",
   "generator": {
@@ -26,7 +26,7 @@
     "scene_extraction_exit": 0,
     "sources": {
       "build.py": "aa3f8aeeb445244037df2da327bba32ac21323082de2c7096ae3916515837f36",
-      "entries/baseline.css": "bc7c838e4fe3ea3ec7b172534d2e5b856ccd0040cb6e103684fe46dc2990e6bc",
+      "entries/baseline.css": "280684296a5d545025d897a2874e3bb1d8f29b00afe5391b9cd52f3bd4c11037",
       "entries/baseline.html": "262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc",
       "entries/baseline.tsx": "6fddafbaf54a41bd229a38bb6c52d41a14c528487c9a3fb47cb0b4493440e065",
       "entries/fixtures.tsx": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820",
@@ -35,10 +35,13 @@
       "entries/interview-input-entry.tsx": "b929dd09a07d6e758bea7588f507b6ee1a4c9aea72b530107b51d10b2e749023",
       "entries/interview-input.html": "1867cbe345ecdc2c1c1016770729115a95cce8ac01e63fff84ba784d86fcc816",
       "entries/interview-input.tsx": "ebba4dbd16c4989a09c13e7410c58cbf0df5b0d440bab5ddb8b4aa05813c3152",
+      "entries/interview-localization.tsx": "09ac26520a75292039343c7228417156ac94748bef4ffd649bbdcc667f941ba9",
       "entries/scene-ids.ts": "95ce8fbb7474bdb0fc408c7cc23ab6dd710f24374d794f896dea824e2b477b9f",
-      "entries/scenes.tsx": "ee7bc70dddc9eac6a744b6b56f11010794aff9b19fd29237fb79006e87ba7d86",
+      "entries/scenes.tsx": "da2370a6e03c58d293db9fe406b4168432b1a4b428e2937974a14db46cbd191f",
+      "localization-functional-cases.json": "222b46309acdb2d68fbfb7593b53ba6ae6112a593a64d322076e9dcabeec66c6",
       "scene-ids-runner.cjs": "4af8277faaf90e266f9a5051f5379d8abde722fb0f9c187f598fd969de9f2975",
       "tsconfig.json": "fe55756c85d43c98d8776a79b18188dc89dbe873ebf6eb9b5e79ffc8b3f6e0e4",
+      "verify-interview-localization.py": "e8f6541cd7e53f497423e0395edf69eb53e97dae503d939494c8516cea49ae16",
       "vite.config.mjs": "8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4",
       "vite.interview-input.config.mjs": "c30fbc8836954dbdd98c8fb89b91614a93f320575f541a96ebefb03f8744e861",
       "vite.scene-ids.config.mjs": "eff52dc6b1854c66cddd6242ad42735092cece0c77a2b197b160caf5e6b03252"
@@ -47,7 +50,7 @@
     "typecheck_exit": 0,
     "vite_exit": 0
   },
-  "input_fingerprint": "92415ba715c02bda76b26c1e92c8b89e0a7a092bab6b234f3fd555e6e116bbea",
+  "input_fingerprint": "78adb762afd41954687093fc6a70175399703372dc51fb28dedd018777c4aab4",
   "inputs": {
     "lockfiles": {
       "bun.lock": "a5d2f45992a02c75fc365647cb6bf5a60125ec65caeadb250db2b21eff446398",
@@ -369,14 +372,15 @@
     "repo_files": {
       ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
       ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css": "be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css": "bc7c838e4fe3ea3ec7b172534d2e5b856ccd0040cb6e103684fe46dc2990e6bc",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css": "280684296a5d545025d897a2874e3bb1d8f29b00afe5391b9cd52f3bd4c11037",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.html": "262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx": "6fddafbaf54a41bd229a38bb6c52d41a14c528487c9a3fb47cb0b4493440e065",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/fixtures.tsx": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx": "3718396018601dae4af76f4fb9b9820dfc29628e748fd83f9d8c3c54208163fc",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx": "3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08",
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-input.tsx": "ebba4dbd16c4989a09c13e7410c58cbf0df5b0d440bab5ddb8b4aa05813c3152",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx": "ee7bc70dddc9eac6a744b6b56f11010794aff9b19fd29237fb79006e87ba7d86",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-localization.tsx": "09ac26520a75292039343c7228417156ac94748bef4ffd649bbdcc667f941ba9",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx": "da2370a6e03c58d293db9fe406b4168432b1a4b428e2937974a14db46cbd191f",
       "apps/electron/package.json": "77a358dae4c7fb9096706bacf2b378a2d9fbadbf4b074238b9d8b2d0bf592f7a",
       "apps/electron/resources/icon.png": "5fe6f3ac7876d19aaf0f1080833a9dba4ea91a5ffe0d9833666a370ff7837005",
       "apps/electron/resources/themes/catppuccin.json": "a3c8cc47ba1fcdf284ff7a3c23b108ecd39640b2a43edd6545b6095a6c43cf02",
@@ -427,17 +431,17 @@
       "apps/electron/src/renderer/components/apisetup/submit-helpers.ts": "d5d817fecf04fd27a7a8b1fce949dd9a8b94b544c4f64b2fff34cbcef1e4ccc5",
       "apps/electron/src/renderer/components/apisetup/tier-models.ts": "a921e356bd8dc06ac7506964cba40f2d74022a881271dbfed5b231c9c17f5666",
       "apps/electron/src/renderer/components/app-menu/WorkbenchAccountMenu.tsx": "638aee837b38d71528ad12dd975122228eec13bcb35732cb050df083e14ef7b9",
-      "apps/electron/src/renderer/components/app-shell/ActiveOptionBadges.tsx": "4c3b7cfdc10e85a73356feae3650b5cad192a7e3ec5545de1ec6797010134a4b",
+      "apps/electron/src/renderer/components/app-shell/ActiveOptionBadges.tsx": "277cab9af6b8cfab93b8a416ec31231acc50b2f3580c89ecb7922b287c001084",
       "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "293c84fa4151ebf2f07d6ac60d68a50ee0918090c97c3efc89f8530cce854808",
-      "apps/electron/src/renderer/components/app-shell/AppShell.tsx": "50729360a863da43c45e1d8e6c013e66f47543842272b5f600fff7f34cce3f04",
+      "apps/electron/src/renderer/components/app-shell/AppShell.tsx": "f08716ca5ac22816cfcf358b67c91ca0bca0f3cfef0cc3dca07ed9be0f50e2ba",
       "apps/electron/src/renderer/components/app-shell/AttachmentPreview.tsx": "e932b0ae3e593b1fc4b4edf886402e3c6d42706f7856d0bb1c6b4245b669abb6",
       "apps/electron/src/renderer/components/app-shell/BatchSessionMenu.tsx": "5e42aa8273bc6fc6b778ff1b64c3a909489ccb86ec861a7c2ab2cacefe9a1d3f",
       "apps/electron/src/renderer/components/app-shell/CanvasPane.tsx": "5b020d4d61363eaa5e27169c24a0e746b54d7ffe03753de651c100e2c870d570",
       "apps/electron/src/renderer/components/app-shell/ChatDisplay.follow-ups.ts": "79b1e058fbadd0c031fc61491287651970935edaaa5573acd1415577220b8fb1",
       "apps/electron/src/renderer/components/app-shell/ChatDisplay.tsx": "430f98ae6fdf747d1f5375d8121c575f5ae0388eb0557a57faf0e08e30500632",
       "apps/electron/src/renderer/components/app-shell/CompactPanelTransition.tsx": "4158bd6a3d2be2960d04e64afb95ffe7a86eeaa253025f990756aec4163fe302",
-      "apps/electron/src/renderer/components/app-shell/CompactSessionListFilter.tsx": "fbf372303db89677180f4cc34ef1c5a8119a41a74ef0d85f750680b335739b78",
-      "apps/electron/src/renderer/components/app-shell/CompactSessionMenu.tsx": "e1ba3baec37cf70206af908821951e14f88e7cbf38143abe7630ebafa03cadfa",
+      "apps/electron/src/renderer/components/app-shell/CompactSessionListFilter.tsx": "58718f9535852674a8efff9fad0a75e7afbf0d907c173462c28d41a2168bfebc",
+      "apps/electron/src/renderer/components/app-shell/CompactSessionMenu.tsx": "b7c68a4c294ea787e879f4072b3480a1d93bb81978adfd55983a2f01094b3452",
       "apps/electron/src/renderer/components/app-shell/CompactWorkspaceSwitcher.tsx": "e0e2d998655ea14711b15f2e95912fb5e99dc72c08bb7b8d97f0f9bb5dad7e35",
       "apps/electron/src/renderer/components/app-shell/FabNewChat.tsx": "d6ff138db2b37c743de45ec617000abeb14e8a07b2ed0033bb93f10c593d5823",
       "apps/electron/src/renderer/components/app-shell/GlobalSettingsSurface.tsx": "520211d2234d4a040d1b429001cd269beb79c8dd664a3498e4b5e4f22cab6187",
@@ -457,11 +461,11 @@
       "apps/electron/src/renderer/components/app-shell/SessionBadges.tsx": "80d99704714f626758eb95e57d7ed60d222f66ccdd0bb58d396b24cc07a82c8b",
       "apps/electron/src/renderer/components/app-shell/SessionInfoPopover.tsx": "1fc6fff91f279af2a6ebfe21da21e58ec3a0fa6a5a7ff852b5d7bb9511a802c9",
       "apps/electron/src/renderer/components/app-shell/SessionItem.tsx": "119ee1207b2a9cce1dc466a86f5ab9b9724960980b3f6750bc962cc0e0da36bb",
-      "apps/electron/src/renderer/components/app-shell/SessionList.tsx": "c5143027f046899d31bf56c59c096448a335c604192e53c01dcde03247e882c3",
+      "apps/electron/src/renderer/components/app-shell/SessionList.tsx": "1c037268a7ad6040c80251afc8b39925ad405094824f755a87d7ee33ac0ec735",
       "apps/electron/src/renderer/components/app-shell/SessionMenu.tsx": "b93467be8b96819fb0a490c445f770e96f6b9528f39462613bd930db853a6a0c",
-      "apps/electron/src/renderer/components/app-shell/SessionMenuParts.tsx": "1df2e6238efa613051aaed7f771b89ed26b32968e61b59f0da0fb9a568cea4a5",
+      "apps/electron/src/renderer/components/app-shell/SessionMenuParts.tsx": "8c31331c6124fe1c93a47f7c207a61a6913926e13bd5f1071a0a1ba87a0026e7",
       "apps/electron/src/renderer/components/app-shell/SessionSearchHeader.tsx": "6dd131b920aa10d3f0d872c083e9a5eef05f1d066852aff95311b4e34963deb1",
-      "apps/electron/src/renderer/components/app-shell/SessionStatusIcon.tsx": "01d16ba8450804c723d6524986855feb185f3b7cfa08f7239ef1c2f7a641162d",
+      "apps/electron/src/renderer/components/app-shell/SessionStatusIcon.tsx": "7e5d15533914a4d94bd8f5dc3441a8c0e86a347d3e33f58b1abcdfe1080fb68b",
       "apps/electron/src/renderer/components/app-shell/SetupAuthBanner.tsx": "a812253b58b84e787ba44ad52d233655ddfec6b7a7855e5dde62af56751d2d63",
       "apps/electron/src/renderer/components/app-shell/SidebarMenu.tsx": "b3a0560074ef3503468591ea30ed855e1052ffbf601fb6405a67f65685539998",
       "apps/electron/src/renderer/components/app-shell/SkillMenu.tsx": "3cd19e4beeefa0db995ea3dc44aa5baeea925f25d8f585a07a7a59532e7a7d22",
@@ -739,6 +743,7 @@
       "apps/electron/src/renderer/components/ui/__tests__/long-press-state.test.ts": "c6f7db8c7992c4da33e531603241ecf779649260d24bb5fcb592576c26473241",
       "apps/electron/src/renderer/components/ui/__tests__/mention-menu.test.ts": "d04ea0898206885d7d1c31f4c5a4b8efbe90a198855a475d833b779329d5e3a1",
       "apps/electron/src/renderer/components/ui/__tests__/rich-text-input.test.ts": "1fe178df73d2346baaa305bcdc64d9e8dc254ec2b71d44a3e7c8280e61f34c0f",
+      "apps/electron/src/renderer/components/ui/__tests__/session-status-menu.i18n.test.tsx": "0d898fd350fad8bda6963aecc87bb455f4a564e1a8da485e1fe20846febb31d7",
       "apps/electron/src/renderer/components/ui/__tests__/status-icon.test.ts": "67ebc34b5741f25374e93d220c21773521c25422ce950eb6e6d864ac7f74a7d3",
       "apps/electron/src/renderer/components/ui/action-menu-item.tsx": "c031e0873f962df06a608c6854b824341e1f1b04ee37a90048d9645468790be6",
       "apps/electron/src/renderer/components/ui/action-tooltip.tsx": "7dbc7295d7f3d1344f6511851c4f2d98d075ec52532c4cc479d8b479dd7f8c9a",
@@ -772,7 +777,7 @@
       "apps/electron/src/renderer/components/ui/label-badge-row.tsx": "f1425d1114c5e089202f2d8ffdf8a0da1e7b0dcee0bf1e392d922238c560e841",
       "apps/electron/src/renderer/components/ui/label-icon.tsx": "1bad2aea31244a1f37aec7b66a1fcc956f3378e0486bb7e49a21edc4b4a12a4e",
       "apps/electron/src/renderer/components/ui/label-menu-utils.ts": "ebb6d1f6a9225938a1abe1cd2451496f1534244cab3d719bbe1380ea8e67fb27",
-      "apps/electron/src/renderer/components/ui/label-menu.tsx": "7831e4d273ffdbd032df9be9e95c55350bc13ed4d20609a1aae976fa4d2d0039",
+      "apps/electron/src/renderer/components/ui/label-menu.tsx": "65aa51cc18e1733838eea940b775b5014bbb9d8cfd9b0f235f888235f60ce9e5",
       "apps/electron/src/renderer/components/ui/label-value-popover.tsx": "ff195161f83c66c3fc6c742e78e784bd65b1fbb9f752509569a8c2f4a09bf82b",
       "apps/electron/src/renderer/components/ui/label.tsx": "70d2b90324e521926a48678ce5329446caaed155c6e5954a454499d5b67a014c",
       "apps/electron/src/renderer/components/ui/long-press-state.ts": "1410fa2d56f846758891694a77f7b6e9878bc9b8a2827e632d9c61af6bd8502f",
@@ -788,7 +793,7 @@
       "apps/electron/src/renderer/components/ui/select.tsx": "67d97cbb5b93ca65d46fbad29e030e7c6c9d071494d2894de89a5a17a7939ad9",
       "apps/electron/src/renderer/components/ui/separator.tsx": "59702c827716d56fca469b75b8948f46d564ef03a9e62a2ed265ba55bcec050e",
       "apps/electron/src/renderer/components/ui/service-logo.tsx": "ab029e0edf54234f3e1fec22d04df976945f65f7b13efcee8569fd813021e121",
-      "apps/electron/src/renderer/components/ui/session-status-menu.tsx": "d9fb80f17e0f007c7d5f198fbf9078a1efe36dff32529fc910dab7a82994867e",
+      "apps/electron/src/renderer/components/ui/session-status-menu.tsx": "8ffa79798a545c9483b5a412bdbbec4c417559e9f5e6f42368fc9d6211eac7ef",
       "apps/electron/src/renderer/components/ui/skill-avatar.tsx": "d7c7b1a057d932faee518b0a90c8f4b0706eef85faf27332bf8e947e1baa9d3f",
       "apps/electron/src/renderer/components/ui/skill-mention-menu.tsx": "d2b3d1acfa20b475f7bf022175f7920773fbe4c8e9afcbdf9584f5e5200c72e5",
       "apps/electron/src/renderer/components/ui/slash-command-menu.tsx": "7fb5555b34a65a96dbac5c8b95c4c2c12de07090138b91f113d2fb2e02ec81e4",
@@ -816,9 +821,9 @@
       "apps/electron/src/renderer/components/workspace/WorkspacePicker.tsx": "9fc69821d266b88bcbea8fb5b684a3a6f28a128c0ee0911140f72e101f027e40",
       "apps/electron/src/renderer/components/workspace/index.ts": "94bf705dd1b0cd8aeb0129f00574a34fd62075cca07975ff2bb189065acbf3e5",
       "apps/electron/src/renderer/components/workspace/primitives.tsx": "b4392831f8218037c11cb013a728fff870ab07ff7e7f5bb3471e46c2f1447736",
-      "apps/electron/src/renderer/config/__tests__/session-status-config.test.ts": "fa5762936e9286591740398d512bc9b147908d5ba005870d5b537f657330e139",
+      "apps/electron/src/renderer/config/__tests__/session-status-config.test.ts": "347657ad98108cfda8f22751b49479f62102a486f6623a11e41456af49147c68",
       "apps/electron/src/renderer/config/layout.ts": "d70fc386950ba8821d15d5ec63550d6302e94255247034219b965985090b440a",
-      "apps/electron/src/renderer/config/session-status-config.tsx": "501914cb82a3bfa128c2a2cafeaf1bfde04f0c41b69aa7e99bf5b6d210db482e",
+      "apps/electron/src/renderer/config/session-status-config.tsx": "3a195c617ef76f71d1c4519ce228e047f0e889d4a72bf1e88119a68e006023ea",
       "apps/electron/src/renderer/context/AppShellContext.tsx": "132fea9ecc3e46d031adf9eeacfa206a4c25ad97da1571865da5854eb4d86484",
       "apps/electron/src/renderer/context/ClientPageContext.tsx": "182cbc57653939e6f0c778a801cfefffcae33e491b8100f1b497c936fe578403",
       "apps/electron/src/renderer/context/DismissibleLayerContext.tsx": "fc2cc33cfc91f76bfda257dee6cf37daccc16b83656cfdcc84ac37088b97cba6",
@@ -1085,13 +1090,13 @@
       "packages/shared/src/i18n/date-locale.ts": "fe4d12cf88166f9c26c73bd14e7d6359a9c673853a261b68a63cc463b183e9b8",
       "packages/shared/src/i18n/index.ts": "78e679f8fff5d8f534f6e944477d96edae7746e8a1b7b7df1cd28dd0f34c42a6",
       "packages/shared/src/i18n/languages.ts": "3683e848dbcd088fbd5ef9d368cd72bb7712194d2862611220597036a66bd4c0",
-      "packages/shared/src/i18n/locales/de.json": "4bfd901d3733f6062215473e4983ecc97385140a3f0611b7fe0d4f3cabc442f2",
-      "packages/shared/src/i18n/locales/en.json": "5871c256dca3db3b08b646fc710a0feba18c53be66b5a3394176abb7f88511e7",
-      "packages/shared/src/i18n/locales/es.json": "ad83858af965c05f338fc5dda349a8a20978af26ffec4d54904265248c514d83",
-      "packages/shared/src/i18n/locales/hu.json": "3eb7ecb3eae3fa7f7f495ae9a98a284eff2535e35464ea2f806d6bb19d0f495d",
-      "packages/shared/src/i18n/locales/ja.json": "014bff9b9a1ce259f73aa87815ad46bc315bb47d41220cd7bf27c0a8c6b7e257",
-      "packages/shared/src/i18n/locales/pl.json": "18132a8475d70d2a2e5e978d791059856451c78f2038e146b3bd0ea589eb1cdc",
-      "packages/shared/src/i18n/locales/zh-Hans.json": "1ebd156c86b17eb4e0a103786a078d4398573d4e51b04ff043c04eb8ddf26024",
+      "packages/shared/src/i18n/locales/de.json": "65e2b64317f048c2baa70cd333b7ee1c6382e17636f7ae2c3892db2606a48af2",
+      "packages/shared/src/i18n/locales/en.json": "493714c11423509cf48e5afb5020d825474c7c59cce5a7dd78ecad9ab4175ad7",
+      "packages/shared/src/i18n/locales/es.json": "25de83764eba920dd8da488c199ebe520d5100d80d2159fa5038af20be4c31eb",
+      "packages/shared/src/i18n/locales/hu.json": "1109ecaef50f2afd93b3fa41d5a808cc74aef8dbc0d68aea3af4df867538e9e7",
+      "packages/shared/src/i18n/locales/ja.json": "eff8fb68445d13cd037a75d06d19137350f5f85c89a081de647028de2f61ce26",
+      "packages/shared/src/i18n/locales/pl.json": "a9586f83321b712987df054d1157a33587c19346bab41a7604e4b8ca588e1b0e",
+      "packages/shared/src/i18n/locales/zh-Hans.json": "1ec7fcba5e0daae19f1b19eae118eaa1dcfb931d615ffe0982c4e2941c74d233",
       "packages/shared/src/i18n/registry.ts": "3e40435777f072a2c263db2d1f1e468e67ca727c2340cf0dc8b750374f487443",
       "packages/shared/src/i18n/setupI18n.ts": "9eaad538fbe9ff4d2ce1904597b9f4a7761ef68b1c7feda8ed94fab4bffa78dc",
       "packages/shared/src/icons/index.ts": "59d6159f210fe21aaa63dd058fa4a3a0fe1cebe9e623a9e2f8b300658a9f22f5",
@@ -1318,6 +1323,76 @@
   "scenes": [
     {
       "fullBleed": true,
+      "id": "interview-localization-context-zh-Hans",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-context-en",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-permission-zh-Hans",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-permission-en",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-credential-zh-Hans",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-credential-en",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-table-zh-Hans",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-table-en",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-overlay-zh-Hans",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-turn-zh-Hans",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-settings-zh-Hans",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-remote-zh-Hans",
+      "region": "助手"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-settings-language",
+      "region": "设置"
+    },
+    {
+      "fullBleed": true,
+      "id": "interview-localization-reauth-error",
+      "region": "登录"
+    },
+    {
+      "fullBleed": true,
       "id": "interview-scroll",
       "region": "助手"
     },
@@ -1479,12 +1554,13 @@
   ],
   "schema_version": 2,
   "snapshot": {
-    "head": "0ecb0fc1887bc9341eedbaed530783f74fbf0cac",
+    "head": "8987fd6f506fd3cd591952253e211e15dd3db8fb",
     "head_dirty": [
       ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx",
-      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx"
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-localization.tsx",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/localization-functional-cases.json",
+      ".agents/skills/polo-ai-design-system/tools/source-baseline/verify-interview-localization.py"
     ],
     "note": "Input state at the time the inputs LAST changed (git head plus uncommitted/untracked input paths of THIS build). Currency is proven by inputs hashes + regeneration, not by comparing this snapshot to the current git state."
   }

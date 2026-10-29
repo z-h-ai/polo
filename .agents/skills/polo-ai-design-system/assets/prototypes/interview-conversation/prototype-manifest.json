@@ -12,30 +12,66 @@
     "asset_5": "styles/bc641d85825b4ee17e33c8829f5219087a5d922202a1c5870eae2a9d0178463c.css",
     "asset_6": "styles/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.css",
     "asset_7": "styles/f8f616f50b927b825b3314bfc82809909c6432ceff002ac4d6280b29f8312c28.css",
-    "asset_8": "views/scroll-history-compact-800x600.html",
-    "asset_9": "views/scroll-history-desktop-1280x800.html",
-    "asset_10": "views/scroll-history-desktop-1440x900.html",
-    "asset_11": "views/scroll-latest-compact-800x600.html",
-    "asset_12": "views/scroll-latest-desktop-1280x800.html",
-    "asset_13": "views/scroll-latest-desktop-1440x900.html",
-    "asset_14": "views/status-compact-en-compact-800x600.html",
-    "asset_15": "views/status-compact-en-desktop-1280x800.html",
-    "asset_16": "views/status-compact-en-desktop-1440x900.html",
-    "asset_17": "views/status-compact-zh-Hans-compact-800x600.html",
-    "asset_18": "views/status-compact-zh-Hans-desktop-1280x800.html",
-    "asset_19": "views/status-compact-zh-Hans-desktop-1440x900.html",
-    "asset_20": "views/status-desktop-en-compact-800x600.html",
-    "asset_21": "views/status-desktop-en-desktop-1280x800.html",
-    "asset_22": "views/status-desktop-en-desktop-1440x900.html",
-    "asset_23": "views/status-desktop-zh-Hans-compact-800x600.html",
-    "asset_24": "views/status-desktop-zh-Hans-desktop-1280x800.html",
-    "asset_25": "views/status-desktop-zh-Hans-desktop-1440x900.html",
-    "asset_26": "views/status-picker-en-compact-800x600.html",
-    "asset_27": "views/status-picker-en-desktop-1280x800.html",
-    "asset_28": "views/status-picker-en-desktop-1440x900.html",
-    "asset_29": "views/status-picker-zh-Hans-compact-800x600.html",
-    "asset_30": "views/status-picker-zh-Hans-desktop-1280x800.html",
-    "asset_31": "views/status-picker-zh-Hans-desktop-1440x900.html"
+    "asset_8": "views/localization-context-en-compact-800x600.html",
+    "asset_9": "views/localization-context-en-desktop-1280x800.html",
+    "asset_10": "views/localization-context-en-desktop-1440x900.html",
+    "asset_11": "views/localization-context-zh-Hans-compact-800x600.html",
+    "asset_12": "views/localization-context-zh-Hans-desktop-1280x800.html",
+    "asset_13": "views/localization-context-zh-Hans-desktop-1440x900.html",
+    "asset_14": "views/localization-credential-en-compact-800x600.html",
+    "asset_15": "views/localization-credential-en-desktop-1280x800.html",
+    "asset_16": "views/localization-credential-en-desktop-1440x900.html",
+    "asset_17": "views/localization-credential-zh-Hans-compact-800x600.html",
+    "asset_18": "views/localization-credential-zh-Hans-desktop-1280x800.html",
+    "asset_19": "views/localization-credential-zh-Hans-desktop-1440x900.html",
+    "asset_20": "views/localization-overlay-zh-Hans-compact-800x600.html",
+    "asset_21": "views/localization-overlay-zh-Hans-desktop-1280x800.html",
+    "asset_22": "views/localization-overlay-zh-Hans-desktop-1440x900.html",
+    "asset_23": "views/localization-permission-en-compact-800x600.html",
+    "asset_24": "views/localization-permission-en-desktop-1280x800.html",
+    "asset_25": "views/localization-permission-en-desktop-1440x900.html",
+    "asset_26": "views/localization-permission-zh-Hans-compact-800x600.html",
+    "asset_27": "views/localization-permission-zh-Hans-desktop-1280x800.html",
+    "asset_28": "views/localization-permission-zh-Hans-desktop-1440x900.html",
+    "asset_29": "views/localization-remote-zh-Hans-compact-800x600.html",
+    "asset_30": "views/localization-remote-zh-Hans-desktop-1280x800.html",
+    "asset_31": "views/localization-remote-zh-Hans-desktop-1440x900.html",
+    "asset_32": "views/localization-settings-zh-Hans-compact-800x600.html",
+    "asset_33": "views/localization-settings-zh-Hans-desktop-1280x800.html",
+    "asset_34": "views/localization-settings-zh-Hans-desktop-1440x900.html",
+    "asset_35": "views/localization-table-en-compact-800x600.html",
+    "asset_36": "views/localization-table-en-desktop-1280x800.html",
+    "asset_37": "views/localization-table-en-desktop-1440x900.html",
+    "asset_38": "views/localization-table-zh-Hans-compact-800x600.html",
+    "asset_39": "views/localization-table-zh-Hans-desktop-1280x800.html",
+    "asset_40": "views/localization-table-zh-Hans-desktop-1440x900.html",
+    "asset_41": "views/localization-turn-zh-Hans-compact-800x600.html",
+    "asset_42": "views/localization-turn-zh-Hans-desktop-1280x800.html",
+    "asset_43": "views/localization-turn-zh-Hans-desktop-1440x900.html",
+    "asset_44": "views/scroll-history-compact-800x600.html",
+    "asset_45": "views/scroll-history-desktop-1280x800.html",
+    "asset_46": "views/scroll-history-desktop-1440x900.html",
+    "asset_47": "views/scroll-latest-compact-800x600.html",
+    "asset_48": "views/scroll-latest-desktop-1280x800.html",
+    "asset_49": "views/scroll-latest-desktop-1440x900.html",
+    "asset_50": "views/status-compact-en-compact-800x600.html",
+    "asset_51": "views/status-compact-en-desktop-1280x800.html",
+    "asset_52": "views/status-compact-en-desktop-1440x900.html",
+    "asset_53": "views/status-compact-zh-Hans-compact-800x600.html",
+    "asset_54": "views/status-compact-zh-Hans-desktop-1280x800.html",
+    "asset_55": "views/status-compact-zh-Hans-desktop-1440x900.html",
+    "asset_56": "views/status-desktop-en-compact-800x600.html",
+    "asset_57": "views/status-desktop-en-desktop-1280x800.html",
+    "asset_58": "views/status-desktop-en-desktop-1440x900.html",
+    "asset_59": "views/status-desktop-zh-Hans-compact-800x600.html",
+    "asset_60": "views/status-desktop-zh-Hans-desktop-1280x800.html",
+    "asset_61": "views/status-desktop-zh-Hans-desktop-1440x900.html",
+    "asset_62": "views/status-picker-en-compact-800x600.html",
+    "asset_63": "views/status-picker-en-desktop-1280x800.html",
+    "asset_64": "views/status-picker-en-desktop-1440x900.html",
+    "asset_65": "views/status-picker-zh-Hans-compact-800x600.html",
+    "asset_66": "views/status-picker-zh-Hans-desktop-1280x800.html",
+    "asset_67": "views/status-picker-zh-Hans-desktop-1440x900.html"
   },
   "target": {
     "languages": [
@@ -111,11 +147,83 @@
       "state": "status",
       "title": "status-compact-en",
       "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-context-zh-Hans",
+      "state": "context-ready",
+      "title": "localization-context-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-context-en",
+      "state": "context-ready",
+      "title": "localization-context-en",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-permission-zh-Hans",
+      "state": "permission-known",
+      "title": "localization-permission-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-permission-en",
+      "state": "permission-unsupported",
+      "title": "localization-permission-en",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-credential-zh-Hans",
+      "state": "credential-filled",
+      "title": "localization-credential-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-credential-en",
+      "state": "credential-filled",
+      "title": "localization-credential-en",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-table-zh-Hans",
+      "state": "table-expanded",
+      "title": "localization-table-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-table-en",
+      "state": "table-expanded",
+      "title": "localization-table-en",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-overlay-zh-Hans",
+      "state": "tool-path-menu",
+      "title": "localization-overlay-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-turn-zh-Hans",
+      "state": "turn-executing",
+      "title": "localization-turn-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-settings-zh-Hans",
+      "state": "settings-no-results",
+      "title": "localization-settings-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "localization-remote-zh-Hans",
+      "state": "remote-empty",
+      "title": "localization-remote-zh-Hans",
+      "source_entry": "prototype.html"
     }
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "201511460517afa3d682626e78ab34d142871b0698529e755458e465dd0412af",
+    "sha256": "359b04e4a4aaf791f0adac66603038f0ccb4eeb972c16fa6ea498d2e1f66247e",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -129,13 +237,19 @@
       "status": "confirmed",
       "source": ".agents/skills/polo-ai-design-system/references/policy-alignment.json#D-ASSISTANT-REUSE",
       "scope": "Preserve current renderer components/styles only; no new layout or fix outcome is visually approved."
+    },
+    {
+      "id": "D-CURRENT-STYLE",
+      "status": "confirmed",
+      "source": ".agents/skills/polo-ai-design-system/references/policy-alignment.json#D-CURRENT-STYLE",
+      "scope": "Existing settings, forms and dialogs keep their real renderer styles. Current untranslated copy is implementation evidence, not a new product design."
     }
   ],
   "provenance": {
     "generator": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "92415ba715c02bda76b26c1e92c8b89e0a7a092bab6b234f3fd555e6e116bbea",
-    "source_export_sha256": "9096bb5840be880b2ed10e6d9770ec1c7f8dfbc098c5e47ebc6743555b20550d",
+    "source_input_fingerprint": "78adb762afd41954687093fc6a70175399703372dc51fb28dedd018777c4aab4",
+    "source_export_sha256": "802e508a026bf266fdaa2e9310e65300ff7081501d3336699992cdaa494718e1",
     "method": "Actual Chromium render and native click/key replay; cloned DOM with product scripts removed only from reference. Reference-only script restores observed scroll offsets. Live React runtime remains unchanged.",
     "fixed_reference_clock": "2026-10-28T12:00:00Z",
     "scope": "Component smoke references; not Electron/backend acceptance and not bug before/after proof."

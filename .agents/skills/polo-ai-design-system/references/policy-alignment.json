@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "model_sha256": "d411865f167d496fe255099a47e25e4b580d8148912a853c84a5d3b407e69b95",
+  "model_sha256": "c3b588d41b96b8982070871154b4bb714753c5c4db88c844eb320a58b9c56229",
   "decisions": [
     {
       "id": "D-CURRENT-STYLE",
@@ -40,7 +40,7 @@
         "section": "## 页面与组件合同",
         "quote": "助手：既有聊天、输入、附件及会话导航以当前 `apps/electron/src/renderer/` 为准，原型转译助手只作行为衔接。暂缓管理技能页面与打开助手后的 Polo 助手内部代码，不能从历史 `assistant-shell` 派生重写。"
       },
-      "reason": "POO-105 不触及助手内部代码；材质作用域标记与令牌落在真实 Renderer 挂载层，符合既有复用边界。"
+      "reason": "POO-105 不触及助手内部代码；材质作用域标记与令牌落在真实 Renderer 挂载层，符合既有复用边界。 本轮仅补齐已被Renderer实际消费的packages/ui chat/markdown/overlay及tool-parsers实现复用路径，保留原组件/provider/CSS；不新增产品视觉或权限方向。"
     },
     {
       "id": "D-PAGE-VISUAL",

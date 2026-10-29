@@ -123,3 +123,9 @@ POLO_REVIEW_EVIDENCE="$(mktemp -d /tmp/polo-navigation.XXXXXX)" python3 docs/mvp
 
 最终集成 main 前、创建新任务前均回到本 Skill，按 [使用手册的维护步骤](usage-playbook.md#维护时机与-git-边界)
 检查三层素材。检查只读，过期才修源再生。维护不自动提交、push、tag 或发版；源码未变则复用素材。
+
+### POO-179 完整本地化的原生补充
+
+`interview-localization.tsx` 只import真实ChatDisplay/structured输入、共享MarkdownDatatableBlock/overlay、设置与目录组件；provider/样式沿上文，平台动作仅在fixture边界记录原始参数。正式smoke的新增代表状态由既有export-conversation-references.py全量生成，保留原18状态单元，不增第二manifest/loader或task专属生成机制。
+
+功能输入为 `tools/source-baseline/localization-functional-cases.json`，driver为同目录 `verify-interview-localization.py`。`--mode inventory --output-dir <ignored>`明确列出所有43顶层用例和实际缺失planned测试；`--mode baseline`只采当前真实行为与已知漏译，不产生Acceptance PASS；`--mode verify`仍须满足完整原需求与后端origin/记忆合同，不把浏览器假数据当授权证明。通过`--frontend-url`消费调用者服务时driver不停止该服务，未传时自建本树Vite并在finally关闭；每用例独立context。输出到本次ignored目录，禁止回写旧sealed evidence。

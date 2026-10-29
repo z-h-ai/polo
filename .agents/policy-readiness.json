@@ -11,7 +11,11 @@
         "apps/electron/src/main",
         "apps/electron/src/preload",
         "docs/mvp-complete-flow-hifi",
-        ".agents/skills/polo-ai-design-system"
+        ".agents/skills/polo-ai-design-system",
+        "packages/ui/src/components/chat",
+        "packages/ui/src/components/markdown",
+        "packages/ui/src/components/overlay",
+        "packages/ui/src/lib/tool-parsers.ts"
       ],
       "prototype_manifest": null
     }

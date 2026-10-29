@@ -34,6 +34,20 @@ CASES = [
 ]
 
 
+# POO-179 retains all original routes. These are real component compositions,
+# not a second product UI or an approval of the currently untranslated copy.
+LOCALIZATION_CASES = [
+    ('context', 'context-ready', 'zh-Hans'), ('context', 'context-ready', 'en'),
+    ('permission', 'permission-known', 'zh-Hans'), ('permission', 'permission-unsupported', 'en'),
+    ('credential', 'credential-filled', 'zh-Hans'), ('credential', 'credential-filled', 'en'),
+    ('table', 'table-expanded', 'zh-Hans'), ('table', 'table-expanded', 'en'),
+    ('overlay', 'tool-path-menu', 'zh-Hans'), ('turn', 'turn-executing', 'zh-Hans'),
+    ('settings', 'settings-no-results', 'zh-Hans'), ('remote', 'remote-empty', 'zh-Hans'),
+]
+CASES += [{'id': f'localization-{name}-{lang}', 'scene': f'interview-localization-{name}-{lang}',
+           'state': state, 'lang': lang, 'task': 'POO-179'} for name, state, lang in LOCALIZATION_CASES]
+
+
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -43,6 +57,30 @@ def encode(value) -> bytes:
 
 
 def steps(case):
+    state, lang = case['state'], case['lang']
+    wrapper = f'[data-localization-case="{state}"]'
+    if state == 'context-ready':
+        return [{'action': 'hover', 'selector': wrapper + ' button:has-text("90%")'}]
+    if state == 'credential-filled':
+        return [{'action': 'fill', 'selector': '#credential-username:visible', 'value': 'fixture-user'},
+                {'action': 'fill', 'selector': '#credential-password:visible', 'value': 'fixture-secret-not-real'}]
+    if state == 'table-expanded':
+        fullscreen = 'View Fullscreen' if lang == 'en' else '全屏查看'
+        controls = 'Table Controls' if lang == 'en' else '表格控制'
+        group = 'Group by' if lang == 'en' else '分组依据'
+        return [{'action': 'hover', 'selector': wrapper + ' table'},
+                {'action': 'click', 'selector': wrapper + f' button[title="{fullscreen}"]'},
+                {'action': 'click', 'selector': f'.fixed.z-50 button[title="{controls}"], [role="dialog"] button[title="{controls}"]'},
+                {'action': 'hover', 'selector': f'[role="menuitem"]:has-text("{group}")'}]
+    if state == 'tool-path-menu':
+        return [{'action': 'click', 'selector': wrapper + ' [data-search-exclude="true"] > button'},
+                {'action': 'click', 'selector': wrapper + ' [data-search-exclude="true"] [class~="group/row"]'},
+                {'action': 'click', 'selector': 'button[title="/fixture/work/原名 Report.md"]'}]
+    if state == 'settings-no-results':
+        return [{'action': 'click', 'selector': wrapper + ' button'},
+                {'action': 'fill', 'selector': '[role="dialog"] input', 'value': 'no-match-179'}]
+    if case['id'].startswith('localization-'):
+        return []
     if case['task'] == 'POO-170':
         result = [{'action': 'press', 'selector': '[data-radix-scroll-area-viewport]', 'key': 'End'}]
         if case['state'] == 'history':
@@ -60,11 +98,61 @@ def steps(case):
 
 
 def assertions(case):
+    state = case['state']
+    wrapper = f'[data-localization-case="{state}"]'
+    if state == 'context-ready':
+        return [{'type': 'visible', 'selector': '[role="tooltip"]'},
+                {'type': 'textContent', 'selector': '[role="tooltip"]', 'expected': '90%'}]
+    if state.startswith('permission-'):
+        return [{'type': 'visible', 'selector': '[data-tutorial="permission-banner"]:visible'},
+                {'type': 'visible', 'selector': '[data-tutorial="permission-allow-button"]:visible'},
+                {'type': 'countMin', 'selector': '[data-tutorial="permission-banner"]:visible button:visible', 'expected': '2'}]
+    if state == 'credential-filled':
+        return [{'type': 'inputValue', 'selector': '#credential-username:visible', 'expected': 'fixture-user'},
+                {'type': 'attribute', 'selector': '#credential-password:visible', 'attribute': 'type', 'expected': 'password'}]
+    if state == 'table-expanded':
+        return [{'type': 'visible', 'selector': '[role="menu"]'},
+                {'type': 'textContent', 'selector': 'body', 'expected': 'Fixture Orders'},
+                {'type': 'countMin', 'selector': '[role="menuitem"]', 'expected': '2'}]
+    if state == 'tool-path-menu':
+        return [{'type': 'visible', 'selector': '[role="menu"]'},
+                {'type': 'count', 'selector': '[role="menu"] [role="menuitem"]', 'expected': '2'}]
+    if state == 'settings-no-results':
+        return [{'type': 'visible', 'selector': '[role="dialog"]'},
+                {'type': 'inputValue', 'selector': '[role="dialog"] input', 'expected': 'no-match-179'},
+                {'type': 'count', 'selector': '[role="dialog"] button', 'expected': '0'}]
+    if state == 'remote-empty':
+        return [{'type': 'visible', 'selector': '[role="dialog"]'},
+                {'type': 'inputValue', 'selector': '[role="dialog"] input', 'expected': '/fixture/work'}]
+    if state == 'turn-executing':
+        return [{'type': 'visible', 'selector': wrapper + ' [data-radix-scroll-area-viewport]'},
+                {'type': 'visible', 'selector': wrapper + ' button.send-btn'}]
     if case['task'] == 'POO-170':
         return [{'type': 'visible', 'selector': '[data-radix-scroll-area-viewport]'}]
     if '-picker-' in case['id']:
         return [{'type': 'visible', 'selector': '[cmdk-root]'}]
     return [{'type': 'visible', 'selector': '[role="dialog"]' if '-compact-' in case['id'] else '[role="menu"]'}]
+
+
+def assert_native_state(page, case):
+    """Check the real arranged DOM; the fixture never inserts an expected result."""
+    for assertion in assertions(case):
+        target = page.locator(assertion['selector'])
+        kind, expected = assertion['type'], assertion.get('expected')
+        if kind == 'visible':
+            target.first.wait_for(state='visible')
+        elif kind == 'textContent':
+            if str(expected) not in target.first.inner_text(): raise ValueError(f"{case['id']}: text state differs")
+        elif kind in {'count', 'countMin'}:
+            count = target.count()
+            if (count != int(expected)) if kind == 'count' else (count < int(expected)):
+                raise ValueError(f"{case['id']}: expected {kind} {expected}, observed {count}")
+        elif kind == 'attribute':
+            if target.first.get_attribute(assertion['attribute']) != expected: raise ValueError(f"{case['id']}: attribute state differs")
+        elif kind == 'inputValue':
+            if target.first.input_value() != expected: raise ValueError(f"{case['id']}: input state differs")
+        else:
+            raise ValueError('unsupported native state assertion: ' + kind)
 
 
 def expected_outputs(evidence: Path | None):
@@ -82,6 +170,12 @@ def expected_outputs(evidence: Path | None):
                     page = browser.new_page(viewport={k: viewport[k] for k in ('width', 'height')}, device_scale_factor=1)
                     errors = []
                     page.on('pageerror', lambda error: errors.append(str(error)))
+                    # Deterministic capture entropy. Product logic is untouched; only the
+                    # environment's randomness (per-mount placeholder shuffle, processing
+                    # verb pick) is pinned so an actual render is reproducible byte for byte.
+                    page.add_init_script('let __referenceSeed = 0x9e3779b9;'
+                                         ' Math.random = () => { __referenceSeed = (__referenceSeed * 1664525 + 1013904223) >>> 0;'
+                                         ' return __referenceSeed / 4294967296; }')
                     try:
                         page.clock.set_fixed_time(datetime(2026, 10, 28, 12, tzinfo=timezone.utc))
                         page.emulate_media(reduced_motion='reduce')
@@ -90,9 +184,30 @@ def expected_outputs(evidence: Path | None):
                         page.wait_for_timeout(500)
                         for step in steps(case):
                             target = page.locator(step['selector'])
-                            target.press(step['key']) if step['action'] == 'press' else target.click()
+                            if step['action'] == 'press': target.press(step['key'])
+                            elif step['action'] == 'hover': target.hover()
+                            elif step['action'] == 'fill': target.fill(step['value'])
+                            elif step['action'] == 'click': target.click()
+                            else: raise ValueError('unsupported native action: ' + step['action'])
                             page.wait_for_timeout(300)
                         page.evaluate('document.fonts.ready')
+                        assert_native_state(page, case)
+                        # Settle entry/fade animations before freezing. Entry animations
+                        # emit a mid-flight inline opacity on every frame and never loop,
+                        # so requiring a 200ms window with none of them (the product also
+                        # keeps a few permanently hidden opacity:0 spans) means the clone
+                        # captures a resting state, never a random frame.
+                        page.wait_for_function('''() => {
+                          const mid = [...document.querySelectorAll('*')].some(node => {
+                            const value = node.style && node.style.opacity
+                            if (!value) return false
+                            const opacity = parseFloat(value)
+                            return opacity > 0 && opacity < 1
+                          })
+                          if (mid) { window.__referenceCalm = 0; return false }
+                          if (!window.__referenceCalm) window.__referenceCalm = performance.now()
+                          return performance.now() - window.__referenceCalm > 200
+                        }''', timeout=20000)
                         if errors:
                             raise ValueError(f'{case["id"]}: actual component failed: {errors}')
                         metrics = None
@@ -140,6 +255,7 @@ const restore=()=>requestAnimationFrame(()=>{
                             evidence.mkdir(parents=True, exist_ok=True)
                             screenshot = evidence / f'{case["id"]}-{viewport["name"]}.png'
                             page.screenshot(path=str(screenshot), caret='hide')
+                            assert_native_state(page, case)
                             record['screenshot'] = str(screenshot)
                         records.append(record)
                     finally:
@@ -169,7 +285,10 @@ document.getElementById('reference').src=scenes[scene][viewport];
         'design': {'skill_path': f'{PREFIX}/SKILL.md', 'sha256': sha((SKILL / 'SKILL.md').read_bytes()), 'sources': sources},
         'confirmations': [{'id': 'D-ASSISTANT-REUSE', 'status': 'confirmed',
                            'source': f'{PREFIX}/references/policy-alignment.json#D-ASSISTANT-REUSE',
-                           'scope': 'Preserve current renderer components/styles only; no new layout or fix outcome is visually approved.'}],
+                           'scope': 'Preserve current renderer components/styles only; no new layout or fix outcome is visually approved.'},
+                          {'id': 'D-CURRENT-STYLE', 'status': 'confirmed',
+                           'source': f'{PREFIX}/references/policy-alignment.json#D-CURRENT-STYLE',
+                           'scope': 'Existing settings, forms and dialogs keep their real renderer styles. Current untranslated copy is implementation evidence, not a new product design.'}],
         'provenance': {'generator': f'{PREFIX}/tools/export-conversation-references.py',
                        'source_manifest': f'{PREFIX}/assets/source-baseline/baseline-manifest.json',
                        'source_input_fingerprint': baseline['input_fingerprint'], 'source_export_sha256': sha(html.read_bytes()),

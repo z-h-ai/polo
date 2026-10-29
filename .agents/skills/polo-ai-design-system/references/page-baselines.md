@@ -86,3 +86,12 @@
 
 - 目标模板层：场景集由 `tools/build_review.py` 从主 manifest 再生；本文引用 ID 与消费 manifest 的一致性由 check_design_system.py 校验。新增/更名场景时：改主 manifest 权威源 → 按 usage-playbook 第 7 步完整命令重跑 build_review → 更新本文表格 → 重跑检查。
 - 当前实现基线层：改 `tools/source-baseline/entries/*` 源 → `build.py` 再生落位（manifest 记录真实输入指纹与生成时的 HEAD/dirty 快照）→ check_design_system.py 强制输入指纹与逐字节再生；检查器对历史 evidence 只读，不回写。
+
+## POO-179 本地化补充实现基线
+
+`interview-localization-*` 来自 `tools/source-baseline/entries/interview-localization.tsx` 的真实组件组合：ChatDisplay高占用tooltip、普通权限/凭据、datatable展开控件、Read路径双触发菜单、执行中turn，以及原SettingsMenuSelect/ServerDirectoryBrowser。入口、语言与三视口清单由既有 `tools/export-conversation-references.py` 的CASES和实际scene registry派生；不另维护产品布局或静态结果。
+
+- 复用 `entries/baseline.tsx` 的原Jotai/i18n/Theme/ActionRegistry/Escape/Dismissible/ProductSpace/AppShell/Tooltip等provider；ChatDisplay沿原Navigation/Focus并使用App原有PlatformProvider边界。
+- `settings-language` 与 `reauth-error` 额外原生入口供功能交互使用，不扩大正式smoke库存。fixture只替换本地类型化数据/IPC回调；不执行真实登录、凭据保存、服务器创建或工具权限。
+- 原POO-179六路线×三视口18单元完整保留；新增12代表路线×三视口36，总54。POO-170原场景保持，官方全量producer输出在本worktree内，串行集成时须按真实来源重新维护/复验。
+- 本次维护素材仍展示当前产品的英文漏译与未知后端记忆按钮；它们是before实现证据，**没有**实现本地化/权限能力，也不是新产品视觉确认。完整origin记忆、全部菜单/富块/错误与语言切换功能由同卡Plan及独立实施/验收承担。

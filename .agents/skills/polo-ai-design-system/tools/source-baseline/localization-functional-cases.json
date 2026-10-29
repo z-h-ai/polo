@@ -1,0 +1,1109 @@
+{
+  "baseline": "8987fd6f506fd3cd591952253e211e15dd3db8fb",
+  "status": "source-bound executable input; baseline never acceptance pass",
+  "cases": [
+    {
+      "id": "L01",
+      "family": "F01/F21",
+      "setup": "真实datatable有日期/boolean/数值及自定义英文列/行，另空表",
+      "actions": "打开表格→分组日期/数值→筛选→切语言→关闭再开",
+      "expected": "Table/粒度/YesNo/空态中英准确",
+      "invariants": "raw rows/column key/granularity values/export payload及视图状态不变",
+      "test_owner": "native browser + datatable-cell-format.test.ts",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "table",
+        "actual": "/entries/baseline.html?scene=interview-localization-table-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "L02",
+      "family": "F02",
+      "setup": "context有效80%以上，idle与processing两态",
+      "actions": "hover原百分比tooltip→中英切换；空闲才点击compact",
+      "expected": "两个分支准确，processing不触发",
+      "invariants": "percent/threshold原算法；只空闲onSubmit(/compact,[])一次",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/input-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "context",
+        "actual": "/entries/baseline.html?scene=interview-localization-context-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "L03",
+      "family": "F03 inherited",
+      "setup": "已安装8987的默认/改名/未知/custom archive id状态及#中文输入",
+      "actions": "现真实#菜单搜索/键盘选择→换语言→归档动作",
+      "expected": "保留已完成中文与英文别名/选择行为",
+      "invariants": "stored status id、自定义原名和archive action隔离",
+      "test_owner": "existing session-status-menu.i18n.test.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/ui/__tests__/session-status-menu.i18n.test.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/ui/__tests__/session-status-menu.i18n.test.tsx"
+        ],
+        "coverage_obligation": "F03 inherited",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "L04",
+      "family": "F04/F05/F06/F07",
+      "setup": "原slash/compact权限/数据源空与有值/工作目录原UI",
+      "actions": "打开菜单、中文搜索、选择/无匹配、开着换语言",
+      "expected": "组标题/空态/说明中文完整；英文语义一致",
+      "invariants": "mode/command/slug/path/key callback不变；焦点不丢",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/input-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/app-shell/input/__tests__/input-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/app-shell/input/__tests__/input-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F04/F05/F06/F07",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-eligible-claude",
+      "family": "F08 + origin metadata",
+      "setup": "普通请求同origin requestId，canRemember=True",
+      "actions": "中英切换→允许/拒绝；eligible另点原记忆动作",
+      "expected": "仅明确true有记忆按钮；无新解释/占位",
+      "invariants": "允许true/false，拒绝false/false；记忆true/true；requestId/session保持",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "permission",
+        "actual": "/entries/baseline.html?scene=interview-localization-permission-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "P-pi",
+      "family": "F08 + origin metadata",
+      "setup": "普通请求同origin requestId，canRemember=False",
+      "actions": "中英切换→允许/拒绝；eligible另点原记忆动作",
+      "expected": "仅明确true有记忆按钮；无新解释/占位",
+      "invariants": "允许true/false，拒绝false/false；记忆true/true；requestId/session保持",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "permission",
+        "actual": "/entries/baseline.html?scene=interview-localization-permission-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "P-missing",
+      "family": "F08 + origin metadata",
+      "setup": "普通请求同origin requestId，canRemember=omitted",
+      "actions": "中英切换→允许/拒绝；eligible另点原记忆动作",
+      "expected": "仅明确true有记忆按钮；无新解释/占位",
+      "invariants": "允许true/false，拒绝false/false；记忆true/true；requestId/session保持",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "permission",
+        "actual": "/entries/baseline.html?scene=interview-localization-permission-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "P-explicit-false",
+      "family": "F08 + origin metadata",
+      "setup": "普通请求同origin requestId，canRemember=False",
+      "actions": "中英切换→允许/拒绝；eligible另点原记忆动作",
+      "expected": "仅明确true有记忆按钮；无新解释/占位",
+      "invariants": "允许true/false，拒绝false/false；记忆true/true；requestId/session保持",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "permission",
+        "actual": "/entries/baseline.html?scene=interview-localization-permission-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "P-unknown",
+      "family": "F08 + origin metadata",
+      "setup": "普通请求同origin requestId，canRemember=False",
+      "actions": "中英切换→允许/拒绝；eligible另点原记忆动作",
+      "expected": "仅明确true有记忆按钮；无新解释/占位",
+      "invariants": "允许true/false，拒绝false/false；记忆true/true；requestId/session保持",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "permission",
+        "actual": "/entries/baseline.html?scene=interview-localization-permission-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "P-authority",
+      "family": "origin metadata",
+      "setup": "实际Claude/Pi emitter、同代/旧代managed callback",
+      "actions": "触发真实callback→事件→renderer；尝试旧代/缺字段/伪renderer字段；真实Claude SDK hook与Pi pre_tool_use prompt被调用后捕获origin事件，不能复制回调逻辑或只测bool helper",
+      "expected": "元数据只随有效origin；旧代不发布；未知不承诺",
+      "invariants": "不向PermissionResponseOptions新增field，不改grant流程/legacy side effects",
+      "test_owner": "permission-presentation-metadata.isolated.ts (shared + server)",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-bash-same-base",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-curl-same-domain",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-curl-different-domain",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-curl-without-domain",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-dangerous-base",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-MCP-exact-tool",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-MCP-different-tool",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-file_write-filepath-vs-tool",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-API-method-vs-fullpath",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则；就算保守展示false，仍逐项证明旧respond依旧whitelistCommand(method)；不修已有API不匹配",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-unknown",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-memory-different-session",
+      "family": "origin metadata",
+      "setup": "真实PermissionManager和canonical shouldPromptInAskMode，隔离无外部SDK执行",
+      "actions": "首请求→实际respond legacy写入→第二请求lookup，并记录白名单集合",
+      "expected": "只有真正lookup匹配能力true；危险/空域/file/API/unknown不承诺",
+      "invariants": "old legacy target、whitelist side effects/allowed resolve逐项等价，不修旧规则",
+      "test_owner": "new shared permission-presentation-metadata.isolated.ts + existing permission-manager/pre-tool-use-checks",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "packages/shared/src/agent/__tests__/permission-presentation-metadata.isolated.ts",
+          "packages/server-core/src/sessions/__tests__/permission-presentation-metadata.isolated.ts"
+        ],
+        "coverage_obligation": "origin metadata",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-admin",
+      "family": "F09",
+      "setup": "同session完整commandHash和原10分钟default",
+      "actions": "checkbox开/关→批准/取消→中英切换",
+      "expected": "完整命令+本会话+分钟准确，无普通alwaysAllow",
+      "invariants": "approved/rememberForMinutes原值；requiresSystemPrompt/broker规则不变",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F09",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "P-browser",
+      "family": "existing browser independent",
+      "setup": "原browser_action digest/phase，令metadata true作为反例",
+      "actions": "允许/拒绝/无效phase；切语言",
+      "expected": "仍是browser原专用按钮，不出现session记忆",
+      "invariants": "browserActionDigest/phase、拒绝broad grant原契约",
+      "test_owner": "existing browser-action-authorization.test.ts + structured rendering",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "existing browser independent",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "A-input-basic-required",
+      "family": "F10/F12",
+      "setup": "原credential request，源自定义header/labels含英文",
+      "actions": "真实输入/遮蔽/切语言/保存或取消",
+      "expected": "自有模板中文；用户标签/secret保持",
+      "invariants": "trim、optional password空值、headers key/value及cancelled不变",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "credential",
+        "actual": "/entries/baseline.html?scene=interview-localization-credential-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "A-input-basic-optional",
+      "family": "F10/F12",
+      "setup": "原credential request，源自定义header/labels含英文",
+      "actions": "真实输入/遮蔽/切语言/保存或取消",
+      "expected": "自有模板中文；用户标签/secret保持",
+      "invariants": "trim、optional password空值、headers key/value及cancelled不变",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "credential",
+        "actual": "/entries/baseline.html?scene=interview-localization-credential-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "A-input-bearer",
+      "family": "F10/F12",
+      "setup": "原credential request，源自定义header/labels含英文",
+      "actions": "真实输入/遮蔽/切语言/保存或取消",
+      "expected": "自有模板中文；用户标签/secret保持",
+      "invariants": "trim、optional password空值、headers key/value及cancelled不变",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "credential",
+        "actual": "/entries/baseline.html?scene=interview-localization-credential-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "A-input-multi-header",
+      "family": "F10/F12",
+      "setup": "原credential request，源自定义header/labels含英文",
+      "actions": "真实输入/遮蔽/切语言/保存或取消",
+      "expected": "自有模板中文；用户标签/secret保持",
+      "invariants": "trim、optional password空值、headers key/value及cancelled不变",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "credential",
+        "actual": "/entries/baseline.html?scene=interview-localization-credential-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "A-input-cancel",
+      "family": "F10/F12",
+      "setup": "原credential request，源自定义header/labels含英文",
+      "actions": "真实输入/遮蔽/切语言/保存或取消",
+      "expected": "自有模板中文；用户标签/secret保持",
+      "invariants": "trim、optional password空值、headers key/value及cancelled不变",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/input/__tests__/structured-input-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "credential",
+        "actual": "/entries/baseline.html?scene=interview-localization-credential-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "A-card-pending",
+      "family": "F11",
+      "setup": "同session原auth-request消息，含source/email/workspace品牌英文",
+      "actions": "打开真实card→切语言，pending点原动作",
+      "expected": "自有title/status/action译，非交互历史仍读",
+      "invariants": "不重发OAuth、不清表单、不改源id或历史消息",
+      "test_owner": "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F11",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "A-card-browser-wait",
+      "family": "F11",
+      "setup": "同session原auth-request消息，含source/email/workspace品牌英文",
+      "actions": "打开真实card→切语言，pending点原动作",
+      "expected": "自有title/status/action译，非交互历史仍读",
+      "invariants": "不重发OAuth、不清表单、不改源id或历史消息",
+      "test_owner": "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F11",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "A-card-completed",
+      "family": "F11",
+      "setup": "同session原auth-request消息，含source/email/workspace品牌英文",
+      "actions": "打开真实card→切语言，pending点原动作",
+      "expected": "自有title/status/action译，非交互历史仍读",
+      "invariants": "不重发OAuth、不清表单、不改源id或历史消息",
+      "test_owner": "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F11",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "A-card-cancelled",
+      "family": "F11",
+      "setup": "同session原auth-request消息，含source/email/workspace品牌英文",
+      "actions": "打开真实card→切语言，pending点原动作",
+      "expected": "自有title/status/action译，非交互历史仍读",
+      "invariants": "不重发OAuth、不清表单、不改源id或历史消息",
+      "test_owner": "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F11",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "A-card-failed",
+      "family": "F11",
+      "setup": "同session原auth-request消息，含source/email/workspace品牌英文",
+      "actions": "打开真实card→切语言，pending点原动作",
+      "expected": "自有title/status/action译，非交互历史仍读",
+      "invariants": "不重发OAuth、不清表单、不改源id或历史消息",
+      "test_owner": "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F11",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "A-card-readonly-completed",
+      "family": "F11",
+      "setup": "同session原auth-request消息，含source/email/workspace品牌英文",
+      "actions": "打开真实card→切语言，pending点原动作",
+      "expected": "自有title/status/action译，非交互历史仍读",
+      "invariants": "不重发OAuth、不清表单、不改源id或历史消息",
+      "test_owner": "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/chat/__tests__/auth-request-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F11",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "R-errors",
+      "family": "F13/F14",
+      "setup": "历史读取失败、retrying、不可渲染、非Error fallback、warning/compaction",
+      "actions": "点重试/标注发送禁用、切语言",
+      "expected": "自有标题/状态正确，原诊断不改",
+      "invariants": "retry计数/发送保护、draft/session/scroll保持",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/__tests__/chat-display-localization.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/app-shell/__tests__/chat-display-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/app-shell/__tests__/chat-display-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "F13/F14",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "R-turn",
+      "family": "F15/F16",
+      "setup": "响应/流式/计划/todo/known tool和用户英文displayName",
+      "actions": "展开活动→切语言→查看原Markdown/详情",
+      "expected": "自有状态译；用户正文/metadata原样",
+      "invariants": "activity/turn ids、toolInput/command/result/error字节相同；打开态/选择保持",
+      "test_owner": "native browser + turn-details-localization.test.ts",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "turn",
+        "actual": "/entries/baseline.html?scene=interview-localization-turn-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "R-overlay",
+      "family": "F17/F18/F19/F20/F21/F22/F23",
+      "setup": "真实Bash Input/Output、Read/Write/Edit、文档/图/HTML/PDF加载失败等",
+      "actions": "点工具→路径左/右菜单→copy/open/reveal→换语言→关闭/ESC",
+      "expected": "自有badge/错误/行数/标题/导航/aria译",
+      "invariants": "callback原path/JSON/content、打开实例与焦点保持；不改存储",
+      "test_owner": "native browser + tool-parsers-cards.test.ts",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "subcases": [
+        "Bash Input/Output cards",
+        "Read/Write/Edit paths",
+        "JSON原字节/默认标题",
+        "HTML/PDF/image/Doc/spreadsheet loading+nonError failure",
+        "Mermaid invalid/error",
+        "MultiDiff prev/next",
+        "generic/code/terminal empty or no-output fallback",
+        "same opened instance zh↔en without payload persistence"
+      ],
+      "execution": {
+        "kind": "native",
+        "native": "overlay",
+        "actual": "/entries/baseline.html?scene=interview-localization-overlay-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "S-settings",
+      "family": "S01/S02",
+      "setup": "实际AppearanceSettings语言/主题菜单，App/Message/Workspace设置的自产错误边界",
+      "actions": "从原菜单选中英→无匹配搜索→nonError失败→再切语言",
+      "expected": "默认提示/空态/fallback刷新；品牌语言nativeName不翻",
+      "invariants": "原onValueChange/IPC入参、表单与已有设置不写真实用户数据",
+      "test_owner": "apps/electron/src/renderer/components/settings/__tests__/settings-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "settings",
+        "actual": "/entries/baseline.html?scene=interview-localization-settings-zh-Hans&pure=1&lang=zh-Hans",
+        "language_menu_actual": "/entries/baseline.html?scene=interview-localization-settings-language&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "S-login",
+      "family": "S03",
+      "setup": "实际ReauthScreen与AdminLogin/PhoneAuth既有卡的隔离fixture",
+      "actions": "抛非Error→恢复；换语言；原登录/重置动作",
+      "expected": "自产fallback译，原合规/安全/数据保留文案保留",
+      "invariants": "原callback参数；不真实发短信/登录/改账号",
+      "test_owner": "apps/electron/src/renderer/components/onboarding/__tests__/ReauthScreen.localize.isolated.tsx",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "reauth",
+        "actual": "/entries/baseline.html?scene=interview-localization-reauth-error&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "C-chrome",
+      "family": "C01/C02/C03/C09/C10",
+      "setup": "筛选无匹配/会话信息/分组日期/崩溃fallback/原Compact badge",
+      "actions": "原菜单/aria操作→切语言→已知/未知command badge读取",
+      "expected": "系统词译、未知/用户badge保持",
+      "invariants": "筛选Map/rename/date/command/rawText/start/end与恢复行为不变",
+      "test_owner": "apps/electron/src/renderer/components/app-shell/__tests__/system-chrome-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "subcases": [
+        "filter empty",
+        "session info rename debounce unchanged",
+        "group expand/collapse",
+        "date aria",
+        "App fallback action same URL/path",
+        "CrashFallback real extracted component+reload callback",
+        "known vs unknown command badges"
+      ],
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/app-shell/__tests__/system-chrome-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/app-shell/__tests__/system-chrome-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "C01/C02/C03/C09/C10",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "C-automation",
+      "family": "C04",
+      "setup": "真实AutomationInfo/list含event/conditions/mode和用户matcher",
+      "actions": "列表中文搜索→开详情→切语言→原发送Workspace菜单",
+      "expected": "显示mapping/phase/condition译",
+      "invariants": "event/condition/cron/id/target、列表选择和搜索上下文不变",
+      "test_owner": "automation-display-localization.test.ts + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/automations/__tests__/automation-display-localization.test.ts"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/automations/__tests__/automation-display-localization.test.ts"
+        ],
+        "coverage_obligation": "C04",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    },
+    {
+      "id": "C-remote",
+      "family": "C06/C07/C08",
+      "setup": "真实远程目录/WorkspaceCreationScreen remote、资源转工作区；隔离IPC结果",
+      "actions": "连接/重连/测试/选择/创建按钮只记录fixture调用→切语言",
+      "expected": "系统提示与失败中文完整",
+      "invariants": "URL/token/path/workspace/resource id和RPC command逐项相同；零真实创建",
+      "test_owner": "remote-workspace-localization.isolated.tsx + native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "native",
+        "native": "remote",
+        "actual": "/entries/baseline.html?scene=interview-localization-remote-zh-Hans&pure=1&lang=zh-Hans"
+      }
+    },
+    {
+      "id": "C-browser",
+      "family": "C05",
+      "setup": "真实BrowserTabStrip现/历史session绑定、disabled两态",
+      "actions": "窗口菜单点击show/open/terminate并切语言",
+      "expected": "系统动作准确；未知对象仍禁用",
+      "invariants": "只记录精确instance id/session id与原disabled；不动真实browser",
+      "test_owner": "native browser",
+      "languages": [
+        "zh-Hans",
+        "en"
+      ],
+      "status": "planned-not-run",
+      "execution": {
+        "kind": "contract_tests",
+        "test_files": [
+          "apps/electron/src/renderer/components/app-shell/__tests__/system-chrome-localization.isolated.tsx"
+        ],
+        "argv": [
+          "bun",
+          "test",
+          "--isolate",
+          "apps/electron/src/renderer/components/app-shell/__tests__/system-chrome-localization.isolated.tsx"
+        ],
+        "coverage_obligation": "C05",
+        "baseline_execution": "not run during material preparation; missing planned tests block verify"
+      }
+    }
+  ],
+  "case_count_note": "43 top-level case definitions with explicit subcases; not 43 executed tests, no passed count.",
+  "schema_version": 1,
+  "baseline_product_head": "8987fd6f506fd3cd591952253e211e15dd3db8fb",
+  "limitations": [
+    "Native17 representative top-level cases cannot satisfy origin/memory contracts or every grouped rich-block/menu subcase",
+    "Each contract test must be implemented and independently executed with semantic coverage; existing filenames alone do not prove case coverage",
+    "Before code still has known English strings and unsupported remember action; these are retained failures, never suppressed"
+  ]
+}

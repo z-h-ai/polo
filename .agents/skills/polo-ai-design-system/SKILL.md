@@ -10,7 +10,7 @@ Adoption revision: `native-materials-r5-lifecycle-candidate-20261023`. Mode: `ex
 ## Applicability
 
 - Repository: `polo-ai`
-- Paths: `apps/electron/src/renderer`, `apps/electron/src/main`, `apps/electron/src/preload`, `docs/mvp-complete-flow-hifi`, `.agents/skills/polo-ai-design-system`
+- Paths: `apps/electron/src/renderer`, `apps/electron/src/main`, `apps/electron/src/preload`, `docs/mvp-complete-flow-hifi`, `.agents/skills/polo-ai-design-system`, `packages/ui/src/components/chat`, `packages/ui/src/components/markdown`, `packages/ui/src/components/overlay`, `packages/ui/src/lib/tool-parsers.ts`
 - Platforms: desktop-electron
 - Modules: 登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉
 
@@ -46,7 +46,7 @@ Maintenance can create local Git changes but never authorizes commit, push, vers
 - `.agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `dda528141636c0253fe70afaeeb23a9919aa8264e562d63235c77316a6248de7`
 - `.agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `b26fcc98fb62dc2d9ee91ddbed21a5bd83a23f830b9acea9028a40f747934808`
 - `.agents/skills/polo-ai-design-system/references/usage-playbook.md` — authority; 新需求实施流程手册：当前实现基线→真实组件→设计变量的复用顺序、当前基线与目标设计分层、范围外降级路径、Placeholder 规则、常见坑; SHA-256 `2806d1d3120a96b2c72eb0f9745532f0cfeb8cc594918b3f9ed976ed5732b9c1`
-- `.agents/skills/polo-ai-design-system/references/page-baselines.md` — authority; 页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出; SHA-256 `1f8f5207d773719b1ea9806adc4567fbaf0c364d9c45e540bd3b9eb1ad4efbb4`
+- `.agents/skills/polo-ai-design-system/references/page-baselines.md` — authority; 页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出; SHA-256 `05c1fecb02eb4c4330a4fb274bd1f9a8a40e6bc71d4126ab91d8b92fcfff20b8`
 - `.agents/skills/polo-ai-design-system/references/component-usage.md` — authority; 组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界; SHA-256 `1378d84b106cb79d373de46ec0edef8cc33bf276c74accdd9e4b087541170988`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.config.mjs` — implementation; 当前实现基线生成器：vite 配置（alias @→renderer 源码，单文件内联，模块图与 watch 文件收集入输入指纹，确定性构建无时间戳）; SHA-256 `8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.scene-ids.config.mjs` — implementation; 场景清单 SSR 提取构建（ssr noExternal 全打包，单 cjs 输出）; SHA-256 `eff52dc6b1854c66cddd6242ad42735092cece0c77a2b197b160caf5e6b03252`
@@ -54,20 +54,23 @@ Maintenance can create local Git changes but never authorizes commit, push, vers
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/tsconfig.json` — implementation; 基线入口真实类型检查配置（继承 apps/electron tsconfig，检查器强制跑通）; SHA-256 `fe55756c85d43c98d8776a79b18188dc89dbe873ebf6eb9b5e79ffc8b3f6e0e4`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/build.py` — implementation; 基线落位生成器：tsc→vite SSR 场景提取→浏览器单文件打包→落位 assets/source-baseline→manifest+统一入口；--out 保护非拥有目录；--check 校验真实输入指纹与输出逐字节再生; SHA-256 `aa3f8aeeb445244037df2da327bba32ac21323082de2c7096ae3916515837f36`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.tsx` — implementation; 基线入口：Provider 栈+材质作用域+场景路由（?scene/#scene/pure），导出运行时场景 ID 清单供再生核对; SHA-256 `6fddafbaf54a41bd229a38bb6c52d41a14c528487c9a3fb47cb0b4493440e065`
-- `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx` — implementation; 基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致; SHA-256 `ee7bc70dddc9eac6a744b6b56f11010794aff9b19fd29237fb79006e87ba7d86`
+- `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx` — implementation; 基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致; SHA-256 `da2370a6e03c58d293db9fe406b4168432b1a4b428e2937974a14db46cbd191f`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx` — implementation; 第二层组件画廊：三组生产组件卡复用 playground 注册渲染协议，真实变体切换+生产落点索引；布局 guard 只抑制自动聚焦滚动，用户滚动立即接管; SHA-256 `3718396018601dae4af76f4fb9b9820dfc29628e748fd83f9d8c3c54208163fc`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/scene-ids.ts` — implementation; 场景清单提取入口：求值真实场景注册表模块并输出 ID/region/fullBleed JSON; SHA-256 `95ce8fbb7474bdb0fc408c7cc23ab6dd710f24374d794f896dea824e2b477b9f`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/fixtures.tsx` — implementation; 受控 fixture：真实类型 satisfies+zod parse，只替换后端数据（正常态默认，写接口仅内存完成，不存任何 secret）; SHA-256 `291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820`
-- `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css` — implementation; 基线浏览壳样式：@import renderer index.css + 本目录入口/场景/画廊的 Tailwind @source 扫描声明 + 仅基线文档的滚动覆盖; SHA-256 `bc7c838e4fe3ea3ec7b172534d2e5b856ccd0040cb6e103684fe46dc2990e6bc`
+- `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css` — implementation; 基线浏览壳样式：@import renderer index.css + 本目录入口/场景/画廊的 Tailwind @source 扫描声明 + 仅基线文档的滚动覆盖; SHA-256 `280684296a5d545025d897a2874e3bb1d8f29b00afe5391b9cd52f3bd4c11037`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.html` — implementation; 基线 HTML 入口; SHA-256 `262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc`
-- `.agents/skills/polo-ai-design-system/references/native-reuse.md` — implementation; 当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口; SHA-256 `5f445bfe930d12469fccd3ab8fa4c70c53bddd618bdea1f250cd3c90df169c10`
+- `.agents/skills/polo-ai-design-system/references/native-reuse.md` — implementation; 当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口; SHA-256 `f890013512d9953e2689bc21191b8725c89fcc8dc061c73501688fd134d8ce4d`
 - `.agents/skills/polo-ai-design-system/references/style-usage.md` — implementation; 工作台与renderer样式体系、变量预览、原生消费和再生方法; SHA-256 `0f87d6691a5436941a1fb1b0d57e640ae5d573d890618a3771897a24713e1887`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-input.tsx` — implementation; implementation; production RichTextInput controlled fixture for task smoke; no target design; SHA-256 `ebba4dbd16c4989a09c13e7410c58cbf0df5b0d440bab5ddb8b4aa05813c3152`
 - `.agents/skills/polo-ai-design-system/tools/export-interview-reference.py` — implementation; implementation; deterministic native baseline to POO-169 smoke reference export, no business changes; SHA-256 `8276145adca30e8439900e318641174a17d42474f3a09ab84a564a7cfcf5a289`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-input-entry.tsx` — implementation; isolated native editor reference entry; current components and CSS only; no new target design; SHA-256 `b929dd09a07d6e758bea7588f507b6ee1a4c9aea72b530107b51d10b2e749023`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/vite.interview-input.config.mjs` — implementation; isolated native editor reference entry; current components and CSS only; no new target design; SHA-256 `c30fbc8836954dbdd98c8fb89b91614a93f320575f541a96ebefb03f8744e861`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx` — implementation; implementation; real ChatDisplay and status-menu compositions with local data only; SHA-256 `3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08`
-- `.agents/skills/polo-ai-design-system/tools/export-conversation-references.py` — implementation; implementation; reproducible native render to static smoke reference; runtime remains React; SHA-256 `2a9b1d21b210a1124c2535120e3d60162fd2c485f2c273ca9d65c9ce128f860f`
+- `.agents/skills/polo-ai-design-system/tools/export-conversation-references.py` — implementation; implementation; reproducible native render to static smoke reference; runtime remains React; SHA-256 `e709f3ff70bca2cbc841bd9ed7fcfa7e269d5aa752464eb2fdb3aca791112846`
+- `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-localization.tsx` — implementation; Current real renderer/shared component compositions and local typed data only; no product localization or permission/grant change; SHA-256 `09ac26520a75292039343c7228417156ac94748bef4ffd649bbdcc667f941ba9`
+- `.agents/skills/polo-ai-design-system/tools/source-baseline/verify-interview-localization.py` — implementation; Source-bound native interaction driver and explicit coverage gaps; baseline is not Acceptance; SHA-256 `e8f6541cd7e53f497423e0395edf69eb53e97dae503d939494c8516cea49ae16`
+- `.agents/skills/polo-ai-design-system/tools/source-baseline/localization-functional-cases.json` — implementation; Complete same-card functional case inputs; actual missing implementation tests fail closed rather than become coverage claims; SHA-256 `222b46309acdb2d68fbfb7593b53ba6ae6112a593a64d322076e9dcabeec66c6`
 
 ## Reuse
 

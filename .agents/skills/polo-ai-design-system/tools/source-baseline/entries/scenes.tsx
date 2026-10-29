@@ -22,6 +22,7 @@ import { ComponentGallery } from './gallery'
 import { InterviewInputScene } from './interview-input'
 import { InterviewScrollScene, InterviewStatusPickerScene, InterviewStatusDesktopScene, InterviewStatusCompactScene } from './interview-conversation'
 import { productSpaceFixture } from './fixtures'
+import { localizationScenes } from './interview-localization'
 
 /**
  * Login scenes render through the REAL OnboardingWizard shell — the component
@@ -243,6 +244,7 @@ const chatScenes = [
 ].filter((s): s is BaselineScene => s !== null)
 
 export const baselineScenes: BaselineScene[] = [
+  ...localizationScenes,
   { id: 'interview-scroll', region: '助手', title: 'ChatDisplay（长对话阅读）', fullBleed: true,
     note: '真实对话显示组件及固定长会话；发送仅改变内存数据，不代表服务端或计费。', render: () => <InterviewScrollScene /> },
   { id: 'interview-status-picker', region: '助手', title: 'SessionStatusMenu（状态选择与搜索）',
