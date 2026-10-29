@@ -66,6 +66,18 @@ describe('status menu localization', () => {
     expect(screen.getByRole('option', { name: /已取消/ })).toBeTruthy()
   })
 
+  it('distinguishes a custom archive status from the archive action', async () => {
+    const user = userEvent.setup()
+    const { selected, archived } = mountMenu({
+      states: [{ ...states[0], id: 'archive', label: 'Customer archive', isFixed: false }],
+      activeState: 'archive',
+    })
+    expect(screen.getAllByRole('option', { selected: true })).toHaveLength(1)
+    await user.click(screen.getByText('归档', { exact: true }))
+    expect(archived).toEqual(['archive'])
+    expect(selected).toEqual([])
+  })
+
   it('refreshes a mounted menu and its active search on language changes', async () => {
     const user = userEvent.setup()
     mountMenu()

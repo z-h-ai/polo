@@ -125,7 +125,7 @@ export function SessionStatusMenu({
           <>
             <div className="border-t border-border/50 mx-2 my-1" />
             <CommandPrimitive.Item
-              value={isArchived ? "unarchive" : "archive"}
+              value={isArchived ? "action:unarchive" : "action:archive"}
               onSelect={() => isArchived ? onUnarchive?.() : onArchive?.()}
               className={cn(
                 MENU_ITEM_STYLE,
