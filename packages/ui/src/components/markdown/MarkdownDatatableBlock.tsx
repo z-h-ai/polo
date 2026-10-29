@@ -760,7 +760,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
   // The optional GenUI action column widens every grid span by one.
   const columnCount = parsed.columns.length + (renderRowAction ? 1 : 0)
-  const tableHeaderClass = 'sticky top-[var(--table-sticky-top,0px)] z-10 bg-background shadow-bottom-border-thin'
+  // The scroll host owns its padding; adding it to top would offset headers
+  // twice in the overlay. Scenic backgrounds also need an explicit alpha of 1.
+  const tableHeaderClass = 'sticky top-0 z-10 bg-[oklch(from_var(--background)_l_c_h_/_1)] shadow-bottom-border-thin'
 
   // Per-column filter control rendered under the header label. Clicks are
   // stopped so they never trigger the th's sort handler.

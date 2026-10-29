@@ -10,7 +10,6 @@ import * as React from 'react'
 import type { ReactNode } from 'react'
 import { Table2 } from 'lucide-react'
 import { PreviewOverlay, type BadgeVariant } from './PreviewOverlay'
-import { useOverlayMode } from '../../lib/layout'
 
 export interface DataTableOverlayProps {
   /** Whether the overlay is visible */
@@ -41,8 +40,6 @@ export function DataTableOverlay({
   headerActions,
   children,
 }: DataTableOverlayProps) {
-  const mode = useOverlayMode()
-
   return (
     <PreviewOverlay
       isOpen={isOpen}
@@ -58,11 +55,7 @@ export function DataTableOverlay({
       headerActions={headerActions}
     >
       {/* Table content — scrolling is handled by the parent overlay's scroll container */}
-      <div style={{
-        // Match PreviewOverlay's 24px fade inset; fullscreen also has the
-        // 48px floating PreviewHeader (FullscreenOverlayBase.contentPaddingTop).
-        '--table-sticky-top': mode === 'fullscreen' ? '72px' : '24px',
-      } as React.CSSProperties}>
+      <div>
         {children}
       </div>
     </PreviewOverlay>

@@ -58,7 +58,7 @@ describe('message table scroll structure', () => {
       for (const header of table.querySelectorAll('th')) {
         expect(header.classList.contains('sticky')).toBe(true)
         expect(header.classList.contains('top-0')).toBe(true)
-        expect(header.classList.contains('bg-background')).toBe(true)
+        expect(header.classList.contains('bg-[oklch(from_var(--background)_l_c_h_/_1)]')).toBe(true)
       }
     })
 
@@ -83,7 +83,7 @@ describe('message table scroll structure', () => {
     expect(table.parentElement!.classList.contains('max-h-[400px]')).toBe(true)
     for (const header of table.querySelectorAll('th')) {
       expect(header.classList.contains('sticky')).toBe(true)
-      expect(header.classList.contains('bg-background')).toBe(true)
+      expect(header.classList.contains('bg-[oklch(from_var(--background)_l_c_h_/_1)]')).toBe(true)
     }
     expect(table.querySelectorAll('th')).toHaveLength(2)
     click(table.querySelector('th'))
@@ -107,11 +107,13 @@ describe('message table scroll structure', () => {
       ancestor = ancestor.parentElement!
       expect(ancestor).not.toBeNull()
     }
-    // The fullscreen overlay has a floating header and a fade inset. A sticky
-    // table must clear those, rather than disappearing behind the header.
-    const inset = (dialog.querySelector('[style*="--table-sticky-top"]') as HTMLElement)
-      .style.getPropertyValue('--table-sticky-top')
-    expect(inset).toBe(ancestor.style.scrollPaddingTop)
+    // The overlay scroll host already owns the safe inset. Adding that value
+    // to th.top again paints headers over data rows in Chromium. Real geometry
+    // and scenic opacity are checked by the browser regression, not happy-dom.
+    expect(dialog.querySelector('[style*="--table-sticky-top"]')).toBeNull()
+    for (const header of table.querySelectorAll('th')) {
+      expect(header.classList.contains('top-0')).toBe(true)
+    }
     expect(table.querySelectorAll('thead')).toHaveLength(1)
     expect(table.querySelectorAll('tbody tr')).toHaveLength(100)
   })

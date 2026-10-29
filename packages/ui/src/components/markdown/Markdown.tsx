@@ -53,7 +53,9 @@ export type DisablablePreviewBlock =
  */
 export type RenderMode = 'terminal' | 'minimal' | 'full'
 
-const TABLE_HEADER_CLASS = 'sticky top-0 z-10 bg-background shadow-bottom-border-thin'
+// Scenic themes give --background an alpha channel. Keep its color channels
+// but make the header opaque so scrolling rows cannot show through the label.
+const TABLE_HEADER_CLASS = 'sticky top-0 z-10 bg-[oklch(from_var(--background)_l_c_h_/_1)] shadow-bottom-border-thin'
 
 function MarkdownTable({ children, className, tableClassName }: {
   children?: React.ReactNode
