@@ -55,6 +55,63 @@ export function InterviewScrollScene() {
   )
 }
 
+const citationSession: Session = {
+  id: 'interview-citation-session', workspaceId: 'playground-workspace', workspaceName: 'Playground',
+  name: '引用来源核对', lastMessageAt: timestamp + 40, isProcessing: false,
+  messages: [
+    {
+      id: 'interview-citation-1', role: 'user', timestamp: timestamp + 36, turnId: 'interview-citation-turn-1',
+      content: '请整理这次发布更新的要点，并附上可核对的来源。',
+    },
+    {
+      id: 'interview-citation-2', role: 'assistant', timestamp: timestamp + 37, turnId: 'interview-citation-turn-1',
+      content: [
+        '## 发布更新要点', '',
+        '- 客户端新增引用来源跳转：来源链接在应用内浏览器打开。',
+        '- 会话列表支持按状态快速筛选，筛选条件跨重启保留。', '',
+        '### 带链接的来源', '',
+        '1. [Polo 10 月发布公告](https://polo.example.com/notes/2026-10-release)',
+        '2. [客户端更新日志](https://polo.example.com/changelog/desktop)', '',
+        '### 纯文本来源', '',
+        '3. 来源：2026-10 用户体验访谈记录（内部整理稿）',
+      ].join('\n'),
+    },
+    {
+      id: 'interview-citation-3', role: 'user', timestamp: timestamp + 38, turnId: 'interview-citation-turn-2',
+      content: '第二条来源为什么没有链接？',
+    },
+    {
+      id: 'interview-citation-4', role: 'assistant', timestamp: timestamp + 39, turnId: 'interview-citation-turn-2',
+      content: '该来源没有可跳转的 URL，是访谈现场的纯文本记录，所以只显示普通文本，不渲染为链接。',
+    },
+  ],
+}
+
+/** Real ChatDisplay; citation fixtures cover linked and plain-text sources. */
+export function InterviewCitationScene() {
+  const [session, setSession] = useState(citationSession)
+  const [draft, setDraft] = useState('')
+  return (
+    <NavigationProvider workspaceId="playground-workspace" workspaceSlug="playground"
+      onCreateSession={async () => { throw new Error('interview fixture: no server session creation') }}>
+      <FocusProvider>
+        <section className="flex h-screen min-h-0 flex-col" aria-label="引用来源链接">
+          <ChatDisplay session={session} currentModel="gpt-6.1-sol" inputValue={draft} onInputChange={setDraft}
+            placeholder="输入消息" permissionMode="ask"
+            onSendMessage={(content) => {
+              setSession(previous => ({ ...previous, messages: [...previous.messages, {
+                id: `local-user-${previous.messages.length}`, role: 'user', content,
+                timestamp: timestamp + previous.messages.length,
+              }] }))
+              setDraft('')
+            }}
+            onOpenFile={noAction} onOpenUrl={noAction} workspaceId="playground-workspace" />
+        </section>
+      </FocusProvider>
+    </NavigationProvider>
+  )
+}
+
 // Fixture data mirrors the five stored defaults; it is not a status schema.
 const statuses: StatusConfig[] = [
   { id: 'backlog', label: 'Backlog', category: 'open', isFixed: false, isDefault: true, order: 0 },

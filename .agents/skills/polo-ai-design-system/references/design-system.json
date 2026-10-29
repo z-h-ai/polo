@@ -12,14 +12,16 @@
       "packages/ui/src/components/markdown/Markdown.tsx",
       "packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx",
       "packages/ui/src/components/overlay/DataTableOverlay.tsx",
-      "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx"
+      "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx",
+      "packages/ui/src/components/chat/TurnCard.tsx",
+      "packages/ui/src/components/overlay/DocumentFormattedMarkdownOverlay.tsx"
     ],
     "platforms": [
       "desktop-electron"
     ],
     "modules": [
       "登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉",
-      "助手消息表格的共享Markdown/datatable/展开容器；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范"
+      "助手消息的共享Markdown/datatable/展开容器与引用来源链接呈现（对话卡透传）；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范"
     ]
   },
   "mode": "extracted",
@@ -153,7 +155,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-      "sha256": "25d071de969bb26641b437d2e9d9fe583777d041662e7178c5027109f354f124",
+      "sha256": "4486fdfbb9d7372fd05fd8ffa9f8240fc0a8a10c259450f8e3878d4159f87afa",
       "role": "implementation",
       "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
@@ -225,13 +227,13 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx",
-      "sha256": "3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08",
+      "sha256": "4c5ef01e89b33ed350779bc648099938045361df662c9f760e8f0aa2c9766fa4",
       "role": "implementation",
       "scope": "implementation; real ChatDisplay and status-menu compositions with local data only"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-      "sha256": "09194d191e720d28a73a12c0010ada62ee46377a89c9cd7ccf43d9693ad3737c",
+      "sha256": "d299757f8bbc9cc85a1b99ede04298306cad5185cb69471f6c6afc75f27e56c2",
       "role": "implementation",
       "scope": "implementation; reproducible native render to static smoke reference; runtime remains React"
     },

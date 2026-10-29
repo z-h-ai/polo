@@ -15,7 +15,9 @@
         "packages/ui/src/components/markdown/Markdown.tsx",
         "packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx",
         "packages/ui/src/components/overlay/DataTableOverlay.tsx",
-        "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx"
+        "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx",
+        "packages/ui/src/components/chat/TurnCard.tsx",
+        "packages/ui/src/components/overlay/DocumentFormattedMarkdownOverlay.tsx"
       ],
       "prototype_manifest": null
     }

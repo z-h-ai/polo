@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze actual native component renders for POO-170/179 smoke references.
+"""Freeze actual native component renders for POO-170/179/172 smoke references.
 
 Runtime remains the live React components. The reference removes product scripts
 and only restores observed scroll offsets. The full ChatDisplay bundle contains
@@ -31,6 +31,7 @@ CASES = [
     *[{'id': f'status-{surface}-{language}', 'scene': f'interview-status-{surface}',
        'state': 'status', 'lang': language, 'task': 'POO-179'}
       for surface in ('picker', 'desktop', 'compact') for language in ('zh-Hans', 'en')],
+    {'id': 'citation-links', 'scene': 'interview-citation', 'state': 'citation', 'lang': 'zh-Hans', 'task': 'POO-172'},
 ]
 
 
@@ -48,6 +49,8 @@ def steps(case):
         if case['state'] == 'history':
             result.append({'action': 'press', 'selector': '[data-radix-scroll-area-viewport]', 'key': 'PageUp'})
         return result
+    if case['task'] == 'POO-172':
+        return []
     if '-desktop-' in case['id']:
         return [{'action': 'click', 'selector': '[data-interview-status="desktop"] button'}]
     if '-compact-' in case['id']:
@@ -62,6 +65,8 @@ def steps(case):
 def assertions(case):
     if case['task'] == 'POO-170':
         return [{'type': 'visible', 'selector': '[data-radix-scroll-area-viewport]'}]
+    if case['task'] == 'POO-172':
+        return [{'type': 'visible', 'selector': 'section[aria-label="引用来源链接"]'}]
     if '-picker-' in case['id']:
         return [{'type': 'visible', 'selector': '[cmdk-root]'}]
     return [{'type': 'visible', 'selector': '[role="dialog"]' if '-compact-' in case['id'] else '[role="menu"]'}]
@@ -168,7 +173,7 @@ document.getElementById('reference').src=scenes[scene][viewport];
     sources = [{'path': f'{PREFIX}/references/foundations.md', 'sha256': sha((SKILL / 'references/foundations.md').read_bytes())}]
     manifest = {
         'schema_version': 1, 'kind': 'frozen-native-conversation-reference', 'mode': 'high_fidelity',
-        'revision': 'poo170-poo179-native-reuse-r1',
+        'revision': 'poo170-poo179-poo172-native-reuse-r2',
         'files': {'prototype': 'prototype.html', **{f'asset_{i}': name for i, name in enumerate(sorted(files)) if name != 'prototype.html'}},
         'target': {'languages': ['zh-Hans', 'en'], 'themes': ['light'],
                    'viewports': [{'id': v['name'], 'width': v['width'], 'height': v['height']} for v in VIEWPORTS]},
@@ -185,7 +190,7 @@ document.getElementById('reference').src=scenes[scene][viewport];
                        'scope': 'Component smoke references; not Electron/backend acceptance and not bug before/after proof.'},
     }
     files['prototype-manifest.json'] = encode(manifest)
-    for task, port in [('POO-170', 43170), ('POO-179', 43179)]:
+    for task, port in [('POO-170', 43170), ('POO-179', 43179), ('POO-172', 43172)]:
         routes = [{'name': case['id'], 'state': case['state'],
                    'actual': f'/entries/baseline.html?scene={case["scene"]}&pure=1&lang={case["lang"]}',
                    'whole_page': True, 'capture_full_page': True, 'actual_steps': steps(case), 'state_assertions': assertions(case)}
