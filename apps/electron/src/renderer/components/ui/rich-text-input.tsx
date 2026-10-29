@@ -173,9 +173,6 @@ function renderBadgeHTML(
 // ============================================================================
 
 function getTextFromElement(element: HTMLElement): string {
-  // Chromium keeps one BR as the caret host when an editor becomes empty.
-  if (element.childNodes.length === 1 && element.firstChild?.nodeName === 'BR') return ''
-
   let text = ''
 
   // isTopLevel: true for direct children of the contenteditable root
@@ -595,10 +592,18 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }), [])
 
     // Handle input events
-    const handleInput = React.useCallback(() => {
+    const handleInput = React.useCallback((event?: React.FormEvent<HTMLDivElement>) => {
       if (!divRef.current) return
 
-      const newText = getTextFromElement(divRef.current)
+      const inputType = (event?.nativeEvent as InputEvent | undefined)?.inputType ?? ''
+      const isSingleBreak = divRef.current.childNodes.length === 1
+        && divRef.current.firstChild?.nodeName === 'BR'
+      // A lone BR is ambiguous: Chromium's empty caret host or a real newline.
+      // Resolve it only at the editor root, retaining a known/inserted newline.
+      // Range fragments must always count their BRs when measuring the cursor.
+      const isRealNewline = inputType === 'insertLineBreak' || inputType === 'insertParagraph'
+        || (lastValueRef.current === '\n' && !inputType.startsWith('delete'))
+      const newText = isSingleBreak && !isRealNewline ? '' : getTextFromElement(divRef.current)
       setHasEditorContent(Boolean(newText))
       // Keep unfinished IME text local while still showing what the editor draws.
       if (isComposing.current) return
