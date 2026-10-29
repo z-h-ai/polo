@@ -794,6 +794,8 @@
   "editor.searchLanguages": "Sprachen suchen...",
   "editor.strikethrough": "Durchgestrichen",
   "errors.chatGptOAuthNotAvailable": "ChatGPT OAuth ist in der Web-Oberfläche nicht verfügbar. Verwende die Desktop-App oder richte einen API-Schlüssel ein.",
+  "errors.crash.description": "Bitte starte die App neu. Der Fehler wurde gemeldet.",
+  "errors.crash.title": "Etwas ist schiefgelaufen",
   "errors.failedToLoadSession": "Sitzung konnte nicht geladen werden",
   "errors.failedToLoadSessions": "Sitzungen konnten nicht geladen werden",
   "errors.failedToLoadSessionsDesc": "Polo AI konnte eine Verbindung herstellen, aber das Laden der Sitzungsliste ist fehlgeschlagen. Dies wird nicht als leerer Workspace behandelt, um echte Fehler oder Datenprobleme nicht zu verbergen.",

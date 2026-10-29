@@ -794,6 +794,8 @@
   "editor.searchLanguages": "Nyelvek keresése...",
   "editor.strikethrough": "Áthúzott",
   "errors.chatGptOAuthNotAvailable": "A ChatGPT OAuth nem érhető el a webes felületen. Használd az asztali alkalmazást vagy állíts be egy API kulcsot.",
+  "errors.crash.description": "Indítsd újra az alkalmazást. A hibát jelentettük.",
+  "errors.crash.title": "Hiba történt",
   "errors.failedToLoadSession": "A munkamenet betöltése sikertelen",
   "errors.failedToLoadSessions": "A munkamenetek betöltése sikertelen",
   "errors.failedToLoadSessionsDesc": "A Polo AI kapcsolódott, de a munkamenetek listájának betöltése nem sikerült. Ez nem üres munkaterületként van kezelve, hogy ne rejtsen el egy valódi hibát vagy adatproblémát.",

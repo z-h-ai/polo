@@ -794,6 +794,8 @@
   "editor.searchLanguages": "言語を検索...",
   "editor.strikethrough": "取り消し線",
   "errors.chatGptOAuthNotAvailable": "Web UIではChatGPT OAuthを利用できません。デスクトップアプリを使用するか、APIキーを設定してください。",
+  "errors.crash.description": "アプリを再起動してください。エラーは報告されました。",
+  "errors.crash.title": "問題が発生しました",
   "errors.failedToLoadSession": "セッションの読み込みに失敗しました",
   "errors.failedToLoadSessions": "セッション一覧の読み込みに失敗しました",
   "errors.failedToLoadSessionsDesc": "Polo AIは接続できましたが、セッション一覧の読み込みに失敗しました。実際のバグやデータの問題を隠さないよう、空のWorkspaceとして扱っていません。",
