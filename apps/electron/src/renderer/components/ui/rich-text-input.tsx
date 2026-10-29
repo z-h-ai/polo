@@ -173,6 +173,9 @@ function renderBadgeHTML(
 // ============================================================================
 
 function getTextFromElement(element: HTMLElement): string {
+  // Chromium keeps one BR as the caret host when an editor becomes empty.
+  if (element.childNodes.length === 1 && element.firstChild?.nodeName === 'BR') return ''
+
   let text = ''
 
   // isTopLevel: true for direct children of the contenteditable root
@@ -523,6 +526,8 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const divRef = React.useRef<HTMLDivElement>(null)
     const [isFocused, setIsFocused] = React.useState(false)
     const isComposing = React.useRef(false)
+    // IME may already draw text before the controlled value is committed.
+    const [hasEditorContent, setHasEditorContent] = React.useState(Boolean(safeValue))
     const lastValueRef = React.useRef(safeValue)
     const cursorPositionRef = React.useRef(0)
     const lastMentionSignatureRef = React.useRef('')
@@ -591,10 +596,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Handle input events
     const handleInput = React.useCallback(() => {
-      if (isComposing.current) return
       if (!divRef.current) return
 
       const newText = getTextFromElement(divRef.current)
+      setHasEditorContent(Boolean(newText))
+      // Keep unfinished IME text local while still showing what the editor draws.
+      if (isComposing.current) return
       const cursorPos = getCursorPosition(divRef.current, cursorPositionRef.current)
 
       lastValueRef.current = newText
@@ -692,6 +699,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
       const html = textToHTML(safeValue, skills, sources, workspaceId)
       divRef.current.innerHTML = html || '<br>'
+      setHasEditorContent(Boolean(safeValue))
 
       // Restore cursor position after innerHTML update.
       // Only restore if:
@@ -758,7 +766,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }, [])
 
     // Show placeholder when input is empty (regardless of focus state)
-    const showPlaceholder = !safeValue
+    const showPlaceholder = !safeValue && !hasEditorContent
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {
