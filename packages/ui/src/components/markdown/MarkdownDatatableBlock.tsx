@@ -760,6 +760,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
   // The optional GenUI action column widens every grid span by one.
   const columnCount = parsed.columns.length + (renderRowAction ? 1 : 0)
+  const tableHeaderClass = 'sticky top-[var(--table-sticky-top,0px)] z-10 bg-background shadow-bottom-border-thin'
 
   // Per-column filter control rendered under the header label. Clicks are
   // stopped so they never trigger the th's sort handler.
@@ -844,12 +845,13 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
   const tableContent = (maxHeight?: boolean, scrollable?: boolean) => (
     <div
       ref={scrollable ? scrollRef : undefined}
-      className={cn(maxHeight && 'max-h-[400px]', 'overflow-y-auto')}
+      // Expanded tables use the overlay's scroll host. An unbounded overflow
+      // wrapper here would intercept sticky without ever scrolling vertically.
+      className={maxHeight ? 'isolate max-h-[400px] overflow-auto' : undefined}
       style={scrollable ? {
-        overflowX: 'auto',
         maskImage,
         WebkitMaskImage: maskImage,
-      } : { overflowX: 'auto' }}
+      } : undefined}
     >
       <table className="w-max min-w-full text-[13px]">
         <thead>
@@ -857,10 +859,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             {parsed.columns.map((col) => (
               <th
                 key={col.key}
-                // align-top only when a filter control may stack under the
-                // label — the markdown rich-block path (no filters) keeps the
-                // exact pre-filter class list.
+                // Only filter controls need top alignment under the label.
                 className={cn(
+                  tableHeaderClass,
                   'py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap',
                   enableColumnFilters && 'align-top',
                   colAlign(col.type, col.align),
@@ -874,7 +875,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
                 {renderColumnFilterControl(col)}
               </th>
             ))}
-            {renderRowAction && <th className="py-2 px-3 whitespace-nowrap" aria-hidden="true" />}
+            {renderRowAction && <th className={cn(tableHeaderClass, 'py-2 px-3 whitespace-nowrap')} aria-hidden="true" />}
           </tr>
         </thead>
         <tbody>
@@ -1105,8 +1106,8 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
           </div>
         }
       >
-        <div className="px-6">
-          <div className="bg-background shadow-minimal rounded-[12px] overflow-hidden">
+        <div className="px-6 w-max min-w-full">
+          <div className="bg-background shadow-minimal rounded-[12px] overflow-clip">
             {/* F2: filters stay visible in fullscreen — the overlayed table's
                 subset is explainable and its clear control stays reachable. */}
             {renderFilterStatusBar()}
