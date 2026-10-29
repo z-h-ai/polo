@@ -1688,7 +1688,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 <button
                   type="button"
                   onClick={handleJumpToLatest}
-                  className="pointer-events-auto flex h-8 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 text-[13px] text-muted-foreground shadow-tinted transition-colors hover:border-border hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/60"
+                  className="pointer-events-auto flex h-8 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 text-[13px] text-muted-foreground shadow-tinted transition-colors hover:border-border hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-info focus-visible:outline-offset-2"
                 >
                   <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span className="truncate">{t('chat.jumpToLatest')}</span>
@@ -1838,7 +1838,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           className={cn(
                             compactMode ? "pt-2 pb-1" : CHAT_LAYOUT.userMessagePadding,
                             "rounded-lg transition-all duration-200",
-                            isLatestHighlighted && "ring-2 ring-info ring-offset-2 ring-offset-background",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1865,7 +1865,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           data-latest-highlight={isLatestHighlighted || undefined}
                           className={cn(
                             "rounded-lg transition-all duration-200",
-                            isLatestHighlighted && "ring-2 ring-info ring-offset-2 ring-offset-background",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1902,7 +1902,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           data-latest-highlight={isLatestHighlighted || undefined}
                           className={cn(
                             "mt-2 rounded-lg transition-all duration-200",
-                            isLatestHighlighted && "ring-2 ring-info ring-offset-2 ring-offset-background",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1931,7 +1931,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         className={cn(
                           "pt-2",
                           "rounded-lg transition-all duration-200",
-                          isLatestHighlighted && "ring-2 ring-info ring-offset-2 ring-offset-background",
+                          isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                           isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                           isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                         )}
