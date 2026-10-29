@@ -19,7 +19,8 @@
     ],
     "modules": [
       "登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉",
-      "助手消息表格的共享Markdown/datatable/展开容器；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范"
+      "助手消息表格的共享Markdown/datatable/展开容器；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范",
+      "聊天输入区额度提醒横幅的当前实现状态（insufficient-credit 成员/所有者分岔与U2重新检查动作）；刷新行为属POO-177实现卡，本素材不预批新行为"
     ]
   },
   "mode": "extracted",
@@ -189,7 +190,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-      "sha256": "1aa292bd6867306661436a566bf770db70ee3fb8eae04089c9d3383bbb9bb25f",
+      "sha256": "5651eb03c7390e27eeaf5daa65c9e1faa2fbd338f8f362dce9a89663985e6e92",
       "role": "implementation",
       "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
     },
