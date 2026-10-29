@@ -13,14 +13,26 @@ managed compute uses a running, signed-in App as its authorization broker:
 "/Applications/Polo AI.app/Contents/MacOS/Polo AI" --polo-cli exec "Explain this directory"
 ```
 
-Use your actual App path if it is installed elsewhere. To enable the shorter
-`polo` command on macOS, accept the first-launch terminal prompt or open
-**Settings → Polo terminal features → Enable command**. This optional step adds
-a managed launcher in `~/.local/bin` and a PATH block in your shell profile;
-it does not download the CLI. Repair/remove actions preserve unrelated shell
-configuration and refuse to overwrite another command named `polo`.
-Readiness checks run asynchronously with a bounded timeout. A timeout keeps
-terminal readiness unconfirmed; other settings remain usable.
+Use your actual App path if it is installed elsewhere. The CLI, server and Bun
+runtime are bundled with the App. Polo apps call AI through their host SDK, and
+internal Agent tools use the bundled runtime and command paths; neither requires
+a system-terminal command or a user shell configuration change.
+
+On macOS, a normal App launch never checks or configures the external `polo`
+command and shows no terminal setup dialog. To use the optional short command,
+open **Help → polo terminal command…** in the packaged App, then choose
+**Enable command**. This creates a managed launcher in `~/.local/bin` and adds
+a PATH block to the shell profile; it does not download the CLI. Open a new
+Terminal window afterward. The same Help dialog offers **Repair** when needed
+and **Disable command** for an existing managed launcher. Merely opening or
+closing it does not modify shell configuration. Conflicts are shown there and
+never overwrite another command or unrelated shell configuration.
+
+Existing command installations are preserved. Disabling the external command
+does not disable built-in AI or remove the bundled CLI/runtime. Shell readiness
+checks are asynchronous and bounded, and only run when requested. Windows,
+Linux and the explicit shell installer retain their existing installation
+behavior; the macOS Help flow does not change their contracts.
 
 Linux and Windows installers manage their existing terminal PATH setup. Open a
 new terminal after enabling the command, then verify it:
