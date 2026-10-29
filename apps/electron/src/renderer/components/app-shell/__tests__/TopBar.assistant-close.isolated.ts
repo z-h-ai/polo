@@ -43,7 +43,7 @@ let shellActiveTabId = POLO_TAB.id
 
 mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => ({ resolvedMode: 'light', setMode: () => {} }) }))
 mock.module('@/atoms/sessions', () => ({ sessionMetaMapAtom: {} }))
-mock.module('jotai', () => ({ useAtomValue: () => new Map() }))
+mock.module('jotai', () => ({ useAtomValue: () => new Map(), atom: () => ({}) }))
 mock.module('@/context/AppShellContext', () => ({ useOptionalAppShellContext: () => null }))
 mock.module('@/context/ClientPageContext', () => ({ useOptionalClientPage: () => ({ isHeaderLineVisible: false }) }))
 mock.module('@/context/ProductSpaceContext', () => ({ useOptionalProductSpaceContext: () => null }))
