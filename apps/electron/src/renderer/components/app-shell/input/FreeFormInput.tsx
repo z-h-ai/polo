@@ -1714,7 +1714,7 @@ export function FreeFormInput({
             {...addLabelEditConfig}
             defaultValue={addLabelPrefill}
             secondaryAction={workspaceRootPath ? {
-              label: 'Edit File',
+              label: t('common.editFile'),
               filePath: `${workspaceRootPath}/labels/config.json`,
             } : undefined}
             side="top"
@@ -2237,8 +2237,8 @@ export function FreeFormInput({
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {isProcessing
-                    ? `${usagePercent}% context used — wait for current operation`
-                    : `${usagePercent}% context used — click to compact`
+                    ? t('chat.contextUsage.wait', { usagePercent })
+                    : t('chat.contextUsage.compact', { usagePercent })
                   }
                 </TooltipContent>
               </Tooltip>
@@ -2367,7 +2367,7 @@ function WorkingDirectoryBadge({
         <span className="shrink min-w-0 overflow-hidden">
           <FreeFormInputContextBadge
             icon={<Icon_Home className="h-4 w-4" />}
-            label={folderName ?? 'Work in Folder'}
+            label={folderName ?? t('chat.workInFolder')}
             isExpanded={isEmptySession}
             hasSelection={hasFolder}
             showChevron={true}
@@ -2423,7 +2423,7 @@ function WorkingDirectoryBadge({
 
             {/* Recent Directories - filterable (current directory already filtered out via filteredRecent) */}
             {filteredRecent.map((path) => {
-              const recentFolderName = getPathBasename(path) || 'Folder'
+              const recentFolderName = getPathBasename(path) || t('chat.folderFallback')
               return (
                 <CommandPrimitive.Item
                   key={path}
