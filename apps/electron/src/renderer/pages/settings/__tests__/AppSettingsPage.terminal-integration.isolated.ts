@@ -80,7 +80,6 @@ mock.module('@/components/settings', () => ({
 }))
 
 const { cleanup, render, screen, waitFor } = await import('@testing-library/react')
-const userEvent = (await import('@testing-library/user-event')).default
 const { default: AppSettingsPage } = await import('../AppSettingsPage')
 
 type StatusResult = Awaited<
@@ -135,84 +134,24 @@ afterEach(() => {
   cleanup()
 })
 
-describe('App settings terminal integration status failures', () => {
-  it('shows a pending check while other settings can render', async () => {
-    let finish!: (result: StatusResult) => void
-    getStatus = () => new Promise(resolve => { finish = resolve })
-    renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('Polo terminal features')).toBeTruthy()
-      expect(screen.getByText('Checking...')).toBeTruthy()
-      expect(screen.getByText('Network')).toBeTruthy()
-    })
-    expect(screen.queryByText('Command enabled')).toBeNull()
-    finish({ success: false, errorCode: 'status_failed' })
-    await screen.findByRole('button', { name: 'Retry' })
-  })
-
-  it('renders a structured initial status failure with a localized retry', async () => {
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('Polo terminal features')).toBeTruthy()
-      expect(screen.getByText('Terminal feature status unavailable')).toBeTruthy()
-      expect(screen.getByText(
-        'Polo could not check terminal feature status. Try again.',
-      )).toBeTruthy()
-      expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
-    })
-  })
-
-  it('renders a transport rejection through the localized IPC error', async () => {
-    getStatus = async () => {
-      throw new Error('sensitive transport diagnostic')
-    }
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText(
-        'Polo could not communicate with terminal setup. Try again.',
-      )).toBeTruthy()
-      expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
-    })
-    expect(document.body.textContent).not.toContain('sensitive transport diagnostic')
-  })
-
-  it('retries a failed status check and replaces the error with ready state', async () => {
-    let reads = 0
-    getStatus = async () => {
-      reads++
-      if (reads === 1) {
-        return {
-          success: false,
-          errorCode: 'status_failed',
-          errorParams: { operation: 'status' },
-        }
+describe('App settings keep external terminal setup out of the normal user flow', () => {
+  for (const runtime of ['electron', 'web']) {
+    it(`does not query or expose terminal setup in ${runtime}`, async () => {
+      let statusReads = 0
+      getStatus = async () => {
+        statusReads++
+        throw new Error('terminal checks must be on demand')
       }
-      return {
-        success: true,
-        status: {
-          supported: true,
-          installed: true,
-          pathReady: true,
-          needsRepair: false,
-          statusCode: 'ready',
-          launcherPath: '/Users/test/.local/bin/polo',
-        },
-      }
-    }
-    const user = userEvent.setup({ document: window.document })
-    renderPage()
-
-    await user.click(await screen.findByRole('button', { name: 'Retry' }))
-
-    await waitFor(() => {
-      expect(screen.getByText('Command enabled')).toBeTruthy()
-      expect(screen.getByText('The polo terminal command is ready.')).toBeTruthy()
+      window.electronAPI.getRuntimeEnvironment = () => runtime as 'electron' | 'web'
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByText('Network')).toBeTruthy()
+        expect(screen.getByText('About')).toBeTruthy()
+      })
+      expect(statusReads).toBe(0)
+      expect(screen.queryByText('Polo terminal features')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Enable command' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Disable command' })).toBeNull()
     })
-    expect(reads).toBe(2)
-    expect(screen.queryByText(
-      'Polo could not check terminal feature status. Try again.',
-    )).toBeNull()
-  })
+  }
 })

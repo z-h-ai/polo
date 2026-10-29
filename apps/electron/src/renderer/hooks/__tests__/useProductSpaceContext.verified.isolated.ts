@@ -189,7 +189,6 @@ function configureIpc(): void {
 const { renderHook, act, waitFor } = await import('@testing-library/react')
 const { useProductSpaceContextState } = await import('../useProductSpaceContext')
 const { resetProductSpaceStorageMemoryForTests } = await import('@/lib/product-space-storage')
-const { deriveMembershipTransition } = await import('@/lib/membership-transition')
 
 function useHarness() {
   return useProductSpaceContextState()
@@ -250,18 +249,6 @@ function seedStaleVerifiedSnapshot(activeId = personalId) {
   listResult = { success: false, errorCode: 'NETWORK_ERROR', message: 'offline' }
 }
 
-/** The banner derivation fed from the LIVE hook projection. */
-function deriveFromHook(hook: { current: ReturnType<typeof useHarness> }) {
-  return deriveMembershipTransition({
-    membershipListVerified: hook.current.membershipListVerified,
-    allProductSpaces: hook.current.allProductSpaces,
-    circles: [],
-    memberships: [],
-    circleReadDenied: false,
-    audience: 'enterprise',
-  })
-}
-
 describe('useProductSpaceContextState membershipListVerified 状态机 (POO-142 F1)', () => {
   it('登录成功选择后置位；发布前（loading 停留在权威拉取上）绝不提前置位', async () => {
     // Park the bootstrap on its authoritative membership fetch: call 1 hangs
@@ -307,7 +294,7 @@ describe('useProductSpaceContextState membershipListVerified 状态机 (POO-142 
     expect(result.current.membershipListVerified).toBe(true)
   })
 
-  it('离线 restore 不置位：快照可 ready，但缓存快照永不支撑 banner（推导保持 unknown）', async () => {
+  it('离线 restore 不置位：快照可 ready，但缓存快照永不置 verified 事实', async () => {
     seedStaleVerifiedSnapshot()
     const { result } = renderHook(useHarness)
     expect(await boot(result)).toBe('ready')
@@ -316,12 +303,9 @@ describe('useProductSpaceContextState membershipListVerified 状态机 (POO-142 
     expect(result.current.flowState).toBe('ready')
     expect(result.current.activeProductSpaceId).toBe(personalId)
     expect(result.current.allProductSpaces.map(space => space.id as string)).toEqual([personalId])
-    // The offline/cached restore NEVER sets the verified fact.
+    // The offline/cached restore NEVER sets the verified fact: only an
+    // online list read may turn the cached snapshot into a verified one.
     expect(result.current.membershipListVerified).toBe(false)
-    // Wired into the real banner derivation: receipts settled empty, but the
-    // missing online verification alone keeps the state `unknown` — the
-    // snapshot can never become a "no membership" claim.
-    expect(deriveFromHook(result)).toEqual({ status: 'unknown', reason: 'spaces_unverified' })
   })
 
   it('在线恢复发布后置位（路径一：verified refresh）', async () => {
@@ -341,8 +325,6 @@ describe('useProductSpaceContextState membershipListVerified 状态机 (POO-142 
       expect(await result.current.refreshProductSpaces()).not.toBeNull()
     })
     expect(result.current.membershipListVerified).toBe(true)
-    // And the derived banner state may now speak (personal-only = unaffiliated).
-    expect(deriveFromHook(result)).toEqual({ status: 'unaffiliated', audience: 'enterprise' })
   })
 
   it('在线恢复发布后置位（路径二：Catalog403 trusted recovery 事务发布）', async () => {

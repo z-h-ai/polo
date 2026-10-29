@@ -148,10 +148,12 @@ export function useProductSpaceContextState() {
   /**
    * POO-142: whether the CURRENT account scope's ProductSpace list was
    * published from an authoritative ONLINE read. An offline/cached restore
-   * never sets it, so the membership-transition banner can never present a
-   * device snapshot as "no membership". Reset on every bootstrap start,
-   * clearAccount and the contract-blocked teardown; a plain network failure
-   * of a later refresh keeps the last verified fact of this scope.
+   * never sets it, so a device snapshot can never masquerade as an
+   * online-verified fact (POO-193 removed the banner that consumed this;
+   * the verified fact stays part of the context contract). Reset on every
+   * bootstrap start, clearAccount and the contract-blocked teardown; a plain
+   * network failure of a later refresh keeps the last verified fact of this
+   * scope.
    */
   const [membershipListVerified, setMembershipListVerified] = useState(false)
 

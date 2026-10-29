@@ -16,7 +16,6 @@ import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { SessionInfoPopover } from '@/components/app-shell/SessionInfoPopover'
 import { RenameDialog } from '@/components/ui/rename-dialog'
-import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -579,21 +578,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
   }, [sessionId])
 
-  // Journey #7: sharing asks via the shared confirm dialog (same locales keys
-  // as the session menu) instead of a native window.confirm.
-  const { requestConfirm: requestShareConfirm, confirmElement: shareConfirmElement } = useConfirmDialog()
-
+  // Sharing publishes the session directly — no confirm ask (POO-166), same as
+  // the session-menu path in `useSessionMenuActions`.
   // Share action handlers
   const handleShare = React.useCallback(async () => {
-    const confirmed = await requestShareConfirm({
-      testId: 'share-confirm',
-      title: t('chat.shareConfirm.title'),
-      description: t('chat.shareConfirm.description'),
-      confirmLabel: t('chat.shareConfirm.confirm'),
-    })
-    if (!confirmed) {
-      return
-    }
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
     if (result?.success && result.url) {
       await navigator.clipboard.writeText(result.url)
@@ -604,7 +592,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     } else {
       toast.error(t('toast.failedToShare'), { description: result?.error || t('toast.unknownError') })
     }
-  }, [sessionId, t, requestShareConfirm])
+  }, [sessionId, t])
 
   const handleOpenInBrowser = React.useCallback(() => {
     if (sharedUrl) window.electronAPI.openUrl(sharedUrl)
@@ -948,7 +936,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
-      {shareConfirmElement}
     </>
   )
 })

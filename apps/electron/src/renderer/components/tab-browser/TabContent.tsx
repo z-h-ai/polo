@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import { ClientHomeRouter } from '@/components/circles/ClientHomeRouter'
 import { useOptionalMemberCatalog } from '@/context/MemberCatalogContext'
 import { MemberCircleResourceProvider } from '@/context/MemberCircleResourceContext'
-import { MembershipTransitionBanner } from '@/components/product-space/MembershipTransitionBanner'
 import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { WebAppView } from './WebAppView'
 import { KnowledgeBaseApp } from './KnowledgeBaseApp'
@@ -30,12 +29,12 @@ function WebTabLayer({ tab, active }: { tab: TabInstance; active: boolean }) {
 
 /**
  * The home-branch surface (POO-70 C9 / POO-100). POO-142 moved the SINGLE
- * member-circle resource provider OUT of this surface to the TabContent root:
- * the workbench membership banner reads the same shared relations resource,
- * and the silent circle pull now runs with the shell (not only while the home
- * tab is active). The router still reads THE one shared instance through
+ * member-circle resource provider OUT of this surface to the TabContent root,
+ * so the silent circle pull runs with the shell (not only while the home tab
+ * is active). The router still reads THE one shared instance through
  * `useMemberCircles()` — a row click's invalidation refreshes list and detail
- * through one context, exactly as before.
+ * through one context, exactly as before. (POO-193 removed the POO-142
+ * workbench "not joined yet" banner; the provider stays at the root.)
  *
  * Lifecycle: the provider mounts/dies with the keyed TabShell scope (account
  * + ProductSpace context key), so no relations fact of a previous scope can
@@ -62,15 +61,12 @@ export function TabContent({ renderPolo, onReauthenticateRequest }: TabContentPr
 
   return (
     <MemberCircleResourceProvider catalog={catalog}>
-      {/* POO-142: flex column so the membership banner can take exactly one row
-      above the tab surfaces when (and only when) it has something to say.
-      The banner renders null otherwise, and the surfaces below keep their
-      h-full sizing inside the flex-1 min-h-0 region. */}
+      {/* The tab surfaces keep their h-full sizing inside the flex-1
+      min-h-0 region. */}
       <div
         className="flex h-full min-h-0 flex-col text-foreground"
         style={{ paddingTop: 'var(--content-top-offset)' }}
       >
-        <MembershipTransitionBanner />
         <div className="relative min-h-0 flex-1">
           <div className={activeType === 'polo' ? 'flex h-full min-h-0 flex-col' : 'hidden'}>
             {renderPolo()}

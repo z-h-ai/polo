@@ -163,8 +163,6 @@ import {
   TerminalIntegrationCommandParseError,
   type TerminalIntegrationCommand,
 } from './terminal-integration-command'
-import { runTerminalOnboarding } from './terminal-onboarding'
-import { runNonCriticalTerminalOnboarding } from './startup-continuation'
 import { TERMINAL_INTEGRATION_ERROR_KEYS } from '../shared/terminal-integration'
 import type {
   TerminalIntegrationOperation,
@@ -350,29 +348,6 @@ async function terminalIntegrationIpcResult(
       success: false,
       ...toTerminalIntegrationErrorPayload(error, operation),
     }
-  }
-}
-
-function terminalSetupCopy() {
-  return {
-    conflictTitle: i18n.t('dialog.terminalSetup.conflictTitle'),
-    conflictMessage: i18n.t('dialog.terminalSetup.conflictMessage'),
-    conflictDetail: i18n.t('dialog.terminalSetup.conflictDetail'),
-    setupTitle: i18n.t('dialog.terminalSetup.setupTitle'),
-    setupDetail: i18n.t('dialog.terminalSetup.setupDetail'),
-    completeNow: i18n.t('dialog.terminalSetup.completeNow'),
-    notNow: i18n.t('dialog.terminalSetup.notNow'),
-    completeTitle: i18n.t('dialog.terminalSetup.completeTitle'),
-    completeMessage: i18n.t('dialog.terminalSetup.completeMessage'),
-    newTerminal: i18n.t('dialog.terminalSetup.newTerminal'),
-    failedTitle: i18n.t('dialog.terminalSetup.failedTitle'),
-    failedMessage: i18n.t('dialog.terminalSetup.failedMessage'),
-    skippedTitle: i18n.t('dialog.terminalSetup.skippedTitle'),
-    skippedMessage: i18n.t('dialog.terminalSetup.skippedMessage'),
-    skippedDetail: i18n.t('dialog.terminalSetup.skippedDetail'),
-    retry: i18n.t('common.retry'),
-    ok: i18n.t('common.ok'),
-    done: i18n.t('common.done'),
   }
 }
 
@@ -1518,31 +1493,6 @@ app.whenReady().then(async () => {
     // In headless mode the server runs without any UI — skip window creation.
     if (!isHeadless) {
       await createInitialWindows()
-
-      if (app.isPackaged && process.platform === 'darwin') {
-        const terminalOptions = terminalIntegrationOptions()
-        const setupCopy = terminalSetupCopy()
-        const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-        await runNonCriticalTerminalOnboarding(
-          () => runTerminalOnboarding({
-            terminalOptions,
-            copy: setupCopy,
-            showMessageBox: (options) => dialog.showMessageBox(win, options),
-            formatError: error => i18n.t(
-              TERMINAL_INTEGRATION_ERROR_KEYS[error.errorCode],
-              error.errorParams,
-            ),
-            logError: error => mainLog.error(
-              '[terminal-integration] onboarding failed',
-              error,
-            ),
-          }),
-          error => mainLog.error(
-            '[terminal-integration] unexpected onboarding failure',
-            error,
-          ),
-        )
-      }
     }
 
     // Run credential health check at startup to detect issues early

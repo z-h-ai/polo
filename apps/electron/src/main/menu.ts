@@ -1,4 +1,4 @@
-import { Menu, app, shell, BrowserWindow } from 'electron'
+import { Menu, app, shell, BrowserWindow, dialog } from 'electron'
 import { i18n } from '@polo-ai/shared/i18n'
 import { RPC_CHANNELS, type BroadcastEventMap } from '../shared/types'
 import type { NewWindowRequestSource } from '../shared/types'
@@ -8,6 +8,8 @@ import type { WindowManager } from './window-manager'
 import { createMainWindowWithOutcome } from './new-window-launch'
 import type { EventSink } from '@polo-ai/server-core/transport'
 import { mainLog, isDebugMode } from './logger'
+import { runTerminalCommandDialog } from './terminal-command-dialog'
+import { getTerminalIntegrationErrorMessage, getTerminalIntegrationStatusMessage } from '../shared/terminal-integration'
 
 type ClientResolver = (webContentsId: number) => string | undefined
 
@@ -15,6 +17,38 @@ type ClientResolver = (webContentsId: number) => string | undefined
 let cachedWindowManager: WindowManager | null = null
 let cachedEventSink: EventSink | null = null
 let cachedClientResolver: ClientResolver | null = null
+let terminalCommandDialog: Promise<void> | null = null
+
+function openTerminalCommandDialog(): Promise<void> {
+  if (terminalCommandDialog) return terminalCommandDialog
+  terminalCommandDialog = runTerminalCommandDialog({
+    terminalOptions: {
+      platform: process.platform,
+      homeDir: process.env.POLO_AI_TERMINAL_HOME,
+      shell: process.env.SHELL,
+      resourcesPath: process.resourcesPath,
+      appExecutable: process.execPath,
+      appVersion: app.getVersion(),
+    },
+    copy: {
+      title: i18n.t('dialog.terminalCommand.title'),
+      description: i18n.t('dialog.terminalCommand.description'),
+      enableDetail: i18n.t('dialog.terminalCommand.enableDetail'),
+      enable: i18n.t('settings.terminalFeatures.install'),
+      repair: i18n.t('settings.terminalFeatures.repair'),
+      disable: i18n.t('settings.terminalFeatures.uninstall'),
+      close: i18n.t('common.close'),
+      retry: i18n.t('common.retry'),
+      newTerminal: i18n.t('settings.terminalFeatures.newTerminalHint'),
+      failedTitle: i18n.t('dialog.terminalCommand.failedTitle'),
+    },
+    showMessageBox: options => dialog.showMessageBox(options),
+    formatStatus: status => getTerminalIntegrationStatusMessage(status, i18n.t),
+    formatError: error => getTerminalIntegrationErrorMessage(error, i18n.t),
+    logError: error => mainLog.error('[terminal-command] failed', error),
+  }).finally(() => { terminalCommandDialog = null })
+  return terminalCommandDialog
+}
 
 /**
  * Creates and sets the application menu for macOS.
@@ -230,6 +264,10 @@ export async function rebuildMenu(): Promise<void> {
     {
       label: i18n.t("menu.help"),
       submenu: [
+        ...(app.isPackaged ? [{
+          label: i18n.t('menu.terminalCommand'),
+          click: () => { void openTerminalCommandDialog() },
+        }] : []),
         {
           label: i18n.t("menu.helpAndDocs"),
           click: () => shell.openExternal('https://app.polo.z-h-ai.com/docs')

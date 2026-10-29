@@ -356,9 +356,6 @@ export function CompactSessionMenu({
           )}
         </div>
       </DrawerContent>
-
-      {/* Journey #7: share confirmation dialog, above the drawer. */}
-      {actions.confirmElement}
     </Drawer>
   )
 }

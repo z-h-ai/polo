@@ -88,6 +88,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
+import { workbenchFocusModeAtom, workbenchSidebarVisibleAtom } from "@/atoms/workbench-view"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
 import { reportTargetProjectionFailure } from '@/lib/target-projection'
@@ -1692,15 +1693,20 @@ function AppShellContent({
     storage.set(storage.KEYS.expandedFolders, [...expandedFolders], activeWorkspaceId)
   }, [expandedFolders, activeWorkspaceId])
 
-  // Persist sidebar visibility to localStorage
+  // Persist sidebar visibility to localStorage; POO-191 mirrors the same fact
+  // to the TopBar view controls (atoms read-only — the shell stays the truth).
+  const setWorkbenchSidebarVisible = useSetAtom(workbenchSidebarVisibleAtom)
+  const setWorkbenchFocusMode = useSetAtom(workbenchFocusModeAtom)
   React.useEffect(() => {
     storage.set(storage.KEYS.sidebarVisible, isSidebarVisible)
-  }, [isSidebarVisible])
+    setWorkbenchSidebarVisible(isSidebarVisible)
+  }, [isSidebarVisible, setWorkbenchSidebarVisible])
 
-  // Persist focus mode state to localStorage
+  // Persist focus mode state to localStorage; POO-191 mirror as above.
   React.useEffect(() => {
     storage.set(storage.KEYS.focusModeEnabled, isSidebarAndNavigatorHidden)
-  }, [isSidebarAndNavigatorHidden])
+    setWorkbenchFocusMode(isSidebarAndNavigatorHidden)
+  }, [isSidebarAndNavigatorHidden, setWorkbenchFocusMode])
 
   // Persist per-view filter map to localStorage (workspace-scoped)
   React.useEffect(() => {

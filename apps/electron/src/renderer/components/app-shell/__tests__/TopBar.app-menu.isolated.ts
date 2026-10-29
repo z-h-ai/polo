@@ -25,7 +25,7 @@ setupI18n()
 // import.meta.glob, which does not exist under bun test.
 mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
 mock.module('@/atoms/sessions', () => ({ sessionMetaMapAtom: {} }))
-mock.module('jotai', () => ({ useAtomValue: () => new Map() }))
+mock.module('jotai', () => ({ useAtomValue: () => new Map(), atom: () => ({}) }))
 mock.module('@/context/AppShellContext', () => ({ useOptionalAppShellContext: () => null }))
 mock.module('@/context/ClientPageContext', () => ({ useOptionalClientPage: () => ({ isHeaderLineVisible: false }) }))
 mock.module('@/context/TabShellContext', () => ({ useTabShell: () => ({
@@ -76,16 +76,17 @@ afterEach(() => {
   menuNewWindow.mockClear()
 })
 
-describe('TopBar brand slot and avatar menu (POO-117)', () => {
-  it('renders the logo as a static decorative mark — no menu, no button semantics', () => {
+describe('TopBar brand slot and avatar menu (POO-117, POO-191)', () => {
+  it('POO-191: from Home the corner is the POO-117 brand mark — view controls need the assistant tab', () => {
+    // This file's TabShell mock pins the Home tab as active. Per the POO-191
+    // review decision the view controls only render while the assistant tab
+    // is active; every other tab falls back to the decorative brand mark.
     render(tree())
-    const mark = screen.getByTestId('topbar-brand-mark')
-    expect(mark.getAttribute('aria-hidden')).toBe('true')
-    // The dropdown trigger of the former AppMenu is gone.
+    expect(screen.queryByTestId('topbar-brand-mark')).not.toBeNull()
+    expect(screen.queryByTestId('topbar-sidebar-toggle')).toBeNull()
+    expect(screen.queryByTestId('topbar-focus-toggle')).toBeNull()
+    // The dropdown trigger of the former AppMenu stays gone.
     expect(screen.queryByTestId('topbar-app-menu')).toBeNull()
-    // The mark must not host interactive elements (buttons keep focus/Enter
-    // semantics that a decorative brand mark must not have).
-    expect(mark.querySelector('button')).toBeNull()
   })
 
   it('mounts WorkbenchAccountMenu inside the avatar dropdown', async () => {
