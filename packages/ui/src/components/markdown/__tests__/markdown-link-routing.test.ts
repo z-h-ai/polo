@@ -178,10 +178,18 @@ describe('Markdown empty-href anchors render as non-links (POO-172 CITE-02)', ()
   it('keeps an anchor-text URL fallback clickable without a DOM href', () => {
     const html = renderWithCallbacks('Read [https://example.com/source]() next.')
     expect(html).toContain('<a')
+    // R1 fix (CITE-FALLBACK-KEYBOARD): the href-less fallback anchor gets real
+    // link semantics so keyboard users can focus and activate it.
+    expect(html).toContain('tabindex="0"')
+    expect(html).toContain('role="link"')
   })
 
   it('keeps normal markdown links clickable', () => {
     const html = renderWithCallbacks('Read [site](https://example.com/path) next.')
     expect(html).toContain('href="https://example.com/path"')
+    // A real link keeps its native focus/activation behavior — no manual
+    // tabindex/role injection.
+    expect(html).not.toContain('tabindex=')
+    expect(html).not.toContain('role="link"')
   })
 })

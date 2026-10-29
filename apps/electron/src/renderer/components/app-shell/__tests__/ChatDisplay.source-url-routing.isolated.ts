@@ -11,8 +11,11 @@
  * - a user-message link still routes to the business channel
  * - a same-screen error-card `open_url` (even https) still routes to the
  *   business channel
- * - swapping `onOpenSourceUrl` re-renders memoized bubbles (the comparator
- *   must not cache the old callback)
+ * - swapping `onOpenSourceUrl` re-renders memoized bubbles via a REAL rerender
+ *   (the comparator must not cache the old callback)
+ * - a middle-click (auxclick button=1) routes through the same SOURCE channel
+ *   instead of Electron's default external-open path, and the href-less URL
+ *   fallback anchor is keyboard-activatable (R1 fix)
  *
  * Isolated happy-dom render (shared-process pattern, see
  * TopBar.app-menu.isolated.ts). Run per-file:
@@ -223,7 +226,6 @@ const calls = {
   source: [] as string[],
   file: [] as string[],
 }
-let currentSourceHandler: (url: string) => void = (url) => calls.source.push(url)
 
 function resetCalls() {
   calls.business.length = 0
@@ -247,19 +249,19 @@ function makeSession(messages: any[]): any {
   }
 }
 
-function Harness({ messages }: { messages: any[] }) {
+function Harness({ messages, onOpenSourceUrl }: { messages: any[]; onOpenSourceUrl: (url: string) => void }) {
   return React.createElement(ChatDisplay, {
     session: makeSession(messages),
     onSendMessage: () => {},
     onOpenFile: (path: string) => calls.file.push(path),
     onOpenUrl: (url: string) => calls.business.push(url),
-    onOpenSourceUrl: (url: string) => currentSourceHandler(url),
+    onOpenSourceUrl,
     currentModel: 'test-model',
   })
 }
 
-function mount(messages: any[]) {
-  return render(React.createElement(Harness, { messages }))
+function mount(messages: any[], onOpenSourceUrl: (url: string) => void = (url) => calls.source.push(url)) {
+  return render(React.createElement(Harness, { messages, onOpenSourceUrl }))
 }
 
 afterEach(() => {
@@ -267,7 +269,6 @@ afterEach(() => {
   resetCalls()
   defaultStore.values.clear()
   contextStore.values.clear()
-  currentSourceHandler = (url) => calls.source.push(url)
   toastError.mockClear()
   toastSuccess.mockClear()
 })
@@ -358,29 +359,128 @@ describe('ChatDisplay citation-source routing (POO-172)', () => {
     expect(calls.source).toEqual([])
   })
 
-  it('re-renders memoized content when onOpenSourceUrl identity changes', async () => {
+  it('re-renders memoized content when onOpenSourceUrl identity changes (REAL rerender)', async () => {
     const routedToSecond: string[] = []
-    mount([
+    const firstHandler = (url: string) => calls.source.push(url)
+    const messages = [
       {
         id: 'a3',
         role: 'assistant',
         content: 'Cite [the source](https://example.com/again).',
         createdAt: 5,
       },
-    ])
+    ]
+    const { rerender } = mount(messages, firstHandler)
 
     const link = await screen_findLink('the source')
     expect(link).toBeTruthy()
     fireEvent.click(link!)
     expect(calls.source).toEqual(['https://example.com/again'])
 
-    // Swap the handler identity (what ChatPage does when the workspace/handler
-    // changes): the memoized tree must pick up the NEW callback.
-    currentSourceHandler = (url) => routedToSecond.push(url)
+    // REAL rerender with a brand-new callback identity and unchanged
+    // content/session/props (what ChatPage does when the workspace/handler
+    // changes): the memo comparators must let the new callback through. A
+    // comparator that silently keeps the cached tree would keep dispatching
+    // to firstHandler, failing the assertions below.
+    rerender(
+      React.createElement(Harness, {
+        messages,
+        onOpenSourceUrl: (url: string) => routedToSecond.push(url),
+      })
+    )
     const linkAfter = await screen_findLink('the source')
     expect(linkAfter).toBeTruthy()
     fireEvent.click(linkAfter!)
     expect(routedToSecond).toEqual(['https://example.com/again'])
+    expect(calls.source).toEqual(['https://example.com/again'])
+  })
+
+  // --- POO-172 R1 fix: middle-click and keyboard parity (CITE-01) ------------
+
+  it('routes a middle-click (auxclick button=1) to the SOURCE channel and prevents the default', async () => {
+    mount([
+      {
+        id: 'a4',
+        role: 'assistant',
+        content: 'See [the source](https://example.com/src) for details.',
+        createdAt: 6,
+      },
+    ])
+
+    const link = await screen_findLink('the source')
+    expect(link).toBeTruthy()
+    // jsdom/happy-dom never synthesize auxclick — dispatch the real event the
+    // way a Chromium middle-click does.
+    const event = new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true })
+    link!.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(calls.source).toEqual(['https://example.com/src'])
+    expect(calls.business).toEqual([])
+  })
+
+  it('leaves non-middle auxclicks alone (right-click keeps its default behavior)', async () => {
+    mount([
+      {
+        id: 'a5',
+        role: 'assistant',
+        content: 'See [the source](https://example.com/src) for details.',
+        createdAt: 7,
+      },
+    ])
+
+    const link = await screen_findLink('the source')
+    expect(link).toBeTruthy()
+    const event = new MouseEvent('auxclick', { button: 2, bubbles: true, cancelable: true })
+    link!.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(calls.source).toEqual([])
+    expect(calls.business).toEqual([])
+  })
+
+  it('activates a href citation with Enter and routes it to the SOURCE channel', async () => {
+    mount([
+      {
+        id: 'a6',
+        role: 'assistant',
+        content: 'See [the source](https://example.com/src) for details.',
+        createdAt: 8,
+      },
+    ])
+
+    const link = await screen_findLink('the source')
+    expect(link).toBeTruthy()
+    fireEvent.keyDown(link!, { key: 'Enter' })
+
+    expect(calls.source).toEqual(['https://example.com/src'])
+    expect(calls.business).toEqual([])
+  })
+
+  it('gives the URL-fallback anchor real link semantics: focusable, Enter and Space route to the SOURCE channel', async () => {
+    mount([
+      {
+        id: 'a7',
+        role: 'assistant',
+        content: 'Read [https://example.com/fallback]() next.',
+        createdAt: 9,
+      },
+    ])
+
+    const link = await screen_findLink('https://example.com/fallback')
+    expect(link).toBeTruthy()
+    // href-less fallback anchor: focusable + link role so keyboard users can
+    // reach and activate it.
+    expect(link!.getAttribute('href')).toBeNull()
+    expect(link!.getAttribute('tabindex')).toBe('0')
+    expect(link!.getAttribute('role')).toBe('link')
+
+    fireEvent.keyDown(link!, { key: 'Enter' })
+    expect(calls.source).toEqual(['https://example.com/fallback'])
+
+    fireEvent.keyDown(link!, { key: ' ' })
+    expect(calls.source).toEqual(['https://example.com/fallback', 'https://example.com/fallback'])
+    expect(calls.business).toEqual([])
   })
 })
 

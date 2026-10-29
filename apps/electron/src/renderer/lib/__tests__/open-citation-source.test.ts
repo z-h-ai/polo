@@ -135,8 +135,10 @@ describe('resolveCitationSourceTarget', () => {
 describe('canReuseForCitationSource', () => {
   const scope: CitationSourceScope = { sessionId: 'sess-a', workspaceId: 'ws-1' }
 
-  it('reuses the citing session\'s own browser', () => {
-    expect(canReuseForCitationSource(makeInstance({ ownerSessionId: 'sess-a' }), scope)).toBe(true)
+  it('reuses the citing session\'s own browser inside the citing workspace', () => {
+    expect(canReuseForCitationSource(
+      makeInstance({ ownerSessionId: 'sess-a', workspaceId: 'ws-1' }), scope
+    )).toBe(true)
   })
 
   it('reuses a workspace-level window of the citing workspace', () => {
@@ -144,8 +146,55 @@ describe('canReuseForCitationSource', () => {
   })
 
   it('never reuses another session\'s browser or another workspace\'s window', () => {
-    expect(canReuseForCitationSource(makeInstance({ ownerSessionId: 'sess-b' }), scope)).toBe(false)
+    expect(canReuseForCitationSource(makeInstance({ ownerSessionId: 'sess-b', workspaceId: 'ws-1' }), scope)).toBe(false)
     expect(canReuseForCitationSource(makeInstance({ ownerSessionId: null, workspaceId: 'ws-2' }), scope)).toBe(false)
+  })
+})
+
+describe('canReuseForCitationSource workspace ownership (POO-172 R1 fix)', () => {
+  // A session id is only unique WITHIN its workspace: the same id can legally
+  // exist in two workspaces, so a name match alone must never adopt another
+  // workspace's window.
+  const scope: CitationSourceScope = { sessionId: 'same-session', workspaceId: 'ws-a' }
+
+  it('never reuses a SAME-NAMED session bound in ANOTHER workspace', () => {
+    expect(canReuseForCitationSource(
+      makeInstance({ ownerSessionId: 'same-session', workspaceId: 'ws-b' }), scope
+    )).toBe(false)
+  })
+
+  it('never reuses an instance of unknown workspace ownership', () => {
+    expect(canReuseForCitationSource(
+      makeInstance({ ownerSessionId: 'same-session', workspaceId: null }), scope
+    )).toBe(false)
+    expect(canReuseForCitationSource(
+      makeInstance({ ownerSessionId: null, workspaceId: null }), scope
+    )).toBe(false)
+  })
+
+  it('never reuses anything when the scope itself has no workspace context', () => {
+    const homeless: CitationSourceScope = { sessionId: 'same-session', workspaceId: null }
+    expect(canReuseForCitationSource(
+      makeInstance({ ownerSessionId: 'same-session', workspaceId: 'ws-a' }), homeless
+    )).toBe(false)
+  })
+
+  it('accepts the remote-mirror alias of the citing workspace (authoritative mapping)', () => {
+    const remoteScope: CitationSourceScope = {
+      sessionId: 'sess-a',
+      workspaceId: 'ws-local',
+      remoteWorkspaceId: 'ws-remote',
+    }
+    expect(canReuseForCitationSource(
+      makeInstance({ ownerSessionId: 'sess-a', workspaceId: 'ws-remote' }), remoteScope
+    )).toBe(true)
+    expect(canReuseForCitationSource(
+      makeInstance({ ownerSessionId: null, workspaceId: 'ws-remote' }), remoteScope
+    )).toBe(true)
+    // A third workspace sharing neither alias stays foreign.
+    expect(canReuseForCitationSource(
+      makeInstance({ ownerSessionId: 'sess-a', workspaceId: 'ws-c' }), remoteScope
+    )).toBe(false)
   })
 })
 
@@ -204,7 +253,7 @@ describe('createCitationSourceOpener', () => {
 
   it('never reuses another session\'s browser — creates its own bound instance', async () => {
     const { calls, opener } = makeOpener({
-      list: async () => [makeInstance({ id: 'foreign', ownerSessionId: 'sess-b' })],
+      list: async () => [makeInstance({ id: 'foreign', ownerSessionId: 'sess-b', workspaceId: 'ws-1' })],
     })
 
     const outcome = await opener('https://example.com/x')
@@ -358,7 +407,7 @@ describe('createCitationSourceOpener', () => {
 
   it('a failed navigation on a REUSED browser never destroys the user\'s instance', async () => {
     const { calls, opener } = makeOpener({
-      list: async () => [makeInstance({ id: 'owned-1', ownerSessionId: 'sess-a' })],
+      list: async () => [makeInstance({ id: 'owned-1', ownerSessionId: 'sess-a', workspaceId: 'ws-1' })],
       navigate: async (id, url) => {
         calls.navigate.push([id, url])
         throw new Error('ERR_TIMEOUT')
@@ -373,6 +422,20 @@ describe('createCitationSourceOpener', () => {
     expect(calls.create).toEqual([])
   })
 
+  it('reuses an instance stamped with the scope\'s REMOTE workspace alias', async () => {
+    const { calls, opener } = makeOpener({
+      list: async () => [makeInstance({ id: 'remote-1', ownerSessionId: 'sess-a', workspaceId: 'ws-remote' })],
+    })
+
+    scope = { sessionId: 'sess-a', workspaceId: 'ws-1', remoteWorkspaceId: 'ws-remote' }
+    const outcome = await opener('https://example.com/remote')
+
+    expect(outcome).toEqual({ status: 'opened-in-browser', instanceId: 'remote-1', reused: true })
+    expect(calls.navigate).toEqual([['remote-1', 'https://example.com/remote']])
+    expect(calls.create).toEqual([])
+    expect(calls.destroy).toEqual([])
+  })
+
   it('fails cleanly when the browserPane API is unavailable', async () => {
     Object.defineProperty(window, 'electronAPI', { configurable: true, value: {} })
     const opener = createCitationSourceOpener({
@@ -384,5 +447,166 @@ describe('createCitationSourceOpener', () => {
     const outcome = await opener('https://example.com/x')
 
     expect(outcome.status).toBe('failed')
+  })
+})
+
+describe('createCitationSourceOpener get-or-create ownership (POO-172 R1 fix)', () => {
+  // `api.create` is get-or-create (Main's createForSession): the resolved id
+  // may be an instance that already existed. These cases lock the R1 fix —
+  // a destroy may only ever touch an instance the call created AND never
+  // delivered.
+  let scope: CitationSourceScope
+  let onFile: ReturnType<typeof mock>
+  let onExternal: ReturnType<typeof mock>
+  let onBlocked: ReturnType<typeof mock>
+
+  beforeEach(() => {
+    scope = { sessionId: 'sess-a', workspaceId: 'ws-1' }
+    onFile = mock((_p: string) => {})
+    onExternal = mock((_u: string) => {})
+    onBlocked = mock((_r: string) => {})
+  })
+
+  afterEach(() => {
+    Object.defineProperty(window, 'electronAPI', { configurable: true, value: undefined })
+  })
+
+  function makeOpener(paneOverrides?: Parameters<typeof installPane>[0]) {
+    const calls = installPane(paneOverrides)
+    const opener = createCitationSourceOpener({
+      getSessionScope: () => scope,
+      onOpenFile: onFile,
+      onExternalUrl: onExternal,
+      onBlocked,
+    })
+    return { calls, opener }
+  }
+
+  it('never destroys an ADOPTED instance (create returned a pre-existing id)', async () => {
+    // A global manual window with no workspace stamp is exactly what Main's
+    // createForSession adopts; the create handler resolves with ITS id.
+    const { calls, opener } = makeOpener({
+      list: async () => [makeInstance({ id: 'manual-1', ownerSessionId: null, workspaceId: null })],
+      create: async (input) => {
+        calls.create.push(input ?? {})
+        return 'manual-1'
+      },
+      navigate: async (id, url) => {
+        calls.navigate.push([id, url])
+        throw new Error('ERR_NAVIGATION')
+      },
+    })
+
+    const outcome = await opener('https://example.com/broken')
+
+    expect(outcome).toEqual({ status: 'failed', reason: 'ERR_NAVIGATION' })
+    // The adopted (user-visible) manual window survives the failed navigation.
+    expect(calls.destroy).toEqual([])
+    expect(calls.focus).toEqual([])
+  })
+
+  it('does not destroy a fresh id that is VISIBLE by recycle time (delivered elsewhere)', async () => {
+    let listings = 0
+    const { calls, opener } = makeOpener({
+      list: async () => {
+        listings += 1
+        // First list (reuse check) sees nothing; by recycle time another
+        // window has already presented the instance to the user.
+        return listings === 1
+          ? []
+          : [makeInstance({ id: 'created-1', ownerSessionId: 'sess-a', workspaceId: 'ws-1', isVisible: true })]
+      },
+      create: async (input) => {
+        calls.create.push(input ?? {})
+        return 'created-1'
+      },
+      navigate: async (id, url) => {
+        calls.navigate.push([id, url])
+        throw new Error('ERR_NAVIGATION')
+      },
+    })
+
+    const outcome = await opener('https://example.com/raced')
+
+    expect(outcome).toEqual({ status: 'failed', reason: 'ERR_NAVIGATION' })
+    expect(calls.destroy).toEqual([])
+  })
+
+  it('serializes two concurrent opens on one scope: the shared get-or-create id is never destroyed', async () => {
+    const { calls, opener } = makeOpener({
+      create: async (input) => {
+        calls.create.push(input ?? {})
+        // get-or-create: BOTH calls resolve to the same bound instance.
+        return 'shared-session-browser'
+      },
+    })
+
+    const [first, second] = await Promise.all([
+      opener('https://example.com/first'),
+      opener('https://example.com/second'),
+    ])
+
+    expect(first).toMatchObject({ status: 'opened-in-browser', instanceId: 'shared-session-browser' })
+    expect(second).toMatchObject({ status: 'opened-in-browser', instanceId: 'shared-session-browser' })
+    expect(calls.destroy).toEqual([])
+    expect(calls.focus).toEqual(['shared-session-browser', 'shared-session-browser'])
+  })
+
+  it('a failing open can no longer recycle an id another open has already delivered', async () => {
+    // Reviewer probe scenario (CITE-CREATE-NOT-EXCLUSIVE): two clicks resolve
+    // to the SAME id; the first open keeps failing while the second delivers.
+    const timeline: string[] = []
+    let navigateAttempt = 0
+    const { calls, opener } = makeOpener({
+      create: async (input) => {
+        calls.create.push(input ?? {})
+        timeline.push('create')
+        return 'shared-session-browser'
+      },
+      navigate: async (id, url) => {
+        calls.navigate.push([id, url])
+        navigateAttempt += 1
+        timeline.push(`navigate:${navigateAttempt}`)
+        if (navigateAttempt <= 2) throw new Error('ERR_ABORTED (-3)')
+        return { url, title: '' }
+      },
+      focus: async (id) => {
+        calls.focus.push(id)
+        timeline.push(`focus:${id}`)
+      },
+      destroy: async (id) => {
+        calls.destroy.push(id)
+        timeline.push(`destroy:${id}`)
+      },
+    })
+
+    const [first, second] = await Promise.all([
+      opener('https://example.com/one'),
+      opener('https://example.com/two'),
+    ])
+
+    expect(first).toMatchObject({ status: 'failed' })
+    expect(second).toMatchObject({ status: 'opened-in-browser', instanceId: 'shared-session-browser' })
+    // Whatever gets destroyed must be destroyed BEFORE the surviving open
+    // delivers (focus) — never after.
+    const destroyAt = calls.destroy.indexOf('shared-session-browser')
+    expect(destroyAt).toBeGreaterThanOrEqual(0)
+    expect(timeline.indexOf(`destroy:shared-session-browser`))
+      .toBeLessThan(timeline.indexOf(`focus:shared-session-browser`))
+  })
+
+  it('never reuses a same-named session bound in another workspace — creates its own', async () => {
+    const { calls, opener } = makeOpener({
+      list: async () => [
+        makeInstance({ id: 'ws-b-window', ownerSessionId: 'sess-a', workspaceId: 'ws-b' }),
+      ],
+    })
+
+    const outcome = await opener('https://example.com/cross')
+
+    expect(outcome).toEqual({ status: 'opened-in-browser', instanceId: 'created-1', reused: false })
+    expect(calls.navigate[0][0]).toBe('created-1')
+    // The foreign workspace's window is untouched.
+    expect(calls.destroy).toEqual([])
   })
 })
