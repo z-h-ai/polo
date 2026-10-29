@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Key, User, Lock, Eye, EyeOff, Check, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,6 +25,9 @@ interface CredentialRequestProps {
  * - query: API Key for query parameter auth
  */
 export function CredentialRequest({ request, onResponse, unstyled = false }: CredentialRequestProps) {
+  // POO-179: surrounding system copy and field defaults only — source-supplied
+  // labels/description/hint/header names and technical auth type names stay.
+  const { t } = useTranslation()
   const [value, setValue] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -100,8 +104,8 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
   // Get field labels
   const credentialLabel = request.labels?.credential ||
     (request.mode === 'bearer' ? 'Bearer Token' : 'API Key')
-  const usernameLabel = request.labels?.username || 'Username'
-  const basePasswordLabel = request.labels?.password || 'Password'
+  const usernameLabel = request.labels?.username || t('auth.username')
+  const basePasswordLabel = request.labels?.password || t('auth.password')
   const passwordLabel = getPasswordLabel(basePasswordLabel, passwordRequired)
   const passwordPlaceholder = getPasswordPlaceholder(basePasswordLabel, passwordRequired)
 
@@ -128,7 +132,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
             <div className="flex-1 min-w-0 space-y-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-foreground">
-                  Authentication Required
+                  {t('auth.required')}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   ({request.sourceName})
@@ -160,7 +164,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
                       onChange={(e) => setUsername(e.target.value)}
                       onKeyDown={handleKeyDown}
                       className="pl-9"
-                      placeholder={`Enter ${usernameLabel.toLowerCase()}`}
+                      placeholder={t('auth.enterField', { field: usernameLabel.toLowerCase() })}
                       autoFocus
                     />
                   </div>
@@ -216,7 +220,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
                         }))}
                         onKeyDown={handleKeyDown}
                         className="pl-9 pr-9"
-                        placeholder={`Enter ${headerName}`}
+                        placeholder={t('auth.enterField', { field: headerName })}
                         autoFocus={index === 0}
                       />
                       <button
@@ -253,7 +257,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
                     onChange={(e) => setValue(e.target.value)}
                     onKeyDown={handleKeyDown}
                     className="pl-9 pr-9"
-                    placeholder={`Enter ${credentialLabel.toLowerCase()}`}
+                    placeholder={t('auth.enterField', { field: credentialLabel.toLowerCase() })}
                     autoFocus
                   />
                   <button
@@ -287,7 +291,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
             disabled={!isValid}
           >
             <Check className="h-3.5 w-3.5" />
-            Save
+            {t('common.save')}
           </Button>
           <Button
             type="button"
@@ -297,11 +301,11 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
             onClick={handleCancel}
           >
             <X className="h-3.5 w-3.5" />
-            Cancel
+            {t('common.cancel')}
           </Button>
 
           <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
-            Credentials are encrypted at rest
+            {t('auth.encryptedAtRest')}
           </span>
         </div>
       </form>
