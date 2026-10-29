@@ -160,6 +160,9 @@ Object.defineProperty(window, 'electronAPI', {
     }),
     getHomeQuickAccess: async () => [],
     setHomeQuickAccess: async (_contextKey: unknown, apps: unknown[]) => apps,
+    // POO-154: the TabShell hydrate reads the persisted pinned canvas apps;
+    // the probe tree has none.
+    getTabBrowserApps: async () => [],
     productSpaceResolveLaunch: async () => { throw new Error('not reachable in the R34 probe') },
     localApps: localAppsProxy,
   },
@@ -639,19 +642,19 @@ it('R3FIX home tab keeps the real ClientPage stack inside TabShell (POO-100 pres
   expect(screen.getByTestId('app-topbar').querySelector('button[aria-label="' + i18n.t('topbar.brand.home') + '"]')).toBeNull()
 })
 
-// POO-142 review F2 (CL-TR-05): the shell-level regression the banner work
-// promised. A user WITH an affiliation never sees the "not joined yet"
-// banner — asserted here against the REAL TabShell tree (TopBar + TabContent
-// + the shared MemberCircleResourceProvider the banner mounts inside), not a
-// banner-only mount.
-describe('membership-transition banner scope regression (POO-142 F2)', () => {
-  it('an affiliated (own enterprise space in the verified list) scope never renders the banner', async () => {
+// POO-193: the POO-142 workbench "not joined yet" banner was REMOVED — a
+// personal-space account has no use for an enterprise-join prompt. Regression
+// pin against the REAL TabShell tree (TopBar + TabContent + the shared
+// MemberCircleResourceProvider the banner used to mount inside): the exact
+// scope that used to show it (verified list, personal space only) renders
+// none.
+describe('membership-transition banner removal regression (POO-193)', () => {
+  it('an unaffiliated (personal-space-only) scope renders no banner', async () => {
     render(buildShellTree(SCOPE_A, {
-      // The scope IS affiliated: the verified online list contains its own
-      // enterprise space. Derivation must answer `affiliated` — the banner
-      // stays silent for the whole hydration + tab lifecycle.
+      // The scope is NOT affiliated: the verified online list holds only the
+      // personal space — the state that used to show the banner.
       allProductSpaces: [
-        { id: SCOPE_A.productSpaceId, kind: 'enterprise', name: 'Organization A' },
+        { id: SCOPE_A.productSpaceId, kind: 'personal', name: 'Personal' },
       ],
     }))
 
