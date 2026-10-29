@@ -259,8 +259,8 @@ personal or enterprise space; the CLI still executes in its own server/runtime.
 ### Installation
 
 - macOS: the App includes the CLI, Bun runtime, server, and Agent worker; no
-  separate npm package or install script is needed. Choose **Enable command**
-  at first launch or in **Settings → Polo terminal features** for the optional
+  separate npm package or install script is needed. Normal startup never configures
+  the shell. Use **Help → polo terminal command… → Enable command** for the optional
   `polo` PATH shortcut. Without that shortcut, invoke the bundled CLI directly:
   `"/Applications/Polo AI.app/Contents/MacOS/Polo AI" --polo-cli exec "Hello"`.
   Use your actual App path. Owned connections can run after the App exits;
