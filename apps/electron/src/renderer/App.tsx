@@ -3322,8 +3322,8 @@ export default function App() {
     void requestSwitch(productSpaceId)
   }, [requestSwitch])
 
-  // POO-142: the returned list (or null on failure) is consumed by the
-  // membership-transition banner to release its single-flight busy state.
+  // POO-142 contract: the returned list (or null on failure) is awaitable for
+  // consumers that need the refresh outcome.
   const handleRefreshProductSpaces = useCallback(() => refreshProductSpaces(), [refreshProductSpaces])
 
   const productSpaceContextValue = useMemo<ProductSpaceContextValue | null>(() => {
