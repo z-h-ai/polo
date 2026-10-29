@@ -148,6 +148,62 @@ describe('POO-170 jump to latest', () => {
     expect(view.viewport().scrollTop).toBe(300)
     expect(view.jump()).not.toBeNull()
   })
+  it('keeps arrival feedback when content grows while stuck to the bottom', async () => {
+    const view = await mount()
+    await tick(550) // Leave the existing session-switch smooth-scroll guard.
+    view.geometry(300)
+    fireEvent.click(view.jump()!)
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
+    expect(view.getByRole('status').textContent).toBe('chat.latestReached')
+    // A stream chunk appends content before the sticky-bottom follow lands:
+    // the observer sees a temporary gap that is not the user reading away.
+    Object.defineProperty(view.viewport(), 'scrollHeight', { value: 1300, configurable: true })
+    await act(async () => { for (const observer of observers) observer.callback() })
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
+    expect(view.getByRole('status').textContent).toBe('chat.latestReached')
+    expect(view.viewport().contains(document.activeElement)).toBe(true)
+    expect(view.jump()).toBeNull()
+    await tick(250) // Follow lands.
+    expect(view.viewport().scrollTop).toBe(900)
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
+    // Continuous chunks must not end it either.
+    Object.defineProperty(view.viewport(), 'scrollHeight', { value: 1600, configurable: true })
+    await act(async () => { for (const observer of observers) observer.callback() })
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
+    await tick(1700)
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).toBeNull()
+    expect(view.queryByRole('status')?.textContent ?? '').toBe('')
+  })
+  it('ends arrival feedback on an upward user scroll, not on the follow passing a gap', async () => {
+    const view = await mount(); view.geometry(300)
+    fireEvent.click(view.jump()!)
+    // Mid-follow geometry: the viewport moves DOWN toward the bottom the user
+    // asked for while grown content keeps the gap open.
+    Object.defineProperty(view.viewport(), 'scrollHeight', { value: 1300, configurable: true })
+    view.viewport().scrollTop = 800
+    fireEvent.scroll(view.viewport())
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
+    expect(view.jump()).not.toBeNull() // Still a real gap until the follow lands.
+    view.viewport().scrollTop = 900
+    fireEvent.scroll(view.viewport())
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
+    expect(view.jump()).toBeNull()
+    // A real upward user scroll ends the feedback immediately.
+    view.viewport().scrollTop = 400
+    fireEvent.scroll(view.viewport())
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).toBeNull()
+    expect(view.jump()).not.toBeNull()
+  })
+  it('ends arrival feedback immediately when Recap takes over', async () => {
+    const view = await mount(); view.geometry(300)
+    fireEvent.click(view.jump()!)
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).not.toBeNull()
+    recapReveal = () => view.geometry(300)
+    fireEvent.click(view.getByRole('button', { name: 'chat.recap.jumpToMessage' }))
+    expect(view.container.querySelector('[data-latest-highlight="true"]')).toBeNull()
+    expect(view.queryByRole('status')?.textContent ?? '').toBe('')
+    expect(view.jump()).not.toBeNull()
+  })
   it('clears feedback on session switch, panel blur and unmount', async () => {
     const view = await mount(); view.geometry(300); fireEvent.click(view.jump()!)
     view.rerender(h(ChatDisplay, props(baseSession('b'))))
