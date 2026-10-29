@@ -46,6 +46,9 @@ const exportSessionToFile = mock((_sessionId: string) =>
   Promise.resolve<string | null>(null),
 )
 const showInFolder = mock((_path: string) => Promise.resolve())
+const sessionCommand = mock((_sessionId: string, _command: unknown) =>
+  Promise.resolve({ success: false }),
+)
 
 // electronAPI double — only the surface the export action touches.
 Object.defineProperty(window, 'electronAPI', {
@@ -53,6 +56,8 @@ Object.defineProperty(window, 'electronAPI', {
   value: {
     exportSessionToFile,
     showInFolder,
+    sessionCommand,
+    openUrl: mock((_url: string) => {}),
   },
 })
 
@@ -73,6 +78,7 @@ afterEach(() => {
   toastError.mockClear()
   exportSessionToFile.mockClear()
   showInFolder.mockClear()
+  sessionCommand.mockClear()
 })
 
 describe('useSessionMenuActions.exportSession', () => {
@@ -165,6 +171,51 @@ describe('useSessionMenuActions.exportSession', () => {
   })
 })
 
+
+describe('useSessionMenuActions.share', () => {
+  function setClipboard(writeText: (value: string) => Promise<void>) {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  }
+
+  // POO-166: sharing no longer asks through a confirm dialog — the first tap
+  // publishes immediately (sessionCommand fires synchronously in the same
+  // task, with no dialog round-trip in between).
+  it('publishes on the first tap without a confirm round-trip, then toasts the copied link', async () => {
+    const writeText = mock(async (_value: string) => {})
+    setClipboard(writeText)
+    sessionCommand.mockImplementation((_sessionId, _command) =>
+      Promise.resolve({ success: true, url: 'https://app.polo.z-h-ai.com/s/abc123' }),
+    )
+    const { result } = renderActions()
+
+    await act(async () => {
+      await result.current.share()
+    })
+
+    expect(sessionCommand.mock.calls).toEqual([['session-export-1', { type: 'shareToViewer' }]])
+    expect(writeText.mock.calls).toEqual([['https://app.polo.z-h-ai.com/s/abc123']])
+    expect(toastSuccess.mock.calls.length).toBe(1)
+    expect(toastSuccess.mock.calls[0][0]).toBe('Link copied to clipboard')
+    expect(toastError.mock.calls.length).toBe(0)
+  })
+
+  it('reports a failed publish without claiming success', async () => {
+    setClipboard(async () => {})
+    sessionCommand.mockImplementation((_sessionId, _command) =>
+      Promise.resolve({ success: false, error: 'Session manager not initialized' }),
+    )
+    const { result } = renderActions()
+
+    await act(async () => {
+      await result.current.share()
+    })
+
+    expect(sessionCommand.mock.calls.length).toBe(1)
+    expect(toastError.mock.calls.length).toBe(1)
+    expect(toastError.mock.calls[0][0]).toBe('Failed to share')
+    expect(toastSuccess.mock.calls.length).toBe(0)
+  })
+})
 
 describe('useSessionMenuActions.copySessionId', () => {
   function setClipboard(writeText: (value: string) => Promise<void>) {

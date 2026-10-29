@@ -281,9 +281,6 @@ export function SessionMenu({
         <Trash2 className="h-3.5 w-3.5" />
         <span className="flex-1">{t("common.delete")}</span>
       </MenuItem>
-
-      {/* Journey #7: share confirmation dialog (portal-free, renders above the menu). */}
-      {actions.confirmElement}
     </>
   )
 }
