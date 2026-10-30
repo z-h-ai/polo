@@ -119,12 +119,6 @@ interface MultiDiffOverlayState {
 interface MarkdownOverlayState {
   type: 'markdown'
   content: string
-  /**
-   * POO-179: overlay titles are stored as i18n keys and resolved at render
-   * time, so an open overlay re-renders with the current language instead of
-   * freezing a translation captured at open time. Content stays verbatim.
-   */
-  titleKey: string
   /** When true, show raw markdown source in code viewer instead of rendered preview */
   forceCodeView?: boolean
 }
@@ -1095,7 +1089,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     setOverlayState({
       type: 'markdown',
       content: message.content,
-      titleKey: 'chat.messagePreview',
     })
   }, [session])
 
@@ -1887,7 +1880,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                               {
                                 branchFromMessageId: messageId,
                                 branchFromSessionId: session.id,
-                                name: t('chat.branchOf', { name: session.name || t('chat.untitledSession') }),
+                                // POO-179: the branch name is persisted session
+                                // metadata, so it stays the untranslated baseline
+                                // form; localizing it here would freeze a
+                                // translation into the session list forever.
+                                name: `Branch of ${session.name || 'Untitled'}`,
                                 // Keep branch on the same backend/provider by inheriting parent session settings.
                                 llmConnection: session.llmConnection,
                                 model: session.model,
@@ -1985,7 +1982,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           setOverlayState({
                             type: 'markdown',
                             content: text,
-                            titleKey: 'chat.responsePreview',
                             forceCodeView: true,
                           })
                         }}
@@ -1995,7 +1991,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           setOverlayState({
                             type: 'markdown',
                             content: markdown,
-                            titleKey: 'chat.turnDetails',
                           })
                         }}
                         onOpenActivityDetails={(activity) => {

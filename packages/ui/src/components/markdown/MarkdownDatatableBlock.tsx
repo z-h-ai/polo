@@ -685,8 +685,11 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
   const granularityOptions = React.useMemo(() => {
     if (!parsed) return new Map<string, GranularityOption[]>()
+    // POO-179: labels resolve inside compute* at call time; `t` is the
+    // language-change signal (react-i18next rotates its reference on switch)
+    // so cached options re-translate without invalidating `parsed`.
     return computeGranularityOptions(parsed)
-  }, [parsed])
+  }, [parsed, t])
 
   const groupedData = React.useMemo(() => {
     if (!groupKey || !parsed) return null
