@@ -54,7 +54,7 @@ export function SessionSearchHeader({
   resultCount,
   exceededLimit = false,
   inputRef,
-  placeholder = 'Search titles and content...',
+  placeholder,
   readOnly = false,
 }: SessionSearchHeaderProps) {
   const { t } = useTranslation()
@@ -73,7 +73,7 @@ export function SessionSearchHeader({
           onFocus={onFocus}
           onBlur={onBlur}
           readOnly={readOnly}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('session.searchTitlesAndContent')}
           className="w-full h-8 pl-8 pr-8 text-sm bg-transparent border-0 rounded-[8px] outline-none focus-visible:ring-0 focus-visible:outline-none placeholder:text-muted-foreground/50"
         />
         {onSearchClose && (

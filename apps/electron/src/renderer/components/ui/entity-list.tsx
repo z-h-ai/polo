@@ -12,6 +12,7 @@
  */
 
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChevronRight } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -104,6 +105,7 @@ function CollapsibleGroupHeader({
   onCollapseAll?: () => void
   onExpandAll?: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <ContextMenu modal>
       <ContextMenuTrigger asChild>
@@ -125,14 +127,14 @@ function CollapsibleGroupHeader({
       </ContextMenuTrigger>
       <StyledContextMenuContent>
         <StyledContextMenuItem onClick={onToggle}>
-          {isCollapsed ? 'Expand' : 'Collapse'}
+          {isCollapsed ? t('common.expand') : t('common.collapse')}
         </StyledContextMenuItem>
         <StyledContextMenuSeparator />
         <StyledContextMenuItem onClick={onCollapseAll}>
-          Collapse All
+          {t('common.collapseAll')}
         </StyledContextMenuItem>
         <StyledContextMenuItem onClick={onExpandAll}>
-          Expand All
+          {t('common.expandAll')}
         </StyledContextMenuItem>
       </StyledContextMenuContent>
     </ContextMenu>

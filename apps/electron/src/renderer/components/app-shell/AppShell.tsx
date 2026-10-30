@@ -2579,7 +2579,7 @@ function AppShellContent({
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="max-w-[220px]">
-                    Scheduling requires your machine to be running. It can be locked, but must be powered on.
+                    {t('automations.schedulingRequiresRunning')}
                   </TooltipContent>
                 </Tooltip>
               ) : undefined}
@@ -2985,7 +2985,7 @@ function AppShellContent({
                                 Supports keyboard navigation (ArrowUp/Down/Enter in input). */}
                             {filterDropdownResults.states.length === 0 && filterDropdownResults.labels.length === 0 ? (
                               <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                                No matching statuses or labels
+                                {t('chat.noStatusLabelMatches')}
                               </div>
                             ) : (
                               <div ref={filterDropdownListRef} className="max-h-[240px] overflow-y-auto py-1">
@@ -3449,7 +3449,7 @@ function AppShellContent({
             side="bottom"
             align="start"
             secondaryAction={{
-              label: 'Edit File',
+              label: t('common.editFile'),
               filePath: `${activeWorkspace.rootPath}/statuses/config.json`,
             }}
             {...getEditConfig('edit-statuses', activeWorkspace.rootPath)}
@@ -3469,7 +3469,7 @@ function AppShellContent({
             side="bottom"
             align="start"
             secondaryAction={{
-              label: 'Edit File',
+              label: t('common.editFile'),
               filePath: `${activeWorkspace.rootPath}/labels/config.json`,
             }}
             {...(() => {
@@ -3505,7 +3505,7 @@ function AppShellContent({
             side="bottom"
             align="start"
             secondaryAction={{
-              label: 'Edit File',
+              label: t('common.editFile'),
               filePath: `${activeWorkspace.rootPath}/views.json`,
             }}
             {...getEditConfig('edit-views', activeWorkspace.rootPath)}
@@ -3578,7 +3578,7 @@ function AppShellContent({
             side="bottom"
             align="start"
             secondaryAction={{
-              label: 'Edit File',
+              label: t('common.editFile'),
               filePath: `${activeWorkspace.rootPath}/labels/config.json`,
             }}
             {...(() => {
