@@ -523,7 +523,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   connectionUnavailable = false,
   inputStatusBanner,
 }, ref) {
-  const { t } = useTranslation()
+  const { t, i18n: i18nInstance } = useTranslation()
 
   // Panel focus state (for multi-panel auto-scroll behavior)
   const appShellContext = useAppShellContext()
@@ -1073,13 +1073,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const overlayCards = useMemo(() => {
     if (!overlayState || overlayState.type !== 'activity') return []
     return extractOverlayCards(overlayState.activity)
-  }, [overlayState])
+    // POO-179: card labels/fallbacks are display copy — re-derive on language change.
+  }, [overlayState, i18nInstance.language])
 
   // Parsed output data for legacy output-only activity overlays
   const activityOutputOverlayData = useMemo(() => {
     if (!overlayState || overlayState.type !== 'activity') return null
     return extractOverlayData(overlayState.activity)
-  }, [overlayState])
+    // POO-179: derived titles/fallbacks are display copy — re-derive on language change.
+  }, [overlayState, i18nInstance.language])
 
   // Stacked input/output cards are only enabled for Bash and MCP tools
   const useStackedActivityOverlay = useMemo(() => {
@@ -2135,7 +2137,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           isOpen={true}
           onClose={handleCloseOverlay}
           cards={overlayCards}
-          title={overlayState.activity.displayName || overlayState.activity.toolName || 'Activity'}
+          title={overlayState.activity.displayName || overlayState.activity.toolName || t('overlay.activity')}
           theme={isDark ? 'dark' : 'light'}
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
@@ -2203,7 +2205,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             onOpenFile={onOpenFile}
             typeBadge={{
               icon: Info,
-              label: overlayState.activity.displayName || overlayState.activity.toolName || 'Activity',
+              label: overlayState.activity.displayName || overlayState.activity.toolName || t('overlay.activity'),
               variant: 'blue',
             }}
             error={activityOutputOverlayData.error}

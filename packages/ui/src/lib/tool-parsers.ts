@@ -7,6 +7,7 @@
 
 import type { ActivityItem } from '../components/chat/TurnCard'
 import type { ToolType } from '../components/terminal/TerminalOutput'
+import i18n from 'i18next'
 
 // ============================================================================
 // Individual Tool Parsers
@@ -498,24 +499,26 @@ export function extractOverlayCards(activity: ActivityItem): OverlayCard[] {
       inputJson = JSON.stringify(input, null, 2)
       cards.push({
         id: 'input',
-        label: 'Input',
+        label: i18n.t('overlay.input'),
         commandPreview,
         data: {
           type: 'json',
           data: input,
           rawContent: inputJson,
-          title: `${activity.displayName || activity.toolName || 'Tool'} Input`,
+          // POO-179: titles/fallbacks are display copy resolved at call time;
+          // the tool display name stays verbatim.
+          title: i18n.t('overlay.toolInputTitle', { tool: activity.displayName || activity.toolName || i18n.t('table.tool') }),
         },
       })
     } catch {
       cards.push({
         id: 'input',
-        label: 'Input',
+        label: i18n.t('overlay.input'),
         commandPreview,
         data: {
           type: 'generic',
           content: String(input),
-          title: `${activity.displayName || activity.toolName || 'Tool'} Input`,
+          title: i18n.t('overlay.toolInputTitle', { tool: activity.displayName || activity.toolName || i18n.t('table.tool') }),
         },
       })
     }
@@ -534,20 +537,20 @@ export function extractOverlayCards(activity: ActivityItem): OverlayCard[] {
   const outputData: OverlayData = isInputMirrorFallback
     ? {
         type: 'generic',
-        content: 'No output captured for this tool call.',
-        title: `${activity.displayName || activity.toolName || 'Tool'} Output`,
+        content: i18n.t('overlay.noOutputCaptured'),
+        title: i18n.t('overlay.toolOutputTitle', { tool: activity.displayName || activity.toolName || i18n.t('table.tool') }),
         error: activity.error,
       }
     : (output || {
       type: 'generic',
       content: rawContent || 'No output captured for this tool call.',
-      title: `${activity.displayName || activity.toolName || 'Tool'} Output`,
+      title: i18n.t('overlay.toolOutputTitle', { tool: activity.displayName || activity.toolName || i18n.t('table.tool') }),
       error: activity.error,
     })
 
   cards.push({
     id: 'output',
-    label: 'Output',
+    label: i18n.t('overlay.output'),
     data: outputData,
   })
 
@@ -555,11 +558,11 @@ export function extractOverlayCards(activity: ActivityItem): OverlayCard[] {
   if (cards.length === 0) {
     cards.push({
       id: 'output',
-      label: 'Output',
+      label: i18n.t('overlay.output'),
       data: {
         type: 'generic',
-        content: 'No output captured for this tool call.',
-        title: activity.displayName || activity.toolName || 'Activity',
+        content: i18n.t('overlay.noOutputCaptured'),
+        title: activity.displayName || activity.toolName || i18n.t('overlay.activity'),
         error: activity.error,
       },
     })

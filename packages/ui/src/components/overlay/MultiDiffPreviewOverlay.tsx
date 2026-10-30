@@ -23,6 +23,7 @@ import { DiffViewerControls } from '../code-viewer/DiffViewerControls'
 import { LANGUAGE_MAP } from '../code-viewer/language-map'
 import { PreviewOverlay, type BadgeVariant } from './PreviewOverlay'
 import { usePlatform } from '../../context/PlatformContext'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../../lib/utils'
 
 /**
@@ -152,6 +153,9 @@ export function MultiDiffPreviewOverlay({
   onDiffViewerSettingsChange,
 }: MultiDiffPreviewOverlayProps) {
   const { onOpenFileExternal } = usePlatform()
+  // POO-179: summary badge/title copy localizes with count plurals; file
+  // paths, tool types and diff content stay verbatim.
+  const { t } = useTranslation()
 
   // Ref map for scroll-to-focused-change support
   const changeRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -260,28 +264,31 @@ export function MultiDiffPreviewOverlay({
     if (isMultiFile) {
       return {
         icon: hasWrite ? FilePlus : PencilLine,
-        label: `${totalChangeCount} edit${totalChangeCount !== 1 ? 's' : ''}`,
+        label: t('overlay.editCount', { count: totalChangeCount }),
         variant: hasWrite ? 'green' : 'orange',
       }
     }
     // Single file — show tool type and count if multiple changes
     const firstSection = fileSections[0]
-    if (!firstSection) return { icon: PencilLine, label: 'Edit', variant: 'orange' }
+    if (!firstSection) return { icon: PencilLine, label: t('common.edit'), variant: 'orange' }
     const sectionHasWrite = firstSection.changes.some(c => c.toolType === 'Write')
     const count = firstSection.changes.length
     return {
       icon: sectionHasWrite ? FilePlus : PencilLine,
       label: count > 1
-        ? `${count} ${sectionHasWrite ? 'Write' : 'Edit'}s`
-        : (sectionHasWrite ? 'Write' : 'Edit'),
+        ? t(sectionHasWrite ? 'overlay.writeCount' : 'overlay.editCount', { count })
+        : (sectionHasWrite ? t('overlay.write') : t('common.edit')),
       variant: sectionHasWrite ? 'green' : 'orange',
     }
-  }, [changes, isMultiFile, totalChangeCount, fileSections])
+  }, [changes, isMultiFile, totalChangeCount, fileSections, t])
 
   // Header file path (single file) or summary title (multi-file)
   const headerFilePath = !isMultiFile ? fileSections[0]?.filePath : undefined
   const headerTitle = isMultiFile
-    ? `${totalChangeCount} edit${totalChangeCount !== 1 ? 's' : ''} across ${fileSections.length} file${fileSections.length !== 1 ? 's' : ''}`
+    ? t('overlay.multiFileTitle', {
+        edits: t('overlay.editCount', { count: totalChangeCount }),
+        files: fileSections.length,
+      })
     : undefined
 
   // Header actions: total diff stats + viewer controls
