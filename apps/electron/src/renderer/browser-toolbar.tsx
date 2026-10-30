@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
-import { EyeOff, X, XCircle } from 'lucide-react'
+import { EyeOff, X, XCircle, MoreHorizontal, PanelRightClose } from 'lucide-react'
 import { BrowserControls } from '@polo-ai/ui'
 import { HeaderIconButton } from '@/components/ui/HeaderIconButton'
 import {
@@ -17,7 +17,13 @@ import {
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
 } from '@/components/ui/styled-dropdown'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n'
+import { initReactI18next, useTranslation } from 'react-i18next'
 import './index.css'
+
+setupI18n([initReactI18next])
+// eslint-disable-next-line polo-ai/no-localstorage -- shared i18next language preference, same as main/canvas renderers
+void i18n.changeLanguage(window.localStorage.getItem('i18nextLng') ?? 'zh-Hans')
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -32,6 +38,7 @@ interface ToolbarState {
   themeColor?: string | null
   /** POO-135: localized「加入:<会话名>」when the browser belongs to a session. */
   boundSessionName?: string | null
+  canReturnToSidebar?: boolean
 }
 
 declare global {
@@ -44,6 +51,7 @@ declare global {
       reload: () => Promise<void>
       stop: () => Promise<void>
       setMenuGeometry: (open: boolean, height?: number) => Promise<void>
+      returnToSidebar: () => Promise<void>
       hideWindow: () => Promise<void>
       closeWindowEntirely: () => Promise<void>
       onStateUpdate: (callback: (state: ToolbarState) => void) => () => void
@@ -58,6 +66,7 @@ declare global {
 /* ------------------------------------------------------------------ */
 
 function BrowserToolbarApp() {
+  const { t } = useTranslation()
   const [state, setState] = useState<ToolbarState>({
     url: 'about:blank',
     title: 'New Tab',
@@ -198,8 +207,8 @@ function BrowserToolbarApp() {
             <DropdownMenu open={windowMenuOpen} onOpenChange={setWindowMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <HeaderIconButton
-                  icon={<X className="h-3.5 w-3.5" />}
-                  aria-label="Browser window options"
+                  icon={<MoreHorizontal className="h-3.5 w-3.5" />}
+                  aria-label={t('common.more')}
                   className={themeColor ? '' : 'bg-background shadow-minimal hover:bg-foreground/5'}
                   style={themeColor ? { color: 'var(--tb-fg)' } : undefined}
                 />
@@ -213,16 +222,21 @@ function BrowserToolbarApp() {
                 minWidth="min-w-44"
                 className="titlebar-no-drag z-[110] max-h-none overflow-visible"
               >
+                {state.canReturnToSidebar && <StyledDropdownMenuItem onSelect={() => { setWindowMenuOpen(false); void api?.returnToSidebar() }}>
+                  <PanelRightClose className="h-3.5 w-3.5" />
+                  {t('browserPane.sidebar.embed')}
+                </StyledDropdownMenuItem>}
                 <StyledDropdownMenuItem onSelect={handleHideWindow}>
                   <EyeOff className="h-3.5 w-3.5" />
-                  Hide Window
+                  {t('browserPane.sidebar.hide')}
                 </StyledDropdownMenuItem>
                 <StyledDropdownMenuItem variant="destructive" onSelect={handleCloseWindowEntirely}>
                   <XCircle className="h-3.5 w-3.5" />
-                  Close Window Entirely
+                  {t('browserPane.sidebar.terminate')}
                 </StyledDropdownMenuItem>
               </StyledDropdownMenuContent>
             </DropdownMenu>
+            <HeaderIconButton icon={<X className="h-3.5 w-3.5" />} aria-label={t('browserPane.sidebar.hide')} onClick={handleHideWindow} />
           </div>
         )}
         themeColor={themeColor}

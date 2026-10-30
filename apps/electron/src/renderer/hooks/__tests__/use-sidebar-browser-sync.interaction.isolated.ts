@@ -272,7 +272,7 @@ describe('useSidebarBrowserSync (POO-135)', () => {
     expect(toastInfo).not.toHaveBeenCalled()
   })
 
-  it('system-close of the detached popup returns the browser to the sidebar (embed)', () => {
+  it('system-close of the detached popup preserves it without auto-embedding', () => {
     listedInstances = [makeInstance({ id: 'inst-1' })]
     mount('sess-a')
     contextStore.set(sidebarBrowserOpenAtom, true)
@@ -281,7 +281,7 @@ describe('useSidebarBrowserSync (POO-135)', () => {
     // Main reports the popup window disappeared (system close button).
     stateHandler!(makeInstance({ id: 'inst-1', hostMode: 'popup', isVisible: false }))
 
-    expect(apiCalls.embed).toEqual(['inst-1'])
+    expect(apiCalls.embed).toEqual([])
   })
 
   it('unavailable picks toast the whitelisted reason (cross-origin iframe vs generic)', () => {
@@ -505,5 +505,55 @@ describe('POO-157 deferred return to owning chat', () => {
     expect(apiCalls.embed).toEqual(['a'])
     expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('a')
     expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
+  })
+})
+
+describe('POO159 automatic presentation only in the active owner session', () => {
+  function mountAutomatic(currentSessionId = 'session-b', remoteWorkspaceId: string | null = null) {
+    const selected = mock((_id: string) => {})
+    const presented = mock(() => {})
+    function AutomaticHarness() {
+      useSidebarBrowserSync({ currentSessionId, activeWorkspaceId: 'ws-a', remoteWorkspaceId, onSelectSession: selected, onBrowserPresented: presented })
+      return null
+    }
+    render(createElement(AutomaticHarness))
+    return { selected, presented }
+  }
+  it('presents a fresh current owner in the unified sidebar without selecting a chat', () => {
+    const { selected, presented } = mountAutomatic()
+    ;(openHandler as any)(makeInstance({ id: 'fresh-b', ownerSessionId: 'session-b', workspaceId: 'ws-a', isVisible: false }), 'automatic')
+    expect(apiCalls.embed).toEqual(['fresh-b'])
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('fresh-b')
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(true)
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
+    expect(presented).toHaveBeenCalledTimes(1)
+    expect(selected).not.toHaveBeenCalled()
+  })
+  it('does not select or overwrite current A when background B creates a page', () => {
+    const { selected, presented } = mountAutomatic('session-a')
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'owned-a')
+    contextStore.set(sidebarBrowserOpenAtom, true)
+    ;(openHandler as any)(makeInstance({ id: 'fresh-b', ownerSessionId: 'session-b', workspaceId: 'ws-a', isVisible: false }), 'automatic')
+    expect(apiCalls.embed).toHaveLength(0)
+    expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('owned-a')
+    expect(selected).not.toHaveBeenCalled()
+    expect(presented).not.toHaveBeenCalled()
+  })
+  for (const info of [
+    { id: 'foreign', ownerSessionId: 'session-b', workspaceId: 'ws-other' },
+    { id: 'manual', ownerSessionId: null, workspaceId: 'ws-a' },
+    { id: 'unknown-workspace', ownerSessionId: 'session-b', workspaceId: null },
+  ]) it('ignores automatic presentation without exact owner/workspace: ' + info.id, () => {
+    const { selected, presented } = mountAutomatic()
+    ;(openHandler as any)(makeInstance({ ...info, isVisible: false }), 'automatic')
+    expect(apiCalls.embed).toHaveLength(0)
+    expect(selected).not.toHaveBeenCalled()
+    expect(presented).not.toHaveBeenCalled()
+  })
+  it('accepts the remote workspace belonging to the active local mirror', () => {
+    const { selected } = mountAutomatic('session-b', 'remote-ws')
+    ;(openHandler as any)(makeInstance({ id: 'remote-b', ownerSessionId: 'session-b', workspaceId: 'remote-ws', isVisible: false }), 'automatic')
+    expect(apiCalls.embed).toEqual(['remote-b'])
+    expect(selected).not.toHaveBeenCalled()
   })
 })

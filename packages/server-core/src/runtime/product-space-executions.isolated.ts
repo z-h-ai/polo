@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import {
   EXECUTION_STOP_DRAIN_TIMEOUT_MS,
+  onRuntimeScopeChanged,
+  setRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpace,
   getRegisteredProductSpaceExecution,
   getRegisteredProductSpaceExecutionGeneration,
   stopAllRegisteredProductSpaceExecutions,
@@ -479,5 +482,19 @@ describe('per-call stop-drain deadline isolation (R39-6)', () => {
     expect((await secondRun)[0]?.executionId).toBe('second-default-stop')
     expect(getRegisteredProductSpaceExecution('second-default-stop')).toBeUndefined()
     resetProductSpaceExecutionRegistryForTests()
+  })
+})
+
+
+describe('runtime scope invalidation observers', () => {
+  it('a failed consumer cannot interrupt committed scope state or later owner cleanup', () => {
+    let cleaned = false
+    const offFailure = onRuntimeScopeChanged(() => { throw new Error('injected listener failure') })
+    const offCleanup = onRuntimeScopeChanged(() => { cleaned = true })
+    try {
+      expect(() => setRuntimeActiveProductSpace('next-space')).not.toThrow()
+      expect(getRuntimeActiveProductSpace()).toBe('next-space')
+      expect(cleaned).toBe(true)
+    } finally { offFailure(); offCleanup(); setRuntimeActiveProductSpace(null) }
   })
 })

@@ -520,6 +520,11 @@ export const CHANNEL_MAP = {
   'browserPane.onElementPickerEvent': listener(RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT),
 
   // Canvas pane popout (POO-135 验收修复 SB-CANVAS-OUT)
+  'canvasPane.embed': invoke(RPC_CHANNELS.canvasPane.EMBED),
+  'canvasPane.unembed': invoke(RPC_CHANNELS.canvasPane.UNEMBED),
+  'canvasPane.hide': invoke(RPC_CHANNELS.canvasPane.HIDE),
+  'canvasPane.destroy': invoke(RPC_CHANNELS.canvasPane.DESTROY),
+  'canvasPane.release': invoke(RPC_CHANNELS.canvasPane.RELEASE),
   'canvasPane.detachToPopup': invoke(RPC_CHANNELS.canvasPane.DETACH_TO_POPUP),
   'canvasPane.attachFromPopup': invoke(RPC_CHANNELS.canvasPane.ATTACH_FROM_POPUP),
   'canvasPane.focus': invoke(RPC_CHANNELS.canvasPane.FOCUS),

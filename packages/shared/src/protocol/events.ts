@@ -57,7 +57,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.browserPane.STATE_CHANGED]: [info: BrowserInstanceInfo]
   [RPC_CHANNELS.browserPane.REMOVED]: [id: string]
   [RPC_CHANNELS.browserPane.INTERACTED]: [id: string]
-  [RPC_CHANNELS.browserPane.OPEN_REQUESTED]: [info: BrowserInstanceInfo, reason: 'focus' | 'return']
+  [RPC_CHANNELS.browserPane.OPEN_REQUESTED]: [info: BrowserInstanceInfo, reason: 'focus' | 'return' | 'automatic']
   // POO-135: element picker outcomes (picked / cancelled / unavailable)
   [RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT]: [event: BrowserElementPickerEvent]
 

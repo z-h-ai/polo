@@ -168,6 +168,12 @@ export interface AppShellContextType {
     resolution: QuestionResolution,
   ) => Promise<QuestionResolutionResult>
 
+  filePreviewVisible?: boolean
+  filePreview?: React.ReactNode
+  filePreviewTitle?: string
+  onHideFilePreview?: () => void
+  onShowFilePreview?: () => void
+  onCloseFilePreview?: () => void
   // File/URL handlers - these can open in tabs or external apps
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void

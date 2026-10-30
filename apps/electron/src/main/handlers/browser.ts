@@ -45,7 +45,7 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
     const id = typeof input === 'string'
       ? browserPaneManager.createInstance(input, { workspaceId })
       : input?.bindToSessionId
-        ? browserPaneManager.createForSession(input.bindToSessionId, { show: false, workspaceId })
+        ? browserPaneManager.createForSession(input.bindToSessionId, { show: false, allowReuseManual: false, workspaceId })
         : browserPaneManager.createInstance(input?.id, { show: false, workspaceId })
     if (typeof input !== 'string' && input?.show) {
       browserPaneManager.focus(id, resolveHostWindow(ctx.webContentsId) ?? undefined)
@@ -54,7 +54,7 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
   })
 
   server.handle(RPC_CHANNELS.browserPane.DESTROY, (_ctx, id: string) => {
-    browserPaneManager.destroyInstance(id)
+    return browserPaneManager.requestDestroy(id)
   })
 
   server.handle(RPC_CHANNELS.browserPane.LIST, () => {

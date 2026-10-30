@@ -89,6 +89,8 @@ const {
   installWebviewSecurityHandlers,
   setWebviewScopeResolver,
   setGenUiGuestSrcValidator,
+  registerGenUiCarrier,
+  unregisterGenUiCarrier,
   isGenUiAppPartition,
   GENUI_APP_PARTITION_PATTERN,
 } = await import('../webview-security')
@@ -218,6 +220,24 @@ describe('genui canvas webview partition policy', () => {
     expect(ses!.permissionChecks).toBe(1)
     expect(ses!.permissionRequests).toBe(1)
     expect(beforeRequestByPartition.has('genui-app-sess-1')).toBe(true)
+  })
+
+  it('installs the same gate before a browserView carrier is registered, then permits only its exact session', () => {
+    const carrier = { ...makeWindow(707), getType: () => 'browserView' }
+    webContentsCreated!({}, carrier)
+    const probe = (partition: string, src: string) => {
+      const preventDefault = mock(() => {})
+      carrier.emit('will-attach-webview', { preventDefault }, { partition }, { src })
+      return preventDefault.mock.calls.length > 0
+    }
+    expect(probe('genui-app-sess-1', bundleSrc())).toBe(true)
+    registerGenUiCarrier(707, 'sess-1')
+    expect(probe('genui-app-sess-1', bundleSrc())).toBe(false)
+    expect(probe('genui-app-sess-2', bundleSrc())).toBe(true)
+    expect(probe('persist:browser-pane', 'https://example.com')).toBe(true)
+    expect(probe('genui-app-sess-1', 'file:///etc/hosts')).toBe(true)
+    unregisterGenUiCarrier(707)
+    expect(probe('genui-app-sess-1', bundleSrc())).toBe(true)
   })
 
   it('allows an inline data: src without any validator path check', () => {

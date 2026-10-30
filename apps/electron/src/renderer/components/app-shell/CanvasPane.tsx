@@ -47,6 +47,7 @@ import {
   canvasPaneRatioFromPointer,
   clampCanvasPaneRatio,
   canvasPaneAppAtomFamily,
+  canvasPanePopoutAtomFamily,
   canvasPaneWidthAtomFamily,
   type CanvasPaneApp,
 } from '@/atoms/canvas-pane'
@@ -81,19 +82,69 @@ interface CanvasPaneProps {
  * the locked header rule only constrains browser entries). The popup carrier
  * passes nothing: there the header ✕ already means「收回」.
  */
-export function CanvasPaneCard({ sessionId, app, onPopOut }: {
+export function CanvasPaneCard({ nativeGuest = false, ...props }: { sessionId: string; app: CanvasPaneApp; onPopOut?: () => void; headerActions?: React.ReactNode; nativeGuest?: boolean }) {
+  return nativeGuest ? <CanvasGuestCard {...props} /> : <NativeCanvasSurface sessionId={props.sessionId} app={props.app} />
+}
+
+/** The carrier renderer and its guest stay alive in Main across surface changes. */
+function NativeCanvasSurface({ sessionId, app }: { sessionId: string; app: CanvasPaneApp }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const { t } = useTranslation()
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const presentation = useAtomValue(canvasPanePopoutAtomFamily(sessionId))
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    let disposed = false, pending = false, blocked = false
+    let lastBounds = ''
+    const sync = () => {
+      if (disposed || pending || blocked) return
+      const rect = node.getBoundingClientRect()
+      if (!rect.width || !rect.height) return
+      const bounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      const key = JSON.stringify(bounds)
+      if (key === lastBounds) return
+      lastBounds = key
+      pending = true
+      void window.electronAPI.canvasPane.embed(sessionId, app, bounds).then(() => {
+        pending = false
+        if (!disposed) sync() // Coalesce animation resize events while the request was pending.
+      }).catch(() => {
+        pending = false
+        blocked = true // A failed target waits for the user's explicit Retry attempt.
+        if (!disposed) setFailed(true)
+      })
+    }
+    const observer = new ResizeObserver(sync)
+    observer.observe(node)
+    window.addEventListener('resize', sync)
+    sync()
+    return () => {
+      disposed = true
+      observer.disconnect()
+      window.removeEventListener('resize', sync)
+      void window.electronAPI.canvasPane.unembed(sessionId).catch(() => {})
+    }
+  }, [sessionId, app.appId, app.indexPath, attempt])
+  return <div ref={ref} data-testid="native-canvas-surface" className="h-full w-full min-h-0">{(failed || presentation?.loadFailed) && <div role="alert" className="p-4 text-xs text-muted-foreground"><p>{t('genui.app.loadError')}</p><button type="button" onClick={() => { setFailed(false); setAttempt(n => n + 1) }} className="mt-2 rounded border px-2 py-1">{t('common.retry')}</button></div>}</div>
+}
+
+function CanvasGuestCard({ sessionId, app, onPopOut, headerActions }: {
   sessionId: string
   app: CanvasPaneApp
   onPopOut?: () => void
+  headerActions?: React.ReactNode
 }) {
   const { t } = useTranslation()
   const webviewRef = React.useRef<HTMLElement | null>(null)
   const [focusing, setFocusing] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
 
   // Per-mount card id (POO-103), same scheme as the inline card — the pane's
   // guest is its own UiCardRegistry entry, not a shadow of the card's.
-  const cardId = useMemo(() => `${app.appId}-canvas-${createMountNonce()}`, [app.appId])
+  const cardId = useMemo(() => `${app.appId}-canvas-${attempt}-${createMountNonce()}`, [app.appId, attempt])
   const partition = useMemo(() => getGenUiAppPartition(sessionId), [sessionId])
   const registration = useMemo(
     () => (GENUI_SESSION_ID_PATTERN.test(sessionId) ? { sessionId, cardId } : null),
@@ -150,6 +201,7 @@ export function CanvasPaneCard({ sessionId, app, onPopOut }: {
             {t('genui.app.version', { version: app.version })}
           </span>
         )}
+        {headerActions}
         {onPopOut && (
           <button
             type="button"
@@ -171,8 +223,9 @@ export function CanvasPaneCard({ sessionId, app, onPopOut }: {
         </button>
       </div>
       {loadFailed ? (
-        <div className="flex-1 flex items-center justify-center text-[12px] text-muted-foreground/70">
+        <div role="alert" className="flex-1 flex flex-col gap-2 items-center justify-center text-[12px] text-muted-foreground/70">
           {t('genui.app.loadError')}
+          <button type="button" className="rounded border px-2 py-1" onClick={() => { setLoadFailed(false); setAttempt(value => value + 1) }}>{t('common.retry')}</button>
         </div>
       ) : (
         <webview

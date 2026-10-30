@@ -157,6 +157,7 @@ function createMockWindow(opts?: { width?: number; height?: number; minWidth?: n
 }
 
 mock.module('electron', () => ({
+  dialog: { showMessageBox: mock(async () => ({ response: 0 })) },
   app: {
     getPath: mock((name: string) => name === 'downloads' ? '/tmp/mock-downloads' : `/tmp/mock-${name}`),
   },
@@ -178,6 +179,8 @@ mock.module('electron', () => ({
   },
   ipcMain: {
     handle: mockIpcMainHandle,
+    on: mock(() => {}),
+    removeListener: mock(() => {}),
   },
   Menu: {
     buildFromTemplate: mock(() => ({
@@ -457,10 +460,28 @@ describe('BrowserPaneManager', () => {
     expect(manager.listInstances()).toHaveLength(1)
   })
 
+  it('local AI getOrCreateForSession never adopts a manual page or its ownership', () => {
+    manager.createInstance('manual-private', { workspaceId: 'ws-a' })
+    const manual = manager.getInstance('manual-private')!
+    manual.currentUrl = 'https://example.com/private-draft'
+    const id = manager.getOrCreateForSession('ai-session', { workspaceId: 'ws-a' })
+    expect(id).not.toBe('manual-private')
+    expect(manager.getInstance('manual-private')).toBe(manual)
+    expect(manual.ownerType).toBe('manual')
+    expect(manual.boundSessionId).toBeNull()
+    expect(manual.currentUrl).toBe('https://example.com/private-draft')
+  })
+  it('cancelling explicit close during AI control preserves the same browser', async () => {
+    const id = manager.createForSession('ai-close')
+    manager.setAgentControl('ai-close', { displayName: 'Browser' })
+    const original = manager.getInstance(id)
+    expect(await manager.requestDestroy(id)).toBe(false)
+    expect(manager.getInstance(id)).toBe(original)
+  })
   it('createForSession reuses an unbound manual window before creating new', () => {
     manager.createInstance('manual-1')
 
-    const id = manager.createForSession('sess-reuse')
+    const id = manager.createForSession('sess-reuse', { allowReuseManual: true })
 
     expect(id).toBe('manual-1')
     const info = manager.listInstances()[0]
@@ -502,7 +523,7 @@ describe('BrowserPaneManager', () => {
       manager.createInstance('manual-reuse')
       expect(manager.listInstances().find((i) => i.id === 'manual-reuse')?.workspaceId).toBeNull()
 
-      const id = manager.createForSession('sess-reuse-ws', { workspaceId: 'ws-beta' })
+      const id = manager.createForSession('sess-reuse-ws', { workspaceId: 'ws-beta', allowReuseManual: true })
       expect(id).toBe('manual-reuse')
 
       const info = manager.listInstances().find((i) => i.id === 'manual-reuse')
@@ -567,7 +588,7 @@ describe('BrowserPaneManager', () => {
         const original = manager.createForSession('sess-a1', { workspaceId: 'ws-a' })
         manager.unbindAllForSession('sess-a1')
 
-        const reused = manager.createForSession('sess-a2', { workspaceId: 'ws-a' })
+        const reused = manager.createForSession('sess-a2', { workspaceId: 'ws-a', allowReuseManual: true })
         expect(reused).toBe(original)
         expect(manager.listInstances()).toHaveLength(1)
       })
@@ -576,7 +597,7 @@ describe('BrowserPaneManager', () => {
         manager.createInstance('manual-anyworkspace')
         expect(manager.listInstances().find((i) => i.id === 'manual-anyworkspace')?.workspaceId).toBeNull()
 
-        const adopted = manager.createForSession('sess-c', { workspaceId: 'ws-c' })
+        const adopted = manager.createForSession('sess-c', { workspaceId: 'ws-c', allowReuseManual: true })
         expect(adopted).toBe('manual-anyworkspace')
         expect(manager.listInstances().find((i) => i.id === 'manual-anyworkspace')?.workspaceId).toBe('ws-c')
       })
@@ -600,6 +621,21 @@ describe('BrowserPaneManager', () => {
         expect(manager.listInstances().find((i) => i.id === fresh)?.ownerSessionId).toBe('sess-d')
       })
     })
+  })
+
+  it('waits for initial page setup before dispatching the first requested URL', async () => {
+    let ready!: () => void
+    const initial = new Promise<void>(resolve => { ready = resolve })
+    ;(manager as any).loadEmptyStatePage = () => initial
+    const id = manager.createInstance('startup-race')
+    const page = manager.getInstance(id)!.pageView.webContents as any
+    const target = 'https://example.com/requested'
+    const navigation = manager.navigate(id, target)
+    await Promise.resolve()
+    expect(page.loadURL.mock.calls.some((args: any[]) => args[0] === target)).toBe(false)
+    ready()
+    await navigation
+    expect(page.loadURL.mock.calls.at(-1)[0]).toBe(target)
   })
 
   it('navigate normalizes hostnames to https', async () => {
@@ -1318,5 +1354,161 @@ describe('BrowserPaneManager', () => {
         status: 'failed',
       })
     })
+  })
+})
+
+// R12: the deadline covers the asynchronous guest predicate itself. Electron
+// can abandon an executeJavaScript result when its guest is destroyed; a timer
+// outside `await predicate()` cannot end that operation or its tool response.
+describe('browser wait terminal lifecycle', () => {
+  const realSetTimeout = globalThis.setTimeout
+  const realClearTimeout = globalThis.clearTimeout
+  function deferred<T>() {
+    let resolve!: (value: T) => void, reject!: (reason: Error) => void
+    return { promise: new Promise<T>((a, b) => { resolve = a; reject = b }), resolve: (v: T) => resolve(v), reject: (e: Error) => reject(e) }
+  }
+  async function outcome(promise: Promise<unknown>, budget = 350) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        promise.then(value => ({ status: 'resolved', value }), error => ({ status: 'rejected', message: String(error?.message ?? error) })),
+        new Promise<{ status: string }>(resolve => { timer = realSetTimeout(() => resolve({ status: 'still-pending' }), budget) }),
+      ])
+    } finally { if (timer) realClearTimeout(timer) }
+  }
+  function setup(id: string) {
+    const manager = new BrowserPaneManager()
+    manager.createInstance(id)
+    const instance = manager.getInstance(id)! as any
+    const evaluation = deferred<boolean>()
+    let calls = 0
+    instance.pageView.webContents.executeJavaScript = mock(async (script: string) => {
+      if (script.startsWith('document.body') || script.startsWith('Boolean(document.querySelector')) { calls++; return evaluation.promise }
+      return undefined
+    })
+    return { manager, instance, evaluation, calls: () => calls }
+  }
+  for (const kind of ['text', 'selector'] as const) {
+    it(`ends ${kind} at its deadline even when guest evaluation never settles`, async () => {
+      const f = setup(`deadline-${kind}`)
+      try {
+        const started = Date.now()
+        const result = await outcome(f.manager.waitFor(f.instance.id, { kind, value: 'never', timeoutMs: 100 }))
+        expect(result.status).toBe('rejected')
+        expect((result as any).message).toContain('Wait timed out after 100ms')
+        expect(Date.now() - started).toBeLessThan(300)
+        expect(f.calls()).toBe(1)
+        expect((f.manager as any).pendingWaits?.size ?? 0).toBe(0)
+      } finally { f.manager.destroyAll() }
+    })
+  }
+  it('closing one exact instance promptly ends only its pending tool wait', async () => {
+    const a = setup('close-wait'), b = a.manager.createInstance('other-wait')
+    const other = a.manager.getInstance(b)! as any
+    const ready = deferred<boolean>()
+    other.pageView.webContents.executeJavaScript = mock(async () => ready.promise)
+    try {
+      const waiting = outcome(a.manager.waitFor(a.instance.id, { kind: 'text', value: 'never', timeoutMs: 60000 }))
+      const otherWaiting = a.manager.waitFor(b, { kind: 'text', value: 'ready', timeoutMs: 1000 })
+      a.manager.destroyInstance(a.instance.id)
+      const result = await waiting
+      expect(result.status).toBe('rejected')
+      expect((result as any).message).toContain('closed')
+      expect(a.manager.getInstance(b)).toBe(other)
+      ready.resolve(true)
+      expect(await otherWaiting).toMatchObject({ ok: true })
+      expect((a.manager as any).pendingWaits?.size ?? 0).toBe(0)
+    } finally { a.manager.destroyAll() }
+  })
+  it('hiding and cancelling the native close prompt preserve the same pending wait', async () => {
+    const f = setup('hide-keep-wait')
+    try {
+      f.manager.bindSession(f.instance.id, 'test-session')
+      f.manager.setAgentControl('test-session', {})
+      const wait = f.manager.waitFor(f.instance.id, { kind: 'text', value: 'ready', timeoutMs: 1000 })
+      f.manager.hide(f.instance.id)
+      expect(await f.manager.requestDestroy(f.instance.id)).toBe(false)
+      expect((await outcome(wait, 40)).status).toBe('still-pending')
+      expect(f.manager.getInstance(f.instance.id)).toBe(f.instance)
+      f.evaluation.resolve(true)
+      expect(await wait).toMatchObject({ ok: true })
+      expect((f.manager as any).pendingWaits?.size ?? 0).toBe(0)
+    } finally { f.manager.destroyAll() }
+  })
+  it('guest destruction and renderer exit reject a pending wait without waiting for its predicate', async () => {
+    for (const event of ['destroyed', 'render-process-gone']) {
+      const f = setup(`guest-${event}`)
+      try {
+        const waiting = outcome(f.manager.waitFor(f.instance.id, { kind: 'text', value: 'never', timeoutMs: 60000 }))
+        ;(f.instance.pageView.webContents as any)._emit(event, { reason: 'crashed' })
+        expect((await waiting).status).toBe('rejected')
+        expect((f.manager as any).pendingWaits?.size ?? 0).toBe(0)
+      } finally { f.manager.destroyAll() }
+    }
+  })
+  it('late guest rejection after close is consumed and never polls again', async () => {
+    const f = setup('late-reject-wait'), unhandled: unknown[] = []
+    const onUnhandled = (error: unknown) => unhandled.push(error)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const waiting = outcome(f.manager.waitFor(f.instance.id, { kind: 'text', value: 'never', timeoutMs: 60000 }))
+      f.manager.destroyInstance(f.instance.id)
+      expect((await waiting).status).toBe('rejected')
+      const before = f.calls()
+      f.evaluation.reject(new Error('late guest rejection'))
+      await new Promise(resolve => realSetTimeout(resolve, 40))
+      expect(f.calls()).toBe(before)
+      expect(unhandled).toEqual([])
+      expect((f.manager as any).pendingWaits?.size ?? 0).toBe(0)
+    } finally { process.off('unhandledRejection', onUnhandled); f.manager.destroyAll() }
+  })
+  it('a late successful evaluation cannot revive a timed-out wait or leave a timer', async () => {
+    const f = setup('late-success-wait'), timers = new Set<ReturnType<typeof setTimeout>>()
+    globalThis.setTimeout = ((handler: (...args: any[]) => void, delay?: number, ...args: any[]) => {
+      const timer = realSetTimeout(() => { timers.delete(timer); handler(...args) }, delay)
+      timers.add(timer); return timer
+    }) as typeof setTimeout
+    globalThis.clearTimeout = ((timer: ReturnType<typeof setTimeout>) => { timers.delete(timer); realClearTimeout(timer) }) as typeof clearTimeout
+    try {
+      const waiting = f.manager.waitFor(f.instance.id, { kind: 'text', value: 'never', timeoutMs: 100 })
+      const result = await outcome(waiting)
+      expect(result.status).toBe('rejected')
+      f.evaluation.resolve(true)
+      await new Promise(resolve => realSetTimeout(resolve, 40))
+      expect((await outcome(waiting)).status).toBe('rejected')
+      expect(f.calls()).toBe(1)
+      expect(timers.size).toBe(0)
+      expect((f.manager as any).pendingWaits?.size ?? 0).toBe(0)
+    } finally { globalThis.setTimeout = realSetTimeout; globalThis.clearTimeout = realClearTimeout; f.manager.destroyAll() }
+  })
+  it('closing during a polling pause also clears its long poll timer', async () => {
+    const f = setup('poll-pause-wait'), timers = new Set<ReturnType<typeof setTimeout>>()
+    f.instance.pageView.webContents.executeJavaScript = mock(async () => false)
+    globalThis.setTimeout = ((handler: (...args: any[]) => void, delay?: number, ...args: any[]) => {
+      const timer = realSetTimeout(() => { timers.delete(timer); handler(...args) }, delay)
+      timers.add(timer); return timer
+    }) as typeof setTimeout
+    globalThis.clearTimeout = ((timer: ReturnType<typeof setTimeout>) => { timers.delete(timer); realClearTimeout(timer) }) as typeof clearTimeout
+    try {
+      const wait = outcome(f.manager.waitFor(f.instance.id, { kind: 'text', value: 'never', timeoutMs: 1000, pollMs: 500 }))
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+      f.manager.destroyInstance(f.instance.id)
+      expect((await wait).status).toBe('rejected')
+      expect(timers.size).toBe(0)
+      expect((f.manager as any).pendingWaits?.size ?? 0).toBe(0)
+    } finally {
+      for (const timer of timers) realClearTimeout(timer)
+      globalThis.setTimeout = realSetTimeout; globalThis.clearTimeout = realClearTimeout; f.manager.destroyAll()
+    }
+  })
+  it('normal predicate success and immediate predicate failure retain their original outcomes', async () => {
+    const f = setup('ordinary-wait')
+    try {
+      f.evaluation.resolve(true)
+      expect(await f.manager.waitFor(f.instance.id, { kind: 'text', value: 'ready', timeoutMs: 100 })).toMatchObject({ ok: true, kind: 'text' })
+      f.instance.pageView.webContents.executeJavaScript = mock(async () => { throw new Error('guest execution denied') })
+      await expect(f.manager.waitFor(f.instance.id, { kind: 'text', value: 'ready', timeoutMs: 100 })).rejects.toThrow('guest execution denied')
+      expect((f.manager as any).pendingWaits?.size ?? 0).toBe(0)
+    } finally { f.manager.destroyAll() }
   })
 })

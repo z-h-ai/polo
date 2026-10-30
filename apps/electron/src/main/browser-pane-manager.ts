@@ -10,8 +10,10 @@ import {browserActionDigest, BrowserActionNotDispatched, type BrowserActionFacts
 import { join, parse as parsePath } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
-import { BrowserView, BrowserWindow, app, ipcMain, nativeTheme, session, shell, type Session as ElectronSession } from 'electron'
+import { BrowserView, BrowserWindow, app, ipcMain, nativeTheme, session, shell, dialog, type Session as ElectronSession } from 'electron'
 import { mainLog } from './logger'
+import { captureCompleteTrustedSessionScopeToken, isTrustedSessionScopeTokenCurrent, getAccountTransitionEpoch, getTrustedAccountGeneration, getSyncTrustedProductSpaceAccountState, isAccountTransitionInProgress, type TrustedSessionScopeToken } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+import { onRuntimeScopeChanged, getRuntimeFenceGeneration, getRuntimeActiveProductSpace, isRuntimeProductSpaceRestricted } from '@polo-ai/server-core/runtime/product-space-executions'
 import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
 import type { WindowManager } from './window-manager'
 import { BrowserCDP, type AccessibilitySnapshot, type ElementGeometry } from './browser-cdp'
@@ -311,6 +313,7 @@ const TOOLBAR_CHANNELS = {
   MENU_GEOMETRY: 'browser-toolbar:menu-geometry',
   FORCE_CLOSE_MENU: 'browser-toolbar:force-close-menu',
   HIDE: 'browser-toolbar:hide',
+  RETURN: 'browser-toolbar:return-to-sidebar',
   DESTROY: 'browser-toolbar:destroy',
   STATE_UPDATE: 'browser-toolbar:state-update',
   THEME_COLOR: 'browser-toolbar:theme-color',
@@ -330,7 +333,17 @@ interface AgentControlLockState {
   previousResizable: boolean
 }
 
+interface BrowserScope { token: TrustedSessionScopeToken | null; snapshot: string }
+interface ScrollTransfer {
+  token: string; epoch: number; ready: boolean; revision: number; restoring: boolean; settled: boolean
+  position?: { x: number; y: number }; bounds?: BrowserEmbedBounds
+  quietTimer?: ReturnType<typeof setTimeout>; deadlineTimer?: ReturnType<typeof setTimeout>
+}
 interface BrowserInstance {
+  scope: BrowserScope
+  navigationEpoch: number
+  automaticPresentationEligible: boolean
+  scrollTransfer: ScrollTransfer | null
   id: string
   window: BrowserWindow
   toolbarView: BrowserView
@@ -380,6 +393,8 @@ interface BrowserInstance {
    * sidebar (`embedded`). The toolbar/overlay views always stay on the
    * popup window; only the page view migrates.
    */
+  pageStartup: Promise<void> | null
+  popupRequested: boolean
   hostMode: 'popup' | 'embedded'
   /** Last sidebar host, retained while popped out so hide returns to the same window. */
   sidebarHostWindow: BrowserWindow | null
@@ -545,9 +560,25 @@ let elementReferenceCounter = 0
 
 export class BrowserPaneManager implements IBrowserPaneManager {
   private instances: Map<string, BrowserInstance> = new Map()
+  private pendingWaits = new Map<BrowserInstance, Set<AbortController>>()
+  private offScope: (() => void) | null = null
+  private scopeSnapshot(): string {
+    return JSON.stringify([getAccountTransitionEpoch(), getTrustedAccountGeneration(), getRuntimeFenceGeneration(), getRuntimeActiveProductSpace(), getSyncTrustedProductSpaceAccountState().status])
+  }
+  private watchScope(): void {
+    if (this.offScope) return
+    this.offScope = onRuntimeScopeChanged(() => {
+      for (const instance of [...this.instances.values()]) {
+        const current = instance.scope.token ? isTrustedSessionScopeTokenCurrent(instance.scope.token) : instance.scope.snapshot === this.scopeSnapshot()
+        if (!current || isAccountTransitionInProgress() || isRuntimeProductSpaceRestricted(getRuntimeActiveProductSpace())) {
+          try { this.destroyInstance(instance.id) } catch (error) { mainLog.warn('[browser-pane] scope cleanup failed', error) }
+        }
+      }
+    })
+  }
   private destroyingIds: Set<string> = new Set()
   private stateChangeCallback: ((info: BrowserInstanceInfo) => void) | null = null
-  private openRequestedCallback: ((info: BrowserInstanceInfo, host: BrowserWindow, reason: 'focus' | 'return') => void) | null = null
+  private openRequestedCallback: ((info: BrowserInstanceInfo, host: BrowserWindow, reason: 'focus' | 'return' | 'automatic') => void) | null = null
   private removedCallback: ((id: string) => void) | null = null
   private interactedCallback: ((id: string) => void) | null = null
   private partitionPermissionsInitialized = false
@@ -596,7 +627,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.removedCallback = callback
   }
 
-  onOpenRequested(callback: (info: BrowserInstanceInfo, host: BrowserWindow, reason: 'focus' | 'return') => void): void {
+  onOpenRequested(callback: (info: BrowserInstanceInfo, host: BrowserWindow, reason: 'focus' | 'return' | 'automatic') => void): void {
     this.openRequestedCallback = callback
   }
 
@@ -687,7 +718,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     const cdp = new BrowserCDP(pageView.webContents)
 
+    this.watchScope()
     const instance: BrowserInstance = {
+      scope: { token: captureCompleteTrustedSessionScopeToken(workspaceId), snapshot: this.scopeSnapshot() },
+      navigationEpoch: 0,
+      automaticPresentationEligible: true,
+      scrollTransfer: null,
       id: instanceId,
       window,
       toolbarView,
@@ -728,6 +764,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       networkLogs: [],
       downloads: [],
       lastLaunchToken: null,
+      pageStartup: null,
+      popupRequested: false,
       hostMode: 'popup',
       sidebarHostWindow: null,
       embeddedHostWindow: null,
@@ -763,9 +801,9 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           this.markToolbarReady(instance, 'toolbar-load-finalized')
         }
       })
-    void this.loadEmptyStatePage(instance).catch((error) => {
+    instance.pageStartup = this.loadEmptyStatePage(instance).catch(async (error) => {
       mainLog.warn(`[browser-pane] empty-state load failed id=${instance.id}: ${error instanceof Error ? error.message : String(error)}`)
-      void pageView.webContents.loadURL('about:blank')
+      if (!pageView.webContents.isDestroyed()) await pageView.webContents.loadURL('about:blank')
     })
 
     return instanceId
@@ -778,6 +816,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       return
     }
 
+    this.cancelScrollTransfer(instance)
     const destroyedBefore = instance.window.isDestroyed()
     mainLog.info(`[browser-pane] destroy requested id=${id} destroyedBefore=${destroyedBefore} keepAlive=${instance.keepAliveOnWindowClose}`)
 
@@ -963,7 +1002,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   async createForSessionAsync(
     sessionId: string,
-    options?: { show?: boolean; workspaceId?: string | null },
+    options?: { show?: boolean; presentIfActive?: boolean; workspaceId?: string | null },
   ): Promise<string> {
     return this.createForSession(sessionId, options)
   }
@@ -994,6 +1033,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   async navigate(id: string, url: string): Promise<{ url: string; title: string }> {
     const instance = this.requireAliveInstance(id)
+    await instance.pageStartup
+    this.requireAliveInstance(id)
 
     let normalizedUrl = url.trim()
     const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedUrl)
@@ -1057,6 +1098,11 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   focus(id: string, hostWindow?: BrowserWindow): void {
     const instance = this.instances.get(id)
     if (!instance || instance.window.isDestroyed()) return
+    instance.automaticPresentationEligible = false
+    if (instance.popupRequested) {
+      this.focusPopup(id)
+      return
+    }
     if (this.openRequestedCallback) {
       this.requestSidebarOpen(instance, 'focus', hostWindow)
       return
@@ -1065,7 +1111,14 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.focusPopup(id)
   }
 
-  private requestSidebarOpen(instance: BrowserInstance, reason: 'focus' | 'return', requestedHost?: BrowserWindow): void {
+  private requestAutomaticPresentation(instance: BrowserInstance, host?: BrowserWindow): void {
+    if (!instance.automaticPresentationEligible) return
+    instance.automaticPresentationEligible = false
+    this.requestSidebarOpen(instance, 'automatic', host)
+  }
+
+  private requestSidebarOpen(instance: BrowserInstance, reason: 'focus' | 'return' | 'automatic', requestedHost?: BrowserWindow): void {
+    if (reason === 'automatic' && !this.openRequestedCallback) return
     const wm = this.windowManager
     const focused = wm?.getFocusedWindow()
     const focusedWorkspace = focused && wm?.getWorkspaceForWindow(focused.webContents.id)
@@ -1074,13 +1127,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       (focusedWorkspace && (!instance.workspaceId || focusedWorkspace === instance.workspaceId) ? focused : null) ??
       (instance.workspaceId ? wm?.getWindowByWorkspace(instance.workspaceId) : null)
     if (!host || host.isDestroyed()) {
+      if (reason === 'automatic') return
       throw new Error(`[browser-pane] sidebar host unavailable (instance: ${instance.id})`)
     }
     instance.sidebarHostWindow = host
     instance.showOnCreate = false
     instance.pendingShowOnReady = false
     instance.pendingShowToken += 1
-    this.openRequestedCallback?.(this.toInfo(instance), host, reason)
+    if (reason === 'automatic') {
+      try { this.openRequestedCallback?.(this.toInfo(instance), host, reason) } catch (error) { mainLog.warn('[browser-pane] automatic presentation unavailable', error) }
+    } else this.openRequestedCallback?.(this.toInfo(instance), host, reason)
     if (reason === 'focus') {
       if (host.isMinimized()) host.restore()
       host.show()
@@ -1120,6 +1176,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   hide(id: string): void {
     const instance = this.instances.get(id)
     if (!instance) return
+    instance.automaticPresentationEligible = false
 
     // Re-entrancy guard: bail if a hide is already in progress. Prevents the
     // 'close' listener from re-entering hide() during teardown, which can crash
@@ -1140,35 +1197,28 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.forceCloseToolbarMenu(instance, 'window-hide')
     this.cancelElementPicking(instance, 'host')
 
-    // Cancel an in-flight page load before hiding. Hiding the window while the
-    // BrowserView is still loading can trigger a Chromium compositor assertion
-    // and kill the main process.
-    if (instance.isLoading) {
-      try {
-        const pageWc = instance.pageView.webContents
-        if (!pageWc.isDestroyed()) pageWc.stop()
-      } catch (error) {
-        mainLog.warn(`[browser-pane] failed to stop page load before hide id=${id}: ${(error as Error)?.message ?? error}`)
-      }
-    }
-
+    if (instance.hostMode === 'embedded') this.unembedInstance(id)
     win.hide()
-
     instance.isVisible = false
-
-    // Defer the state-change callback so native window teardown completes before
-    // listeners (which may touch BrowserView/Chromium internals) run.
     queueMicrotask(() => {
       instance.isHiding = false
       this.emitStateChange(instance)
-      if (instance.hostMode === 'popup' && this.openRequestedCallback && this.instances.has(id)) {
-        try {
-          this.requestSidebarOpen(instance, 'return')
-        } catch (error) {
-          mainLog.warn(`[browser-pane] sidebar return failed id=${id}: ${String(error)}`)
-        }
-      }
     })
+  }
+
+  /** Explicit user close; background teardown continues to use destroyInstance. */
+  async requestDestroy(id: string): Promise<boolean> {
+    const instance = this.instances.get(id)
+    if (!instance) return true
+    if (instance.agentControl?.active) {
+      const parent = instance.hostMode === 'embedded' ? instance.embeddedHostWindow : instance.window
+      const options = { type: 'warning' as const, title: i18n.t('browserPane.sidebar.terminate'), message: i18n.t('browserPane.sidebar.closeActiveTitle'), detail: i18n.t('browserPane.sidebar.closeActiveBody'), buttons: [i18n.t('common.cancel'), i18n.t('common.close')], defaultId: 0, cancelId: 0 }
+      const answer = parent && !parent.isDestroyed() ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
+      if (answer.response !== 1) return false
+    }
+    if (this.instances.get(id) !== instance) return false
+    this.destroyInstance(id)
+    return true
   }
 
   // ---------------------------------------------------------------------------
@@ -1187,6 +1237,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     if (hostWindow.isDestroyed()) {
       throw new Error(`Embed host window is gone (instance: ${id})`)
     }
+    instance.automaticPresentationEligible = false
 
     if (instance.hostMode === 'embedded') {
       if (instance.embeddedHostWindow === hostWindow) {
@@ -1203,9 +1254,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       instance.window.removeBrowserView(instance.pageView)
     }
 
+    if (instance.sidebarHostWindow || instance.popupRequested) this.beginScrollTransfer(instance)
     hostWindow.addBrowserView(instance.pageView)
     // Do not cover the workbench before the renderer measures its sidebar.
-    if (!bounds) instance.pageView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+    if (!bounds) this.setPageBounds(instance, { x: 0, y: 0, width: 0, height: 0 })
     instance.sidebarHostWindow = hostWindow
     instance.showOnCreate = false
     instance.pendingShowOnReady = false
@@ -1214,6 +1266,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     instance.pageView.setAutoResize({ width: false, height: false })
     instance.embeddedHostWindow = hostWindow
     instance.embeddedViewsAttached = true
+    instance.popupRequested = false
     instance.hostMode = 'embedded'
     if (!instance.window.isDestroyed() && instance.window.isVisible()) {
       instance.window.hide()
@@ -1230,6 +1283,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
    */
   detachToPopup(id: string): void {
     const instance = this.requireAliveInstance(id)
+    instance.automaticPresentationEligible = false
+    instance.popupRequested = true
     instance.showOnCreate = false
     instance.pendingShowOnReady = false
     instance.pendingShowToken += 1
@@ -1238,6 +1293,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       return
     }
 
+    this.beginScrollTransfer(instance)
     this.cancelElementPicking(instance, 'host')
     const host = instance.embeddedHostWindow
     if (host && !host.isDestroyed()) {
@@ -1313,7 +1369,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       const n = Math.floor(Number(value))
       return Number.isFinite(n) ? Math.max(min, n) : min
     }
-    instance.pageView.setBounds({
+    this.setPageBounds(instance, {
       x: clamp(bounds.x, 0),
       y: clamp(bounds.y, 0),
       width: clamp(bounds.width, 1),
@@ -2219,18 +2275,54 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     const started = Date.now()
 
     const until = async (predicate: () => Promise<boolean>, detail: string): Promise<BrowserWaitResult> => {
-      while (Date.now() - started <= timeoutMs) {
-        if (await predicate()) {
-          return {
-            ok: true,
-            kind: args.kind,
-            elapsedMs: Date.now() - started,
-            detail,
-          }
+      const controller = new AbortController()
+      const waits = this.pendingWaits.get(instance) ?? new Set<AbortController>()
+      waits.add(controller)
+      this.pendingWaits.set(instance, waits)
+      const timedOut = () => new Error(`Wait timed out after ${timeoutMs}ms (${args.kind})`)
+      let active = true
+      let pollTimer: ReturnType<typeof setTimeout> | undefined
+      let wakePoll: (() => void) | undefined
+      let onAbort!: () => void
+      const terminal = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(controller.signal.reason)
+        controller.signal.addEventListener('abort', onAbort, { once: true })
+      })
+      // Electron can leave executeJavaScript pending when its guest disappears.
+      // The deadline must cover that await, rather than only the next poll.
+      const deadline = setTimeout(() => controller.abort(timedOut()), timeoutMs)
+      const assertWaiting = () => {
+        controller.signal.throwIfAborted()
+        if (!active) throw new Error('Browser wait already ended')
+        if (this.instances.get(id) !== instance || instance.window.isDestroyed() || instance.pageView.webContents.isDestroyed()) {
+          throw new Error(`Browser window was closed (instance: ${id})`)
         }
-        await this.sleep(pollMs)
+        if (Date.now() - started >= timeoutMs) throw timedOut()
       }
-      throw new Error(`Wait timed out after ${timeoutMs}ms (${args.kind})`)
+      const poll = async (): Promise<BrowserWaitResult> => {
+        while (true) {
+          assertWaiting()
+          const matched = await predicate()
+          assertWaiting()
+          if (matched) {
+            return { ok: true, kind: args.kind, elapsedMs: Date.now() - started, detail }
+          }
+          await new Promise<void>(resolve => {
+            wakePoll = resolve
+            pollTimer = setTimeout(() => { pollTimer = undefined; wakePoll = undefined; resolve() }, Math.min(pollMs, timeoutMs - (Date.now() - started)))
+          })
+        }
+      }
+      try { return await Promise.race([poll(), terminal]) }
+      finally {
+        active = false
+        clearTimeout(deadline)
+        if (pollTimer) clearTimeout(pollTimer)
+        wakePoll?.()
+        controller.signal.removeEventListener('abort', onAbort)
+        waits.delete(controller)
+        if (!waits.size && this.pendingWaits.get(instance) === waits) this.pendingWaits.delete(instance)
+      }
     }
 
     if (args.kind === 'selector') {
@@ -2411,7 +2503,9 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       // AX snapshot can fail transiently during navigation; ignore
     }
 
-    const detected = signals.length > 0
+    // A small ordinary page is not a human-verification challenge. Keep AX sparsity
+    // as a diagnostic, but require a title, URL or DOM challenge signal.
+    const detected = signals.some(signal => !signal.startsWith('ax:'))
     const isCloudflare = signals.some(s =>
       s.includes('cf-') || s.includes('challenge') || s.includes('turnstile') || s === 'title:just-a-moment'
     )
@@ -2517,7 +2611,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   createForSession(
     sessionId: string,
-    options?: { show?: boolean; allowReuseManual?: boolean; workspaceId?: string | null },
+    options?: { show?: boolean; presentIfActive?: boolean; allowReuseManual?: boolean; workspaceId?: string | null },
   ): string {
     const workspaceId = options?.workspaceId ?? null
     const existing = this.getBoundForSession(sessionId)
@@ -2530,6 +2624,9 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
       if (options?.show) {
         this.focus(existing)
+      } else if (options?.presentIfActive) {
+        const instance = this.instances.get(existing)
+        if (instance) this.requestAutomaticPresentation(instance)
       }
       return existing
     }
@@ -2537,7 +2634,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     // Reuse an unbound/manual window before creating a new one — local
     // sessions only. Remote agents must always get a fresh window so they
     // can never hijack a window the user opened manually.
-    const allowReuseManual = options?.allowReuseManual ?? true
+    const allowReuseManual = options?.allowReuseManual ?? false
     if (allowReuseManual) {
       const reusable = this.findReusableUnboundInstance(workspaceId)
       if (reusable) {
@@ -2550,12 +2647,19 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
     }
 
-    return this.createInstance(undefined, {
+    const id = this.createInstance(undefined, {
       show: options?.show ?? false,
       ownerType: 'session',
       ownerSessionId: sessionId,
       workspaceId,
     })
+    // A fresh background AI open may present inside its already-active chat.
+    // Existing hidden/popped-out instances keep the user's presentation choice.
+    if (options?.presentIfActive && !options.show) {
+      const instance = this.instances.get(id)
+      if (instance) this.requestAutomaticPresentation(instance)
+    }
+    return id
   }
 
   focusBoundForSession(sessionId: string, options?: { workspaceId?: string | null }): string {
@@ -2800,12 +2904,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   }
 
   destroyAll(): void {
+    this.offScope?.()
+    this.offScope = null
     for (const id of [...this.instances.keys()]) {
       this.destroyInstance(id)
     }
   }
 
   private finalizeDestroyedInstance(instance: BrowserInstance, source: 'destroy' | 'closed'): void {
+    this.cancelInstanceWaits(instance, `Browser window was closed (instance: ${instance.id})`)
     if (!this.instances.has(instance.id)) {
       return
     }
@@ -2818,20 +2925,165 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
     }
 
+    this.cancelScrollTransfer(instance)
     this.destroyingIds.delete(instance.id)
     runCleanup('closePopupsForParent', () => this.closePopupsForParent(instance.id, 'parent_destroy'))
     runCleanup('applyAgentControlLock', () => this.applyAgentControlLock(instance, false))
     runCleanup('updateNativeOverlayState', () => this.updateNativeOverlayState(instance))
     runCleanup('cdp.detach', () => instance.cdp.detach())
+    // An embedded page was detached from its host before the backing window
+    // closed. Close each remaining WebContents explicitly; hiding never enters
+    // this terminal path, and beforeunload cannot hold an ended account alive.
+    for (const [name, view] of [['page', instance.pageView], ['toolbar', instance.toolbarView], ['overlay', instance.nativeOverlayView]] as const) {
+      runCleanup(`${name}.close`, () => { if (!view.webContents.isDestroyed()) view.webContents.close({ waitForBeforeUnload: false }) })
+    }
     this.instances.delete(instance.id)
     this.removedCallback?.(instance.id)
     mainLog.info(`[browser-pane] Destroyed instance: ${instance.id} (${source})`)
   }
 
+  private cancelInstanceWaits(instance: BrowserInstance, reason: string): void {
+    const waits = this.pendingWaits.get(instance)
+    if (!waits) return
+    for (const controller of waits) controller.abort(new Error(reason))
+  }
+
+  private scrollPageAlive(instance: BrowserInstance): boolean {
+    return this.instances.get(instance.id) === instance && !this.destroyingIds.has(instance.id) && !instance.window.isDestroyed() && !instance.pageView.webContents.isDestroyed()
+  }
+  private cancelScrollTransfer(instance: BrowserInstance, applyBounds = false, token?: string): void {
+    const current = instance.scrollTransfer
+    const matches = !token || current?.token === token
+    const pendingBounds = matches ? current?.bounds : undefined
+    if (matches) {
+      if (current?.quietTimer) clearTimeout(current.quietTimer)
+      if (current?.deadlineTimer) clearTimeout(current.deadlineTimer)
+      instance.scrollTransfer = null
+      if (this.scrollPageAlive(instance) && instance.hostMode === 'popup') instance.pageView.setAutoResize({ width: false, height: false })
+    }
+    if (applyBounds && pendingBounds && this.scrollPageAlive(instance)) instance.pageView.setBounds(pendingBounds)
+    if (!instance.pageView.webContents.isDestroyed()) {
+      try { void instance.pageView.webContents.executeJavaScript(`(() => { const state = window.__poloHostTransfer; if (state && (${token ? `state.token === ${JSON.stringify(token)}` : 'true'})) state.cleanup() })()`).catch(() => {}) } catch { /* Native destruction may already have begun. */ }
+    }
+  }
+  /** Snapshot before resizing the same native page. Chromium scroll anchoring can otherwise
+   * shift a mid-page pixel position merely because its host changed width. */
+  private beginScrollTransfer(instance: BrowserInstance): void {
+    if (!this.scrollPageAlive(instance) || instance.scrollTransfer) return
+    const transfer: ScrollTransfer = { token: `${instance.id}:${Date.now()}:${Math.random()}`, epoch: instance.navigationEpoch, ready: false, revision: 0, restoring: false, settled: false }
+    instance.scrollTransfer = transfer
+    // The lease begins before any renderer work. A pending script or a hidden
+    // zero-sized pane must have the same bounded cleanup as a visible migration.
+    transfer.deadlineTimer = setTimeout(() => {
+      if (!this.scrollPageAlive(instance) || instance.scrollTransfer !== transfer) return
+      const position = transfer.position
+      // A stalled capture must not leave the native page at its old host size.
+      if (transfer.bounds) {
+        try { instance.pageView.setBounds(transfer.bounds) } catch (error) { mainLog.warn('[browser-pane] transfer deadline bounds failed', error) }
+      }
+      try { void instance.pageView.webContents.executeJavaScript(`(() => {
+        const state = window.__poloHostTransfer;
+        const position = ${JSON.stringify(position ?? null)};
+        if (state?.token === ${JSON.stringify(transfer.token)}) {
+          try { if (position && !state.moved) window.scrollTo(position.x, position.y); } finally { state.cleanup(); }
+        }
+      })()`).catch(() => {}) } catch { /* Native shutdown can race this deadline. */ }
+      this.cancelScrollTransfer(instance, false, transfer.token)
+    }, 1500)
+    instance.pageView.setAutoResize({ width: false, height: false })
+    void instance.pageView.webContents.executeJavaScript(`(() => {
+      const previous = window.__poloHostTransfer; if (previous) previous.cleanup();
+      const root = document.documentElement;
+      const anchor = root.style.overflowAnchor;
+      const state = { token: ${JSON.stringify(transfer.token)}, moved: false, cleanup: null };
+      const moved = () => { state.moved = true };
+      const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+      events.forEach(name => addEventListener(name, moved, { capture: true, passive: true }));
+      state.cleanup = () => { root.style.overflowAnchor = anchor; events.forEach(name => removeEventListener(name, moved, true)); if (window.__poloHostTransfer === state) delete window.__poloHostTransfer };
+      root.style.overflowAnchor = 'none'; window.__poloHostTransfer = state;
+      return { x: scrollX, y: scrollY };
+    })()`).then((position: { x: number; y: number } | undefined) => {
+      if (!this.scrollPageAlive(instance)) return
+      if (instance.scrollTransfer !== transfer) {
+        // A slow renderer can install hooks after Main's deadline already ran.
+        // Revoke just this token without disturbing a replacement migration.
+        this.cancelScrollTransfer(instance, false, transfer.token)
+        return
+      }
+      transfer.position = position
+      transfer.ready = true
+      this.flushScrollTransfer(instance, transfer)
+    }).catch(() => {
+      if (!this.scrollPageAlive(instance)) return
+      if (instance.scrollTransfer !== transfer) { this.cancelScrollTransfer(instance, false, transfer.token); return }
+      transfer.ready = true
+      this.flushScrollTransfer(instance, transfer)
+    })
+  }
+  private setPageBounds(instance: BrowserInstance, bounds: BrowserEmbedBounds): void {
+    if (!this.scrollPageAlive(instance)) return
+    const transfer = instance.scrollTransfer
+    if (!transfer) { instance.pageView.setBounds(bounds); return }
+    transfer.bounds = bounds
+    transfer.revision += 1
+    transfer.settled = false
+    this.flushScrollTransfer(instance, transfer)
+  }
+  private flushScrollTransfer(instance: BrowserInstance, transfer: ScrollTransfer): void {
+    if (!this.scrollPageAlive(instance) || !transfer.ready || !transfer.bounds || instance.scrollTransfer !== transfer) return
+    const bounds = transfer.bounds
+    try { instance.pageView.setBounds(bounds) } catch (error) {
+      this.cancelScrollTransfer(instance, false, transfer.token)
+      mainLog.warn('[browser-pane] host transfer bounds failed', error)
+      return
+    }
+    // A sidebar first reports zero bounds. Retain the snapshot until it measures
+    // its visible content; restoring against that zero-sized viewport loses it.
+    if (!bounds.width || !bounds.height) return
+    const position = transfer.position
+    if (transfer.epoch !== instance.navigationEpoch || !position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+      this.cancelScrollTransfer(instance, false, transfer.token)
+      return
+    }
+    // Framer's pane animation emits several nonzero bounds. Retain one snapshot
+    // through the whole burst, rather than treating its first visible frame as final.
+    if (transfer.quietTimer) clearTimeout(transfer.quietTimer)
+    transfer.quietTimer = setTimeout(() => {
+      if (!this.scrollPageAlive(instance) || instance.scrollTransfer !== transfer) return
+      transfer.settled = true
+      if (!transfer.restoring) this.cancelScrollTransfer(instance, false, transfer.token)
+    }, 100)
+    this.restoreScrollTransfer(instance, transfer)
+  }
+  private restoreScrollTransfer(instance: BrowserInstance, transfer: ScrollTransfer): void {
+    if (!this.scrollPageAlive(instance) || instance.scrollTransfer !== transfer || transfer.restoring) return
+    const position = transfer.position!
+    const revision = transfer.revision
+    transfer.restoring = true
+    try {
+      void instance.pageView.webContents.executeJavaScript(`new Promise(resolve => {
+        const restore = () => {
+          const state = window.__poloHostTransfer;
+          if (state?.token === ${JSON.stringify(transfer.token)} && !state.moved) window.scrollTo(${position.x}, ${position.y});
+          resolve();
+        };
+        if (document.hidden) restore(); else requestAnimationFrame(() => requestAnimationFrame(restore));
+      })`).then(() => {
+        if (!this.scrollPageAlive(instance) || instance.scrollTransfer !== transfer) return
+        transfer.restoring = false
+        if (transfer.revision !== revision) this.restoreScrollTransfer(instance, transfer)
+        else if (transfer.settled) this.cancelScrollTransfer(instance, false, transfer.token)
+      }).catch(() => { if (this.scrollPageAlive(instance)) this.cancelScrollTransfer(instance, false, transfer.token) })
+    } catch { this.cancelScrollTransfer(instance, false, transfer.token) }
+  }
+
   private layoutPageView(instance: BrowserInstance): void {
+    if (instance.hostMode === 'embedded') return
     const [width, height] = instance.window.getContentSize()
-    instance.pageView.setBounds({ x: 0, y: TOOLBAR_HEIGHT, width, height: Math.max(100, height - TOOLBAR_HEIGHT) })
-    instance.pageView.setAutoResize({ width: true, height: true })
+    this.setPageBounds(instance, { x: 0, y: TOOLBAR_HEIGHT, width, height: Math.max(100, height - TOOLBAR_HEIGHT) })
+    // Owner reattachment appends Electron's delta-resize listener after ours.
+    // Keep one geometry owner: the resize handler's explicit content bounds.
+    instance.pageView.setAutoResize({ width: false, height: false })
     this.updateNativeOverlayState(instance)
   }
 
@@ -3031,6 +3283,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       canGoBack: instance.canGoBack,
       canGoForward: instance.canGoForward,
       themeColor: instance.themeColor,
+      ...(instance.sidebarHostWindow && !instance.sidebarHostWindow.isDestroyed() ? { canReturnToSidebar: true } : {}),
       // POO-135: ownership label for the popup toolbar's target-chat chip.
       // Omitted (not null) when the browser is not session-bound so the
       // payload shape stays identical to the pre-POO-135 one for unowned panes.
@@ -3096,6 +3349,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       this.layoutAllViews(inst)
     })
 
+    ipcMain.handle(TOOLBAR_CHANNELS.RETURN, async (event, instanceId: string) => {
+      const inst = findInstance(instanceId)
+      if (!inst || event.sender.id !== inst.toolbarView.webContents.id) throw new Error('Browser toolbar does not own this instance')
+      const host = inst.sidebarHostWindow
+      if (!host || host.isDestroyed()) throw new Error('Browser sidebar host is unavailable')
+      this.forceCloseToolbarMenu(inst, 'return-to-sidebar')
+      this.requestSidebarOpen(inst, 'return', host)
+    })
+
     ipcMain.handle(TOOLBAR_CHANNELS.HIDE, async (_event, instanceId: string) => {
       const inst = findInstance(instanceId)
       mainLog.info(`[browser-pane] toolbar ipc hide requested instanceId=${instanceId} resolved=${inst?.id ?? 'none'}`)
@@ -3105,7 +3367,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     ipcMain.handle(TOOLBAR_CHANNELS.DESTROY, async (_event, instanceId: string) => {
       const inst = findInstance(instanceId)
       mainLog.info(`[browser-pane] toolbar ipc destroy requested instanceId=${instanceId} resolved=${inst?.id ?? 'none'}`)
-      if (inst) this.destroyInstance(inst.id)
+      if (inst) await this.requestDestroy(inst.id)
     })
 
     mainLog.info('[browser-pane] Toolbar IPC handlers registered')
@@ -3230,18 +3492,19 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     // The remote workspace id differs from the local mirror id. Preserve
     // the actual capability sender instead of guessing from the focused window.
-    const createSessionBrowser = (show: boolean): string => {
+    const createSessionBrowser = (show: boolean, presentIfActive = false): string => {
       const id = this.createForSession(ownerKey, { show: false, allowReuseManual: false, workspaceId: req.workspaceId })
       const instance = this.instances.get(id)
       if (instance && hostWindow) instance.sidebarHostWindow = hostWindow
       if (show) this.focus(id, hostWindow)
+      else if (presentIfActive && instance) this.requestAutomaticPresentation(instance, hostWindow)
       return id
     }
 
     switch (req.method) {
       case 'createForSession': {
-        const [, options] = args as [string, { show?: boolean } | undefined]
-        return createSessionBrowser(options?.show ?? false)
+        const [, options] = args as [string, { show?: boolean; presentIfActive?: boolean } | undefined]
+        return createSessionBrowser(options?.show ?? false, options?.presentIfActive ?? false)
       }
       case 'getOrCreateForSession':
         return createSessionBrowser(false)
@@ -4272,12 +4535,19 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     })
 
     pageWc.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
-      if (!isMainFrame || isInPlace || url.startsWith(POLO_AI_DEEPLINK_SCHEME_PREFIX)) return
-      getDeepLinkCallbackBridge().cleanupWebContents(pageWc.id)
+      if (!isMainFrame || url.startsWith(POLO_AI_DEEPLINK_SCHEME_PREFIX)) return
+      instance.navigationEpoch += 1
+      // Same-document navigation retains its DOM, so remove anchor/input hooks too.
+      this.cancelScrollTransfer(instance, true)
+      if (!isInPlace) getDeepLinkCallbackBridge().cleanupWebContents(pageWc.id)
     })
 
     pageWc.on('destroyed', () => {
+      this.cancelInstanceWaits(instance, `Browser page was closed (instance: ${instance.id})`)
       getDeepLinkCallbackBridge().cleanupWebContents(pageWc.id)
+    })
+    pageWc.on('render-process-gone', () => {
+      this.cancelInstanceWaits(instance, `Browser renderer exited (instance: ${instance.id})`)
     })
 
     pageWc.on('did-create-window', (popupWindow, details) => {

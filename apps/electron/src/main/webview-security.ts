@@ -440,6 +440,11 @@ function clearLegacyPartitionsForScope(
   cleanupLegacyTabAppPartition(legacyPartition)
 }
 
+// Only Main-created persistent canvas carriers may host the named session's guest.
+const genUiCarriers = new Map<number, string>()
+export function registerGenUiCarrier(webContentsId: number, sessionId: string): void { genUiCarriers.set(webContentsId, sessionId) }
+export function unregisterGenUiCarrier(webContentsId: number): void { genUiCarriers.delete(webContentsId) }
+
 export function installWebviewSecurityHandlers(): void {
   attachWebviewPermissionHandlers(BROWSER_PANE_SESSION_PARTITION)
 
@@ -458,7 +463,7 @@ export function installWebviewSecurityHandlers(): void {
       if (decision.mode === 'scoped') {
         attachWebviewPermissionHandlers(decision.partition)
       }
-    } else if (contents.getType() !== 'window') {
+    } else if (contents.getType() !== 'window' && contents.getType() !== 'browserView') {
       return
     }
 
@@ -533,7 +538,7 @@ export function installWebviewSecurityHandlers(): void {
       )
     })
 
-    if (contents.getType() !== 'window') return
+    if (contents.getType() !== 'window' && contents.getType() !== 'browserView') return
 
     // The host window gate: when the renderer attaches a <webview>, verify
     // the guest's actual partition against the one Main derives from the
@@ -584,6 +589,10 @@ export function installWebviewSecurityHandlers(): void {
       }
     })
     contents.on('will-attach-webview', (event, webPreferences, params) => {
+      if (contents.getType() === 'browserView') {
+        const sessionId = genUiCarriers.get(contents.id)
+        if (!sessionId || webPreferences.partition !== `genui-app-${sessionId}`) { event.preventDefault(); return }
+      }
       delete params.preload
       delete webPreferences.preload
       webPreferences.nodeIntegration = false

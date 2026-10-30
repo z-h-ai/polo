@@ -841,6 +841,8 @@ export type BrowserElementPickerEvent =
  * popup are two carriers of the same logical canvas.
  */
 export interface CanvasPanePopoutState {
+  loadFailed?: boolean
+  closed?: boolean
   sessionId: string
   poppedOut: boolean
   /** Whether the popup window is currently visible (focus/restore affordance). */

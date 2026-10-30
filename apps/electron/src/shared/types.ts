@@ -1578,7 +1578,7 @@ export interface ElectronAPI {
   // Browser pane management
   browserPane: {
     create(input?: string | BrowserPaneCreateOptions): Promise<string>
-    destroy(id: string): Promise<void>
+    destroy(id: string): Promise<boolean>
     list(): Promise<BrowserInstanceInfo[]>
     navigate(id: string, url: string): Promise<{ url: string; title: string }>
     goBack(id: string): Promise<void>
@@ -1605,7 +1605,7 @@ export interface ElectronAPI {
     onStateChanged(callback: (info: BrowserInstanceInfo) => void): () => void
     onRemoved(callback: (id: string) => void): () => void
     onInteracted(callback: (id: string) => void): () => void
-    onOpenRequested(callback: (info: BrowserInstanceInfo, reason: 'focus' | 'return') => void): () => void
+    onOpenRequested(callback: (info: BrowserInstanceInfo, reason: 'focus' | 'return' | 'automatic') => void): () => void
     /** POO-135: element picker outcome (picked / cancelled / unavailable). */
     onElementPickerEvent(callback: (event: BrowserElementPickerEvent) => void): () => void
   }
@@ -1617,6 +1617,11 @@ export interface ElectronAPI {
    * popped-out=false broadcast so the canvas returns to the sidebar.
    */
   canvasPane: {
+    embed(sessionId: string, app: CanvasPaneApp, bounds: BrowserEmbedBounds): Promise<void>
+    unembed(sessionId: string): Promise<void>
+    hide(sessionId: string): Promise<void>
+    destroy(sessionId: string): Promise<void>
+    release(): Promise<void>
     detachToPopup(sessionId: string, app: CanvasPaneApp): Promise<void>
     attachFromPopup(sessionId: string): Promise<void>
     focus(sessionId: string): Promise<void>

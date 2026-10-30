@@ -23,46 +23,50 @@ import { useCallback, useEffect } from 'react'
 import { useStore } from 'jotai'
 import {
   GENUI_APP_CANVAS_CLOSE_EVENT,
+  GENUI_APP_CANVAS_FOCUS_EVENT,
   GENUI_APP_CANVAS_OPEN_EVENT,
   GENUI_APP_CANVAS_QUERY_EVENT,
   dispatchGenUiAppCanvasState,
   type GenUiAppCanvasCloseRequest,
+  type GenUiAppCanvasFocusRequest,
   type GenUiAppCanvasOpenRequest,
   type GenUiAppCanvasQuery,
 } from '@polo-ai/ui/chat/GenUiAppCard'
+import { rightPaneTabAtom } from '@/atoms/sidebar-browser'
 import { canvasPaneAppAtomFamily, canvasPanePopoutAtomFamily } from '@/atoms/canvas-pane'
 
-export function GenUiCanvasBridge() {
+export function GenUiCanvasBridge({ onPresented }: { onPresented?: () => void } = {}) {
   // The ambient jotai store, NOT getDefaultStore(): the app renders inside a
   // <JotaiProvider> (per-provider scope store), so AppShell's useAtomValue
   // reads the scoped store — a default-store write would land in a different
   // store and the pane would never open.
   const store = useStore()
+  const presentSidebar = useCallback(() => {
+    store.set(rightPaneTabAtom, 'canvas')
+    onPresented?.()
+  }, [store, onPresented])
+  const handleFocus = useCallback((request: GenUiAppCanvasFocusRequest) => {
+    const existing = store.get(canvasPaneAppAtomFamily(request.sessionId))
+    if (!existing || existing.appId !== request.appId) return
+    if (!store.get(canvasPanePopoutAtomFamily(request.sessionId))?.poppedOut) presentSidebar()
+    void window.electronAPI?.canvasPane?.focus(request.sessionId)
+  }, [store, presentSidebar])
   const handleOpen = useCallback((request: GenUiAppCanvasOpenRequest) => {
     if (!request.sessionId || !request.appId || !request.indexPath) return
-    // POO-135 验收修复 (SB-CANVAS-OUT): the canvas lives in ONE surface per
-    // session. An explicit open (inline card → sidebar canvas) while the
-    // canvas is popped out first returns it — Main closes the popup and its
-    // closed broadcast flips the popout flags; the sidebar shows the opened
-    // app as soon as the pane atom is written here.
-    if (store.get(canvasPanePopoutAtomFamily(request.sessionId))?.poppedOut) {
-      void window.electronAPI?.canvasPane?.attachFromPopup?.(request.sessionId).catch(() => {})
-    }
-    store.set(canvasPaneAppAtomFamily(request.sessionId), {
-      appId: request.appId,
-      title: request.title,
-      indexPath: request.indexPath,
-      version: request.version,
-    })
+    const existing = store.get(canvasPaneAppAtomFamily(request.sessionId))
+    if (existing?.appId === request.appId) { handleFocus(request); return }
+    store.set(canvasPanePopoutAtomFamily(request.sessionId), null)
+    store.set(canvasPaneAppAtomFamily(request.sessionId), { appId: request.appId, title: request.title, indexPath: request.indexPath, version: request.version })
+    presentSidebar()
     dispatchGenUiAppCanvasState({ sessionId: request.sessionId, appId: request.appId })
-  }, [store])
+  }, [store, presentSidebar, handleFocus])
 
   const handleClose = useCallback((request: GenUiAppCanvasCloseRequest) => {
     if (!request.sessionId || !request.appId) return
     const current = store.get(canvasPaneAppAtomFamily(request.sessionId))
     if (!current || current.appId !== request.appId) return
-    store.set(canvasPaneAppAtomFamily(request.sessionId), null)
-    dispatchGenUiAppCanvasState({ sessionId: request.sessionId, appId: null })
+    void window.electronAPI?.canvasPane?.hide(request.sessionId)
+
   }, [store])
 
   const handleQuery = useCallback((query: GenUiAppCanvasQuery) => {
@@ -82,12 +86,13 @@ export function GenUiCanvasBridge() {
       return () => window.removeEventListener(type, listener)
     }
     const unlisten = [
+      listen<GenUiAppCanvasFocusRequest>(GENUI_APP_CANVAS_FOCUS_EVENT, handleFocus),
       listen<GenUiAppCanvasOpenRequest>(GENUI_APP_CANVAS_OPEN_EVENT, handleOpen),
       listen<GenUiAppCanvasCloseRequest>(GENUI_APP_CANVAS_CLOSE_EVENT, handleClose),
       listen<GenUiAppCanvasQuery>(GENUI_APP_CANVAS_QUERY_EVENT, handleQuery),
     ]
     return () => unlisten.forEach((fn) => fn())
-  }, [handleClose, handleOpen, handleQuery])
+  }, [handleClose, handleOpen, handleQuery, handleFocus])
 
   return null
 }
