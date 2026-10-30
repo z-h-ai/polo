@@ -48,6 +48,7 @@ import {
   SendPhoneAuthCodeRpcInputSchema,
   SetAdminPasswordRpcInputSchema,
   UpdateOrganizationMemberRpcInputSchema,
+  AdminRefreshBillingRpcInputSchema,
   VerifyPhoneAuthCodeRpcInputSchema,
 } from '@polo-ai/shared/admin/schemas'
 import {
@@ -70,6 +71,7 @@ import {
   deleteLlmConnection,
   getAdminConfigVersion,
   getAdminUrl,
+  getLlmConnection,
   getLlmConnections,
   setAdminConfigVersion,
   setBrowserFastDeciderEnabled,
@@ -90,10 +92,13 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import {
   beginAccountTransition,
+  captureCompleteTrustedSessionScopeToken,
+  isTrustedSessionScopeTokenCurrent,
   settleAccountTransition,
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
   setTrustedProductSpaceListFetcher,
+  trustedScopeMatchesSessionRecord,
   type TrustedProductSpaceListResult,
 } from './trusted-product-space-account'
 import {
@@ -278,6 +283,8 @@ export const HANDLED_CHANNELS = [
   // Registered inline below but previously missing from this manifest —
   // the registration coverage test (registration.test.ts) counts them.
   RPC_CHANNELS.admin.PAYMENT_HANDOFF,
+  // POO-177 QUOTA-01: manual billing refresh — a scoped preflight read.
+  RPC_CHANNELS.admin.REFRESH_BILLING,
   RPC_CHANNELS.productSpace.LIST_SKILLS,
 ] as const
 
@@ -1096,6 +1103,15 @@ export function registerAdminHandlers(
      * policy makes the deny hook structurally mandatory.
      */
     catalogScope?: CatalogScopeRevocationPolicy
+    /**
+     * POO-177 scoped-read semantics (billing refresh): a denied read
+     * (403/FORBIDDEN/membership/404/enterprise restriction/unreadable DTO)
+     * reports the failed refresh WITHOUT ending the session, WITHOUT a
+     * catalog deny hook and WITHOUT any revocation — a read refusal proves
+     * nothing about membership. Only a true 401/account_disabled still ends
+     * the session. Mutually exclusive with `catalogScope`.
+     */
+    scopedRead?: true
   }
 
   const callOrganization = async <T extends object>(
@@ -1127,6 +1143,10 @@ export function registerAdminHandlers(
     // cannot opt into scoped 403s while forgetting the fail-closed
     // revocation.
     const catalogScope = objectOptions?.catalogScope ?? null
+    const scopedRead = objectOptions?.scopedRead ?? false
+    if (catalogScope && scopedRead) {
+      throw new Error('callOrganization: catalogScope and scopedRead are mutually exclusive')
+    }
     let requestContext: AdminRequestContext | null = null
     let manager: CredentialManager | null = null
     let settledResult: T | null = null
@@ -1197,7 +1217,7 @@ export function registerAdminHandlers(
       if (error instanceof AdminSessionChangedError) {
         return staleAdminSessionResult()
       }
-      const sessionEnding = catalogScope
+      const sessionEnding = catalogScope || scopedRead
         ? isSessionEndingCatalogScopedError(error)
         : isSessionEndingAuthFailure(error)
       if (sessionEnding) {
@@ -2240,6 +2260,123 @@ export function registerAdminHandlers(
       }
       return { url: paymentHandoffUrl(requireAdminUrl(), ticket), accountId, productSpaceId: space.id }
     })
+  })
+
+
+  // POO-177 QUOTA-01: the renderer's manual billing refresh. A preflight read
+  // bound to the caller's own trusted session — the input's three fields
+  // exist ONLY to fail closed against Main's own facts (trusted session
+  // scope, session metadata, actual admin-managed connection); they are
+  // never an identity or permission source. The scoped-read policy keeps a
+  // refused read (403/404/unreadable DTO) a failed refresh: no logout, no
+  // space revocation, no catalog write; only a true 401/account_disabled
+  // ends the session. The snapshot disclosure is bounded by the publication
+  // token captured BEFORE the first await, re-checked after every await and
+  // once more before the envelope leaves the handler.
+  server.handle(RPC_CHANNELS.admin.REFRESH_BILLING, async (ctx, rawInput: unknown) => {
+    const parsedInput = AdminRefreshBillingRpcInputSchema.safeParse(rawInput)
+    if (!parsedInput.success) {
+      return {
+        success: false as const,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'Billing refresh request is invalid',
+      }
+    }
+    const input = parsedInput.data
+    const callerWorkspaceId = ctx.workspaceId
+      ?? (ctx.webContentsId !== null
+        ? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
+        : null)
+    // Capture BEFORE the first await: this lease is what every later check
+    // and the final envelope are bound to.
+    const scopeToken = captureCompleteTrustedSessionScopeToken(callerWorkspaceId)
+    if (!scopeToken || isSwitchInProgress()) {
+      return {
+        success: false as const,
+        errorCode: 'SESSION_CHANGED',
+        message: 'The trusted product space scope changed',
+      }
+    }
+    if (input.expectedProductSpaceId !== scopeToken.productSpaceId) {
+      return {
+        success: false as const,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'Billing refresh does not match the current product space',
+      }
+    }
+    const findSession = () => deps.sessionManager.getSessions().find(item => item.id === input.sessionId)
+    const session = findSession()
+    if (!session || !trustedScopeMatchesSessionRecord(session, scopeToken)) {
+      return {
+        success: false as const,
+        errorCode: 'NOT_FOUND',
+        message: 'Session was not found in the current trusted scope',
+      }
+    }
+    const connection = session.llmConnection ? getLlmConnection(session.llmConnection) : undefined
+    // Canonical billing evidence only: the actual admin-managed connection of
+    // THIS session, matching its committed slug for THIS space. A name, a
+    // slug prefix or the workspace default prove nothing.
+    if (
+      !connection
+      || connection.managedBy !== 'admin'
+      || connection.slug !== input.expectedConnectionSlug
+      || connection.slug !== `polo-space-${scopeToken.productSpaceId}`
+    ) {
+      return {
+        success: false as const,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'Billing refresh requires the current admin-managed connection',
+      }
+    }
+    const connectionSlug = connection.slug
+    const assertUnchanged = () => {
+      if (!isTrustedSessionScopeTokenCurrent(scopeToken) || isSwitchInProgress()) {
+        throw new AdminSessionChangedError()
+      }
+      const currentSession = findSession()
+      if (!currentSession || currentSession.llmConnection !== session.llmConnection) {
+        throw new AdminSessionChangedError()
+      }
+      const currentConnection = currentSession.llmConnection
+        ? getLlmConnection(currentSession.llmConnection)
+        : undefined
+      if (!currentConnection || currentConnection.slug !== connectionSlug || currentConnection.managedBy !== 'admin') {
+        throw new AdminSessionChangedError()
+      }
+    }
+    const envelope = await callOrganization(
+      'refreshBilling',
+      async (client, accessToken, accountId) => {
+        assertUnchanged()
+        if (accountId !== scopeToken.accountId) throw new AdminSessionChangedError()
+        const snapshot = await client.getSelfBillingAvailability(accessToken, scopeToken.productSpaceId)
+        assertUnchanged()
+        if (snapshot.productSpaceId !== scopeToken.productSpaceId) {
+          throw new AdminError(
+            'Admin billing availability belongs to another product space',
+            'FORBIDDEN',
+          )
+        }
+        return {
+          accountId,
+          productSpaceId: scopeToken.productSpaceId,
+          sessionId: session.id,
+          connectionSlug,
+          snapshot,
+        }
+      },
+      { scopedRead: true },
+    )
+    if (!envelope.success) return envelope
+    if (!isTrustedSessionScopeTokenCurrent(scopeToken) || isSwitchInProgress()) {
+      return {
+        success: false as const,
+        errorCode: 'SESSION_CHANGED',
+        message: 'The trusted product space scope changed',
+      }
+    }
+    return envelope
   })
 
   server.handle(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES, async () => {

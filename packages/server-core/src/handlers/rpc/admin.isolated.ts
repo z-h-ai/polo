@@ -26,7 +26,10 @@ import {
   switchLockEventLog,
   type SwitchLockToken,
 } from '../../runtime/switch-lock-internal'
-import { getAccountTransitionEpoch } from './trusted-product-space-account'
+import {
+  getAccountTransitionEpoch,
+  setSyncTrustedProductSpaceAccountId,
+} from './trusted-product-space-account'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 
@@ -131,6 +134,9 @@ const adminClientBehavior = {
   },
   issuePaymentHandoff: async (_accessToken: string, _productSpaceId: string): Promise<any> => {
     throw new Error('issuePaymentHandoff behavior not configured')
+  },
+  getSelfBillingAvailability: async (_accessToken: string, _productSpaceId: string): Promise<any> => {
+    throw new Error('getSelfBillingAvailability behavior not configured')
   },
   getProductSpaceCatalog: async (_accessToken: string, _context: unknown): Promise<any> => {
     throw new Error('getProductSpaceCatalog behavior not configured')
@@ -248,6 +254,11 @@ class MockAdminClient {
   async issuePaymentHandoff(accessToken: string, productSpaceId: string) {
     adminClientCalls.push({ method: 'issuePaymentHandoff', args: [productSpaceId], accessToken })
     return adminClientBehavior.issuePaymentHandoff(accessToken, productSpaceId)
+  }
+
+  async getSelfBillingAvailability(accessToken: string, productSpaceId: string) {
+    adminClientCalls.push({ method: 'getSelfBillingAvailability', args: [productSpaceId], accessToken })
+    return adminClientBehavior.getSelfBillingAvailability(accessToken, productSpaceId)
   }
 
   async getProductSpaceCatalog(accessToken: string, context: unknown) {
@@ -517,6 +528,8 @@ mock.module('@polo-ai/shared/config', () => ({
   // load; the harness must export them or the whole file fails to link.
   setGenerativeUiRemoteCapability: () => {},
   setWebAppArtifactPolicy: () => {},
+  getLlmConnection: (slug: string) =>
+    configState.connections.find(item => item.slug === slug) ?? null,
   getLlmConnections: () => configState.connections,
   addLlmConnection: (connection: TestConnection) => {
     if (configState.connections.some(item => item.slug === connection.slug)) return false
@@ -668,6 +681,7 @@ function createHarness(observe?: (runtime: HarnessRuntime) => void) {
   observe?.({ server, deps, handlers })
   return {
     paymentHandoff: requiredHandler(handlers, RPC_CHANNELS.admin.PAYMENT_HANDOFF),
+    refreshBilling: requiredHandler(handlers, RPC_CHANNELS.admin.REFRESH_BILLING),
     login: requiredHandler(handlers, RPC_CHANNELS.admin.LOGIN),
     getAuthConfig: requiredHandler(handlers, RPC_CHANNELS.admin.GET_AUTH_CONFIG),
     getPhoneAuthChallengeConfig: requiredHandler(
@@ -2014,6 +2028,7 @@ describe('registerAdminHandlers', () => {
       'productSpaceListSkills',
       'productSpaceResolveLaunch',
       'productSpaceSetSkillEnablement',
+      'refreshBilling',
       'removeOrganizationMember',
       'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',
@@ -5796,5 +5811,360 @@ describe('R5A trusted direct launch current entitlement', () => {
     expect(result).toMatchObject({ success: false, errorCode: 'CIRCLE_ENTITLEMENT_REQUIRED', reason: 'unknown', recovery: 'refresh_membership' })
     expect(adminClientCalls.some(call => call.method === 'resolveProductSpaceLaunch')).toBe(false)
     expect(getRuntimeActiveProductSpace()).toBe('space-a')
+  })
+})
+
+describe('admin:refreshBilling (POO-177 QUOTA-01)', () => {
+  const SPACE = '11111111-2222-3333-4444-555555555555'
+  const SLUG = `polo-space-${SPACE}`
+  const CONTEXT = { clientId: 'client-1', workspaceId: 'workspace-1', webContentsId: null }
+
+  function availabilitySnapshot(
+    availability: Record<string, unknown> = { state: 'available', reason: null },
+  ) {
+    return {
+      productSpaceId: SPACE,
+      computedAt: '2026-10-29T08:00:00.000Z',
+      billingMode: 'provider_metered',
+      preflightOnly: true,
+      availability,
+      quota: null,
+    }
+  }
+
+  let sessionsFixture: Array<Record<string, unknown>>
+
+  function setupTrustedBillingScope() {
+    // The trusted scope is captured from runtime state AFTER login: the login
+    // path re-binds the sync account id and REPLACES the stored tokens with
+    // the login response, so the fixture user must be this test's account.
+    adminClientBehavior.login = async () => ({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'account-1',
+        username: 'account-1',
+        displayName: 'Account One',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    sessionsFixture = [{
+      id: 'session-1',
+      workspaceId: 'workspace-1',
+      accountId: 'account-1',
+      productSpaceId: SPACE,
+      llmConnection: SLUG,
+    }]
+  }
+
+  function createBillingHarness() {
+    let harnessDeps: HandlerDeps | null = null
+    const harness = createHarness(runtime => {
+      harnessDeps = runtime.deps
+    })
+    ;(harnessDeps as unknown as { sessionManager: unknown }).sessionManager = {
+      getSessions: () => sessionsFixture,
+    }
+    return harness
+  }
+
+  function refreshInput(overrides: Record<string, unknown> = {}) {
+    return {
+      expectedProductSpaceId: SPACE,
+      sessionId: 'session-1',
+      expectedConnectionSlug: SLUG,
+      ...overrides,
+    }
+  }
+
+  function billingCalls() {
+    return adminClientCalls.filter(call => call.method === 'getSelfBillingAvailability')
+  }
+
+  it('answers one scoped GET with the Main-owned envelope for the current managed session', async () => {
+    setupTrustedBillingScope()
+    adminClientBehavior.getSelfBillingAvailability = async () => availabilitySnapshot()
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput())
+    expect(result).toMatchObject({
+      success: true,
+      accountId: 'account-1',
+      productSpaceId: SPACE,
+      sessionId: 'session-1',
+      connectionSlug: SLUG,
+    })
+    expect((result as { snapshot: Record<string, unknown> }).snapshot).toEqual(availabilitySnapshot())
+    expect(billingCalls()).toHaveLength(1)
+    expect(billingCalls()[0]!.accessToken).toBe('access-token')
+  })
+
+  it('passes blocked verdicts through without extra reads', async () => {
+    setupTrustedBillingScope()
+    adminClientBehavior.getSelfBillingAvailability = async () =>
+      availabilitySnapshot({ state: 'blocked', reason: 'budget_exhausted' })
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput())
+    expect(result).toMatchObject({
+      success: true,
+      snapshot: { availability: { state: 'blocked', reason: 'budget_exhausted' } },
+    })
+    expect(billingCalls()).toHaveLength(1)
+  })
+
+  it('reports a scoped-read 403 as a failed refresh and keeps the session, tokens and space intact', async () => {
+    setupTrustedBillingScope()
+    adminClientBehavior.getSelfBillingAvailability = async () => {
+      throw new TestAdminError('Billing read is not permitted', 'FORBIDDEN', { status: 403 })
+    }
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput())
+    expect(result).toMatchObject({ success: false, errorCode: 'FORBIDDEN' })
+    expect(adminSessionEnding).not.toHaveBeenCalled()
+    expect(managerState.tokens).not.toBeNull()
+    expect(getRuntimeActiveProductSpace()).toBe(SPACE)
+  })
+
+  it('treats a missing route (404) as a failed read, never as a membership revocation', async () => {
+    setupTrustedBillingScope()
+    adminClientBehavior.getSelfBillingAvailability = async () => {
+      throw new TestAdminError('No such route', 'NOT_FOUND', { status: 404 })
+    }
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput())
+    expect(result).toMatchObject({ success: false, errorCode: 'NOT_FOUND' })
+    expect(adminSessionEnding).not.toHaveBeenCalled()
+    expect(getRuntimeActiveProductSpace()).toBe(SPACE)
+  })
+
+  it('fails closed on an unreadable billing contract without ending the session', async () => {
+    setupTrustedBillingScope()
+    adminClientBehavior.getSelfBillingAvailability = async () => {
+      throw new TestAdminError(
+        'Polo Admin speaks a billing contract this client cannot safely understand',
+        'billing_contract_unsupported',
+      )
+    }
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput())
+    expect(result).toMatchObject({ success: false, errorCode: 'billing_contract_unsupported' })
+    expect(adminSessionEnding).not.toHaveBeenCalled()
+  })
+
+  it('never sends the Admin GET for a BYOK or unmanaged session', async () => {
+    setupTrustedBillingScope()
+    sessionsFixture = [{
+      id: 'session-1', workspaceId: 'workspace-1', accountId: 'account-1',
+      productSpaceId: SPACE, llmConnection: 'byok-key',
+    }]
+    configState.connections = [adminConnection({ slug: 'byok-key' })]
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput({ expectedConnectionSlug: 'byok-key' }))
+    expect(result).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' })
+    expect(billingCalls()).toHaveLength(0)
+  })
+
+  it('rejects a forged connection slug before any Admin read', async () => {
+    setupTrustedBillingScope()
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput({ expectedConnectionSlug: 'polo-space-99999999-9999-9999-9999-999999999999' }))
+    expect(result).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' })
+    expect(billingCalls()).toHaveLength(0)
+  })
+
+  it('rejects a refresh aimed at another product space before any Admin read', async () => {
+    setupTrustedBillingScope()
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput({ expectedProductSpaceId: '99999999-8888-7777-6666-555555555555' }))
+    expect(result).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' })
+    expect(billingCalls()).toHaveLength(0)
+  })
+
+  it('refuses renderer-supplied identity or payer fields on the strict input', async () => {
+    setupTrustedBillingScope()
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    for (const extra of [{ accountId: 'account-1' }, { payerId: 'payer-1' }, { managed: true }]) {
+      const result = await harness.refreshBilling(CONTEXT, refreshInput(extra))
+      expect(result).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' })
+    }
+    expect(billingCalls()).toHaveLength(0)
+  })
+
+  it('fails closed without disclosing a snapshot when the scope switches while the GET is pending', async () => {
+    setupTrustedBillingScope()
+    const pendingSnapshot = createDeferred<Record<string, unknown>>()
+    const readStarted = createDeferred<void>()
+    adminClientBehavior.getSelfBillingAvailability = async () => {
+      readStarted.resolve()
+      return pendingSnapshot.promise
+    }
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const pending = harness.refreshBilling(CONTEXT, refreshInput())
+    await readStarted.promise
+    setRuntimeActiveProductSpace('99999999-8888-7777-6666-555555555555')
+    setRuntimeActiveProductSpaceAccount('account-2')
+    setSyncTrustedProductSpaceAccountId('account-2')
+    pendingSnapshot.resolve(availabilitySnapshot())
+
+    expect(await pending).toMatchObject({ success: false, errorCode: 'SESSION_CHANGED' })
+  })
+
+  it('refuses a stale A→B→A revival after the fence moved underneath the read', async () => {
+    setupTrustedBillingScope()
+    const pendingSnapshot = createDeferred<Record<string, unknown>>()
+    const readStarted = createDeferred<void>()
+    adminClientBehavior.getSelfBillingAvailability = async () => {
+      readStarted.resolve()
+      return pendingSnapshot.promise
+    }
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const pending = harness.refreshBilling(CONTEXT, refreshInput())
+    await readStarted.promise
+    setRuntimeActiveProductSpace('99999999-8888-7777-6666-555555555555')
+    setRuntimeActiveProductSpace(SPACE)
+    pendingSnapshot.resolve(availabilitySnapshot())
+
+    expect(await pending).toMatchObject({ success: false, errorCode: 'SESSION_CHANGED' })
+  })
+
+  it('ends the session only for a true 401 account failure', async () => {
+    setupTrustedBillingScope()
+    adminClientBehavior.getSelfBillingAvailability = async () => {
+      throw new TestAdminError('Admin account is disabled', 'ACCOUNT_DISABLED', { status: 401 })
+    }
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(CONTEXT, refreshInput())
+    expect(result).toMatchObject({ success: false })
+    expect(adminSessionEnding).toHaveBeenCalledTimes(1)
+    expect(adminSessionEnding).toHaveBeenCalledWith('account-1')
+  })
+
+  it('fails closed when the caller workspace cannot be attributed', async () => {
+    setupTrustedBillingScope()
+    const harness = createBillingHarness()
+    await harness.login(CONTEXT, 'account-1', 'secret')
+    setRuntimeActiveProductSpace(SPACE)
+    setRuntimeActiveProductSpaceAccount('account-1')
+    setSyncTrustedProductSpaceAccountId('account-1')
+    // The login-path connection sync wipes locally cached connections; the
+    // admin-managed connection of THIS test's session is committed after it.
+    configState.connections = [adminConnection({ slug: SLUG, managedBy: 'admin' })]
+    adminClientCalls.length = 0
+
+    const result = await harness.refreshBilling(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      refreshInput(),
+    )
+    expect(result).toMatchObject({ success: false })
+    expect(billingCalls()).toHaveLength(0)
   })
 })

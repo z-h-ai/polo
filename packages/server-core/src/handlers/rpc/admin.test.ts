@@ -91,6 +91,9 @@ const adminClientBehavior = {
   login: async (_username: string, _password: string): Promise<any> => {
     throw new Error('login behavior not configured')
   },
+  getSelfBillingAvailability: async (_accessToken: string, _productSpaceId: string): Promise<any> => {
+    throw new Error('getSelfBillingAvailability behavior not configured')
+  },
   refresh: async (_refreshToken: string): Promise<any> => {
     throw new Error('refresh behavior not configured')
   },
@@ -241,6 +244,11 @@ class MockAdminClient {
   async refresh(refreshToken: string) {
     adminClientCalls.push({ method: 'refresh', args: [refreshToken] })
     return adminClientBehavior.refresh(refreshToken)
+  }
+
+  async getSelfBillingAvailability(accessToken: string, productSpaceId: string) {
+    adminClientCalls.push({ method: 'getSelfBillingAvailability', args: [productSpaceId], accessToken })
+    return adminClientBehavior.getSelfBillingAvailability(accessToken, productSpaceId)
   }
 
   async admitNativeInstallation(accessToken: string, input: any) {
@@ -535,6 +543,8 @@ mock.module('@polo-ai/shared/config', () => ({
   setAdminConfigVersion: (version: string | undefined) => {
     configState.adminConfigVersion = version
   },
+  getLlmConnection: (slug: string) =>
+    configState.connections.find(item => item.slug === slug) ?? null,
   getLlmConnections: () => configState.connections,
   addLlmConnection: (connection: TestConnection) => {
     if (configState.connections.some(item => item.slug === connection.slug)) return false
@@ -676,6 +686,7 @@ function createHarness() {
     revokeOrganizationJoinLink: requiredHandler(handlers, RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK),
     updateOrganizationMember: requiredHandler(handlers, RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER),
     removeOrganizationMember: requiredHandler(handlers, RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER),
+    refreshBilling: requiredHandler(handlers, RPC_CHANNELS.admin.REFRESH_BILLING),
   }
 }
 
@@ -876,6 +887,7 @@ describe('registerAdminHandlers', () => {
       'logout',
       'previewOrganizationJoin',
       'publishCreatorApp',
+      'refreshBilling',
       'removeOrganizationMember',
       'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',
