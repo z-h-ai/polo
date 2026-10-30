@@ -21,7 +21,7 @@ import { chatComponents } from '@/playground/registry/chat'
 import { ComponentGallery } from './gallery'
 import { InterviewInputScene } from './interview-input'
 import { InterviewMarkdownTableScene, InterviewDatatableScene, InterviewGenUiTableScene } from './interview-table'
-import { InterviewScrollScene, InterviewStatusPickerScene, InterviewStatusDesktopScene, InterviewStatusCompactScene } from './interview-conversation'
+import { InterviewFileLinkScene, InterviewScrollScene, InterviewStatusPickerScene, InterviewStatusDesktopScene, InterviewStatusCompactScene } from './interview-conversation'
 import { productSpaceFixture } from './fixtures'
 
 /**
@@ -255,6 +255,8 @@ export const baselineScenes: BaselineScene[] = [
     note: '真实 GenUI→MarkdownDatatableBlock，保留筛选/行操作；文件读取为本地fixture，不向服务发送。', render: () => <InterviewGenUiTableScene /> },
   { id: 'interview-scroll', region: '助手', title: 'ChatDisplay（长对话阅读）', fullBleed: true,
     note: '真实对话显示组件及固定长会话；发送仅改变内存数据，不代表服务端或计费。', render: () => <InterviewScrollScene /> },
+  { id: 'interview-file-link', region: '助手', title: 'ChatDisplay（文件链接右键菜单）', fullBleed: true,
+    note: '真实对话显示组件与固定文件链接会话；右键菜单为当前 ContextMenu 原生组合演示（专用组件尚未实现），菜单项沿用既有会话菜单词汇，动作不连接后端。', render: () => <InterviewFileLinkScene /> },
   { id: 'interview-status-picker', region: '助手', title: 'SessionStatusMenu（状态选择与搜索）',
     note: '真实状态选择器；包含系统默认状态与用户自定义英文名，选择仅改变本地状态。', render: () => <InterviewStatusPickerScene /> },
   { id: 'interview-status-desktop', region: '助手', title: 'StatusMenuItems（桌面状态菜单）',
