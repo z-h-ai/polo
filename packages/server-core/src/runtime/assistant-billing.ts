@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { CONFIG_DIR } from '@polo-ai/shared/config'
 import { AdminError } from '@polo-ai/shared/admin'
 import { BillingOutbox, type AssistantBillingJournalScope } from '@polo-ai/shared/admin/billing-outbox'
-import { billingRuntimeAdmissionResponseSchema, billingRuntimeFinishResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
+import { billingAssistantPreparationResponseSchema, billingRuntimeRunResponseSchema, billingRuntimeAdmissionResponseSchema, billingRuntimeFinishResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
 import type { ManagedBillingHooks, ManagedBillingResult } from '@polo-ai/shared/credentials/managed-billing-observation'
 
 // AdminClient validates the HTTP envelope and returns this flat DTO. Derive
@@ -16,6 +16,9 @@ const assistantFinishResponseSchema = billingRuntimeFinishResponseSchema.shape.r
 }) satisfies z.ZodType<AdminFinishAppRunResponse>
 
 export interface AssistantBillingTransport {
+  supportsPreparation?(scope: AssistantBillingJournalScope): Promise<boolean>
+  prepare?(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput): Promise<unknown>
+  inspectRun?(scope: AssistantBillingJournalScope, runId: string): Promise<unknown>
   start(scope: AssistantBillingJournalScope, input: { subjectKind: 'polo_assistant'; productSpaceId: string; runId: string }): Promise<unknown>
   admit(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput): Promise<unknown>
   report(scope: AssistantBillingJournalScope, input: BillingRuntimeUsageInput): Promise<{ settlement?: 'pending' | 'confirmed' | 'no_charge'; resolution?: 'platform_absorbed' }>
@@ -38,16 +41,29 @@ export class AssistantBillingCoordinator {
       assertCurrent()
       const transport = this.transport()
       if (!transport) throw new Error('Trusted assistant billing is unavailable')
+      // Discovery cannot create billable work; do it before persisting an intent.
+      const combined = Boolean(transport.prepare) && (await transport.supportsPreparation?.(scope) ?? true)
+      assertCurrent()
       const runId = randomUUID(), requestId = randomUUID()
       const admission = { ...facts, productSpaceId: scope.productSpaceId, requestId }
       const key = this.outbox.stageAdmission(scope, runId, admission)
       this.live.add(key)
       let started = false
       try {
-        await transport.start(scope, { subjectKind: 'polo_assistant', productSpaceId: scope.productSpaceId, runId })
-        started = true
+        let admitted
+        if (combined) {
+          // The server may commit start before returning any response.
+          started = true
+          const prepared = billingAssistantPreparationResponseSchema.parse(await transport.prepare!(scope, runId, admission))
+          if (prepared.runId !== runId) throw new Error('Assistant preparation changed its original run')
+          admitted = prepared
+        } else {
+          await transport.start(scope, { subjectKind: 'polo_assistant', productSpaceId: scope.productSpaceId, runId })
+          started = true
+          assertCurrent()
+          admitted = billingRuntimeAdmissionResponseSchema.parse(await transport.admit(scope, runId, admission))
+        }
         assertCurrent()
-        const admitted = billingRuntimeAdmissionResponseSchema.parse(await transport.admit(scope, runId, admission))
         if (admitted.request.requestId !== requestId) throw new Error('Assistant admission changed its original identity')
         let completed = false
         return { providerCorrelation: admitted.request.providerCorrelation, assertCurrent,
@@ -71,7 +87,12 @@ export class AssistantBillingCoordinator {
         const definitivelyDenied = error instanceof AdminError && (
           ['insufficient_credit', 'quota_exhausted', 'budget_exhausted'].includes(error.errorCode)
           || error.status !== undefined && error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status))
-        if (!started && definitivelyDenied) this.outbox.discardRejectedAdmission(key)
+        const rejection = error instanceof AdminError ? error.details?.assistantPreparation : undefined
+        // This call owns fresh random IDs and is never retried. The marker only
+        // retires this unsent intent; it is not a zero-cost settlement receipt.
+        const freshStartRejected = combined && definitivelyDenied && rejection?.phase === 'start_rejected'
+          && rejection.runId === runId && rejection.requestId === requestId
+        if (freshStartRejected || !started && definitivelyDenied) this.outbox.discardRejectedAdmission(key)
         else {
           // This catch precedes the return of the send ticket: no provider
           // request can have been sent. A transient admission failure can still
@@ -135,6 +156,17 @@ export class AssistantBillingCoordinator {
               .then(value => assistantFinishResponseSchema.safeParse(value)).catch(() => null)
             if (finished?.success && finished.data.runId === entry.runId
               && finished.data.settlement === 'no_charge') this.outbox.discardRejectedAdmission(entry.key)
+            else if (this.transport()?.inspectRun) {
+              // The worker may already have closed this run with a different
+              // terminal status. Read it, never overwrite it to make PATCH pass.
+              const original = await this.transport()!.inspectRun!(entry.scope, entry.runId)
+                .then(value => billingRuntimeRunResponseSchema.safeParse(value)).catch(() => null)
+              if (original?.success && original.data.run.runId === entry.runId
+                && original.data.run.productSpaceId === entry.scope.productSpaceId
+                && original.data.run.status !== 'running' && original.data.settlement === 'no_charge') {
+                this.outbox.discardRejectedAdmission(entry.key)
+              }
+            }
           }
           if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') this.outbox.markConflict(entry.key)
         }

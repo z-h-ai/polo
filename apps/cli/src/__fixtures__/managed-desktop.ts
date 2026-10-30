@@ -46,6 +46,8 @@ const provider = Bun.serve({ port: 0, async fetch(req) {
 } })
 const admin = Bun.serve({ port: 0, async fetch(req) {
   const url = new URL(req.url)
+  // Old Admin capability response: production must preserve the two-step path.
+  if (url.pathname === '/api/auth/config') return Response.json({ phoneAuthEnabled: false, selfRegistrationEnabled: false })
   if (url.pathname === '/fixture/control') return Response.json(await control(await req.json()))
   if (url.pathname === '/fixture/state') {
     const secretsOnDisk: string[] = []

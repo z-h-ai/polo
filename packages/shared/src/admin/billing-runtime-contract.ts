@@ -1,5 +1,5 @@
 // GENERATED from polo-admin/src/lib/billing/runtime-contract.ts
-// Source SHA-256: a0248fc6b743238d80edacf9255a12afcc92d4002f3d8a15dfbb88fd88d50799
+// Source SHA-256: 86ae750aa97bc00c522ed97203b6bb9070dc99ea815e0ba8294ab3fc784f5f7a
 // Run backend scripts/sync-billing-runtime-contract.mjs --client <checkout>; do not edit.
 
 // Authority for the deployed billing runtime HTTP boundary. Client copies are
@@ -120,3 +120,28 @@ export type AppRuntimeStartInput = z.infer<typeof billingRunStartSchema> & {
 export type BillingRuntimeUsageInput = z.infer<typeof billingUsageSchema>;
 export type BillingRuntimeAdmissionInput = z.infer<typeof billingRequestAdmissionSchema>;
 export type BillingRuntimeFinishInput = z.infer<typeof billingRunFinishSchema>;
+
+
+/** One assistant HTTP attempt; space and payer cannot disagree across stages. */
+export const billingAssistantPreparationSchema = z.object({
+  runId: billingExternalIdSchema,
+  admission: billingRequestAdmissionSchema,
+}).strict();
+export const billingAssistantPreparationResponseSchema = billingRuntimeAdmissionResponseSchema.extend({
+  runId: billingExternalIdSchema,
+}).strict();
+// This describes only this attempt. It is NOT evidence that no earlier run exists.
+export const billingAssistantStartRejectionSchema = z.object({
+  runId: billingExternalIdSchema,
+  requestId: billingExternalIdSchema,
+  phase: z.literal("start_rejected"),
+}).strict();
+export const billingRuntimeRunResponseSchema = z.object({
+  run: z.object({
+    runId: billingExternalIdSchema,
+    productSpaceId: uuidSchema,
+    status: z.enum(["running", "completed", "failed", "cancelled", "unknown", "timed_out"]),
+  }).strict(),
+  settlement: z.enum(["pending", "confirmed", "no_charge"]),
+}).strict();
+export type BillingAssistantPreparationInput = z.infer<typeof billingAssistantPreparationSchema>;

@@ -1,3 +1,4 @@
+import { billingAssistantPreparationSchema, billingAssistantPreparationResponseSchema, billingAssistantStartRejectionSchema, billingRuntimeRunResponseSchema, type BillingAssistantPreparationInput } from './billing-runtime-contract';
 import {browserPolicyResponseSchema,type BrowserPolicyResponse} from "./browser-policy-contract";
 import { SkillTurnBeginSchema, SkillTurnOperationSchema, SkillTurnReceiptSchema, type SkillTurnBegin, type SkillTurnReceipt } from './skill-turn-contract.ts';
 import {
@@ -1315,6 +1316,42 @@ export class AdminClient {
     return this.startBillingRun(accessToken, input, options);
   }
 
+  /** Capability discovery only. No authorization or balance is cached. */
+  async supportsAssistantPreparation(): Promise<boolean> {
+    const response = await this.request<unknown>('/api/auth/config', { method: 'GET' });
+    const config = this.readSuccessResponse(response, z.object({
+      phoneAuthEnabled: z.boolean(), selfRegistrationEnabled: z.boolean(),
+      assistantPreparationVersion: z.number().int().positive().optional(),
+    }));
+    if (config.assistantPreparationVersion === undefined) return false;
+    if (config.assistantPreparationVersion !== 1) throw new AdminError('Unsupported assistant preparation', 'SERVER_ERROR');
+    return true;
+  }
+
+  /** One write, with no automatic refresh/replay or fallback after an unknown result. */
+  async prepareAssistantRequest(accessToken: string, input: BillingAssistantPreparationInput, options?: { signal?: AbortSignal }) {
+    const checked = billingAssistantPreparationSchema.parse(input);
+    const response = await this.request<unknown>('/api/billing/assistant-requests', {
+      method: 'POST', accessToken, body: checked, signal: options?.signal, retryingAfterRefresh: true,
+    });
+    const result = this.readSuccessResponse(response, billingAssistantPreparationResponseSchema);
+    if (result.runId !== checked.runId || result.request.requestId !== checked.admission.requestId) {
+      throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    }
+    return result;
+  }
+
+  async getBillingRun(accessToken: string, runId: string, productSpaceId: string) {
+    const response = await this.request<unknown>(`/api/billing/runs/${encodeURIComponent(runId)}`, {
+      method: 'GET', accessToken, retryingAfterRefresh: true,
+    });
+    const result = this.readSuccessResponse(response, billingRuntimeRunResponseSchema);
+    if (result.run.runId !== runId || result.run.productSpaceId !== productSpaceId) {
+      throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    }
+    return result;
+  }
+
   async startAssistantRun(
     accessToken: string,
     input: { runId: string; productSpaceId: string; subjectKind: 'polo_assistant' },
@@ -1735,21 +1772,19 @@ export class AdminClient {
     return getSafeAdminErrorMessage(errorCode, status);
   }
 
-  private readSafeErrorDetails(data: unknown): { retryAfter?: number } | undefined {
+  private readSafeErrorDetails(data: unknown): import('./types').AdminErrorDetails | undefined {
     if (!data || typeof data !== 'object') return undefined;
     const record = data as Record<string, unknown>;
     const nested = record.details && typeof record.details === 'object'
-      ? (record.details as Record<string, unknown>).retryAfter
-      : undefined;
-    const value = record.retryAfter ?? nested;
-    return (
-      typeof value === 'number'
-      && Number.isFinite(value)
-      && value > 0
-      && value <= MAX_RETRY_AFTER_SECONDS
-    )
-      ? { retryAfter: Math.ceil(value) }
-      : undefined;
+      ? record.details as Record<string, unknown> : undefined;
+    const value = record.retryAfter ?? nested?.retryAfter;
+    const details: import('./types').AdminErrorDetails = {};
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= MAX_RETRY_AFTER_SECONDS) {
+      details.retryAfter = Math.ceil(value);
+    }
+    const preparation = billingAssistantStartRejectionSchema.safeParse(nested?.assistantPreparation);
+    if (preparation.success) details.assistantPreparation = preparation.data;
+    return Object.keys(details).length ? details : undefined;
   }
 
   private readAdminErrorCode(data: unknown): AdminErrorCode | null {

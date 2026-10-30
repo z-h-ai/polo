@@ -1,3 +1,4 @@
+import { AssistantBillingCapability } from '../../runtime/assistant-billing-capability'
 import { requireMemberCircleAppAdmission, MemberCircleAdmissionError } from '@polo-ai/shared/admin/member-circle-admission'
 import {setBrowserPolicyReader} from '../../runtime/browser-policy'
 import { paymentHandoffUrl } from './payment-handoff'
@@ -928,17 +929,24 @@ export function registerAdminHandlers(
     report: async (accountId,input) => { const session = await installationSession(accountId); return session.client.reportNativeInstallation(session.accessToken,input) },
   })
   const billingSession = async (scope: { accountId: string; adminOrigin: string }) => installationSession(scope.accountId, scope.adminOrigin)
-  const billingOptions = () => ({ signal: AbortSignal.timeout(5_000) })
+  const browserPolicyOptions = () => ({ signal: AbortSignal.timeout(5_000) })
+  const billingCapability = new AssistantBillingCapability()
   setBrowserPolicyReader(async scope => {
     const session = await billingSession(scope)
-    return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, billingOptions())
+    return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, browserPolicyOptions())
   })
   setAssistantBillingTransport({
-    start: async (scope, input) => { const s = await billingSession(scope); return s.client.startAssistantRun(s.accessToken, input, billingOptions()) },
-    admit: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.admitAppRequest(s.accessToken, runId, input, billingOptions()) },
-    report: async (scope, input) => { const s = await billingSession(scope); return s.client.recordAppUsage(s.accessToken, input, billingOptions()) },
-    inspect: async (scope, runId, requestId) => { const s = await billingSession(scope); return s.client.getAppRequest(s.accessToken, runId, requestId, billingOptions()) },
-    finish: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.finishAppRun(s.accessToken, runId, input, billingOptions()) },
+    supportsPreparation: scope => billingCapability.read(scope, async () => {
+      const s = await billingSession(scope)
+      return s.client.supportsAssistantPreparation()
+    }),
+    prepare: async (scope, runId, admission) => { const s = await billingSession(scope); return s.client.prepareAssistantRequest(s.accessToken, { runId, admission }) },
+    inspectRun: async (scope, runId) => { const s = await billingSession(scope); return s.client.getBillingRun(s.accessToken, runId, scope.productSpaceId) },
+    start: async (scope, input) => { const s = await billingSession(scope); return s.client.startAssistantRun(s.accessToken, input) },
+    admit: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.admitAppRequest(s.accessToken, runId, input) },
+    report: async (scope, input) => { const s = await billingSession(scope); return s.client.recordAppUsage(s.accessToken, input) },
+    inspect: async (scope, runId, requestId) => { const s = await billingSession(scope); return s.client.getAppRequest(s.accessToken, runId, requestId) },
+    finish: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.finishAppRun(s.accessToken, runId, input) },
   }, async () => {
     const manager = getCredentialManager(), adminOrigin = getAdminUrl()
     if (!adminOrigin) return null

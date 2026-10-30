@@ -517,6 +517,7 @@ export type AdminErrorCode =
 
 export interface AdminErrorDetails {
   retryAfter?: number;
+  assistantPreparation?: { runId: string; requestId: string; phase: 'start_rejected' };
 }
 
 export class AdminError extends Error {
