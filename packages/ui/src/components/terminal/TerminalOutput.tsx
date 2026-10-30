@@ -98,7 +98,7 @@ export function TerminalOutput({
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2 text-xs" style={{ color: mutedColor }}>
             <Terminal className="w-3 h-3" />
-            <span>Command</span>
+            <span>{t('overlay.command')}</span>
           </div>
           <button
             onClick={() => copyToClipboard(command, 'command')}
@@ -213,7 +213,7 @@ export function TerminalOutput({
               ))}
             </div>
           ) : (
-            <span style={{ color: mutedColor }}>(no output)</span>
+            <span style={{ color: mutedColor }}>{t('overlay.noOutputCaptured')}</span>
           )}
         </pre>
       </div>
