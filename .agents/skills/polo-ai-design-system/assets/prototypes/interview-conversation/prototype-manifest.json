@@ -133,7 +133,7 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "6878a5fd524cb92ef6a807764906147fe4f3c9ebbc514f06e92f3c57b6ae6314",
+    "sha256": "44d3e77c29a36363d073d2cc63df0e95c8adff6be245c1529987a7cfd5120b43",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
