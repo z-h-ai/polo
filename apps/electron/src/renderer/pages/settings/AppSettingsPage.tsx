@@ -253,7 +253,9 @@ export default function AppSettingsPage() {
       setProxyForm(form)
       setSavedProxyForm(form)
     } catch (error) {
-      setProxyError(error instanceof Error ? error.message : 'Failed to save')
+      // POO-179: keep the raw diagnostic in state; the self-produced failure
+      // copy resolves at render time from a stable error kind.
+      setProxyError(error instanceof Error ? error.message : 'proxyErrorSaveFailed')
     } finally {
       setIsSavingProxy(false)
     }
@@ -332,7 +334,7 @@ export default function AppSettingsPage() {
                   {(isProxyDirty || proxyError) && (
                     <SettingsCardFooter>
                       {proxyError && (
-                        <span className="text-destructive text-sm mr-auto">{proxyError === 'proxyErrorProtocol' ? t("settings.network.proxyErrorProtocol") : proxyError === 'proxyErrorFormat' ? t("settings.network.proxyErrorFormat") : proxyError}</span>
+                        <span className="text-destructive text-sm mr-auto">{proxyError === 'proxyErrorProtocol' ? t("settings.network.proxyErrorProtocol") : proxyError === 'proxyErrorFormat' ? t("settings.network.proxyErrorFormat") : proxyError === 'proxyErrorSaveFailed' ? t("settings.network.proxySaveFailed") : proxyError}</span>
                       )}
                       <Button
                         variant="ghost"

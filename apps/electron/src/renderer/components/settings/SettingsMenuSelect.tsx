@@ -56,7 +56,7 @@ export function SettingsMenuSelect({
   value,
   onValueChange,
   options,
-  placeholder = 'Select...',
+  placeholder,
   disabled,
   className,
   menuWidth = 280,
@@ -121,7 +121,7 @@ export function SettingsMenuSelect({
             className
           )}
         >
-          <span className="truncate">{selectedOption?.label || placeholder}</span>
+          <span className="truncate">{selectedOption?.label || placeholder || t('common.select')}</span>
           <ChevronDown className="opacity-50 shrink-0 size-3.5" />
         </button>
       </PopoverTrigger>
@@ -154,7 +154,7 @@ export function SettingsMenuSelect({
         <div className="space-y-0.5 max-h-64 overflow-auto">
           {filteredOptions.length === 0 ? (
             <div className="px-2.5 py-3 text-sm text-muted-foreground text-center">
-              No results found
+              {t('settings.noResultsFound')}
             </div>
           ) : (
             filteredOptions.map((option) => {
@@ -230,7 +230,7 @@ export function SettingsMenuSelectRow({
   value,
   onValueChange,
   options,
-  placeholder = 'Select...',
+  placeholder,
   disabled,
   className,
   inCard = true,

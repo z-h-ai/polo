@@ -534,7 +534,7 @@ function TelegramBindingsBody({
           ...(next.mode === 'allow-list' ? { allowedSenderIds: next.allowedSenderIds } : {}),
         })
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to update access')
+        toast.error(err instanceof Error ? err.message : t('settings.messaging.accessUpdateFailed'))
       }
     },
     [],
