@@ -12,7 +12,11 @@
       "packages/ui/src/components/markdown/Markdown.tsx",
       "packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx",
       "packages/ui/src/components/overlay/DataTableOverlay.tsx",
-      "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx"
+      "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx",
+      "packages/ui/src/components/markdown/FileLinkContextMenu.tsx",
+      "packages/ui/src/components/markdown/__tests__/markdown-link-routing.test.ts",
+      "packages/ui/src/components/markdown/__tests__/file-link-context-menu.test.tsx",
+      "packages/shared/src/i18n/locales"
     ],
     "platforms": [
       "desktop-electron"

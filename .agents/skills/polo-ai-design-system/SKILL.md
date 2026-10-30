@@ -10,7 +10,7 @@ Adoption revision: `native-materials-r5-lifecycle-candidate-20261023`. Mode: `ex
 ## Applicability
 
 - Repository: `polo-ai`
-- Paths: `apps/electron/src/renderer`, `apps/electron/src/main`, `apps/electron/src/preload`, `docs/mvp-complete-flow-hifi`, `.agents/skills/polo-ai-design-system`, `packages/ui/src/components/markdown/Markdown.tsx`, `packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx`, `packages/ui/src/components/overlay/DataTableOverlay.tsx`, `packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx`
+- Paths: `apps/electron/src/renderer`, `apps/electron/src/main`, `apps/electron/src/preload`, `docs/mvp-complete-flow-hifi`, `.agents/skills/polo-ai-design-system`, `packages/ui/src/components/markdown/Markdown.tsx`, `packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx`, `packages/ui/src/components/overlay/DataTableOverlay.tsx`, `packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx`, `packages/ui/src/components/markdown/FileLinkContextMenu.tsx`, `packages/ui/src/components/markdown/__tests__/markdown-link-routing.test.ts`, `packages/ui/src/components/markdown/__tests__/file-link-context-menu.test.tsx`, `packages/shared/src/i18n/locales`
 - Platforms: desktop-electron
 - Modules: 登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉, 助手消息的共享Markdown/datatable/展开容器与会话文件链接右键菜单演示（对话卡透传）；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范
 
