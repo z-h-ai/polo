@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll } from 'bun:test'
+import { describe, it, expect, beforeAll, afterEach } from 'bun:test'
 import type { ActivityItem } from '../../components/chat/TurnCard'
 import { extractOverlayCards } from '../tool-parsers'
 import type { OverlayData } from '../tool-parsers'
-import { setupI18n } from '@polo-ai/shared/i18n'
+import { setupI18n, i18n } from '@polo-ai/shared/i18n'
 
 function makeActivity(overrides: Partial<ActivityItem>): ActivityItem {
   return {
@@ -133,6 +133,61 @@ describe('extractOverlayCards', () => {
     expect((output?.data as OverlayData).type).toBe('generic')
     if (output?.data.type === 'generic') {
       expect(output.data.content).toBe(markdownText)
+    }
+  })
+})
+
+// F18 regression (POO-179): the no-output placeholder must resolve through
+// i18n, never stay an English literal. The rawContent-fallback branch in
+// extractOverlayCards (:546 area) is defensive and unreachable — `!activity`
+// returns [] above and extractOverlayData never returns null for a live
+// activity — so the reachable mirror-fallback branch is the assertion
+// surface for the same `overlay.noOutputCaptured` key both branches share.
+describe('extractOverlayCards — no-output placeholder localization (F18)', () => {
+  afterEach(() => {
+    i18n.changeLanguage('en')
+  })
+
+  /** Unknown tool + input and no captured output → input-mirror fallback. */
+  function noOutputActivity(): ActivityItem {
+    return makeActivity({
+      toolName: 'mcp__custom__unified_search',
+      toolInput: { query: 'status page' },
+      content: '',
+    })
+  }
+
+  it('resolves the placeholder through overlay.noOutputCaptured in English', () => {
+    i18n.changeLanguage('en')
+    const cards = extractOverlayCards(noOutputActivity())
+    const output = cards.find(card => card.id === 'output')
+    expect(output?.data.type).toBe('generic')
+    if (output?.data.type === 'generic') {
+      expect(output.data.content).toBe('No output captured for this tool call.')
+    }
+  })
+
+  it('re-translates the placeholder after a language switch', () => {
+    i18n.changeLanguage('zh-Hans')
+    const cards = extractOverlayCards(noOutputActivity())
+    const output = cards.find(card => card.id === 'output')
+    expect(output?.data.type).toBe('generic')
+    if (output?.data.type === 'generic') {
+      expect(output.data.content).toBe('未捕获此工具调用的输出。')
+    }
+  })
+
+  it('keeps captured raw content verbatim — the placeholder only fills empty output', () => {
+    i18n.changeLanguage('zh-Hans')
+    const cards = extractOverlayCards(makeActivity({
+      toolName: 'mcp__custom__unified_search',
+      toolInput: { query: 'status page' },
+      content: 'total 0\n-rw-r--r--',
+    }))
+    const output = cards.find(card => card.id === 'output')
+    expect(output?.data.type).toBe('generic')
+    if (output?.data.type === 'generic') {
+      expect(output.data.content).toBe('total 0\n-rw-r--r--')
     }
   })
 })
