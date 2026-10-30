@@ -157,6 +157,12 @@ import {
   type MemberMembershipListResponse,
   type OriginalCircleOrder,
 } from './member-circles.ts';
+import {
+  AdminRefreshBillingRpcInputSchema,
+  SelfBillingAvailabilityResponseSchema,
+  type SelfBillingAvailabilityResponse,
+  type AdminRefreshBillingRpcInput,
+} from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -233,6 +239,7 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
 
 const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   product_space_contract_unsupported: 'ProductSpace contract is not supported by this client',
+  billing_contract_unsupported: 'Billing contract is not supported by this client',
   INVALID_CREDENTIALS: 'Invalid username or password',
   ACCOUNT_DISABLED: 'Admin account is disabled',
   TOKEN_REVOKED: 'Admin session is no longer valid',
@@ -521,6 +528,49 @@ export class AdminClient {
     return parsed.data;
   }
 
+
+  /**
+   * POO-177 (POL-288 consumer): reads the caller's OWN billing availability
+   * for one ProductSpace. Strictly a preflight read — no query, no body, no
+   * cache. A response speaking a different contract, an unreadable payload or
+   * an answer for a different space fails closed with a dedicated error
+   * instead of downgrading into a billing verdict; a missing route (404) is
+   * the caller's ordinary NOT_FOUND, never "no quota".
+   */
+  async getSelfBillingAvailability(
+    accessToken: string,
+    productSpaceId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SelfBillingAvailabilityResponse> {
+    const data = await this.request<unknown>(
+      `/api/product-spaces/${encodeURIComponent(productSpaceId)}/billing/self-availability`,
+      { method: 'GET', accessToken, signal: options?.signal },
+    );
+    const parsed = SelfBillingAvailabilityResponseSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new AdminError(
+        'Polo Admin speaks a billing contract this client cannot safely understand',
+        'billing_contract_unsupported',
+        { cause: parsed.error },
+      );
+    }
+    if (parsed.data.productSpaceId !== productSpaceId) {
+      throw new AdminError(
+        'Admin billing availability belongs to another product space',
+        'SERVER_ERROR',
+      );
+    }
+    return parsed.data;
+  }
+
+  /**
+   * Validates the renderer's manual refresh input at the SDK boundary. The
+   * caller (server-core) re-checks every field against its own trusted facts;
+   * this parse only fixes the minimal strict shape.
+   */
+  parseRefreshBillingInput(rawInput: unknown): AdminRefreshBillingRpcInput {
+    return AdminRefreshBillingRpcInputSchema.parse(rawInput);
+  }
   /**
    * Reads the ProductSpace v1 contract list. A response written for a
    * different contractVersion fails closed with a dedicated error code so the

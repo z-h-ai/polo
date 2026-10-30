@@ -8,6 +8,8 @@ import {
   isValidMainlandChinaPhone,
   MainlandChinaPhoneSchema,
   OrganizationIdRpcInputSchema,
+  AdminRefreshBillingRpcInputSchema,
+  SelfBillingAvailabilityResponseSchema,
   SendPhoneAuthCodeRpcInputSchema,
   VerifyPhoneAuthCodeRpcInputSchema,
 } from '../schemas'
@@ -207,5 +209,141 @@ describe('Catalog organization entity id RPC contract', () => {
         apps: [{ ...deniedApp, ...capability }],
       }).success).toBe(false)
     }
+  })
+})
+
+describe('SelfBillingAvailabilityResponseSchema (POO-177 / POL-288 consumer)', () => {
+  const SPACE_ID = '11111111-2222-3333-4444-555555555555'
+  const COMPUTED_AT = '2026-10-29T08:00:00.000Z'
+
+  function availabilityFixture(
+    // Deliberately loose: cross-state probes below must fail at the schema,
+    // not at the type checker.
+    outcome: { state: string; reason: string | null },
+    quota: unknown = null,
+  ) {
+    return {
+      productSpaceId: SPACE_ID,
+      computedAt: COMPUTED_AT,
+      billingMode: 'provider_metered',
+      preflightOnly: true,
+      availability: outcome,
+      quota,
+    }
+  }
+
+  it('accepts every availability state and reason of the locked POL-288 contract', () => {
+    for (const outcome of [
+      { state: 'available', reason: null },
+      { state: 'blocked', reason: 'payment_result_pending' },
+      { state: 'blocked', reason: 'payer_restricted' },
+      { state: 'blocked', reason: 'insufficient_credit' },
+      { state: 'blocked', reason: 'budget_exhausted' },
+      { state: 'unknown', reason: 'not_ready' },
+      { state: 'unknown', reason: 'billing_migration_in_progress' },
+    ] as const) {
+      expect(SelfBillingAvailabilityResponseSchema.safeParse(availabilityFixture(outcome)).success).toBe(true)
+    }
+  })
+
+  it('accepts the legacy token quota with non-negative integer decimal strings, never numbers', () => {
+    const legacyQuota = {
+      unit: 'tokens',
+      period: '2026-10',
+      enforcement: 'not_applied_to_provider_metered',
+      configuredLimitTokens: '900719925474099300000',
+      override: null,
+      usedTokens: '12345678901234',
+      reservedTokens: '0',
+    }
+    const parsed = SelfBillingAvailabilityResponseSchema.safeParse(
+      availabilityFixture({ state: 'available', reason: null }, legacyQuota),
+    )
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+    expect(parsed.data.quota?.unit).toBe('tokens')
+    expect(parsed.data.quota?.configuredLimitTokens).toBe('900719925474099300000')
+    expect(parsed.data.quota?.usedTokens).toBe('12345678901234')
+    expect(parsed.data.quota?.reservedTokens).toBe('0')
+    // override form keeps its strict two-field shape
+    expect(SelfBillingAvailabilityResponseSchema.safeParse(availabilityFixture(
+      { state: 'available', reason: null },
+      { ...legacyQuota, override: { limitTokens: '500000', expiresAt: '2026-11-01T00:00:00.000Z' } },
+    )).success).toBe(true)
+    // numeric tokens fail closed — the contract passes them as strings only
+    expect(SelfBillingAvailabilityResponseSchema.safeParse(availabilityFixture(
+      { state: 'available', reason: null },
+      { ...legacyQuota, usedTokens: 123 },
+    )).success).toBe(false)
+  })
+
+  it('rejects unknown states, cross-state reasons, and non-provider metered modes', () => {
+    expect(SelfBillingAvailabilityResponseSchema.safeParse(availabilityFixture({
+      state: 'blocked',
+      reason: 'not_ready',
+    })).success).toBe(false)
+    expect(SelfBillingAvailabilityResponseSchema.safeParse(availabilityFixture({
+      state: 'unknown',
+      reason: 'insufficient_credit',
+    })).success).toBe(false)
+    expect(SelfBillingAvailabilityResponseSchema.safeParse(availabilityFixture({
+      state: 'available',
+      reason: 'budget_exhausted',
+    })).success).toBe(false)
+    expect(SelfBillingAvailabilityResponseSchema.safeParse(availabilityFixture({
+      // probe an unlisted state
+      state: 'deprecated',
+      reason: null,
+    })).success).toBe(false)
+    expect(SelfBillingAvailabilityResponseSchema.safeParse({
+      ...availabilityFixture({ state: 'available', reason: null }),
+      billingMode: 'legacy_pre_paid',
+    }).success).toBe(false)
+    expect(SelfBillingAvailabilityResponseSchema.safeParse({
+      ...availabilityFixture({ state: 'available', reason: null }),
+      preflightOnly: false,
+    }).success).toBe(false)
+  })
+
+  it('rejects enterprise finance fields, remaining/allowed projections, and extra envelope keys', () => {
+    for (const extra of [
+      { remainingTokens: '42' },
+      { allowed: true },
+      { payerId: 'payer-1' },
+      { costMicrosPerToken: '9' },
+      { effectiveRemaining: '42' },
+    ]) {
+      expect(SelfBillingAvailabilityResponseSchema.safeParse({
+        ...availabilityFixture({ state: 'available', reason: null }),
+        ...extra,
+      }).success).toBe(false)
+    }
+    expect(SelfBillingAvailabilityResponseSchema.safeParse(availabilityFixture(
+      { state: 'available', reason: null },
+      {
+        unit: 'tokens',
+        period: '2026-10',
+        enforcement: 'not_applied_to_provider_metered',
+        configuredLimitTokens: '100',
+        override: null,
+        usedTokens: '0',
+        reservedTokens: '0',
+        remainingTokens: '100',
+      },
+    )).success).toBe(false)
+  })
+
+  it('binds the refresh RPC input to exactly the three fail-closed comparison fields', () => {
+    const input = {
+      expectedProductSpaceId: SPACE_ID,
+      sessionId: 'session-1',
+      expectedConnectionSlug: 'polo-space-11111111-2222-3333-4444-555555555555',
+    }
+    expect(AdminRefreshBillingRpcInputSchema.safeParse(input).success).toBe(true)
+    expect(AdminRefreshBillingRpcInputSchema.safeParse({ ...input, accountId: 'account-a' }).success).toBe(false)
+    expect(AdminRefreshBillingRpcInputSchema.safeParse({ ...input, payerId: 'payer-1' }).success).toBe(false)
+    expect(AdminRefreshBillingRpcInputSchema.safeParse({ ...input, managed: true }).success).toBe(false)
+    expect(AdminRefreshBillingRpcInputSchema.safeParse({ ...input, sessionId: '  ' }).success).toBe(false)
+    expect(AdminRefreshBillingRpcInputSchema.safeParse({ ...input, expectedProductSpaceId: undefined }).success).toBe(false)
   })
 })
