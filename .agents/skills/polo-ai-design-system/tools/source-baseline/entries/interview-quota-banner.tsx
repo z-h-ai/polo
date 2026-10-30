@@ -62,12 +62,12 @@ function QuotaBannerScene({ status, scope, ariaLabel }: QuotaBannerSceneProps) {
 
 /** insufficient-credit without the payment handoff: member copy + U2 recheck only. */
 export function InterviewQuotaMemberScene() {
-  return <QuotaBannerScene status={{ issue: 'insufficient-credit' }} scope={{ canOpenPayment: false }}
-    ariaLabel="额度提醒（成员）" />
+  return <QuotaBannerScene status={{ issue: 'insufficient-credit', refreshable: true }}
+    scope={{ canOpenPayment: false }} ariaLabel="额度提醒（成员）" />
 }
 
 /** insufficient-credit with the trusted payment handoff: recharge + U2 recheck. */
 export function InterviewQuotaOwnerScene() {
-  return <QuotaBannerScene status={{ issue: 'insufficient-credit' }} scope={{ canOpenPayment: true }}
-    ariaLabel="额度提醒（所有者）" />
+  return <QuotaBannerScene status={{ issue: 'insufficient-credit', refreshable: true }}
+    scope={{ canOpenPayment: true }} ariaLabel="额度提醒（所有者）" />
 }
