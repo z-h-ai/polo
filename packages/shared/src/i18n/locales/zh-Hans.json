@@ -863,6 +863,7 @@
   "diff.switchToSplit": "切换到分栏视图",
   "diff.switchToUnified": "切换到统一视图",
   "directory.enterFullPath": "输入服务器上的完整路径：",
+  "directory.go": "前往",
   "directory.listFailed": "目录列举失败",
   "directory.noSubdirectories": "没有子目录。请使用上方路径输入框进行导航。",
   "directory.showingFirst": "仅显示前 {{shown}} 个文件夹（共 {{total}} 个）。若缺少目标文件夹，请缩小路径范围。",

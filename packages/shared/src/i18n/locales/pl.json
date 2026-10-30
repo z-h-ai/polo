@@ -869,6 +869,7 @@
   "diff.switchToSplit": "Przełącz na widok podzielony",
   "diff.switchToUnified": "Przełącz na widok zunifikowany",
   "directory.enterFullPath": "Podaj pełną ścieżkę na serwerze:",
+  "directory.go": "Przejdź",
   "directory.listFailed": "Nie udało się wylistować katalogu",
   "directory.noSubdirectories": "Brak podkatalogów. Aby nawigować, użyj pola ścieżki powyżej.",
   "directory.showingFirst": "Wyświetlanie pierwszych {{shown}} z {{total}} folderów. Zawęź ścieżkę, jeśli brakuje szukanego folderu.",

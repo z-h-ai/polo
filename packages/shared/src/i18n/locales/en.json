@@ -863,6 +863,7 @@
   "diff.switchToSplit": "Switch to split view",
   "diff.switchToUnified": "Switch to unified view",
   "directory.enterFullPath": "Enter the full path on the server:",
+  "directory.go": "Go",
   "directory.listFailed": "Failed to list directory",
   "directory.noSubdirectories": "No subdirectories. Use the path input above to navigate.",
   "directory.showingFirst": "Showing the first {{shown}} folders out of {{total}}. Narrow the path if the folder you want is missing.",

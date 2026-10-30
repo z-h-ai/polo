@@ -863,6 +863,7 @@
   "diff.switchToSplit": "分割ビューに切り替え",
   "diff.switchToUnified": "統合ビューに切り替え",
   "directory.enterFullPath": "サーバー上の完全なパスを入力：",
+  "directory.go": "移動",
   "directory.listFailed": "ディレクトリの取得に失敗しました",
   "directory.noSubdirectories": "サブディレクトリがありません。上のパス入力欄を使用して移動してください。",
   "directory.showingFirst": "全 {{total}} 件のうち最初の {{shown}} 件のフォルダを表示しています。目的のフォルダがない場合はパスを絞り込んでください。",

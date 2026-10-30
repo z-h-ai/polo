@@ -543,7 +543,7 @@ export function extractOverlayCards(activity: ActivityItem): OverlayCard[] {
       }
     : (output || {
       type: 'generic',
-      content: rawContent || 'No output captured for this tool call.',
+      content: rawContent || i18n.t('overlay.noOutputCaptured'),
       title: i18n.t('overlay.toolOutputTitle', { tool: activity.displayName || activity.toolName || i18n.t('table.tool') }),
       error: activity.error,
     })

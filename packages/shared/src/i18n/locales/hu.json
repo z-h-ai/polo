@@ -863,6 +863,7 @@
   "diff.switchToSplit": "Váltás osztott nézetre",
   "diff.switchToUnified": "Váltás egységes nézetre",
   "directory.enterFullPath": "Adja meg a teljes elérési utat a szerveren:",
+  "directory.go": "Mehet",
   "directory.listFailed": "Nem sikerült listázni a könyvtárat",
   "directory.noSubdirectories": "Nincsenek almappák. A navigációhoz használja a fenti útvonalbeviteli mezőt.",
   "directory.showingFirst": "Az első {{shown}} mappa látható, összesen {{total}} közül. Szűkítse az elérési utat, ha a keresett mappa hiányzik.",

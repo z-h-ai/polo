@@ -93,7 +93,7 @@ function CommandBadge({ badge }: { badge: ContentBadge }) {
       <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[10px] font-medium">
         {COMMAND_ICON_TEXT}
       </span>
-      <span className="truncate max-w-[200px]">{badge.label}</span>
+      <span className="truncate max-w-[200px]">{displayLabel}</span>
     </span>
   )
 }

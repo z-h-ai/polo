@@ -863,6 +863,7 @@
   "diff.switchToSplit": "Zur geteilten Ansicht wechseln",
   "diff.switchToUnified": "Zur einheitlichen Ansicht wechseln",
   "directory.enterFullPath": "Geben Sie den vollständigen Pfad auf dem Server ein:",
+  "directory.go": "Los",
   "directory.listFailed": "Verzeichnis konnte nicht gelesen werden",
   "directory.noSubdirectories": "Keine Unterverzeichnisse. Verwenden Sie das Pfadfeld oben zur Navigation.",
   "directory.showingFirst": "Die ersten {{shown}} von {{total}} Ordnern werden angezeigt. Grenzen Sie den Pfad ein, wenn der gewünschte Ordner fehlt.",

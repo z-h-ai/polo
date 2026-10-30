@@ -863,6 +863,7 @@
   "diff.switchToSplit": "Cambiar a vista dividida",
   "diff.switchToUnified": "Cambiar a vista unificada",
   "directory.enterFullPath": "Introduce la ruta completa en el servidor:",
+  "directory.go": "Ir",
   "directory.listFailed": "No se pudo listar el directorio",
   "directory.noSubdirectories": "No hay subdirectorios. Usa el campo de ruta de arriba para navegar.",
   "directory.showingFirst": "Mostrando las primeras {{shown}} carpetas de {{total}}. Acota la ruta si falta la carpeta que buscas.",
