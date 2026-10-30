@@ -940,7 +940,16 @@ export function registerAdminHandlers(
       const s = await billingSession(scope)
       return s.client.supportsAssistantPreparation()
     }),
-    prepare: async (scope, runId, admission) => { const s = await billingSession(scope); return s.client.prepareAssistantRequest(s.accessToken, { runId, admission }) },
+    prepare: async (scope, runId, admission) => {
+      const s = await billingSession(scope)
+      try { return await s.client.prepareAssistantRequest(s.accessToken, { runId, admission }) }
+      catch (error) {
+        // A rollback may remove the endpoint. Re-probe for the NEXT request;
+        // this original attempt stays unknown and must never fall back/replay.
+        if (error instanceof AdminError && [404, 405].includes(error.status ?? 0)) billingCapability.invalidate(scope)
+        throw error
+      }
+    },
     inspectRun: async (scope, runId) => { const s = await billingSession(scope); return s.client.getBillingRun(s.accessToken, runId, scope.productSpaceId) },
     start: async (scope, input) => { const s = await billingSession(scope); return s.client.startAssistantRun(s.accessToken, input) },
     admit: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.admitAppRequest(s.accessToken, runId, input) },

@@ -88,6 +88,8 @@ test('capability reuse is bounded, scoped and does not retain failed discovery',
   await cache.read({ ...scope, accountId: 'b' }, probe); expect(calls).toBe(3)
   await expect(cache.read(scope, async () => { throw new Error('offline') })).rejects.toThrow()
   await cache.read(scope, probe); expect(calls).toBe(4)
+  cache.invalidate({ ...scope, accountId: 'old' }); await cache.read(scope, probe); expect(calls).toBe(4)
+  cache.invalidate(scope); await cache.read(scope, probe); expect(calls).toBe(5)
 })
 
 for (const supports of [true, false]) {

@@ -4,6 +4,9 @@
 export class AssistantBillingCapability {
   private entry?: { key: string; expiresAt: number; value: Promise<boolean> }
   constructor(private readonly now = Date.now) {}
+  invalidate(scope: { accountId: string; adminOrigin: string; productSpaceId: string }): void {
+    if (this.entry?.key === JSON.stringify([scope.adminOrigin, scope.accountId, scope.productSpaceId])) this.entry = undefined
+  }
   read(scope: { accountId: string; adminOrigin: string; productSpaceId: string }, probe: () => Promise<boolean>): Promise<boolean> {
     const key = JSON.stringify([scope.adminOrigin, scope.accountId, scope.productSpaceId])
     if (this.entry?.key === key && this.entry.expiresAt > this.now()) return this.entry.value
