@@ -10,28 +10,67 @@ setupI18n()
 
 describe('decideChatAccessBanner (journey #1 classification matrix)', () => {
   test('insufficient credit: owner/personal gets the recharge handoff action', () => {
-    const decision = decideChatAccessBanner({ issue: 'insufficient-credit' }, { canOpenPayment: true })
+    const decision = decideChatAccessBanner({ issue: 'insufficient-credit', refreshable: true }, { canOpenPayment: true })
     expect(decision).toMatchObject({
       variant: 'destructive',
       messageKey: 'chat.statusBanner.insufficientCredit',
       action: 'recharge',
-      // U2: both role variants carry the latch-clearing recheck as the
-      // SECOND action — the recharge handoff stays primary.
+      // U2, superseded by POO-177: the second action is now the REAL Admin
+      // refresh, offered only when the latch's source lease proves the
+      // admin-managed connection. The recharge handoff stays primary.
       secondaryAction: 'recheck-billing',
     })
     expect(decision?.quotaResetAt).toBeUndefined()
   })
 
   test('insufficient credit: non-owner member gets contact-an-admin copy and NO recharge action', () => {
-    const decision = decideChatAccessBanner({ issue: 'insufficient-credit' }, { canOpenPayment: false })
+    const decision = decideChatAccessBanner({ issue: 'insufficient-credit', refreshable: true }, { canOpenPayment: false })
     expect(decision).toMatchObject({
       variant: 'destructive',
       messageKey: 'chat.statusBanner.insufficientCreditMember',
-      // U2: the member still gets the recheck — the latch yields to the next
-      // server answer even though the member cannot recharge themselves.
+      // The member still gets the refresh — the canonical read is the same
+      // self DTO for every role.
       secondaryAction: 'recheck-billing',
     })
     expect(decision?.action).toBeUndefined()
+  })
+
+  test('POO-177: an unproven latch source (BYOK 402, unknown attempt) gets NO refresh action', () => {
+    for (const status of [
+      { issue: 'insufficient-credit' as const },
+      { issue: 'insufficient-credit' as const, refreshable: false },
+    ]) {
+      for (const scope of [{ canOpenPayment: true }, { canOpenPayment: false }]) {
+        const decision = decideChatAccessBanner(status, scope)
+        expect(decision?.secondaryAction).toBeUndefined()
+        // The recharge handoff contract is untouched by the gating.
+        expect(decision?.action).toBe(scope.canOpenPayment ? 'recharge' : undefined)
+      }
+    }
+  })
+
+  test('POO-177: the three canonical Admin classes carry their own copy plus the refresh action', () => {
+    const cases = [
+      ['billing-budget-exhausted', 'chat.statusBanner.billingBudgetExhausted'],
+      ['billing-payment-pending', 'chat.statusBanner.billingPaymentPending'],
+      ['billing-payer-restricted', 'chat.statusBanner.billingPayerRestricted'],
+    ] as const
+    for (const [issue, messageKey] of cases) {
+      const decision = decideChatAccessBanner({ issue, refreshable: true }, { canOpenPayment: true })
+      expect(decision).toMatchObject({
+        variant: 'destructive',
+        messageKey,
+        // A budget is never lifted by recharging in-place: no recharge
+        // action on any of the three classes, for any role.
+        secondaryAction: 'recheck-billing',
+      })
+      expect(decision?.action).toBeUndefined()
+      expect(decision?.quotaResetAt).toBeUndefined()
+      // Member role: same copy, same refresh, still no recharge action.
+      const member = decideChatAccessBanner({ issue, refreshable: true }, { canOpenPayment: false })
+      expect(member).toMatchObject({ messageKey, secondaryAction: 'recheck-billing' })
+      expect(member?.action).toBeUndefined()
+    }
   })
 
   test('insufficient credit never carries a reset promise', () => {

@@ -61,6 +61,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     chatAccessStatus,
     onRetryAiConfigSync,
     onRecheckBilling,
+    billingRecheckPending,
     onSendMessage,
     onOpenFile,
     onOpenUrl,
@@ -375,11 +376,17 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         ...(bannerDecision.action === 'retry-ai-config-sync'
           ? { actionLabel: t('chat.statusBanner.retrySync'), onAction: onRetryAiConfigSync }
           : {}),
-        // U2: the "I've recharged — recheck" second action. It only clears
-        // the client latch; the NEXT explicit send re-adjudicates (never an
-        // automatic resend).
+        // U2, superseded by POO-177: this second action IS the manual billing
+        // refresh — one real Admin read per click. While the read is in
+        // flight it renders disabled + aria-busy with the short checking
+        // copy (QUOTA-02); it still never auto-sends.
         ...(bannerDecision.secondaryAction === 'recheck-billing' && onRecheckBilling
-          ? { secondaryActionLabel: t('billingRecheck.action'), onSecondaryAction: onRecheckBilling }
+          ? {
+              secondaryActionLabel: t('billingRecheck.action'),
+              onSecondaryAction: onRecheckBilling,
+              secondaryActionDisabled: billingRecheckPending,
+              secondaryActionBusy: billingRecheckPending,
+            }
           : {}),
       }
     }
@@ -399,7 +406,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       }
     }
     return null
-  }, [bannerDecision, onRetryAiConfigSync, onRecheckBilling, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
+  }, [bannerDecision, onRetryAiConfigSync, onRecheckBilling, billingRecheckPending, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
 
   // Only the hard billing block disables the composer (review F4); the
   // failed-send prompt is advisory.

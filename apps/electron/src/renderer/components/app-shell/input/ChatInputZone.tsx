@@ -24,9 +24,14 @@ export interface ChatInputStatusBanner {
   /** POO-144: optional explicit action (e.g. retry sync) — user-triggered only */
   actionLabel?: string
   onAction?: () => void
-  /** U2: optional second, lower-emphasis action (e.g. "I've recharged — recheck"). */
+  /** U2: optional second, lower-emphasis action (e.g. "I've recharged — recheck").
+   * POO-177: this is now the manual billing refresh — while its read is in
+   * flight it renders disabled with aria-busy and the short checking label. */
   secondaryActionLabel?: string
   onSecondaryAction?: () => void
+  /** POO-177 QUOTA-02: the refresh read is in flight — disabled + aria-busy. */
+  secondaryActionDisabled?: boolean
+  secondaryActionBusy?: boolean
   /** Journey #8 (review F4): optional dismiss (e.g. discard preserved draft). */
   dismissLabel?: string
   onDismiss?: () => void
@@ -204,11 +209,16 @@ export function ChatInputZone({
               data-testid="chat-status-banner-secondary-action"
               className={cn(
                 'shrink-0 rounded-md text-[13px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80',
+                'disabled:cursor-default disabled:opacity-60 disabled:hover:opacity-60',
                 statusBanner.actionLabel && statusBanner.onAction ? '' : 'ml-auto',
               )}
               onClick={statusBanner.onSecondaryAction}
+              disabled={statusBanner.secondaryActionDisabled}
+              aria-busy={statusBanner.secondaryActionBusy || undefined}
             >
-              {statusBanner.secondaryActionLabel}
+              {/* POO-177 QUOTA-02: in flight, the action label collapses to
+                  the short checking copy — no second button, no explainer. */}
+              {statusBanner.secondaryActionBusy ? t('common.checking') : statusBanner.secondaryActionLabel}
             </button>
           )}
           {statusBanner.dismissLabel && statusBanner.onDismiss && (
