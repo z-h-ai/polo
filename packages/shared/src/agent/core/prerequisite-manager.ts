@@ -10,9 +10,9 @@
  * - Reset state on context compaction
  */
 
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { getDocPath } from '../../docs/index.ts';
 import { expandPath } from './path-processor.ts';
 import { getBrowserToolEnabled } from '../../config/storage.ts';
 
@@ -48,8 +48,19 @@ export interface PrerequisiteManagerConfig {
 /** Slugs that are exempt from prerequisite checks (internal sources) */
 const EXEMPT_SLUGS = new Set(['session', 'polo-ai-docs']);
 
-/** Global browser tools docs path required before browser tool usage. */
-const BROWSER_TOOLS_DOC_PATH = resolve(join(homedir(), '.polo-ai', 'docs', 'browser-tools.md'));
+/** Same instance-specific path used by bundled-doc sync and the Read instruction. */
+const BROWSER_TOOLS_DOC_PATH = resolve(getDocPath('browser-tools.md'));
+
+/** Browser backend hooks track before Read completes. Never accept an unreadable
+ * canonical guide as a completed prerequisite, including after it syncs back. */
+function isBrowserGuideReadable(): boolean {
+  try {
+    readFileSync(BROWSER_TOOLS_DOC_PATH, 'utf-8');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // ============================================================
 // Rules
@@ -102,11 +113,10 @@ const RULES: PrerequisiteRule[] = [
     toolMatcher: (toolName: string) =>
       getBrowserToolEnabled() &&
       (toolName === 'browser_tool' || toolName === 'mcp__session__browser_tool'),
-    resolveRequiredPath: () => {
-      return existsSync(BROWSER_TOOLS_DOC_PATH) ? BROWSER_TOOLS_DOC_PATH : null;
-    },
+    // Missing bundled docs must not bypass this strict prerequisite.
+    resolveRequiredPath: () => BROWSER_TOOLS_DOC_PATH,
     blockMessage:
-      'You must read the browser tools guide before using browser automation. Please read the file at {filePath} first, then retry.',
+      'You must read the browser tools guide before using browser automation. Please read the file at {filePath} first, then retry. If it is missing, restart Polo AI to sync the bundled docs; reinstall the app if syncing fails.',
     strict: true,
   },
 ];
@@ -158,6 +168,9 @@ export class PrerequisiteManager {
 
       const requiredPath = rule.resolveRequiredPath(toolName, this.workspaceRootPath);
       if (!requiredPath) continue; // No guide.md exists, skip
+      if (rule.strict && requiredPath === BROWSER_TOOLS_DOC_PATH && !isBrowserGuideReadable()) {
+        this.readFiles.delete(requiredPath);
+      }
 
       if (!this.readFiles.has(requiredPath)) {
         const count = (this.rejectionCounts.get(requiredPath) ?? 0) + 1;
@@ -219,6 +232,11 @@ export class PrerequisiteManager {
     if (!filePath) return;
 
     const expanded = expandPath(filePath);
+    if (expanded === BROWSER_TOOLS_DOC_PATH && !isBrowserGuideReadable()) {
+      this.readFiles.delete(expanded);
+      this.onDebug?.(`Prerequisite: ignored unreadable browser guide Read attempt ${expanded}`);
+      return;
+    }
     this.readFiles.add(expanded);
 
     // Clear matching pending skill path

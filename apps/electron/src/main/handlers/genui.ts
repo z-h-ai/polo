@@ -352,7 +352,7 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
  * path-checked before any path composition, and the managed-vs-storage
  * identity cross-check rejects a moved or fabricated session.
  */
-function resolveTrustedSessionContext(
+export function resolveTrustedSessionContext(
   ctx: { workspaceId?: string | null; webContentsId?: number | null },
   deps: GenUiDeps,
   sessionId: string,

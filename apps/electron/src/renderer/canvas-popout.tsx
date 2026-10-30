@@ -10,10 +10,8 @@
  * Main through the shared bootstrap preload) — so the popup is just another
  * carrier of the one logical canvas.
  *
- * The card header's ✕ dispatches `craft:close-genui-canvas`; here that maps
- * to `canvasPane.attachFromPopup` — Main closes the window, the closed
- * broadcast returns the canvas to the sidebar. Closing the window by ANY
- * route (system close button, app quit) reaches the sidebar the same way.
+ * The persistent carrier contains the original guest. Its ✕ hides the current
+ * surface; only an explicit return moves it into the sidebar.
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
@@ -27,6 +25,8 @@ import {
 } from '@polo-ai/ui/chat/GenUiAppCard'
 import { GenUiCardRegistryBridge } from './components/tab-browser/GenUiCardRegistryBridge'
 import { CanvasPaneCard } from './components/app-shell/CanvasPane'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './components/ui/dropdown-menu'
+import { MoreHorizontal } from 'lucide-react'
 import type { CanvasPaneApp } from '../shared/types'
 import './index.css'
 
@@ -100,26 +100,34 @@ function CanvasPopoutApp() {
   useSyncThemeClass()
   // The payload is fixed per window — parse once, defensively (Main always
   // sends a well-formed pair; a corrupted handoff degrades to a message).
+  const [poppedOut, setPoppedOut] = useState(false)
   const [payload] = useState<PopoutPayload | null>(parsePopoutPayload)
+  const { t } = useTranslation()
   const app = useMemo(() => payload?.app ?? null, [payload])
 
   useEffect(() => {
     if (!payload) return
-    // The card header ✕ asks the canvas to close — in the popup that means
-    //「收回」: Main closes the window and the sidebar restores the card.
+    const off = window.electronAPI.canvasPane.onStateChanged(state => { if (state.sessionId === payload.sessionId) setPoppedOut(state.poppedOut) })
+    // The card header ✕ hides this surface and preserves the existing instance.
     const listener = (event: Event) => {
       const detail = (event as CustomEvent<GenUiAppCanvasCloseRequest>).detail
       if (!detail || detail.sessionId !== payload.sessionId) return
-      void window.electronAPI?.canvasPane?.attachFromPopup(payload.sessionId)
+      void window.electronAPI?.canvasPane?.hide(payload.sessionId)
     }
     window.addEventListener(GENUI_APP_CANVAS_CLOSE_EVENT, listener)
-    return () => window.removeEventListener(GENUI_APP_CANVAS_CLOSE_EVENT, listener)
+    return () => { off(); window.removeEventListener(GENUI_APP_CANVAS_CLOSE_EVENT, listener) }
   }, [payload])
 
   if (!payload || !app) return <PopoutFallback messageKey="genui.app.loadError" />
   return (
-    <div className="h-screen w-screen p-0">
-      <CanvasPaneCard sessionId={payload.sessionId} app={app} />
+    <div className="h-screen w-screen p-0 relative">
+      <GenUiCardRegistryBridge />
+      <CanvasPaneCard nativeGuest sessionId={payload.sessionId} app={app} onPopOut={poppedOut ? undefined : () => { void window.electronAPI.canvasPane.detachToPopup(payload.sessionId, app) }} headerActions={
+        <DropdownMenu><DropdownMenuTrigger asChild><button type="button" title={t('common.more')} className="p-1 text-muted-foreground hover:bg-muted rounded"><MoreHorizontal className="w-3.5 h-3.5" /></button></DropdownMenuTrigger><DropdownMenuContent align="end">
+          {poppedOut && <DropdownMenuItem onSelect={() => { void window.electronAPI.canvasPane.attachFromPopup(payload.sessionId) }}>{t('browserPane.sidebar.embed')}</DropdownMenuItem>}
+          <DropdownMenuItem onSelect={() => { void window.electronAPI.canvasPane.destroy(payload.sessionId) }}>{t('common.close')}</DropdownMenuItem>
+        </DropdownMenuContent></DropdownMenu>
+      } />
     </div>
   )
 }

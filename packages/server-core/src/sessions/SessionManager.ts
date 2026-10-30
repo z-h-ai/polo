@@ -6328,7 +6328,7 @@ export class SessionManager implements ISessionManager {
             readBrowserPolicy: () => authorization.readPolicy(),
             openPanel: async (options) => {
               const instanceId = options?.background
-                ? await bpm.createForSessionAsync(sid, { show: false, workspaceId })
+                ? await bpm.createForSessionAsync(sid, { show: false, presentIfActive: true, workspaceId })
                 : await bpm.focusBoundForSessionAsync(sid, { workspaceId })
               const info = await bpm.getInstanceAsync(instanceId)
               sessionLog.info(`[browser-pane] route decision: browser_open session=${sid} instance=${instanceId} background=${options?.background ?? false} ownerType=${info?.ownerType ?? 'unknown'} ownerSessionId=${info?.ownerSessionId ?? 'none'} visible=${info?.isVisible ?? false}`)

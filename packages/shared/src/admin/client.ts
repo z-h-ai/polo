@@ -1597,8 +1597,11 @@ export class AdminClient {
 
     const controller = new AbortController();
     const callerSignal = options.signal;
-    const abortFromCaller = () =>
-      controller.abort(new AdminError('Admin request was aborted', 'NETWORK_ERROR'));
+    const callerTimedOut = () => callerSignal?.reason?.name === 'TimeoutError';
+    const abortFromCaller = () => controller.abort(new AdminError(
+      callerTimedOut() ? 'Admin request timed out' : 'Admin request was aborted',
+      callerTimedOut() ? 'TIMEOUT' : 'NETWORK_ERROR',
+    ));
     if (callerSignal?.aborted) abortFromCaller();
     else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
     let timedOut = false;
@@ -1647,7 +1650,7 @@ export class AdminClient {
         || (options.readResponse && response && response.status >= 400)) {
         data = undefined;
       } else {
-        if (timedOut || error === timeoutError) throw timeoutError;
+        if (timedOut || error === timeoutError || callerSignal?.aborted && callerTimedOut()) throw timeoutError;
         if (error instanceof MemberCircleInvalidResponseError) throw error;
         throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
       }

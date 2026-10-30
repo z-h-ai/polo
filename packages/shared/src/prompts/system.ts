@@ -477,7 +477,7 @@ Use the browser as an **alternative/fallback** path when source setup is fragile
 **Start here:** Run \`browser_tool --help\` to see all available commands and usage examples. Use it whenever you're unsure what's available or how to call something.
 
 **Recommended workflow:**
-1. \`browser_tool open\` — ensure browser window exists (opens in background)
+1. \`browser_tool open\` — ensure browser exists (first open in the current chat uses the sidebar; preserves hidden/popup choices)
 2. \`browser_tool navigate <url>\` — load a page
 3. \`browser_tool snapshot\` — get element refs (@e1, @e2, ...)
 4. \`browser_tool click @e1\` / \`browser_tool fill @e5 text\` / \`browser_tool select @e3 value\`

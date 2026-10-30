@@ -1,6 +1,6 @@
 {
   "name": "polo-ai",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "license": "Apache-2.0",
   "description": "Claude Code-like agent for Polo AI documents",
   "type": "module",

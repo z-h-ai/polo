@@ -119,6 +119,7 @@ function createMockWindow() {
 }
 
 mock.module('electron', () => ({
+  dialog: { showMessageBox: mock(async () => ({ response: 0 })) },
   app: {
     getPath: mock((name: string) => `/tmp/mock-${name}`),
   },
@@ -519,7 +520,7 @@ describe('POO-157 sidebar-first presentation requests', () => {
     manager.destroyInstance(id)
   })
 
-  it('explicit detach alone opens the popup; hiding requests return to the ORIGINAL host', async () => {
+  it('explicit detach opens the popup; hiding keeps it there without sidebar return', async () => {
     const manager = new BrowserPaneManager()
     const original = createMockWindow()
     const other = createMockWindow()
@@ -533,8 +534,8 @@ describe('POO-157 sidebar-first presentation requests', () => {
     expect(popup.show).toHaveBeenCalledTimes(1)
     manager.hide(id)
     await Promise.resolve()
-    expect(requests.at(-1).target).toBe(original)
-    expect(requests.at(-1).reason).toBe('return')
+    expect(requests).toEqual([])
+    expect(manager.getInstance(id)?.hostMode).toBe('popup')
     expect(manager.getInstance(id)).toBeDefined()
     manager.destroyInstance(id)
   })
@@ -585,5 +586,268 @@ describe('POO-157 explicit popup while toolbar loads', () => {
     expect(createdWindows.at(-1).show).toHaveBeenCalledTimes(1)
     expect(requests).toHaveLength(0)
     manager.destroyInstance(id)
+  })
+})
+
+// Real-checklist regressions: these reproduce the renderer/native boundary failures.
+describe('POO159 real E2E failures', () => {
+  it('sparse ordinary AX is diagnostic only; a real challenge still requests human handling', async () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('sparse-page')
+    const inst = (manager as any).instances.get(id)
+    inst.cdp.getAccessibilitySnapshot = async () => ({ nodes: [{ role: 'RootWebArea' }, { role: 'button' }, { role: 'textbox' }] })
+    inst.pageView.webContents.executeJavaScript = async () => []
+    expect(await manager.detectSecurityChallenge(id)).toMatchObject({ detected: false, provider: 'none' })
+    inst.title = 'Just a moment...'
+    expect(await manager.detectSecurityChallenge(id)).toMatchObject({ detected: true, provider: 'cloudflare' })
+    manager.destroyAll()
+  })
+  it('account transition revokes a visible manual popup as well as session-owned pages', async () => {
+    const { beginAccountTransition, settleAccountTransition } = await import('@polo-ai/server-core/handlers/rpc/trusted-product-space-account')
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('logout-manual')
+    const inst = (manager as any).instances.get(id)
+    manager.detachToPopup(id)
+    const epoch = beginAccountTransition()
+    try {
+      expect(manager.listInstances()).toHaveLength(0)
+      expect(inst.window.destroy).toHaveBeenCalled()
+    } finally { settleAccountTransition(epoch, 'abort'); manager.destroyAll() }
+  })
+  it('popup return IPC is present, verifies toolbar sender, and targets the original sidebar host', async () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('return-owner')
+    const host = createMockWindow()
+    const inst = (manager as any).instances.get(id)
+    inst.toolbarView.webContents.id = 7001
+    const opened = mock(() => {})
+    manager.onOpenRequested(opened)
+    manager.embedInstance(id, host)
+    manager.detachToPopup(id)
+    manager.registerToolbarIpc()
+    const handler = (mockIpcMainHandle.mock.calls as unknown as [string, Function][]).find(c => c[0] === 'browser-toolbar:return-to-sidebar')?.[1] as any
+    expect(handler).toBeTypeOf('function')
+    await expect(handler({ sender: { id: 7002 } }, id)).rejects.toThrow()
+    expect(opened).not.toHaveBeenCalled()
+    await handler({ sender: { id: 7001 } }, id)
+    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ id }), host, 'return')
+    manager.destroyAll()
+  })
+  it('host migration snapshots scroll before native resize and restores the same page afterwards', async () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('scroll-transfer')
+    const host = createMockWindow()
+    const inst = (manager as any).instances.get(id)
+    manager.embedInstance(id, host)
+    let y = 900
+    const seen: string[] = []
+    inst.pageView.webContents.executeJavaScript = mock(async (script: string) => {
+      seen.push(script)
+      if (script.includes('scrollX') && script.includes('scrollY')) return { x: 0, y }
+      if (script.includes('scrollTo')) y = 900
+    })
+    inst.pageView.setBounds = mock(() => { y = 875 })
+    manager.detachToPopup(id)
+    await new Promise(r => setTimeout(r, 30))
+    expect(seen.some(script => script.includes('scrollY'))).toBe(true)
+    expect(y).toBe(900)
+    expect((manager as any).instances.get(id).pageView).toBe(inst.pageView)
+    manager.destroyAll()
+  })
+})
+
+describe('POO159 scroll transfer cancellation', () => {
+  it('a snapshot rejection after instance destruction never touches its native view', async () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('destroy-during-transfer')
+    const inst = (manager as any).instances.get(id)
+    manager.embedInstance(id, createMockWindow())
+    let reject!: (error: Error) => void
+    inst.pageView.webContents.executeJavaScript = mock(() => new Promise((_resolve, failure) => { reject = failure }))
+    manager.detachToPopup(id)
+    inst.pageView.setBounds.mockClear()
+    manager.destroyInstance(id)
+    reject(new Error('WebContents destroyed'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(inst.pageView.setBounds).not.toHaveBeenCalled()
+    expect(manager.listInstances()).toHaveLength(0)
+    manager.destroyAll()
+  })
+})
+
+describe('POO159 ended browser scope resources', () => {
+  it('explicit destruction closes an embedded page after it has been detached from every window', () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('detached-page-destroy')
+    const instance = (manager as any).instances.get(id)
+    const closePage = mock(() => {})
+    instance.pageView.webContents.close = closePage
+    manager.embedInstance(id, createMockWindow())
+    manager.destroyInstance(id)
+    expect(closePage).toHaveBeenCalledWith({ waitForBeforeUnload: false })
+    expect(manager.listInstances()).toHaveLength(0)
+    manager.destroyAll()
+  })
+})
+
+describe('POO159 animated scroll transfer', () => {
+  it('retains the original pixel position through successive nonzero sidebar animation bounds', async () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('animated-scroll-transfer')
+    const host = createMockWindow()
+    const instance = (manager as any).instances.get(id)
+    manager.embedInstance(id, host)
+    let y = 900
+    instance.pageView.webContents.executeJavaScript = mock(async (script: string) => {
+      if (script.includes('scrollX') && script.includes('scrollY')) return { x: 0, y }
+      if (script.includes('scrollTo')) y = 900
+    })
+    instance.pageView.setBounds = mock(() => { y = 875 })
+    manager.detachToPopup(id)
+    await new Promise(resolve => setTimeout(resolve, 140))
+    manager.embedInstance(id, host, { x: 400, y: 0, width: 500, height: 600 })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    manager.setEmbedBounds(id, { x: 450, y: 0, width: 450, height: 600 })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    manager.setEmbedBounds(id, { x: 500, y: 0, width: 400, height: 600 })
+    await new Promise(resolve => setTimeout(resolve, 160))
+    expect(y).toBe(900)
+    expect((manager as any).instances.get(id).scrollTransfer).toBeNull()
+    manager.destroyAll()
+  })
+})
+
+describe('POO159 scroll lease deadlines', () => {
+  it('expires a zero-sized embed even if no later visible bounds arrive', async () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('zero-sized-scroll-lease')
+    const host = createMockWindow()
+    const instance = (manager as any).instances.get(id)
+    manager.embedInstance(id, host)
+    instance.pageView.webContents.executeJavaScript = mock(async (script: string) => script.includes('scrollX') ? { x: 0, y: 900 } : undefined)
+    manager.detachToPopup(id)
+    await new Promise(resolve => setTimeout(resolve, 140))
+    manager.embedInstance(id, host)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1600))
+      expect(instance.scrollTransfer).toBeNull()
+      expect(instance.pageView.webContents.executeJavaScript.mock.calls.some(([script]: [string]) => script.includes('cleanup'))).toBe(true)
+    } finally { manager.destroyAll() }
+  })
+  it('expires before the initial snapshot resolves and removes only that late token hooks', async () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('pending-scroll-lease')
+    const instance = (manager as any).instances.get(id)
+    manager.embedInstance(id, createMockWindow())
+    let resolveSnapshot!: (position: { x: number; y: number }) => void
+    const snapshot = new Promise(resolve => { resolveSnapshot = resolve })
+    const cleanupScripts: string[] = []
+    instance.pageView.webContents.executeJavaScript = mock((script: string) => {
+      if (script.includes('scrollX') && script.includes('scrollY')) return snapshot
+      cleanupScripts.push(script)
+      return Promise.resolve()
+    })
+    manager.detachToPopup(id)
+    const token = instance.scrollTransfer.token
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1600))
+      expect(instance.scrollTransfer).toBeNull()
+      cleanupScripts.length = 0
+      resolveSnapshot({ x: 0, y: 900 })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(cleanupScripts.some(script => script.includes(token) && script.includes('cleanup'))).toBe(true)
+      expect(instance.scrollTransfer).toBeNull()
+    } finally { resolveSnapshot({ x: 0, y: 900 }); manager.destroyAll() }
+  })
+})
+
+describe('POO159 pending snapshot geometry', () => {
+  it('applies the destination bounds when the capture deadline ends an unresponsive snapshot', async () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('pending-scroll-geometry')
+    const instance = (manager as any).instances.get(id)
+    manager.embedInstance(id, createMockWindow())
+    instance.pageView.setBounds.mockClear()
+    let resolveSnapshot!: (position: { x: number; y: number }) => void
+    instance.pageView.webContents.executeJavaScript = mock((script: string) => script.includes('scrollX') ? new Promise(resolve => { resolveSnapshot = resolve }) : Promise.resolve())
+    manager.detachToPopup(id)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1600))
+      expect(instance.pageView.setBounds).toHaveBeenCalledWith({ x: 0, y: 48, width: 1200, height: 852 })
+      expect(instance.scrollTransfer).toBeNull()
+    } finally { resolveSnapshot({ x: 0, y: 900 }); manager.destroyAll() }
+  })
+})
+
+describe('POO159 fresh AI browser automatic presentation', () => {
+  function setupAutomatic() {
+    const manager = new BrowserPaneManager()
+    const host = createMockWindow()
+    manager.setWindowManager({ getFocusedWindow: () => host, getWorkspaceForWindow: () => 'ws-a', getWindowByWorkspace: () => host } as any)
+    const requests: any[] = []
+    manager.onOpenRequested((info, target, reason) => { requests.push({ info, target, reason }) })
+    return { manager, host, requests }
+  }
+  it('a fresh local AI open requests current-session presentation after binding without focusing an OS window', async () => {
+    const { manager, host, requests } = setupAutomatic()
+    const id = await manager.createForSessionAsync('session-b', { show: false, presentIfActive: true, workspaceId: 'ws-a' } as any)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({ info: { id, ownerType: 'session', ownerSessionId: 'session-b', workspaceId: 'ws-a' }, target: host, reason: 'automatic' })
+    expect(host.show).not.toHaveBeenCalled()
+    expect(createdWindows.at(-1).show).not.toHaveBeenCalled()
+    manager.destroyAll()
+  })
+  it('remote AI open forwards automatic presentation to the actual sender host with its public owner', async () => {
+    const { manager, requests } = setupAutomatic()
+    const sender = createMockWindow()
+    const id = await (manager as any).dispatchCapability({ v: 1, workspaceId: 'ws-a', sessionId: 'session-b', method: 'createForSession', args: ['session-b', { show: false, presentIfActive: true }] }, sender)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({ info: { id, ownerSessionId: 'session-b', workspaceId: 'ws-a' }, target: sender, reason: 'automatic' })
+    manager.destroyAll()
+  })
+  it('opening an existing hidden sidebar page never automatically expands it again or grabs manual pages', () => {
+    const { manager, host, requests } = setupAutomatic()
+    const manual = manager.createInstance('user-manual', { workspaceId: 'ws-a' })
+    const id = manager.createForSession('session-b', { show: false, workspaceId: 'ws-a' })
+    manager.embedInstance(id, host)
+    manager.hide(id)
+    expect(manager.createForSession('session-b', { show: false, presentIfActive: true, workspaceId: 'ws-a' } as any)).toBe(id)
+    expect(id).not.toBe(manual)
+    expect(requests).toHaveLength(0)
+    expect(manager.getInstance(id)?.isVisible).toBe(false)
+    manager.destroyAll()
+  })
+  it('opening an existing hidden popup keeps the user-selected presentation and never wakes its OS window', () => {
+    const { manager, host, requests } = setupAutomatic()
+    const id = manager.createForSession('session-b', { show: false, workspaceId: 'ws-a' })
+    manager.embedInstance(id, host)
+    manager.detachToPopup(id)
+    manager.hide(id)
+    const popup = createdWindows.at(-1)
+    popup.show.mockClear()
+    manager.createForSession('session-b', { show: false, presentIfActive: true, workspaceId: 'ws-a' } as any)
+    expect(requests).toHaveLength(0)
+    expect(manager.getInstance(id)?.hostMode).toBe('popup')
+    expect(manager.getInstance(id)?.isVisible).toBe(false)
+    expect(popup.show).not.toHaveBeenCalled()
+    manager.destroyAll()
+  })
+})
+
+describe('POO159 AI overlay allocation before open', () => {
+  it('presents an untouched backing instance allocated by tool_start before the real open command', async () => {
+    const manager = new BrowserPaneManager()
+    const host = createMockWindow()
+    manager.setWindowManager({ getFocusedWindow: () => host, getWorkspaceForWindow: () => 'ws-a', getWindowByWorkspace: () => host } as any)
+    const requests: any[] = []
+    manager.onOpenRequested((info, target, reason) => { requests.push({ info, target, reason }) })
+    const backing = manager.getOrCreateForSession('session-b', { workspaceId: 'ws-a' })
+    manager.setAgentControl('session-b', { displayName: 'Browser', intent: 'Open guide' }, { workspaceId: 'ws-a' })
+    expect(requests).toHaveLength(0)
+    const id = await manager.createForSessionAsync('session-b', { show: false, presentIfActive: true, workspaceId: 'ws-a' } as any)
+    expect(id).toBe(backing)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({ info: { id, ownerSessionId: 'session-b' }, target: host, reason: 'automatic' })
+    manager.destroyAll()
   })
 })

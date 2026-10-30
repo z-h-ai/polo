@@ -1,5 +1,16 @@
 import type { ExecutionStatus, ProductSpaceExecutionScope } from '@polo-ai/shared/product-spaces'
 
+const runtimeScopeListeners = new Set<() => void>()
+export function onRuntimeScopeChanged(listener: () => void): () => void {
+  runtimeScopeListeners.add(listener)
+  return () => { runtimeScopeListeners.delete(listener) }
+}
+export function notifyRuntimeScopeChanged(): void {
+  for (const listener of [...runtimeScopeListeners]) {
+    try { listener() } catch (error) { console.error('[runtime-scope] invalidation consumer failed', error) }
+  }
+}
+
 export type ProductSpaceExecutionKind = 'assistant_session' | 'local_app' | 'skill_operation' | 'cli_execution'
 
 export type ExecutionStopOutcome = 'stopped' | 'failed'
@@ -443,12 +454,14 @@ export function setRuntimeActiveProductSpace(productSpaceId: string | null, kind
     // blocks starts on its own until an online switch revalidates.
     restrictedProductSpaces.clear()
   }
+  notifyRuntimeScopeChanged()
 }
 
 /** Binds (or re-binds) the trusted account of the committed fence. */
 export function setRuntimeActiveProductSpaceAccount(accountId: string | null): void {
   runtimeActiveAccountId = accountId
   lastCommittedSwitch = null
+  notifyRuntimeScopeChanged()
 }
 
 export function getRuntimeActiveProductSpaceAccount(): string | null {
@@ -664,6 +677,7 @@ const restrictedProductSpaces = new Set<string>()
 export function setRuntimeProductSpaceRestricted(productSpaceId: string, restricted: boolean): void {
   if (restricted) restrictedProductSpaces.add(productSpaceId)
   else restrictedProductSpaces.delete(productSpaceId)
+  notifyRuntimeScopeChanged()
 }
 
 export function isRuntimeProductSpaceRestricted(productSpaceId: string | null | undefined): boolean {

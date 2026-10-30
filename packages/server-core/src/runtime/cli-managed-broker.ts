@@ -165,8 +165,8 @@ export class CliManagedBroker {
     const hooks = createAssistantBillingHooks({ subjectKind: 'polo_assistant', accountId: captured.owner.accountId, productSpaceId: captured.owner.productSpaceId, adminOrigin: captured.owner.adminOrigin }, current)
     const proxy = await startInvocationCredentialProxy({ upstreamBaseUrl: connection.baseUrl, credential, credentialHeaders: [{ name: 'authorization', format: 'bearer' }] }, {
       managedPolicy: { allowedModels }, assertExecutionCurrent: () => { if (!current()) throw new Error('POLO_MANAGED_REVOKED') },
-      billing: { beforeSend: async facts => {
-        try { return await hooks.beforeSend(facts) }
+      billing: { beforeSend: async (facts, context) => {
+        try { return await hooks.beforeSend(facts, context) }
         catch (error) {
           const raw = (error as { errorCode?: string })?.errorCode
           const code = isInsufficientCreditCode(raw) ? 'POLO_INSUFFICIENT_CREDIT' : 'POLO_BILLING_UNAVAILABLE'

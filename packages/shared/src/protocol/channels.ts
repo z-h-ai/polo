@@ -574,6 +574,11 @@ export const RPC_CHANNELS = {
   // browser pane (mutual exclusion with the in-pane card, placeholder +
   // return entry while popped out, automatic return when the window closes).
   canvasPane: {
+    EMBED: 'canvas-pane:embed',
+    UNEMBED: 'canvas-pane:unembed',
+    HIDE: 'canvas-pane:hide',
+    DESTROY: 'canvas-pane:destroy',
+    RELEASE: 'canvas-pane:release',
     DETACH_TO_POPUP: 'canvas-pane:detach-to-popup',
     ATTACH_FROM_POPUP: 'canvas-pane:attach-from-popup',
     FOCUS: 'canvas-pane:focus',
