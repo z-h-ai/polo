@@ -48,7 +48,9 @@ export function ImagePreviewOverlay({
   const [activeIdx, setActiveIdx] = useState(initialIndex)
   const [contentCache, setContentCache] = useState<Record<string, string>>({})
   const [dimensionsCache, setDimensionsCache] = useState<Record<string, { width: number; height: number }>>({})
-  const [error, setError] = useState<string | null>(null)
+  // POO-179: keep the raw diagnostic (if any) in state; the self-produced
+  // fallback copy resolves at render time so a language switch re-translates.
+  const [error, setError] = useState<{ raw: string | null } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
   const containerRef = React.useRef<HTMLDivElement>(null)
@@ -117,7 +119,7 @@ export function ImagePreviewOverlay({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load image')
+          setError({ raw: err instanceof Error ? err.message : null })
           setIsLoading(false)
         }
       })
@@ -155,12 +157,12 @@ export function ImagePreviewOverlay({
       theme={theme}
       typeBadge={{
         icon: Image,
-        label: 'Image',
+        label: t('overlay.image'),
         variant: 'purple',
       }}
       filePath={activeItem?.src || filePath}
       title={title}
-      error={error ? { label: 'Load Failed', message: error } : undefined}
+      error={error ? { label: t('overlay.loadFailed'), message: error.raw ?? t('overlay.loadImageFailed') } : undefined}
       headerActions={headerActions}
     >
       <div
@@ -179,7 +181,7 @@ export function ImagePreviewOverlay({
         {activeDataUrl && (
           <img
             src={activeDataUrl}
-            alt={activeItem?.label || activeItem?.src.split('/').pop() || 'Image preview'}
+            alt={activeItem?.label || activeItem?.src.split('/').pop() || t('overlay.imagePreview')}
             className="max-w-full max-h-full object-contain rounded-sm"
             draggable={false}
             onTransitionEnd={() => setIsAnimating(false)}
