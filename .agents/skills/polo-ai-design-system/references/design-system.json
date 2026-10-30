@@ -304,7 +304,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-quota-banner.tsx",
-      "sha256": "6f1acb1b282ee44a347ebf33677999506648ecb296db25dfb5a53b7616c27e2f",
+      "sha256": "e6fec8aa3fcbc0b45b1b6aa3b1c503465cdc3a6435b8c962464b350ee90c386e",
       "role": "implementation",
       "scope": "POO-177 current billing-banner states (member/owner insufficient-credit, U2 recheck secondary action); actions are local no-ops; refresh behaviour belongs to the implementation card"
     },
