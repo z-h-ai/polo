@@ -28,6 +28,7 @@ import {
   removeBrowserInstanceAtom,
 } from '@/atoms/browser-pane'
 import { useAppShellContext } from '@/context/AppShellContext'
+import { useTranslation } from 'react-i18next'
 import { BrowserTabBadge } from './BrowserTabBadge'
 import type { BrowserInstanceInfo } from '../../../shared/types'
 import { getHostname } from './utils'
@@ -46,6 +47,7 @@ export function BrowserTabStrip({
   instancesOverride,
   maxVisibleBadges = DEFAULT_MAX_VISIBLE_BADGES,
 }: BrowserTabStripProps) {
+  const { t } = useTranslation()
   // Filter the badge strip to the workspace currently in focus. Remote-connected
   // workspaces have a different `remoteWorkspaceId` (what the remote agent
   // stamps onto its tabs) than the local `activeWorkspaceId` (what locally-
@@ -223,9 +225,6 @@ export function BrowserTabStrip({
     const canUseLiveWindowActions = !instancesOverride
     const targetSessionId = instance.boundSessionId ?? instance.ownerSessionId
     const canOpenSession = !!targetSessionId
-    const openSessionLabel = instance.agentControlActive
-      ? 'Open Session Using this Window'
-      : 'Open Session Which Used this Window'
 
     return (
       <>
@@ -234,7 +233,7 @@ export function BrowserTabStrip({
           onSelect={() => focusBrowserWindow(instance)}
         >
           <Icons.Monitor className="h-3.5 w-3.5" />
-          Show Browser Window
+          {t('browser.showWindow')}
         </StyledDropdownMenuItem>
 
         <StyledDropdownMenuItem
@@ -242,7 +241,9 @@ export function BrowserTabStrip({
           onSelect={() => openSessionUsingWindow(instance)}
         >
           <Icons.PanelRightOpen className="h-3.5 w-3.5" />
-          {openSessionLabel}
+          {instance.agentControlActive
+            ? t('browser.openSessionCurrent')
+            : t('browser.openSessionPrevious')}
         </StyledDropdownMenuItem>
 
         <StyledDropdownMenuSeparator />
@@ -253,11 +254,11 @@ export function BrowserTabStrip({
           onSelect={() => terminateBrowserWindow(instance)}
         >
           <Icons.XCircle className="h-3.5 w-3.5" />
-          Terminate Browser
+          {t('browser.terminate')}
         </StyledDropdownMenuItem>
       </>
     )
-  }, [instancesOverride, focusBrowserWindow, openSessionUsingWindow, terminateBrowserWindow])
+  }, [t, instancesOverride, focusBrowserWindow, openSessionUsingWindow, terminateBrowserWindow])
 
   if (orderedInstances.length === 0) return null
 

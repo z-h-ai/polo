@@ -79,6 +79,12 @@ function InlineBadge({ badge }: { badge: ContentBadge }) {
  * Styled similarly to InlineBadge but indicates a SDK command (e.g., /compact)
  */
 function CommandBadge({ badge }: { badge: ContentBadge }) {
+  const { t } = useTranslation()
+  // POO-179: only the display label of a *known* command localizes; the raw
+  // text (/compact and any unknown command) is persisted message content and
+  // stays verbatim, as does any label we cannot positively identify.
+  const isKnownCompact = /^\/compact\b/i.test(badge.rawText)
+  const displayLabel = isKnownCompact ? t('commands.compactBadge') : badge.label
   return (
     <span
       className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle"
