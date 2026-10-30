@@ -20,6 +20,7 @@ import { MarkdownPdfBlock } from './MarkdownPdfBlock'
 import { MarkdownDocBlock } from './MarkdownDocBlock'
 import { preprocessLinks } from './linkify'
 import { isOpenableMarkdownLinkText, resolveMarkdownLinkTarget } from './link-target'
+import { FileLinkContextMenu } from './FileLinkContextMenu'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
@@ -224,17 +225,24 @@ function createComponents(
         return <span>{children}</span>
       }
 
+      // Resolved once here instead of per-dispatch: the classification decides
+      // both click routing and whether the anchor gets the file-link context
+      // menu (POO-173/FILELINK-01). Web URLs and plain text never get wrapped,
+      // so their native right-click (selection copy etc.) is untouched
+      // (FILELINK-02).
+      const linkTarget = (trimmedHref || fallbackText)
+        ? resolveMarkdownLinkTarget(trimmedHref || fallbackText)
+        : null
+
       const dispatchLinkTarget = (e: { preventDefault: () => void }) => {
         e.preventDefault()
 
-        const target = trimmedHref || fallbackText
-        if (!target) return
+        if (!linkTarget) return
 
-        const resolvedTarget = resolveMarkdownLinkTarget(target)
-        if (resolvedTarget.kind === 'file' && onFileClick) {
-          onFileClick(resolvedTarget.path)
-        } else if (resolvedTarget.kind === 'url' && onUrlClick) {
-          onUrlClick(resolvedTarget.url)
+        if (linkTarget.kind === 'file' && onFileClick) {
+          onFileClick(linkTarget.path)
+        } else if (linkTarget.kind === 'url' && onUrlClick) {
+          onUrlClick(linkTarget.url)
         }
       }
 
@@ -258,7 +266,7 @@ function createComponents(
         dispatchLinkTarget(e)
       }
 
-      return (
+      const anchor = (
         <a
           href={safeHref}
           onClick={handleClick}
@@ -271,6 +279,15 @@ function createComponents(
           {children}
         </a>
       )
+
+      // Only filesystem targets get the right-click menu (FILELINK-01); the
+      // component itself no-ops to the raw anchor when the platform offers
+      // neither reveal nor copy. Radix `Trigger asChild` merges into the <a>
+      // above — no wrapper element, so layout and streaming output are stable.
+      if (linkTarget?.kind === 'file') {
+        return <FileLinkContextMenu path={linkTarget.path}>{anchor}</FileLinkContextMenu>
+      }
+      return anchor
     },
   }
 
