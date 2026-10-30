@@ -119,3 +119,24 @@ for (const supports of [true, false]) {
     } finally { f.close(); await server.stop(true) }
   })
 }
+
+for (const receipt of [false, true]) {
+  for (const matches of [false, true]) {
+    test(`worker terminal recovery with existing request: receipt=${receipt} matching=${matches}`, async () => {
+      const expected = receipt ? 'confirmed' : 'no_charge'
+      const f = setup({
+        report: async () => ({ settlement: 'confirmed' }),
+        inspect: async () => ({ settlement: 'no_charge' }),
+        finish: async () => { throw new AdminError('worker already finished', 'run_finalized', { status: 409 }) },
+        inspectRun: async (_, runId) => ({ run: { runId, productSpaceId: f.scope.productSpaceId, status: 'timed_out' }, settlement: matches ? expected : expected === 'confirmed' ? 'no_charge' : 'confirmed' }),
+      })
+      try {
+        const runId = randomUUID(), requestId = randomUUID()
+        f.outbox.stageAdmission(f.scope, runId, { ...facts(), productSpaceId: f.scope.productSpaceId, requestId })
+        if (receipt) f.outbox.stageReceipt(f.scope, { runId, requestId, productSpaceId: f.scope.productSpaceId, inputTokens: 1, outputTokens: 1, outputDisposition: 'usable' })
+        await f.coordinator.recover(f.scope.accountId, f.scope.adminOrigin)
+        expect(f.outbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(matches ? 0 : 1)
+      } finally { f.close() }
+    })
+  }
+}

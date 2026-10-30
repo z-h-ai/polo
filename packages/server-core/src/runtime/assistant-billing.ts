@@ -108,6 +108,18 @@ export class AssistantBillingCoordinator {
       }
     } }
   }
+  private async finishOriginal(transport: AssistantBillingTransport, scope: AssistantBillingJournalScope, runId: string,
+    status: 'completed' | 'unknown', settlement: 'pending' | 'confirmed' | 'no_charge'): Promise<void> {
+    try { await transport.finish(scope, runId, { status }) }
+    catch (error) {
+      if (!(error instanceof AdminError) || error.errorCode !== 'run_finalized' || !transport.inspectRun) throw error
+      const original = billingRuntimeRunResponseSchema.parse(await transport.inspectRun(scope, runId))
+      // A worker may have settled this same request before the client's final
+      // PATCH. Only matching original facts can replace that acknowledgement.
+      if (original.run.runId !== runId || original.run.productSpaceId !== scope.productSpaceId
+        || original.run.status === 'running' || original.settlement !== settlement || settlement === 'pending') throw error
+    }
+  }
   private async settle(key: string, scope: AssistantBillingJournalScope, receipt: BillingRuntimeUsageInput): Promise<void> {
     const transport = this.transport()
     if (!transport) return
@@ -121,7 +133,7 @@ export class AssistantBillingCoordinator {
     }
     // Finish before retirement, so a lost terminal acknowledgement is also
     // recoverable. Retries keep the exact original receipt and run status.
-    await transport.finish(scope, receipt.runId, { status: receipt.outputDisposition === 'usable' ? 'completed' : 'unknown' })
+    await this.finishOriginal(transport, scope, receipt.runId, receipt.outputDisposition === 'usable' ? 'completed' : 'unknown', ack.settlement)
     this.outbox.applySettlement(key, ack.settlement)
   }
   async recover(accountId: string, adminOrigin: string): Promise<void> {
@@ -143,7 +155,7 @@ export class AssistantBillingCoordinator {
           else {
             const ack = await this.transport()!.inspect(entry.scope, entry.runId, entry.admission.requestId)
             if (ack.settlement && ack.settlement !== 'pending') {
-              await this.transport()!.finish(entry.scope, entry.runId, { status: 'unknown' })
+              await this.finishOriginal(this.transport()!, entry.scope, entry.runId, 'unknown', ack.settlement)
               this.outbox.applySettlement(entry.key, ack.settlement)
             }
           }
