@@ -45,6 +45,13 @@ export type ChatAccessIssue =
   /** Journey #1: payer lacks allowance — recharge handoff (owner/personal) or
    * contact-an-admin copy (member). Never carries a reset promise. */
   | 'insufficient-credit'
+  /** POO-177: canonical Admin read says the period budget is spent. Honest
+   * copy only — never a promise that recharging lifts it in-place. */
+  | 'billing-budget-exhausted'
+  /** POO-177: a payment is still settling on the Admin side. */
+  | 'billing-payment-pending'
+  /** POO-177: the payer account cannot pay for this space right now. */
+  | 'billing-payer-restricted'
   /** Journey #1: period quota exhausted. `quotaResetAt` carries the server's
    * reset fact; without it the banner stays promise-free. */
   | 'quota-exhausted'
@@ -56,6 +63,9 @@ export interface ChatAccessStatus {
   issue: ChatAccessIssue
   /** Epoch-ms reset fact for `quota-exhausted`, only when the server supplied one. */
   quotaResetAt?: number
+  /** POO-177 QUOTA-01: the manual Admin refresh entry exists for this latch —
+   * only a proven admin-managed source, never a BYOK 402 or a true 429. */
+  refreshable?: boolean
 }
 
 export interface AppShellContextType {
@@ -75,9 +85,13 @@ export interface AppShellContextType {
   chatAccessStatus?: ChatAccessStatus | null
   /** POO-144: user-triggered retry of a failed space AI-config sync (never automatic) */
   onRetryAiConfigSync?: () => void
-  /** U2: banner "I've recharged — recheck" — clears a balance-shaped latch
-   * (insufficient-credit only); hard blocks are not clearable from the client. */
-  onRecheckBilling?: () => void
+  /** POO-177 QUOTA-01/02: banner manual billing refresh — one canonical
+   * Admin read that applies through the revision-guarded latch. Async-safe:
+   * the banner surfaces `billingRecheckPending` while the read is in flight. */
+  onRecheckBilling?: () => void | Promise<void>
+  /** POO-177 QUOTA-02: true while the manual billing refresh read is in
+   * flight (single in-flight business operation). */
+  billingRecheckPending?: boolean
   /** Signed-in Admin user, when Admin auth is configured */
   currentAdminUser?: Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null
   /** Log out the current Admin user and return to login */

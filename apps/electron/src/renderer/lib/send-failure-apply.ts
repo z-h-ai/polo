@@ -19,12 +19,16 @@ import { i18n } from '@polo-ai/shared/i18n'
 import { toast } from 'sonner'
 import { sendFailureAtomFamily } from '@/atoms/sessions'
 import { classifySendFailure, type SendFailureOutcome } from './send-failure'
+import type { BillingLatchSourceLease } from './billing-refresh'
 
 export interface ApplySendFailureDeps {
   /** The ambient provider store (useStore() / getDefaultStore()). */
   store: ReturnType<typeof getDefaultStore>
   /** U2/U4: the Journey #1 billing latch setter (App-owned state). */
   setBillingLatch: (issue: 'insufficient-credit' | 'quota-exhausted', quotaResetAt?: number) => void
+  /** POO-177: bind the latch's source lease (App-owned ref) — called on
+   * billing blocks only, never on other failure classes. */
+  onBindBillingLease?: (lease: BillingLatchSourceLease) => void
 }
 
 /**
@@ -35,7 +39,15 @@ export interface ApplySendFailureDeps {
  */
 export function applySendFailure(
   error: unknown,
-  opts: { sessionId: string; draft: string; hadGoalStartIntent: boolean },
+  opts: {
+    sessionId: string
+    draft: string
+    hadGoalStartIntent: boolean
+    /** POO-177: the resolved source lease for THIS send (opaque attempt
+     * already resolved by the caller) — bound to the latch on billing blocks
+     * only, so the Admin refresh can later reach exactly this latch. */
+    sendLease?: BillingLatchSourceLease
+  },
   deps: ApplySendFailureDeps,
 ): SendFailureOutcome {
   let outcome: SendFailureOutcome
@@ -53,6 +65,7 @@ export function applySendFailure(
     // (reset copy only with the server's own reset fact). A reset fact the
     // server did not send is never invented here.
     deps.setBillingLatch(outcome.issue, outcome.issue === 'quota-exhausted' ? outcome.quotaResetAt : undefined)
+    deps.onBindBillingLease?.(opts.sendLease ?? { source: 'unknown' })
     // Journey #8 (review F1): the block banner outranks the draft prompt,
     // but the draft itself must survive the block — it rides in the same
     // session-scoped prompt atom and becomes restorable once the latch
