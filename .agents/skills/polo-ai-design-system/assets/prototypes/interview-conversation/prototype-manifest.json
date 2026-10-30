@@ -152,8 +152,8 @@
   "provenance": {
     "generator": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "74686186d100fafb5e0e252effaaee6b8b265199c05b8a5f69cceff74cf1ea78",
-    "source_export_sha256": "039b4c44dfe124f04ed4fcd44d8dc4488975cb47b08057c6268e47cd196d59d3",
+    "source_input_fingerprint": "d10c5aae687b15db70ce7f060097f2090bbdbe671a794dbb07d5c18896bf2e26",
+    "source_export_sha256": "181bd2ed00906c84c1dcc2f5a6da80aaaa622062b490bf56d3ea04b46501337d",
     "method": "Actual Chromium render and native click/key replay; cloned DOM with product scripts removed only from reference. Reference-only script restores observed scroll offsets. Live React runtime remains unchanged.",
     "fixed_reference_clock": "2026-10-28T12:00:00Z",
     "scope": "Component smoke references; not Electron/backend acceptance and not bug before/after proof."
