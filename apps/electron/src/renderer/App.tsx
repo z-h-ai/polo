@@ -21,6 +21,7 @@ import { AppShellProvider, type AppShellContextType, type ChatAccessIssue, type 
 import { isManagedBillingIssue, refreshResultApplies, resolveBillingRefreshOutcome, type BillingLatchSourceLease } from '@/lib/billing-refresh'
 import { useBillingRefresh } from '@/hooks/useBillingRefresh'
 import type { AdminRefreshBillingRpcInput } from '@polo-ai/shared/admin/schemas'
+import type { SessionBillingErrorClassification } from '@polo-ai/shared/protocol'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -72,7 +73,7 @@ import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
 import { extractBadges } from '@/lib/mentions'
 import { stripFailedOptimisticMessage } from '@/lib/send-failure'
-import { applySendBlockedByLatch, applySendFailure } from '@/lib/send-failure-apply'
+import { applyEventBillingBlock, applySendBlockedByLatch, applySendFailure } from '@/lib/send-failure-apply'
 import { getDefaultStore } from 'jotai'
 import {
   ShikiThemeProvider,
@@ -568,6 +569,40 @@ export default function App() {
       resetBillingLatchLease()
     }
   }, [productSpace.activeProductSpaceId, commitBillingLatch, resetBillingLatchLease])
+
+  // POO-177 QUOTA-01: the source lease for a billing block that arrived on
+  // the session event stream. Same canonical evidence rule as
+  // captureSendAttempt — the session's ACTUAL admin-managed connection inside
+  // the committed space proves the Admin refresh's reach — but resolved from
+  // the session metadata at failure time, because an in-turn rejection has no
+  // renderer-captured send attempt to consume. Declared before the event
+  // subscription effect below consumes it.
+  const resolveSessionBillingLease = useCallback((sessionId: string): BillingLatchSourceLease => {
+    const meta = store.get(sessionMetaMapAtom).get(sessionId)
+    const connectionSlug = meta?.llmConnection
+    const connection = connectionSlug ? llmConnections.find(item => item.slug === connectionSlug) : undefined
+    const activeSpaceId = productSpaceRef.current.activeProductSpaceId ?? null
+    return {
+      source: connection?.managedBy === 'admin' && activeSpaceId ? 'admin-managed' : 'unknown',
+      sessionId,
+      connectionSlug,
+      productSpaceId: activeSpaceId,
+      accountId: currentAdminUserIdRef.current,
+    }
+  }, [store, llmConnections])
+
+  // POO-177 QUOTA-01: a turn the server terminated with a structured billing
+  // rejection — a blocked admission on the post-persist error event, a
+  // provider 402 on the in-stream typed_error — drives the SAME latch write
+  // (commitBillingLatch + lease) a synchronously rejected send does. The
+  // shared applier no-ops on anything that is not a billing block.
+  const applyEventBillingBlockForSession = useCallback((sessionId: string, classification: SessionBillingErrorClassification | undefined) => {
+    applyEventBillingBlock(sessionId, classification, {
+      setBillingLatch: commitBillingLatch,
+      onBindBillingLease: bindBillingLatchLease,
+      resolveLease: () => resolveSessionBillingLease(sessionId),
+    })
+  }, [commitBillingLatch, bindBillingLatchLease, resolveSessionBillingLease])
 
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Session selection state — declared with the other account-scoped state so
@@ -2020,6 +2055,16 @@ export default function App() {
       // Track activity for stale session watchdog
       trackSessionActivity(sessionId)
 
+      // POO-177 QUOTA-01: a turn the server terminated with a structured
+      // billing rejection never reaches a renderer catch block — the
+      // post-persist error event and the in-stream typed_error both absorb
+      // it. Classify the carried classification and drive the identical
+      // latch a rejected send writes, so the managed banner (and its 刷新)
+      // exists wherever a managed rejection actually lands.
+      if (event.type === 'error' || event.type === 'typed_error') {
+        applyEventBillingBlockForSession(sessionId, event.billingClassification)
+      }
+
       // Dispatch window event when compaction completes
       // This allows FreeFormInput to sequence the plan execution message after compaction
       // Note: markCompactionComplete is called on the backend (sessions.ts) to ensure
@@ -2123,6 +2168,7 @@ export default function App() {
     applyPermissionModeState,
     reconcilePermissionModeState,
     applyGoalProjection,
+    applyEventBillingBlockForSession,
   ])
 
   // Transport reconnect recovery — refresh session metadata plus active/processing

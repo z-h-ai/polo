@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { CONFIG_DIR } from '@polo-ai/shared/config'
 import { AdminError } from '@polo-ai/shared/admin'
 import { BillingOutbox, type AssistantBillingJournalScope } from '@polo-ai/shared/admin/billing-outbox'
+import type { SessionBillingErrorClassification } from '@polo-ai/shared/protocol'
+import { isInsufficientCreditCode } from '@polo-ai/shared/credentials/insufficient-credit-codes'
 import { billingRuntimeAdmissionResponseSchema, billingRuntimeFinishResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
 import type { ManagedBillingHooks, ManagedBillingResult } from '@polo-ai/shared/credentials/managed-billing-observation'
 
@@ -161,4 +163,25 @@ export function setAssistantBillingTransport(next: AssistantBillingTransport, se
 }
 export function createAssistantBillingHooks(scope: AssistantBillingJournalScope, isCurrent: () => boolean): ManagedBillingHooks {
   return getCoordinator().hooks(scope, isCurrent)
+}
+
+/**
+ * POO-177: the structured billing facts of a thrown send/turn failure, as
+ * they may ride the session event stream to the renderer. An admission
+ * rejection (AdminError) carries its runtime errorCode and HTTP status;
+ * anything without those trusted structured fields classifies as `undefined`
+ * — the event then stays a plain error and the renderer never guesses a
+ * billing class from message text. Only the shared billing classes are
+ * forwarded, so the field's presence itself means "candidate billing block".
+ */
+export function readBillingErrorClassification(error: unknown): SessionBillingErrorClassification | undefined {
+  const source = error as { errorCode?: unknown; status?: unknown } | null
+  const errorCode = typeof source?.errorCode === 'string' ? source.errorCode : undefined
+  const status = typeof source?.status === 'number' ? source.status : undefined
+  const isBillingClass = isInsufficientCreditCode(errorCode) || status === 402 || status === 429
+  if (!isBillingClass) return undefined
+  return {
+    ...(errorCode !== undefined ? { errorCode } : {}),
+    ...(status !== undefined ? { status } : {}),
+  }
 }

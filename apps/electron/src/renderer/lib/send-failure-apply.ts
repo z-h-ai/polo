@@ -17,8 +17,9 @@
 import type { getDefaultStore } from 'jotai'
 import { i18n } from '@polo-ai/shared/i18n'
 import { toast } from 'sonner'
+import type { SessionBillingErrorClassification } from '@polo-ai/shared/protocol'
 import { sendFailureAtomFamily } from '@/atoms/sessions'
-import { classifySendFailure, type SendFailureOutcome } from './send-failure'
+import { classifyEventBillingBlock, classifySendFailure, type SendFailureOutcome } from './send-failure'
 import type { BillingLatchSourceLease } from './billing-refresh'
 
 export interface ApplySendFailureDeps {
@@ -116,4 +117,35 @@ export function applySendBlockedByLatch(
     draft,
     billingBlocked: true,
   })
+}
+
+/**
+ * POO-177 QUOTA-01 — apply the billing block a SESSION EVENT carried, for a
+ * turn the server itself terminated (a post-persist admission rejection on
+ * the error event, a provider 402 on the typed_error event). Same latch
+ * write and same source-lease binding as applySendFailure's billing branch;
+ * the transport differences stay out of the semantics: the optimistic bubble
+ * is already a server-confirmed message (nothing to strip) and its text is
+ * already persisted (parking it as a restorable draft would invite a
+ * duplicate send), so only the latch and its lease are written — the error
+ * bubble the event processor appends carries the failure text. A
+ * non-billing class, or an event without the classification, is a no-op.
+ */
+export function applyEventBillingBlock(
+  sessionId: string,
+  classification: SessionBillingErrorClassification | undefined,
+  deps: {
+    /** The Journey #1 billing latch setter (App-owned state). */
+    setBillingLatch: (issue: 'insufficient-credit' | 'quota-exhausted', quotaResetAt?: number) => void
+    /** POO-177: bind the latch's source lease — resolved by the caller at
+     * failure time, since an in-turn rejection has no renderer-captured
+     * send attempt to consume. */
+    onBindBillingLease: (lease: BillingLatchSourceLease) => void
+    resolveLease: () => BillingLatchSourceLease
+  },
+): void {
+  const outcome = classifyEventBillingBlock(classification)
+  if (!outcome) return
+  deps.setBillingLatch(outcome.issue, outcome.issue === 'quota-exhausted' ? outcome.quotaResetAt : undefined)
+  deps.onBindBillingLease(deps.resolveLease())
 }
