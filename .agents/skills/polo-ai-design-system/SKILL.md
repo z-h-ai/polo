@@ -81,6 +81,8 @@ Maintenance can create local Git changes but never authorizes commit, push, vers
 - `.agents/skills/polo-ai-design-system/tools/export-table-reference.py` — implementation; POO-171 real Markdown/datatable/GenUI fixture and observed smoke export; current styles only, no sticky fix or new design approval; SHA-256 `1815f4523e712a98d409676d349bae5be69be1cc51b73886a4ffe1904852ee61`
 - `.agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-quota-banner.tsx` — implementation; POO-177 current billing-banner states (member/owner insufficient-credit, U2 recheck secondary action); actions are local no-ops; refresh behaviour belongs to the implementation card; SHA-256 `e6fec8aa3fcbc0b45b1b6aa3b1c503465cdc3a6435b8c962464b350ee90c386e`
 - `.agents/skills/polo-ai-design-system/tools/export-quota-banner-references.py` — implementation; POO-177 reproducible native render to static smoke reference; single destructive banner asserted per case; runtime remains React; SHA-256 `0e745732553916d2e06631176b32b430e741cdf379981d0ee2c8c58719321a20`
+- `.agents/skills/polo-ai-design-system/assets/source-baseline/entries/baseline.html` — implementation; POO-177 regenerated entry bundle after the refreshable declaration fix; reviewed Skill asset rebind evidence, no new design approval; SHA-256 `43a54a84f2094b211c507e92fbadad2bfb39270c560aca53a0ece4f2a0e95b7b`
+- `.agents/skills/polo-ai-design-system/assets/source-baseline/index.html` — implementation; POO-177 regenerated build record (snapshot head, input fingerprint, output hashes) for the entry bundle; no new design approval; SHA-256 `3c42a6555b365a7381f22b3463906f920dc4732579c50fefa1a46a02fbc57405`
 
 ## Reuse
 

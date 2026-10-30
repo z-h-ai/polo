@@ -313,6 +313,18 @@
       "sha256": "0e745732553916d2e06631176b32b430e741cdf379981d0ee2c8c58719321a20",
       "role": "implementation",
       "scope": "POO-177 reproducible native render to static smoke reference; single destructive banner asserted per case; runtime remains React"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/source-baseline/entries/baseline.html",
+      "sha256": "43a54a84f2094b211c507e92fbadad2bfb39270c560aca53a0ece4f2a0e95b7b",
+      "role": "implementation",
+      "scope": "POO-177 regenerated entry bundle after the refreshable declaration fix; reviewed Skill asset rebind evidence, no new design approval"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/source-baseline/index.html",
+      "sha256": "3c42a6555b365a7381f22b3463906f920dc4732579c50fefa1a46a02fbc57405",
+      "role": "implementation",
+      "scope": "POO-177 regenerated build record (snapshot head, input fingerprint, output hashes) for the entry bundle; no new design approval"
     }
   ],
   "themes": [
