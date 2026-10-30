@@ -84,6 +84,13 @@ function kindOf(parts: string[], facts: BrowserActionFacts, policy: BrowserPolic
     const verb = parts[0]?.toLowerCase(), label = facts.name + ' ' + facts.href;
     if (facts.incomplete)
         return 'unknown';
+    // Navigation acts on the requested destination, not the current focus/form.
+    // Their labels can describe an unrelated unsubmitted payment or save button.
+    if (verb === 'navigate') {
+        const destination = parts.slice(1).join(' ').trim();
+        const configuredDanger = policy.policy.dangerousWords.some(word => destination.toLowerCase().includes(word.toLowerCase()));
+        return !destination || CORE_DANGER.test(destination) || configuredDanger ? 'unknown' : 'ordinary';
+    }
     const text = label + ' ' + facts.formText + ' ' + parts.slice(1).join(' ');
     const configuredDanger = policy.policy.dangerousWords.some(word => text.toLowerCase().includes(word.toLowerCase()));
     if (verb === 'evaluate' || verb === 'drag' || verb === 'upload')
@@ -92,7 +99,7 @@ function kindOf(parts: string[], facts: BrowserActionFacts, policy: BrowserPolic
         return 'unknown';
     if (['fill', 'type', 'select', 'paste'].includes(verb ?? ''))
         return facts.hasInlineMutation || configuredDanger ? 'unknown' : 'ordinary';
-    if (['navigate', 'back', 'forward'].includes(verb ?? ''))
+    if (['back', 'forward'].includes(verb ?? ''))
         return CORE_DANGER.test(text) || configuredDanger ? 'unknown' : 'ordinary';
     if (verb === 'scroll')
         return 'ordinary';

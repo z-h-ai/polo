@@ -381,14 +381,21 @@ export async function startInvocationCredentialProxy(
   const server = createServer(async (request, response) => {
     const controller = new AbortController()
     controllers.add(controller)
+    const cancelAdmission = () => { if (!response.writableEnded) controller.abort() }
+    response.once('close', cancelAdmission)
+    request.once('aborted', cancelAdmission)
     let finishRequest!: () => void
     const finished = new Promise<void>(resolve => { finishRequest = resolve })
     pending.add(finished)
-    const done = () => { controllers.delete(controller); pending.delete(finished); finishRequest() }
+    const done = () => {
+      response.off('close', cancelAdmission); request.off('aborted', cancelAdmission)
+      controllers.delete(controller); pending.delete(finished); finishRequest()
+    }
     let lease: ManagedBillingLease | undefined
     let observation: ManagedBillingObservation | undefined
     let completed = false
     let privateCorrelation: string | undefined
+    let admissionPending = false
     const complete = async (ended: boolean) => {
       if (!lease || completed) return
       completed = true
@@ -426,7 +433,9 @@ export async function startInvocationCredentialProxy(
         body = parsed.body
         requestedModel = parsed.model
         if (!targetSnapshot.credential) throw new Error('Managed upstream credential is unavailable')
-        lease = await options.billing.beforeSend({ model: parsed.model, requestBounds: parsed.requestBounds, hostRequestId: newManagedHostRequestId(), transportBaseUrl: targetSnapshot.upstreamBaseUrl.replace(/\/$/, ''), credentialFingerprint: createHash('sha256').update(targetSnapshot.credential).digest('hex') })
+        admissionPending = true
+        lease = await options.billing.beforeSend({ model: parsed.model, requestBounds: parsed.requestBounds, hostRequestId: newManagedHostRequestId(), transportBaseUrl: targetSnapshot.upstreamBaseUrl.replace(/\/$/, ''), credentialFingerprint: createHash('sha256').update(targetSnapshot.credential).digest('hex') }, { signal: controller.signal })
+        admissionPending = false
         const correlation = parseProviderCorrelation(lease.providerCorrelation)
         if (!correlation) throw new Error('Managed admission correlation is invalid')
         lease.assertCurrent()
@@ -455,8 +464,9 @@ export async function startInvocationCredentialProxy(
       await complete(false).catch(() => {})
       const code = (error as { errorCode?: string })?.errorCode
       const insufficientCredit = !!options.billing && isInsufficientCreditCode(code)
-      if (!response.headersSent) response.writeHead(insufficientCredit ? 402 : 502, { 'content-type': 'text/plain; charset=utf-8' })
-      response.end(insufficientCredit ? `POLO_INSUFFICIENT_CREDIT: ${setupI18n().t('billing.insufficientCredit')}` : 'Credential proxy upstream request failed')
+      const admissionTimeout = admissionPending && code === 'TIMEOUT'
+      if (!response.headersSent) response.writeHead(insufficientCredit ? 402 : admissionTimeout ? 504 : 502, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end(insufficientCredit ? `POLO_INSUFFICIENT_CREDIT: ${setupI18n().t('billing.insufficientCredit')}` : admissionTimeout ? 'POLO_BILLING_ADMISSION_TIMEOUT' : 'Credential proxy upstream request failed')
     } finally { done() }
   })
 

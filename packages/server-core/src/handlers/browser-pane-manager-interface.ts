@@ -171,12 +171,12 @@ export interface IBrowserPaneManager {
   // -- Instance management -------------------------------------------------
 
   /** Create a browser instance for a session (optionally shown) */
-  createForSession(sessionId: string, options?: { show?: boolean; workspaceId?: string | null }): string
+  createForSession(sessionId: string, options?: { show?: boolean; presentIfActive?: boolean; workspaceId?: string | null }): string
 
   /**
    * Async equivalent of {@link createForSession}. Required for the remote bridge.
    */
-  createForSessionAsync(sessionId: string, options?: { show?: boolean; workspaceId?: string | null }): Promise<string>
+  createForSessionAsync(sessionId: string, options?: { show?: boolean; presentIfActive?: boolean; workspaceId?: string | null }): Promise<string>
 
   /** Get instance info by ID (sync; local-only). For remote-aware code use {@link getInstanceAsync}. */
   getInstance(id: string): BrowserInstanceSnapshot | undefined

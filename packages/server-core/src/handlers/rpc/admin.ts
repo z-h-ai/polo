@@ -31,6 +31,7 @@ import {
 import { z } from 'zod'
 import { setNativeInstallationTransport } from '../../runtime/native-installations'
 import { setAssistantBillingTransport } from '../../runtime/assistant-billing'
+import { createAssistantBillingTransport } from '../../runtime/assistant-billing-transport'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -933,13 +934,7 @@ export function registerAdminHandlers(
     const session = await billingSession(scope)
     return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, billingOptions())
   })
-  setAssistantBillingTransport({
-    start: async (scope, input) => { const s = await billingSession(scope); return s.client.startAssistantRun(s.accessToken, input, billingOptions()) },
-    admit: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.admitAppRequest(s.accessToken, runId, input, billingOptions()) },
-    report: async (scope, input) => { const s = await billingSession(scope); return s.client.recordAppUsage(s.accessToken, input, billingOptions()) },
-    inspect: async (scope, runId, requestId) => { const s = await billingSession(scope); return s.client.getAppRequest(s.accessToken, runId, requestId, billingOptions()) },
-    finish: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.finishAppRun(s.accessToken, runId, input, billingOptions()) },
-  }, async () => {
+  setAssistantBillingTransport(createAssistantBillingTransport(billingSession), async () => {
     const manager = getCredentialManager(), adminOrigin = getAdminUrl()
     if (!adminOrigin) return null
     const snapshot = await sessions.capture(manager)

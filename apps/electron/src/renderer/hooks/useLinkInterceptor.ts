@@ -23,6 +23,14 @@ import { getLanguageFromPath } from '@/lib/file-utils'
 // For text-based files (code, markdown, json, text), content starts as null
 // while the file is being read, then gets populated.
 
+interface HTMLPreview {
+  scopeKey?: string | null
+  type: 'html'
+  filePath: string
+  content: string | null
+  error?: string
+}
+
 interface ImagePreview {
   /** Immutable ProductSpace context key this preview was opened under. */
   scopeKey?: string | null
@@ -74,13 +82,15 @@ interface TextPreview {
   error?: string
 }
 
-export type FilePreviewState =
+export type FilePreviewState = (
+  | HTMLPreview
   | ImagePreview
   | PDFPreview
   | CodePreview
   | MarkdownPreview
   | JSONPreview
   | TextPreview
+) & { ownerSessionId?: string | null }
 
 // ── Hook options ───────────────────────────────────────────────────────────────
 // Callbacks injected by App.tsx so the hook doesn't depend on window.electronAPI directly.
@@ -104,6 +114,7 @@ interface LinkInterceptorOptions {
    * reject a retained previous-scope preview synchronously during render
    * (Review R33/R34 scope-isolation boundary).
    */
+  sessionId?: () => string | null
   scopeKey?: () => string | null
 }
 
@@ -118,6 +129,9 @@ interface LinkInterceptorResult {
   openFileExternal: (path: string) => void
   /** Current preview state, drives which overlay renders in App.tsx */
   previewState: FilePreviewState | null
+  previewVisible: boolean
+  hidePreview: () => void
+  showPreview: () => void
   /** Close the preview overlay */
   closePreview: () => void
   /** Open the currently previewed file in external app */
@@ -133,18 +147,31 @@ interface LinkInterceptorResult {
 // ── Hook implementation ────────────────────────────────────────────────────────
 
 export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterceptorResult {
+  const [previewVisible, setPreviewVisible] = useState(false)
+  const requestRef = useRef(0)
   const [previewState, setPreviewState] = useState<FilePreviewState | null>(null)
 
   // Use refs for options so callbacks remain referentially stable.
   // Without this, every render creates a new options object → new callbacks → cascading
   // re-renders of AppShellContext and PlatformProvider consumers.
   const optionsRef = useRef(options)
-  useEffect(() => { optionsRef.current = options }, [options])
+  optionsRef.current = options
+  const selectedSessionId = options.sessionId?.() ?? null
+  const previousSessionId = useRef(selectedSessionId)
+  const sessionStale = !!options.sessionId && previewState !== null && previewState.ownerSessionId !== selectedSessionId
+  const sealedPreviewState = sessionStale ? null : previewState
+  useEffect(() => {
+    if (previousSessionId.current === selectedSessionId) return
+    previousSessionId.current = selectedSessionId
+    requestRef.current += 1
+    setPreviewState(null)
+    setPreviewVisible(false)
+  }, [selectedSessionId])
 
   // Also track previewState in a ref for the openCurrentExternal/revealCurrentInFinder
   // callbacks, so they don't need previewState in their dependency array.
-  const previewStateRef = useRef(previewState)
-  useEffect(() => { previewStateRef.current = previewState }, [previewState])
+  const previewStateRef = useRef(sealedPreviewState)
+  previewStateRef.current = sealedPreviewState
 
   /**
    * Main entry point for file link clicks.
@@ -157,7 +184,7 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
    * (e.g., @uiw/react-json-view crashes on null value).
    */
   const handleOpenFile = useCallback(async (path: string) => {
-    const classification = classifyFile(path)
+    const classification = /\.html?$/i.test(path) ? { type: 'html' as const, canPreview: true } : classifyFile(path)
 
     if (!classification.canPreview || !classification.type) {
       // No preview available — open in default external app
@@ -165,26 +192,28 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
       return
     }
 
+    const request = ++requestRef.current
+    setPreviewVisible(true)
     const type = classification.type
     // Seal the preview to the immutable scope that opened it (Review R33/R34).
     const scopeKey = optionsRef.current.scopeKey?.() ?? null
+    const ownerSessionId = optionsRef.current.sessionId?.() ?? null
 
     // For image/pdf: set state immediately — the overlay handles its own async loading
     if (type === 'image' || type === 'pdf') {
-      setPreviewState({ type, filePath: path, scopeKey })
+      setPreviewState({ type, filePath: path, scopeKey, ownerSessionId })
       return
     }
 
-    // For text-based files: read content first, then show overlay with content ready.
-    // Local filesystem reads are near-instant — no loading state needed.
+    const state = type === 'html' ? { type: 'html' as const, filePath: path, content: null } : buildInitialTextState(type, path)
+    setPreviewState({ ...state, scopeKey, ownerSessionId } as FilePreviewState)
+    const current = () => request === requestRef.current && scopeKey === (optionsRef.current.scopeKey?.() ?? null) && ownerSessionId === (optionsRef.current.sessionId?.() ?? null)
     try {
       const content = await optionsRef.current.readFile(path)
-      const state = buildInitialTextState(type, path)
-      setPreviewState({ ...state, content, scopeKey } as FilePreviewState)
+      if (current()) setPreviewState({ ...state, content, scopeKey, ownerSessionId } as FilePreviewState)
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to read file'
-      const state = buildInitialTextState(type, path)
-      setPreviewState({ ...state, content: '', error: errorMsg, scopeKey } as FilePreviewState)
+      if (current()) setPreviewState({ ...state, content: '', error: errorMsg, scopeKey, ownerSessionId } as FilePreviewState)
     }
   }, []) // Stable: uses optionsRef
 
@@ -200,7 +229,9 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
   }, []) // Stable: uses optionsRef
 
   const closePreview = useCallback(() => {
+    requestRef.current += 1
     setPreviewState(null)
+    setPreviewVisible(false)
   }, [])
 
   /** Open the currently previewed file in external app (from overlay header) */
@@ -233,7 +264,10 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
     handleOpenFile,
     handleOpenUrl,
     openFileExternal,
-    previewState,
+    previewState: sealedPreviewState,
+    previewVisible: !!sealedPreviewState && previewVisible,
+    hidePreview: useCallback(() => setPreviewVisible(false), []),
+    showPreview: useCallback(() => setPreviewVisible(true), []),
     closePreview,
     openCurrentExternal,
     revealCurrentInFinder,
