@@ -19,6 +19,7 @@ type AdminPreloadApi = Pick<
   | 'adminGetStatus'
   | 'adminSyncConnections'
   | 'adminPaymentHandoff'
+  | 'adminRefreshBilling'
   | 'adminSyncAppCatalog'
   | 'creatorAppPublish'
   | 'onAdminReauthRequired'
@@ -91,6 +92,9 @@ export function buildAdminPreloadApi(
     adminGetStatus: () =>
       client.invoke(RPC_CHANNELS.admin.GET_STATUS),
     adminPaymentHandoff: () => client.invoke(RPC_CHANNELS.admin.PAYMENT_HANDOFF),
+    // Comparison input travels verbatim; the main process validates it
+    // against the trusted scope (POO-177 QUOTA-01).
+    adminRefreshBilling: input => client.invoke(RPC_CHANNELS.admin.REFRESH_BILLING, input),
     adminSyncConnections: () =>
       client.invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
     adminSyncAppCatalog: (organizationId, options) =>

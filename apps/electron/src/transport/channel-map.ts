@@ -176,6 +176,7 @@ export const CHANNEL_MAP = {
   adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
   adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
   adminPaymentHandoff: invoke(RPC_CHANNELS.admin.PAYMENT_HANDOFF),
+  adminRefreshBilling: invoke(RPC_CHANNELS.admin.REFRESH_BILLING),
   adminSyncAppCatalog: invoke(RPC_CHANNELS.admin.SYNC_APP_CATALOG),
   creatorAppPublish: invoke(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP),
   onAdminReauthRequired: listener('admin:reauthRequired'),

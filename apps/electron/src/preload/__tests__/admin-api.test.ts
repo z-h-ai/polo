@@ -116,6 +116,26 @@ describe('admin preload RPC chain', () => {
     ])
   })
 
+  it('forwards the billing refresh comparison input verbatim (POO-177 QUOTA-01)', async () => {
+    const calls: unknown[][] = []
+    const api = buildAdminPreloadApi({
+      invoke: mock(async (...args: unknown[]) => {
+        calls.push(args)
+        return { success: true }
+      }),
+      on: mock(() => () => {}),
+    })
+    const input = {
+      expectedProductSpaceId: '11111111-2222-3333-4444-555555555555',
+      sessionId: 'session-1',
+      expectedConnectionSlug: 'polo-space-11111111-2222-3333-4444-555555555555',
+    }
+
+    await api.adminRefreshBilling(input)
+
+    expect(calls).toEqual([[RPC_CHANNELS.admin.REFRESH_BILLING, input]])
+  })
+
   it('gets an issuer-signed challenge through the production preload provider', async () => {
     let resolveCallback!: (payload: { query: Record<string, string> }) => void
     const callbackPromise = new Promise<{ query: Record<string, string> }>(resolve => {
