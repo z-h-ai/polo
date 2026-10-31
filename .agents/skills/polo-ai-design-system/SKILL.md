@@ -10,7 +10,7 @@ Adoption revision: `native-materials-r5-lifecycle-candidate-20261023`. Mode: `ex
 ## Applicability
 
 - Repository: `polo-ai`
-- Paths: `apps/electron/src/renderer`, `apps/electron/src/main`, `apps/electron/src/preload`, `docs/mvp-complete-flow-hifi`, `.agents/skills/polo-ai-design-system`, `packages/ui/src/components/chat`, `packages/ui/src/components/markdown`, `packages/ui/src/components/overlay`, `packages/ui/src/lib/tool-parsers.ts`
+- Paths: `.agents/skills/polo-ai-design-system`, `apps/electron/src/main`, `apps/electron/src/preload`, `apps/electron/src/renderer`, `docs/mvp-complete-flow-hifi`, `packages/ui/src/components/chat`, `packages/ui/src/components/markdown`, `packages/ui/src/components/overlay`, `packages/ui/src/components/terminal`, `packages/ui/src/lib/tool-parsers.ts`
 - Platforms: desktop-electron
 - Modules: 登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉
 
