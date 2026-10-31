@@ -4,14 +4,15 @@
   "repository": {
     "name": "polo-ai",
     "paths": [
-      "apps/electron/src/renderer",
+      ".agents/skills/polo-ai-design-system",
       "apps/electron/src/main",
       "apps/electron/src/preload",
+      "apps/electron/src/renderer",
       "docs/mvp-complete-flow-hifi",
-      ".agents/skills/polo-ai-design-system",
       "packages/ui/src/components/chat",
       "packages/ui/src/components/markdown",
       "packages/ui/src/components/overlay",
+      "packages/ui/src/components/terminal",
       "packages/ui/src/lib/tool-parsers.ts"
     ],
     "platforms": [
