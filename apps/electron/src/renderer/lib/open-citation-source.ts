@@ -127,7 +127,7 @@ export interface CitationSourceOpener {
 
 interface BrowserPaneApi {
   create(input?: { show?: boolean; bindToSessionId?: string }): Promise<string>
-  destroy(id: string): Promise<void>
+  destroy(id: string): Promise<boolean>
   list(): Promise<BrowserInstanceInfo[]>
   navigate(id: string, url: string): Promise<unknown>
   focus(id: string): Promise<void>
