@@ -18,7 +18,7 @@
     ]
   },
   "mode": "extracted",
-  "revision": "native-materials-r6-client-design-system-20261101",
+  "revision": "native-materials-r7-client-design-system-20261101",
   "sources": [
     {
       "path": "docs/client-journey-review/spec.md",
@@ -100,13 +100,13 @@
     },
     {
       "path": ".agents/skills/polo-client-design-system/references/page-baselines.md",
-      "sha256": "613fc0dcfce93ec23b6870d5e6d24a8ba07e8371ddbc548dfd907c35c2df8b19",
+      "sha256": "24081f569edf9a7bd549b53eea696e2f07f7638047d40b30248554cb9cf3e509",
       "role": "authority",
       "scope": "页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出"
     },
     {
       "path": ".agents/skills/polo-client-design-system/references/component-usage.md",
-      "sha256": "1378d84b106cb79d373de46ec0edef8cc33bf276c74accdd9e4b087541170988",
+      "sha256": "00e5eade23fe87d3d5fc8bea0f1f4dbcd2a881ed2b283aeac0dc111de238557e",
       "role": "authority",
       "scope": "组件素材索引：playground 与基线画廊双通道可再生展示注册、生产落点、token 桥梁；非权威素材边界"
     },
@@ -148,7 +148,7 @@
     },
     {
       "path": ".agents/skills/polo-client-design-system/tools/source-baseline/entries/scenes.tsx",
-      "sha256": "958a39ebee44cc66a3c674c69d0eaf5cdad27279c338e66d22ffc2d4d42b36ed",
+      "sha256": "4f3d1a4c1400b9c6ddebe67f7647e3fab12fb74851dc1bc19413994296c38429",
       "role": "implementation",
       "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
@@ -166,7 +166,7 @@
     },
     {
       "path": ".agents/skills/polo-client-design-system/tools/source-baseline/entries/fixtures.tsx",
-      "sha256": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820",
+      "sha256": "4beb42506635f7c6159e517caaa35d7916a21e2d279963dd1cf27525b8c5e560",
       "role": "implementation",
       "scope": "受控 fixture：真实类型 satisfies+zod parse，只替换后端数据（正常态默认，写接口仅内存完成，不存任何 secret）"
     },

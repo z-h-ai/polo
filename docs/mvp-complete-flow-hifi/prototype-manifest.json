@@ -454,8 +454,8 @@
   ],
   "default_story": "UI-refinement",
   "design": {
-    "revision": "native-materials-r6-client-design-system-20261101",
-    "sha256": "00603421df7f2d7c49e37a6b3b30f656caf27ccc7b3c0002876ab62f9248ea6c",
+    "revision": "native-materials-r7-client-design-system-20261101",
+    "sha256": "decf8c361a1568eb689acbac0dfbf1d920a8dec8c5480285df772a724f11e83e",
     "skill_path": ".agents/skills/polo-client-design-system/SKILL.md",
     "sources": [
       {
@@ -512,11 +512,11 @@
       },
       {
         "path": ".agents/skills/polo-client-design-system/references/page-baselines.md",
-        "sha256": "613fc0dcfce93ec23b6870d5e6d24a8ba07e8371ddbc548dfd907c35c2df8b19"
+        "sha256": "24081f569edf9a7bd549b53eea696e2f07f7638047d40b30248554cb9cf3e509"
       },
       {
         "path": ".agents/skills/polo-client-design-system/references/component-usage.md",
-        "sha256": "1378d84b106cb79d373de46ec0edef8cc33bf276c74accdd9e4b087541170988"
+        "sha256": "00e5eade23fe87d3d5fc8bea0f1f4dbcd2a881ed2b283aeac0dc111de238557e"
       },
       {
         "path": ".agents/skills/polo-client-design-system/tools/source-baseline/vite.config.mjs",
@@ -544,7 +544,7 @@
       },
       {
         "path": ".agents/skills/polo-client-design-system/tools/source-baseline/entries/scenes.tsx",
-        "sha256": "958a39ebee44cc66a3c674c69d0eaf5cdad27279c338e66d22ffc2d4d42b36ed"
+        "sha256": "4f3d1a4c1400b9c6ddebe67f7647e3fab12fb74851dc1bc19413994296c38429"
       },
       {
         "path": ".agents/skills/polo-client-design-system/tools/source-baseline/entries/gallery.tsx",
@@ -556,7 +556,7 @@
       },
       {
         "path": ".agents/skills/polo-client-design-system/tools/source-baseline/entries/fixtures.tsx",
-        "sha256": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820"
+        "sha256": "4beb42506635f7c6159e517caaa35d7916a21e2d279963dd1cf27525b8c5e560"
       },
       {
         "path": ".agents/skills/polo-client-design-system/tools/source-baseline/entries/baseline.css",
@@ -45634,28 +45634,28 @@
       "id": "client-workbench-template",
       "path": ".agents/skills/polo-client-design-system/references/client-workbench.template.html",
       "label": "客户端产品页面唯一维护模板",
-      "revision": "native-materials-r6-client-design-system-20261101",
+      "revision": "native-materials-r7-client-design-system-20261101",
       "sha256": "d50590c7bbd5ed6df9e206c3568188ebd8b20f620475e88078dd1cf80886b8f7"
     },
     {
       "id": "workbench-base-css",
       "path": ".agents/skills/polo-client-design-system/assets/tokens/workbench-base.css",
       "label": "最新原型提升的 b82fa1e5 基础样式",
-      "revision": "native-materials-r6-client-design-system-20261101",
+      "revision": "native-materials-r7-client-design-system-20261101",
       "sha256": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a"
     },
     {
       "id": "client-design-model",
       "path": ".agents/skills/polo-client-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
-      "revision": "native-materials-r6-client-design-system-20261101",
-      "sha256": "2977a372429618ae38b4380ecc46e70850be18a750861172616d0d9f3f63f6d4"
+      "revision": "native-materials-r7-client-design-system-20261101",
+      "sha256": "e9b6b97cd0c22764d7f7a7b9cfdea5688060580e858c80260ccf0800330965b9"
     },
     {
       "id": "client-design-foundations",
       "path": ".agents/skills/polo-client-design-system/references/foundations.md",
       "label": "当前客户端设计来源和消费边界",
-      "revision": "native-materials-r6-client-design-system-20261101",
+      "revision": "native-materials-r7-client-design-system-20261101",
       "sha256": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d"
     },
     {

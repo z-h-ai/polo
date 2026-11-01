@@ -24,11 +24,11 @@
 | 区域 | Skill 内场景（`assets/source-baseline/entries/baseline.html?scene=`） | 生产文件 |
 |---|---|---|
 | 登录 | `login-phone` / `login-password` / `login-error`（真实 OnboardingWizard 外层壳，含 useClientMaterialScope 材质画布） | `components/onboarding/OnboardingWizard.tsx` + `AdminLoginStep.tsx`/`PhoneAuthStep.tsx` |
-| 工作台整页 | `workspace-home` / `workspace-circle-detail`（真实 TabShell+TopBar+ClientHomeRouter，首页→圈子→详情产品路由） | `tab-browser/TabShell.tsx` + `app-shell/TopBar.tsx` + `circles/ClientHomeRouter.tsx` + `context/ClientPageContext.tsx` |
+| 工作台整页 | `workspace-home` / `workspace-assistant-tab` / `workspace-circle-detail`（真实 TabShell+TopBar+ClientHomeRouter，首页→圈子→详情产品路由；`workspace-assistant-tab` 经 openApp(POLO_APP_DEFINITION) 激活真实助手标签页） | `tab-browser/TabShell.tsx` + `app-shell/TopBar.tsx` + `circles/ClientHomeRouter.tsx` + `context/ClientPageContext.tsx` |
 | 工作台首页 | `home-page`（正常应用目录 + 圈子关系，异常态另列于目录 fixture 说明） | `tab-browser/HomePage.tsx` |
 | 圈子列表 | `circles-list`（付费+免费两条样例） | `circles/MyCirclesPage.tsx` + `MemberCircleRow.tsx` |
 | 圈子详情 | `circle-detail-content` / `circle-detail-updates` / `circle-detail-subscription`（可读订阅周期+续费预览契约） | `circles/CircleDetailPage.tsx` + `CircleSubscriptionPanel.tsx` |
-| 助手 | `chat-input-container` / `chat-turn-card` / `chat-turn-card-tasks`（整体复用 playground chat 注册的 wrapper/mockData 协议） | `playground/registry/chat.tsx` 消费的 InputContainer/TurnCard 生产组件 |
+| 助手 | `chat-input-container` / `chat-turn-card` / `chat-turn-card-tasks`（整体复用 playground chat 注册的 wrapper/mockData 协议）；`assistant-conversation` / `assistant-conversation-streaming`（真实 NavigationProvider→ChatDisplay 装配，与 App.tsx renderPolo 同组合）、`assistant-session-list`（真实 SessionList + 会话 fixture）、`product-space-skills-dialog`（管理技能对话框，实现事实登记；产品验收仍暂缓） | `playground/registry/chat.tsx` 消费的 InputContainer/TurnCard 生产组件；`app-shell/ChatDisplay.tsx` + `app-shell/SessionList.tsx` + `product-space/ProductSpaceSkillsDialog.tsx` |
 | 设置 | `settings-<注册表 key>`；完整集合见 baseline-manifest.json，另有账号安全未登录态 | `pages/settings/settings-pages.ts` + `pages/settings/*.tsx`（注册表自动遍历，不手抄场景目录） |
 
 Settings 分类注册（`registry/settings.tsx`，与本文联动校验；id 集合必须与下面列表一致）：

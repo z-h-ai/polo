@@ -18,8 +18,70 @@ import type {
   MemberMembership,
   MemberCircleEntitlement,
 } from '@polo-ai/shared/admin'
-import { ProductSpaceSummarySchema } from '@polo-ai/shared/product-spaces'
+import type { LoadedSkill } from '@polo-ai/shared/skills/types'
+import { ProductSpaceCatalogEntrySchema, ProductSpaceSummarySchema } from '@polo-ai/shared/product-spaces'
 import { mockSources } from '@/playground/mock-utils'
+import {
+  MOCK_LABELS,
+  MOCK_MESSAGES,
+  MOCK_SESSION_STATUSES,
+  MOCK_SESSIONS,
+  MOCK_SOURCES,
+  MOCK_SKILLS,
+  buildMockSession,
+} from '@/playground/demos/mobile-webui/mock-mobile-data'
+
+// Chat mock data rides the SAME playground registry protocol as the chat-*
+// scenes (playground mock + baseline fixture); re-exported so scenes.tsx has
+// a single fixture import surface.
+export {
+  MOCK_LABELS,
+  MOCK_SESSION_STATUSES,
+  MOCK_SESSIONS,
+  MOCK_SOURCES,
+  MOCK_SKILLS,
+}
+
+/**
+ * Polo assistant (chat) sessions for the ChatDisplay conversation scenes.
+ * The playground builder points sessions at the mobile demo workspace; the
+ * baseline re-homes them on the playground workspace so the scene, the
+ * NavigationProvider wrapper and the shell context all agree.
+ */
+export type BaselineAssistantSession = ReturnType<typeof buildMockSession>
+
+export function baselineAssistantSession(options?: {
+  streaming?: boolean
+  isProcessing?: boolean
+}): BaselineAssistantSession {
+  const streaming = options?.streaming ?? false
+  const messages = streaming
+    ? [
+      ...MOCK_MESSAGES.slice(0, -1),
+      {
+        ...MOCK_MESSAGES[MOCK_MESSAGES.length - 1],
+        id: 'm-baseline-streaming',
+        content: MOCK_MESSAGES[MOCK_MESSAGES.length - 1].content + '\n\n正在继续分析渲染管线…',
+        isStreaming: true,
+      },
+    ]
+    : MOCK_MESSAGES
+  return {
+    ...buildMockSession('baseline-assistant-session', {
+      messages,
+      isProcessing: options?.isProcessing ?? streaming,
+    }),
+    workspaceId: 'playground-workspace',
+    workspaceName: 'Playground',
+  }
+}
+
+/**
+ * Session list fixture for the assistant session-navigation scene: the
+ * playground set exercises flagged / unread / archived / status variety, so
+ * the baseline shows the same real list rendering without inventing data.
+ */
+export const fixtureSessionMetas = MOCK_SESSIONS
 
 // Parsed through the real shared schema — a drifted fixture fails loudly
 // instead of masquerading as a valid personal space.
@@ -207,6 +269,95 @@ function installOfflineSourceIcons(): void {
 }
 
 /** Patched onto window.electronAPI AFTER playground/mock-utils installs its mock. */
+// ---------------------------------------------------------------------------
+// ProductSpace skills dialog (管理技能) — catalog entries parsed through the
+// real shared schema. Authorization (sources), personal enablement (enabled)
+// and native preparation (getSkills → canonicalInstallation) stay separate,
+// mirroring the real dialog's three distinct states.
+// ---------------------------------------------------------------------------
+
+type SkillCatalogEntry = Extract<ReturnType<typeof ProductSpaceCatalogEntrySchema.parse>, { kind: 'skill' }>
+
+function fixtureSkillEntry(input: { entryId: string; instanceId: string; name: string; description: string; enabled: boolean; versionId: string; version: string }): SkillCatalogEntry {
+  const parsed = ProductSpaceCatalogEntrySchema.parse({
+    kind: 'skill',
+    catalogEntryId: input.entryId,
+    artifactInstanceId: input.instanceId,
+    name: input.name,
+    description: input.description,
+    availability: 'available',
+    version: { versionId: input.versionId, version: input.version },
+    enabled: input.enabled,
+    sources: [{ kind: 'creator_circle', circleId: 'circle-baseline-monthly', name: '晨星增长圈' }],
+    permissions: [],
+  })
+  if (parsed.kind !== 'skill') throw new Error('fixture: expected a skill catalog entry')
+  return parsed
+}
+
+export const fixtureSkillEntries = [
+  fixtureSkillEntry({
+    entryId: 'entry-skill-weekly-report',
+    instanceId: 'instance-skill-weekly-report',
+    name: '团队周报助手',
+    description: '把本周会话与任务进展整理成结构化周报草稿。',
+    enabled: true,
+    versionId: 'artifact-version-weekly-2',
+    version: '1.2.0',
+  }),
+  fixtureSkillEntry({
+    entryId: 'entry-skill-data-clean',
+    instanceId: 'instance-skill-data-clean',
+    name: '数据清洗脚本',
+    description: '按团队规范清洗与对齐导出的表格数据。',
+    enabled: false,
+    versionId: 'artifact-version-data-clean-1',
+    version: '0.9.1',
+  }),
+]
+
+// Authorization withdrawn for one entry: the dialog keeps the row visible and
+// offers clearing the previous enablement choice instead of hiding history.
+export const fixtureWithdrawnSkillEntries = [
+  fixtureSkillEntry({
+    entryId: 'entry-skill-retired',
+    instanceId: 'instance-skill-retired',
+    name: '旧版发布清单',
+    description: '授权已结束的历史技能，保留供清理之前的启用状态。',
+    enabled: true,
+    versionId: 'artifact-version-retired-1',
+    version: '1.0.0',
+  }),
+]
+
+// One natively prepared skill (canonical source matches the fixture space and
+// account) — the dialog shows "Current version prepared" for it; the other
+// enabled entry stays unprepared so its download/update action is offered.
+export const fixtureInstalledSkills: LoadedSkill[] = [
+  {
+    slug: 'team-weekly-report',
+    metadata: { name: '团队周报助手', description: '把本周会话与任务进展整理成结构化周报草稿。' },
+    content: '',
+    path: '/Users/baseline/.polo-ai/skills/team-weekly-report',
+    source: 'workspace',
+    canonicalInstallation: {
+      artifactId: 'artifact-weekly-report',
+      slug: 'team-weekly-report',
+      version: '1.2.0',
+      archiveChecksum: 'sha256-baseline-checksum',
+      contentDigest: 'sha256-baseline-content',
+      installedAt: '2026-11-01T00:00:00.000Z',
+      canonicalSource: {
+        accountId: 'baseline-account',
+        productSpaceId: 'personal-space',
+        subjectKind: 'personal_artifact',
+        subjectId: 'instance-skill-weekly-report',
+        versionId: 'artifact-version-weekly-2',
+      },
+    },
+  } satisfies LoadedSkill,
+]
+
 export function installBaselineApiFixtures(api: Record<string, unknown>) {
   // Must run before any component reads the shared mockSources array.
   installOfflineSourceIcons()
@@ -370,6 +521,46 @@ export function installBaselineApiFixtures(api: Record<string, unknown>) {
     getUpdates: () => Promise.resolve({ success: true, updates: { availability: 'upstream_pending', contractGap: 'G2' } }),
     getProfile: () => Promise.resolve({ success: true, profile: { availability: 'upstream_pending', contractGap: 'G3' } }),
     getSupport: () => Promise.resolve({ success: true, support: { availability: 'upstream_pending', contractGap: 'G4' } }),
+  }
+  // ProductSpace skills dialog (管理技能, D-ASSISTANT-REUSE deferred page):
+  // read path serves the parsed fixture catalog; the two write handlers
+  // complete in-memory ONLY (same contract as the settings toggles above).
+  api.productSpaceListSkills = (productSpaceId: string) => Promise.resolve({
+    success: true as const,
+    productSpaceId,
+    accessMode: 'active',
+    entries: fixtureSkillEntries,
+    withdrawnEntries: fixtureWithdrawnSkillEntries,
+  })
+  api.getSkills = (_workspaceId: string, _workingDirectory?: string) => Promise.resolve(fixtureInstalledSkills)
+  api.productSpaceSetSkillEnablement = (_spaceId: string, instanceId: string, enabled: boolean) => {
+    for (const entry of fixtureSkillEntries) {
+      if (entry.artifactInstanceId === instanceId) entry.enabled = enabled
+    }
+    return Promise.resolve({
+      success: true as const,
+      mutation: { productSpaceId: 'personal-space', artifactInstanceId: instanceId, enabled },
+      catalog: { entries: fixtureSkillEntries },
+    })
+  }
+  api.productSpaceInstallSkill = (_spaceId: string, instanceId: string) => {
+    const entry = fixtureSkillEntries.find(candidate => candidate.artifactInstanceId === instanceId)
+    if (!entry) return Promise.resolve({ success: false as const, errorCode: 'not_found', message: 'fixture: unknown skill' })
+    fixtureInstalledSkills[0] = {
+      ...fixtureInstalledSkills[0],
+      slug: 'prepared-' + instanceId,
+      canonicalInstallation: {
+        ...fixtureInstalledSkills[0].canonicalInstallation!,
+        slug: 'prepared-' + instanceId,
+        version: entry.version.version,
+        canonicalSource: {
+          ...fixtureInstalledSkills[0].canonicalInstallation!.canonicalSource,
+          subjectId: instanceId,
+          versionId: entry.version.versionId,
+        },
+      },
+    }
+    return Promise.resolve({ success: true as const })
   }
 }
 

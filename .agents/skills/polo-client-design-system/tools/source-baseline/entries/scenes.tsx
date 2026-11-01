@@ -12,14 +12,31 @@ import { HomePage } from '@/components/tab-browser/HomePage'
 import { TabShell } from '@/components/tab-browser/TabShell'
 import { MyCirclesPage } from '@/components/circles/MyCirclesPage'
 import { CircleDetailPage } from '@/components/circles/CircleDetailPage'
+import { ChatDisplay } from '@/components/app-shell/ChatDisplay'
+import { SessionList } from '@/components/app-shell/SessionList'
+import { ProductSpaceSkillsDialog } from '@/components/product-space/ProductSpaceSkillsDialog'
 import { ClientPageProvider, useClientPage } from '@/context/ClientPageContext'
 import { AppShellProvider, useOptionalAppShellContext, type AppShellContextType } from '@/context/AppShellContext'
+import { useTabShell } from '@/context/TabShellContext'
+import { FocusProvider } from '@/context/FocusContext'
 import { SETTINGS_PAGE_COMPONENTS } from '@/pages/settings/settings-pages'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { ActionRegistryProvider } from '@/actions/registry'
 import { chatComponents } from '@/playground/registry/chat'
+// Real built-in app constant for openApp — resolving outside the renderer
+// tree on purpose: the tab id/app id pair must stay the production one.
+import { POLO_APP_DEFINITION } from '../../../../../../apps/electron/src/shared/tab-browser-types'
 import { ComponentGallery } from './gallery'
-import { productSpaceFixture } from './fixtures'
+import {
+  baselineAssistantSession,
+  fixtureSessionMetas,
+  MOCK_LABELS,
+  MOCK_SESSION_STATUSES,
+  MOCK_SOURCES,
+  MOCK_SKILLS,
+  productSpaceFixture,
+  type BaselineAssistantSession,
+} from './fixtures'
 
 /**
  * Login scenes render through the REAL OnboardingWizard shell — the component
@@ -115,6 +132,109 @@ function messagingWrapper({ children }: { children: ReactNode }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Polo assistant (chat) assembly. The production Polo tab mounts
+// NavigationProvider → ChatDisplay (App.tsx renderPolo); these scenes reuse
+// that exact composition. ChatDisplay reads the FocusZone context, which the
+// baseline entry does not provide — scenes add FocusProvider on top.
+// ---------------------------------------------------------------------------
+
+/** Fixed fixture sessions — module-level so ChatDisplay sees stable props. */
+const assistantSession = baselineAssistantSession()
+const assistantSessionStreaming = baselineAssistantSession({ streaming: true })
+
+function AssistantChatSurface(props: { session: BaselineAssistantSession }) {
+  return (
+    <FocusProvider>
+      {messagingWrapper({
+        children: (
+          <div className="flex h-[680px] flex-col overflow-hidden rounded-lg border border-border bg-background">
+            <ChatDisplay
+              session={props.session}
+              onSendMessage={() => {}}
+              onOpenFile={() => {}}
+              onOpenUrl={() => {}}
+              currentModel="baseline-model"
+              inputValue=""
+              onInputChange={() => {}}
+              sources={MOCK_SOURCES}
+              onSourcesChange={() => {}}
+              skills={MOCK_SKILLS}
+              labels={MOCK_LABELS}
+              onLabelsChange={() => {}}
+              sessionStatuses={MOCK_SESSION_STATUSES}
+              onSessionStatusChange={() => {}}
+              workspaceId="playground-workspace"
+            />
+          </div>
+        ),
+      })}
+    </FocusProvider>
+  )
+}
+
+function assistantConversationScene(id: string, title: string, note: string, session: BaselineAssistantSession): BaselineScene {
+  return {
+    id,
+    region: '助手',
+    title,
+    note,
+    render: () => <AssistantChatSurface session={session} />,
+  }
+}
+
+/** Session navigation (会话导航): the REAL SessionList over playground metas. */
+function assistantSessionListScene(): BaselineScene {
+  return {
+    id: 'assistant-session-list',
+    region: '助手',
+    title: 'SessionList（会话导航列表）',
+    note: '真实列表组件；条目来自 playground 会话 fixture（flagged/unread/archived/状态各异），回调为受控 no-op。',
+    render: () => (
+      <div className="h-[680px] w-[340px] overflow-hidden rounded-lg border border-border bg-background">
+        <FocusProvider>
+          {messagingWrapper({
+            children: (
+              <SessionList
+                items={fixtureSessionMetas}
+                onDelete={async () => false}
+                onMarkUnread={() => {}}
+                onSessionStatusChange={() => {}}
+                onRename={() => {}}
+                onFlag={() => {}}
+                onUnflag={() => {}}
+                onArchive={() => {}}
+                onUnarchive={() => {}}
+                onSessionSelect={() => {}}
+                sessionStatuses={MOCK_SESSION_STATUSES}
+                labels={MOCK_LABELS}
+                onLabelsChange={() => {}}
+                workspaceId="playground-workspace"
+              />
+            ),
+          })}
+        </FocusProvider>
+      </div>
+    ),
+  }
+}
+
+/**
+ * 管理技能 dialog (Spec-deferred page, D-ASSISTANT-REUSE): records the REAL
+ * dialog's current rendering only. Catalog/enablement/preparation states come
+ * from the parsed fixture catalog; writes complete in-memory. This scene is an
+ * implementation-fact registration, NOT product acceptance for the page.
+ */
+function productSpaceSkillsDialogScene(): BaselineScene {
+  return {
+    id: 'product-space-skills-dialog',
+    region: '助手',
+    title: 'ProductSpaceSkillsDialog（管理技能）',
+    note: '真实对话框组件；目录条目/授权来源/启用与准备状态由共享 schema parse 后的 fixture 提供（含授权结束条目），写操作内存完成。Spec 对该页暂缓产品验收——本场景仅登记当前实现事实。',
+    render: () => <ProductSpaceSkillsDialog onClose={() => {}} />,
+  }
+}
+
 /**
  * Account-security normal state (R11): the REAL page gates its password form
  * on useOptionalAppShellContext().currentAdminUser. This wrapper re-provides
@@ -188,7 +308,40 @@ function settingsScenes(): BaselineScene[] {
 function workspacePoloPlaceholder() {
   return (
     <div className="flex h-full min-h-0 items-center justify-center text-sm text-muted-foreground">
-      Polo 助手标签页（本场景聚焦工作台 home 分支；助手素材见 chat-* 场景）
+      Polo 助手标签页（本场景聚焦工作台 home 分支；助手素材见 chat-* 与 assistant-* 场景）
+    </div>
+  )
+}
+
+/**
+ * The REAL Polo tab content (App.tsx renderPolo composition): NavigationProvider
+ * → ChatDisplay. Session writes are fixture no-ops; the conversation fixture is
+ * the same one the assistant-* scenes render.
+ */
+function workspacePoloSurface() {
+  return (
+    <div data-testid="polo-app-root" className="flex h-full min-h-0 flex-col text-foreground">
+      <div className="flex-1 min-h-0">
+        <FocusProvider>
+          {messagingWrapper({ children: <ChatDisplay
+            session={assistantSession}
+            onSendMessage={() => {}}
+            onOpenFile={() => {}}
+            onOpenUrl={() => {}}
+            currentModel="baseline-model"
+            inputValue=""
+            onInputChange={() => {}}
+            sources={MOCK_SOURCES}
+            onSourcesChange={() => {}}
+            skills={MOCK_SKILLS}
+            labels={MOCK_LABELS}
+            onLabelsChange={() => {}}
+            sessionStatuses={MOCK_SESSION_STATUSES}
+            onSessionStatusChange={() => {}}
+            workspaceId="playground-workspace"
+          /> })}
+        </FocusProvider>
+      </div>
     </div>
   )
 }
@@ -205,12 +358,31 @@ function NavigateOnceToCircleDetail(props: { circleId: string; section: 'content
   return null
 }
 
+/** Opens the REAL built-in assistant tab once on mount (same call HomePage makes). */
+function NavigateOnceToPoloTab() {
+  const { openApp, isReady } = useTabShell()
+  const fired = useRef(false)
+  useEffect(() => {
+    // TabShellProvider hydrates asynchronously and resets the active tab to
+    // HOME after restore — opening before its isReady gate would be undone.
+    if (!isReady || fired.current) return
+    fired.current = true
+    openApp(POLO_APP_DEFINITION)
+  }, [isReady, openApp])
+  return null
+}
+
 function workspaceShellScene(
   id: string,
   title: string,
   note: string,
-  deepRoute?: { circleId: string; section: 'content' | 'updates' | 'subscription' },
+  options?: {
+    deepRoute?: { circleId: string; section: 'content' | 'updates' | 'subscription' }
+    /** Mount with the assistant tab active instead of the home branch. */
+    poloTab?: boolean
+  },
 ): BaselineScene {
+  const { deepRoute, poloTab } = options ?? {}
   return {
     id,
     region: '工作台整页',
@@ -227,7 +399,8 @@ function workspaceShellScene(
           }}
         >
           {deepRoute ? <NavigateOnceToCircleDetail {...deepRoute} /> : null}
-          <TabShell renderPolo={workspacePoloPlaceholder} />
+          {poloTab ? <NavigateOnceToPoloTab /> : null}
+          <TabShell renderPolo={poloTab ? workspacePoloSurface : workspacePoloPlaceholder} />
         </ClientPageProvider>
       </div>
     ),
@@ -307,16 +480,36 @@ export const baselineScenes: BaselineScene[] = [
     render: () => <CircleDetailPage circleId="circle-baseline-monthly" section="subscription" />,
   },
   ...chatScenes,
+  assistantConversationScene(
+    'assistant-conversation',
+    'ChatDisplay（会话流 · 正常态）',
+    '真实 Polo 标签页装配（NavigationProvider→ChatDisplay，与 App.tsx renderPolo 同组合）；会话 fixture 为多轮 markdown/代码块，输入区/来源/标签/状态条为真实组件。',
+    assistantSession,
+  ),
+  assistantConversationScene(
+    'assistant-conversation-streaming',
+    'ChatDisplay（会话流 · 流式输出中）',
+    '同一装配；末条消息 isStreaming 且 isProcessing=true，展示流式渲染与运行态。',
+    assistantSessionStreaming,
+  ),
+  assistantSessionListScene(),
+  productSpaceSkillsDialogScene(),
   workspaceShellScene(
     'workspace-home',
     'TabShell 工作台整页 · 首页路由',
-    '真实 TabShell（TopBar+TabContent）+ ClientPageProvider + ClientHomeRouter；首页→我的圈子→详情为产品自身 navigate/back。Polo 标签页为占位（助手见 chat-*）。',
+    '真实 TabShell（TopBar+TabContent）+ ClientPageProvider + ClientHomeRouter；首页→我的圈子→详情为产品自身 navigate/back。Polo 标签页为占位（助手见 chat-* 与 assistant-*）。',
+  ),
+  workspaceShellScene(
+    'workspace-assistant-tab',
+    'TabShell 工作台整页 · Polo 助手标签页',
+    '同一壳组合；mount 后经 openApp(POLO_APP_DEFINITION) 打开真实助手标签页，标签内容为 NavigationProvider→ChatDisplay 真实装配（会话为 fixture）。',
+    { poloTab: true },
   ),
   workspaceShellScene(
     'workspace-circle-detail',
     'TabShell 工作台整页 · 圈子详情深路由',
     '同一壳组合，mount 后经 useClientPage().navigate 定位到晨星增长圈详情；顶栏返回/面包屑为真实路由栈。',
-    { circleId: 'circle-baseline-monthly', section: 'content' },
+    { deepRoute: { circleId: 'circle-baseline-monthly', section: 'content' } },
   ),
   ...settingsScenes(),
 ]

@@ -1,9 +1,9 @@
 {
-  "design_revision": "native-materials-r6-client-design-system-20261101",
+  "design_revision": "native-materials-r7-client-design-system-20261101",
   "entry": "entries/baseline.html",
   "entry_self_contained": "entries/baseline.html inlines its JS and CSS (vite inlineDynamicImports + single-file transform), so it opens and runs directly from file:// with no server and no external request.",
   "files": {
-    "entries/baseline.html": "057e0c0257e8ecb379327087c70d42842294731ecb83c52337ec7aa4c052a5ff"
+    "entries/baseline.html": "df407a0371952b03e497aa603d30003865997339b393c2f294b0a691dab68118"
   },
   "fixture_scope": "Fixtures replace BACKEND DATA only (playground mock + baseline fixtures); every rendered element comes from the renderer sources consumed by this build. They do not represent real backend behavior.",
   "generator": {
@@ -29,10 +29,10 @@
       "entries/baseline.css": "3f708acb93832bbb1340748efaa4ae032b0eff163282f5e8c1c6ffb7e16e1cf6",
       "entries/baseline.html": "262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc",
       "entries/baseline.tsx": "ff38a5bc0d91f481f544e0ec97affbac962347de06217acb80560860050ff8f2",
-      "entries/fixtures.tsx": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820",
+      "entries/fixtures.tsx": "4beb42506635f7c6159e517caaa35d7916a21e2d279963dd1cf27525b8c5e560",
       "entries/gallery.tsx": "3718396018601dae4af76f4fb9b9820dfc29628e748fd83f9d8c3c54208163fc",
       "entries/scene-ids.ts": "95ce8fbb7474bdb0fc408c7cc23ab6dd710f24374d794f896dea824e2b477b9f",
-      "entries/scenes.tsx": "958a39ebee44cc66a3c674c69d0eaf5cdad27279c338e66d22ffc2d4d42b36ed",
+      "entries/scenes.tsx": "4f3d1a4c1400b9c6ddebe67f7647e3fab12fb74851dc1bc19413994296c38429",
       "scene-ids-runner.cjs": "4af8277faaf90e266f9a5051f5379d8abde722fb0f9c187f598fd969de9f2975",
       "tsconfig.json": "fe55756c85d43c98d8776a79b18188dc89dbe873ebf6eb9b5e79ffc8b3f6e0e4",
       "vite.config.mjs": "8ee2ead08fa1bcce8c2cea675fea02e15e989cc2d42c2461c07cc14194e452f4",
@@ -42,7 +42,7 @@
     "typecheck_exit": 0,
     "vite_exit": 0
   },
-  "input_fingerprint": "a2a0274c7d7fe7c833a4499fd2981e8503c46172d587720cc872c5db433a1a12",
+  "input_fingerprint": "b7789f0d0df14ba69f1299ef189452583976fbe24599569cfeab46a3ae34edc9",
   "inputs": {
     "lockfiles": {
       "bun.lock": "fe2e8fd7b68cce1439e4f5e4148e2a0f92b380ab5620e75bf1aa87a435c3916e",
@@ -56,6 +56,7 @@
       "@floating-ui/dom": "1.7.4",
       "@floating-ui/react-dom": "2.1.6",
       "@floating-ui/utils": "0.2.10",
+      "@leeoniya/ufuzzy": "1.0.19",
       "@paper-design/shaders": "0.0.69",
       "@paper-design/shaders-react": "0.0.69",
       "@pierre/diffs": "1.0.5",
@@ -367,9 +368,9 @@
       ".agents/skills/polo-client-design-system/tools/source-baseline/entries/baseline.css": "3f708acb93832bbb1340748efaa4ae032b0eff163282f5e8c1c6ffb7e16e1cf6",
       ".agents/skills/polo-client-design-system/tools/source-baseline/entries/baseline.html": "262b459b4a4778ebf03da8bed6e26e7dba9cb698241b6c827b427206225e22bc",
       ".agents/skills/polo-client-design-system/tools/source-baseline/entries/baseline.tsx": "ff38a5bc0d91f481f544e0ec97affbac962347de06217acb80560860050ff8f2",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/fixtures.tsx": "291dc5c3fb523d6b52b4e61acdf472da88dfdcf642eda9c0a677806e03628820",
+      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/fixtures.tsx": "4beb42506635f7c6159e517caaa35d7916a21e2d279963dd1cf27525b8c5e560",
       ".agents/skills/polo-client-design-system/tools/source-baseline/entries/gallery.tsx": "3718396018601dae4af76f4fb9b9820dfc29628e748fd83f9d8c3c54208163fc",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/scenes.tsx": "958a39ebee44cc66a3c674c69d0eaf5cdad27279c338e66d22ffc2d4d42b36ed",
+      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/scenes.tsx": "4f3d1a4c1400b9c6ddebe67f7647e3fab12fb74851dc1bc19413994296c38429",
       "apps/electron/package.json": "6402c8e9f6c6de1e6951d72f553367c9420b64f0b57510df1d6eb3915f72a977",
       "apps/electron/resources/icon.png": "5fe6f3ac7876d19aaf0f1080833a9dba4ea91a5ffe0d9833666a370ff7837005",
       "apps/electron/resources/themes/catppuccin.json": "a3c8cc47ba1fcdf284ff7a3c23b108ecd39640b2a43edd6545b6095a6c43cf02",
@@ -827,6 +828,7 @@
       "apps/electron/src/renderer/context/MemberCircleResourceContext.tsx": "8d4fa62f0d49e8760401567434a3fd93b0d7173185992c89cefdcc1ec8a39a80",
       "apps/electron/src/renderer/context/ModalContext.tsx": "b339fa4ee17996f08233b27654dc403d6a1ebdcf78a7f1a78d1db52ba43260aa",
       "apps/electron/src/renderer/context/ProductSpaceContext.tsx": "6dfa36ed5faea57f4b8854eed139e00071f70ff36be92c49bbf43399437d32fd",
+      "apps/electron/src/renderer/context/SessionListContext.tsx": "2e659151fffd3a8e89d4a227a06a6b74b0787c8a0f372bcbee63cc7b321019df",
       "apps/electron/src/renderer/context/StoplightContext.tsx": "b32de67e7d29ec1a275b86a73cefa8266188802874b97e0203ab0654ca6a7a76",
       "apps/electron/src/renderer/context/TabShellContext.tsx": "488be59facc3b145752b5692efbc66a299b2bc6a7dd2c5e90fdb5694cfe391ca",
       "apps/electron/src/renderer/context/ThemeContext.tsx": "3bfa8fef6c20e0baf7dab1792635eb1808b4aa93f2e53c366880b2e8c7cc6a80",
@@ -936,6 +938,7 @@
       "apps/electron/src/renderer/lib/navigate.ts": "fbdda27cd70ae677d253d7aff5ae69706d0bd3f47474973067b3a353d6a68922",
       "apps/electron/src/renderer/lib/new-window-request.ts": "e8638216ca63d448ef28d14bd1e6f554db2f743b9f688e659af7fe5bc07b5c3b",
       "apps/electron/src/renderer/lib/overlay-detection.ts": "d1d937622185e95b6e8a44defe15c2fb142586a86db2dd6fb15878f8bf4ef991",
+      "apps/electron/src/renderer/lib/perf.ts": "239fd11436299b2baaba749c7cb563e1bddc6ebb203bae09fd76a768a89e351d",
       "apps/electron/src/renderer/lib/platform.ts": "c07b4e47b70b8402b4783d389515672e31de1aa9e258d29e133b9fb8dec6fa6e",
       "apps/electron/src/renderer/lib/product-space-app-launch-handoff.ts": "59d6eda11dffe9b0b5c699f0395969f9d37ea94f5457f88fd6beb9482bbaf36e",
       "apps/electron/src/renderer/lib/product-space-contract-failure.ts": "2e6df10152805dce0c2c980fcd6748b066b3ac6e6bd4cfedc1a9491133cd365b",
@@ -1122,6 +1125,8 @@
       "packages/shared/src/protocol/local-apps.ts": "1dfa398a7782ce4c46b821cd942886eba9077b993dc9cf99afb068718759f52b",
       "packages/shared/src/protocol/routing.ts": "a1242abe6f2752d4920ed0c5b70fb1d4398f2093e10e933cd396888ffbe6fbb6",
       "packages/shared/src/protocol/types.ts": "c4e2c4b68553cd73c11a82ee60dc79ea1faec8cc73d2d879451233d1f16d6485",
+      "packages/shared/src/search/fuzzy.ts": "b71e6219a73b0059fab21d450a2c9f281e2e770425b9b3eccc033cd3f0564f16",
+      "packages/shared/src/search/index.ts": "051225515b6900ae688974d4dcccd1a6d11cb5f3000a1a5aa33dcaff89fcd859",
       "packages/shared/src/skills/types.ts": "4a5d57da6793cdf4fa149c11025c23757c88edaa7d03bbbc24008cd6101d10f4",
       "packages/shared/src/utils/icon-constants.ts": "0c283b2ece8691116d787425396ca5383487921b5b3a99c132ce8f2186f085e2",
       "packages/shared/src/utils/toolNames.ts": "39ac653e00a4715b6ce4601da6efa43d5924e9b73f37567d242a733c1ee7fb87",
@@ -1379,8 +1384,33 @@
       "region": "助手"
     },
     {
+      "fullBleed": false,
+      "id": "assistant-conversation",
+      "region": "助手"
+    },
+    {
+      "fullBleed": false,
+      "id": "assistant-conversation-streaming",
+      "region": "助手"
+    },
+    {
+      "fullBleed": false,
+      "id": "assistant-session-list",
+      "region": "助手"
+    },
+    {
+      "fullBleed": false,
+      "id": "product-space-skills-dialog",
+      "region": "助手"
+    },
+    {
       "fullBleed": true,
       "id": "workspace-home",
+      "region": "工作台整页"
+    },
+    {
+      "fullBleed": true,
+      "id": "workspace-assistant-tab",
       "region": "工作台整页"
     },
     {
@@ -1456,8 +1486,11 @@
   ],
   "schema_version": 2,
   "snapshot": {
-    "head": "aca163927b9c7dda2cc351d76dcff09c487d0d78",
-    "head_dirty": [],
+    "head": "6511dcfe452188a80f6ad1efbf9e719ca534f6f4",
+    "head_dirty": [
+      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/fixtures.tsx",
+      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/scenes.tsx"
+    ],
     "note": "Input state at the time the inputs LAST changed (git head plus uncommitted/untracked input paths of THIS build). Currency is proven by inputs hashes + regeneration, not by comparing this snapshot to the current git state."
   }
 }
