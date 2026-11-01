@@ -95,6 +95,45 @@ test('a second coordinator cannot delete another sender admission while it is pe
     expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
   } finally { f.close() }
 })
+
+test('receipt disk recovery keeps its admitted queue after capability changes', async () => {
+  let fail = true, recovery = true, reports = 0
+  const f = setup({ capabilities: async () => ({ preparation: true, recovery }), prepare: async (_, runId, input) => ack(runId, input.requestId),
+    report: async (_, receipt) => { reports++; expect(receipt.outputTokens).toBe(2); return { settlement: 'confirmed' } }, finish: async () => {},
+  })
+  const stage = f.admittedOutbox.stageReceipt.bind(f.admittedOutbox)
+  f.admittedOutbox.stageReceipt = (scope, value) => { if (fail) throw new Error('ENOSPC'); return stage(scope, value) }
+  try {
+    const ticket = await f.coordinator.hooks(f.scope, () => true).beforeSend(facts())
+    await expect(ticket.complete({ inputTokens: 3, outputTokens: 2, actualModel: 'owned-model', outputDisposition: 'usable', provenance: 'provider_final' })).rejects.toThrow('ENOSPC')
+    recovery = false; fail = false
+    await f.coordinator.recover(f.scope.accountId, f.scope.adminOrigin)
+    expect(reports).toBe(1)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+    expect(f.outbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+  } finally { f.close() }
+})
+
+test('recovery capability shares the existing probe and keeps warm preparation at one HTTP write', async () => {
+  const calls: string[] = []
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    const path = new URL(request.url).pathname; calls.push(`${request.method} ${path}`)
+    if (path === '/api/auth/config') return Response.json({ phoneAuthEnabled: false, selfRegistrationEnabled: false, assistantPreparationVersion: 1, assistantRecoveryVersion: 1 })
+    const body = await request.json() as any
+    return Response.json(ack(body.runId, body.admission.requestId))
+  } })
+  const client = new AdminClient(`http://127.0.0.1:${server.port}`)
+  const cache = new AssistantBillingCapability<{ preparation: boolean; recovery: boolean }>()
+  const f = setup({ capabilities: scope => cache.read(scope, () => client.getAssistantBillingCapabilities()), prepare: (_, runId, admission) => client.prepareAssistantRequest('fixture', { runId, admission }) })
+  try {
+    await f.coordinator.hooks(f.scope, () => true).beforeSend(facts())
+    const cold = calls.length
+    await f.coordinator.hooks(f.scope, () => true).beforeSend(facts())
+    expect(cold).toBe(2); expect(calls.length - cold).toBe(1)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(2)
+    expect(f.outbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+  } finally { f.close(); await server.stop(true) }
+})
 function ack(runId: string, requestId: string) { return { runId, request: { requestId, state: 'admitted', providerCorrelation: { nonce: 'a'.repeat(32), header: 'X-Polo-Request-Id' } }, idempotent: false } }
 
 test('two model rounds each prepare once with independent durable identities', async () => {

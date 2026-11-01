@@ -4,6 +4,7 @@ import { SkillTurnBeginSchema, SkillTurnOperationSchema, SkillTurnReceiptSchema,
 import {
   AdminError,
   type AdminAuthConfig,
+  type AssistantBillingCapabilities,
   type AdminErrorCode,
   type AdminLlmConnectionsResponse,
   type AdminLoginResponse,
@@ -1318,14 +1319,20 @@ export class AdminClient {
 
   /** Capability discovery only. No authorization or balance is cached. */
   async supportsAssistantPreparation(): Promise<boolean> {
+    return (await this.getAssistantBillingCapabilities()).preparation;
+  }
+
+  async getAssistantBillingCapabilities(): Promise<AssistantBillingCapabilities> {
     const response = await this.request<unknown>('/api/auth/config', { method: 'GET' });
     const config = this.readSuccessResponse(response, z.object({
       phoneAuthEnabled: z.boolean(), selfRegistrationEnabled: z.boolean(),
       assistantPreparationVersion: z.number().int().positive().optional(),
+      assistantRecoveryVersion: z.number().int().positive().optional(),
     }));
-    if (config.assistantPreparationVersion === undefined) return false;
+    if (config.assistantPreparationVersion === undefined && config.assistantRecoveryVersion === undefined) return { preparation: false, recovery: false };
     if (config.assistantPreparationVersion !== 1) throw new AdminError('Unsupported assistant preparation', 'SERVER_ERROR');
-    return true;
+    if (config.assistantRecoveryVersion !== undefined && config.assistantRecoveryVersion !== 1) throw new AdminError('Unsupported assistant recovery', 'SERVER_ERROR');
+    return { preparation: true, recovery: config.assistantRecoveryVersion === 1 };
   }
 
   /** One write, with no automatic refresh/replay or fallback after an unknown result. */

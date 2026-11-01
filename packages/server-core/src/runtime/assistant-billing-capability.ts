@@ -1,13 +1,13 @@
 /** Bounded discovery for one active identity. This never caches authorization.
  * In-flight probes are shared; failed probes are discarded. Changing scope or
  * restarting the process forces discovery, upgrades are noticed within 60s. */
-export class AssistantBillingCapability {
-  private entry?: { key: string; expiresAt: number; value: Promise<boolean> }
+export class AssistantBillingCapability<T = boolean> {
+  private entry?: { key: string; expiresAt: number; value: Promise<T> }
   constructor(private readonly now = Date.now) {}
   invalidate(scope: { accountId: string; adminOrigin: string; productSpaceId: string }): void {
     if (this.entry?.key === JSON.stringify([scope.adminOrigin, scope.accountId, scope.productSpaceId])) this.entry = undefined
   }
-  read(scope: { accountId: string; adminOrigin: string; productSpaceId: string }, probe: () => Promise<boolean>): Promise<boolean> {
+  read(scope: { accountId: string; adminOrigin: string; productSpaceId: string }, probe: () => Promise<T>): Promise<T> {
     const key = JSON.stringify([scope.adminOrigin, scope.accountId, scope.productSpaceId])
     if (this.entry?.key === key && this.entry.expiresAt > this.now()) return this.entry.value
     const entry = { key, expiresAt: this.now() + 60_000, value: Promise.resolve().then(probe) }

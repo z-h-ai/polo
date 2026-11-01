@@ -36,3 +36,26 @@ test('only schema-validated, bound preparation details survive error normalizati
     expect((error as AdminError).details).toEqual({ assistantPreparation: { runId: original.runId, requestId: original.admission.requestId, phase: 'start_rejected' } })
   } finally { await server.stop(true) }
 })
+
+for (const mode of ['legacy', 'preparation', 'recovery'] as const) {
+  test(`one public config read distinguishes ${mode} from a recovery guarantee`, async () => {
+    let calls = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+      calls++; expect(req.method).toBe('GET'); expect(new URL(req.url).pathname).toBe('/api/auth/config')
+      return Response.json({ phoneAuthEnabled: false, selfRegistrationEnabled: false,
+        ...(mode !== 'legacy' ? { assistantPreparationVersion: 1 } : {}), ...(mode === 'recovery' ? { assistantRecoveryVersion: 1 } : {}),
+      })
+    } })
+    try {
+      expect(await new AdminClient(`http://127.0.0.1:${server.port}`).getAssistantBillingCapabilities()).toEqual({ preparation: mode !== 'legacy', recovery: mode === 'recovery' })
+      expect(calls).toBe(1)
+    } finally { await server.stop(true) }
+  })
+}
+for (const versions of [{ assistantRecoveryVersion: 1 }, { assistantPreparationVersion: 1, assistantRecoveryVersion: 2 }]) {
+  test('an inconsistent or unknown recovery contract cannot grant post-ack journaling', async () => {
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ phoneAuthEnabled: false, selfRegistrationEnabled: false, ...versions }) })
+    try { await expect(new AdminClient(`http://127.0.0.1:${server.port}`).getAssistantBillingCapabilities()).rejects.toBeInstanceOf(AdminError) }
+    finally { await server.stop(true) }
+  })
+}

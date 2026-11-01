@@ -6,6 +6,7 @@ import {
   AdminClient,
   AdminError,
   type AdminErrorDetails,
+  type AssistantBillingCapabilities,
   denyAppCatalogAccessForAccount,
   denyCachedAppCatalogAuthorization,
   denyCachedAppCatalogAuthorizationForAccount,
@@ -930,15 +931,15 @@ export function registerAdminHandlers(
   })
   const billingSession = async (scope: { accountId: string; adminOrigin: string }) => installationSession(scope.accountId, scope.adminOrigin)
   const browserPolicyOptions = () => ({ signal: AbortSignal.timeout(5_000) })
-  const billingCapability = new AssistantBillingCapability()
+  const billingCapability = new AssistantBillingCapability<AssistantBillingCapabilities>()
   setBrowserPolicyReader(async scope => {
     const session = await billingSession(scope)
     return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, browserPolicyOptions())
   })
   setAssistantBillingTransport({
-    supportsPreparation: scope => billingCapability.read(scope, async () => {
+    capabilities: scope => billingCapability.read(scope, async () => {
       const s = await billingSession(scope)
-      return s.client.supportsAssistantPreparation()
+      return s.client.getAssistantBillingCapabilities()
     }),
     prepare: async (scope, runId, admission) => {
       const s = await billingSession(scope)

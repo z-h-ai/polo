@@ -54,7 +54,9 @@ const admin = Bun.serve({ port: 0, async fetch(req) {
     const walk = async (path: string) => { for (const e of await readdir(path, { withFileTypes: true }).catch(() => [])) { const file = join(path, e.name); if (e.isDirectory()) await walk(file); else if (e.isFile()) { const text = await readFile(file, 'utf8').catch(() => ''); if (text.includes('polo-cap-') || caps.some(cap => text.includes(cap))) secretsOnDisk.push(file.replace(root, 'ROOT')) } } }
     await walk(root)
     const outbox = []
-    for (const name of await readdir(join(root, 'assistant-billing')).catch(() => [])) if (name.endsWith('.json')) outbox.push(JSON.parse(await readFile(join(root, 'assistant-billing', name), 'utf8')))
+    for (const directory of [join(root, 'assistant-billing'), join(root, 'assistant-billing', 'admitted')]) {
+      for (const name of await readdir(directory).catch(() => [])) if (name.endsWith('.json')) outbox.push(JSON.parse(await readFile(join(directory, name), 'utf8')))
+    }
     return Response.json({ providerCalls, billing, bodies: providerBodies, secretsOnDisk, space, accountId, personal, enterprise, outbox, missingRoutes, executions: executionState() })
   }
   if (req.headers.get('authorization') !== 'Bearer fixture-admin-token') return Response.json({ error: 'UNAUTHORIZED', message: 'fixture auth required' }, { status: 401 })

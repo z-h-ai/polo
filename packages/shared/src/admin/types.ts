@@ -42,6 +42,11 @@ export interface AdminAuthConfig {
   phoneAuthEnabled: boolean;
 }
 
+export interface AssistantBillingCapabilities {
+  preparation: boolean;
+  recovery: boolean;
+}
+
 export interface AdminPhoneAuthChallengeConfig {
   type: 'browser_redirect';
   issuerUrl: string;
