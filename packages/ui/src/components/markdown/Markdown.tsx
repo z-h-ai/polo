@@ -54,6 +54,24 @@ export type DisablablePreviewBlock =
  */
 export type RenderMode = 'terminal' | 'minimal' | 'full'
 
+// Scenic themes give --background an alpha channel. Keep its color channels
+// but make the header opaque so scrolling rows cannot show through the label.
+const TABLE_HEADER_CLASS = 'sticky top-0 z-10 bg-[oklch(from_var(--background)_l_c_h_/_1)] shadow-bottom-border-thin'
+
+function MarkdownTable({ children, className, tableClassName }: {
+  children?: React.ReactNode
+  className?: string
+  tableClassName: string
+}) {
+  // Both axes must share a bounded scroll host: overflow-x alone would trap
+  // sticky headers in an ancestor that never scrolls vertically.
+  return (
+    <div className={cn('isolate max-h-[400px] max-w-full overflow-auto', className)}>
+      <table className={tableClassName}>{children}</table>
+    </div>
+  )
+}
+
 export interface MarkdownProps {
   children: string
   /**
@@ -310,9 +328,9 @@ function createComponents(
       li: ({ children }) => <li className="my-0.5">{children}</li>,
       // Plain tables
       table: ({ children }) => (
-        <table className="my-2 font-mono text-sm">{children}</table>
+        <MarkdownTable className="my-2" tableClassName="font-mono text-sm">{children}</MarkdownTable>
       ),
-      th: ({ children }) => <th className="text-left pr-4">{children}</th>,
+      th: ({ children }) => <th className={cn(TABLE_HEADER_CLASS, 'text-left pr-4')}>{children}</th>,
       td: ({ children }) => <td className="pr-4">{children}</td>,
     }
   }
@@ -427,13 +445,11 @@ function createComponents(
       },
       // Clean tables
       table: ({ children }) => (
-        <div className="my-3 overflow-x-auto">
-          <table className="min-w-full text-sm">{children}</table>
-        </div>
+        <MarkdownTable className="my-3" tableClassName="min-w-full text-sm">{children}</MarkdownTable>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
       th: ({ children }) => (
-        <th className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
+        <th className={cn(TABLE_HEADER_CLASS, 'text-left py-2 px-3 font-semibold text-muted-foreground')}>{children}</th>
       ),
       td: ({ children }) => (
         <td className="py-2 px-3 border-b border-border/50">{children}</td>
@@ -547,14 +563,12 @@ function createComponents(
     ),
     // Beautiful tables
     table: ({ children }) => (
-      <div className="my-4 overflow-x-auto rounded-md border">
-        <table className="min-w-full divide-y divide-border">{children}</table>
-      </div>
+      <MarkdownTable className="my-4 rounded-md border" tableClassName="min-w-full divide-y divide-border">{children}</MarkdownTable>
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
     th: ({ children }) => (
-      <th className="text-left py-3 px-4 font-semibold text-sm">{children}</th>
+      <th className={cn(TABLE_HEADER_CLASS, 'text-left py-3 px-4 font-semibold text-sm')}>{children}</th>
     ),
     td: ({ children }) => (
       <td className="py-3 px-4 text-sm">{children}</td>
