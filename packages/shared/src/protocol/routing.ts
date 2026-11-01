@@ -265,6 +265,11 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 
   // canvasPane — POO-135 验收修复 (SB-CANVAS-OUT): the canvas popup BrowserWindow
   // is local to this desktop; nothing here is workspace-server routable
+  RPC_CHANNELS.canvasPane.EMBED,
+  RPC_CHANNELS.canvasPane.UNEMBED,
+  RPC_CHANNELS.canvasPane.HIDE,
+  RPC_CHANNELS.canvasPane.DESTROY,
+  RPC_CHANNELS.canvasPane.RELEASE,
   RPC_CHANNELS.canvasPane.DETACH_TO_POPUP,
   RPC_CHANNELS.canvasPane.ATTACH_FROM_POPUP,
   RPC_CHANNELS.canvasPane.FOCUS,

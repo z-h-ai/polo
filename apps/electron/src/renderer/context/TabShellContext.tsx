@@ -22,6 +22,7 @@ import {
   type AppDefinition,
   type TabInstance,
 } from '../../shared/tab-browser-types'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { ProductSpaceAppLaunchBridge } from '@/components/tab-browser/ProductSpaceAppLaunchBridge'
 import { GenUiAppPinBridge } from '@/components/tab-browser/GenUiAppPinBridge'
@@ -108,6 +109,7 @@ function restoreTabs(rawTabs: TabInstance[], apps: AppDefinition[]): TabInstance
 }
 
 export function TabShellProvider({ workspaceId, productSpaceScope, children }: TabShellProviderProps) {
+  const shellContext = useOptionalAppShellContext()
   const isProductSpaceWindow = Boolean(productSpaceScope)
   const liveProductSpace = useOptionalProductSpaceContext()
   const [installedApps, setInstalledAppsState] = useAtom(installedAppsAtom)
@@ -306,7 +308,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
       <GenUiAppPinBridge />
       <GenUiAppPublishBridge />
       <GenUiCardRegistryBridge />
-      <GenUiCanvasBridge />
+      <GenUiCanvasBridge onPresented={shellContext?.onHideFilePreview} />
       {children}
     </TabShellContext.Provider>
   )

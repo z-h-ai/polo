@@ -477,37 +477,39 @@ export function useGenUiGuestWebview({ webviewRef, src, partition, registration,
     }
   }, [src, partition, webviewRef])
 
-  // POO-103: register the mounted guest with the Main-owned UiCardRegistry
-  // (via the Electron-side bridge) and unregister on unmount. Registration is
-  // only honored when Main observed this very guest attach.
-  React.useEffect(() => {
+  // Install before Electron's asynchronous guest attach can beat passive effects.
+  // did-attach can precede getWebContentsId readiness; dom-ready retries the
+  // same Main-validated identity without issuing duplicate registrations.
+  React.useLayoutEffect(() => {
     const webview = webviewRef.current
     if (!webview || !registration) return
     let registeredGuestId: number | null = null
-    const handleDomReady = () => {
-      const guestId = (webview as GenUiWebviewElement).getWebContentsId?.()
-      if (typeof guestId !== 'number' || guestId <= 0) return
+    const unregister = () => {
+      if (registeredGuestId == null) return
+      dispatchGenUiCardUnregister({ ...registration, guestWebContentsId: registeredGuestId })
+      registeredGuestId = null
+    }
+    const register = () => {
+      let guestId: number | undefined
+      try { guestId = (webview as GenUiWebviewElement).getWebContentsId?.() } catch { return }
+      if (typeof guestId !== 'number' || guestId <= 0 || guestId === registeredGuestId) return
+      unregister()
       registeredGuestId = guestId
-      dispatchGenUiCardRegister({
-        sessionId: registration.sessionId,
-        cardId: registration.cardId,
-        guestWebContentsId: guestId,
-      })
+      dispatchGenUiCardRegister({ ...registration, guestWebContentsId: guestId })
     }
-    // getWebContentsId throws before dom-ready in Electron. did-attach only
-    // establishes Main's ownership; it does not make the element API usable.
-    webview.addEventListener('dom-ready', handleDomReady)
+    webview.addEventListener('did-attach', register)
+    webview.addEventListener('dom-ready', register)
+    webview.addEventListener('destroyed', unregister)
+    webview.addEventListener('render-process-gone', unregister)
     return () => {
-      webview.removeEventListener('dom-ready', handleDomReady)
-      if (registeredGuestId != null) {
-        dispatchGenUiCardUnregister({
-          sessionId: registration.sessionId,
-          cardId: registration.cardId,
-          guestWebContentsId: registeredGuestId,
-        })
-      }
+      webview.removeEventListener('did-attach', register)
+      webview.removeEventListener('dom-ready', register)
+      webview.removeEventListener('destroyed', unregister)
+      webview.removeEventListener('render-process-gone', unregister)
+      unregister()
     }
-  }, [registration, webviewRef])
+  }, [registration, webviewRef, src, partition])
+
 }
 
 /** Mount-unique suffix for UiCardRegistry card ids (shared with the pane). */

@@ -92,10 +92,14 @@ mock.module('react-i18next', () => ({
 }))
 
 // motion.div → plain div (animation props dropped), reduced motion always on.
+const motionTags = new Map<string, any>()
 const motionProxy: any = new Proxy({}, {
-  get: (_target, tag: string) => (props: Record<string, unknown>) => {
-    const { initial: _i, animate: _a, transition: _t, exit: _e, whileHover: _h, whileTap: _p, ...rest } = props
-    return (createElement as any)(tag, rest)
+  get: (_target, tag: string) => {
+    if (!motionTags.has(tag)) motionTags.set(tag, (props: Record<string, unknown>) => {
+      const { initial: _i, animate: _a, transition: _t, exit: _e, whileHover: _h, whileTap: _p, ...rest } = props
+      return (createElement as any)(tag, { ...rest, 'data-motion-width': (_a as { width?: string } | undefined)?.width })
+    })
+    return motionTags.get(tag)
   },
 })
 mock.module('motion/react', () => ({
@@ -162,6 +166,8 @@ Object.defineProperty(window, 'electronAPI', {
 const { render, cleanup, fireEvent, waitFor, screen } = await import('@testing-library/react')
 const { createElement } = await import('react')
 const { RightSidebarPane } = await import('../RightSidebarPane')
+const { useRightPanePresentation } = await import('@/hooks/use-right-pane-presentation')
+const { shouldAutoHideNavigation } = await import('../right-pane-layout')
 const {
   activeElementPickingAtom,
   rightPaneTabAtom,
@@ -187,6 +193,9 @@ function makeInstance(overrides: Record<string, unknown> = {}): any {
 }
 
 function mountPane(overrides: Record<string, unknown> = {}) {
+  // Direct component mounts represent an explicit open surface; the real
+  // AppShell mounts an empty browser only after its open atom was set.
+  if (!contextStore.values.has(sidebarBrowserOpenAtom)) contextStore.set(sidebarBrowserOpenAtom, true)
   const props = {
     layoutKey: 'sess-a',
     canvasSessionId: null as string | null,
@@ -325,7 +334,7 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     expect(contextStore.get(activeElementPickingAtom)).toBeNull()
   })
 
-  it('embedded browser: detach pops it out; terminate reaches the sync hook', async () => {
+  it('embedded browser: detach pops it out and releases its sidebar slot', async () => {
     const instance = makeInstance({ hostMode: 'embedded' })
     setInstances([instance])
     const { getByTestId, queryByTestId } = mountPane({ currentSessionId: 'sess-a' })
@@ -334,20 +343,15 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     fireEvent.click(getByTestId('sidebar-browser-detach'))
     await waitFor(() => expect(apiCalls.detachToPopup).toEqual([['inst-1']]))
 
-    fireEvent.click(getByTestId('sidebar-browser-terminate'))
-    await waitFor(() => expect(terminateBrowser).toHaveBeenCalledWith(instance))
+    expect(contextStore.get(sidebarBrowserOpenAtom)).toBe(false)
   })
 
-  it('popped-out browser: placeholder card + 收回 button embeds it back', async () => {
+  it('popped-out browser leaves its instance alive without sidebar placeholder controls', () => {
     setInstances([makeInstance({ hostMode: 'popup', isVisible: true })])
-    const { getByTestId, queryByTestId } = mountPane({ currentSessionId: 'sess-a' })
-
-    expect(queryByTestId('sidebar-browser-embedded-container')).toBeNull()
-    expect(getByTestId('sidebar-browser-popup-placeholder').textContent)
-      .toContain('browserPane.sidebar.popupTitle')
-
-    fireEvent.click(getByTestId('sidebar-browser-embed'))
-    await waitFor(() => expect(apiCalls.embed).toEqual([['inst-1']]))
+    const { queryByTestId } = mountPane({ currentSessionId: 'sess-a' })
+    expect(queryByTestId('sidebar-browser-popup-placeholder')).toBeNull()
+    expect(queryByTestId('sidebar-browser-embed')).toBeNull()
+    expect((contextStore.get(browserInstancesMapAtom) as Map<string, unknown>).has('inst-1')).toBe(true)
   })
 
   it('no browser at all: the empty state creates one WORKSPACE-visible (not session-bound), embedded (r1)', async () => {
@@ -377,17 +381,12 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     expect(contextStore.get(sidebarBrowserInstanceIdAtom)).toBe('inst-2')
   })
 
-  it('popped-out slot: layer 2 collapses to a read-only status bar with a show-window entry (r1)', async () => {
+  it('a popped-out instance leaves no sidebar placeholder or controls', () => {
     setInstances([makeInstance({ hostMode: 'popup', isVisible: true })])
-    const { getByTestId, queryByTestId } = mountPane({ currentSessionId: 'sess-a' })
-
-    // No navigation, no picking — the popup window is the single active surface.
+    const { queryByTestId } = mountPane({ currentSessionId: 'sess-a' })
     expect(queryByTestId('sidebar-browser-nav-layer')).toBeNull()
     expect(queryByTestId('sidebar-browser-pick-element')).toBeNull()
-    expect(getByTestId('sidebar-browser-popup-status').textContent).toContain('https://example.com/page')
-
-    fireEvent.click(getByTestId('sidebar-browser-show-window'))
-    await waitFor(() => expect(apiCalls.focus).toEqual([['inst-1']]))
+    expect(queryByTestId('sidebar-browser-popup-placeholder')).toBeNull()
   })
 
   it('hide keeps the instance alive: unembed + slot closed + toast with a show action (r1)', async () => {
@@ -476,5 +475,126 @@ describe('RightSidebarPane header integration (POO-135)', () => {
     render(createElement(StoreProbe))
     expect(probe).toBeTruthy()
     expect(probe).not.toBe(getDefaultStore())
+  })
+})
+
+
+// Shares the production AppShell geometry hook and the real pane. Native CSS
+// measurements remain a separate acceptance; motion exposes its actual width
+// prop so a happy-dom zero-rect cannot conceal an unintended resource region.
+interface ScopeLayoutProps {
+  owner: string
+  file?: 'shown' | 'hidden' | 'closed'
+  canvas?: boolean
+  workspace?: string
+  remote?: string | null
+}
+function ScopeLayout({ owner, file = 'closed', canvas = false, workspace = 'ws-a', remote = null }: ScopeLayoutProps) {
+  const presentation = useRightPanePresentation({ currentSessionId: owner, activeWorkspaceId: workspace, remoteWorkspaceId: remote, fileVisible: file === 'shown', canvasVisible: canvas })
+  const retainsFile = file !== 'closed'
+  return createElement('div', {},
+    createElement('output', { 'data-testid': 'shell-right-pane-open', 'data-navigation-collapsed': String(shouldAutoHideNavigation(920, 520, presentation.hasRightPane ? .45 : 0)) }, String(presentation.hasRightPane)),
+    (retainsFile || canvas || presentation.browserSlotOpen) && createElement(RightSidebarPane, {
+      layoutKey: owner, canvasSessionId: canvas ? owner : null,
+      canvasApp: canvas ? { kind: 'preview' } : null,
+      visible: presentation.hasRightPane,
+      filePreview: retainsFile ? createElement('input', { 'data-testid': 'retained-file-input', defaultValue: 'C draft' }) : undefined,
+      filePreviewVisible: file === 'shown',
+      getLayoutRect: () => null, currentSessionId: owner, activeWorkspaceId: workspace, remoteWorkspaceId: remote,
+      onSelectSession: () => {}, onTerminate: terminateBrowser,
+    } as any),
+  )
+}
+
+describe('scope-correct right pane geometry and real content', () => {
+  it('A browser does not reserve C file-hide/close width, and returning A preserves the same resource', () => {
+    const page = makeInstance({ ownerSessionId: 'a', workspaceId: 'ws-a', draft: 'A memory', count: 9 })
+    setInstances([page])
+    const view = render(createElement(ScopeLayout, { owner: 'a' }))
+    expect(view.getByTestId('sidebar-browser-section')).toBeTruthy()
+    view.rerender(createElement(ScopeLayout, { owner: 'c', file: 'shown' }))
+    const input = view.getByTestId('retained-file-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'C retained input' } })
+    view.rerender(createElement(ScopeLayout, { owner: 'c', file: 'hidden' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('false')
+    expect(view.getByTestId('shell-right-pane-open').getAttribute('data-navigation-collapsed')).toBe('false')
+    expect(view.queryByTestId('sidebar-browser-empty-state')).toBeNull()
+    expect(view.getByTestId('retained-file-input')).toBe(input)
+    expect(input.value).toBe('C retained input')
+    expect(input.closest('[data-motion-width]')?.getAttribute('data-motion-width')).toBe('0%')
+    view.rerender(createElement(ScopeLayout, { owner: 'c', file: 'shown' }))
+    expect(view.getByTestId('retained-file-input')).toBe(input)
+    view.rerender(createElement(ScopeLayout, { owner: 'c', file: 'closed' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('false')
+    expect(view.queryByTestId('sidebar-browser-empty-state')).toBeNull()
+    view.rerender(createElement(ScopeLayout, { owner: 'a' }))
+    expect(view.getByTestId('sidebar-browser-section')).toBeTruthy()
+    expect((contextStore.get(browserInstancesMapAtom) as Map<string, any>).get(page.id)).toBe(page)
+    expect(page).toMatchObject({ draft: 'A memory', count: 9 })
+    expect(apiCalls.create).toEqual([])
+  })
+  it('retains an explicitly open empty browser and its workspace-visible create action', async () => {
+    setInstances([])
+    const view = render(createElement(ScopeLayout, { owner: 'c' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('true')
+    fireEvent.click(view.getByTestId('sidebar-browser-create'))
+    await waitFor(() => expect(apiCalls.create).toEqual([[{ show: false }]]))
+  })
+  it('keeps a workspace manual browser without owner visible in another chat', () => {
+    setInstances([makeInstance({ ownerSessionId: null, workspaceId: 'ws-a' })])
+    const view = render(createElement(ScopeLayout, { owner: 'c' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('true')
+    expect(view.getByTestId('sidebar-browser-section')).toBeTruthy()
+  })
+  it('rejects foreign-workspace selections in both shell width and content', () => {
+    setInstances([makeInstance({ ownerSessionId: 'c', workspaceId: 'ws-other' })])
+    const view = render(createElement(ScopeLayout, { owner: 'c', file: 'hidden' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('false')
+    expect(view.queryByTestId('sidebar-browser-empty-state')).toBeNull()
+    expect(view.queryByTestId('sidebar-browser-section')).toBeNull()
+  })
+  it('accepts a remote mirror workspace when its selected owner matches', () => {
+    setInstances([makeInstance({ ownerSessionId: 'c', workspaceId: 'ws-remote' })])
+    const view = render(createElement(ScopeLayout, { owner: 'c', remote: 'ws-remote' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('true')
+    expect(view.getByTestId('sidebar-browser-section')).toBeTruthy()
+  })
+  it('does not fall back from a removed selection to another live browser or an empty slot', () => {
+    setInstances([makeInstance({ ownerSessionId: 'c', workspaceId: 'ws-a' })])
+    contextStore.set(sidebarBrowserInstanceIdAtom, 'already-removed')
+    const view = render(createElement(ScopeLayout, { owner: 'c', file: 'hidden' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('false')
+    expect(view.queryByTestId('sidebar-browser-empty-state')).toBeNull()
+    expect(view.queryByTestId('sidebar-browser-section')).toBeNull()
+  })
+  it('does not reserve popup selection width or fall back to another embedded browser', () => {
+    setInstances([makeInstance({ ownerSessionId: 'c', workspaceId: 'ws-a', hostMode: 'popup' }), makeInstance({ id: 'other', ownerSessionId: 'c', workspaceId: 'ws-a' })])
+    const view = render(createElement(ScopeLayout, { owner: 'c', file: 'hidden' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('false')
+    expect(view.queryByTestId('sidebar-browser-empty-state')).toBeNull()
+    expect(view.queryByTestId('sidebar-browser-section')).toBeNull()
+  })
+  it('preserves a same-owner hidden choice when a retained file is hidden', () => {
+    setInstances([makeInstance({ ownerSessionId: 'c', workspaceId: 'ws-a' })])
+    contextStore.set(sidebarBrowserOpenAtom, false)
+    const view = render(createElement(ScopeLayout, { owner: 'c', file: 'hidden' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('false')
+    expect(view.queryByTestId('sidebar-browser-section')).toBeNull()
+    expect(apiCalls.embed).toEqual([])
+  })
+  it('file hide restores a legitimate same-owner browser rather than closing it', () => {
+    setInstances([makeInstance({ ownerSessionId: 'c', workspaceId: 'ws-a' })])
+    const view = render(createElement(ScopeLayout, { owner: 'c', file: 'shown' }))
+    view.rerender(createElement(ScopeLayout, { owner: 'c', file: 'hidden' }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('true')
+    expect(view.getByTestId('sidebar-browser-section')).toBeTruthy()
+  })
+  it('file hide restores its current canvas even when a foreign browser intent remains', () => {
+    setInstances([makeInstance({ ownerSessionId: 'a', workspaceId: 'ws-a' })])
+    const view = render(createElement(ScopeLayout, { owner: 'c', file: 'shown', canvas: true }))
+    view.rerender(createElement(ScopeLayout, { owner: 'c', file: 'hidden', canvas: true }))
+    expect(view.getByTestId('shell-right-pane-open').textContent).toBe('true')
+    expect(view.getByTestId('canvas-pane-card')).toBeTruthy()
+    expect(view.queryByTestId('sidebar-browser-empty-state')).toBeNull()
   })
 })

@@ -17,11 +17,15 @@
  * never writes `poppedOut` from the renderer side.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useStore } from 'jotai'
-import { canvasPanePopoutAtomFamily } from '@/atoms/canvas-pane'
+import { dispatchGenUiAppCanvasState } from '@polo-ai/ui/chat/GenUiAppCard'
+import { rightPaneTabAtom } from '@/atoms/sidebar-browser'
+import { canvasPanePopoutAtomFamily, canvasPaneAppAtomFamily } from '@/atoms/canvas-pane'
 
-export function useCanvasPaneSync(): void {
+export function useCanvasPaneSync(options?: { currentSessionId?: string | null; onPresented?: () => void }): void {
+  const optionsRef = useRef(options)
+  optionsRef.current = options
   // The CONTEXT store (same discipline as GenUiCanvasBridge) — the per-session
   // family means writes need the store handle, not a fixed useSetAtom.
   const store = useStore()
@@ -29,11 +33,17 @@ export function useCanvasPaneSync(): void {
     const api = window.electronAPI?.canvasPane
     if (!api?.onStateChanged || !window.electronAPI.isChannelAvailable?.('canvas-pane:detach-to-popup')) return
     return api.onStateChanged((state) => {
-      store.set(canvasPanePopoutAtomFamily(state.sessionId), {
-        sessionId: state.sessionId,
-        poppedOut: state.poppedOut,
-        isVisible: state.isVisible,
-      })
+      if (state.closed) {
+        store.set(canvasPaneAppAtomFamily(state.sessionId), null)
+        store.set(canvasPanePopoutAtomFamily(state.sessionId), null)
+        dispatchGenUiAppCanvasState({ sessionId: state.sessionId, appId: null })
+        return
+      }
+      store.set(canvasPanePopoutAtomFamily(state.sessionId), { ...state })
+      if (state.isVisible && !state.poppedOut && state.sessionId === optionsRef.current?.currentSessionId) {
+        store.set(rightPaneTabAtom, 'canvas')
+        optionsRef.current?.onPresented?.()
+      }
     })
   }, [store])
 }

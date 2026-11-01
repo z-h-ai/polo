@@ -18,7 +18,10 @@ let mockExistsPaths: Set<string> = new Set();
 mock.module('node:fs', () => ({
   existsSync: (path: string) => mockExistsPaths.has(path),
   // Re-export anything else the module needs
-  readFileSync: originalReadFileSync,
+  readFileSync: (path: Parameters<typeof originalReadFileSync>[0], ...args: unknown[]) => {
+    if (typeof path === 'string' && mockExistsPaths.has(path)) return 'Readable fixture guide';
+    return (originalReadFileSync as (...input: unknown[]) => unknown)(path, ...args);
+  },
 }));
 
 mock.module('../../../config/storage.ts', () => ({

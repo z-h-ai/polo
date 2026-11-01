@@ -7,12 +7,21 @@ export class AssistantBillingCapability<T = boolean> {
   invalidate(scope: { accountId: string; adminOrigin: string; productSpaceId: string }): void {
     if (this.entry?.key === JSON.stringify([scope.adminOrigin, scope.accountId, scope.productSpaceId])) this.entry = undefined
   }
-  read(scope: { accountId: string; adminOrigin: string; productSpaceId: string }, probe: () => Promise<T>): Promise<T> {
+  read(scope: { accountId: string; adminOrigin: string; productSpaceId: string }, probe: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
     const key = JSON.stringify([scope.adminOrigin, scope.accountId, scope.productSpaceId])
-    if (this.entry?.key === key && this.entry.expiresAt > this.now()) return this.entry.value
-    const entry = { key, expiresAt: this.now() + 60_000, value: Promise.resolve().then(probe) }
-    this.entry = entry
-    void entry.value.catch(() => { if (this.entry === entry) this.entry = undefined })
-    return entry.value
+    if (this.entry?.key !== key || this.entry.expiresAt <= this.now()) {
+      const entry = { key, expiresAt: this.now() + 60_000, value: Promise.resolve().then(probe) }
+      this.entry = entry
+      void entry.value.catch(() => { if (this.entry === entry) this.entry = undefined })
+    }
+    const value = this.entry.value
+    if (!signal) return value
+    // Cancel only this waiter. The shared bounded HTTP probe may serve others.
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason) }
+      signal.addEventListener('abort', abort, { once: true })
+      void value.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+    })
   }
 }

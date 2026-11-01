@@ -118,7 +118,8 @@ export const DOC_REFS = {
   imagePreview: `${APP_ROOT}/docs/image-preview.md`,
   markdownPreview: `${APP_ROOT}/docs/markdown-preview.md`,
   llmTool: `${APP_ROOT}/docs/llm-tool.md`,
-  browserTools: `${APP_ROOT}/docs/browser-tools.md`,
+  // This is an actionable Read prerequisite, so it must match initializeDocs.
+  browserTools: getDocPath('browser-tools.md'),
   genUi: `${APP_ROOT}/docs/genui.md`,
   poloAiCli: `${APP_ROOT}/docs/polo-ai.md`,
   docsDir: `${APP_ROOT}/docs/`,

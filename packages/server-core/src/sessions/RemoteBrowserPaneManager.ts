@@ -168,12 +168,12 @@ export class RemoteBrowserPaneManager implements IBrowserPaneManager {
   // IBrowserPaneManager — instance management
   // ---------------------------------------------------------------------------
 
-  createForSession(sessionId: string, options?: { show?: boolean; workspaceId?: string | null }): string {
+  createForSession(sessionId: string, options?: { show?: boolean; presentIfActive?: boolean; workspaceId?: string | null }): string {
     this.invokeSync('createForSession', [sessionId, options])
     return `remote-pending:${sessionId}`
   }
 
-  async createForSessionAsync(sessionId: string, options?: { show?: boolean; workspaceId?: string | null }): Promise<string> {
+  async createForSessionAsync(sessionId: string, options?: { show?: boolean; presentIfActive?: boolean; workspaceId?: string | null }): Promise<string> {
     return await this.invoke('createForSession', [sessionId, options])
   }
 

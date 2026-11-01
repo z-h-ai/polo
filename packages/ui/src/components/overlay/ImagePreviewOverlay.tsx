@@ -19,6 +19,7 @@ interface PreviewItem {
 }
 
 export interface ImagePreviewOverlayProps {
+  embedded?: boolean
   isOpen: boolean
   onClose: () => void
   filePath: string
@@ -30,6 +31,7 @@ export interface ImagePreviewOverlayProps {
 }
 
 export function ImagePreviewOverlay({
+  embedded,
   isOpen,
   onClose,
   filePath,
@@ -150,6 +152,7 @@ export function ImagePreviewOverlay({
 
   return (
     <PreviewOverlay
+      embedded={embedded}
       isOpen={isOpen}
       onClose={onClose}
       theme={theme}

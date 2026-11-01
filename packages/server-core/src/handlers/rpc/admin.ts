@@ -1,4 +1,3 @@
-import { AssistantBillingCapability } from '../../runtime/assistant-billing-capability'
 import { requireMemberCircleAppAdmission, MemberCircleAdmissionError } from '@polo-ai/shared/admin/member-circle-admission'
 import {setBrowserPolicyReader} from '../../runtime/browser-policy'
 import { paymentHandoffUrl } from './payment-handoff'
@@ -6,7 +5,6 @@ import {
   AdminClient,
   AdminError,
   type AdminErrorDetails,
-  type AssistantBillingCapabilities,
   denyAppCatalogAccessForAccount,
   denyCachedAppCatalogAuthorization,
   denyCachedAppCatalogAuthorizationForAccount,
@@ -33,6 +31,7 @@ import {
 import { z } from 'zod'
 import { setNativeInstallationTransport } from '../../runtime/native-installations'
 import { setAssistantBillingTransport } from '../../runtime/assistant-billing'
+import { createAssistantBillingTransport } from '../../runtime/assistant-billing-transport'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -931,33 +930,11 @@ export function registerAdminHandlers(
   })
   const billingSession = async (scope: { accountId: string; adminOrigin: string }) => installationSession(scope.accountId, scope.adminOrigin)
   const browserPolicyOptions = () => ({ signal: AbortSignal.timeout(5_000) })
-  const billingCapability = new AssistantBillingCapability<AssistantBillingCapabilities>()
   setBrowserPolicyReader(async scope => {
     const session = await billingSession(scope)
     return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, browserPolicyOptions())
   })
-  setAssistantBillingTransport({
-    capabilities: scope => billingCapability.read(scope, async () => {
-      const s = await billingSession(scope)
-      return s.client.getAssistantBillingCapabilities()
-    }),
-    prepare: async (scope, runId, admission) => {
-      const s = await billingSession(scope)
-      try { return await s.client.prepareAssistantRequest(s.accessToken, { runId, admission }) }
-      catch (error) {
-        // A rollback may remove the endpoint. Re-probe for the NEXT request;
-        // this original attempt stays unknown and must never fall back/replay.
-        if (error instanceof AdminError && [404, 405].includes(error.status ?? 0)) billingCapability.invalidate(scope)
-        throw error
-      }
-    },
-    inspectRun: async (scope, runId) => { const s = await billingSession(scope); return s.client.getBillingRun(s.accessToken, runId, scope.productSpaceId) },
-    start: async (scope, input) => { const s = await billingSession(scope); return s.client.startAssistantRun(s.accessToken, input) },
-    admit: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.admitAppRequest(s.accessToken, runId, input) },
-    report: async (scope, input) => { const s = await billingSession(scope); return s.client.recordAppUsage(s.accessToken, input) },
-    inspect: async (scope, runId, requestId) => { const s = await billingSession(scope); return s.client.getAppRequest(s.accessToken, runId, requestId) },
-    finish: async (scope, runId, input) => { const s = await billingSession(scope); return s.client.finishAppRun(s.accessToken, runId, input) },
-  }, async () => {
+  setAssistantBillingTransport(createAssistantBillingTransport(billingSession), async () => {
     const manager = getCredentialManager(), adminOrigin = getAdminUrl()
     if (!adminOrigin) return null
     const snapshot = await sessions.capture(manager)

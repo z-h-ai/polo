@@ -7,6 +7,7 @@ import { AdminClient, AdminError } from '@polo-ai/shared/admin'
 import { BillingOutbox, type AssistantBillingJournalScope } from '@polo-ai/shared/admin/billing-outbox'
 import { AssistantBillingCoordinator, type AssistantBillingTransport } from '../assistant-billing'
 import { AssistantBillingCapability } from '../assistant-billing-capability'
+import { createAssistantBillingTransport } from '../assistant-billing-transport'
 
 const facts = () => ({ model: 'owned-model', hostRequestId: `host-${randomUUID()}`, transportBaseUrl: 'https://provider.invalid/v1', credentialFingerprint: 'a'.repeat(64) })
 const unused = async () => { throw new Error('unexpected write') }
@@ -259,3 +260,46 @@ for (const receipt of [false, true]) {
     })
   }
 }
+
+
+test('cancelling a cold capability waiter stops it before prepare without cancelling its peer', async () => {
+  let release!: () => void, entered!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const probed = new Promise<void>(resolve => { entered = resolve })
+  let probes = 0, prepares = 0, finishes = 0, cancelled = false
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    const path = new URL(request.url).pathname
+    if (path === '/api/auth/config') { probes++; entered(); await gate; return Response.json({ phoneAuthEnabled: false, selfRegistrationEnabled: false, assistantPreparationVersion: 1, assistantRecoveryVersion: 1 }) }
+    if (path === '/api/billing/assistant-requests') { prepares++; const body = await request.json() as any; return Response.json(ack(body.runId, body.admission.requestId)) }
+    if (request.method === 'PATCH') finishes++
+    return new Response('unexpected', { status: 500 })
+  } })
+  const client = new AdminClient(`http://127.0.0.1:${server.port}`)
+  const f = setup(createAssistantBillingTransport(async () => ({ client, accessToken: 'owned-fixture' })))
+  const controller = new AbortController()
+  const first = f.coordinator.hooks(f.scope, () => true).beforeSend(facts(), { signal: controller.signal }).catch(error => { cancelled = true; throw error })
+  void first.catch(() => {})
+  const second = f.coordinator.hooks(f.scope, () => true).beforeSend(facts())
+  void second.catch(() => {})
+  try {
+    await probed; controller.abort()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(cancelled).toBe(true)
+    expect(prepares).toBe(0); expect(finishes).toBe(0)
+    release()
+    await expect(first).rejects.toThrow()
+    const ticket = await second
+    expect(probes).toBe(1); expect(prepares).toBe(1)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(1)
+    ticket.assertCurrent()
+  } finally { release(); await Promise.allSettled([first, second]); f.close(); await server.stop(true) }
+})
+
+test('cancellation at preparation acknowledgement cannot journal or return a send ticket', async () => {
+  const controller = new AbortController()
+  const f = setup({ capabilities: async () => ({ preparation: true, recovery: true }), prepare: async (_, runId, admission) => { controller.abort(); return ack(runId, admission.requestId) }, finish: async (_, runId) => ({ runId, status: 'failed', settlement: 'no_charge' }) })
+  try {
+    await expect(f.coordinator.hooks(f.scope, () => true).beforeSend(facts(), { signal: controller.signal })).rejects.toThrow()
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+  } finally { f.close() }
+})

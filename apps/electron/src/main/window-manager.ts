@@ -75,6 +75,7 @@ export interface CreateWindowOptions {
 }
 
 export class WindowManager {
+  private auxiliaryRenderers = new Map<number, { workspaceId: string | null; host: BrowserWindow }>()
   private windows: Map<number, ManagedWindow> = new Map()  // webContents.id → ManagedWindow
   private focusedModeWindows: Set<number> = new Set()  // webContents.id of windows in focused mode
   private pendingCloseTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Fallback timeouts for window close
@@ -698,7 +699,7 @@ export class WindowManager {
    */
   getWorkspaceForWindow(webContentsId: number): string | null {
     const managed = this.windows.get(webContentsId)
-    return managed?.workspaceId ?? null
+    return managed?.workspaceId ?? this.auxiliaryRenderers.get(webContentsId)?.workspaceId ?? null
   }
 
   /**
@@ -807,6 +808,15 @@ export class WindowManager {
     const webContentsId = window.webContents.id
     this.windows.set(webContentsId, { window, workspaceId: workspaceId ?? '', aux: true })
     windowLog.info(`Registered aux window ${webContentsId} for workspace ${workspaceId ?? '(none)'}`)
+  }
+
+  registerAuxRenderer(webContentsId: number, host: BrowserWindow, workspaceId: string | null): void {
+    if (host.isDestroyed()) throw new Error('Canvas host is gone')
+    this.auxiliaryRenderers.set(webContentsId, { host, workspaceId })
+  }
+
+  unregisterAuxRenderer(webContentsId: number): void {
+    this.auxiliaryRenderers.delete(webContentsId)
   }
 
   /** Remove an aux window registration (popup closed). */

@@ -175,7 +175,7 @@ const {
   sidebarBrowserOpenAtom,
 } = await import('@/atoms/sidebar-browser')
 const { browserInstancesMapAtom } = await import('@/atoms/browser-pane')
-const { GENUI_APP_CANVAS_OPEN_EVENT } = await import('@polo-ai/ui/chat/GenUiAppCard')
+const { GENUI_APP_CANVAS_OPEN_EVENT, GENUI_APP_CANVAS_FOCUS_EVENT, GENUI_APP_CANVAS_STATE_EVENT } = await import('@polo-ai/ui/chat/GenUiAppCard')
 const { getDefaultStore, useStore } = await import('jotai')
 
 const APP = { appId: 'app-1', title: 'Weather Card', indexPath: '/bundles/app-1/index.html', version: 3 }
@@ -244,35 +244,24 @@ describe('canvas popout in the unified right sidebar (SB-CANVAS-OUT)', () => {
     expect(view.getByTestId('canvas-pane-card')).toBeTruthy()
   })
 
-  it('popped-out canvas shows the placeholder with 收回/显示窗口; the card is gone', () => {
+  it('popped-out canvas leaves no placeholder or live sidebar card', () => {
     broadcastCanvasState({ sessionId: 'sess-a', poppedOut: true, isVisible: true })
     const view = mountPane()
-    expect(view.getByTestId('sidebar-canvas-popup-placeholder')).toBeTruthy()
+    expect(view.queryByTestId('sidebar-canvas-popup-placeholder')).toBeNull()
     expect(view.queryByTestId('canvas-pane-card')).toBeNull()
-    expect(contextStore.get(canvasPanePopoutAtomFamily('sess-a'))).toEqual({
-      sessionId: 'sess-a', poppedOut: true, isVisible: true,
-    })
   })
 
-  it('placeholder 收回 → attachFromPopup; the closed broadcast returns the card', () => {
-    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
+  it('explicit return makes the original canvas available in the sidebar', () => {
+    broadcastCanvasState({ sessionId: 'sess-a', poppedOut: false, isVisible: true })
     const view = mountPane()
-    fireEvent.click(view.getByTestId('sidebar-canvas-attach'))
-    expect(apiCalls.attachFromPopup).toEqual([['sess-a']])
-
-    // System close / explicit attach both funnel into the same broadcast.
-    broadcastCanvasState({ sessionId: 'sess-a', poppedOut: false, isVisible: false })
-    view.unmount()
-    const restored = mountPane()
-    expect(restored.getByTestId('canvas-pane-card')).toBeTruthy()
-    expect(restored.queryByTestId('sidebar-canvas-popup-placeholder')).toBeNull()
+    expect(view.getByTestId('canvas-pane-card')).toBeTruthy()
   })
 
-  it('placeholder 显示窗口 → focus', () => {
-    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
+  it('hiding a popup does not return its canvas to the sidebar', () => {
+    broadcastCanvasState({ sessionId: 'sess-a', poppedOut: true, isVisible: false })
     const view = mountPane()
-    fireEvent.click(view.getByTestId('sidebar-canvas-show-window'))
-    expect(apiCalls.focus).toEqual([['sess-a']])
+    expect(view.queryByTestId('canvas-pane-card')).toBeNull()
+    expect(apiCalls.attachFromPopup).toEqual([])
   })
 
   it('popout flag is per-session: another session keeps its card embedded', () => {
@@ -290,17 +279,9 @@ describe('canvas popout in the unified right sidebar (SB-CANVAS-OUT)', () => {
     contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
 
     const view = mountPane()
-    // Both content kinds reachable → tab strip, canvas tab shows the placeholder.
-    expect(view.getByTestId('right-pane-tabs')).toBeTruthy()
-    expect(view.getByTestId('sidebar-canvas-popup-placeholder')).toBeTruthy()
-
-    fireEvent.click(view.getByTestId('right-pane-tab-browser'))
-    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
-    view.unmount()
-
-    const switched = mountPane()
-    expect(switched.getByTestId('sidebar-browser-section')).toBeTruthy()
-    expect(switched.queryByTestId('sidebar-canvas-popup-placeholder')).toBeNull()
+    expect(view.queryByTestId('right-pane-tabs')).toBeNull()
+    expect(view.queryByTestId('sidebar-canvas-popup-placeholder')).toBeNull()
+    expect(view.getByTestId('sidebar-browser-section')).toBeTruthy()
   })
 })
 
@@ -330,7 +311,7 @@ describe('useCanvasPaneSync (SB-CANVAS-OUT)', () => {
 })
 
 describe('GenUiCanvasBridge open-while-popped guard (SB-CANVAS-OUT)', () => {
-  it('an explicit canvas open while popped out first returns the popup', () => {
+  it('a new canvas replaces the old presentation and selects its sidebar tab', () => {
     contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: true })
 
     const view = render(createElement(GenUiCanvasBridge))
@@ -338,7 +319,9 @@ describe('GenUiCanvasBridge open-while-popped guard (SB-CANVAS-OUT)', () => {
       detail: { sessionId: 'sess-a', appId: APP.appId, title: APP.title, indexPath: APP.indexPath, version: 3 },
     }))
 
-    expect(apiCalls.attachFromPopup).toEqual([['sess-a']])
+    expect(apiCalls.attachFromPopup).toEqual([])
+    expect(contextStore.get(canvasPanePopoutAtomFamily('sess-a'))).toBeNull()
+    expect(contextStore.get(rightPaneTabAtom)).toBe('canvas')
     expect(contextStore.get(canvasPaneAppAtomFamily('sess-a'))).toEqual(APP)
     view.unmount()
   })
@@ -350,6 +333,56 @@ describe('GenUiCanvasBridge open-while-popped guard (SB-CANVAS-OUT)', () => {
     }))
     expect(apiCalls.attachFromPopup).toEqual([])
     expect(contextStore.get(canvasPaneAppAtomFamily('sess-a'))).toEqual(APP)
+    view.unmount()
+  })
+
+  it('closed state clears the inline placeholder and a later open resets presentation', () => {
+    contextStore.set(canvasPaneAppAtomFamily('sess-a'), APP)
+    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: false, isVisible: false })
+    const events: any[] = []
+    const listener = (event: any) => events.push(event.detail)
+    window.addEventListener(GENUI_APP_CANVAS_STATE_EVENT, listener)
+    broadcastCanvasState({ sessionId: 'sess-a', poppedOut: false, isVisible: false, closed: true })
+    expect(contextStore.get(canvasPaneAppAtomFamily('sess-a'))).toBeNull()
+    expect(contextStore.get(canvasPanePopoutAtomFamily('sess-a'))).toBeNull()
+    expect(events.at(-1)).toEqual({ sessionId: 'sess-a', appId: null })
+    const view = render(createElement(GenUiCanvasBridge))
+    window.dispatchEvent(new window.CustomEvent(GENUI_APP_CANVAS_OPEN_EVENT, { detail: { sessionId: 'sess-a', ...APP } }))
+    expect(contextStore.get(canvasPaneAppAtomFamily('sess-a'))).toEqual(APP)
+    expect(contextStore.get(canvasPanePopoutAtomFamily('sess-a'))).toBeNull()
+    window.removeEventListener(GENUI_APP_CANVAS_STATE_EVENT, listener)
+    view.unmount()
+  })
+  it('the transcript FOCUS request restores a hidden sidebar canvas through Main', () => {
+    contextStore.set(canvasPaneAppAtomFamily('sess-a'), APP)
+    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: false, isVisible: false })
+    contextStore.set(rightPaneTabAtom, 'browser')
+    const view = render(createElement(GenUiCanvasBridge))
+    window.dispatchEvent(new window.CustomEvent(GENUI_APP_CANVAS_FOCUS_EVENT, { detail: { sessionId: 'sess-a', appId: APP.appId } }))
+    expect(apiCalls.focus).toEqual([['sess-a']])
+    expect(contextStore.get(rightPaneTabAtom)).toBe('canvas')
+    expect(apiCalls.attachFromPopup).toEqual([])
+    view.unmount()
+  })
+  it('a transcript FOCUS keeps an existing popup in its chosen location', () => {
+    contextStore.set(canvasPaneAppAtomFamily('sess-a'), APP)
+    contextStore.set(canvasPanePopoutAtomFamily('sess-a'), { sessionId: 'sess-a', poppedOut: true, isVisible: false })
+    contextStore.set(rightPaneTabAtom, 'browser')
+    const view = render(createElement(GenUiCanvasBridge))
+    window.dispatchEvent(new window.CustomEvent(GENUI_APP_CANVAS_FOCUS_EVENT, { detail: { sessionId: 'sess-a', appId: APP.appId } }))
+    expect(apiCalls.focus).toEqual([['sess-a']])
+    expect(contextStore.get(rightPaneTabAtom)).toBe('browser')
+    expect(apiCalls.attachFromPopup).toEqual([])
+    view.unmount()
+  })
+  it('Main explicit return selects canvas and clears the file surface precedence', () => {
+    const onPresented = mock(() => {})
+    function Host() { useCanvasPaneSync({ currentSessionId: 'sess-a', onPresented }); return null }
+    const view = render(createElement(Host))
+    contextStore.set(rightPaneTabAtom, 'browser')
+    broadcastCanvasState({ sessionId: 'sess-a', poppedOut: false, isVisible: true })
+    expect(contextStore.get(rightPaneTabAtom)).toBe('canvas')
+    expect(onPresented).toHaveBeenCalledTimes(1)
     view.unmount()
   })
 

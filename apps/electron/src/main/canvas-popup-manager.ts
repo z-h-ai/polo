@@ -1,183 +1,206 @@
-/**
- * POO-135 验收修复 (SB-CANVAS-OUT): the canvas app's dedicated popup window.
- *
- * The right-sidebar canvas card is a renderer `<webview>`, which cannot
- * migrate across windows the way the browser pane's WebContentsView does —
- * so popping out creates a fresh BrowserWindow that loads the SAME carrier
- * contract (canvas-popout.html hosting a CanvasPaneCard: same ephemeral
- * `genui-app-<sessionId>` partition, same UiCardRegistry registration via
- * the shared useGenUiGuestWebview hook). The logical canvas — the app object
- * in the renderer's canvas-pane atoms — never moves; the sidebar and the
- * popup are two carriers of one canvas, mutually exclusive by the
- * `canvasPanePopout` atom the main window reconciles from our broadcasts.
- *
- * Window semantics (aligned with the browser pane where applicable):
- * - the popup registers into the WindowManager's workspace map (aux window)
- *   so Main's webview attach gate resolves the same trusted scope — an
- *   unmapped window is fail-closed for every `<webview>`;
- * - closing the window by ANY route (explicit「收回」or the system close
- *   button) emits `poppedOut:false` — the sidebar returns the canvas
- *   automatically (spec: system-close returns it, contents preserved; the
- *   canvas object is renderer state, so a fresh webview re-mounts on return);
- * - the title shows the app name and is never overridden by the workspace
- *   title policy (aux windows are not counted as main windows).
- */
-
-import { BrowserWindow, app, nativeTheme } from 'electron'
+/** A persistent renderer carrier moves as one BrowserView; its trusted guest never remounts. */
+import { BrowserView, BrowserWindow, app, nativeTheme, dialog } from 'electron'
+import { i18n } from '@polo-ai/shared/i18n'
 import { join } from 'path'
-import type { CanvasPaneApp, CanvasPanePopoutState } from '@polo-ai/shared/protocol'
+import type { BrowserEmbedBounds, CanvasPaneApp, CanvasPanePopoutState } from '@polo-ai/shared/protocol'
+import { registerGenUiCarrier, unregisterGenUiCarrier } from './webview-security'
+import { captureCompleteTrustedSessionScopeToken, isTrustedSessionScopeTokenCurrent, getAccountTransitionEpoch, getTrustedAccountGeneration, getSyncTrustedProductSpaceAccountState, isAccountTransitionInProgress, type TrustedSessionScopeToken } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+import { onRuntimeScopeChanged, getRuntimeFenceGeneration, getRuntimeActiveProductSpace, isRuntimeProductSpaceRestricted } from '@polo-ai/server-core/runtime/product-space-executions'
 import { mainLog } from './logger'
 import type { WindowManager } from './window-manager'
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
-
-/** Matches the prototype's popout dimensions (candidate review.html). */
-const POPUP_DEFAULT_WIDTH = 880
-const POPUP_DEFAULT_HEIGHT = 720
-const POPUP_MIN_WIDTH = 480
-const POPUP_MIN_HEIGHT = 360
-
-interface CanvasPopupEntry {
-  window: BrowserWindow
+interface CanvasEntry {
+  view: BrowserView
+  host: BrowserWindow
+  popup: BrowserWindow | null
   app: CanvasPaneApp
   workspaceId: string | null
+  poppedOut: boolean
+  visible: boolean
+  mountedIn: BrowserWindow | null
+  ready: Promise<void>
+  cleanupHost: () => void
+  scope: { token: TrustedSessionScopeToken | null; epoch: number; generation: number; fence: number }
 }
 
 export class CanvasPopupManager {
-  private popouts = new Map<string, CanvasPopupEntry>()
+  private popouts = new Map<string, CanvasEntry>()
   private windowManager: WindowManager | null = null
-  private stateListeners = new Set<(state: CanvasPanePopoutState) => void>()
-
-  setWindowManager(windowManager: WindowManager | null): void {
-    this.windowManager = windowManager
+  private readonly offScope: () => void
+  constructor() {
+    this.offScope = onRuntimeScopeChanged(() => {
+      for (const [id, entry] of [...this.popouts]) if (!this.scopeCurrent(entry.scope)) this.destroy(id)
+    })
   }
-
-  /** Renderer-side sync subscribes here (browser.ts forwards as a broadcast). */
+  private scopeCurrent(scope: CanvasEntry['scope']): boolean {
+    const { token, epoch, generation, fence } = scope
+    if (token) return isTrustedSessionScopeTokenCurrent(token) && !isRuntimeProductSpaceRestricted(token.productSpaceId)
+    return getSyncTrustedProductSpaceAccountState().status === 'signed_out' && !getRuntimeActiveProductSpace() && !isAccountTransitionInProgress() && getAccountTransitionEpoch() === epoch && getTrustedAccountGeneration() === generation && getRuntimeFenceGeneration() === fence
+  }
+  private stateListeners = new Set<(state: CanvasPanePopoutState) => void>()
+  setWindowManager(value: WindowManager | null): void { this.windowManager = value }
   onStateChanged(listener: (state: CanvasPanePopoutState) => void): () => void {
     this.stateListeners.add(listener)
-    return () => {
-      this.stateListeners.delete(listener)
-    }
+    return () => { this.stateListeners.delete(listener) }
   }
-
-  private emitState(sessionId: string, poppedOut: boolean, isVisible: boolean): void {
-    const state: CanvasPanePopoutState = { sessionId, poppedOut, isVisible }
-    for (const listener of [...this.stateListeners]) {
-      try {
-        listener(state)
-      } catch {
-        // A dead listener must never break the others (app shutdown order).
-      }
-    }
+  private emit(sessionId: string, entry: CanvasEntry, closed = false): void {
+    const state = { sessionId, poppedOut: entry.poppedOut, isVisible: entry.visible, ...(closed ? { closed: true } : {}) }
+    for (const listener of this.stateListeners) { try { listener(state) } catch (error) { mainLog.warn('[canvas] state consumer failed', error) } }
   }
-
-  detachToPopup(sessionId: string, app_: CanvasPaneApp, workspaceId: string | null | undefined): void {
-    const existing = this.popouts.get(sessionId)
-    if (existing && !existing.window.isDestroyed()) {
-      // Mutual exclusion: one popup per session's canvas — re-request focuses.
-      existing.window.show()
-      existing.window.focus()
-      return
+  /** All controls accept only the exact owner window or this canvas's carrier renderer. */
+  assertOwner(sessionId: string, senderId: number | null | undefined, workspaceId: string | null | undefined): CanvasEntry | undefined {
+    const entry = this.popouts.get(sessionId)
+    if (entry && !this.scopeCurrent(entry.scope)) { this.destroy(sessionId); throw new Error('Canvas scope has ended') }
+    if (entry && (entry.workspaceId !== (workspaceId ?? null) || (senderId !== entry.host.webContents.id && senderId !== entry.view.webContents.id))) {
+      throw new Error('Canvas belongs to another window or workspace')
     }
-    this.popouts.delete(sessionId)
-
-    // Match background to current OS theme to prevent black/white flash.
-    const bgColor = nativeTheme.shouldUseDarkColors ? '#2b292e' : '#fafafb'
-    const window = new BrowserWindow({
-      width: POPUP_DEFAULT_WIDTH,
-      height: POPUP_DEFAULT_HEIGHT,
-      minWidth: POPUP_MIN_WIDTH,
-      minHeight: POPUP_MIN_HEIGHT,
-      show: false,
-      title: app_.title,
-      backgroundColor: bgColor,
-      autoHideMenuBar: true,
-      webPreferences: {
-        preload: join(__dirname, 'bootstrap-preload.cjs'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false,
-        // The popup hosts the very same <webview> carrier contract.
-        webviewTag: true,
-      },
-    })
-
-    // Keep the app-name title; the carrier page's <title> must not override it.
-    window.on('page-title-updated', (event) => event.preventDefault())
-
-    // The popup is a terminal carrier: no nested window.open from it.
-    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-
-    window.once('ready-to-show', () => {
-      if (!window.isDestroyed()) {
-        window.show()
-        this.emitState(sessionId, true, true)
+    return entry
+  }
+  private mount(entry: CanvasEntry, target: BrowserWindow): void {
+    if (entry.mountedIn === target) return
+    if (entry.mountedIn && !entry.mountedIn.isDestroyed()) entry.mountedIn.removeBrowserView(entry.view)
+    target.addBrowserView(entry.view)
+    entry.mountedIn = target
+  }
+  private unmount(entry: CanvasEntry): void {
+    if (entry.mountedIn && !entry.mountedIn.isDestroyed()) entry.mountedIn.removeBrowserView(entry.view)
+    entry.mountedIn = null
+  }
+  async embed(sessionId: string, app_: CanvasPaneApp, host: BrowserWindow, workspaceId: string | null | undefined, bounds: BrowserEmbedBounds): Promise<void> {
+    let entry = this.assertOwner(sessionId, host.webContents.id, workspaceId)
+    if (entry && (entry.app.appId !== app_.appId || entry.app.indexPath !== app_.indexPath)) {
+      this.destroy(sessionId, false)
+      entry = undefined
+    }
+    if (!entry) {
+      const token = captureCompleteTrustedSessionScopeToken(workspaceId)
+      const scope = { token, epoch: getAccountTransitionEpoch(), generation: getTrustedAccountGeneration(), fence: getRuntimeFenceGeneration() }
+      if (!this.scopeCurrent(scope)) throw new Error('Canvas scope is unavailable')
+      const view = new BrowserView({ webPreferences: { preload: join(__dirname, 'bootstrap-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false, webviewTag: true } })
+      entry = { view, host, popup: null, app: app_, workspaceId: workspaceId ?? null, poppedOut: false, visible: true, mountedIn: null, scope, ready: Promise.resolve(), cleanupHost: () => {} }
+      this.popouts.set(sessionId, entry)
+      registerGenUiCarrier(view.webContents.id, sessionId)
+      this.windowManager?.registerAuxRenderer(view.webContents.id, host, entry.workspaceId)
+      view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      const current = entry
+      const release = () => { if (this.popouts.get(sessionId) === current) this.destroy(sessionId) }
+      const onNavigation = (_event: unknown, _url: string, sameDocument: boolean, mainFrame: boolean) => { if (mainFrame && !sameDocument) release() }
+      const fail = () => { if (this.popouts.get(sessionId) === current) this.failLoad(sessionId, current) }
+      host.once('closed', release)
+      host.webContents.on('render-process-gone', release)
+      host.webContents.on('did-start-navigation', onNavigation)
+      view.webContents.on('render-process-gone', fail)
+      entry.cleanupHost = () => {
+        host.off('closed', release)
+        host.webContents.off('render-process-gone', release)
+        host.webContents.off('did-start-navigation', onNavigation)
+        view.webContents.off('render-process-gone', fail)
       }
-    })
-
-    // ANY close route (system close button, explicit attachFromPopup, app
-    // shutdown) funnels here: the canvas returns to the sidebar automatically.
-    window.on('closed', () => {
-      const entry = this.popouts.get(sessionId)
-      if (entry?.window === window) this.popouts.delete(sessionId)
-      this.windowManager?.unregisterAuxWindow(window.webContents.id)
-      mainLog.info(`[canvas-popup] closed for session=${sessionId} — canvas returns to the sidebar`)
-      this.emitState(sessionId, false, false)
-    })
-
-    // Register into the workspace map so the webview attach gate treats this
-    // renderer as a member of the same trusted scope (aux: title policy skips
-    // it and main-window counting ignores it).
-    this.windowManager?.registerAuxWindow(window, workspaceId ?? null)
-
-    this.popouts.set(sessionId, { window, app: app_, workspaceId: workspaceId ?? null })
-
-    const appQuery = encodeURIComponent(JSON.stringify(app_))
-    if (VITE_DEV_SERVER_URL) {
-      void window.loadURL(`${VITE_DEV_SERVER_URL}/canvas-popout.html?sessionId=${encodeURIComponent(sessionId)}&app=${appQuery}`)
-    } else {
-      void window.loadFile(join(__dirname, 'renderer/canvas-popout.html'), {
-        query: { sessionId, app: JSON.stringify(app_) },
+      const query = new URLSearchParams({ sessionId, app: JSON.stringify(app_) })
+      const load = VITE_DEV_SERVER_URL ? view.webContents.loadURL(`${VITE_DEV_SERVER_URL}/canvas-popout.html?${query}`) : view.webContents.loadFile(join(__dirname, 'renderer/canvas-popout.html'), { search: query.toString() })
+      entry.ready = load.catch(error => {
+        if (this.popouts.get(sessionId) === current) this.failLoad(sessionId, current)
+        throw error
       })
     }
-    mainLog.info(`[canvas-popup] detached canvas to popup session=${sessionId} app=${app_.appId}`)
+    if (entry.poppedOut) return
+    this.mount(entry, host)
+    entry.view.setBounds({ x: Math.max(0, Math.round(bounds.x)), y: Math.max(0, Math.round(bounds.y)), width: Math.max(1, Math.round(bounds.width)), height: Math.max(1, Math.round(bounds.height)) })
+    entry.visible = true
+    this.emit(sessionId, entry)
+    await entry.ready
+    if (this.popouts.get(sessionId) !== entry || !this.scopeCurrent(entry.scope)) throw new Error('Canvas scope or host has ended')
   }
-
-  /** Return the canvas to the sidebar: close the popup window. */
+  unembed(sessionId: string): void {
+    const entry = this.popouts.get(sessionId)
+    if (!entry || entry.poppedOut) return
+    this.unmount(entry)
+  }
+  detachToPopup(sessionId: string, _app?: CanvasPaneApp, _workspaceId?: string | null): void {
+    const entry = this.popouts.get(sessionId)
+    if (!entry) throw new Error('Open the canvas before detaching it')
+    if (entry.popup && !entry.popup.isDestroyed()) { this.focus(sessionId); return }
+    // Construct before moving the carrier: a failed popup leaves the sidebar intact.
+    const popup = new BrowserWindow({ width: 880, height: 720, minWidth: 480, minHeight: 360, show: false, title: entry.app.title, backgroundColor: nativeTheme.shouldUseDarkColors ? '#2b292e' : '#fafafb', autoHideMenuBar: true })
+    const layout = () => { const [width, height] = popup.getContentSize(); entry.view.setBounds({ x: 0, y: 0, width, height }) }
+    try { this.mount(entry, popup); layout() } catch (error) { popup.destroy(); this.mount(entry, entry.host); throw error }
+    entry.popup = popup
+    entry.poppedOut = true
+    entry.visible = true
+    popup.on('resize', layout)
+    popup.on('close', event => { event.preventDefault(); this.hide(sessionId) })
+    popup.on('closed', () => { if (entry.popup === popup) { entry.popup = null; entry.visible = false; this.emit(sessionId, entry) } })
+    popup.show()
+    popup.focus()
+    this.emit(sessionId, entry)
+  }
   attachFromPopup(sessionId: string): void {
     const entry = this.popouts.get(sessionId)
-    if (!entry || entry.window.isDestroyed()) {
-      // Idempotent: no popup — make sure the sidebar state is reconciled.
-      this.emitState(sessionId, false, false)
-      return
-    }
-    entry.window.close()
+    if (!entry) return
+    this.unmount(entry)
+    const popup = entry.popup
+    entry.popup = null
+    if (popup && !popup.isDestroyed()) popup.destroy()
+    entry.poppedOut = false
+    entry.visible = true
+    this.emit(sessionId, entry)
+    // Renderer measures the sidebar before the view is attached there.
   }
-
-  /** Show + focus the popup window (sidebar「显示窗口」affordance). */
+  hide(sessionId: string): void {
+    const entry = this.popouts.get(sessionId)
+    if (!entry) return
+    if (entry.poppedOut) entry.popup?.hide()
+    else this.unmount(entry)
+    entry.visible = false
+    this.emit(sessionId, entry)
+  }
   focus(sessionId: string): void {
     const entry = this.popouts.get(sessionId)
-    if (!entry || entry.window.isDestroyed()) return
-    if (entry.window.isMinimized()) entry.window.restore()
-    entry.window.show()
-    entry.window.focus()
+    if (!entry) return
+    if (entry.poppedOut && entry.popup && !entry.popup.isDestroyed()) { entry.popup.show(); entry.popup.focus() }
+    entry.visible = true
+    this.emit(sessionId, entry)
   }
-
-  isPoppedOut(sessionId: string): boolean {
+  async requestDestroy(sessionId: string, aiActive: boolean): Promise<boolean> {
     const entry = this.popouts.get(sessionId)
-    return Boolean(entry && !entry.window.isDestroyed())
-  }
-
-  /** App-quit cleanup: close every popup (broadcasts drive the sidebar back). */
-  destroyAll(): void {
-    for (const [sessionId, entry] of [...this.popouts]) {
-      if (!entry.window.isDestroyed()) entry.window.close()
-      this.popouts.delete(sessionId)
+    if (!entry) return true
+    if (aiActive) {
+      const parent = entry.poppedOut && entry.popup ? entry.popup : entry.host
+      const answer = await dialog.showMessageBox(parent, { type: 'warning', title: entry.app.title, message: i18n.t('genui.app.closeActiveTitle'), detail: i18n.t('genui.app.closeActiveBody'), buttons: [i18n.t('common.cancel'), i18n.t('common.close')], defaultId: 0, cancelId: 0 })
+      if (answer.response !== 1) return false
     }
+    if (this.popouts.get(sessionId) !== entry) return false
+    this.destroy(sessionId)
+    return true
   }
+  private failLoad(sessionId: string, entry: CanvasEntry): void {
+    this.destroy(sessionId, false)
+    for (const listener of this.stateListeners) { try { listener({ sessionId, poppedOut: false, isVisible: true, loadFailed: true }) } catch (error) { mainLog.warn('[canvas] failure consumer failed', error) } }
+  }
+  destroy(sessionId: string, notify = true): void {
+    const entry = this.popouts.get(sessionId)
+    if (!entry) return
+    this.popouts.delete(sessionId)
+    const wcId = entry.view.webContents.id
+    const popup = entry.popup
+    entry.popup = null
+    const releases = [
+      () => entry.cleanupHost(),
+      () => this.unmount(entry),
+      () => unregisterGenUiCarrier(wcId),
+      () => this.windowManager?.unregisterAuxRenderer(wcId),
+      () => { if (popup && !popup.isDestroyed()) popup.destroy() },
+      () => { if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close({ waitForBeforeUnload: false }) },
+    ]
+    for (const release of releases) { try { release() } catch (error) { mainLog.error('[canvas] failed to release owned resource', error) } }
+    entry.visible = false
+    if (notify) this.emit(sessionId, entry, true)
+  }
+  releaseForHost(senderId: number): void {
+    for (const [id, entry] of this.popouts) if (entry.host.webContents.id === senderId) this.destroy(id)
+  }
+  isPoppedOut(sessionId: string): boolean { return this.popouts.get(sessionId)?.poppedOut ?? false }
+  destroyAll(): void { for (const id of [...this.popouts.keys()]) this.destroy(id); this.offScope() }
 }
-
-/** Guard for tests / headless import (no Electron runtime). */
-export function isCanvasPopupSupported(): boolean {
-  return typeof BrowserWindow !== 'undefined' && typeof app !== 'undefined'
-}
+export function isCanvasPopupSupported(): boolean { return typeof BrowserWindow !== 'undefined' && typeof app !== 'undefined' }

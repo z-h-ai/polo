@@ -26,6 +26,7 @@ import { OptionSelect } from '@polo-ai/ui/ui/option-select'
  * AppShell's isAutoCompact).
  */
 
+import { MIN_CHAT_WIDTH } from "./right-pane-layout"
 import * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -35,13 +36,10 @@ import { motion, useReducedMotion } from 'motion/react'
 import {
   ArrowLeft,
   ArrowRight,
-  AppWindow,
   Crosshair,
   ExternalLink,
-  EyeOff,
   Globe,
   LayoutGrid,
-  PictureInPicture2,
   RotateCw,
   X,
 } from 'lucide-react'
@@ -66,14 +64,12 @@ import {
 import { CanvasPaneCard } from './CanvasPane'
 import {
   activeElementPickingAtom,
-  filterSidebarBrowserInstances,
   resolvePickTargetSessionId,
-  resolveSidebarBrowserInstance,
   rightPaneTabAtom,
   sidebarBrowserInstanceIdAtom,
   sidebarBrowserOpenAtom,
 } from '@/atoms/sidebar-browser'
-import { browserInstancesMapAtom } from '@/atoms/browser-pane'
+import { useRightPanePresentation } from '@/hooks/use-right-pane-presentation'
 import { sessionMetaMapAtom } from '@/atoms/sessions'
 
 /** Fallback width-atom key when only the browser slot is open (no session canvas key). */
@@ -85,6 +81,9 @@ const CANVAS_PANE_REDUCED_TWEEN = { type: 'tween' as const, duration: 0.12 }
 
 interface RightSidebarPaneProps {
   /** Width-atom key — the session id when a canvas exists, else the fallback. */
+  visible?: boolean
+  filePreviewVisible?: boolean
+  filePreview?: React.ReactNode
   layoutKey: string
   canvasSessionId: string | null
   canvasApp: CanvasPaneApp | null
@@ -106,9 +105,12 @@ interface RightSidebarPaneProps {
 }
 
 export function RightSidebarPane({
+  visible = true,
+  filePreviewVisible = true,
+  filePreview,
   layoutKey,
   canvasSessionId,
-  canvasApp,
+  canvasApp: suppliedCanvasApp,
   getLayoutRect,
   currentSessionId,
   activeWorkspaceId,
@@ -123,31 +125,13 @@ export function RightSidebarPane({
   const [isDragging, setIsDragging] = useState(false)
   const reduceMotion = useReducedMotion()
 
-  const browserSlotOpen = useAtomValue(sidebarBrowserOpenAtom)
+  const canvasPresentation = useAtomValue(useMemo(() => canvasPanePopoutAtomFamily(canvasSessionId ?? ''), [canvasSessionId]))
+  const canvasApp = suppliedCanvasApp && !canvasPresentation?.poppedOut && canvasPresentation?.isVisible !== false ? suppliedCanvasApp : null
+  const presentation = useRightPanePresentation({ currentSessionId, activeWorkspaceId, remoteWorkspaceId, fileVisible: Boolean(filePreview && filePreviewVisible), canvasVisible: Boolean(canvasApp) })
+  const { browserSlotOpen } = presentation
   const storedTab = useAtomValue(rightPaneTabAtom)
-  const allBrowserInstances = useAtomValue(browserInstancesMapAtom)
-
-  // POO-135 验收修复 (SB-CANVAS-OUT): while the session's canvas lives in the
-  // popup window the sidebar hosts a placeholder — one live canvas surface
-  // per session (popup XOR sidebar card).
-  const canvasPopout = useAtomValue(
-    useMemo(() => canvasPanePopoutAtomFamily(canvasSessionId ?? ''), [canvasSessionId]),
-  )
-  const canvasPoppedOut = Boolean(canvasApp && canvasSessionId && canvasPopout?.poppedOut)
-
-  // POO-135 r1: the browser tab stays reachable while instances are merely
-  // hidden (slot closed, objects preserved) so they can be shown again.
-  const visibleBrowserCount = useMemo(
-    () =>
-      filterSidebarBrowserInstances(
-        Array.from(allBrowserInstances.values()),
-        currentSessionId,
-        activeWorkspaceId,
-        remoteWorkspaceId,
-      ).length,
-    [allBrowserInstances, currentSessionId, activeWorkspaceId, remoteWorkspaceId],
-  )
-  const browserReachable = browserSlotOpen || visibleBrowserCount > 0
+  const browserReachable = browserSlotOpen && Boolean(presentation.instance)
+  const paneVisible = visible && presentation.hasRightPane
 
   // The pane exists when either content kind is open; with only one kind open
   // it always shows that kind regardless of the stored tab.
@@ -187,18 +171,6 @@ export function RightSidebarPane({
       toast.error(t('toast.failedToDetachCanvas'))
     })
   }, [canvasApp, canvasSessionId, t])
-
-  const handleCanvasAttach = useCallback(() => {
-    if (!canvasSessionId) return
-    void window.electronAPI?.canvasPane?.attachFromPopup?.(canvasSessionId).catch(() => {
-      toast.error(t('toast.failedToAttachCanvas'))
-    })
-  }, [canvasSessionId, t])
-
-  const handleCanvasFocusPopup = useCallback(() => {
-    if (!canvasSessionId) return
-    void window.electronAPI?.canvasPane?.focus?.(canvasSessionId)
-  }, [canvasSessionId])
 
   // Sash drag: pointer x → ratio of the shell row — same contract as
   // CanvasPane (content-box basis; see the measurement comment there).
@@ -249,7 +221,8 @@ export function RightSidebarPane({
       ref={rootRef}
       className="relative flex items-stretch shrink-0"
       initial={{ width: '0%' }}
-      animate={{ width: `${widthRatio * 100}%` }}
+      animate={{ width: paneVisible ? `${widthRatio * 100}%` : '0%' }}
+      style={{ visibility: paneVisible ? undefined : 'hidden', overflow: paneVisible ? undefined : 'hidden', maxWidth: paneVisible ? `calc(100% - ${MIN_CHAT_WIDTH}px)` : undefined }}
       transition={
         isDragging
           ? { duration: 0 }
@@ -300,82 +273,24 @@ export function RightSidebarPane({
         />
       </div>
       <div className="h-full w-full min-w-0 flex flex-col overflow-hidden rounded-[8px] border bg-background">
-        {canvasApp && browserReachable && (
+        {!(filePreview && filePreviewVisible) && canvasApp && browserReachable && (
           <RightPaneTabs tab={effectiveTab} onSwitch={handleTabSwitch} />
         )}
-        {effectiveTab === 'canvas' && canvasApp && canvasSessionId ? (
-          canvasPoppedOut ? (
-            <CanvasPopoutPlaceholder
-              app={canvasApp}
-              onAttach={handleCanvasAttach}
-              onFocusPopup={handleCanvasFocusPopup}
-            />
-          ) : (
-            <CanvasPaneCard
-              sessionId={canvasSessionId}
-              app={canvasApp}
-              onPopOut={handleCanvasDetach}
-            />
-          )
-        ) : (
+        {filePreview && <div hidden={!filePreviewVisible} className="flex-1 min-h-0 h-full">{filePreview}</div>}
+        {filePreview && filePreviewVisible ? null : effectiveTab === 'canvas' && canvasApp && canvasSessionId ? (
+          <CanvasPaneCard sessionId={canvasSessionId} app={canvasApp} onPopOut={handleCanvasDetach} />
+        ) : browserSlotOpen ? (
           <SidebarBrowserSection
             currentSessionId={currentSessionId}
-            activeWorkspaceId={activeWorkspaceId}
-            remoteWorkspaceId={remoteWorkspaceId}
+            instances={presentation.instances}
+            instance={presentation.instance}
             onSelectSession={onSelectSession}
             onTerminate={onTerminate}
             onSwitchAway={disarmArmedPicker}
           />
-        )}
+        ) : null}
       </div>
     </motion.div>
-  )
-}
-
-/**
- * POO-135 验收修复 (SB-CANVAS-OUT): the sidebar-side placeholder shown while
- * the session's canvas lives in the popup window — the popup is the single
- * active surface; the slot offers 收回 (return) and 显示窗口 (focus).
- */
-function CanvasPopoutPlaceholder({ app, onAttach, onFocusPopup }: {
-  app: CanvasPaneApp
-  onAttach: () => void
-  onFocusPopup: () => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <div
-      className="flex-1 min-h-0 flex flex-col items-center justify-center gap-2 p-4 text-center"
-      data-testid="sidebar-canvas-popup-placeholder"
-    >
-      <AppWindow className="w-5 h-5 text-muted-foreground/60" />
-      <div className="text-[13px] font-medium text-foreground-80 max-w-[260px] truncate">
-        {app.title}
-      </div>
-      <div className="max-w-[260px] text-[12px] text-muted-foreground">
-        {t('browserPane.sidebar.popupBody')}
-      </div>
-      <div className="mt-1 flex items-center gap-1.5">
-        <button
-          type="button"
-          data-testid="sidebar-canvas-attach"
-          onClick={onAttach}
-          className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-background px-2.5 py-1 text-[12px] text-foreground-80 transition-colors hover:border-foreground/20 hover:text-foreground"
-        >
-          <PictureInPicture2 className="w-3.5 h-3.5" />
-          {t('browserPane.sidebar.embed')}
-        </button>
-        <button
-          type="button"
-          data-testid="sidebar-canvas-show-window"
-          onClick={onFocusPopup}
-          className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-background px-2.5 py-1 text-[12px] text-foreground-80 transition-colors hover:border-foreground/20 hover:text-foreground"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-          {t('browserPane.sidebar.showWindow')}
-        </button>
-      </div>
-    </div>
   )
 }
 
@@ -423,8 +338,8 @@ function RightPaneTabs({ tab, onSwitch }: { tab: 'canvas' | 'browser'; onSwitch:
 
 interface SidebarBrowserSectionProps {
   currentSessionId: string | null
-  activeWorkspaceId: string | null
-  remoteWorkspaceId: string | null
+  instances: BrowserInstanceInfo[]
+  instance: BrowserInstanceInfo | null
   onSelectSession: (sessionId: string) => void
   onTerminate: (instance: BrowserInstanceInfo) => Promise<void>
   /** POO-135 r1: disarm an armed picker before the shown instance changes. */
@@ -434,30 +349,17 @@ interface SidebarBrowserSectionProps {
 /** The browser slot: layer-2 header over the embedded container / placeholder / empty state. */
 function SidebarBrowserSection({
   currentSessionId,
-  activeWorkspaceId,
-  remoteWorkspaceId,
+  instances: visible,
+  instance,
   onSelectSession,
   onTerminate,
   onSwitchAway,
 }: SidebarBrowserSectionProps) {
   const { t } = useTranslation()
-  const allInstances = useAtomValue(browserInstancesMapAtom)
-  const selectedId = useAtomValue(sidebarBrowserInstanceIdAtom)
   const setSelectedId = useSetAtom(sidebarBrowserInstanceIdAtom)
   const picking = useAtomValue(activeElementPickingAtom)
   const sessionMetas = useAtomValue(sessionMetaMapAtom)
 
-  const visible = useMemo(
-    () =>
-      filterSidebarBrowserInstances(
-        Array.from(allInstances.values()),
-        currentSessionId,
-        activeWorkspaceId,
-        remoteWorkspaceId,
-      ),
-    [allInstances, currentSessionId, activeWorkspaceId, remoteWorkspaceId],
-  )
-  const instance = resolveSidebarBrowserInstance(visible, selectedId)
   const targetSessionId = resolvePickTargetSessionId(instance, currentSessionId)
   const isPicking = Boolean(instance && picking?.instanceId === instance.id)
 
@@ -482,24 +384,17 @@ function SidebarBrowserSection({
     }
   }, [store, t])
 
-  const handleEmbed = useCallback(async (id: string) => {
-    try {
-      await window.electronAPI?.browserPane?.embed?.(id)
-    } catch {
-      toast.error(t('toast.failedToEmbedBrowser'))
-    }
-  }, [t])
-
   const handleDetach = useCallback(async (id: string) => {
     // r3 (spec 28): detaching cancels an armed picker — the popup hosts a
     // fresh webview and must not inherit a live picking session.
     onSwitchAway()
     try {
       await window.electronAPI?.browserPane?.detachToPopup?.(id)
+      store.set(sidebarBrowserOpenAtom, false)
     } catch {
       toast.error(t('toast.failedToDetachBrowser'))
     }
-  }, [onSwitchAway, t])
+  }, [onSwitchAway, store, t])
 
   /** POO-135 r1 (spec suggested behavior 4): hide without destroying — the
    * instance object, its page and its history all stay alive in Main. */
@@ -523,6 +418,8 @@ function SidebarBrowserSection({
       },
     })
   }, [onSwitchAway, store, t])
+
+  if (instance?.hostMode === 'popup') return null
 
   if (!instance) {
     return <SidebarBrowserEmptyState onCreate={handleCreate} />
@@ -562,17 +459,6 @@ function SidebarBrowserSection({
             }))}
           />
         )}
-        {instance.hostMode === 'popup' ? (
-          <button
-            type="button"
-            data-testid="sidebar-browser-embed"
-            title={t('browserPane.sidebar.embed')}
-            onClick={() => void handleEmbed(instance.id)}
-            className="shrink-0 inline-flex items-center justify-center rounded-[6px] p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <PictureInPicture2 className="w-3.5 h-3.5" />
-          </button>
-        ) : (
           <button
             type="button"
             data-testid="sidebar-browser-detach"
@@ -582,21 +468,11 @@ function SidebarBrowserSection({
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </button>
-        )}
         <button
           type="button"
           data-testid="sidebar-browser-hide"
           title={t('browserPane.sidebar.hide')}
           onClick={() => void handleHide(instance.id)}
-          className="shrink-0 inline-flex items-center justify-center rounded-[6px] p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        >
-          <EyeOff className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          data-testid="sidebar-browser-terminate"
-          title={t('browserPane.sidebar.terminate')}
-          onClick={() => void onTerminate(instance)}
           className="shrink-0 inline-flex items-center justify-center rounded-[6px] p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         >
           <X className="w-3.5 h-3.5" />
@@ -607,38 +483,8 @@ function SidebarBrowserSection({
           browser's single active surface is the popup window; the slot keeps a
           read-only status bar with a show-window entry (spec: one active
           location). */}
-      {instance.hostMode === 'popup' ? (
-        <PopupStatusBar instance={instance} />
-      ) : (
-        <BrowserNavLayer
-          instance={instance}
-          targetSessionId={targetSessionId}
-          currentSessionId={currentSessionId}
-          isPicking={isPicking}
-        />
-      )}
-
-      {instance.hostMode === 'popup' ? (
-        <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-2 p-4 text-center" data-testid="sidebar-browser-popup-placeholder">
-          <ExternalLink className="w-5 h-5 text-muted-foreground/60" />
-          <div className="text-[13px] font-medium text-foreground-80">
-            {t('browserPane.sidebar.popupTitle')}
-          </div>
-          <div className="max-w-[260px] text-[12px] text-muted-foreground">
-            {t('browserPane.sidebar.popupBody')}
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleEmbed(instance.id)}
-            className="mt-1 inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-background px-2.5 py-1 text-[12px] text-foreground-80 transition-colors hover:border-foreground/20 hover:text-foreground"
-          >
-            <PictureInPicture2 className="w-3.5 h-3.5" />
-            {t('browserPane.sidebar.embed')}
-          </button>
-        </div>
-      ) : (
-        <EmbeddedBrowserContainer instanceId={instance.id} />
-      )}
+      <BrowserNavLayer instance={instance} targetSessionId={targetSessionId} currentSessionId={currentSessionId} isPicking={isPicking} />
+      <EmbeddedBrowserContainer instanceId={instance.id} />
     </div>
   )
 }
@@ -783,33 +629,6 @@ function BrowserNavLayer({ instance, targetSessionId, currentSessionId, isPickin
  * POO-135 r1: read-only status bar shown while the browser is popped out —
  * the popup window is the single active surface; the slot offers showing it.
  */
-function PopupStatusBar({ instance }: { instance: BrowserInstanceInfo }) {
-  const { t } = useTranslation()
-  return (
-    <div
-      className="px-2 py-1.5 border-b bg-background/60 flex items-center gap-2 shrink-0"
-      data-testid="sidebar-browser-popup-status"
-    >
-      <span
-        className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground"
-        title={instance.url}
-        aria-label={t('browserPane.sidebar.currentUrl')}
-      >
-        {instance.url || t('browserPane.sidebar.urlPlaceholder')}
-      </span>
-      <button
-        type="button"
-        data-testid="sidebar-browser-show-window"
-        title={t('browserPane.sidebar.showWindow')}
-        onClick={() => void window.electronAPI?.browserPane?.detachToPopup?.(instance.id)}
-        className="shrink-0 inline-flex items-center gap-1 rounded-[6px] border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground-80 transition-colors hover:text-foreground"
-      >
-        <ExternalLink className="w-3 h-3" />
-        {t('browserPane.sidebar.showWindow')}
-      </button>
-    </div>
-  )
-}
 
 /**
  * The embedded browser container: a purely visual mount point. The actual

@@ -37,6 +37,7 @@ import {
 import { queuePendingFocusForSession } from '@/components/app-shell/input/focus-input-events'
 
 interface UseSidebarBrowserSyncOptions {
+  onBrowserPresented?: () => void
   currentSessionId: string | null
   activeWorkspaceId: string | null
   remoteWorkspaceId: string | null
@@ -68,12 +69,15 @@ export interface SidebarBrowserSyncControls {
 }
 
 export function useSidebarBrowserSync({
+  onBrowserPresented,
   currentSessionId,
   activeWorkspaceId,
   remoteWorkspaceId,
   onSelectSession,
 }: UseSidebarBrowserSyncOptions): SidebarBrowserSyncControls {
   const { t } = useTranslation()
+  const onPresentedRef = useRef(onBrowserPresented)
+  onPresentedRef.current = onBrowserPresented
   const setInstances = useSetAtom(setBrowserInstancesAtom)
   const updateInstance = useSetAtom(updateBrowserInstanceAtom)
   const removeInstance = useSetAtom(removeBrowserInstanceAtom)
@@ -110,23 +114,7 @@ export function useSidebarBrowserSync({
 
     const offState = api.onStateChanged((info) => {
       updateInstance(info)
-      // System-closed (or toolbar-hidden) while the sidebar slot showed this
-      // instance detached → return it to the sidebar. The instance stays
-      // alive; URL, history and draft references are untouched.
-      const store = storeRef.current
-      if (
-        !info.sidebarHostWindowId &&
-        (!info.ownerSessionId || info.ownerSessionId === currentSessionIdRef.current) &&
-        (!info.workspaceId || info.workspaceId === activeWorkspaceId || info.workspaceId === remoteWorkspaceId) &&
-        info.hostMode !== 'embedded' &&
-        !info.isVisible &&
-        store.get(sidebarBrowserOpenAtom) &&
-        store.get(sidebarBrowserInstanceIdAtom) === info.id
-      ) {
-        void api.embed?.(info.id).catch(() => {
-          toast.error(t('toast.failedToEmbedBrowser'))
-        })
-      }
+      if (info.hostMode === 'popup' && info.sidebarHostWindowId && storeRef.current.get(sidebarBrowserInstanceIdAtom) === info.id) storeRef.current.set(sidebarBrowserOpenAtom, false)
     })
 
     const offOpen = api.onOpenRequested?.((info, reason) => {
@@ -134,6 +122,8 @@ export function useSidebarBrowserSync({
       // Closing A's window must not replace B's content. An explicit open
       // may select the owning chat, while a return never changes chats.
       const current = currentSessionIdRef.current
+      if (reason === 'automatic' && (!current || info.ownerSessionId !== current || !info.workspaceId ||
+          (info.workspaceId !== activeWorkspaceId && info.workspaceId !== remoteWorkspaceId))) return
       if (activeWorkspaceId || remoteWorkspaceId) {
         if (info.workspaceId && info.workspaceId !== activeWorkspaceId && info.workspaceId !== remoteWorkspaceId) return
       }
@@ -144,6 +134,7 @@ export function useSidebarBrowserSync({
         }
         onSelectSessionRef.current(info.ownerSessionId)
       }
+      onPresentedRef.current?.()
       const store = storeRef.current
       store.set(sidebarBrowserInstanceIdAtom, info.id)
       store.set(sidebarBrowserOpenAtom, true)
@@ -158,6 +149,7 @@ export function useSidebarBrowserSync({
       if (store.get(sidebarBrowserInstanceIdAtom) === id) {
         store.set(sidebarBrowserInstanceIdAtom, null)
       }
+      if (visibleCountExcluding(id) === 0) store.set(sidebarBrowserOpenAtom, false)
       const picking = store.get(activeElementPickingAtom)
       if (picking?.instanceId === id) store.set(activeElementPickingAtom, null)
     })
@@ -188,7 +180,7 @@ export function useSidebarBrowserSync({
       offDownload()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWorkspaceId, remoteWorkspaceId, removeInstance, setInstances, t, updateInstance])
+  }, [activeWorkspaceId, remoteWorkspaceId, removeInstance, setInstances, t, updateInstance, visibleCountExcluding])
 
   // A popup closed while B was active returns when its owner A is selected;
   // it neither switches chats nor steals B's right pane during close.
@@ -292,7 +284,8 @@ export function useSidebarBrowserSync({
     const api = window.electronAPI?.browserPane
     if (!api) return
     try {
-      await api.destroy(instance.id)
+      const destroyed = await api.destroy(instance.id)
+      if (destroyed === false) return
     } catch {
       toast.error(t('toast.failedToTerminateBrowser'))
       return

@@ -3,7 +3,7 @@
  * Admin session, never from RPC arguments. The admin handler module installs
  * the provider because only it owns the Admin session coordinator.
  */
-import { getRuntimeActiveProductSpaceScope, getRuntimeFenceGeneration } from '../../runtime/product-space-executions'
+import { getRuntimeActiveProductSpaceScope, getRuntimeFenceGeneration, notifyRuntimeScopeChanged } from '../../runtime/product-space-executions'
 
 export type TrustedProductSpaceAccountProvider = () => Promise<string | null>
 
@@ -111,6 +111,7 @@ export function setSyncTrustedProductSpaceAccountState(
   // epoch may settle (see settleAccountTransition). Unrelated snapshots
   // must never clear an older cleanup's boundary early.
   syncAccountState = state
+  notifyRuntimeScopeChanged()
 }
 
 /**
@@ -125,6 +126,7 @@ export function setSyncTrustedProductSpaceAccountId(accountId: string | null): v
   syncAccountState = accountId
     ? { status: 'authenticated', accountId }
     : { status: 'signed_out' }
+  notifyRuntimeScopeChanged()
 }
 
 /**
@@ -185,6 +187,7 @@ export function beginAccountTransition(): number {
     accountGeneration: getTrustedAccountGeneration(),
   }
   accountTransitionInProgress = true
+  notifyRuntimeScopeChanged()
   return epoch
 }
 

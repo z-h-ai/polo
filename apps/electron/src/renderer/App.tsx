@@ -74,14 +74,11 @@ import { getDefaultStore } from 'jotai'
 import {
   ShikiThemeProvider,
   PlatformProvider,
-  ImagePreviewOverlay,
-  PDFPreviewOverlay,
-  CodePreviewOverlay,
-  DocumentFormattedMarkdownOverlay,
-  JSONPreviewOverlay,
 } from '@polo-ai/ui'
 import { appendGenUiToolInputDelta } from '@polo-ai/ui/chat/genuiToolInputDeltas'
-import { useLinkInterceptor, type FilePreviewState } from '@/hooks/useLinkInterceptor'
+import { FilePreviewPane } from '@/components/app-shell/FilePreviewPane'
+import { useLinkInterceptor } from '@/hooks/useLinkInterceptor'
+import { useOpenBrowserLink } from '@/hooks/use-open-browser-link'
 import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
 import { useStaleSessionRecovery } from '@/hooks/useStaleSessionRecovery'
 import { TransportConnectionBanner, shouldShowTransportConnectionBanner } from '@/components/app-shell/TransportConnectionBanner'
@@ -2909,10 +2906,16 @@ export default function App() {
     return outcome
   }, [])
 
+  const openSessionBrowserLink = useOpenBrowserLink(window.electronAPI.browserPane, {
+    scopeKey: productSpace.productSpaceContextKey,
+    sessionId: sessionSelection.selected ?? undefined,
+  })
+
   // Centralized link interceptor: classifies file types and decides whether to
   // show an in-app preview overlay or open externally. Replaces the old
   // handleOpenFile/handleOpenUrl that always opened in external apps.
   const linkInterceptor = useLinkInterceptor({
+    sessionId: () => sessionSelection.selected ?? null,
     // Scope seal (Review R33/R34): every opened preview is stamped with the
     // immutable ProductSpace context key that opened it.
     scopeKey: () => productSpace.productSpaceContextKey ?? null,
@@ -2929,7 +2932,9 @@ export default function App() {
     },
     openUrl: async (url) => {
       try {
-        await window.electronAPI.openUrl(url)
+        if (/^https?:\/\//i.test(url)) {
+          await openSessionBrowserLink(url)
+        } else await window.electronAPI.openUrl(url)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
         console.error('Failed to open URL:', error)
@@ -2981,6 +2986,10 @@ export default function App() {
   const previewStale =
     linkInterceptor.previewState !== null
     && previewScopeKey !== (productSpace.productSpaceContextKey ?? null)
+
+  useEffect(() => {
+    return () => { void window.electronAPI.canvasPane.release().catch(() => {}) }
+  }, [productSpace.productSpaceContextKey])
 
   const connectionState = useTransportConnectionState()
   const showTransportConnectionBanner = shouldShowTransportConnectionBanner(connectionState)
@@ -3249,6 +3258,12 @@ export default function App() {
     onRespondToCredential: handleRespondToCredential,
     onRespondToQuestion: handleRespondToQuestion,
     onGetEditPopoverPendingQuestion: handleGetEditPopoverPendingQuestion,
+    filePreview: linkInterceptor.previewState && !previewStale && !narrowViewport ? <FilePreviewPane key={linkInterceptor.previewState.filePath} state={linkInterceptor.previewState} onClose={linkInterceptor.hidePreview} onRetry={() => handleOpenFile(linkInterceptor.previewState!.filePath)} loadDataUrl={linkInterceptor.readFileDataUrl} loadPdfData={linkInterceptor.readFileBinary} isDark={isDark} /> : null,
+    filePreviewVisible: linkInterceptor.previewVisible,
+    filePreviewTitle: !previewStale ? linkInterceptor.previewState?.filePath.split('/').pop() : undefined,
+    onHideFilePreview: linkInterceptor.hidePreview,
+    onShowFilePreview: linkInterceptor.showPreview,
+    onCloseFilePreview: linkInterceptor.closePreview,
     // File/URL handlers
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
@@ -3269,6 +3284,7 @@ export default function App() {
     openNewChat,
   }), [
     // NOTE: sessions removed to prevent memory leaks - components use atoms instead
+    linkInterceptor.previewState, linkInterceptor.previewVisible, linkInterceptor.hidePreview, linkInterceptor.showPreview, linkInterceptor.closePreview, linkInterceptor.readFileDataUrl, linkInterceptor.readFileBinary, previewStale, narrowViewport, isDark,
     workspaces,
     windowWorkspaceId,
     windowWorkspaceSlug,
@@ -3873,17 +3889,6 @@ export default function App() {
                   renderer — retained previews are closed on entry (effect at
                   the useNarrowViewport declaration) so the POO-43 Home
                   surface can never be overlaid by a preview. */}
-              {linkInterceptor.previewState && !previewStale && !narrowViewport && (
-                <div data-testid="file-preview-overlay">
-                  <FilePreviewRenderer
-                    state={linkInterceptor.previewState}
-                    onClose={linkInterceptor.closePreview}
-                    loadDataUrl={linkInterceptor.readFileDataUrl}
-                    loadPdfData={linkInterceptor.readFileBinary}
-                    isDark={isDark}
-                  />
-                </div>
-              )}
             </TabShellProvider>
             </ClientPageProvider>
             </MemberCatalogProvider>
@@ -3919,140 +3924,4 @@ function MaybeProductSpaceProvider({
 function WindowCloseHandler({ assistantTabGuard = false }: { assistantTabGuard?: boolean }) {
   useWindowCloseHandler({ assistantTabGuard })
   return null
-}
-
-/**
- * FilePreviewRenderer - Routes file preview state to the correct overlay component.
- *
- * Handles all preview types from the link interceptor:
- * - image → ImagePreviewOverlay (binary, loaded via data URL)
- * - pdf → PDFPreviewOverlay (binary, embedded via Chromium viewer)
- * - code/text → CodePreviewOverlay (syntax highlighted)
- * - markdown → DocumentFormattedMarkdownOverlay
- * - json → JSONPreviewOverlay
- *
- * File path badges with "Open" / "Reveal in {file manager}" menus are provided
- * automatically by PlatformContext — no per-overlay callback props needed.
- */
-function FilePreviewRenderer({
-  state,
-  onClose,
-  loadDataUrl,
-  loadPdfData,
-  isDark,
-}: {
-  state: FilePreviewState
-  onClose: () => void
-  loadDataUrl: (path: string) => Promise<string>
-  loadPdfData: (path: string) => Promise<Uint8Array>
-  isDark: boolean
-}) {
-  const theme = isDark ? 'dark' : 'light' as const
-
-  switch (state.type) {
-    case 'image':
-      return (
-        <ImagePreviewOverlay
-          isOpen
-          onClose={onClose}
-          filePath={state.filePath}
-          loadDataUrl={loadDataUrl}
-          theme={theme}
-        />
-      )
-
-    case 'pdf':
-      return (
-        <PDFPreviewOverlay
-          isOpen
-          onClose={onClose}
-          filePath={state.filePath}
-          loadPdfData={loadPdfData}
-          theme={theme}
-        />
-      )
-
-    case 'code':
-    case 'text':
-      return (
-        <CodePreviewOverlay
-          isOpen
-          onClose={onClose}
-          filePath={state.filePath}
-          content={state.content ?? ''}
-          language={state.type === 'code' ? state.language : 'plaintext'}
-          mode="read"
-          theme={theme}
-          error={state.error}
-        />
-      )
-
-    case 'markdown': {
-      // Show PLAN header for .md files in plans folder (handles both absolute and relative paths)
-      const isPlanFile =
-        (state.filePath.includes('/plans/') || state.filePath.startsWith('plans/')) &&
-        state.filePath.endsWith('.md')
-      return (
-        <DocumentFormattedMarkdownOverlay
-          isOpen
-          onClose={onClose}
-          content={state.content ?? ''}
-          filePath={state.filePath}
-          variant={isPlanFile ? 'plan' : 'response'}
-        />
-      )
-    }
-
-    case 'json': {
-      // JSONPreviewOverlay expects parsed data, not a raw string.
-      // @uiw/react-json-view crashes on null value, so guard against it.
-      let parsedData: unknown = null
-      try {
-        if (state.content) parsedData = JSON.parse(state.content)
-      } catch {
-        // If parsing fails, fall back to showing as code
-        return (
-          <CodePreviewOverlay
-            isOpen
-            onClose={onClose}
-            filePath={state.filePath}
-            content={state.content ?? ''}
-            language="json"
-            mode="read"
-            theme={theme}
-            error={state.error}
-          />
-        )
-      }
-      // If read failed and content is empty, show raw code overlay with the read error.
-      if ((!state.content || !state.content.trim()) && state.error) {
-        return (
-          <CodePreviewOverlay
-            isOpen
-            onClose={onClose}
-            filePath={state.filePath}
-            content={state.content ?? ''}
-            language="json"
-            mode="read"
-            theme={theme}
-            error={state.error}
-          />
-        )
-      }
-      return (
-        <JSONPreviewOverlay
-          isOpen
-          onClose={onClose}
-          filePath={state.filePath}
-          title={state.filePath.split('/').pop() ?? 'JSON'}
-          data={parsedData}
-          theme={theme}
-          error={state.error}
-        />
-      )
-    }
-
-    default:
-      return null
-  }
 }

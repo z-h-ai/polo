@@ -17,8 +17,9 @@ export interface ManagedBillingLease {
   complete(result: ManagedBillingResult): Promise<void>
 }
 /** Trusted Host callbacks only; never serialized to the model subprocess. */
+export interface ManagedBillingContext { signal?: AbortSignal }
 export interface ManagedBillingHooks {
-  beforeSend(facts: ManagedBillingFacts): Promise<ManagedBillingLease>
+  beforeSend(facts: ManagedBillingFacts, context?: ManagedBillingContext): Promise<ManagedBillingLease>
 }
 
 export async function readManagedRequest(request: IncomingMessage, upstream: URL): Promise<{ body: Buffer; model: string; requestBounds: NonNullable<ManagedBillingFacts['requestBounds']> }> {

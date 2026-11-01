@@ -35,7 +35,7 @@ browser_tool({ command: "windows" })
 ```
 
 Recommended flow:
-1. `open` — ensure browser window exists (background by default)
+1. `open` — ensure the session browser exists; a fresh active chat uses the sidebar, preserving existing hidden/popup choices
 2. `navigate <url>` — load a URL
 3. `snapshot` — inspect accessible elements and get refs (`@e1`, `@e2`, ...)
 4. `find <query>` — quickly narrow to matching refs by keyword
@@ -117,8 +117,8 @@ Use backslash escaping when needed:
 
 ### `open [--foreground|-f]`
 Create or reuse the session browser window.
-- Default: opens in background
-- `--foreground` / `-f`: focuses in foreground
+- Default: a fresh browser for the currently active chat appears in its sidebar without focusing an OS window. Background chats do not replace the active chat. Existing hidden or popped-out browsers keep their presentation.
+- `--foreground` / `-f`: explicitly restores/focuses the existing presentation, as does `focus`.
 
 ### `snapshot`
 Returns an accessibility tree with refs and element metadata.
@@ -207,7 +207,7 @@ Navigate the page history. Output reports the URL and title before → after. Bo
 ### Lifecycle commands
 - `release [windowId|all]` — dismiss the agent overlay; the window stays visible for the user. `all` releases every window owned by the session
 - `close [windowId]` — close and destroy a window (defaults to the session window)
-- `hide [windowId]` — hide a window but preserve its state; `open` re-shows it
+- `hide [windowId]` — hide the current surface and preserve its state. Use `focus` or `open --foreground` to restore it explicitly; ordinary background `open` keeps it hidden.
 
 ---
 
@@ -238,7 +238,7 @@ Output is deterministic JSON (`href`, `protocol`, `host`, `hostname`, `pathname`
 ## Behavior notes
 
 - Browser tools are allowed in **Explore/Safe mode** by default.
-- Before first browser tool usage, the agent must read this guide (`~/.polo-ai/docs/browser-tools.md`).
+- Before first browser tool usage, the agent must read this instance’s guide (use the absolute `browser-tools.md` path provided in your tool instructions).
 - `navigate`, `click`, and `snapshot` run a **security-challenge (CAPTCHA) check** afterwards. When a challenge is detected, the tool automatically releases control back to the user, shows the window, and returns the challenge provider plus detected signals — ask the user to complete the check, then re-run `snapshot`.
 - Closing browser UI via OS controls may hide the window; use `browser_tool close` for explicit teardown.
 

@@ -138,10 +138,13 @@ import { PanelHeader } from "./PanelHeader"
 import { FabNewChat } from "./FabNewChat"
 import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
 import { RightSidebarPane, SIDEBAR_ONLY_WIDTH_KEY } from "./RightSidebarPane"
-import { sidebarBrowserOpenAtom } from "@/atoms/sidebar-browser"
+import { RightPaneMenu } from "./RightPaneMenu"
+import { canvasPanePopoutAtomFamily } from "@/atoms/canvas-pane"
+import { useRightPanePresentation } from "@/hooks/use-right-pane-presentation"
 import { useSidebarBrowserSync } from "@/hooks/use-sidebar-browser-sync"
 import { useCanvasPaneSync } from "@/hooks/use-canvas-pane-sync"
-import { canvasPaneAppAtomFamily } from "@/atoms/canvas-pane"
+import { shouldAutoHideNavigation } from "./right-pane-layout"
+import { canvasPaneWidthAtomFamily, canvasPaneAppAtomFamily } from "@/atoms/canvas-pane"
 import { MessagingDialogHost } from "@/components/messaging/MessagingDialogHost"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
 import SettingsNavigator from "@/pages/settings/SettingsNavigator"
@@ -578,7 +581,6 @@ function AppShellContent({
   const MOBILE_THRESHOLD = 768
   const isAutoCompact = shellWidth > 0 && shellWidth < MOBILE_THRESHOLD
 
-  const effectiveSidebarAndNavigatorHidden = isSidebarAndNavigatorHidden || isAutoCompact
 
   const [isResizing, setIsResizing] = React.useState<'sidebar' | 'session-list' | null>(null)
   const [sidebarHandleY, setSidebarHandleY] = React.useState<number | null>(null)
@@ -594,7 +596,21 @@ function AppShellContent({
   // the sidebar exists when either content kind is open.
   const canvasSessionId = session.selected
   const canvasApp = useAtomValue(canvasPaneAppAtomFamily(canvasSessionId ?? ""))
-  const sidebarBrowserOpen = useAtomValue(sidebarBrowserOpenAtom)
+  const canvasPresentation = useAtomValue(canvasPanePopoutAtomFamily(canvasSessionId ?? ''))
+  const sidebarCanvas = canvasApp && !canvasPresentation?.poppedOut && canvasPresentation?.isVisible !== false ? canvasApp : null
+  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
+  const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
+  const { browserSlotOpen: sidebarBrowserOpen, hasRightPane } = useRightPanePresentation({
+    currentSessionId: canvasSessionId ?? null,
+    activeWorkspaceId: activeWorkspaceId ?? null,
+    remoteWorkspaceId: remoteWorkspaceId ?? null,
+    fileVisible: Boolean(contextValue.filePreviewVisible),
+    canvasVisible: Boolean(sidebarCanvas),
+  })
+  const rightPaneRatio = useAtomValue(canvasPaneWidthAtomFamily(canvasSessionId || SIDEBAR_ONLY_WIDTH_KEY))
+  const effectiveSidebarAndNavigatorHidden = isSidebarAndNavigatorHidden || shouldAutoHideNavigation(
+    shellWidth, (isSidebarVisible ? sidebarWidth : 0) + sessionListWidth, hasRightPane ? rightPaneRatio : 0,
+  )
   const getCanvasLayoutRect = useCallback(() => shellRef.current?.getBoundingClientRect() ?? null, [])
   const { resolvedMode, isDark, setMode } = useTheme()
   const { canGoBack, canGoForward, goBack, goForward, navigateToSource, navigateToSession } = useNavigation()
@@ -870,7 +886,6 @@ function AppShellContent({
     setSkillsAtom(skillsWithLiveSafety)
   }, [setSkillsAtom, skillsWithLiveSafety])
   // Automations — state, handlers, loading, subscriptions
-  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
 
   // Send to Workspace dialog state (driven by sendToWorkspaceAtom set from SessionMenu/BatchSessionMenu)
   const sendToWorkspaceIds = useAtomValue(sendToWorkspaceAtom)
@@ -1383,12 +1398,12 @@ function AppShellContent({
   // Also exclude hidden sessions (mini-agent sessions) from all counts and lists
   // For remote workspaces, sessions have the remote workspace ID (not the local one),
   // so we match against both the local and remote workspace IDs.
-  const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
   // POO-135 r1: the browser-pane sync hook lives HERE — in the always-mounted
   // shell, above the right pane — so its browser-pane:* subscriptions
   // (system-close → re-embed, picker outcomes) survive narrow viewports and a
   // closed sidebar slot.
   const { terminateBrowser } = useSidebarBrowserSync({
+    onBrowserPresented: contextValue.onHideFilePreview,
     currentSessionId: session.selected ?? null,
     activeWorkspaceId: activeWorkspaceId ?? null,
     remoteWorkspaceId: remoteWorkspaceId ?? null,
@@ -1397,7 +1412,7 @@ function AppShellContent({
   // POO-135 验收修复 (SB-CANVAS-OUT): canvas-pane:state-changed → popout atoms,
   // mounted at the same always-mounted layer so a system-closed popup window
   // reconciles the sidebar even when the pane is not rendered.
-  useCanvasPaneSync()
+  useCanvasPaneSync({ currentSessionId: session.selected ?? null, onPresented: contextValue.onHideFilePreview })
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
     if (!activeWorkspaceId) return metas.filter(s => !s.hidden)
@@ -1671,7 +1686,7 @@ function AppShellContent({
     enabledModes,
     sessionStatuses: effectiveSessionStatuses,
     onSessionSourcesChange: handleSessionSourcesChange,
-    rightSidebarButton: null,
+    rightSidebarButton: <RightPaneMenu sessionId={session.selected ?? null} activeWorkspaceId={activeWorkspaceId ?? null} remoteWorkspaceId={remoteWorkspaceId ?? null} canvasApp={canvasApp} />,
     isCompactMode: isAutoCompact,
     // Search state for ChatDisplay highlighting
     sessionListSearchQuery: searchActive ? searchQuery : undefined,
@@ -1685,7 +1700,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skillsWithLiveSafety, session.selected, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, activeWorkspaceId, remoteWorkspaceId, canvasApp, handleDeleteSession, sources, skillsWithLiveSafety, session.selected, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -3333,7 +3348,7 @@ function AppShellContent({
           }
           navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
-          isRightSidebarVisible={Boolean(canvasApp || sidebarBrowserOpen) && !isAutoCompact}
+          isRightSidebarVisible={hasRightPane && !isAutoCompact}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />
@@ -3345,11 +3360,14 @@ function AppShellContent({
             browser slot rides in the same pane; the width key follows the
             session when a canvas exists so the remembered ratio stays
             per-session, falling back to a workspace-wide key otherwise. */}
-        {(canvasApp || sidebarBrowserOpen) && !isAutoCompact && (
+        {(contextValue.filePreview || canvasApp || sidebarBrowserOpen) && !isAutoCompact && (
           <RightSidebarPane
             layoutKey={canvasSessionId ?? SIDEBAR_ONLY_WIDTH_KEY}
             canvasSessionId={canvasSessionId}
-            canvasApp={canvasApp}
+            visible={hasRightPane}
+            filePreviewVisible={contextValue.filePreviewVisible}
+            filePreview={contextValue.filePreview}
+            canvasApp={sidebarCanvas}
             getLayoutRect={getCanvasLayoutRect}
             currentSessionId={session.selected ?? null}
             activeWorkspaceId={activeWorkspaceId ?? null}

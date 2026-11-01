@@ -6,7 +6,7 @@ import { CONFIG_DIR } from '@polo-ai/shared/config'
 import { AdminError } from '@polo-ai/shared/admin'
 import { BillingOutbox, type AssistantBillingJournalScope } from '@polo-ai/shared/admin/billing-outbox'
 import { billingAssistantPreparationResponseSchema, billingRuntimeRunResponseSchema, billingRuntimeAdmissionResponseSchema, billingRuntimeFinishResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
-import type { ManagedBillingHooks, ManagedBillingResult } from '@polo-ai/shared/credentials/managed-billing-observation'
+import type { ManagedBillingContext, ManagedBillingHooks, ManagedBillingResult } from '@polo-ai/shared/credentials/managed-billing-observation'
 
 // AdminClient validates the HTTP envelope and returns this flat DTO. Derive
 // its fields from the canonical wire schema; do not require wire idempotent
@@ -16,12 +16,12 @@ const assistantFinishResponseSchema = billingRuntimeFinishResponseSchema.shape.r
 }) satisfies z.ZodType<AdminFinishAppRunResponse>
 
 export interface AssistantBillingTransport {
-  capabilities?(scope: AssistantBillingJournalScope): Promise<AssistantBillingCapabilities>
+  capabilities?(scope: AssistantBillingJournalScope, context?: ManagedBillingContext): Promise<AssistantBillingCapabilities>
   supportsPreparation?(scope: AssistantBillingJournalScope): Promise<boolean>
-  prepare?(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput): Promise<unknown>
+  prepare?(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput, context?: ManagedBillingContext): Promise<unknown>
   inspectRun?(scope: AssistantBillingJournalScope, runId: string): Promise<unknown>
-  start(scope: AssistantBillingJournalScope, input: { subjectKind: 'polo_assistant'; productSpaceId: string; runId: string }): Promise<unknown>
-  admit(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput): Promise<unknown>
+  start(scope: AssistantBillingJournalScope, input: { subjectKind: 'polo_assistant'; productSpaceId: string; runId: string }, context?: ManagedBillingContext): Promise<unknown>
+  admit(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput, context?: ManagedBillingContext): Promise<unknown>
   report(scope: AssistantBillingJournalScope, input: BillingRuntimeUsageInput): Promise<{ settlement?: 'pending' | 'confirmed' | 'no_charge'; resolution?: 'platform_absorbed' }>
   inspect(scope: AssistantBillingJournalScope, runId: string, requestId: string): Promise<{ settlement?: 'pending' | 'confirmed' | 'no_charge' }>
   finish(scope: AssistantBillingJournalScope, runId: string, input: { status: 'completed' | 'unknown' | 'failed' }): Promise<unknown>
@@ -39,17 +39,18 @@ export class AssistantBillingCoordinator {
   hooks(originalScope: AssistantBillingJournalScope, isCurrent: () => boolean): ManagedBillingHooks {
     const scope = { ...originalScope }
     const assertCurrent = () => { if (!isCurrent()) throw new Error('Original assistant billing scope changed') }
-    return { beforeSend: async facts => {
-      assertCurrent()
+    return { beforeSend: async (facts, context) => {
+      const assertActive = () => { assertCurrent(); context?.signal?.throwIfAborted() }
+      assertActive()
       const transport = this.transport()
       if (!transport) throw new Error('Trusted assistant billing is unavailable')
       // Discovery cannot create billable work; do it before persisting an intent.
-      const capabilities = transport.capabilities ? await transport.capabilities(scope) : {
+      const capabilities = transport.capabilities ? await transport.capabilities(scope, context) : {
         preparation: Boolean(transport.prepare) && (await transport.supportsPreparation?.(scope) ?? true), recovery: false,
       }
       const combined = Boolean(transport.prepare) && capabilities.preparation
       const serverRecovery = combined && capabilities.recovery
-      assertCurrent()
+      assertActive()
       const runId = randomUUID(), requestId = randomUUID()
       const admission = { ...facts, productSpaceId: scope.productSpaceId, requestId }
       const outbox = serverRecovery ? this.admittedOutbox : this.outbox
@@ -61,21 +62,21 @@ export class AssistantBillingCoordinator {
         if (combined) {
           // The server may commit start before returning any response.
           started = true
-          const prepared = billingAssistantPreparationResponseSchema.parse(await transport.prepare!(scope, runId, admission))
+          const prepared = billingAssistantPreparationResponseSchema.parse(await transport.prepare!(scope, runId, admission, context))
           if (prepared.runId !== runId) throw new Error('Assistant preparation changed its original run')
           admitted = prepared
         } else {
-          await transport.start(scope, { subjectKind: 'polo_assistant', productSpaceId: scope.productSpaceId, runId })
+          await transport.start(scope, { subjectKind: 'polo_assistant', productSpaceId: scope.productSpaceId, runId }, context)
           started = true
-          assertCurrent()
-          admitted = billingRuntimeAdmissionResponseSchema.parse(await transport.admit(scope, runId, admission))
+          assertActive()
+          admitted = billingRuntimeAdmissionResponseSchema.parse(await transport.admit(scope, runId, admission, context))
         }
-        assertCurrent()
+        assertActive()
         if (admitted.request.requestId !== requestId) throw new Error('Assistant admission changed its original identity')
         const journalKey = key ?? (key = outbox.stageAdmission(scope, runId, admission))
         if (serverRecovery) this.live.add(journalKey)
         let completed = false
-        return { providerCorrelation: admitted.request.providerCorrelation, assertCurrent,
+        return { providerCorrelation: admitted.request.providerCorrelation, assertCurrent: assertActive,
           complete: async (result: ManagedBillingResult) => {
             if (completed) return
             // Disk failure must surface. Never pretend an unjournaled receipt
@@ -86,33 +87,35 @@ export class AssistantBillingCoordinator {
             // disk error retains these exact final facts in memory for retry;
             // recovery never replaces them with an unknown/zero observation.
             this.pendingWrites.set(journalKey, { outbox, scope, receipt })
-            this.live.delete(journalKey)
-            outbox.stageReceipt(scope, receipt)
-            this.pendingWrites.delete(journalKey)
-            await this.settle(journalKey, scope, receipt, outbox).catch(() => {})
+            try {
+              outbox.stageReceipt(scope, receipt)
+              this.pendingWrites.delete(journalKey)
+              await this.settle(journalKey, scope, receipt, outbox).catch(() => {})
+            } finally { this.live.delete(journalKey) }
           } }
       } catch (error) {
-        if (key) this.live.delete(key)
-        const definitivelyDenied = error instanceof AdminError && (
-          ['insufficient_credit', 'quota_exhausted', 'budget_exhausted'].includes(error.errorCode)
-          || error.status !== undefined && error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status))
-        const rejection = error instanceof AdminError ? error.details?.assistantPreparation : undefined
-        // This call owns fresh random IDs and is never retried. The marker only
-        // retires this unsent intent; it is not a zero-cost settlement receipt.
-        const freshStartRejected = combined && definitivelyDenied && rejection?.phase === 'start_rejected'
-          && rejection.runId === runId && rejection.requestId === requestId
-        if (freshStartRejected || !started && definitivelyDenied) { if (key) outbox.discardRejectedAdmission(key) }
-        else {
-          // This catch precedes the return of the send ticket: no provider
-          // request can have been sent. A transient admission failure can still
-          // finish authoritatively with no charge. Retire only that exact run's
-          // validated terminal acknowledgement, never a 404 or missing receipt.
-          const finished = await transport.finish(scope, runId, { status: 'failed' })
-            .then(value => assistantFinishResponseSchema.safeParse(value))
-            .catch(() => null)
-          if (key && started && finished?.success && finished.data.runId === runId
-            && finished.data.settlement === 'no_charge') outbox.discardRejectedAdmission(key)
-        }
+        try {
+          const definitivelyDenied = error instanceof AdminError && (
+            ['insufficient_credit', 'quota_exhausted', 'budget_exhausted'].includes(error.errorCode)
+            || error.status !== undefined && error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status))
+          const rejection = error instanceof AdminError ? error.details?.assistantPreparation : undefined
+          // This call owns fresh random IDs and is never retried. The marker only
+          // retires this unsent intent; it is not a zero-cost settlement receipt.
+          const freshStartRejected = combined && definitivelyDenied && rejection?.phase === 'start_rejected'
+            && rejection.runId === runId && rejection.requestId === requestId
+          if (freshStartRejected || !started && definitivelyDenied) { if (key) outbox.discardRejectedAdmission(key) }
+          else {
+            // This catch precedes the return of the send ticket: no provider
+            // request can have been sent. A transient admission failure can still
+            // finish authoritatively with no charge. Retire only that exact run's
+            // validated terminal acknowledgement, never a 404 or missing receipt.
+            const finished = await transport.finish(scope, runId, { status: 'failed' })
+              .then(value => assistantFinishResponseSchema.safeParse(value))
+              .catch(() => null)
+            if (key && started && finished?.success && finished.data.runId === runId
+              && finished.data.settlement === 'no_charge') outbox.discardRejectedAdmission(key)
+          }
+        } finally { if (key) this.live.delete(key) }
         throw error
       }
     } }

@@ -28,6 +28,7 @@ interface PreviewItem {
 }
 
 export interface PDFPreviewOverlayProps {
+  embedded?: boolean
   isOpen: boolean
   onClose: () => void
   /** Absolute file path for the PDF (single item / backward compat) */
@@ -42,6 +43,7 @@ export interface PDFPreviewOverlayProps {
 }
 
 export function PDFPreviewOverlay({
+  embedded,
   isOpen,
   onClose,
   filePath,
@@ -124,6 +126,7 @@ export function PDFPreviewOverlay({
 
   return (
     <PreviewOverlay
+      embedded={embedded}
       isOpen={isOpen}
       onClose={onClose}
       theme={theme}
