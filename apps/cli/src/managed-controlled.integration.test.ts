@@ -3,9 +3,9 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-test('controlled real CLI → desktop Broker/proxy → Admin/Provider: personal+enterprise tools, billing, owner isolation and revoke', async () => {
+for (const protocol of ['legacy', 'combined']) test(`controlled ${protocol} CLI → desktop Broker/proxy → Admin/Provider: personal+enterprise tools, billing, owner isolation and revoke`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'polo-cli-managed-'))
-  const desktop = Bun.spawn([process.execPath, resolve('apps/cli/src/__fixtures__/managed-desktop.ts'), root], { stdout: 'pipe', stderr: 'pipe' })
+  const desktop = Bun.spawn([process.execPath, resolve('apps/cli/src/__fixtures__/managed-desktop.ts'), root], { env: { ...process.env, POLO_TEST_ASSISTANT_PROTOCOL: protocol }, stdout: 'pipe', stderr: 'pipe' })
   const errors = new Response(desktop.stderr).text()
   const reader = desktop.stdout.getReader()
   let stdout = ''
@@ -63,6 +63,8 @@ test('controlled real CLI → desktop Broker/proxy → Admin/Provider: personal+
     const thread = first.out.split('\n').filter(Boolean).map(line => JSON.parse(line)).find(row => row.type === 'thread.started')?.thread_id
     expect(thread).toBeTruthy()
     let facts = await state()
+    expect(facts.billingHttp.filter((path: string) => path === 'POST /api/billing/assistant-requests')).toHaveLength(protocol === 'combined' ? facts.providerCalls : 0)
+    expect(facts.billingHttp.filter((path: string) => path === 'POST /api/billing/runs')).toHaveLength(protocol === 'legacy' ? facts.providerCalls : 0)
     expect(facts.providerCalls).toBeGreaterThanOrEqual(3)
     expect(facts.bodies[1].messages.some((m: any) => m.role === 'tool' && JSON.stringify(m.content).includes(nonce))).toBe(true)
     for (const kind of ['start', 'admit', 'usage', 'finish']) expect(facts.billing.filter((b: any) => b.kind === kind).length).toBe(facts.providerCalls)
