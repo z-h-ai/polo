@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -10,13 +10,91 @@ import { AssistantBillingCapability } from '../assistant-billing-capability'
 
 const facts = () => ({ model: 'owned-model', hostRequestId: `host-${randomUUID()}`, transportBaseUrl: 'https://provider.invalid/v1', credentialFingerprint: 'a'.repeat(64) })
 const unused = async () => { throw new Error('unexpected write') }
-function setup(transport: Partial<AssistantBillingTransport>) {
+function setup(transport: Partial<AssistantBillingTransport> & { capabilities?: (scope: AssistantBillingJournalScope) => Promise<{ preparation: boolean; recovery: boolean }> }) {
   const dir = mkdtempSync(join(tmpdir(), 'poo194-prepare-'))
   const scope: AssistantBillingJournalScope = { subjectKind: 'polo_assistant', accountId: randomUUID(), productSpaceId: randomUUID(), adminOrigin: 'https://admin.invalid' }
   const outbox = new BillingOutbox<AssistantBillingJournalScope>(dir)
-  const coordinator = new AssistantBillingCoordinator(outbox, () => ({ start: unused, admit: unused, report: unused, inspect: unused, finish: unused, ...transport }))
-  return { scope, outbox, coordinator, close: () => rmSync(dir, { recursive: true, force: true }) }
+  const admittedOutbox = new BillingOutbox<AssistantBillingJournalScope>(join(dir, 'admitted'))
+  const getTransport = () => ({ start: unused, admit: unused, report: unused, inspect: unused, finish: unused, ...transport })
+  const coordinator = Reflect.construct(AssistantBillingCoordinator, [outbox, getTransport, admittedOutbox]) as AssistantBillingCoordinator
+  return { dir, scope, outbox, admittedOutbox, coordinator, getTransport, close: () => rmSync(dir, { recursive: true, force: true }) }
 }
+
+test('server recovery journals only after a validated preparation and before returning the ticket', async () => {
+  const f = setup({ capabilities: async () => ({ preparation: true, recovery: true }), prepare: async (_, runId, input) => {
+    expect(f.outbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+    return ack(runId, input.requestId)
+  } })
+  try {
+    await f.coordinator.hooks(f.scope, () => true).beforeSend(facts())
+    expect(f.outbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(1)
+  } finally { f.close() }
+})
+for (const failure of ['lost', 'wrong_identity', 'denied'] as const) {
+  test(`server-owned ${failure} preparation leaves no uncreated local intent`, async () => {
+    const f = setup({ capabilities: async () => ({ preparation: true, recovery: true }),
+      prepare: async (_, runId, input) => {
+        if (failure === 'wrong_identity') return ack(randomUUID(), input.requestId)
+        throw new AdminError(failure, failure === 'lost' ? 'TIMEOUT' : 'insufficient_credit', { status: failure === 'lost' ? 408 : 409 })
+      }, finish: async (_, runId) => ({ runId, status: 'failed', settlement: 'no_charge' }),
+    })
+    try {
+      await expect(f.coordinator.hooks(f.scope, () => true).beforeSend(facts())).rejects.toThrow()
+      expect(f.outbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+      expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+    } finally { f.close() }
+  })
+}
+test('an interface-only Admin keeps the original pre-stage protocol', async () => {
+  const f = setup({ capabilities: async () => ({ preparation: true, recovery: false }), prepare: async (_, runId, input) => {
+    expect(f.outbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(1)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+    return ack(runId, input.requestId)
+  } })
+  try { await f.coordinator.hooks(f.scope, () => true).beforeSend(facts()) } finally { f.close() }
+})
+test('post-ack journal failure cannot return a provider send ticket', async () => {
+  let preparations = 0
+  const f = setup({ capabilities: async () => ({ preparation: true, recovery: true }), prepare: async (_, runId, input) => { preparations++; return ack(runId, input.requestId) }, finish: async (_, runId) => ({ runId, status: 'failed', settlement: 'no_charge' }) })
+  f.admittedOutbox.stageAdmission = () => { throw new Error('ENOSPC') }
+  try {
+    await expect(f.coordinator.hooks(f.scope, () => true).beforeSend(facts())).rejects.toThrow('ENOSPC')
+    expect(preparations).toBe(1)
+  } finally { f.close() }
+})
+test('4096 retained legacy evidence files cannot fill the new admitted queue', async () => {
+  let recovery = false, preparations = 0
+  const f = setup({ capabilities: async () => ({ preparation: true, recovery }), prepare: async (_, runId, input) => { preparations++; return ack(runId, input.requestId) } })
+  try {
+    // Unknown historical files are deliberately preserved, not fabricated as
+    // zero-cost settlements or removed to make the capacity check pass.
+    for (let i = 0; i < 4096; i++) writeFileSync(join(f.dir, `${i.toString(16).padStart(64, '0')}.json`), '{"historical":"retain"}')
+    await expect(f.coordinator.hooks(f.scope, () => true).beforeSend(facts())).rejects.toThrow('capacity')
+    expect(preparations).toBe(0)
+    recovery = true
+    await f.coordinator.hooks(f.scope, () => true).beforeSend(facts())
+    expect(preparations).toBe(1)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(1)
+    expect(readdirSync(f.dir).filter(name => name.endsWith('.json'))).toHaveLength(4096)
+  } finally { f.close() }
+})
+test('a second coordinator cannot delete another sender admission while it is pending', async () => {
+  let reports = 0
+  const f = setup({ capabilities: async () => ({ preparation: true, recovery: true }), prepare: async (_, runId, input) => ack(runId, input.requestId),
+    inspect: async () => ({ settlement: 'pending' }), report: async () => { reports++; return { settlement: 'confirmed' } }, finish: async () => {},
+  })
+  try {
+    const ticket = await f.coordinator.hooks(f.scope, () => true).beforeSend(facts())
+    const second = Reflect.construct(AssistantBillingCoordinator, [f.outbox, f.getTransport, f.admittedOutbox]) as AssistantBillingCoordinator
+    await second.recover(f.scope.accountId, f.scope.adminOrigin)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(1)
+    await ticket.complete({ inputTokens: 3, outputTokens: 2, actualModel: 'owned-model', outputDisposition: 'usable', provenance: 'provider_final' })
+    expect(reports).toBe(1)
+    expect(f.admittedOutbox.entries(f.scope.accountId, f.scope.adminOrigin)).toHaveLength(0)
+  } finally { f.close() }
+})
 function ack(runId: string, requestId: string) { return { runId, request: { requestId, state: 'admitted', providerCorrelation: { nonce: 'a'.repeat(32), header: 'X-Polo-Request-Id' } }, idempotent: false } }
 
 test('two model rounds each prepare once with independent durable identities', async () => {
