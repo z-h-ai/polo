@@ -10,8 +10,8 @@ function deferred() {
   let resolve!: () => void
   return { promise: new Promise<void>(r => { resolve = r }), resolve: () => resolve() }
 }
-for (const phase of ['admission-cleanup', 'receipt-settlement'] as const) {
-  test(`recovery does not race an in-flight ${phase} for the same immutable run`, async () => {
+for (const protocol of ['legacy', 'combined'] as const) for (const phase of ['admission-cleanup', 'receipt-settlement'] as const) {
+  test(`recovery ${protocol} does not race an in-flight ${phase} for the same immutable run`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'polo-billing-self-race-'))
     const entered = deferred(), release = deferred()
     let inspections = 0, reports = 0, finishes = 0
@@ -32,7 +32,12 @@ for (const phase of ['admission-cleanup', 'receipt-settlement'] as const) {
         },
       }
       const outbox = new BillingOutbox<AssistantBillingJournalScope>(directory)
-      const coordinator = new AssistantBillingCoordinator(outbox, () => transport)
+      const admitted = new BillingOutbox<AssistantBillingJournalScope>(join(directory, 'admitted'))
+      if (protocol === 'combined') {
+        transport.capabilities = async () => ({ preparation: true, recovery: true })
+        transport.prepare = async (original, runId, admission) => ({ ...await transport.admit(original, runId, admission) as object, runId })
+      }
+      const coordinator = new AssistantBillingCoordinator(outbox, () => transport, admitted)
       const ticket = coordinator.hooks(scope, () => true).beforeSend({ model: 'fixture-model', hostRequestId: `host-${randomUUID()}`, transportBaseUrl: 'https://provider.fixture.invalid/v1', credentialFingerprint: 'a'.repeat(64) })
       const operation = phase === 'admission-cleanup' ? ticket.catch(() => {}) : ticket.then(lease => lease.complete({ inputTokens: 1, outputTokens: 1, outputDisposition: 'usable', provenance: 'provider_final' }))
       await entered.promise
@@ -45,6 +50,7 @@ for (const phase of ['admission-cleanup', 'receipt-settlement'] as const) {
       expect(reports).toBe(phase === 'receipt-settlement' ? 1 : 0)
       expect(finishes).toBe(1)
       expect(outbox.entries(scope.accountId, scope.adminOrigin)).toHaveLength(0)
+      expect(admitted.entries(scope.accountId, scope.adminOrigin)).toHaveLength(0)
     } finally { release.resolve(); rmSync(directory, { recursive: true, force: true }) }
   })
 }

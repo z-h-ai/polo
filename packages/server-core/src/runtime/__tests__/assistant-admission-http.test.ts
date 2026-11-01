@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 
 // Exercise Electron's Node HTTP cancellation, not Bun's different response-close
 // emulation. All remote endpoints, tokens and journals here are owned fixtures.
-test('actual assistant admission HTTP respects the canonical deadline, cancellation and recovery', async () => {
+for (const protocol of ['legacy', 'combined']) test(`actual ${protocol} assistant admission HTTP respects deadline, cancellation and recovery`, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'polo-assistant-admission-http-'))
   try {
     const imports = {
@@ -26,7 +26,7 @@ test('actual assistant admission HTTP respects the canonical deadline, cancellat
       builder.onResolve({ filter: /^@polo-ai\/shared\/config$/ }, () => ({ path: join(import.meta.dir, '../../../../shared/src/config/paths.ts') }))
     } }] })
     stop()
-    const child = spawnSync('node', ['-e', NODE_FIXTURE], { cwd: dir, encoding: 'utf8', timeout: 25000, env: { ...process.env, POLO_AI_CONFIG_DIR: join(dir, 'config'), NODE_PATH: join(import.meta.dir, '../../../../../node_modules') } })
+    const child = spawnSync('node', ['-e', NODE_FIXTURE], { cwd: dir, encoding: 'utf8', timeout: 25000, env: { ...process.env, POLO_AI_CONFIG_DIR: join(dir, 'config'), NODE_PATH: join(import.meta.dir, '../../../../../node_modules'), ASSISTANT_PROTOCOL: protocol } })
     // The child reports all independent checks before exiting, including red.
     console.log(child.stdout.trim())
     if (child.stderr) console.error(child.stderr.trim())
@@ -42,7 +42,7 @@ const {createServer}=require('node:http');
 const {mkdtempSync,rmSync,readdirSync}=require('node:fs');
 const {tmpdir}=require('node:os');const {join}=require('node:path');const {randomUUID}=require('node:crypto');
 const {AdminClient,BillingOutbox,AssistantBillingCoordinator,createAssistantBillingTransport,startInvocationCredentialProxy}=require('./modules.cjs');
-const checks={};const timers=new Set();const sleep=ms=>new Promise(r=>{const t=setTimeout(()=>{timers.delete(t);r()},ms);timers.add(t)});
+const combined=process.env.ASSISTANT_PROTOCOL==='combined';const checks={};const timers=new Set();const sleep=ms=>new Promise(r=>{const t=setTimeout(()=>{timers.delete(t);r()},ms);timers.add(t)});
 const json=(res,status,body)=>{if(!res.destroyed){res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(body))}};
 const listen=s=>new Promise(r=>s.listen(0,'127.0.0.1',r));const close=s=>new Promise(r=>{s.close(r);s.closeAllConnections()});
 (async()=>{
@@ -52,17 +52,20 @@ const listen=s=>new Promise(r=>s.listen(0,'127.0.0.1',r));const close=s=>new Pro
   let admissionEntered;let entered=new Promise(r=>admissionEntered=r);
   admin=createServer(async(req,res)=>{
    let text='';for await(const b of req)text+=b;const input=text?JSON.parse(text):{};const path=req.url;
+   if(req.method==='GET'&&path==='/api/auth/config')return json(res,200,{phoneAuthEnabled:false,selfRegistrationEnabled:false,...(combined?{assistantPreparationVersion:1,assistantRecoveryVersion:1}:{})});
+   if(req.method==='POST'&&path==='/api/billing/assistant-requests'){admissions++;contextOnWire ||= 'signal' in input || 'context' in input;admissionEntered();await sleep(delay);return json(res,201,{runId:input.runId,request:{requestId:input.admission.requestId,state:'admitted',providerCorrelation:{header:'X-Polo-Request-Id',nonce:'a'.repeat(32)}},idempotent:false})}
    if(req.method==='POST'&&path==='/api/billing/runs')return json(res,201,{run:{runId:input.runId,status:'running'},idempotent:false});
    if(req.method==='POST'&&path.endsWith('/requests')){admissions++;contextOnWire ||= 'signal' in input || 'context' in input;admissionEntered();await sleep(delay);return json(res,201,{request:{requestId:input.requestId,state:'admitted',providerCorrelation:{header:'X-Polo-Request-Id',nonce:'a'.repeat(32)}},idempotent:false})}
    if(req.method==='POST'&&path==='/api/billing/usage')return json(res,200,{receipt:reportState==='pending'?null:{requestId:input.requestId},request:{requestId:input.requestId},recorded:true,idempotent:false,settlement:reportState});
+   if(req.method==='GET'&&/^\/api\/billing\/runs\/[^/]+$/.test(path))return json(res,200,{run:{runId:path.split('/').at(-1),productSpaceId:scope.productSpaceId,status:'timed_out'},settlement:inspectState});
    if(req.method==='GET'){if(inspectState==='missing')return json(res,404,{errorCode:'not_found'});return json(res,200,{request:{requestId:path.split('/').at(-1),state:inspectState},settlement:inspectState})}
    if(req.method==='PATCH'){finishes++;if(finishConflict)return json(res,finishCode==='SERVER_ERROR'?500:409,{errorCode:finishCode});return json(res,200,{run:{runId:path.split('/').at(-1),status:input.status},settlement:input.status==='completed'?'confirmed':'no_charge',idempotent:false})}
    json(res,500,{errorCode:'fixture_unexpected'});
   });await listen(admin);const origin='http://127.0.0.1:'+admin.address().port;
   provider=createServer(async(req,res)=>{for await(const _ of req){};models++;res.setHeader('x-oneapi-request-id','fixture-only');json(res,200,{model:'fixture-model',choices:[{message:{role:'assistant',content:'ok'}}],usage:{prompt_tokens:1,completion_tokens:1}})});await listen(provider);
   const client=new AdminClient(origin);const scope={subjectKind:'polo_assistant',accountId:randomUUID(),productSpaceId:randomUUID(),adminOrigin:origin};
-  const outbox=new BillingOutbox(dir);const transport=createAssistantBillingTransport(async original=>{if(original.accountId!==scope.accountId||original.adminOrigin!==origin)throw Error('wrong original scope');return {client,accessToken:'fixture-token'}});
-  const coordinator=new AssistantBillingCoordinator(outbox,()=>transport);
+  const legacyOutbox=new BillingOutbox(dir),outbox=combined?new BillingOutbox(join(dir,'admitted')):legacyOutbox;const transport=createAssistantBillingTransport(async original=>{if(original.accountId!==scope.accountId||original.adminOrigin!==origin)throw Error('wrong original scope');return {client,accessToken:'fixture-token'}});
+  const coordinator=new AssistantBillingCoordinator(legacyOutbox,()=>transport,outbox);
   const facts={model:'fixture-model',hostRequestId:'host-'+randomUUID(),transportBaseUrl:'http://127.0.0.1:'+provider.address().port+'/v1',credentialFingerprint:'a'.repeat(64)};
   proxy=await startInvocationCredentialProxy({upstreamBaseUrl:facts.transportBaseUrl,credential:'fixture-key',credentialHeaders:[{name:'authorization',format:'bearer'}]},{billing:coordinator.hooks(scope,()=>current)});
   const response=await fetch(proxy.url+'/v1/chat/completions',{method:'POST',headers:{authorization:'Bearer '+proxy.capability},body:JSON.stringify({model:'fixture-model',messages:[]})});await response.text();
@@ -85,8 +88,8 @@ const listen=s=>new Promise(r=>s.listen(0,'127.0.0.1',r));const close=s=>new Pro
   // Scope change during the final await must not return a dispatchable lease.
   delay=70;entered=new Promise(r=>admissionEntered=r);const stale=coordinator.hooks(scope,()=>current).beforeSend(facts);await entered;current=false;rejected=false;try{await stale}catch(e){rejected=true}current=true;
   checks.postAdmissionScopeRevalidated=rejected&&models===1;
-  // Recovery never sends a model. Canonical terminal request + run_finalized is
-  // sufficient; pending, missing and an arbitrary 409 are not settlement proof.
+  // Recovery never sends a model. Canonical terminal request plus original terminal run readback is
+  // required; pending, missing and an arbitrary 409 are not settlement proof.
   const modelsBeforeRecovery=models;
   for(const [state,conflict] of [['no_charge','run_finalized'],['confirmed','run_finalized'],['pending','run_finalized'],['missing','run_finalized'],['no_charge','idempotency_conflict'],['no_charge','SERVER_ERROR']]){
    const d=mkdtempSync(join(tmpdir(),'polo-recovery-node-'));try{

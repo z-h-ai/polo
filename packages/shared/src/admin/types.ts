@@ -42,6 +42,11 @@ export interface AdminAuthConfig {
   phoneAuthEnabled: boolean;
 }
 
+export interface AssistantBillingCapabilities {
+  preparation: boolean;
+  recovery: boolean;
+}
+
 export interface AdminPhoneAuthChallengeConfig {
   type: 'browser_redirect';
   issuerUrl: string;
@@ -517,6 +522,7 @@ export type AdminErrorCode =
 
 export interface AdminErrorDetails {
   retryAfter?: number;
+  assistantPreparation?: { runId: string; requestId: string; phase: 'start_rejected' };
 }
 
 export class AdminError extends Error {

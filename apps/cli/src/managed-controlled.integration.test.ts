@@ -3,9 +3,9 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-test('controlled real CLI → desktop Broker/proxy → Admin/Provider: personal+enterprise tools, billing, owner isolation and revoke', async () => {
+for (const protocol of ['legacy', 'combined']) test(`controlled ${protocol} CLI → desktop Broker/proxy → Admin/Provider: personal+enterprise tools, billing, owner isolation and revoke`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'polo-cli-managed-'))
-  const desktop = Bun.spawn([process.execPath, resolve('apps/cli/src/__fixtures__/managed-desktop.ts'), root], { stdout: 'pipe', stderr: 'pipe' })
+  const desktop = Bun.spawn([process.execPath, resolve('apps/cli/src/__fixtures__/managed-desktop.ts'), root], { env: { ...process.env, POLO_TEST_ASSISTANT_PROTOCOL: protocol }, stdout: 'pipe', stderr: 'pipe' })
   const errors = new Response(desktop.stderr).text()
   const reader = desktop.stdout.getReader()
   let stdout = ''
@@ -36,6 +36,14 @@ test('controlled real CLI → desktop Broker/proxy → Admin/Provider: personal+
       if (!success) expect(code).not.toBe(0)
       return { code, out, err }
     }
+    const assertPreparationPaths = (before: any, after: any) => {
+      const modelCalls = after.providerCalls - before.providerCalls
+      const paths = after.billingHttp.slice(before.billingHttp.length) as string[]
+      expect(modelCalls).toBeGreaterThan(0)
+      expect(paths.filter(path => path === 'POST /api/billing/assistant-requests')).toHaveLength(protocol === 'combined' ? modelCalls : 0)
+      expect(paths.filter(path => path === 'POST /api/billing/runs')).toHaveLength(protocol === 'legacy' ? modelCalls : 0)
+      expect(paths.filter(path => /^POST \/api\/billing\/runs\/[^/]+\/requests$/.test(path))).toHaveLength(protocol === 'legacy' ? modelCalls : 0)
+    }
     // Invalid Admin transport/auth combinations must fail before any Provider call.
     for (const connectionOverrides of [
       { providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key' },
@@ -58,11 +66,13 @@ test('controlled real CLI → desktop Broker/proxy → Admin/Provider: personal+
     expect(probes.providerCalls).toBe(0)
     const work = join(root, 'work'), nonce = crypto.randomUUID()
     await writeFile(join(work, 'input.txt'), nonce)
+    const beforePersonalTools = await state()
     const first = await run(['exec', '--provider', 'polo', '--json', '--yolo', '-C', work, 'FILE_LOOP Read input.txt and write output.txt.'])
     expect(await readFile(join(work, 'output.txt'), 'utf8')).toBe(nonce)
     const thread = first.out.split('\n').filter(Boolean).map(line => JSON.parse(line)).find(row => row.type === 'thread.started')?.thread_id
     expect(thread).toBeTruthy()
     let facts = await state()
+    assertPreparationPaths(beforePersonalTools, facts)
     expect(facts.providerCalls).toBeGreaterThanOrEqual(3)
     expect(facts.bodies[1].messages.some((m: any) => m.role === 'tool' && JSON.stringify(m.content).includes(nonce))).toBe(true)
     for (const kind of ['start', 'admit', 'usage', 'finish']) expect(facts.billing.filter((b: any) => b.kind === kind).length).toBe(facts.providerCalls)
@@ -72,7 +82,9 @@ test('controlled real CLI → desktop Broker/proxy → Admin/Provider: personal+
     const crossProvider = await run(['exec', 'resume', thread, '--provider', 'anthropic', '--api-key', 'forbidden-owned-key', '--json', 'Never forward this history.'], false)
     expect(crossProvider.out + crossProvider.err).toContain('POLO_THREAD_COMPUTE_SOURCE_MISMATCH')
     expect((await state()).providerCalls).toBe(facts.providerCalls)
+    const beforeContinuation = await state()
     await run(['exec', 'resume', thread, '--provider', 'polo', '--json', 'Resume and reply.'])
+    assertPreparationPaths(beforeContinuation, await state())
     await control({ switch: 'enterprise' })
     const before = (await state()).providerCalls
     const deniedResume = await run(['exec', 'resume', thread, '--provider', 'polo', '--json', 'Private history must not be sent.'], false)
@@ -83,8 +95,16 @@ test('controlled real CLI → desktop Broker/proxy → Admin/Provider: personal+
     await run(['exec', '--provider', 'polo', '--model', 'wrong-model', '-C', work, 'Reject wrong model.'], false)
     await run(['exec', '--provider', 'polo', '--api-key', 'not-allowed', '-C', work, 'Reject key.'], false)
     expect((await state()).providerCalls).toBe(before)
-    await run(['exec', '--provider', 'polo', '-C', work, 'Enterprise minimal reply.'])
+    const beforeEnterpriseTools = await state(), enterpriseNonce = crypto.randomUUID()
+    await writeFile(join(work, 'input.txt'), enterpriseNonce)
+    await rm(join(work, 'output.txt'))
+    await run(['exec', '--provider', 'polo', '--yolo', '-C', work, 'FILE_LOOP Read input.txt and write output.txt.'])
+    expect(await readFile(join(work, 'output.txt'), 'utf8')).toBe(enterpriseNonce)
     facts = await state()
+    assertPreparationPaths(beforeEnterpriseTools, facts)
+    expect(facts.providerCalls - beforeEnterpriseTools.providerCalls).toBeGreaterThanOrEqual(3)
+    expect(facts.bodies.slice(beforeEnterpriseTools.providerCalls).some((body: any) => body.messages.some((message: any) => message.role === 'tool' && JSON.stringify(message.content).includes(enterpriseNonce)))).toBe(true)
+    expect(facts.bodies.slice(beforeEnterpriseTools.providerCalls).every((body: any) => !JSON.stringify(body).includes(nonce))).toBe(true)
     expect(facts.billing.filter((b: any) => b.kind === 'start').at(-1).input.productSpaceId).toBe(fixture.enterprise)
     await control({ denied: true })
     const beforeDenied = facts.providerCalls

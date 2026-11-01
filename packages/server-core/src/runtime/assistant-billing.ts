@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { z } from 'zod'
-import type { AdminFinishAppRunResponse } from '@polo-ai/shared/admin'
+import type { AdminFinishAppRunResponse, AssistantBillingCapabilities } from '@polo-ai/shared/admin'
 import { join } from 'node:path'
 import { CONFIG_DIR } from '@polo-ai/shared/config'
 import { AdminError } from '@polo-ai/shared/admin'
 import { BillingOutbox, type AssistantBillingJournalScope } from '@polo-ai/shared/admin/billing-outbox'
-import { billingRuntimeAdmissionResponseSchema, billingRuntimeFinishResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
+import { billingAssistantPreparationResponseSchema, billingRuntimeRunResponseSchema, billingRuntimeAdmissionResponseSchema, billingRuntimeFinishResponseSchema, billingUsageSchema, type BillingRuntimeAdmissionInput, type BillingRuntimeUsageInput } from '@polo-ai/shared/admin/billing-runtime-contract'
 import type { ManagedBillingContext, ManagedBillingHooks, ManagedBillingResult } from '@polo-ai/shared/credentials/managed-billing-observation'
 
 // AdminClient validates the HTTP envelope and returns this flat DTO. Derive
@@ -16,6 +16,10 @@ const assistantFinishResponseSchema = billingRuntimeFinishResponseSchema.shape.r
 }) satisfies z.ZodType<AdminFinishAppRunResponse>
 
 export interface AssistantBillingTransport {
+  capabilities?(scope: AssistantBillingJournalScope, context?: ManagedBillingContext): Promise<AssistantBillingCapabilities>
+  supportsPreparation?(scope: AssistantBillingJournalScope): Promise<boolean>
+  prepare?(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput, context?: ManagedBillingContext): Promise<unknown>
+  inspectRun?(scope: AssistantBillingJournalScope, runId: string): Promise<unknown>
   start(scope: AssistantBillingJournalScope, input: { subjectKind: 'polo_assistant'; productSpaceId: string; runId: string }, context?: ManagedBillingContext): Promise<unknown>
   admit(scope: AssistantBillingJournalScope, runId: string, input: BillingRuntimeAdmissionInput, context?: ManagedBillingContext): Promise<unknown>
   report(scope: AssistantBillingJournalScope, input: BillingRuntimeUsageInput): Promise<{ settlement?: 'pending' | 'confirmed' | 'no_charge'; resolution?: 'platform_absorbed' }>
@@ -28,9 +32,10 @@ export interface AssistantBillingTransport {
 export class AssistantBillingCoordinator {
   private live = new Set<string>()
   private recovering = false
-  private offset = 0
-  private pendingWrites = new Map<string, { scope: AssistantBillingJournalScope; receipt: BillingRuntimeUsageInput }>()
-  constructor(private readonly outbox: BillingOutbox<AssistantBillingJournalScope>, private readonly transport: () => AssistantBillingTransport | null) {}
+  private offsets = new Map<BillingOutbox<AssistantBillingJournalScope>, number>()
+  private pendingWrites = new Map<string, { outbox: BillingOutbox<AssistantBillingJournalScope>; scope: AssistantBillingJournalScope; receipt: BillingRuntimeUsageInput }>()
+  constructor(private readonly outbox: BillingOutbox<AssistantBillingJournalScope>, private readonly transport: () => AssistantBillingTransport | null,
+    private readonly admittedOutbox: BillingOutbox<AssistantBillingJournalScope> = outbox) {}
   hooks(originalScope: AssistantBillingJournalScope, isCurrent: () => boolean): ManagedBillingHooks {
     const scope = { ...originalScope }
     const assertCurrent = () => { if (!isCurrent()) throw new Error('Original assistant billing scope changed') }
@@ -39,18 +44,37 @@ export class AssistantBillingCoordinator {
       assertActive()
       const transport = this.transport()
       if (!transport) throw new Error('Trusted assistant billing is unavailable')
+      // Discovery cannot create billable work; do it before persisting an intent.
+      const capabilities = transport.capabilities ? await transport.capabilities(scope, context) : {
+        preparation: Boolean(transport.prepare) && (await transport.supportsPreparation?.(scope) ?? true), recovery: false,
+      }
+      const combined = Boolean(transport.prepare) && capabilities.preparation
+      const serverRecovery = combined && capabilities.recovery
+      assertActive()
       const runId = randomUUID(), requestId = randomUUID()
       const admission = { ...facts, productSpaceId: scope.productSpaceId, requestId }
-      const key = this.outbox.stageAdmission(scope, runId, admission)
-      this.live.add(key)
+      const outbox = serverRecovery ? this.admittedOutbox : this.outbox
+      let key = serverRecovery ? undefined : outbox.stageAdmission(scope, runId, admission)
+      if (key) this.live.add(key)
       let started = false
       try {
-        await transport.start(scope, { subjectKind: 'polo_assistant', productSpaceId: scope.productSpaceId, runId }, context)
-        started = true
+        let admitted
+        if (combined) {
+          // The server may commit start before returning any response.
+          started = true
+          const prepared = billingAssistantPreparationResponseSchema.parse(await transport.prepare!(scope, runId, admission, context))
+          if (prepared.runId !== runId) throw new Error('Assistant preparation changed its original run')
+          admitted = prepared
+        } else {
+          await transport.start(scope, { subjectKind: 'polo_assistant', productSpaceId: scope.productSpaceId, runId }, context)
+          started = true
+          assertActive()
+          admitted = billingRuntimeAdmissionResponseSchema.parse(await transport.admit(scope, runId, admission, context))
+        }
         assertActive()
-        const admitted = billingRuntimeAdmissionResponseSchema.parse(await transport.admit(scope, runId, admission, context))
         if (admitted.request.requestId !== requestId) throw new Error('Assistant admission changed its original identity')
-        assertActive()
+        const journalKey = key ?? (key = outbox.stageAdmission(scope, runId, admission))
+        if (serverRecovery) this.live.add(journalKey)
         let completed = false
         return { providerCorrelation: admitted.request.providerCorrelation, assertCurrent: assertActive,
           complete: async (result: ManagedBillingResult) => {
@@ -62,19 +86,24 @@ export class AssistantBillingCoordinator {
             // Bounded by the existing admission journal capacity. A temporary
             // disk error retains these exact final facts in memory for retry;
             // recovery never replaces them with an unknown/zero observation.
-            this.pendingWrites.set(key, { scope, receipt })
+            this.pendingWrites.set(journalKey, { outbox, scope, receipt })
             try {
-              this.outbox.stageReceipt(scope, receipt)
-              this.pendingWrites.delete(key)
-              await this.settle(key, scope, receipt).catch(() => {})
-            } finally { this.live.delete(key) }
+              outbox.stageReceipt(scope, receipt)
+              this.pendingWrites.delete(journalKey)
+              await this.settle(journalKey, scope, receipt, outbox).catch(() => {})
+            } finally { this.live.delete(journalKey) }
           } }
       } catch (error) {
         try {
           const definitivelyDenied = error instanceof AdminError && (
             ['insufficient_credit', 'quota_exhausted', 'budget_exhausted'].includes(error.errorCode)
             || error.status !== undefined && error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status))
-          if (!started && definitivelyDenied) this.outbox.discardRejectedAdmission(key)
+          const rejection = error instanceof AdminError ? error.details?.assistantPreparation : undefined
+          // This call owns fresh random IDs and is never retried. The marker only
+          // retires this unsent intent; it is not a zero-cost settlement receipt.
+          const freshStartRejected = combined && definitivelyDenied && rejection?.phase === 'start_rejected'
+            && rejection.runId === runId && rejection.requestId === requestId
+          if (freshStartRejected || !started && definitivelyDenied) { if (key) outbox.discardRejectedAdmission(key) }
           else {
             // This catch precedes the return of the send ticket: no provider
             // request can have been sent. A transient admission failure can still
@@ -83,31 +112,28 @@ export class AssistantBillingCoordinator {
             const finished = await transport.finish(scope, runId, { status: 'failed' })
               .then(value => assistantFinishResponseSchema.safeParse(value))
               .catch(() => null)
-            if (started && finished?.success && finished.data.runId === runId
-              && finished.data.settlement === 'no_charge') this.outbox.discardRejectedAdmission(key)
+            if (key && started && finished?.success && finished.data.runId === runId
+              && finished.data.settlement === 'no_charge') outbox.discardRejectedAdmission(key)
           }
-        } finally {
-          // Keep the original key live through its terminal HTTP acknowledgement:
-          // recovery must not concurrently finish this same run.
-          this.live.delete(key)
-        }
+        } finally { if (key) this.live.delete(key) }
         throw error
       }
     } }
   }
-  private async finishAfterSettlement(transport: AssistantBillingTransport, scope: AssistantBillingJournalScope,
-    runId: string, status: 'completed' | 'unknown', settlement: 'pending' | 'confirmed' | 'no_charge'): Promise<void> {
+  private async finishOriginal(transport: AssistantBillingTransport, scope: AssistantBillingJournalScope, runId: string,
+    status: 'completed' | 'unknown', settlement: 'pending' | 'confirmed' | 'no_charge'): Promise<void> {
     try { await transport.finish(scope, runId, { status }) }
     catch (error) {
-      // The request acknowledgement has already proved canonical settlement.
-      // A concurrent terminal run (including server timeout) must retain its
-      // actual execution result; do not keep trying to overwrite it as unknown.
-      if (settlement !== 'pending' && error instanceof AdminError
-        && error.errorCode === 'run_finalized' && error.status === 409) return
-      throw error
+      if (!(error instanceof AdminError) || error.errorCode !== 'run_finalized' || !transport.inspectRun) throw error
+      const original = billingRuntimeRunResponseSchema.parse(await transport.inspectRun(scope, runId))
+      // A worker may have settled this same request before the client's final
+      // PATCH. Only matching original facts can replace that acknowledgement.
+      if (original.run.runId !== runId || original.run.productSpaceId !== scope.productSpaceId
+        || original.run.status === 'running' || original.settlement !== settlement || settlement === 'pending') throw error
     }
   }
-  private async settle(key: string, scope: AssistantBillingJournalScope, receipt: BillingRuntimeUsageInput): Promise<void> {
+  private async settle(key: string, scope: AssistantBillingJournalScope, receipt: BillingRuntimeUsageInput,
+    outbox: BillingOutbox<AssistantBillingJournalScope>): Promise<void> {
     const transport = this.transport()
     if (!transport) return
     const ack = await transport.report(scope, receipt)
@@ -115,13 +141,13 @@ export class AssistantBillingCoordinator {
     if (ack.resolution === 'platform_absorbed' && ack.settlement === 'no_charge') {
       // The audited resolution already finalized the original execution.
       // A late usable observation must not turn unknown/cancelled into completed.
-      this.outbox.applySettlement(key, 'no_charge')
+      outbox.applySettlement(key, 'no_charge')
       return
     }
     // Finish before retirement, so a lost terminal acknowledgement is also
     // recoverable. Retries keep the exact original receipt and run status.
-    await this.finishAfterSettlement(transport, scope, receipt.runId, receipt.outputDisposition === 'usable' ? 'completed' : 'unknown', ack.settlement)
-    this.outbox.applySettlement(key, ack.settlement)
+    await this.finishOriginal(transport, scope, receipt.runId, receipt.outputDisposition === 'usable' ? 'completed' : 'unknown', ack.settlement)
+    outbox.applySettlement(key, ack.settlement)
   }
   async recover(accountId: string, adminOrigin: string): Promise<void> {
     if (this.recovering || !this.transport()) return
@@ -129,34 +155,49 @@ export class AssistantBillingCoordinator {
     try {
       for (const [key, pending] of this.pendingWrites) {
         if (pending.scope.accountId !== accountId || pending.scope.adminOrigin !== adminOrigin) continue
-        try { this.outbox.stageReceipt(pending.scope, pending.receipt); this.pendingWrites.delete(key) } catch { /* Keep the original bounded in-memory receipt until storage recovers. */ }
+        try { pending.outbox.stageReceipt(pending.scope, pending.receipt); this.pendingWrites.delete(key) } catch { /* Keep the original bounded in-memory receipt until storage recovers. */ }
       }
-      const entries = this.outbox.entries(accountId, adminOrigin)
-      const start = entries.length ? this.offset % entries.length : 0
-      this.offset = start + 32
-      for (let i = 0; i < Math.min(32, entries.length); i++) {
-        const entry = entries[(start + i) % entries.length]!
-        if (this.live.has(entry.key) || this.pendingWrites.has(entry.key)) continue
-        try {
-          if (entry.receipt) await this.settle(entry.key, entry.scope, entry.receipt)
-          else {
-            const ack = await this.transport()!.inspect(entry.scope, entry.runId, entry.admission.requestId)
-            if (ack.settlement && ack.settlement !== 'pending') {
-              await this.finishAfterSettlement(this.transport()!, entry.scope, entry.runId, 'unknown', ack.settlement)
-              this.outbox.applySettlement(entry.key, ack.settlement)
+      // Old readers retain their root files. Separate capacities and cursors
+      // keep old unknown work from blocking the server-owned admitted queue.
+      for (const outbox of new Set([this.admittedOutbox, this.outbox])) {
+        const entries = outbox.entries(accountId, adminOrigin)
+        const start = entries.length ? (this.offsets.get(outbox) ?? 0) % entries.length : 0
+        this.offsets.set(outbox, start + 32)
+        for (let i = 0; i < Math.min(32, entries.length); i++) {
+          const entry = entries[(start + i) % entries.length]!
+          if (this.live.has(entry.key) || this.pendingWrites.has(entry.key)) continue
+          try {
+            if (entry.receipt) await this.settle(entry.key, entry.scope, entry.receipt, outbox)
+            else {
+              const ack = await this.transport()!.inspect(entry.scope, entry.runId, entry.admission.requestId)
+              if (ack.settlement && ack.settlement !== 'pending') {
+                await this.finishOriginal(this.transport()!, entry.scope, entry.runId, 'unknown', ack.settlement)
+                outbox.applySettlement(entry.key, ack.settlement)
+              }
             }
+          } catch (error) {
+            if (!entry.receipt && error instanceof AdminError && error.status === 404) {
+              // A missing admission is not a settlement. Ask the original run to
+              // finish; only its validated no-charge acknowledgement can release
+              // a journal left by a failed admission and lost finish response.
+              const finished = await this.transport()!.finish(entry.scope, entry.runId, { status: 'failed' })
+                .then(value => assistantFinishResponseSchema.safeParse(value)).catch(() => null)
+              if (finished?.success && finished.data.runId === entry.runId
+                && finished.data.settlement === 'no_charge') outbox.discardRejectedAdmission(entry.key)
+              else if (this.transport()?.inspectRun) {
+                // The worker may already have closed this run with a different
+                // terminal status. Read it, never overwrite it to make PATCH pass.
+                const original = await this.transport()!.inspectRun!(entry.scope, entry.runId)
+                  .then(value => billingRuntimeRunResponseSchema.safeParse(value)).catch(() => null)
+                if (original?.success && original.data.run.runId === entry.runId
+                  && original.data.run.productSpaceId === entry.scope.productSpaceId
+                  && original.data.run.status !== 'running' && original.data.settlement === 'no_charge') {
+                  outbox.discardRejectedAdmission(entry.key)
+                }
+              }
+            }
+            if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') outbox.markConflict(entry.key)
           }
-        } catch (error) {
-          if (!entry.receipt && error instanceof AdminError && error.status === 404) {
-            // A missing admission is not a settlement. Ask the original run to
-            // finish; only its validated no-charge acknowledgement can release
-            // a journal left by a failed admission and lost finish response.
-            const finished = await this.transport()!.finish(entry.scope, entry.runId, { status: 'failed' })
-              .then(value => assistantFinishResponseSchema.safeParse(value)).catch(() => null)
-            if (finished?.success && finished.data.runId === entry.runId
-              && finished.data.settlement === 'no_charge') this.outbox.discardRejectedAdmission(entry.key)
-          }
-          if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') this.outbox.markConflict(entry.key)
         }
       }
     } finally { this.recovering = false }
@@ -168,7 +209,12 @@ let coordinator: AssistantBillingCoordinator | undefined
 let retryTimer: ReturnType<typeof setInterval> | undefined
 let billingSession: (() => Promise<{ accountId: string; adminOrigin: string } | null>) | undefined
 function getCoordinator(): AssistantBillingCoordinator {
-  return coordinator ??= new AssistantBillingCoordinator(new BillingOutbox<AssistantBillingJournalScope>(join(CONFIG_DIR, 'assistant-billing')), () => transport)
+  if (!coordinator) {
+    const directory = join(CONFIG_DIR, 'assistant-billing')
+    coordinator = new AssistantBillingCoordinator(new BillingOutbox<AssistantBillingJournalScope>(directory), () => transport,
+      new BillingOutbox<AssistantBillingJournalScope>(join(directory, 'admitted')))
+  }
+  return coordinator
 }
 export function setAssistantBillingTransport(next: AssistantBillingTransport, session: () => Promise<{ accountId: string; adminOrigin: string } | null>): void {
   transport = next; billingSession = session

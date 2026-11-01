@@ -10,6 +10,9 @@ process.env.POLO_AI_RUNTIME_DISCOVERY_FILE = join(root, 'runtime/electron.json')
 const accountId = crypto.randomUUID(), personal = crypto.randomUUID(), enterprise = crypto.randomUUID(), enterpriseId = crypto.randomUUID()
 let space = personal, denied = false, receiptFailure = false, hold = false, providerCalls = 0
 const missingRoutes: string[] = []
+const billingHttp: string[] = []
+const combinedAssistant = process.env.POLO_TEST_ASSISTANT_PROTOCOL === 'combined'
+const admissionAck = (input: { requestId: string }) => ({ request: { requestId: input.requestId, state: 'admitted', providerCorrelation: { header: 'X-Polo-Request-Id', nonce: crypto.randomUUID().replaceAll('-', '') } }, idempotent: false })
 const providerBodies: any[] = [], billing: any[] = [], caps: string[] = []
 let allowedModels = ['test-model']
 let connectionOverrides: Record<string, unknown> = {}
@@ -46,14 +49,19 @@ const provider = Bun.serve({ port: 0, async fetch(req) {
 } })
 const admin = Bun.serve({ port: 0, async fetch(req) {
   const url = new URL(req.url)
+  if (url.pathname.startsWith('/api/billing/')) billingHttp.push(`${req.method} ${url.pathname}`)
+  // Default remains old Admin; the controlled journey can explicitly test V1.
+  if (url.pathname === '/api/auth/config') return Response.json({ phoneAuthEnabled: false, selfRegistrationEnabled: false, ...(combinedAssistant ? { assistantPreparationVersion: 1, assistantRecoveryVersion: 1 } : {}) })
   if (url.pathname === '/fixture/control') return Response.json(await control(await req.json()))
   if (url.pathname === '/fixture/state') {
     const secretsOnDisk: string[] = []
     const walk = async (path: string) => { for (const e of await readdir(path, { withFileTypes: true }).catch(() => [])) { const file = join(path, e.name); if (e.isDirectory()) await walk(file); else if (e.isFile()) { const text = await readFile(file, 'utf8').catch(() => ''); if (text.includes('polo-cap-') || caps.some(cap => text.includes(cap))) secretsOnDisk.push(file.replace(root, 'ROOT')) } } }
     await walk(root)
     const outbox = []
-    for (const name of await readdir(join(root, 'assistant-billing')).catch(() => [])) if (name.endsWith('.json')) outbox.push(JSON.parse(await readFile(join(root, 'assistant-billing', name), 'utf8')))
-    return Response.json({ providerCalls, billing, bodies: providerBodies, secretsOnDisk, space, accountId, personal, enterprise, outbox, missingRoutes, executions: executionState() })
+    for (const directory of [join(root, 'assistant-billing'), join(root, 'assistant-billing', 'admitted')]) {
+      for (const name of await readdir(directory).catch(() => [])) if (name.endsWith('.json')) outbox.push(JSON.parse(await readFile(join(directory, name), 'utf8')))
+    }
+    return Response.json({ providerCalls, billing, billingHttp, bodies: providerBodies, secretsOnDisk, space, accountId, personal, enterprise, outbox, missingRoutes, executions: executionState() })
   }
   if (req.headers.get('authorization') !== 'Bearer fixture-admin-token') return Response.json({ error: 'UNAUTHORIZED', message: 'fixture auth required' }, { status: 401 })
   const input = ['POST', 'PATCH'].includes(req.method) ? await req.json() as any : undefined
@@ -67,11 +75,16 @@ const admin = Bun.serve({ port: 0, async fetch(req) {
   ] })
   if (url.pathname === '/api/llm-connections' && computeBarrier) { enteredCompute?.(); await computeBarrier }
   if (url.pathname === '/api/llm-connections') { const computeSpace = url.searchParams.get('productSpaceId') || space; return Response.json({ productSpaceId: computeSpace, configVersion: 'fixture-1', defaultConnection: `polo-space-${computeSpace}`, connections: [{ ...adminNewApiConnection(computeSpace, `http://127.0.0.1:${provider.port}/v1`, allowedModels), ...connectionOverrides }] }) }
+  if (combinedAssistant && req.method === 'POST' && url.pathname === '/api/billing/assistant-requests') {
+    if (denied) return Response.json({ error: 'insufficient_credit', message: 'insufficient credit', details: { assistantPreparation: { phase: 'start_rejected', runId: input.runId, requestId: input.admission.requestId } } }, { status: 409 })
+    billing.push({ kind: 'start', input: { subjectKind: 'polo_assistant', runId: input.runId, productSpaceId: input.admission.productSpaceId } }, { kind: 'admit', input: input.admission })
+    return Response.json({ runId: input.runId, ...admissionAck(input.admission) })
+  }
   if (url.pathname === '/api/billing/runs') {
     if (denied) return Response.json({ error: 'insufficient_credit', message: 'insufficient credit' }, { status: 409 })
     billing.push({ kind: 'start', input }); return Response.json({ run: { runId: input.runId, status: 'running' }, idempotent: false })
   }
-  if (/\/requests$/.test(url.pathname)) { billing.push({ kind: 'admit', input }); return Response.json({ request: { requestId: input.requestId, state: 'admitted', providerCorrelation: { header: 'X-Polo-Request-Id', nonce: crypto.randomUUID().replaceAll('-', '') } }, idempotent: false }) }
+  if (/\/requests$/.test(url.pathname)) { billing.push({ kind: 'admit', input }); return Response.json(admissionAck(input)) }
   if (url.pathname === '/api/billing/usage') {
     billing.push({ kind: receiptFailure ? 'receipt_failed' : 'usage', input })
     if (receiptFailure) return Response.json({ error: 'SERVER_ERROR', message: 'fixture receipt outage' }, { status: 503 })

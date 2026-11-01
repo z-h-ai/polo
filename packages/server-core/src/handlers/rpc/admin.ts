@@ -929,10 +929,10 @@ export function registerAdminHandlers(
     report: async (accountId,input) => { const session = await installationSession(accountId); return session.client.reportNativeInstallation(session.accessToken,input) },
   })
   const billingSession = async (scope: { accountId: string; adminOrigin: string }) => installationSession(scope.accountId, scope.adminOrigin)
-  const billingOptions = () => ({ signal: AbortSignal.timeout(5_000) })
+  const browserPolicyOptions = () => ({ signal: AbortSignal.timeout(5_000) })
   setBrowserPolicyReader(async scope => {
     const session = await billingSession(scope)
-    return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, billingOptions())
+    return session.client.getBrowserPolicy(session.accessToken, scope.productSpaceId, browserPolicyOptions())
   })
   setAssistantBillingTransport(createAssistantBillingTransport(billingSession), async () => {
     const manager = getCredentialManager(), adminOrigin = getAdminUrl()
