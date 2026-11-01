@@ -11,8 +11,8 @@ import './styles/shell.css'
 import './styles/regions.css'
 import './styles/source-shell.css'
 import './styles/source-admin-login.css'
-import '../../../.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css'
-import '../../../.agents/skills/polo-ai-design-system/assets/components/workbench-header-scroll.js'
+import '../../../.agents/skills/polo-client-design-system/assets/tokens/workbench-review.css'
+import '../../../.agents/skills/polo-client-design-system/assets/components/workbench-header-scroll.js'
 
 installPrototypeRuntime()
 installReviewBridge()

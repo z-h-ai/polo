@@ -12,7 +12,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = '.agents/skills/polo-ai-design-system'
+SKILL = '.agents/skills/polo-client-design-system'
 BASELINE = f'{SKILL}/assets/source-baseline'
 MANIFEST = f'{BASELINE}/baseline-manifest.json'
 GENERATED = (BASELINE + '/', f'{SKILL}/assets/tokens/token-preview.html')

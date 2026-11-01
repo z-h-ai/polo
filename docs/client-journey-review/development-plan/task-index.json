@@ -16,13 +16,13 @@
     "docs/client-journey-review/spec.md": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6",
     "docs/mvp-complete-flow-hifi/prototype.html": "302c749194dd8f8f7fe574d33ba637d26241edcb7f4526ece49effeee02887bf",
     "docs/mvp-complete-flow-hifi/prototype-manifest.json": "84a1b5c07626e9cf5ee09b49495f36fa29d550d8c05817f6810f0ffe3a8575f0",
-    ".agents/skills/polo-ai-design-system/SKILL.md": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
-    ".agents/skills/polo-ai-design-system/references/design-system.json": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4",
-    ".agents/skills/polo-ai-design-system/references/foundations.md": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
-    ".agents/skills/polo-ai-design-system/references/client-workbench.template.html": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8",
-    ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
-    ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
-    ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json": "79cb7d8270497b6a35be4d42a20b3d34e6968b8f341e48014466a28cf6441332"
+    ".agents/skills/polo-client-design-system/SKILL.md": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+    ".agents/skills/polo-client-design-system/references/design-system.json": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4",
+    ".agents/skills/polo-client-design-system/references/foundations.md": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
+    ".agents/skills/polo-client-design-system/references/client-workbench.template.html": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8",
+    ".agents/skills/polo-client-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
+    ".agents/skills/polo-client-design-system/assets/tokens/workbench-review.css": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+    ".agents/skills/polo-client-design-system/assets/prototypes/client-entry/prototype-manifest.json": "79cb7d8270497b6a35be4d42a20b3d34e6968b8f341e48014466a28cf6441332"
   },
   "tasks": {
     "F0": {
@@ -1174,21 +1174,21 @@
     "design_revision": "poo70-client-design-r2-20261004",
     "integration_branch": "integration/poo70-client-entry-r15",
     "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b",
-    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "model_path": ".agents/skills/polo-ai-design-system/references/design-system.json",
+    "skill_path": ".agents/skills/polo-client-design-system/SKILL.md",
+    "model_path": ".agents/skills/polo-client-design-system/references/design-system.json",
     "prototype_path": "docs/mvp-complete-flow-hifi/prototype.html",
     "prototype_manifest": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
     "sources": {
       "docs/client-journey-review/spec.md": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6",
       "docs/mvp-complete-flow-hifi/prototype.html": "302c749194dd8f8f7fe574d33ba637d26241edcb7f4526ece49effeee02887bf",
       "docs/mvp-complete-flow-hifi/prototype-manifest.json": "84a1b5c07626e9cf5ee09b49495f36fa29d550d8c05817f6810f0ffe3a8575f0",
-      ".agents/skills/polo-ai-design-system/SKILL.md": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
-      ".agents/skills/polo-ai-design-system/references/design-system.json": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4",
-      ".agents/skills/polo-ai-design-system/references/foundations.md": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
-      ".agents/skills/polo-ai-design-system/references/client-workbench.template.html": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8",
-      ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
-      ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
-      ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json": "79cb7d8270497b6a35be4d42a20b3d34e6968b8f341e48014466a28cf6441332"
+      ".agents/skills/polo-client-design-system/SKILL.md": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+      ".agents/skills/polo-client-design-system/references/design-system.json": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4",
+      ".agents/skills/polo-client-design-system/references/foundations.md": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
+      ".agents/skills/polo-client-design-system/references/client-workbench.template.html": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8",
+      ".agents/skills/polo-client-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
+      ".agents/skills/polo-client-design-system/assets/tokens/workbench-review.css": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+      ".agents/skills/polo-client-design-system/assets/prototypes/client-entry/prototype-manifest.json": "79cb7d8270497b6a35be4d42a20b3d34e6968b8f341e48014466a28cf6441332"
     },
     "execution_authorized": false,
     "parity_accepted": false
