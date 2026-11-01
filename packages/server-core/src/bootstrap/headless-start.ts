@@ -356,6 +356,16 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
     oauthFlowStore,
   })
 
+  // POO-196: hand the handler deps to the SessionManager so per-agent
+  // project-context tool facades can be built (createProjectContextToolFacade
+  // needs the deps' sessionManager + platform logger). Duck-typed because the
+  // bootstrap is generic over the manager type — a manager without the setter
+  // simply never wires project context and the tools fail closed.
+  const smWithFacadeDeps = sessionManager as unknown as {
+    setProjectContextFacadeDeps?: (deps: unknown) => void
+  }
+  smWithFacadeDeps.setProjectContextFacadeDeps?.(deps)
+
   const startedAt = Date.now()
   const serverHandlerContext: ServerHandlerContext = {
     getConnectedClientCount: () => wsServer.getConnectedClientCount(),

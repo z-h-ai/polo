@@ -222,6 +222,16 @@ export interface CoreBackendConfig {
    */
   sessionCallbackOwnerToken?: string;
 
+  /**
+   * POO-196: per-call re-authorized project context facade factory, injected
+   * by the session layer (server-core owns HandlerDeps; shared backends only
+   * ever see this factory — the dependency direction stays shared ← server).
+   * Null/absent = the backend never obtains a facade and the
+   * project_context_* handlers fail closed. The factory itself re-checks the
+   * trusted scope on every construction — nothing is cached here.
+   */
+  getProjectContext?: () => import('@polo-ai/session-tools-core').ProjectContextFacade | null;
+
   /** Workspace configuration */
   workspace: Workspace;
 
@@ -717,6 +727,15 @@ export interface AgentBackend {
    * fails closed without it.
    */
   allowGoalUpdate: boolean;
+
+  /**
+   * POO-196: per-turn capability flag: whether the project_context_search /
+   * project_context_read tools are visible. Set by the session layer before
+   * each turn — ONLY turns whose session is bound to the CURRENTLY committed
+   * enterprise project with valid membership. Every other turn (personal
+   * space, unbound, non-desktop, hidden/mini) fails closed without it.
+   */
+  allowProjectContext: boolean;
 
   /**
    * Agent-native LLM query (also the call_llm transport). POO-134 uses it with

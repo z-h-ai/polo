@@ -62,9 +62,12 @@ import { KnowledgeBaseSelectorPopover } from './KnowledgeBaseSelectorPopover'
 import { useKbSelectionSave } from './use-kb-selection-save'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { WebElementReference } from '@polo-ai/core/types'
-import type { KbCollection } from '@polo-ai/shared/protocol'
+import type { KbCollection, PcSearchResponse } from '@polo-ai/shared/protocol'
 import type { PermissionMode } from '@polo-ai/shared/agent/modes'
 import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
+import { AssetMentionPopover, useAssetMention, type AssetMentionHit } from '@/components/project-context/AssetMentionPopover'
+import { ProjectAssetDraftChips } from '@/components/project-context/ProjectAssetChip'
+import type { ProjectAssetMentionDraft } from '@/atoms/project-context'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
@@ -133,6 +136,8 @@ export interface FreeFormInputProps {
     kbOptions?: { kbCollectionIds?: string[] },
     /** POO-135: picked web element references attached to this send. */
     elementReferences?: WebElementReference[],
+    /** POO-196: picked project-asset mentions attached to this send. */
+    projectAssetRefs?: ProjectAssetMentionDraft[],
   ) => void
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
   onStop?: (silent?: boolean) => void
@@ -164,6 +169,18 @@ export interface FreeFormInputProps {
   elementReferencesValue?: WebElementReference[]
   /** Callback when a draft reference is removed by the user (send clears the rest). */
   onElementReferencesChange?: (references: WebElementReference[]) => void
+  /**
+   * POO-196: @ project-asset mention surface — wired ONLY in project sessions
+   * (enterprise space + session bound to the committed space). Absent = the
+   * whole surface stays off and the generic mention keeps the `@` key.
+   */
+  projectAssetMention?: {
+    search: (q: string) => Promise<PcSearchResponse>
+  }
+  /** POO-196: picked project-asset references queued for this session's composer. */
+  projectAssetRefsValue?: ProjectAssetMentionDraft[]
+  /** Callback when a draft project-asset reference is removed (send clears the rest). */
+  onProjectAssetRefsChange?: (references: ProjectAssetMentionDraft[]) => void
   /** When true, removes container styling (shadow, bg, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
   /** Callback when component height changes (for external animation sync) */
@@ -283,6 +300,9 @@ export function FreeFormInput({
   onAttachmentsChange,
   elementReferencesValue,
   onElementReferencesChange,
+  projectAssetMention,
+  projectAssetRefsValue,
+  onProjectAssetRefsChange,
   unstyled = false,
   onHeightChange,
   onFocusChange,
@@ -1067,6 +1087,41 @@ export function FreeFormInput({
     workspaceId: workspaceSlug,
   })
 
+  // POO-196: latest project-asset reference callback (no stale closure; the
+  // draft itself is read through the prop in submitMessage).
+  const onProjectAssetRefsChangeRef = React.useRef(onProjectAssetRefsChange)
+  onProjectAssetRefsChangeRef.current = onProjectAssetRefsChange
+
+  // Queue a picked @ project asset as a draft chip (deduped per asset+version).
+  const handleProjectAssetPick = React.useCallback((hit: AssetMentionHit) => {
+    onProjectAssetRefsChangeRef.current?.((projectAssetRefsValue ?? []).some((draft) =>
+      draft.assetId === hit.assetId && draft.version === hit.version,
+    )
+      ? (projectAssetRefsValue ?? [])
+      : [...(projectAssetRefsValue ?? []), { assetId: hit.assetId, version: hit.version, name: hit.name }])
+  }, [projectAssetRefsValue])
+
+  // Apply the post-pick text (the @query token stripped) back into the composer.
+  const handleProjectAssetPickApply = React.useCallback((value: string, cursorPosition: number) => {
+    setInput(value)
+    syncToParent(value)
+    setTimeout(() => {
+      richInputRef.current?.focus()
+      richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
+    }, 0)
+  }, [syncToParent])
+
+  // POO-196: the @ project-asset mention owns the plain `@` trigger in project
+  // sessions. The hook stays mounted everywhere but inert (enabled=false)
+  // unless the parent wired projectAssetMention.
+  const assetMention = useAssetMention({
+    enabled: !!projectAssetMention,
+    inputRef: richInputRef,
+    search: projectAssetMention?.search ?? (async () => ({ degraded: false, hits: [] })),
+    onPick: handleProjectAssetPick,
+    applyInputValue: handleProjectAssetPickApply,
+  })
+
   // Inline label menu hook (for #labels)
   const handleLabelSelect = React.useCallback((labelId: string) => {
     onLabelAdd?.(labelId)
@@ -1362,12 +1417,18 @@ export function FreeFormInput({
       : undefined
 
     const elementSnapshot = elementReferencesValue
+
+    // POO-196: picked project-asset mentions ride with THIS send; an empty
+    // queue sends nothing (the send chain accepts an omission — unlike the KB
+    // scope there is no stored server-side session state to commit).
+    const projectAssetSnapshot = projectAssetRefsValue
     onSubmit(
       input.trim(),
       attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
       mentions.skills.length > 0 ? mentions.skills : undefined,
       kbDraft,
-      elementSnapshot && elementSnapshot.length > 0 ? elementSnapshot : undefined
+      elementSnapshot && elementSnapshot.length > 0 ? elementSnapshot : undefined,
+      projectAssetSnapshot && projectAssetSnapshot.length > 0 ? projectAssetSnapshot : undefined
     )
     setInput('')
     setAttachments([])
@@ -1375,6 +1436,7 @@ export function FreeFormInput({
     // never touched by removals, and the queue clears only after the
     // submission has been handed off (App clears its mirror on failure paths).
     onElementReferencesChangeRef.current?.([])
+    onProjectAssetRefsChangeRef.current?.([])
     // Clear draft immediately (cancel any pending debounced sync)
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
     onInputChange?.('')
@@ -1387,7 +1449,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir, elementReferencesValue])
+  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir, elementReferencesValue, projectAssetRefsValue])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1413,6 +1475,13 @@ export function FreeFormInput({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // During IME composition, ESC should cancel composition, not trigger app/menu ESC behavior.
     if (e.key === 'Escape' && e.nativeEvent.isComposing) {
+      return
+    }
+
+    // POO-196: the @ project-asset popover owns navigation/selection keys
+    // while it floats — route keydowns there FIRST.
+    if (assetMention.handleKeyDown(e)) {
+      e.preventDefault()
       return
     }
 
@@ -1524,8 +1593,16 @@ export function FreeFormInput({
     // Update inline slash command state
     inlineSlash.handleInputChange(nextValue, cursorPosition)
 
-    // Update inline mention state (for @mentions - skills, sources, folders)
-    inlineMention.handleInputChange(nextValue, cursorPosition)
+    // POO-196: the project-asset mention owns the plain `@` trigger in project
+    // sessions — while its trigger is active the generic skill/source menu
+    // stays closed, and the two never float at once.
+    const assetMentionActive = assetMention.handleInputChanged(nextValue, cursorPosition)
+    if (assetMentionActive) {
+      inlineMention.close()
+    } else {
+      // Update inline mention state (for @mentions - skills, sources, folders)
+      inlineMention.handleInputChange(nextValue, cursorPosition)
+    }
 
     // Update inline label state (for #labels)
     inlineLabel.handleInputChange(nextValue, cursorPosition)
@@ -1554,7 +1631,7 @@ export function FreeFormInput({
       setInput(newValue)
       syncToParent(newValue)
     }
-  }, [inlineSlash, inlineMention, inlineLabel, syncToParent, autoCapitalisation])
+  }, [inlineSlash, inlineMention, inlineLabel, assetMention, syncToParent, autoCapitalisation])
 
   // Handle inline slash command selection (removes the /command text)
   const handleInlineSlashCommandSelect = React.useCallback((commandId: SlashCommandId) => {
@@ -1684,6 +1761,12 @@ export function FreeFormInput({
           isSearching={inlineMention.isSearching}
         />
 
+        {/* POO-196: @ project-asset mention popover (project sessions only) */}
+        <AssetMentionPopover
+          state={assetMention}
+          onChoose={(hit) => assetMention.choose(hit)}
+        />
+
         {/* Inline Label & State Autocomplete (#labels / #states) */}
         <InlineLabelMenu
           open={inlineLabel.isOpen}
@@ -1750,6 +1833,20 @@ export function FreeFormInput({
               onRemove={(id) => {
                 onElementReferencesChangeRef.current?.(
                   (elementReferencesValue ?? []).filter((r) => r.id !== id),
+                )
+              }}
+            />
+          </div>
+        )}
+
+        {/* POO-196: picked project-asset references queued for the next send. */}
+        {projectAssetRefsValue && projectAssetRefsValue.length > 0 && (
+          <div className="px-3 pt-2.5">
+            <ProjectAssetDraftChips
+              drafts={projectAssetRefsValue}
+              onRemove={(assetId) => {
+                onProjectAssetRefsChangeRef.current?.(
+                  (projectAssetRefsValue ?? []).filter((r) => r.assetId !== assetId),
                 )
               }}
             />

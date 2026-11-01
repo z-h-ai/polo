@@ -1,6 +1,43 @@
 import {browserPolicyResponseSchema,type BrowserPolicyResponse} from "./browser-policy-contract";
 import { SkillTurnBeginSchema, SkillTurnOperationSchema, SkillTurnReceiptSchema, type SkillTurnBegin, type SkillTurnReceipt } from './skill-turn-contract.ts';
 import {
+  PC_ERROR_CODES,
+  PcCapabilitiesResponseSchema,
+  PcAssetListResponseSchema,
+  PcCompleteUploadResponseSchema,
+  PcCreateAssetInputSchema,
+  PcCreateUploadInputSchema,
+  PcDownloadResponseSchema,
+  PcMutationResponseSchema,
+  PcPreviewResponseSchema,
+  PcReadResponseSchema,
+  PcRebuildResponseSchema,
+  PcRestoreInputSchema,
+  PcSearchResponseSchema,
+  PcSetConfirmedInputSchema,
+  PcSetPinnedInputSchema,
+  PcSummaryResponseSchema,
+  PcUpdateAssetInputSchema,
+  PcUploadGrantResponseSchema,
+  type PcAssetListResponse,
+  type PcCapabilitiesResponse,
+  type PcCompleteUploadResponse,
+  type PcCreateAssetInput,
+  type PcCreateUploadInput,
+  type PcDownloadResponse,
+  type PcMutationResponse,
+  type PcPreviewResponse,
+  type PcReadResponse,
+  type PcRebuildResponse,
+  type PcRestoreInput,
+  type PcSearchResponse,
+  type PcSetConfirmedInput,
+  type PcSetPinnedInput,
+  type PcSummaryResponse,
+  type PcUpdateAssetInput,
+  type PcUploadGrantResponse,
+} from './project-context-contract.ts';
+import {
   AdminError,
   type AdminAuthConfig,
   type AdminErrorCode,
@@ -215,6 +252,11 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'quota_exhausted',
   'budget_exhausted',
   'run_finalized',
+  // POO-196: the generated project-context contract owns this list; the
+  // spread keeps the passthrough set from drifting from it. readAdminErrorCode
+  // only returns codes present here, so without it every pc_* failure would
+  // degrade to a generic status-derived code.
+  ...PC_ERROR_CODES,
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -231,7 +273,10 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
   validation_error: 'VALIDATION_ERROR',
 };
 
-const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
+// Partial by design: domain unions that join AdminErrorCode (e.g. the
+// POO-196 pc_* codes) intentionally have no entry here — getSafeAdminErrorMessage
+// falls back to 'Admin request failed' and callers branch on the code itself.
+const SAFE_ADMIN_ERROR_MESSAGES: Partial<Record<AdminErrorCode, string>> = {
   product_space_contract_unsupported: 'ProductSpace contract is not supported by this client',
   INVALID_CREDENTIALS: 'Invalid username or password',
   ACCOUNT_DISABLED: 'Admin account is disabled',
@@ -1400,6 +1445,273 @@ export class AdminClient {
   }
 
   // -------------------------------------------------------------------------
+  // Project context (POO-196) — the enterprise project-asset control plane on
+  // Polo Admin. Metadata and grants ride the admin Bearer; bytes go directly
+  // between the local device and object storage through the short-lived URLs
+  // these responses carry. Every response is validated against the generated
+  // contract schema — an off-contract body fails closed. Paths all hang off
+  // /api/project-context/{productSpaceId}; pc_* error codes survive into
+  // AdminError.errorCode via the ADMIN_ERROR_CODES registration above.
+  // -------------------------------------------------------------------------
+
+  private projectContextPath(productSpaceId: string, suffix: string): string {
+    return `/api/project-context/${encodeURIComponent(productSpaceId)}${suffix}`;
+  }
+
+  private static projectContextQuery(
+    params: Record<string, string | number | undefined>,
+  ): string {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) search.set(key, String(value));
+    }
+    const encoded = search.toString();
+    return encoded ? `?${encoded}` : '';
+  }
+
+  /** GET /api/project-context/{id}/capabilities — feature gate, role and limits. */
+  async getProjectContextCapabilities(accessToken: string, productSpaceId: string): Promise<PcCapabilitiesResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, '/capabilities'),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcCapabilitiesResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/summary — bounded project overview. */
+  async getProjectContextSummary(accessToken: string, productSpaceId: string): Promise<PcSummaryResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, '/summary'),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcSummaryResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets — paged list; undefined query values are not encoded. */
+  async listProjectContextAssets(
+    accessToken: string,
+    productSpaceId: string,
+    query: {
+      view?: string;
+      tag?: string;
+      pinned?: string;
+      q?: string;
+      limit?: number;
+      cursor?: string;
+    },
+  ): Promise<PcAssetListResponse> {
+    const suffix = AdminClient.projectContextQuery({
+      view: query.view,
+      tag: query.tag,
+      pinned: query.pinned,
+      q: query.q,
+      limit: query.limit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcAssetListResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets — declares the asset, returns the first upload grant. */
+  async createProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    input: PcCreateAssetInput,
+  ): Promise<PcUploadGrantResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, '/assets'),
+      { method: 'POST', accessToken, body: PcCreateAssetInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcUploadGrantResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/uploads — grants one replacement version upload. */
+  async createProjectContextUpload(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcCreateUploadInput,
+  ): Promise<PcUploadGrantResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/uploads`),
+      { method: 'POST', accessToken, body: PcCreateUploadInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcUploadGrantResponseSchema);
+  }
+
+  /** POST .../uploads/{uploadId}/complete — hands the finished PUT to admin for verification/publish. */
+  async completeProjectContextUpload(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    uploadId: string,
+  ): Promise<PcCompleteUploadResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/uploads/${encodeURIComponent(uploadId)}/complete`),
+      { method: 'POST', accessToken, body: {} },
+    );
+    return this.readSuccessResponse(response, PcCompleteUploadResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets/{assetId} — authoritative asset detail. */
+  async getProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** PATCH /api/project-context/{id}/assets/{assetId} — revision-guarded metadata mutation. */
+  async updateProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcUpdateAssetInput,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      { method: 'PATCH', accessToken, body: PcUpdateAssetInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/confirmed — version-bound confirmation write. */
+  async setProjectContextConfirmed(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcSetConfirmedInput,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/confirmed`),
+      { method: 'POST', accessToken, body: PcSetConfirmedInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/pinned — pin toggle. */
+  async setProjectContextPinned(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcSetPinnedInput,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/pinned`),
+      { method: 'POST', accessToken, body: PcSetPinnedInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** DELETE /api/project-context/{id}/assets/{assetId} — revision-guarded trash write. */
+  async trashProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    expectedRevision: number,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      { method: 'DELETE', accessToken, body: { expectedRevision } },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/restore — revision-guarded untrash. */
+  async restoreProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcRestoreInput,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/restore`),
+      { method: 'POST', accessToken, body: PcRestoreInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets/{assetId}/download?version= — short-lived attachment grant. */
+  async getProjectContextDownload(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    version?: number,
+  ): Promise<PcDownloadResponse> {
+    const suffix = AdminClient.projectContextQuery({ version });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/download${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcDownloadResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets/{assetId}/read?version= — bounded text body. */
+  async getProjectContextRead(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    version?: number,
+  ): Promise<PcReadResponse> {
+    const suffix = AdminClient.projectContextQuery({ version });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/read${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcReadResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets/{assetId}/preview?version= — short-lived HTML preview grant. */
+  async getProjectContextPreview(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    version?: number,
+  ): Promise<PcPreviewResponse> {
+    const suffix = AdminClient.projectContextQuery({ version });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/preview${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcPreviewResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/search — semantic hits; `degraded` must reach the renderer verbatim. */
+  async searchProjectContextAssets(
+    accessToken: string,
+    productSpaceId: string,
+    query: { q: string; tag?: string; limit?: number },
+  ): Promise<PcSearchResponse> {
+    const suffix = AdminClient.projectContextQuery({
+      q: query.q,
+      tag: query.tag,
+      limit: query.limit,
+    });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/search${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcSearchResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/rebuild — schedules the index rebuild job. */
+  async rebuildProjectContext(accessToken: string, productSpaceId: string): Promise<PcRebuildResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, '/rebuild'),
+      { method: 'POST', accessToken, body: {} },
+    );
+    return this.readSuccessResponse(response, PcRebuildResponseSchema);
+  }
+
+  // -------------------------------------------------------------------------
   // Member circle reads (POO-70 C1) — F1-verified member-side endpoints only.
   // There is deliberately NO purchase/create-order/grant method here: the
   // client never creates circle payment orders (contract
@@ -1759,7 +2071,8 @@ export class AdminClient {
     const value =
       this.readString(data, 'errorCode') ??
       this.readString(data, 'code') ??
-      this.readString(data, 'error');
+      this.readString(data, 'error') ??
+      this.readNestedErrorCode(data);
     if (value && ADMIN_ERROR_CODE_ALIASES[value]) {
       return ADMIN_ERROR_CODE_ALIASES[value];
     }
@@ -1767,6 +2080,20 @@ export class AdminClient {
       return value as AdminErrorCode;
     }
     return null;
+  }
+
+  /**
+   * POO-196: the project-context envelope nests the wire code at
+   * `error.code` (`{ error: { code, message } }` — PcErrorEnvelopeSchema).
+   * Without this read every pc_* failure would degrade to the generic
+   * status-derived code and erase the distinction callers branch on.
+   */
+  private readNestedErrorCode(data: unknown): string | null {
+    if (!data || typeof data !== 'object') return null;
+    const nested = (data as Record<string, unknown>).error;
+    if (!nested || typeof nested !== 'object') return null;
+    const value = (nested as Record<string, unknown>).code;
+    return typeof value === 'string' && value.length > 0 ? value : null;
   }
 
   private readSuccessResponse<T>(data: unknown, schema: ZodType<T>): T {

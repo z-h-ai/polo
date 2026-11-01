@@ -382,6 +382,27 @@ export const CHANNEL_MAP = {
   kbSetSessionCollections: invokeCoded(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS),
   kbGetSessionCollections: invokeCoded(RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS),
 
+  // Enterprise Project Context (POO-196). codedErrors for the same reason as
+  // the kb block: the renderer's error mapping branches on the stable pc_*
+  // codes, which the context bridge would otherwise erase. The upload is a
+  // single RPC (pc:uploadFile) — the renderer hands over a local file path
+  // and never sees a transfer URL.
+  pcListCapabilities: invokeCoded(RPC_CHANNELS.projectContext.LIST_CAPABILITIES),
+  pcGetSummary: invokeCoded(RPC_CHANNELS.projectContext.GET_SUMMARY),
+  pcListAssets: invokeCoded(RPC_CHANNELS.projectContext.LIST_ASSETS),
+  pcGetAsset: invokeCoded(RPC_CHANNELS.projectContext.GET_ASSET),
+  pcUploadFile: invokeCoded(RPC_CHANNELS.projectContext.UPLOAD_FILE),
+  pcUpdateAsset: invokeCoded(RPC_CHANNELS.projectContext.UPDATE_ASSET),
+  pcSetConfirmed: invokeCoded(RPC_CHANNELS.projectContext.SET_CONFIRMED),
+  pcSetPinned: invokeCoded(RPC_CHANNELS.projectContext.SET_PINNED),
+  pcTrashAsset: invokeCoded(RPC_CHANNELS.projectContext.TRASH_ASSET),
+  pcRestoreAsset: invokeCoded(RPC_CHANNELS.projectContext.RESTORE_ASSET),
+  pcDownloadAsset: invokeCoded(RPC_CHANNELS.projectContext.DOWNLOAD_ASSET),
+  pcReadAsset: invokeCoded(RPC_CHANNELS.projectContext.READ_ASSET),
+  pcGetPreviewUrl: invokeCoded(RPC_CHANNELS.projectContext.GET_PREVIEW_URL),
+  pcSearchAssets: invokeCoded(RPC_CHANNELS.projectContext.SEARCH_ASSETS),
+  pcRebuild: invokeCoded(RPC_CHANNELS.projectContext.REBUILD),
+
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
   reorderStatuses: invoke(RPC_CHANNELS.statuses.REORDER),

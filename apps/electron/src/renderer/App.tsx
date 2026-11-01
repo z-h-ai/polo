@@ -10,6 +10,7 @@ import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult, GoalProjection } from '../shared/types'
 import type { WebElementReference } from '@polo-ai/core/types'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
+import { projectAssetDraftRefsAtomFamily, type ProjectAssetMentionDraft } from '@/atoms/project-context'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -2313,7 +2314,7 @@ export default function App() {
     runtimeChatAccessIssue,
   ])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => {
     // Journey #8: the optimistic bubble's id, hoisted so the catch block can
     // strip exactly that bubble (the send's server receipt is unknown — the
     // failed attempt must not linger as a half-confirmed message).
@@ -2492,6 +2493,21 @@ export default function App() {
         // POO-135: picked web element references ride the same chain and are
         // persisted on the stored user message.
         elementReferences,
+        // POO-196: the composer's @ project-asset mentions ride the same
+        // chain. What is sent are MENTION REQUESTS (assetId/version/name);
+        // the server resolves each one against the admin read path and stamps
+        // the authoritative snapshot (per-reference ok/missing/stale/failed)
+        // on the persisted user message — client-supplied values for the
+        // snapshot fields are always dropped server-side.
+        projectAssetRefs: projectAssetRefs && projectAssetRefs.length > 0
+          ? projectAssetRefs.map((draft) => ({
+            assetId: draft.assetId,
+            version: draft.version,
+            name: draft.name,
+            status: 'ok' as const,
+            snippet: null,
+          }))
+          : undefined,
         optimisticMessageId: userMessage.id,
         invocationSource: 'desktop',
         // POO-134: an armed 目标模式 send declares the Goal start intent. The
@@ -2506,6 +2522,9 @@ export default function App() {
       // session (FreeFormInput already cleared its copy).
       if (elementReferences && elementReferences.length > 0) {
         store.set(elementDraftRefsAtomFamily(sessionId), [])
+      }
+      if (projectAssetRefs && projectAssetRefs.length > 0) {
+        store.set(projectAssetDraftRefsAtomFamily(sessionId), [])
       }
     } catch (error) {
       console.error('Failed to send message:', error)

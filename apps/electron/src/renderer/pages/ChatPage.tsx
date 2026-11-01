@@ -31,6 +31,10 @@ import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sendFailureAtomFamily, sessionMetaMapAtom } from '@/atoms/sessions'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
+import { projectAssetDraftRefsAtomFamily, type ProjectAssetMentionDraft } from '@/atoms/project-context'
+import { ProjectContextTabs, type ProjectContextTab } from '@/components/project-context/ProjectContextTabs'
+import { ProjectFileLibrary } from '@/components/project-context/ProjectFileLibrary'
+import { ProjectPinPane } from '@/components/project-context/ProjectPinPane'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
@@ -311,6 +315,41 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const handleElementRefsChange = React.useCallback((refs: import('@polo-ai/core/types').WebElementReference[]) => {
     store.set(elementDraftRefsAtomFamily(sessionId), refs)
   }, [sessionId, store])
+
+  // POO-196: the per-session draft of @ project-asset mentions (same shape
+  // and lifecycle as the element references above — a jotai draft that dies
+  // with the session unless it rides a send).
+  const projectAssetRefsValue = useAtomValue(
+    React.useMemo(() => projectAssetDraftRefsAtomFamily(sessionId), [sessionId]),
+  )
+  const handleProjectAssetRefsChange = React.useCallback((refs: ProjectAssetMentionDraft[]) => {
+    store.set(projectAssetDraftRefsAtomFamily(sessionId), refs)
+  }, [sessionId, store])
+
+  // POO-196: the business tab strip (消息 / 文件 / Pin) exists only for a
+  // session bound to the COMMITTED enterprise product space. Both ids are
+  // read structurally: the productSpaceId fields are landing with the
+  // shared-layer work, and structural reads keep this page compiling (and
+  // correct at runtime) either way.
+  const [projectTab, setProjectTab] = React.useState<ProjectContextTab>('messages')
+  React.useEffect(() => {
+    // A session switch resets to 消息 (default tab — the current behavior).
+    setProjectTab('messages')
+  }, [sessionId])
+  const sessionProductSpaceId = (session as { productSpaceId?: string } | null)?.productSpaceId
+    ?? (sessionMeta as { productSpaceId?: string } | null)?.productSpaceId
+    ?? null
+  const activeProductSpace = productSpace?.activeProductSpace
+  const isProjectSession = !!sessionProductSpaceId
+    && activeProductSpace?.kind === 'enterprise'
+    && activeProductSpace.id === sessionProductSpaceId
+  const projectScope = React.useMemo(() => (
+    isProjectSession && activeWorkspaceId && sessionProductSpaceId
+      ? { workspaceId: activeWorkspaceId, productSpaceId: sessionProductSpaceId }
+      : null
+  ), [isProjectSession, activeWorkspaceId, sessionProductSpaceId])
+  const showProjectTabs = isProjectSession && projectScope !== null
+  const projectPaneVisible = showProjectTabs && projectTab !== 'messages'
 
   // Journey #8: a failed local send leaves a session-scoped prompt (not a
   // message). The explicit action restores the preserved draft into the
@@ -801,7 +840,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         <>
           <div className="h-full flex flex-col">
             <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-            <div className="flex-1 flex flex-col min-h-0">
+            {showProjectTabs && (
+              <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
+            )}
+            <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
               <ChatDisplay
                 ref={chatDisplayRef}
                 session={skeletonSession}
@@ -845,6 +887,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 compactMode={!!isCompactMode}
               />
             </div>
+            {projectPaneVisible && projectScope && (
+              <div className="flex-1 flex flex-col min-h-0">
+                {projectTab === 'files'
+                  ? <ProjectFileLibrary scope={projectScope} currentUserId={productSpace?.accountId ?? null} />
+                  : <ProjectPinPane scope={projectScope} />}
+              </div>
+            )}
           </div>
           <RenameDialog
             open={renameDialogOpen}
@@ -875,13 +924,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     <>
       <div className="h-full flex flex-col">
         <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-        <div className="flex-1 flex flex-col min-h-0">
+        {showProjectTabs && (
+          <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
+        )}
+        <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
           <ChatDisplay
             ref={chatDisplayRef}
             session={session}
-            onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences) => {
+            onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences, projectAssetRefs) => {
               if (session) {
-                onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences)
+                onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences, projectAssetRefs)
               }
             }}
             onOpenFile={handleOpenFile}
@@ -902,6 +954,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onAttachmentsChange={handleAttachmentsChange}
             elementReferencesValue={elementRefsValue}
             onElementReferencesChange={handleElementRefsChange}
+            projectAssetRefsValue={projectAssetRefsValue}
+            onProjectAssetRefsChange={handleProjectAssetRefsChange}
             sources={enabledSources}
             skills={skills}
             labels={labels}
@@ -926,6 +980,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             compactMode={!!isCompactMode}
           />
         </div>
+        {projectPaneVisible && projectScope && (
+          <div className="flex-1 flex flex-col min-h-0">
+            {projectTab === 'files'
+              ? <ProjectFileLibrary scope={projectScope} currentUserId={productSpace?.accountId ?? null} />
+              : <ProjectPinPane scope={projectScope} />}
+          </div>
+        )}
       </div>
       <RenameDialog
         open={renameDialogOpen}

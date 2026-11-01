@@ -25,6 +25,7 @@ export function getSessionToolProxyDefs(options?: SessionToolFilterOptions): Ses
     allowRequestUserInput: options?.allowRequestUserInput,
     allowRenderUi: options?.allowRenderUi,
     allowGenerateApp: options?.allowGenerateApp,
+    allowProjectContext: options?.allowProjectContext,
     // POO-104 model-side component index: default to the host runtime
     // registry (builtin catalog until third-party installs exist); an explicit
     // renderUiCatalog option wins.

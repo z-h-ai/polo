@@ -435,6 +435,26 @@ export const RPC_CHANNELS = {
     SET_SESSION_COLLECTIONS: 'kb:setSessionCollections',
     GET_SESSION_COLLECTIONS: 'kb:getSessionCollections',
   },
+  // Enterprise Project Context (POO-196): admin-owned enterprise project
+  // assets consumed through the device's trusted Admin session; every channel
+  // is LOCAL_ONLY (see routing.ts) and carries pc_* coded errors.
+  projectContext: {
+    LIST_CAPABILITIES: 'pc:listCapabilities',
+    GET_SUMMARY: 'pc:getSummary',
+    LIST_ASSETS: 'pc:listAssets',
+    GET_ASSET: 'pc:getAsset',
+    UPLOAD_FILE: 'pc:uploadFile',
+    UPDATE_ASSET: 'pc:updateAsset',
+    SET_CONFIRMED: 'pc:setConfirmed',
+    SET_PINNED: 'pc:setPinned',
+    TRASH_ASSET: 'pc:trashAsset',
+    RESTORE_ASSET: 'pc:restoreAsset',
+    DOWNLOAD_ASSET: 'pc:downloadAsset',
+    READ_ASSET: 'pc:readAsset',
+    GET_PREVIEW_URL: 'pc:getPreviewUrl',
+    SEARCH_ASSETS: 'pc:searchAssets',
+    REBUILD: 'pc:rebuild',
+  },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',
     INSTALL: 'creatorSkills:install',

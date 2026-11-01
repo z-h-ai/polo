@@ -1462,6 +1462,25 @@ export interface ElectronAPI {
   kbSetSessionCollections(input: import('@polo-ai/shared/protocol').KbSessionCollectionsInput): Promise<{ ok: true; collectionIds: string[] }>
   kbGetSessionCollections(input: import('@polo-ai/shared/protocol').KbGetSessionCollectionsInput): Promise<{ collectionIds: string[] }>
 
+  // Enterprise Project Context (POO-196). pc:uploadFile is the single upload
+  // RPC (renderer passes a local file path, never a transfer URL);
+  // pc:downloadAsset streams to targetPath and answers with the saved path.
+  pcListCapabilities(input: import('@polo-ai/shared/protocol').PcListCapabilitiesInput): Promise<import('@polo-ai/shared/protocol').PcCapabilitiesResponse>
+  pcGetSummary(input: import('@polo-ai/shared/protocol').PcGetSummaryInput): Promise<import('@polo-ai/shared/protocol').PcSummaryResponse>
+  pcListAssets(input: import('@polo-ai/shared/protocol').PcListAssetsInput): Promise<import('@polo-ai/shared/protocol').PcAssetListResponse>
+  pcGetAsset(input: import('@polo-ai/shared/protocol').PcGetAssetInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcUploadFile(input: import('@polo-ai/shared/protocol').PcUploadFileInput): Promise<import('@polo-ai/shared/protocol').PcCompleteUploadResponse>
+  pcUpdateAsset(input: import('@polo-ai/shared/protocol').PcUpdateAssetIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcSetConfirmed(input: import('@polo-ai/shared/protocol').PcSetConfirmedIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcSetPinned(input: import('@polo-ai/shared/protocol').PcSetPinnedIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcTrashAsset(input: import('@polo-ai/shared/protocol').PcTrashAssetIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcRestoreAsset(input: import('@polo-ai/shared/protocol').PcRestoreIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcDownloadAsset(input: import('@polo-ai/shared/protocol').PcDownloadAssetInput): Promise<import('@polo-ai/shared/protocol').PcDownloadFileOutput>
+  pcReadAsset(input: import('@polo-ai/shared/protocol').PcReadAssetIpcInput): Promise<import('@polo-ai/shared/protocol').PcReadResponse>
+  pcGetPreviewUrl(input: import('@polo-ai/shared/protocol').PcGetPreviewUrlIpcInput): Promise<import('@polo-ai/shared/protocol').PcPreviewResponse>
+  pcSearchAssets(input: import('@polo-ai/shared/protocol').PcSearchAssetsInput): Promise<import('@polo-ai/shared/protocol').PcSearchResponse>
+  pcRebuild(input: import('@polo-ai/shared/protocol').PcRebuildInput): Promise<import('@polo-ai/shared/protocol').PcRebuildResponse>
+
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@polo-ai/shared/statuses').StatusConfig[]>
   reorderStatuses(workspaceId: string, orderedIds: string[]): Promise<void>

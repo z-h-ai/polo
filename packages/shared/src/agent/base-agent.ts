@@ -300,6 +300,21 @@ export abstract class BaseAgent implements AgentBackend {
    */
   allowGoalUpdate = false;
   /**
+   * POO-196: per-turn capability flag: whether the project_context_search /
+   * project_context_read tools are visible. Set by the SessionManager before
+   * each turn — ONLY turns whose session is bound to the CURRENTLY committed
+   * enterprise project with valid membership; every other turn fails closed.
+   */
+  allowProjectContext = false;
+  /**
+   * POO-196: host-injected per-call re-authorized project context facade
+   * factory (from {@link BackendConfig.getProjectContext}). server-core owns
+   * the HandlerDeps; shared backends only see this factory and never import
+   * server-core. Null/absent = the tools' backing facade never resolves and
+   * the handlers fail closed.
+   */
+  protected readonly getProjectContext: (() => import('@polo-ai/session-tools-core').ProjectContextFacade | null) | null;
+  /**
    * The processing generation of the turn whose events this agent is
    * currently processing. Injected by the SessionManager at every turn start
    * (and after agent creation) so tool-call callbacks can carry their
@@ -353,6 +368,9 @@ export abstract class BaseAgent implements AgentBackend {
     this._sessionId = config.session?.id || `agent-${Date.now()}`;
     this._model = config.model || defaultModel;
     this._thinkingLevel = normalizeThinkingLevel(config.thinkingLevel) ?? DEFAULT_THINKING_LEVEL;
+    // POO-196: the facade factory is host-injected construction input — the
+    // backend never constructs one itself (fail closed when absent).
+    this.getProjectContext = config.getProjectContext ?? null;
 
     // Initialize core modules
     // PermissionManager: handles permission evaluation, mode management, and command whitelisting

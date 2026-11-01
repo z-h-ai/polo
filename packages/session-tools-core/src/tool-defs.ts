@@ -57,6 +57,8 @@ import {
   handleListTaskSubscriptions,
   handleEmitTaskEvent,
 } from './handlers/task-events.ts';
+import { handleProjectContextSearch, handleProjectContextRead } from './handlers/project-context.ts';
+import { ProjectContextSearchArgsSchema, ProjectContextReadArgsSchema } from './project-context-types.ts';
 
 // ============================================================
 // Canonical Zod Schemas
@@ -725,6 +727,11 @@ export const UnbindMessagingChannelSchema = z.object({
   platform: z.enum(['telegram', 'whatsapp']).optional().describe('Platform to unbind. If omitted, unbinds all.'),
 });
 
+// Project context (POO-196) — schemas canonicalized in project-context-types.ts
+// (same pattern as question-types.ts) and re-exported here so consumers can
+// import everything tool-related from this module.
+export { ProjectContextSearchArgsSchema, ProjectContextReadArgsSchema } from './project-context-types.ts';
+
 // ============================================================
 // Canonical Tool Descriptions (base — no DOC_REFS)
 // ============================================================
@@ -1071,6 +1078,23 @@ Shows which external chat apps are connected and can send/receive messages.`,
 
   unbind_messaging_channel: `Disconnect a messaging channel from the current session.
 Messages will no longer be forwarded between the chat app and this session.`,
+
+  project_context_search: `Search the shared project file area of the enterprise project this session belongs to (POO-196).
+
+Returns file names, tags, snippets and a \`degraded\` flag. \`degraded: true\` means the search index is temporarily unreachable — results were matched by name and tag only, so treat them as incomplete and say so when you use them.
+
+**Workflow:**
+1. Call \`project_context_search\` to find relevant shared files
+2. Call \`project_context_read\` with a hit's \`assetId\` to read its body
+3. Cite findings by file name and version
+
+Only files shared inside THIS project are searched — never assume content from outside the project.`,
+
+  project_context_read: `Read the body (text content) of one project shared file — an @ reference or a project_context_search hit.
+
+Only files whose content is indexed can be read; when the content is not ready yet you get an explicit error instead of text. Relay that error as-is: NEVER fabricate or guess file content.
+`,
+
 } as const;
 
 // ============================================================
@@ -1180,6 +1204,14 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // Messaging gateway tools
   { name: 'list_messaging_channels', description: TOOL_DESCRIPTIONS.list_messaging_channels, inputSchema: ListMessagingChannelsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListMessagingChannels },
   { name: 'unbind_messaging_channel', description: TOOL_DESCRIPTIONS.unbind_messaging_channel, inputSchema: UnbindMessagingChannelSchema, executionMode: 'registry', safeMode: 'block', handler: handleUnbindMessagingChannel },
+  // POO-196 project context tools — registered ONLY for turns whose session is
+  // bound to the currently committed enterprise project (see
+  // SessionToolFilterOptions.allowProjectContext). Read-only lookups into the
+  // project's shared file area; every call re-runs the full trusted-scope gate
+  // server-side (the handler's facade is null outside the fence → the tools
+  // fail closed even if a stale registration still advertises them).
+  { name: 'project_context_search', description: TOOL_DESCRIPTIONS.project_context_search, inputSchema: ProjectContextSearchArgsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleProjectContextSearch },
+  { name: 'project_context_read', description: TOOL_DESCRIPTIONS.project_context_read, inputSchema: ProjectContextReadArgsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleProjectContextRead },
 ];
 
 export interface SessionToolFilterOptions {
@@ -1219,6 +1251,16 @@ export interface SessionToolFilterOptions {
    */
   allowGoalUpdate?: boolean;
   /**
+   * POO-196: only turns whose session is bound to the CURRENTLY committed
+   * enterprise project (and whose membership is still valid) expose the
+   * project_context_* tools. Fail-closed by default — the desktop host sets
+   * this per turn from the session's committed product space; messaging,
+   * automation, headless/CLI, internal, hidden/mini and personal-space turns
+   * all fail closed. The per-call facade re-authorization in the handlers is
+   * the second gate — this flag is only tool VISIBILITY.
+   */
+  allowProjectContext?: boolean;
+  /**
    * POO-104 model-side component index (proposal §5.7): the enabled-component
    * catalog snapshot appended, one `type — one-line description` per entry, to
    * the render_ui tool description. Description-only — it never changes which
@@ -1241,6 +1283,7 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
   const allowRenderUi = options?.allowRenderUi ?? false;
   const allowGenerateApp = options?.allowGenerateApp ?? false;
   const allowGoalUpdate = options?.allowGoalUpdate ?? false;
+  const allowProjectContext = options?.allowProjectContext ?? false;
 
   return SESSION_TOOL_DEFS.filter(def => {
     if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
@@ -1256,6 +1299,9 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
       return false;
     }
     if (!allowGoalUpdate && def.name === GOAL_UPDATE_TOOL_NAME) {
+      return false;
+    }
+    if (!allowProjectContext && (def.name === 'project_context_search' || def.name === 'project_context_read')) {
       return false;
     }
     return true;
@@ -1376,6 +1422,7 @@ export function getToolDefsAsJsonSchema(opts?: {
   allowRenderUi?: boolean;
   allowGenerateApp?: boolean;
   allowGoalUpdate?: boolean;
+  allowProjectContext?: boolean;
   renderUiCatalog?: GenUiComponentDescriptor[];
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
@@ -1385,6 +1432,7 @@ export function getToolDefsAsJsonSchema(opts?: {
     allowRenderUi: opts?.allowRenderUi,
     allowGenerateApp: opts?.allowGenerateApp,
     allowGoalUpdate: opts?.allowGoalUpdate,
+    allowProjectContext: opts?.allowProjectContext,
   });
   const renderUiCatalog = opts?.renderUiCatalog ?? GENUI_BUILTIN_COMPONENT_DESCRIPTORS;
 

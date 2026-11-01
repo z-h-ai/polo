@@ -18,6 +18,9 @@ import type {
 } from './types.ts';
 import type { RequestUserInputQuestionArgs } from './question-types.ts';
 import type { GoalUpdateReport } from './goal-types.ts';
+// POO-196 project context facade — interface canonicalized in its own module
+// so handlers and tool-defs share one cycle-free source of truth.
+import type { ProjectContextFacade } from './project-context-types.ts';
 
 // ============================================================
 // Source Credential Types
@@ -33,6 +36,12 @@ export interface LoadedSource {
   workspaceRootPath: string;
   workspaceId: string;
 }
+
+// ============================================================
+// Project Context Facade (POO-196)
+// ============================================================
+
+export type { ProjectContextFacade, ProjectContextSearchHit } from './project-context-types.ts';
 
 // ============================================================
 // Callback Interface
@@ -197,6 +206,14 @@ export interface SessionToolContext {
    * never re-read from mutable state after a delay. Optional: hosts without generation tracking default to 0.
    */
   getTurnGeneration?: () => number;
+
+  /**
+   * POO-196: per-call re-authorized project context facade. Null/absent = the
+   * turn is not in an authorized project session — the tools fail closed.
+   * Read by the project_context_* handlers AT TOOL-CALL TIME so a session
+   * that left the project fence mid-turn stops resolving immediately.
+   */
+  getProjectContext?: () => ProjectContextFacade | null;
 
   /** Path to sources folder within workspace */
   get sourcesPath(): string;

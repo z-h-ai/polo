@@ -25,6 +25,7 @@ import type {
   CredentialAuthRequest as SharedCredentialAuthRequest,
 } from '../agent/index'
 import type { GoalProjection } from './goal'
+import type { ProjectAssetReference } from './project-context'
 
 // Re-export generateMessageId for handler convenience
 export { generateMessageId } from '@polo-ai/core/types'
@@ -412,6 +413,22 @@ export interface SendMessageOptions {
    * client-supplied value is always dropped.
    */
   kbModelContext?: { block: string; docs: number; bytes: number }
+  /**
+   * Resolved @ project-asset references for this turn (POO-196), persisted on
+   * the user message as a point-in-time snapshot. The server resolves each
+   * mention and stamps the per-reference outcome (`status` + bounded
+   * `snippet`) so the renderer can show which references did not resolve
+   * (adjudication D7); later asset changes never rewrite it.
+   */
+  projectAssetRefs?: ProjectAssetReference[]
+  /**
+   * Resolved project-context model context for this turn — assembled
+   * server-side and staged for a ONE-SHOT injection into this turn's model
+   * prompt. Internal only — never persisted, never part of the message
+   * record, and a client-supplied value is always dropped (same rules as
+   * `kbModelContext`).
+   */
+  projectModelContext?: { block: string; docs: number; bytes: number }
   /**
    * POO-134 Goal intent carried by the send. Only `start` exists: pausing,
    * resuming and ending a Goal are dedicated server commands, so a client can

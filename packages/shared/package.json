@@ -125,6 +125,7 @@
     "./automations/resolve-config-path": "./src/automations/resolve-config-path.ts",
     "./task-events": "./src/task-events/index.ts",
     "./protocol": "./src/protocol/index.ts",
+    "./admin/project-context-contract": "./src/admin/project-context-contract.ts",
     "./i18n": "./src/i18n/index.ts",
     "./resources": "./src/resources/index.ts",
     "./runtime-discovery": "./src/runtime-discovery.ts",

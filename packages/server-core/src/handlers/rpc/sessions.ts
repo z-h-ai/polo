@@ -12,6 +12,7 @@ import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession, unbindClientActiveSession } from './client-active-session'
 import { resolveSessionKbReferences } from './knowledge-base'
+import { resolveSessionProjectContext } from '../../project-context/service'
 import {
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceScope,
@@ -524,16 +525,34 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // Post-authorization CAS after the awaited KB resolution — the send must
     // not dispatch for a scope that moved while references were resolved.
     assertSessionScopeTokenCurrent(sendScopeToken)
+    // POO-196: resolve the session's project context the same bounded way —
+    // the bounded project header for project sessions and the authoritative
+    // resolution of the composer's @ references. Client-supplied
+    // `projectAssetRefs`/`projectModelContext` are ALWAYS dropped: only the
+    // server-resolved snapshot (each reference carrying its outcome) may be
+    // persisted, and the injected block is server-computed.
+    const resolvedProject = await resolveSessionProjectContext(
+      deps,
+      sessionId,
+      options?.projectAssetRefs,
+      resolveCallerWorkspaceId(ctx),
+      sendScopeToken,
+    )
+    const projectAssetRefs = resolvedProject?.references
+    // Post-authorization CAS after the awaited project resolution.
+    assertSessionScopeTokenCurrent(sendScopeToken)
     // Client-supplied `kbReferences` are ALWAYS dropped (review #13): only
     // the server-computed snapshot may reach the persisted message, so a
     // forged title/snippet/docId can never render as a KB citation. The
     // model-context block is server-computed by the same rule — a client
     // value can never inject content into the model prompt.
-    const { kbReferences: _clientKbReferences, kbModelContext: _clientKbModelContext, ...trustedOptions } = options ?? {}
+    const { kbReferences: _clientKbReferences, kbModelContext: _clientKbModelContext, projectAssetRefs: _clientProjectAssetRefs, projectModelContext: _clientProjectModelContext, ...trustedOptions } = options ?? {}
     const sendOptions: SendMessageOptions = {
       ...trustedOptions,
       ...(kbReferences && kbReferences.length > 0 ? { kbReferences } : {}),
       ...(resolvedKb?.modelContext ? { kbModelContext: resolvedKb.modelContext } : {}),
+      ...(projectAssetRefs && projectAssetRefs.length > 0 ? { projectAssetRefs } : {}),
+      ...(resolvedProject?.modelContext ? { projectModelContext: resolvedProject.modelContext } : {}),
     }
 
     return await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {

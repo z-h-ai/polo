@@ -45,7 +45,7 @@ const LOCAL_CALLBACKS = new Set([
   'backend.canonicalSkills.authorize', 'agent.queryLlm', 'agent.onDebug',
   'agent.onBackendAuthRequired', 'agent.onPermissionRequest',
   'agent.onPermissionModeChange', 'agent.onPlanSubmitted', 'agent.onAuthRequest',
-  'agent.onQuestionRequested', 'getTurnGeneration', 'queryFn',
+  'agent.onQuestionRequested', 'getTurnGeneration', 'getProjectContext', 'queryFn',
   'onPlanSubmitted', 'onAuthRequest', 'onQuestionRequested',
 ])
 

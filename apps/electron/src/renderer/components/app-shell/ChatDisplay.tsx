@@ -67,6 +67,9 @@ import {
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { KbReferenceChips } from "@/components/chat/KbReferenceChips"
 import { ElementReferenceChips } from "@/components/chat/ElementReferenceChips"
+import { ProjectAssetChip } from "@/components/project-context/ProjectAssetChip"
+import type { ProjectAssetMentionDraft } from "@/atoms/project-context"
+import type { ProjectAssetReference } from "@polo-ai/shared/protocol"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { ChatInputZone, type ChatInputStatusBanner, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
@@ -136,6 +139,16 @@ function isStackedActivityTool(activity: ActivityItem): boolean {
   return toolName === 'bash' || toolName.startsWith('mcp__') || toolName.startsWith('browser_')
 }
 
+/**
+ * POO-196: the persisted @ project-asset snapshot on a user message. Read
+ * structurally for the same reason as the session's productSpaceId: the
+ * Message contract field is landing with the shared-layer work, and this read
+ * is correct at runtime either way.
+ */
+function readMessageProjectAssetRefs(message: Message): ProjectAssetReference[] {
+  return (message as { projectAssetRefs?: ProjectAssetReference[] }).projectAssetRefs ?? []
+}
+
 function getTurnKey(turn: Turn): string {
   if (turn.type === 'user') return `user-${turn.message.id}`
   if (turn.type === 'system') return `system-${turn.message.id}`
@@ -145,7 +158,7 @@ function getTurnKey(turn: Turn): string {
 
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   // Current model is read-only in the input; admin-managed settings choose it.
@@ -202,6 +215,10 @@ interface ChatDisplayProps {
   elementReferencesValue?: WebElementReference[]
   /** Callback when a draft reference is removed (send clears the rest) */
   onElementReferencesChange?: (references: WebElementReference[]) => void
+  /** POO-196: picked project-asset mentions queued for this session's composer */
+  projectAssetRefsValue?: ProjectAssetMentionDraft[]
+  /** Callback when a draft project-asset reference is removed (send clears the rest) */
+  onProjectAssetRefsChange?: (references: ProjectAssetMentionDraft[]) => void
   // Source selection
   /** Available sources (enabled only) */
   sources?: LoadedSource[]
@@ -483,6 +500,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onAttachmentsChange,
   elementReferencesValue,
   onElementReferencesChange,
+  projectAssetRefsValue,
+  onProjectAssetRefsChange,
   // Sources
   sources,
   onSourcesChange,
@@ -541,6 +560,29 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       collectionIds,
     }).then(() => undefined)
   }, [isEnterpriseSpace, session])
+
+  // POO-196: the project-context surface (tab strip data + @ mention) exists
+  // only for a session bound to the COMMITTED enterprise space. The session's
+  // productSpaceId is read structurally: the field is being added to the
+  // shared Session contract, and the structural read keeps this file compiling
+  // (and correct at runtime) whether or not the type declaration has landed.
+  const sessionProductSpaceId = (session as { productSpaceId?: string } | null)?.productSpaceId
+    ?? null
+  const isProjectSession = !!sessionProductSpaceId
+    && isEnterpriseSpace
+    && productSpace?.activeProductSpaceId === sessionProductSpaceId
+  const projectAssetMention = React.useMemo(() => (
+    isProjectSession && session && workspaceId
+      ? {
+        search: (q: string) => window.electronAPI.pcSearchAssets({
+          workspaceId,
+          productSpaceId: sessionProductSpaceId!,
+          q,
+          limit: 20,
+        }),
+      }
+      : undefined
+  ), [isProjectSession, session, workspaceId, sessionProductSpaceId])
 
   // Input is only disabled when explicitly disabled (e.g., agent needs activation)
   // User can type during streaming - submitting will stop the stream and send
@@ -1285,7 +1327,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
   // kbOptions mirrors the FreeFormInput onSubmit 4th parameter shape (POO-108)
-  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }, elementReferences?: WebElementReference[]) => {
+  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }, elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => {
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
       includeTopSeparator: hasBaseMessage,
@@ -1297,7 +1339,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
-    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds, elementReferences)
+    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds, elementReferences, projectAssetRefs)
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
     // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
@@ -2091,6 +2133,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onAttachmentsChange,
               elementReferencesValue,
               onElementReferencesChange,
+              projectAssetRefsValue: isProjectSession ? projectAssetRefsValue : undefined,
+              onProjectAssetRefsChange: isProjectSession ? onProjectAssetRefsChange : undefined,
+              projectAssetMention,
               sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
               onSourcesChange,
@@ -2395,6 +2440,13 @@ function MessageBubble({
         {message.kbReferences && message.kbReferences.length > 0 && (
           <KbReferenceChips references={message.kbReferences} workspaceId={workspaceId} />
         )}
+        {/* POO-196: the persisted @ project-asset snapshot with its per-reference
+            outcome; references that did not resolve say so instead of vanishing. */}
+        {readMessageProjectAssetRefs(message).length > 0 && (
+          <div className="flex justify-end">
+            <ProjectAssetChip references={readMessageProjectAssetRefs(message)} mode="message" />
+          </div>
+        )}
         {/* POO-135: point-in-time web element snapshots attached at send time. */}
         {message.elementReferences && message.elementReferences.length > 0 && (
           <div className="flex justify-end">
@@ -2540,6 +2592,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.workspaceId === next.workspaceId &&
     prev.message.kbReferences === next.message.kbReferences &&
     prev.message.elementReferences === next.message.elementReferences &&
+    readMessageProjectAssetRefs(prev.message) === readMessageProjectAssetRefs(next.message) &&
     prev.compactMode === next.compactMode
   )
 })

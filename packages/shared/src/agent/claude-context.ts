@@ -93,6 +93,13 @@ export interface ClaudeContextOptions {
    * binds the value immutably into the callback chain.
    */
   getTurnGeneration?: () => number;
+  /**
+   * POO-196: per-call re-authorized project context facade factory. Read by
+   * the project_context_* handlers AT TOOL-CALL TIME — a null/absent factory
+   * fails the tools closed. Optional: hosts without project context wiring
+   * omit it.
+   */
+  getProjectContext?: () => import('@polo-ai/session-tools-core').ProjectContextFacade | null;
   sessionStorage?: SessionStorage;
   workingDirectory?: string;
 }
@@ -108,7 +115,7 @@ export interface ClaudeContextOptions {
  * - Icon management
  */
 export function createClaudeContext(options: ClaudeContextOptions): SessionToolContext {
-  const { sessionId, workspacePath, workspaceId, onPlanSubmitted, onAuthRequest, onQuestionRequested, onGoalUpdateReport, getTurnGeneration } = options;
+  const { sessionId, workspacePath, workspaceId, onPlanSubmitted, onAuthRequest, onQuestionRequested, onGoalUpdateReport, getTurnGeneration, getProjectContext } = options;
   const sessionStorage = options.sessionStorage ?? defaultWorkspaceSessionStorage;
 
   // File system implementation
@@ -238,6 +245,7 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     sessionId,
     workspacePath,
     getTurnGeneration,
+    getProjectContext,
     get sourcesPath() { return join(workspacePath, 'sources'); },
     get skillsPath() { return join(workspacePath, 'skills'); },
     plansFolderPath: sessionStorage.getPlansPath(workspacePath, sessionId),
