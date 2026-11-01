@@ -7,6 +7,10 @@ import type { Session } from '../../../../shared/types'
 
 GlobalRegistrator.register()
 const { render, fireEvent, cleanup, act } = await import('@testing-library/react')
+// POO-179 localized ChatDisplay's subtree: the isolated harness must mount an
+// initialized i18n (same pattern as session-status-menu.i18n.test.tsx) or
+// useTranslation() resolves to an undefined instance during render.
+
 const noop = () => {}
 let focused = true
 let recapReveal = noop
@@ -32,7 +36,7 @@ window.electronAPI = {
   getSendMessageKey: async () => 'enter',
   readPreferences: async () => ({ content: '{}' }),
 } as unknown as typeof window.electronAPI
-mock.module('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+mock.module('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'zh-Hans' } }) }))
 mock.module('@/context/AppShellContext', () => ({ useAppShellContext: () => ({ isFocusedPanel: focused }) }))
 mock.module('@/context/ProductSpaceContext', () => ({ useOptionalProductSpaceContext: () => null }))
 mock.module('@/contexts/NavigationContext', () => ({ useNavigation: () => ({ navigate: noop }) }))
