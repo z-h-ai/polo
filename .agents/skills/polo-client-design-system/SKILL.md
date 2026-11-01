@@ -5,7 +5,7 @@ description: Apply the polo-ai repository design system within its declared plat
 
 # polo-ai Design System
 
-Adoption revision: `native-materials-r5-lifecycle-candidate-20261023`. Mode: `extracted`.
+Adoption revision: `native-materials-r6-client-design-system-20261101`. Mode: `extracted`.
 
 ## Applicability
 

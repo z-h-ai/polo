@@ -18,7 +18,7 @@
     ]
   },
   "mode": "extracted",
-  "revision": "native-materials-r5-lifecycle-candidate-20261023",
+  "revision": "native-materials-r6-client-design-system-20261101",
   "sources": [
     {
       "path": "docs/client-journey-review/spec.md",

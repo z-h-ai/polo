@@ -454,8 +454,8 @@
   ],
   "default_story": "UI-refinement",
   "design": {
-    "revision": "native-materials-r5-lifecycle-candidate-20261023",
-    "sha256": "c6dc5b25e3dc66e9d56b2c71f00c7414d8447f6e6d7b4807f1dcbd19b43bd216",
+    "revision": "native-materials-r6-client-design-system-20261101",
+    "sha256": "00603421df7f2d7c49e37a6b3b30f656caf27ccc7b3c0002876ab62f9248ea6c",
     "skill_path": ".agents/skills/polo-client-design-system/SKILL.md",
     "sources": [
       {
@@ -45634,28 +45634,28 @@
       "id": "client-workbench-template",
       "path": ".agents/skills/polo-client-design-system/references/client-workbench.template.html",
       "label": "客户端产品页面唯一维护模板",
-      "revision": "native-materials-r5-lifecycle-candidate-20261023",
+      "revision": "native-materials-r6-client-design-system-20261101",
       "sha256": "d50590c7bbd5ed6df9e206c3568188ebd8b20f620475e88078dd1cf80886b8f7"
     },
     {
       "id": "workbench-base-css",
       "path": ".agents/skills/polo-client-design-system/assets/tokens/workbench-base.css",
       "label": "最新原型提升的 b82fa1e5 基础样式",
-      "revision": "native-materials-r5-lifecycle-candidate-20261023",
+      "revision": "native-materials-r6-client-design-system-20261101",
       "sha256": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a"
     },
     {
       "id": "client-design-model",
       "path": ".agents/skills/polo-client-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
-      "revision": "native-materials-r5-lifecycle-candidate-20261023",
-      "sha256": "0e9b4c08c4e957db4880bd349bb7f75dab0540fc4360b71421462e7d4bdeaa5d"
+      "revision": "native-materials-r6-client-design-system-20261101",
+      "sha256": "2977a372429618ae38b4380ecc46e70850be18a750861172616d0d9f3f63f6d4"
     },
     {
       "id": "client-design-foundations",
       "path": ".agents/skills/polo-client-design-system/references/foundations.md",
       "label": "当前客户端设计来源和消费边界",
-      "revision": "native-materials-r5-lifecycle-candidate-20261023",
+      "revision": "native-materials-r6-client-design-system-20261101",
       "sha256": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d"
     },
     {

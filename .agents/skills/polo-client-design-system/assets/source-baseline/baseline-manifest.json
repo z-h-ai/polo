@@ -1,5 +1,5 @@
 {
-  "design_revision": "native-materials-r5-lifecycle-candidate-20261023",
+  "design_revision": "native-materials-r6-client-design-system-20261101",
   "entry": "entries/baseline.html",
   "entry_self_contained": "entries/baseline.html inlines its JS and CSS (vite inlineDynamicImports + single-file transform), so it opens and runs directly from file:// with no server and no external request.",
   "files": {
@@ -42,7 +42,7 @@
     "typecheck_exit": 0,
     "vite_exit": 0
   },
-  "input_fingerprint": "063a6586f9bd75157ef17b2aa26d08fc7631f823fe6f3af389f3ef0473349366",
+  "input_fingerprint": "a2a0274c7d7fe7c833a4499fd2981e8503c46172d587720cc872c5db433a1a12",
   "inputs": {
     "lockfiles": {
       "bun.lock": "fe2e8fd7b68cce1439e4f5e4148e2a0f92b380ab5620e75bf1aa87a435c3916e",
@@ -1456,24 +1456,8 @@
   ],
   "schema_version": 2,
   "snapshot": {
-    "head": "1bb91a226a2e6e7a828f42b26ac61223c451fd31",
-    "head_dirty": [
-      ".agents/skills/polo-client-design-system/assets/tokens/workbench-base.css",
-      ".agents/skills/polo-client-design-system/assets/tokens/workbench-review.css",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/build.py",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/baseline.css",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/baseline.html",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/baseline.tsx",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/fixtures.tsx",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/gallery.tsx",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/scene-ids.ts",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/entries/scenes.tsx",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/scene-ids-runner.cjs",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/tsconfig.json",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/vite.config.mjs",
-      ".agents/skills/polo-client-design-system/tools/source-baseline/vite.scene-ids.config.mjs",
-      "apps/electron/src/renderer/lib/client-workbench-style.ts"
-    ],
+    "head": "aca163927b9c7dda2cc351d76dcff09c487d0d78",
+    "head_dirty": [],
     "note": "Input state at the time the inputs LAST changed (git head plus uncommitted/untracked input paths of THIS build). Currency is proven by inputs hashes + regeneration, not by comparing this snapshot to the current git state."
   }
 }

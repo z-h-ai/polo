@@ -6,15 +6,15 @@
   "integration_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/poo70-client-entry-r15",
   "sources": {
     "docs/client-journey-review/spec.md": "8ed029bb24e623b4ea0b47e5f194c32f4a9f2748758cfb8c98f72fee1a54b06c",
-    "docs/mvp-complete-flow-hifi/prototype.html": "cb71cd7265cd08f8f164c8acd19b9576442350db003eecc62d89a96f5893f0df",
-    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "c3273ff4d580707b9e54aaf7e593e4946e3c6935479530b211d67be6b3ecd264",
-    ".agents/skills/polo-client-design-system/SKILL.md": "c6dc5b25e3dc66e9d56b2c71f00c7414d8447f6e6d7b4807f1dcbd19b43bd216",
-    ".agents/skills/polo-client-design-system/references/design-system.json": "0e9b4c08c4e957db4880bd349bb7f75dab0540fc4360b71421462e7d4bdeaa5d",
+    "docs/mvp-complete-flow-hifi/prototype.html": "39fa6a8f6ef2117cb2b607fef8200f59c5206859f60f64e9dccb52bc80a30833",
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "3ca1e50a2b9063b7617994f8a44477e0460203abef6cc243acc1b9b3f40571e4",
+    ".agents/skills/polo-client-design-system/SKILL.md": "00603421df7f2d7c49e37a6b3b30f656caf27ccc7b3c0002876ab62f9248ea6c",
+    ".agents/skills/polo-client-design-system/references/design-system.json": "2977a372429618ae38b4380ecc46e70850be18a750861172616d0d9f3f63f6d4",
     ".agents/skills/polo-client-design-system/references/foundations.md": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d",
     ".agents/skills/polo-client-design-system/references/client-workbench.template.html": "d50590c7bbd5ed6df9e206c3568188ebd8b20f620475e88078dd1cf80886b8f7",
     ".agents/skills/polo-client-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
     ".agents/skills/polo-client-design-system/assets/tokens/workbench-review.css": "be4d7f7d4ae96ee18e06ce3976fc737fdaeefbdd29a479a31c1a4ff15f130a70",
-    ".agents/skills/polo-client-design-system/assets/prototypes/client-entry/prototype-manifest.json": "93bcadfd1ab8f2dea89eb34f269a73502c757a65eb7e6c5eb21ad3e0ca4b6498"
+    ".agents/skills/polo-client-design-system/assets/prototypes/client-entry/prototype-manifest.json": "eb303b6be35f750b3ec5cd7b891be158f38b2a65a7a75a572c0e1ddc5b69fead"
   },
   "propagation_order": [
     "POO-70 authority and project Skill",
