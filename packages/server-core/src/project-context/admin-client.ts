@@ -1,5 +1,7 @@
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { lstat, mkdir, realpath, stat, unlink } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 
@@ -209,15 +211,113 @@ export async function putProjectContextFile(input: {
   void response.body?.cancel().catch(() => {})
 }
 
+/* ------------------------------------------------------------------ */
+/* Download destination (main-process authority)                       */
+/* ------------------------------------------------------------------ */
+
+/** The ONLY directory downloads may land in — decided by THIS process, never
+ * by the renderer. Same convention as the app's other attachment downloads:
+ * the OS Downloads folder. */
+let downloadRootOverride: string | null = null
+
+/** Test seam: pin the download root so containment/symlink behavior is
+ * observable without touching the user's real Downloads folder. */
+export function setProjectContextDownloadRootForTests(root: string | null): void {
+  downloadRootOverride = root
+}
+
+/** Resolved REAL root: a parent-chain symlink (macOS /tmp → /private/tmp, or
+ * a user-replaced Downloads entry) must not widen the writable set. */
+async function projectContextDownloadRoot(): Promise<string> {
+  const requested = downloadRootOverride ?? path.join(homedir(), 'Downloads')
+  await mkdir(requested, { recursive: true })
+  return realpath(requested)
+}
+
+/** The caller's targetPath contributes a FILE NAME at most — every directory
+ * component (`..`, absolute paths, separators) is discarded before any
+ * filesystem call ever sees it. */
+function downloadFileNameOf(requestedPath: string): string {
+  const base = path.basename(requestedPath ?? '').trim()
+  if (!base || base === '.' || base === '..' || base === path.sep) {
+    throw new Error('A download file name is required')
+  }
+  return base
+}
+
+function slotPath(fileName: string, ordinal: number): string {
+  if (ordinal === 0) return fileName
+  const ext = path.extname(fileName)
+  const stem = ext ? fileName.slice(0, -ext.length) : fileName
+  return `${stem} (${ordinal + 1})${ext}`
+}
+
+/** Finder-style naming: an existing entry is never silently overwritten, the
+ * next free `name (2).ext` ordinal is used instead. */
+async function firstFreeOrdinal(root: string, fileName: string): Promise<number> {
+  for (let ordinal = 0; ordinal < 100; ordinal += 1) {
+    try {
+      await lstat(path.join(root, slotPath(fileName, ordinal)))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ordinal
+      throw error
+    }
+  }
+  throw new Error(`No free download slot for ${fileName}`)
+}
+
+/** Bridges a granted response body to a node readable we own. Pumping the
+ * reader by hand (instead of Readable.fromWeb) matters because a mid-transfer
+ * failure must REJECT the write pipeline — fromWeb leaves the node side
+ * stalled forever on some runtimes when the web stream errors, which would
+ * hang this call and leave the temp file in place. */
+function projectContextBodyStream(body: ReadableStream<Uint8Array>): Readable {
+  const reader = body.getReader()
+  return new Readable({
+    read(this: Readable) {
+      void reader.read().then(
+        (chunk) => {
+          if (chunk.done) this.push(null)
+          else this.push(chunk.value)
+        },
+        (error: unknown) => {
+          this.destroy(error instanceof Error ? error : new Error(String(error)))
+        },
+      )
+    },
+    destroy(this: Readable, error: Error | null, callback: (error?: Error | null) => void) {
+      void reader.cancel().catch(() => {})
+      callback(error)
+    },
+  })
+}
+
 /**
- * Streams a granted download URL to a local path. The URL is a short-lived
- * attachment capability — no admin credential is attached.
+ * Streams a granted download URL to the downloads directory THIS process
+ * owns. The URL is a short-lived attachment capability — no admin credential
+ * is attached.
+ *
+ * Destination discipline (consensus S-04+X9): the renderer's targetPath only
+ * ever supplies the file name; the directory is fixed here, re-checked for
+ * containment, and the final entry is created by an atomic no-clobber
+ * `link()` from a private temp file in the same directory — a failed or
+ * interrupted download can never leave a half-written file at the visible
+ * name, and an existing file (or a planted symlink) is never overwritten.
  */
 export async function downloadProjectContextFile(input: {
   url: string
   targetPath: string
   timeoutMs?: number
 }): Promise<string> {
+  const root = await projectContextDownloadRoot()
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep
+  const fileName = downloadFileNameOf(input.targetPath)
+  // Defense in depth: even after basename-only narrowing, prove containment.
+  const resolved = path.resolve(root, fileName)
+  if (resolved !== root && !resolved.startsWith(rootWithSep)) {
+    throw new Error('Download destination escaped the downloads directory')
+  }
+
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 30 * 60_000)
   let response: Response
@@ -230,10 +330,45 @@ export async function downloadProjectContextFile(input: {
     void response.body?.cancel().catch(() => {})
     throw new Error(`Download failed (${response.status})`)
   }
-  const { writeFile } = await import('node:fs/promises')
-  const { pipeline } = await import('node:stream/promises')
-  const nodeStream = Readable.fromWeb(response.body as unknown as import('node:stream/web').ReadableStream)
-  await pipeline(nodeStream, (await import('node:fs')).createWriteStream(input.targetPath))
-  // Return an absolute path so the renderer can reveal/open it safely.
-  return path.resolve(input.targetPath)
+
+  let ordinal = await firstFreeOrdinal(root, fileName)
+  let targetPath = path.join(root, slotPath(fileName, ordinal))
+  const tempPath = path.join(root, `.${fileName}.${randomUUID()}.part`)
+  let placed = false
+  try {
+    const { pipeline } = await import('node:stream/promises')
+    const { createWriteStream } = await import('node:fs')
+    const { link } = await import('node:fs/promises')
+    const nodeStream = projectContextBodyStream(response.body as ReadableStream<Uint8Array>)
+    await pipeline(nodeStream, createWriteStream(tempPath, { flags: 'wx' }))
+    // Atomic no-clobber publish: EEXIST means a concurrent download claimed
+    // the name between the probe and here — fall through to the next ordinal
+    // instead of ever replacing an entry this download did not write.
+    for (let guard = 0; guard < 100; guard += 1) {
+      try {
+        await link(tempPath, targetPath)
+        placed = true
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        ordinal += 1
+        targetPath = path.join(root, slotPath(fileName, ordinal))
+      }
+    }
+    if (!placed) throw new Error(`No free download slot for ${fileName}`)
+  } catch (error) {
+    void response.body?.cancel().catch(() => {})
+    throw error
+  } finally {
+    // The temp copy is either published (hard-linked) or dead weight.
+    await unlink(tempPath).catch(() => {})
+  }
+
+  // Post-publish proof: the saved entry resolves back inside the real root.
+  const savedPath = await realpath(targetPath)
+  if (!savedPath.startsWith(rootWithSep)) {
+    await unlink(targetPath).catch(() => {})
+    throw new Error('The saved download resolved outside the downloads directory')
+  }
+  return savedPath
 }

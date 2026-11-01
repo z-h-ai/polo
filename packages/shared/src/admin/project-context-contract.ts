@@ -1,6 +1,6 @@
 // GENERATED FILE — do not edit by hand.
 // Source of truth: polo-admin `src/lib/project-context/contracts.ts`.
-// Contract: poo196-contract-r1 · source sha256: 0f2372f680500e8de34047415ad4113d1293e66b95e2238eb591ba1e945e36d1
+// Contract: poo196-contract-r2 · source sha256: 6585ba04d93356a92711e46c810bbda4b0bdead1ee5f716d24ffc2ac1df255dd
 // Regenerate: `tsx scripts/export-project-context-contract.ts <this-file>` (polo-admin repo);
 // `--check` verifies no drift between the two repos.
 import { z } from 'zod'
@@ -33,7 +33,7 @@ import { z } from 'zod'
  */
 
 /** Bumped with every wire-visible change; the client artifact records it. */
-export const PC_CONTRACT_VERSION = "poo196-contract-r1";
+export const PC_CONTRACT_VERSION = "poo196-contract-r2";
 
 /**
  * The error codes this surface may put on the wire. The client's i18n and
@@ -81,6 +81,15 @@ export type PcAssetStatus = (typeof PC_ASSET_STATUSES)[number];
  * original downloadable and a retry path via rebuild. */
 export const PC_PROCESSING_STATES = ["processing", "indexed", "failed", "unsupported"] as const;
 export type PcProcessingState = (typeof PC_PROCESSING_STATES)[number];
+
+/** List-filter vocabulary for the CURRENT version's processing state.
+ * `available` = indexed + unsupported (a stored file that cannot be indexed
+ * is still usable — never relabelled as full-text searchable); an asset whose
+ * first version is not published yet counts as `processing`. The list
+ * endpoint applies this BEFORE pagination so a filter answers over the whole
+ * library, not the loaded page. */
+export const PC_LIST_PROCESSING_FILTERS = ["processing", "indexed", "failed", "unsupported", "available"] as const;
+export type PcListProcessingFilter = (typeof PC_LIST_PROCESSING_FILTERS)[number];
 
 /**
  * Preset tag ids. Tags on the wire are stable ids for presets plus
@@ -275,6 +284,9 @@ export const PcAssetListRequestQuerySchema = z
     tag: z.string().max(PC_TAG_MAX_CHARS).optional(),
     /** `confirmed` selects assets whose CURRENT version is confirmed. */
     pinned: z.enum(["true", "false"]).optional(),
+    /** Current-version content state filter, applied server-side before
+     * pagination (see PC_LIST_PROCESSING_FILTERS). */
+    processing: z.enum(PC_LIST_PROCESSING_FILTERS).optional(),
     q: z.string().max(PC_QUERY_MAX_CHARS).optional(),
     limit: z.coerce.number().int().min(1).max(PC_LIST_LIMIT_MAX).default(PC_LIST_LIMIT_DEFAULT),
     cursor: z.string().max(256).optional(),
