@@ -511,6 +511,8 @@ export const CHANNEL_MAP = {
   'browserPane.detachToPopup': invoke(RPC_CHANNELS.browserPane.DETACH_TO_POPUP),
   'browserPane.setEmbedBounds': invoke(RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS),
   'browserPane.unembed': invoke(RPC_CHANNELS.browserPane.UNEMBED),
+  // POO-198: sidebar native views yield while window DOM covers the pane.
+  'browserPane.setEmbedOcclusion': invoke(RPC_CHANNELS.browserPane.SET_EMBED_OCCLUSION),
   'browserPane.setElementPicking': invoke(RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING),
   'browserPane.emptyStateLaunch': invoke(RPC_CHANNELS.browserPane.LAUNCH),
   'browserPane.onStateChanged': listener(RPC_CHANNELS.browserPane.STATE_CHANGED),
@@ -528,6 +530,8 @@ export const CHANNEL_MAP = {
   // Canvas pane popout (POO-135 验收修复 SB-CANVAS-OUT)
   'canvasPane.embed': invoke(RPC_CHANNELS.canvasPane.EMBED),
   'canvasPane.unembed': invoke(RPC_CHANNELS.canvasPane.UNEMBED),
+  // POO-198: sidebar native views yield while window DOM covers the pane.
+  'canvasPane.setEmbedOcclusion': invoke(RPC_CHANNELS.canvasPane.SET_EMBED_OCCLUSION),
   'canvasPane.hide': invoke(RPC_CHANNELS.canvasPane.HIDE),
   'canvasPane.destroy': invoke(RPC_CHANNELS.canvasPane.DESTROY),
   'canvasPane.release': invoke(RPC_CHANNELS.canvasPane.RELEASE),

@@ -5,7 +5,7 @@ import { resolve } from 'path'
 import { resolveTrustedSessionContext } from './genui'
 import type { HandlerDeps } from './handler-deps'
 
-export const HANDLED_CHANNELS = [RPC_CHANNELS.canvasPane.EMBED, RPC_CHANNELS.canvasPane.UNEMBED, RPC_CHANNELS.canvasPane.HIDE, RPC_CHANNELS.canvasPane.DESTROY, RPC_CHANNELS.canvasPane.RELEASE, RPC_CHANNELS.canvasPane.DETACH_TO_POPUP, RPC_CHANNELS.canvasPane.ATTACH_FROM_POPUP, RPC_CHANNELS.canvasPane.FOCUS] as const
+export const HANDLED_CHANNELS = [RPC_CHANNELS.canvasPane.EMBED, RPC_CHANNELS.canvasPane.UNEMBED, RPC_CHANNELS.canvasPane.SET_EMBED_OCCLUSION, RPC_CHANNELS.canvasPane.HIDE, RPC_CHANNELS.canvasPane.DESTROY, RPC_CHANNELS.canvasPane.RELEASE, RPC_CHANNELS.canvasPane.DETACH_TO_POPUP, RPC_CHANNELS.canvasPane.ATTACH_FROM_POPUP, RPC_CHANNELS.canvasPane.FOCUS] as const
 
 export function registerCanvasPaneHandlers(server: RpcServer, deps: HandlerDeps): void {
   const manager = deps.canvasPopupManager
@@ -21,6 +21,13 @@ export function registerCanvasPaneHandlers(server: RpcServer, deps: HandlerDeps)
   server.handle(RPC_CHANNELS.canvasPane.RELEASE, ctx => { if (ctx.webContentsId) manager.releaseForHost(ctx.webContentsId) })
   const guard = (ctx: { webContentsId?: number | null; workspaceId?: string | null }, id: string) => manager.assertOwner(id, ctx.webContentsId, ctx.workspaceId)
   server.handle(RPC_CHANNELS.canvasPane.UNEMBED, (ctx, id: string) => { guard(ctx, id); manager.unembed(id) })
+  // POO-198: window DOM is about to cover (or has cleared from) this window's
+  // sidebar — every canvas embedded there yields and comes back in Main. Not
+  // owner-guarded on purpose: it is a window-scoped bulk op, like RELEASE.
+  server.handle(RPC_CHANNELS.canvasPane.SET_EMBED_OCCLUSION, (ctx, occluded: boolean) => {
+    const host = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w.webContents.id === ctx.webContentsId)
+    if (host) manager.setEmbedOcclusion(host, occluded)
+  })
   server.handle(RPC_CHANNELS.canvasPane.HIDE, (ctx, id: string) => { guard(ctx, id); manager.hide(id) })
   server.handle(RPC_CHANNELS.canvasPane.DESTROY, async (ctx, id: string) => { const original = guard(ctx, id); const session = await deps.sessionManager?.getSession(id); if (guard(ctx, id) !== original) return false; return manager.requestDestroy(id, Boolean(session?.isProcessing)) })
   server.handle(RPC_CHANNELS.canvasPane.DETACH_TO_POPUP, (ctx, id: string, app: CanvasPaneApp) => { guard(ctx, id); manager.detachToPopup(id, app, ctx.workspaceId) })

@@ -127,7 +127,7 @@ function NativeCanvasSurface({ sessionId, app }: { sessionId: string; app: Canva
       void window.electronAPI.canvasPane.unembed(sessionId).catch(() => {})
     }
   }, [sessionId, app.appId, app.indexPath, attempt])
-  return <div ref={ref} data-testid="native-canvas-surface" className="h-full w-full min-h-0">{(failed || presentation?.loadFailed) && <div role="alert" className="p-4 text-xs text-muted-foreground"><p>{t('genui.app.loadError')}</p><button type="button" onClick={() => { setFailed(false); setAttempt(n => n + 1) }} className="mt-2 rounded border px-2 py-1">{t('common.retry')}</button></div>}</div>
+  return <div ref={ref} data-testid="native-canvas-surface" data-native-surface="true" className="h-full w-full min-h-0">{(failed || presentation?.loadFailed) && <div role="alert" className="p-4 text-xs text-muted-foreground"><p>{t('genui.app.loadError')}</p><button type="button" onClick={() => { setFailed(false); setAttempt(n => n + 1) }} className="mt-2 rounded border px-2 py-1">{t('common.retry')}</button></div>}</div>
 }
 
 function CanvasGuestCard({ sessionId, app, onPopOut, headerActions }: {

@@ -192,3 +192,58 @@ describe('persistent canvas carrier ownership and recovery', async () => {
     second.manager.destroyAll()
   })
 })
+
+describe('POO-198 canvas embed occlusion (sidebar view yields to window DOM)', () => {
+  it('occluding unmounts the view from the sidebar; clearing remounts it at its last bounds', async () => {
+    const { host, manager, entry } = await setup()
+    const view = entry().view
+    expect(host.views).toContain(view)
+
+    manager.setEmbedOcclusion(host as any, true)
+    expect(host.views).not.toContain(view)
+    expect(entry().embedOccluded).toBe(true)
+
+    manager.setEmbedOcclusion(host as any, false)
+    expect(host.views).toContain(view)
+    expect(entry().embedOccluded).toBe(false)
+    expect(view.bounds).toEqual(bounds)
+    manager.destroyAll()
+  })
+
+  it('bounds updated while occluded win on restore, and a popped-out canvas is untouched', async () => {
+    const { host, manager, entry } = await setup()
+    manager.setEmbedOcclusion(host as any, true)
+    await manager.embed('sess-a', appInfo, host as any, 'ws-a', { x: 20, y: 0, width: 380, height: 600 })
+    expect(host.views).not.toContain(entry().view)
+
+    manager.setEmbedOcclusion(host as any, false)
+    expect(entry().view.bounds).toEqual({ x: 20, y: 0, width: 380, height: 600 })
+    manager.destroyAll()
+
+    const popped = await setup()
+    popped.manager.detachToPopup('sess-a')
+    const popup = popped.entry().popup
+    popup.views.length = 0
+    popped.manager.setEmbedOcclusion(popped.host as any, true)
+    expect(popup.views).toEqual([])
+    expect(popped.entry().embedOccluded).toBe(false)
+    popped.manager.destroyAll()
+  })
+
+  it('a canvas the sidebar let go (unembed) stays gone after an occlusion clear; a canvas opened under an overlay waits it out', async () => {
+    const { host, manager, entry } = await setup()
+    manager.unembed('sess-a')
+    manager.setEmbedOcclusion(host as any, false)
+    expect(host.views).not.toContain(entry().view)
+    manager.destroyAll()
+
+    const under = await setup()
+    under.manager.unembed('sess-a')
+    under.manager.setEmbedOcclusion(under.host as any, true)
+    await under.manager.embed('sess-a', appInfo, under.host as any, 'ws-a', bounds)
+    expect(under.host.views).not.toContain(under.entry().view)
+    under.manager.setEmbedOcclusion(under.host as any, false)
+    expect(under.host.views).toContain(under.entry().view)
+    under.manager.destroyAll()
+  })
+})

@@ -761,6 +761,113 @@ describe('POO159 scroll lease deadlines', () => {
   })
 })
 
+describe('POO-198 embed occlusion (sidebar native views yield to window DOM)', () => {
+  it('occluding detaches the embedded view; clearing re-attaches it at the last reported bounds', () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('occlusion-roundtrip', { show: false })
+    const host = createMockWindow()
+    manager.embedInstance(id, host as any)
+    manager.setEmbedBounds(id, { x: 900, y: 60, width: 420, height: 700 })
+    const instance = (manager as any).instances.get(id)
+    const view = instance.pageView
+    host.removeBrowserView.mockClear()
+
+    manager.setEmbedOcclusion(host as any, true)
+    expect(host.removeBrowserView).toHaveBeenCalledWith(view)
+    expect(instance.embeddedViewsAttached).toBe(false)
+    expect(instance.embedOccluded).toBe(true)
+
+    host.addBrowserView.mockClear()
+    manager.setEmbedOcclusion(host as any, false)
+    expect(host.addBrowserView).toHaveBeenCalledWith(view)
+    expect(instance.embeddedViewsAttached).toBe(true)
+    expect(instance.embedOccluded).toBe(false)
+    // The view comes back exactly where the sidebar had it.
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 900, y: 60, width: 420, height: 700 })
+    manager.destroyAll()
+  })
+
+  it('a view the sidebar let go (unembed) is never resurrected by a late occlusion clear', () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('occlusion-stale-clear', { show: false })
+    const host = createMockWindow()
+    manager.embedInstance(id, host as any)
+    const instance = (manager as any).instances.get(id)
+    manager.unembedInstance(id)
+    host.addBrowserView.mockClear()
+
+    manager.setEmbedOcclusion(host as any, false)
+
+    expect(host.addBrowserView).not.toHaveBeenCalled()
+    expect(instance.embeddedViewsAttached).toBe(false)
+    manager.destroyAll()
+  })
+
+  it('bounds reported while occluded are recorded but stay detached until the DOM clears', () => {
+    const manager = new BrowserPaneManager()
+    const id = manager.createInstance('occlusion-bounds-race', { show: false })
+    const host = createMockWindow()
+    manager.embedInstance(id, host as any)
+    manager.setEmbedOcclusion(host as any, true)
+    const instance = (manager as any).instances.get(id)
+    const view = instance.pageView
+    host.addBrowserView.mockClear()
+    view.setBounds.mockClear()
+
+    // The sidebar container remounts (tab switch) underneath the overlay.
+    manager.setEmbedBounds(id, { x: 800, y: 0, width: 300, height: 500 })
+    expect(host.addBrowserView).not.toHaveBeenCalled()
+    expect(instance.embeddedViewsAttached).toBe(false)
+
+    manager.setEmbedOcclusion(host as any, false)
+    expect(host.addBrowserView).toHaveBeenCalledWith(view)
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 800, y: 0, width: 300, height: 500 })
+    manager.destroyAll()
+  })
+
+  it('an embed landing while the window is occluded waits the overlay out', () => {
+    const manager = new BrowserPaneManager()
+    const host = createMockWindow()
+    manager.setEmbedOcclusion(host as any, true)
+
+    const id = manager.createInstance('occlusion-late-embed', { show: false })
+    manager.embedInstance(id, host as any, { x: 900, y: 60, width: 420, height: 700 })
+    const instance = (manager as any).instances.get(id)
+
+    expect(instance.embeddedViewsAttached).toBe(false)
+    expect(instance.embedOccluded).toBe(true)
+    expect(instance.lastEmbedBounds).toEqual({ x: 900, y: 60, width: 420, height: 700 })
+
+    host.addBrowserView.mockClear()
+    manager.setEmbedOcclusion(host as any, false)
+    expect(host.addBrowserView).toHaveBeenCalledWith(instance.pageView)
+    expect(instance.embeddedViewsAttached).toBe(true)
+    manager.destroyAll()
+  })
+
+  it('occlusion is scoped to its host window and never touches popups or other windows', () => {
+    const manager = new BrowserPaneManager()
+    const hostA = createMockWindow()
+    const hostB = createMockWindow()
+    const embedded = manager.createInstance('occlusion-scope-embedded', { show: false })
+    manager.embedInstance(embedded, hostA as any)
+    const poppedOut = manager.createInstance('occlusion-scope-popup', { show: false })
+    ;(manager as any).instances.get(poppedOut).toolbarReady = true
+    manager.detachToPopup(poppedOut)
+    const popupWindow = createdWindows.at(-1)
+    popupWindow.addBrowserView.mockClear()
+    hostB.removeBrowserView.mockClear()
+
+    manager.setEmbedOcclusion(hostB as any, true)
+
+    expect((manager as any).instances.get(embedded).embeddedViewsAttached).toBe(true)
+    expect((manager as any).instances.get(poppedOut).hostMode).toBe('popup')
+    expect(popupWindow.removeBrowserView).not.toHaveBeenCalled()
+    expect(hostB.removeBrowserView).not.toHaveBeenCalled()
+    manager.destroyAll()
+  })
+})
+
 describe('POO159 pending snapshot geometry', () => {
   it('applies the destination bounds when the capture deadline ends an unresponsive snapshot', async () => {
     const manager = new BrowserPaneManager()
