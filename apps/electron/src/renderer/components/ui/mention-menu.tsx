@@ -135,7 +135,10 @@ function getMatchScore(text: string, filter: string): number {
   return 0
 }
 
-function filterSections(sections: MentionSection[], filter: string): MentionSection[] {
+/** Filter + rank sections by the mention query. Exported for the POO-196
+ * unified @ popover, which renders the same skill/source rows in its own
+ * grouped surface and must match identically. */
+export function filterSections(sections: MentionSection[], filter: string): MentionSection[] {
   if (!filter) return sections
   const lowerFilter = filter.trimEnd().toLowerCase()
   if (!lowerFilter) return sections

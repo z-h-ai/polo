@@ -350,6 +350,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   ), [isProjectSession, activeWorkspaceId, sessionProductSpaceId])
   const showProjectTabs = isProjectSession && projectScope !== null
   const projectPaneVisible = showProjectTabs && projectTab !== 'messages'
+  // X6: both project panes stay MOUNTED (hidden) across tab flips, so a
+  // 消息 round-trip no longer discards scroll position, in-flight previews or
+  // an open upload dialog. The key folds the workspace + product space in, so
+  // an account or space switch remounts them and their state can never leak
+  // across scopes. Pin mutations tick a counter the files tab watches to
+  // re-sync its pinned rows (the dead `onChanged` contract, now wired).
+  const [pinsVersion, setPinsVersion] = React.useState(0)
+  const handlePinsChanged = React.useCallback(() => setPinsVersion((version) => version + 1), [])
+  const projectPaneKey = `${activeWorkspaceId ?? ''}::${sessionProductSpaceId ?? ''}`
 
   // Journey #8: a failed local send leaves a session-scoped prompt (not a
   // message). The explicit action restores the preserved draft into the
@@ -887,12 +896,26 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 compactMode={!!isCompactMode}
               />
             </div>
-            {projectPaneVisible && projectScope && (
-              <div className="flex-1 flex flex-col min-h-0">
-                {projectTab === 'files'
-                  ? <ProjectFileLibrary scope={projectScope} currentUserId={productSpace?.accountId ?? null} />
-                  : <ProjectPinPane scope={projectScope} />}
-              </div>
+            {showProjectTabs && projectScope && (
+              <>
+                <div className={projectPaneVisible && projectTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                  <ProjectFileLibrary
+                    key={projectPaneKey}
+                    scope={projectScope}
+                    currentUserId={productSpace?.accountId ?? null}
+                    active={projectPaneVisible && projectTab === 'files'}
+                    pinMutations={pinsVersion}
+                  />
+                </div>
+                <div className={projectPaneVisible && projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                  <ProjectPinPane
+                    key={projectPaneKey}
+                    scope={projectScope}
+                    active={projectPaneVisible && projectTab !== 'files'}
+                    onChanged={handlePinsChanged}
+                  />
+                </div>
+              </>
             )}
           </div>
           <RenameDialog
@@ -980,12 +1003,26 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             compactMode={!!isCompactMode}
           />
         </div>
-        {projectPaneVisible && projectScope && (
-          <div className="flex-1 flex flex-col min-h-0">
-            {projectTab === 'files'
-              ? <ProjectFileLibrary scope={projectScope} currentUserId={productSpace?.accountId ?? null} />
-              : <ProjectPinPane scope={projectScope} />}
-          </div>
+        {showProjectTabs && projectScope && (
+          <>
+            <div className={projectPaneVisible && projectTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+              <ProjectFileLibrary
+                key={projectPaneKey}
+                scope={projectScope}
+                currentUserId={productSpace?.accountId ?? null}
+                active={projectPaneVisible && projectTab === 'files'}
+                pinMutations={pinsVersion}
+              />
+            </div>
+            <div className={projectPaneVisible && projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+              <ProjectPinPane
+                key={projectPaneKey}
+                scope={projectScope}
+                active={projectPaneVisible && projectTab !== 'files'}
+                onChanged={handlePinsChanged}
+              />
+            </div>
+          </>
         )}
       </div>
       <RenameDialog

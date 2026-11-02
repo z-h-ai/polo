@@ -2,95 +2,150 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import type { PcAssetDto, PcCapabilitiesResponse } from '@polo-ai/shared/protocol'
+import { PC_LIST_LIMIT_DEFAULT } from '@polo-ai/shared/protocol'
+import { Button } from '@/components/ui/button'
 import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
 import { AssetRow } from './AssetRow'
-import { projectContextErrorKey, type PcScope } from './useProjectAssets'
+import { ProjectCapabilityNotice } from './ProjectCapabilityNotice'
+import {
+  capabilityStateOf,
+  isPcCapabilityBlocked,
+  projectContextErrorKey,
+  type PcCapabilityState,
+  type PcScope,
+} from './useProjectAssets'
 
 /**
- * The Pin tab (POO-196, Spec v2): pinned project files plus the
- * confirmed-conclusion cards, newest pin first. Unpin (and, for managers,
- * un-confirm) returns the row to the plain file library — nothing here is
- * deleted, the tab is a pure projection of two wire filters.
+ * The Pin tab (POO-196, adjudication D5): ONLY the pinned project files,
+ * newest pin first. Confirmed conclusions are deliberately NOT a second card
+ * source here — they stay reachable where they belong (the files tab's
+ * `confirmed` tag chip and the project summary), so "pin" keeps one meaning.
+ * Unpin returns the row to the plain file library — nothing is deleted, the
+ * tab is a pure projection of one wire filter.
+ *
+ * X23 rides along: rows carry their confirmed state inline (AssetRow badge),
+ * so the floating corner badge is gone.
  */
-
-interface PinEntry {
-  asset: PcAssetDto
-  pinned: boolean
-  confirmed: boolean
-}
 
 export interface ProjectPinPaneProps {
   scope: PcScope
+  /**
+   * False pauses refreshes while the tab is hidden; becoming active re-syncs
+   * (which is also how a Files-tab pin shows up without a manual refresh).
+   */
+  active?: boolean
   /** Called after any local mutation so the files tab can re-sync on return. */
   onChanged?: () => void
 }
 
-export function ProjectPinPane({ scope, onChanged }: ProjectPinPaneProps) {
+export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPaneProps) {
   const { t } = useTranslation()
   const [capabilities, setCapabilities] = React.useState<PcCapabilitiesResponse | null>(null)
-  const [entries, setEntries] = React.useState<PinEntry[]>([])
+  const [capabilityState, setCapabilityState] = React.useState<PcCapabilityState>('idle')
+  const [entries, setEntries] = React.useState<PcAssetDto[]>([])
   const [loading, setLoading] = React.useState(true)
   const [errorKey, setErrorKey] = React.useState<string | null>(null)
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = React.useState(false)
+  const [loadMoreErrorKey, setLoadMoreErrorKey] = React.useState<string | null>(null)
   const [busyAssetId, setBusyAssetId] = React.useState<string | null>(null)
 
   const scopeRef = React.useRef(scope)
   scopeRef.current = scope
+  const activeRef = React.useRef(active)
+  activeRef.current = active
+  // Request token: a stale response (scope switch / reactivation race) is
+  // dropped instead of overwriting the newer view.
+  const seqRef = React.useRef(0)
 
-  const refresh = React.useCallback(async () => {
-    setLoading(true)
-    setErrorKey(null)
-    try {
-      const activeScope = scopeRef.current
-      const [caps, pinned, confirmed] = await Promise.all([
-        window.electronAPI.pcListCapabilities({
-          workspaceId: activeScope.workspaceId,
-          productSpaceId: activeScope.productSpaceId,
-        }),
-        window.electronAPI.pcListAssets({
-          workspaceId: activeScope.workspaceId,
-          productSpaceId: activeScope.productSpaceId,
-          pinned: 'true',
-        }),
-        window.electronAPI.pcListAssets({
-          workspaceId: activeScope.workspaceId,
-          productSpaceId: activeScope.productSpaceId,
-          tag: 'confirmed',
-        }),
-      ])
-      // Merge by id: an asset that is both pinned and confirmed shows once,
-      // carrying both states.
-      const merged = new Map<string, PinEntry>()
-      for (const asset of pinned.assets) {
-        merged.set(asset.id, { asset, pinned: true, confirmed: asset.current.confirmedAt !== null })
-      }
-      for (const asset of confirmed.assets) {
-        const existing = merged.get(asset.id)
-        if (existing) {
-          existing.confirmed = true
-        } else {
-          merged.set(asset.id, { asset, pinned: false, confirmed: true })
-        }
-      }
-      const list = [...merged.values()]
-      // Pin time descending first; confirmed-only cards follow by confirm time.
-      list.sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-        const aTime = Date.parse(a.pinned ? (a.asset.pinnedAt ?? '') : (a.asset.current.confirmedAt ?? ''))
-        const bTime = Date.parse(b.pinned ? (b.asset.pinnedAt ?? '') : (b.asset.current.confirmedAt ?? ''))
-        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime)
-      })
-      setCapabilities(caps)
-      setEntries(list)
-    } catch (error) {
-      setErrorKey(projectContextErrorKey(error))
-    } finally {
-      setLoading(false)
-    }
+  const fetchPage = React.useCallback(async (cursor?: string) => {
+    const currentScope = scopeRef.current
+    if (!currentScope) throw new Error('project context scope is unavailable')
+    return window.electronAPI.pcListAssets({
+      workspaceId: currentScope.workspaceId,
+      productSpaceId: currentScope.productSpaceId,
+      view: 'active',
+      pinned: 'true',
+      limit: PC_LIST_LIMIT_DEFAULT,
+      cursor,
+    })
   }, [])
 
+  const loadFirstPage = React.useCallback(async () => {
+    const token = seqRef.current
+    setLoading(true)
+    setErrorKey(null)
+    setLoadMoreErrorKey(null)
+    try {
+      const page = await fetchPage()
+      if (token !== seqRef.current || !activeRef.current) return
+      setEntries(page.assets)
+      setNextCursor(page.nextCursor ?? null)
+    } catch (error) {
+      if (token !== seqRef.current || !activeRef.current) return
+      setErrorKey(projectContextErrorKey(error))
+    } finally {
+      if (token === seqRef.current) setLoading(false)
+    }
+  }, [fetchPage])
+
+  const loadMore = React.useCallback(async () => {
+    if (!nextCursor || loadingMore) return
+    const token = seqRef.current
+    setLoadingMore(true)
+    setLoadMoreErrorKey(null)
+    try {
+      const page = await fetchPage(nextCursor)
+      if (token !== seqRef.current || !activeRef.current) return
+      // Dedup by id: a row re-pinned between pages must not appear twice.
+      setEntries((prev) => {
+        const seen = new Set(prev.map((asset) => asset.id))
+        return [...prev, ...page.assets.filter((asset) => !seen.has(asset.id))]
+      })
+      setNextCursor(page.nextCursor ?? null)
+    } catch (error) {
+      // X8: the cursor survives a failed page, so the retry re-fires from the
+      // rows the user already has.
+      if (token !== seqRef.current || !activeRef.current) return
+      setLoadMoreErrorKey(projectContextErrorKey(error))
+    } finally {
+      if (token === seqRef.current) setLoadingMore(false)
+    }
+  }, [fetchPage, nextCursor, loadingMore])
+
+  const refresh = React.useCallback(async () => {
+    // Capability discovery settles FIRST and on its own: a list failure can
+    // never erase a feature-disabled state, and a disabled feature never
+    // issues a doomed list call (consensus S-08+E-3).
+    const token = ++seqRef.current
+    let caps: PcCapabilitiesResponse | null = null
+    let capsError: unknown = null
+    try {
+      const currentScope = scopeRef.current
+      caps = await window.electronAPI.pcListCapabilities({
+        workspaceId: currentScope.workspaceId,
+        productSpaceId: currentScope.productSpaceId,
+      })
+    } catch (error) {
+      capsError = error
+    }
+    if (token !== seqRef.current || !activeRef.current) return
+    setCapabilities(caps)
+    const state = capabilityStateOf(caps, capsError)
+    setCapabilityState(state)
+    if (isPcCapabilityBlocked(state)) {
+      setEntries([])
+      setNextCursor(null)
+      setLoading(false)
+      return
+    }
+    await loadFirstPage()
+  }, [loadFirstPage])
+
   React.useEffect(() => {
+    if (!active) return
     void refresh()
-  }, [refresh, scope.workspaceId, scope.productSpaceId])
+  }, [active, refresh, scope.workspaceId, scope.productSpaceId])
 
   const withBusy = async (asset: PcAssetDto, write: () => Promise<unknown>) => {
     setBusyAssetId(asset.id)
@@ -130,12 +185,32 @@ export function ProjectPinPane({ scope, onChanged }: ProjectPinPaneProps) {
     }))
   }
 
+  if (isPcCapabilityBlocked(capabilityState)) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col px-3 py-2" data-testid="pc-pin-blocked">
+        <ProjectCapabilityNotice state={capabilityState} />
+      </div>
+    )
+  }
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" data-testid="pc-pin-pane">
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2" data-testid="pc-pin-pane">
       {errorKey && (
-        <p className="rounded-[10px] border border-destructive/25 bg-destructive/10 px-3 py-2 text-[12px] text-destructive" role="alert" data-testid="pc-pin-error">
-          {t(errorKey)}
-        </p>
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-[10px] border border-destructive/25 bg-destructive/10 px-3 py-2 text-[12px] text-destructive"
+          role="alert"
+          data-testid="pc-pin-error"
+        >
+          <span className="flex-1">{t(errorKey)}</span>
+          <Button
+            variant="ghost"
+            className="h-6 px-2 text-[12px] text-destructive"
+            onClick={() => void refresh()}
+            data-testid="pc-pin-error-retry"
+          >
+            {t('projectContext.library.retry')}
+          </Button>
+        </div>
       )}
 
       {loading && entries.length === 0 && (
@@ -152,22 +227,33 @@ export function ProjectPinPane({ scope, onChanged }: ProjectPinPaneProps) {
         </div>
       )}
 
-      {entries.map(({ asset, pinned, confirmed }) => (
-        <div key={asset.id} className="relative">
-          {!pinned && confirmed && (
-            <span className="absolute -top-1 right-2 z-10 rounded-full bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] px-2 py-px text-[10px] font-medium text-accent">
-              {t('projectContext.confirmed.badge')}
-            </span>
-          )}
-          <AssetRow
-            asset={asset}
-            busy={busyAssetId === asset.id}
-            canManage={capabilities?.canManage ?? false}
-            onSetPinned={pinned ? handleUnpin : undefined}
-            onSetConfirmed={confirmed && capabilities?.canManage ? handleSetConfirmed : undefined}
-          />
-        </div>
+      {entries.map((asset) => (
+        <AssetRow
+          key={asset.id}
+          asset={asset}
+          busy={busyAssetId === asset.id}
+          canManage={capabilities?.canManage ?? false}
+          onSetPinned={handleUnpin}
+          onSetConfirmed={capabilities?.canManage ? handleSetConfirmed : undefined}
+        />
       ))}
+
+      {loadMoreErrorKey && (
+        <p className="rounded-[10px] border border-destructive/25 bg-destructive/10 px-3 py-2 text-[12px] text-destructive" role="alert" data-testid="pc-pin-load-error">
+          {t(loadMoreErrorKey)}
+        </p>
+      )}
+      {nextCursor && (
+        <Button
+          variant="ghost"
+          className="h-8 text-[12px] text-muted-foreground"
+          onClick={() => void loadMore()}
+          disabled={loadingMore}
+          data-testid="pc-pin-load-more"
+        >
+          {loadingMore ? t('projectContext.library.loadingMore') : t('projectContext.library.loadMore')}
+        </Button>
+      )}
     </div>
   )
 }

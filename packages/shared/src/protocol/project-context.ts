@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   PC_LIST_LIMIT_MAX,
+  PC_LIST_PROCESSING_FILTERS,
   PC_QUERY_MAX_CHARS,
   PC_TAG_MAX_CHARS,
   PcRestoreInputSchema,
@@ -38,11 +39,19 @@ import {
 export * from '../admin/project-context-contract'
 
 /**
- * The LOCAL_ONLY workspace gate. Every project-context RPC names the local
+ * pc_* codes this client raises at its OWN boundary (never returned by the
+ * admin wire, so they must not live in the generated PC_ERROR_CODES): the
+ * workspace scope check that refuses to run project files outside an
+ * enterprise project. Registered in the transport whitelist through
+ * `./types.ts` so the coded-error bridge can carry them to the renderer.
+ */
+export const PC_LOCAL_ERROR_CODES = ['pc_unavailable_in_personal'] as const
+export type PcLocalErrorCode = (typeof PC_LOCAL_ERROR_CODES)[number]
+
+/**
+ * The workspace gate message shape. Every project-context RPC names the local
  * workspace it runs against (same non-blank bound as the KB scope).
  */
-export const PC_PRODUCT_SPACE_REQUIRED = 'pc_product_space_context_required'
-
 const nonBlank = (maxLength: number) => z.string()
   .max(maxLength)
   .refine(value => value.trim().length > 0, 'Must be a non-blank string')
@@ -78,6 +87,9 @@ export const PcListAssetsInputSchema = PcIpcAssetScopeSchema.extend({
   view: z.enum(['active', 'trash']).optional(),
   tag: z.string().max(PC_TAG_MAX_CHARS).optional(),
   pinned: z.enum(['true', 'false']).optional(),
+  /** Current-version content state filter, pushed through to the admin list
+   * endpoint so filtering happens BEFORE pagination (consensus X10). */
+  processing: z.enum(PC_LIST_PROCESSING_FILTERS).optional(),
   q: z.string().max(PC_QUERY_MAX_CHARS).optional(),
   limit: z.number().int().min(1).max(PC_LIST_LIMIT_MAX).optional(),
   cursor: z.string().max(256).optional(),

@@ -217,7 +217,7 @@ describe('AssetMentionPopover (POO-196)', () => {
     expect(await screen.findByTestId('pc-mention-degraded')).toBeTruthy()
   })
 
-  it('a search failure never blocks the composer: the popover shows its empty face', async () => {
+  it('a search failure shows its own error face (never the empty face)', async () => {
     const calls: string[] = []
     const applied: Array<{ value: string; cursor: number }> = []
     const picks: AssetMentionHit[] = []
@@ -237,7 +237,8 @@ describe('AssetMentionPopover (POO-196)', () => {
     ))
     type('@boom')
     await act(async () => { await sleep(340) })
-    expect(await screen.findByTestId('pc-mention-empty')).toBeTruthy()
+    expect(await screen.findByTestId('pc-mention-error')).toBeTruthy()
+    expect(screen.queryByTestId('pc-mention-empty')).toBeNull()
     expect(picks).toHaveLength(0)
   })
 })

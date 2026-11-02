@@ -26,6 +26,7 @@ import {
 import {
   InlineMentionMenu,
   useInlineMention,
+  filterSections,
   type MentionItem,
   type MentionItemType,
 } from '@/components/ui/mention-menu'
@@ -65,7 +66,12 @@ import type { WebElementReference } from '@polo-ai/core/types'
 import type { KbCollection, PcSearchResponse } from '@polo-ai/shared/protocol'
 import type { PermissionMode } from '@polo-ai/shared/agent/modes'
 import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
-import { AssetMentionPopover, useAssetMention, type AssetMentionHit } from '@/components/project-context/AssetMentionPopover'
+import {
+  AssetMentionPopover,
+  useAssetMention,
+  type AssetMentionExtraSection,
+  type AssetMentionHit,
+} from '@/components/project-context/AssetMentionPopover'
 import { ProjectAssetDraftChips } from '@/components/project-context/ProjectAssetChip'
 import type { ProjectAssetMentionDraft } from '@/atoms/project-context'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
@@ -1111,6 +1117,49 @@ export function FreeFormInput({
     }, 0)
   }, [syncToParent])
 
+  // POO-196 consensus S-11: the skill/source groups ride INSIDE the project
+  // asset popover as extra sections, so the single-token skill/source mention
+  // that predates POO-196 stays reachable from the same `@` surface. The file
+  // section is excluded — project sessions already have the asset group — and
+  // filtered rows keep the generic menu's ranking so both surfaces agree.
+  const assetMentionCloseRef = React.useRef<() => void>(() => {})
+  // The generic select handler is declared further down (it needs the whole
+  // inlineMention hook); the extra rows call it through this holder.
+  const inlineMentionSelectRef = React.useRef<(item: MentionItem) => void>(() => {})
+  const assetMentionExtraSections = React.useMemo<AssetMentionExtraSection[]>(() => {
+    const assetSections = filterSections(
+      inlineMention.sections.filter((section) => section.id !== 'files'),
+      inlineMention.filter,
+    )
+    const byType = new Map<MentionItemType, MentionItem[]>()
+    for (const section of assetSections) {
+      for (const item of section.items) {
+        if (item.type !== 'skill' && item.type !== 'source') continue
+        const bucket = byType.get(item.type)
+        if (bucket) bucket.push(item)
+        else byType.set(item.type, [item])
+      }
+    }
+    return (['skill', 'source'] as const)
+      .filter((type) => (byType.get(type)?.length ?? 0) > 0)
+      .map((type) => ({
+        id: type === 'skill' ? 'skills' : 'sources',
+        label: t(type === 'skill' ? 'projectContext.mention.groupSkills' : 'projectContext.mention.groupSources'),
+        items: (byType.get(type) ?? []).map((item) => ({
+          id: `${type}:${item.id}`,
+          label: item.label,
+          description: item.description ?? null,
+          pick: () => {
+            // Close the asset popover first: the mention insertion replaces the
+            // `@query` token, which no longer matches the asset trigger, but the
+            // popover state is only told about changes through its own handler.
+            assetMentionCloseRef.current()
+            inlineMentionSelectRef.current(item)
+          },
+        })),
+      }))
+  }, [inlineMention.sections, inlineMention.filter, t])
+
   // POO-196: the @ project-asset mention owns the plain `@` trigger in project
   // sessions. The hook stays mounted everywhere but inert (enabled=false)
   // unless the parent wired projectAssetMention.
@@ -1120,7 +1169,9 @@ export function FreeFormInput({
     search: projectAssetMention?.search ?? (async () => ({ degraded: false, hits: [] })),
     onPick: handleProjectAssetPick,
     applyInputValue: handleProjectAssetPickApply,
+    extraSections: assetMentionExtraSections,
   })
+  assetMentionCloseRef.current = assetMention.close
 
   // Inline label menu hook (for #labels)
   const handleLabelSelect = React.useCallback((labelId: string) => {
@@ -1593,13 +1644,14 @@ export function FreeFormInput({
     // Update inline slash command state
     inlineSlash.handleInputChange(nextValue, cursorPosition)
 
-    // POO-196: the project-asset mention owns the plain `@` trigger in project
-    // sessions — while its trigger is active the generic skill/source menu
-    // stays closed, and the two never float at once.
+    // POO-196 consensus S-11: the project-asset mention and the generic
+    // skill/source mention now share ONE surface, so BOTH hooks track every
+    // input change. While the asset trigger is active the generic menu is
+    // suppressed at render time (below) instead of being force-closed here —
+    // force-closing threw away its live sections and made the single-token
+    // skill/source mention unreachable.
     const assetMentionActive = assetMention.handleInputChanged(nextValue, cursorPosition)
-    if (assetMentionActive) {
-      inlineMention.close()
-    } else {
+    if (!assetMentionActive) {
       // Update inline mention state (for @mentions - skills, sources, folders)
       inlineMention.handleInputChange(nextValue, cursorPosition)
     }
@@ -1660,6 +1712,7 @@ export function FreeFormInput({
       richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
     }, 0)
   }, [inlineMention, syncToParent])
+  inlineMentionSelectRef.current = handleInlineMentionSelect
 
   // Handle inline label selection (removes the #label text from input)
   const handleInlineLabelSelect = React.useCallback((labelId: string) => {
@@ -1748,9 +1801,11 @@ export function FreeFormInput({
           position={inlineSlash.position}
         />
 
-        {/* Inline Mention Autocomplete (skills, sources, files) */}
+        {/* Inline Mention Autocomplete (skills, sources, files) — suppressed
+            while the POO-196 asset popover owns the same `@` caret: the two
+            never float at once (consensus S-11). */}
         <InlineMentionMenu
-          open={inlineMention.isOpen}
+          open={inlineMention.isOpen && !assetMention.isOpen}
           onOpenChange={(open) => !open && inlineMention.close()}
           sections={inlineMention.sections}
           onSelect={handleInlineMentionSelect}
@@ -1765,6 +1820,7 @@ export function FreeFormInput({
         <AssetMentionPopover
           state={assetMention}
           onChoose={(hit) => assetMention.choose(hit)}
+          onChooseExtra={(item) => item.pick()}
         />
 
         {/* Inline Label & State Autocomplete (#labels / #states) */}

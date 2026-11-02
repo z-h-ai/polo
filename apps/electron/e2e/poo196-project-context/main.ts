@@ -1,0 +1,2278 @@
+/**
+ * poo196-project-context experience-review orchestrator.
+ *
+ * Real Electron + production renderer modules (ChatPage + the whole
+ * project-context surface). Fixture boundaries: window manager / IPC /
+ * login state (see README). The fixture store below is PROGRAMMABLE: the
+ * orchestrator reprograms assets, capabilities, latency, fault codes and the
+ * file-dialog queue per scenario. Every pc_* call is logged with latency and
+ * outcome; console noise (error/warn/i18next) is captured from the very first
+ * webContents. Evidence: screenshots (1440x900) + capture receipts +
+ * runtime.json under $POO196_EVIDENCE_DIR.
+ */
+import { app, BrowserWindow, ipcMain } from 'electron'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { join } from 'node:path'
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { encodeRpcErrorCodeInMessage, readRpcErrorCode } from '../../src/shared/rpc-error-bridge'
+import type { PcAssetDto, PcCapabilitiesResponse } from '@polo-ai/shared/protocol'
+import {
+  LONG_NAME_ASSET_ID,
+  CURRENT_USER_ID,
+  SESSION_PERSONAL,
+  SESSION_PROJECT,
+  initialAssets,
+  initialCapabilities,
+  initialSearchIndex,
+  searchAssets,
+  sessionsById,
+} from './fixture-data'
+
+const BUILD = process.env.POO196_BUILD_DIR!
+const OUT = process.env.POO196_EVIDENCE_DIR!
+const SOURCE_REF = process.env.POO196_SOURCE_REF ?? 'unknown'
+
+interface PcCallLog {
+  method: string
+  at: string
+  ms: number
+  outcome: 'ok' | 'fault' | 'error'
+  summary: string
+}
+
+const result: {
+  sourceRef: string
+  electronVersion: string
+  startedAt: string
+  endedAt?: string
+  viewport: { width: number; height: number }
+  driverChannel: string
+  scenarios: { name: string; ok: boolean; detail?: unknown }[]
+  checks: { name: string; ok: boolean; detail?: unknown }[]
+  consoleNoise: { errors: string[]; warnings: string[]; i18nWarnings: string[] }
+  unknownApiCalls: string[]
+  pcCalls: PcCallLog[]
+  previewHttpRequests: string[]
+  /** S-10 证据：预览守卫日志与被 CSP 拒绝的越界尝试（预期存在，不算噪音）。 */
+  previewGuardEvents: string[]
+  previewCspViolations: string[]
+  captures: unknown[]
+  error?: string
+} = {
+  sourceRef: SOURCE_REF,
+  electronVersion: process.versions.electron,
+  startedAt: new Date().toISOString(),
+  viewport: { width: 1440, height: 900 },
+  driverChannel: 'BrowserWindow.executeJavaScript + webContents.sendInputEvent + production craft:submit-input event',
+  scenarios: [],
+  checks: [],
+  consoleNoise: { errors: [], warnings: [], i18nWarnings: [] },
+  unknownApiCalls: [],
+  pcCalls: [],
+  previewHttpRequests: [],
+  previewGuardEvents: [],
+  previewCspViolations: [],
+  captures: [],
+}
+
+const steps: string[] = []
+const mark = (label: string) => { steps.push(label); if (steps.length > 80) steps.shift() }
+
+const check = (name: string, ok: boolean, detail?: unknown) => {
+  result.checks.push({ name, ok, detail })
+  if (!ok) console.error('FAIL', name, detail === undefined ? '' : JSON.stringify(detail)?.slice(0, 300))
+}
+
+/* ── programmable fixture store ─────────────────────────────────────────── */
+
+interface Fault { code: string; message?: string; once?: boolean }
+
+const fixture = {
+  assets: initialAssets(),
+  capabilities: initialCapabilities() as PcCapabilitiesResponse,
+  searchIndex: initialSearchIndex(initialAssets()),
+  searchDegraded: false,
+  latencyMs: 40,
+  faults: new Map<string, Fault>(),
+  onceFired: new Set<string>(),
+  fileDialogQueue: [] as string[][],
+  uploadProcessingState: 'processing' as PcAssetDto['current']['processing'],
+  nextAssetId: 100,
+  downloadDir: join(BUILD, 'fixture-downloads'),
+  previewContent: new Map<string, string>(),
+}
+
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+function resetFixtureAssets() {
+  fixture.assets = initialAssets()
+  fixture.searchIndex = initialSearchIndex(fixture.assets)
+  fixture.capabilities = initialCapabilities()
+  fixture.searchDegraded = false
+  fixture.faults.clear()
+  fixture.onceFired.clear()
+  fixture.fileDialogQueue = []
+  fixture.uploadProcessingState = 'processing'
+}
+
+const nowIso = () => new Date().toISOString()
+const in30d = () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+/**
+ * S-10 夹具正文：不可信 HTML 的一次完整越界尝试。`base` 是运行期 preview
+ * server 的地址（previewPort 只有起服后才知道，只能现填）。被试向量——远程
+ * fetch/XHR、外链 img/iframe、window.open、程序化点链接、表单自动提交。
+ * 注：iframe 自导航（location.href / meta refresh）没有 CSP 或脚本的拦截杠杆
+ * （Chromium 限制），不进断言集，作为已知边界记录在报告里。
+ */
+const hostilePreviewContent = (base: string): string => [
+  '<!doctype html><html><head>',
+  '<title>POO-196 hostile fixture</title>',
+  // 不可信页面最常见的逃逸尝试：自带一份放宽的 CSP，期望与注入策略取并集。
+  // 按规范浏览器对多策略取交集，这条必须无效。
+  `<meta http-equiv="Content-Security-Policy" content="default-src *; img-src *; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src *; frame-src *">`,
+  '</head><body>',
+  '<h1>POO-196 hostile preview</h1>',
+  `<img src="${base}/beacon/img" alt="beacon">`,
+  `<iframe src="${base}/beacon/iframe"></iframe>`,
+  `<a id="l" href="${base}/beacon/link" target="_blank">external link</a>`,
+  `<form id="f" action="${base}/beacon/form" method="GET"><button type="submit">go</button></form>`,
+  '<script>',
+  'function hit(url){ try { fetch(url).catch(function(){}) } catch (e) {} }',
+  `hit('${base}/beacon/fetch');`,
+  `try { var x = new XMLHttpRequest(); x.open('GET', '${base}/beacon/xhr', true); x.send(); } catch (e) {}`,
+  `try { window.open('${base}/beacon/popup'); } catch (e) {}`,
+  `try { document.getElementById('l').click(); } catch (e) {}`,
+  `try { document.getElementById('f').requestSubmit(); } catch (e) {}`,
+  '</script>',
+  '</body></html>',
+].join('')
+
+/** pcReadAsset 的兜底正文与预览链路同一份，保证任一读取路径都拿到夹具向量。 */
+const hostilePreviewBase = () => `http://127.0.0.1:${previewPort}`
+
+function codedError(code: string, message: string): Error {
+  // Production parity: the trusted side answers with a coded failure. ipc
+  // serialization drops the `code` property, so the code rides the MESSAGE
+  // (rpc-error-bridge marker); the fixture preload strips Electron's
+  // "Error invoking remote method…" prefix and re-carries it the same way
+  // build-api.ts codedErrors does, and readRpcErrorCode decodes it.
+  return new Error(encodeRpcErrorCodeInMessage(code, message))
+}
+
+const summarize = (input: unknown): string => {
+  try {
+    const text = JSON.stringify(input)
+    return text ? (text.length > 180 ? `${text.slice(0, 180)}…` : text) : ''
+  } catch {
+    return String(input)
+  }
+}
+
+async function handlePc(method: string, input: Record<string, unknown>): Promise<unknown> {
+  const started = Date.now()
+  const jitter = Math.floor(Math.random() * 12)
+  await delay(fixture.latencyMs + jitter)
+  const fault = fixture.faults.get(method)
+  const faultArmed = fault && (!fault.once || !fixture.onceFired.has(method))
+  if (fault && faultArmed) {
+    fixture.onceFired.add(method)
+    result.pcCalls.push({ method, at: nowIso(), ms: Date.now() - started, outcome: 'fault', summary: `${fault.code} ${summarize(input)}` })
+    const error = codedError(fault.code, fault.message ?? `fixture fault ${fault.code}`)
+    if (readRpcErrorCode(error) !== fault.code) {
+      console.error(`fixture: coded error self-check failed for ${fault.code}`)
+    }
+    throw error
+  }
+  try {
+    const output = computePc(method, input)
+    result.pcCalls.push({ method, at: nowIso(), ms: Date.now() - started, outcome: 'ok', summary: summarize(input) })
+    return output
+  } catch (error) {
+    result.pcCalls.push({ method, at: nowIso(), ms: Date.now() - started, outcome: 'error', summary: String(error) })
+    throw error
+  }
+}
+
+function listAssets(input: Record<string, unknown>) {
+  const view = (input.view as 'active' | 'trash') ?? 'active'
+  const q = typeof input.q === 'string' ? input.q.toLowerCase() : null
+  const tag = typeof input.tag === 'string' ? input.tag : null
+  const pinned = typeof input.pinned === 'string' ? input.pinned : null
+  const limit = typeof input.limit === 'number' ? input.limit : 50
+  const cursor = typeof input.cursor === 'string' ? Number.parseInt(Buffer.from(input.cursor, 'base64').toString('utf8'), 10) : 0
+
+  let pool = fixture.assets.filter((asset) => (view === 'trash' ? asset.status === 'trashed' : asset.status === 'active'))
+  if (q) pool = pool.filter((asset) => asset.name.toLowerCase().includes(q))
+  if (tag === 'confirmed') pool = pool.filter((asset) => asset.current.confirmedAt !== null)
+  else if (tag) pool = pool.filter((asset) => asset.tags.some((entry) => entry.id === tag))
+  if (pinned === 'true') pool = pool.filter((asset) => asset.pinned)
+  else if (pinned === 'false') pool = pool.filter((asset) => !asset.pinned)
+  pool = [...pool].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+
+  const page = pool.slice(cursor, cursor + limit)
+  const nextCursor = cursor + limit < pool.length
+    ? Buffer.from(String(cursor + limit)).toString('base64')
+    : undefined
+  return { assets: clone(page), nextCursor, canManage: fixture.capabilities.canManage }
+}
+
+function findAsset(input: Record<string, unknown>): PcAssetDto {
+  const asset = fixture.assets.find((candidate) => candidate.id === input.assetId)
+  if (!asset) throw codedError('pc_not_found', `asset ${String(input.assetId)} not found`)
+  return asset
+}
+
+function computePc(method: string, input: Record<string, unknown>): unknown {
+  // Contract parity: with the feature disabled the polo-admin control plane
+  // still answers the capabilities declaration (featureEnabled=false +
+  // disabledReason — that IS the disabled face), while every other pc call is
+  // rejected with pc_feature_disabled (the surface is closed). Without this
+  // exception the renderer can never observe a specific disabledReason.
+  if (!fixture.capabilities.featureEnabled && method !== 'pcListCapabilities') {
+    throw codedError('pc_feature_disabled', 'project file feature is disabled')
+  }
+  switch (method) {
+    case 'pcListCapabilities':
+      return clone(fixture.capabilities)
+    case 'pcGetSummary': {
+      const active = fixture.assets.filter((asset) => asset.status === 'active')
+      const confirmed = active.filter((asset) => asset.current.confirmedAt !== null)
+      const recent = [...active]
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+        .slice(0, 5)
+        .map((asset) => ({ assetId: asset.id, name: asset.name, version: asset.current.version, updatedAt: asset.updatedAt, tags: asset.tags }))
+      return {
+        generatedAt: nowIso(),
+        assetCount: active.length,
+        confirmedCount: confirmed.length,
+        overview: `Apollo 项目空间当前 ${active.length} 份共享文件，其中 ${confirmed.length} 份已确认结论；最近更新集中在迭代对齐材料。`,
+        recent: clone(recent),
+      }
+    }
+    case 'pcListAssets':
+      return listAssets(input)
+    case 'pcGetAsset':
+      return { asset: clone(findAsset(input)) }
+    case 'pcUpdateAsset': {
+      const asset = findAsset(input)
+      const body = input.input as { expectedRevision: number; name?: string; tags?: string[] }
+      if (body.expectedRevision !== asset.revision) throw codedError('pc_revision_conflict', 'revision moved')
+      if (body.name) asset.name = body.name
+      if (body.tags) {
+        asset.tags = body.tags.map((label) => {
+          const preset = asset.tags.find((tag) => tag.id === label)
+          return preset ?? { id: label, label, preset: false }
+        })
+      }
+      asset.revision += 1
+      asset.updatedAt = nowIso()
+      return { asset: clone(asset) }
+    }
+    case 'pcSetConfirmed': {
+      const asset = findAsset(input)
+      const body = input.input as { expectedVersion: number; confirmed: boolean }
+      if (body.expectedVersion !== asset.current.version) throw codedError('pc_revision_conflict', 'version moved')
+      asset.current.confirmedAt = body.confirmed ? nowIso() : null
+      asset.current.confirmedByUserId = body.confirmed ? CURRENT_USER_ID : null
+      asset.revision += 1
+      asset.updatedAt = nowIso()
+      return { asset: clone(asset) }
+    }
+    case 'pcSetPinned': {
+      const asset = findAsset(input)
+      const body = input.input as { pinned: boolean }
+      asset.pinned = body.pinned
+      asset.pinnedAt = body.pinned ? nowIso() : null
+      asset.revision += 1
+      asset.updatedAt = nowIso()
+      return { asset: clone(asset) }
+    }
+    case 'pcTrashAsset': {
+      const asset = findAsset(input)
+      if (typeof input.expectedRevision === 'number' && input.expectedRevision !== asset.revision) {
+        throw codedError('pc_revision_conflict', 'revision moved')
+      }
+      asset.status = 'trashed'
+      asset.trashedAt = nowIso()
+      asset.trashExpiresAt = in30d()
+      asset.deletedById = CURRENT_USER_ID
+      asset.revision += 1
+      asset.updatedAt = nowIso()
+      return { asset: clone(asset) }
+    }
+    case 'pcRestoreAsset': {
+      const asset = findAsset(input)
+      const body = input.input as { expectedRevision: number }
+      if (body.expectedRevision !== asset.revision) throw codedError('pc_revision_conflict', 'revision moved')
+      asset.status = 'active'
+      asset.trashedAt = null
+      asset.trashExpiresAt = null
+      asset.deletedById = null
+      asset.revision += 1
+      asset.updatedAt = nowIso()
+      return { asset: clone(asset) }
+    }
+    case 'pcUploadFile': {
+      const name = String(input.name)
+      const checksum = String(input.checksumSha256)
+      const mode = input.mode as 'create' | 'replace'
+      if (mode === 'replace') {
+        const asset = fixture.assets.find((candidate) => candidate.id === input.assetId)
+        if (!asset) throw codedError('pc_not_found', 'asset to replace not found')
+        if (asset.uploaderUserId !== CURRENT_USER_ID) throw codedError('pc_replace_not_uploader', 'only the uploader may replace')
+        if (input.expectedRevision !== asset.revision) throw codedError('pc_revision_conflict', 'revision moved')
+        asset.current = {
+          version: asset.current.version + 1,
+          sizeBytes: Number(input.sizeBytes),
+          mime: String(input.mime ?? 'application/octet-stream'),
+          checksumSha256: checksum,
+          createdAt: nowIso(),
+          createdById: CURRENT_USER_ID,
+          processing: fixture.uploadProcessingState,
+          confirmedAt: null,
+          confirmedByUserId: null,
+        }
+        asset.currentVersion = asset.current.version
+        asset.revision += 1
+        asset.updatedAt = nowIso()
+        const published = fixture.uploadProcessingState === 'indexed'
+        return { published, asset: clone(asset) }
+      }
+      const asset: PcAssetDto = {
+        id: `as-gen-${fixture.nextAssetId++}`,
+        name,
+        tags: Array.isArray(input.tags)
+          ? (input.tags as string[]).map((label) => {
+              const preset = fixture.assets.flatMap((a) => a.tags).find((tag) => tag.id === label && tag.preset)
+              return preset ?? { id: label, label, preset: false }
+            })
+          : [],
+        uploaderUserId: CURRENT_USER_ID,
+        uploaderDisplayName: '林奕',
+        source: (input.source as { kind: 'file'; note?: string } | undefined) ?? { kind: 'file', note: null },
+        status: 'active',
+        currentVersion: 1,
+        revision: 1,
+        pinned: false,
+        pinnedAt: null,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        trashedAt: null,
+        trashExpiresAt: null,
+        deletedById: null,
+        current: {
+          version: 1,
+          sizeBytes: Number(input.sizeBytes),
+          mime: String(input.mime ?? 'application/octet-stream'),
+          checksumSha256: checksum,
+          createdAt: nowIso(),
+          createdById: CURRENT_USER_ID,
+          processing: fixture.uploadProcessingState,
+          confirmedAt: null,
+          confirmedByUserId: null,
+        },
+      }
+      fixture.assets.unshift(asset)
+      const published = fixture.uploadProcessingState === 'indexed'
+      return { published, asset: clone(asset) }
+    }
+    case 'pcDownloadAsset': {
+      const asset = findAsset(input)
+      mkdirSync(fixture.downloadDir, { recursive: true })
+      const safeName = (String(input.targetPath).split('/').pop() ?? 'download.bin').replace(/[/\\:]+/g, '_')
+      const savedPath = join(fixture.downloadDir, safeName)
+      writeFileSync(savedPath, `POO-196 fixture bytes for ${asset.name} v${asset.current.version}`)
+      return { savedPath }
+    }
+    case 'pcGetPreviewUrl': {
+      const asset = findAsset(input)
+      if (asset.current.mime !== 'text/markdown' && asset.current.mime !== 'text/html') {
+        throw codedError('pc_content_not_indexed', 'no preview for this mime')
+      }
+      if (asset.id === 'as-hostile-html') {
+        fixture.previewContent.set(asset.id, hostilePreviewContent(hostilePreviewBase()))
+      } else {
+        fixture.previewContent.set(asset.id, `<h1>${asset.name}</h1><p>POO-196 fixture preview of v${asset.current.version}.</p>`)
+      }
+      return { url: `http://127.0.0.1:${previewPort}/preview/${asset.id}?v=${asset.current.version}`, expiresAt: nowIso(), mime: 'text/html' }
+    }
+    case 'pcReadAsset': {
+      const asset = findAsset(input)
+      if (asset.id === 'as-hostile-html') {
+        return { kind: 'text', version: asset.current.version, content: hostilePreviewContent(hostilePreviewBase()), truncated: false }
+      }
+      const content = fixture.searchIndex.get(asset.id) ?? `# ${asset.name}\n\nPOO-196 fixture 正文占位。`
+      return { kind: 'text', version: asset.current.version, content, truncated: false }
+    }
+    case 'pcSearchAssets': {
+      const q = String(input.q ?? '')
+      return searchAssets(
+        fixture.assets,
+        fixture.searchIndex,
+        q,
+        fixture.searchDegraded,
+        typeof input.limit === 'number' ? input.limit : 20,
+      )
+    }
+    case 'pcRebuild':
+      return { jobId: `job-${Date.now()}` }
+    default:
+      throw new Error(`fixture: unknown pc method ${method}`)
+  }
+}
+
+/* ── fixture stub IPC + preview http server ─────────────────────────────── */
+
+let previewPort = 0
+let previewServer: ReturnType<typeof createServer> | null = null
+
+function startPreviewServer(): Promise<void> {
+  return new Promise((resolve) => {
+    previewServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+      result.previewHttpRequests.push(`${req.method} ${req.url}`)
+      const assetId = req.url?.match(/preview\/([^?]+)/)?.[1] ?? ''
+      res.setHeader('Content-Type', 'text/html;charset=utf-8')
+      res.setHeader('Access-Control-Allow-Origin', '*')
+      res.end(fixture.previewContent.get(assetId) ?? '<p>fixture preview missing</p>')
+    })
+    previewServer.listen(0, '127.0.0.1', () => {
+      previewPort = (previewServer!.address() as { port: number }).port
+      resolve()
+    })
+  })
+}
+
+function registerFixtureIpc() {
+  ipcMain.handle('fixture-pc', (_e, method: string, input: Record<string, unknown>) => handlePc(method, input ?? {}))
+  ipcMain.handle('fixture-stub', (_e, name: string, args: unknown[]) => {
+    switch (name) {
+      case 'getSessionMessages':
+        return clone(sessionsById[String(args?.[0])]) ?? null
+      case 'readPreferences':
+        return {}
+      case 'writePreferences':
+        return { ok: true }
+      case 'getAutoCapitalisation':
+      case 'getSpellCheck':
+        return false
+      case 'getSendMessageKey':
+        return 'Enter'
+      case 'getPendingPlanExecution':
+        return null
+      case 'getHomeDir':
+        return BUILD
+      case 'openFileDialog': {
+        const answer = fixture.fileDialogQueue.shift()
+        return answer ?? []
+      }
+      case 'readFileBinary': {
+        const filePath = String(args?.[0] ?? '')
+        const declared = filePath.match(/__size(\d+)/)?.[1]
+        const size = declared ? Number(declared) : 4096
+        return Buffer.alloc(size, 0x61)
+      }
+      case 'generateThumbnail':
+        return null
+      case 'cancelProcessing':
+      case 'kbSetSessionCollections':
+      case 'setAutoCapitalisation':
+      case 'setSpellCheck':
+      case 'setSendMessageKey':
+      case 'sessionCommand':
+        return { success: true }
+      case 'kbListCollections':
+        return []
+      case 'adminPaymentHandoff':
+        return { ok: false }
+      case 'getTabBrowserApps':
+      case 'organizationList':
+      case 'getRichToolDescriptions':
+      case 'searchFiles':
+      case 'getSkills':
+      case 'getSkillsUnfiltered':
+      case 'getSources':
+      case 'getHomeQuickAccess':
+      case 'productSpaceListActiveExecutions':
+      case 'listLabels':
+      case 'listStatuses':
+        return []
+      case 'getLogoUrl':
+        return ''
+      case 'getUnreadSummary':
+        return { total: 0 }
+      case 'getWorkspaceSettings':
+      case 'getProductSpaceContextStorage':
+      case 'getTaskOutput':
+      case 'creatorSkillGetSafetyStatus':
+        return null
+      case 'setRichToolDescriptions':
+        return {}
+      case 'getSystemTheme':
+        return 'light'
+      case 'getColorTheme':
+      case 'getWorkspaceColorTheme':
+        return 'default'
+      case 'getAllWorkspaceThemes':
+        return {}
+      case 'loadPresetTheme':
+        return null
+      case 'loadPresetThemes':
+        return []
+      case 'getFilePath':
+        return null
+      case 'changeLanguage':
+        return { ok: true }
+      case 'showInFolder':
+        return { ok: true }
+      case 'getSessions':
+      case 'getSession':
+        return null
+      default:
+        return {}
+    }
+  })
+  ipcMain.handle('fixture-unknown-method', (_e, name: string) => {
+    if (!result.unknownApiCalls.includes(name)) result.unknownApiCalls.push(name)
+    return null
+  })
+  ipcMain.handle('fixture-unknown-call', () => ({}))
+  ipcMain.handle('fixture-program', (_e, program: { op: string; args?: Record<string, unknown> }) => runProgram(program))
+}
+
+async function runProgram(program: { op: string; args?: Record<string, unknown> }): Promise<unknown> {
+  const args = program.args ?? {}
+  switch (program.op) {
+    case 'setFault':
+      if (args.fault) fixture.faults.set(String(args.method), args.fault as Fault)
+      else fixture.faults.delete(String(args.method))
+      return true
+    case 'setLatency':
+      fixture.latencyMs = Number(args.ms)
+      return true
+    case 'setDegraded':
+      fixture.searchDegraded = Boolean(args.degraded)
+      return true
+    case 'setCapabilities':
+      fixture.capabilities = { ...clone(fixture.capabilities), ...(args.capabilities as object) }
+      return true
+    case 'setUploadProcessing':
+      fixture.uploadProcessingState = args.state as PcAssetDto['current']['processing']
+      return true
+    case 'queueFileDialog':
+      fixture.fileDialogQueue.push(args.paths as string[])
+      return true
+    case 'indexAsset': {
+      const asset = fixture.assets.find((candidate) => candidate.id === args.assetId)
+      if (asset) {
+        asset.current.processing = 'indexed'
+        asset.updatedAt = nowIso()
+      }
+      return true
+    }
+    case 'bumpAssetVersion': {
+      // Simulates a teammate replacing the file behind the user's back (CAS).
+      const asset = fixture.assets.find((candidate) => candidate.id === args.assetId)
+      if (asset) {
+        asset.revision += 1
+        asset.current = { ...asset.current, version: asset.current.version + 1, confirmedAt: null, confirmedByUserId: null, createdAt: nowIso() }
+        asset.currentVersion = asset.current.version
+        asset.updatedAt = nowIso()
+      }
+      return true
+    }
+    case 'add100Assets': {
+      for (let i = 0; i < 100; i++) {
+        fixture.assets.unshift({
+          id: `as-bulk-${i}`,
+          name: `迭代周报-第${String(45 - Math.floor(i / 5))}期-0${i % 10}.md`,
+          tags: [{ id: 'meeting', label: '会议纪要', preset: true }],
+          uploaderUserId: i % 3 === 0 ? 'u-chen-02' : CURRENT_USER_ID,
+          uploaderDisplayName: i % 3 === 0 ? '陈晓' : '林奕',
+          source: { kind: 'file', note: null },
+          status: 'active',
+          currentVersion: 1,
+          revision: 1,
+          pinned: false,
+          pinnedAt: null,
+          createdAt: nowIso(),
+          updatedAt: new Date(Date.parse('2026-10-01T09:00:00+08:00') - i * 86_400_000).toISOString(),
+          trashedAt: null,
+          trashExpiresAt: null,
+          deletedById: null,
+          current: {
+            version: 1,
+            sizeBytes: 12_000 + i * 10,
+            mime: 'text/markdown',
+            checksumSha256: String(i).padStart(64, '0'),
+            createdAt: nowIso(),
+            createdById: CURRENT_USER_ID,
+            processing: 'indexed',
+            confirmedAt: null,
+            confirmedByUserId: null,
+          },
+        })
+      }
+      return true
+    }
+    case 'resetAssets':
+      resetFixtureAssets()
+      return true
+    case 'stageTrashLoadMore': {
+      // X25 采集布景：把 25 个活跃资产压入回收站，使回收站列表超过默认页大小，
+      // 「加载更多」入口才会出现（before 树没有该入口，驱动侧判 absent）。
+      const limit = Number(args.count ?? 25)
+      let staged = 0
+      for (const asset of fixture.assets) {
+        if (staged >= limit) break
+        if (asset.status !== 'active') continue
+        fixture.assets[fixture.assets.indexOf(asset)] = {
+          ...asset,
+          status: 'trashed',
+          trashedAt: nowIso(),
+          trashExpiresAt: in30d(),
+        }
+        staged += 1
+      }
+      return staged
+    }
+    case 'pcCallStats':
+      return {
+        capabilities: clone(fixture.capabilities),
+        total: result.pcCalls.length,
+        byMethod: result.pcCalls.reduce<Record<string, number>>((acc, call) => {
+          acc[call.method] = (acc[call.method] ?? 0) + 1
+          return acc
+        }, {}),
+        faults: result.pcCalls.filter((call) => call.outcome === 'fault').length,
+      }
+    case 'previewServerPort':
+      return previewPort
+    default:
+      throw new Error(`unknown program op ${program.op}`)
+  }
+}
+
+const runProgramDirect = (program: { op: string; args?: Record<string, unknown> }) => runProgram(program)
+
+/* ── window / observation / capture ─────────────────────────────────────── */
+
+let host: BrowserWindow
+
+function observeWebContents(wc: Electron.WebContents) {
+  const tag = () => {
+    try {
+      const url = wc.getURL()
+      return url ? (url.split('/').pop() || url).split('?')[0] : `wc-${wc.id}`
+    } catch {
+      return `wc-${wc.id}`
+    }
+  }
+  wc.on('console-message', (_e, level: number, message: string, line, sourceId) => {
+    // S-10 证据通道：预览守卫的拦截日志与沙箱内的 CSP/沙箱拒绝是「预期发生」
+    // 的隔离证明，单独留痕，不算 console 噪音（否则末尾零 error 断言会误报）。
+    // Chromium 的措辞不止一种（Refused to… / …violates the following… /
+    // Blocked form submission… / Framing 'origin/'），且不一定带 about:srcdoc
+    // 前缀（frame 违规只报源），按信标主机或 srcdoc 归属路由。
+    const previewOwned = /about:srcdoc|127\.0\.0\.1:\d+/.test(message)
+    if (message.includes('[preview-guard]')) {
+      result.previewGuardEvents.push(`[${tag()}] ${message} (${sourceId}:${line})`)
+      return
+    }
+    if (previewOwned && /Content Security Policy/i.test(message)) {
+      result.previewCspViolations.push(`[${tag()}] ${message} (${sourceId}:${line})`)
+      return
+    }
+    // 沙箱原生拦截（allow-popups/allow-forms 缺失）同属隔离证据。
+    if (previewOwned && /Blocked form submission|request was made in a sandboxed frame|Blocked (call to )?(window\.)?open/i.test(message)) {
+      result.previewCspViolations.push(`[${tag()}] ${message} (${sourceId}:${line})`)
+      return
+    }
+    const entry = `[${tag()}] ${message} (${sourceId}:${line})`
+    if (level >= 3) result.consoleNoise.errors.push(entry)
+    else if (level === 2) {
+      result.consoleNoise.warnings.push(entry)
+      if (/i18next|missingKey|react-i18next/i.test(message)) result.consoleNoise.i18nWarnings.push(entry)
+    }
+  })
+  wc.on('render-process-gone', (_e, d) => result.consoleNoise.errors.push(`[${tag()}] renderer gone: ${JSON.stringify(d)}`))
+}
+
+const js = async <T = unknown,>(expr: string): Promise<T> => {
+  try {
+    return await Promise.race([
+      host.webContents.executeJavaScript(expr) as Promise<T>,
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`executeJavaScript hang: ${expr.slice(0, 100)}`)), 15000)),
+    ]) as Promise<T>
+  } catch (error) {
+    throw new Error(`js failed: ${String((error as Error)?.message ?? error).slice(0, 160)} :: expr=${expr.slice(0, 120)}`)
+  }
+}
+
+/** Non-throwing until: resolves false on timeout (for fallback loops). */
+async function probeUntil(probe: () => Promise<unknown> | unknown, ms = 15000, step = 80): Promise<boolean> {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    try {
+      if (await probe()) return true
+    } catch {
+      // transient probe failure — keep polling
+    }
+    await delay(step)
+  }
+  return false
+}
+
+async function until(probe: () => Promise<unknown> | unknown, ms = 15000, step = 80) {
+  const end = Date.now() + ms
+  let last: unknown
+  while (Date.now() < end) {
+    try {
+      last = await probe()
+      if (last) return last
+    } catch (error) {
+      last = error
+    }
+    await delay(step)
+  }
+  // Failure forensics: dump the observable page state so the orchestrator log
+  // names the exact surface state at timeout.
+  let forensic = ''
+  try {
+    forensic = await js<string>(`(() => {
+      const tab = document.querySelector('[data-testid="pc-tabs"] [data-state="active"]')?.getAttribute('data-testid') ?? 'none'
+      const lib = Boolean(document.querySelector('[data-testid="pc-library"]'))
+      const libRoot = document.querySelector('[data-testid="pc-library"], [data-testid="pc-library-blocked"], [data-testid="pc-library-trash"]')
+      const libRootName = libRoot ? (libRoot.getAttribute('data-testid') ?? '?').replace('pc-library', '') || 'main' : 'none'
+      const notice = document.querySelector('[data-testid="pc-capability-notice"]')?.getAttribute('data-state') ?? ''
+      const rows = document.querySelectorAll('[data-testid^="pc-asset-row-"]').length
+      const popover = document.querySelector('[data-testid="pc-mention-popover"]')
+      const popoverInfo = popover ? \`open(\${popover.querySelectorAll('[data-testid^="pc-mention-option-"]').length} opts, \${(popover.textContent || '').slice(0, 60)})\` : 'closed'
+      const dialog = document.querySelector('[data-testid="pc-upload-dialog"], [data-testid="pc-replace-dialog"]') ? 'dialog' : 'none'
+      const err = document.querySelector('[data-testid="pc-error"], [data-testid="pc-pin-error"], [data-testid="pc-trash-error"]')?.textContent ?? ''
+      const input = (document.querySelector('[data-tutorial="chat-input"]')?.textContent ?? '').slice(0, 40)
+      const renderLog = (window.__poo196 && window.__poo196.renderLog) ? JSON.stringify(window.__poo196.renderLog().slice(-8)) : '[]'
+      const pinPane = Boolean(document.querySelector('[data-testid="pc-pin-pane"]'))
+      const toolbar = Array.from(document.querySelectorAll('[data-testid="pc-library"] button')).slice(0, 6).map(b => (b.getAttribute('data-testid') ?? b.textContent.trim()).slice(0, 12)).join(',')
+      const toastRegion = document.querySelector('[data-sonner-toaster]')
+      const toast = (toastRegion ? (toastRegion.innerText ?? '') : '').slice(0, 50)
+      return \`tab=\${tab} libRoot=\${libRootName} notice=\${notice} pinPane=\${pinPane} rows=\${rows} popover=\${popoverInfo} \${dialog} err=\${err} input=\${JSON.stringify(input)} toast=\${JSON.stringify(toast)} toolbar=[\${toolbar}] renderLog=\${renderLog}\`
+    })()`)
+  } catch (e) {
+    forensic = `forensic failed: ${String(e).slice(0, 80)}`
+  }
+  throw new Error(`timeout waiting (last=${String(last).slice(0, 140)}; state: ${forensic})`)
+}
+
+async function capture(name: string, extra?: Record<string, unknown>) {
+  host.show()
+  host.focus()
+  await delay(280)
+  const viewport = await js<[number, number]>('[window.innerWidth, window.innerHeight]')
+  const image = await host.capturePage()
+  const raw = image.toPNG()
+  const path = join(OUT, `${name}.png`)
+  writeFileSync(path, raw)
+  const receipt = {
+    schema_version: 1,
+    captured_at: new Date().toISOString(),
+    url: host.webContents.getURL(),
+    scene: { object: `poo196-project-context ${name}`, source_ref: SOURCE_REF, viewport, ...(extra ?? {}) },
+    image: {
+      sha256: createHash('sha256').update(raw).digest('hex'),
+      width: image.getSize().width,
+      height: image.getSize().height,
+      device_scale_factor: image.getSize().width / viewport[0],
+      full_page: false,
+    },
+    native_capture: { method: 'BrowserWindow.capturePage' },
+  }
+  writeFileSync(path.replace(/\.png$/, '.capture.json'), JSON.stringify(receipt, null, 2))
+  result.captures.push({ name, path, receipt: path.replace(/\.png$/, '.capture.json') })
+}
+
+/* ── helper probes ──────────────────────────────────────────────────────── */
+
+const T = {
+  tabs: '[data-testid="pc-tabs"]',
+  tabMessages: '[data-testid="pc-tab-messages"]',
+  tabFiles: '[data-testid="pc-tab-files"]',
+  tabPins: '[data-testid="pc-tab-pins"]',
+  library: '[data-testid="pc-library"]',
+  trashButton: '[data-testid="pc-trash-button"]',
+  trashView: '[data-testid="pc-trash-view"]',
+  trashList: '[data-testid="pc-trash-list"]',
+  pinPane: '[data-testid="pc-pin-pane"]',
+  pinError: '[data-testid="pc-pin-error"]',
+  uploadDialog: '[data-testid="pc-upload-dialog"]',
+  replaceDialog: '[data-testid="pc-replace-dialog"]',
+  uploadButton: '[data-testid="pc-upload-button"]',
+  uploadPick: '[data-testid="pc-upload-pick"]',
+  uploadName: '[data-testid="pc-upload-name"]',
+  uploadTagInput: '[data-testid="pc-upload-tag-input"]',
+  uploadSubmit: '[data-testid="pc-upload-submit"]',
+  uploadError: '[data-testid="pc-upload-error"]',
+  replacePick: '[data-testid="pc-replace-pick"]',
+  replaceSubmit: '[data-testid="pc-replace-submit"]',
+  replaceError: '[data-testid="pc-replace-error"]',
+  search: '[data-testid="pc-search"]',
+  error: '[data-testid="pc-error"]',
+  errorRetry: '[data-testid="pc-error-retry"]',
+  loading: '[data-testid="pc-loading"]',
+  empty: '[data-testid="pc-empty"]',
+  emptyFiltered: '[data-testid="pc-empty-filtered"]',
+  list: '[data-testid="pc-list"]',
+  loadMore: '[data-testid="pc-load-more"]',
+  mentionPopover: '[data-testid="pc-mention-popover"]',
+  mentionDegraded: '[data-testid="pc-mention-degraded"]',
+  draftChips: '[data-testid="project-asset-draft-chips"]',
+  snapshotChips: '[data-testid="project-asset-reference-chips"]',
+  input: '[data-tutorial="chat-input"]',
+  deleteConfirm: '[data-testid="pc-delete-confirm"]',
+  deleteConfirmAction: '[data-testid="confirm-dialog-action"]',
+  previewOverlay: '[data-testid="pc-preview-overlay"]',
+  previewFrame: '[data-testid="pc-preview-frame"]',
+  previewSourceToggle: '[data-testid="pc-preview-source-toggle"]',
+}
+
+const clickTab = async (testId: string) => {
+  await js<boolean>(`window.__poo196.click('${testId}')`)
+  if (testId.includes('pc-tab-')) {
+    // Self-verifying tab activation: the Radix trigger activates on
+    // mousedown, and on Enter-on-focus as the fallback keyboard path.
+    const tabId = testId.replace('[data-testid="', '').replace('"]', '')
+    const activeSel = `document.querySelector('[data-testid="pc-tabs"] [data-state="active"]')?.getAttribute('data-testid') === '${tabId}'`
+    const active = await probeUntil(() => js<boolean>(activeSel), 1500)
+    if (!active) {
+      for (const mode of ['key', 'pointer']) {
+        if (mode === 'key') await js<boolean>(`window.__poo196.pressEnterOn('${testId}')`)
+        else await js<boolean>(`window.__poo196.click('${testId}')`)
+        const retried = await probeUntil(() => js<boolean>(activeSel), 1500)
+        if (retried) return
+      }
+      throw new Error(`tab ${tabId} never activated`)
+    }
+  }
+}
+
+const rowMenu = (assetId: string) => `[data-testid="pc-asset-menu-${assetId}"]`
+
+/**
+ * Opens a row's action menu. Radix opens its dropdown on Enter-on-focus (the
+ * production keyboard path, documented in the menu hint) or on pointerdown;
+ * both are driven here, keyboard first because synthetic pointer events are
+ * not always trusted-shape enough for the trigger.
+ */
+const openRowMenu = async (assetId: string, action: string): Promise<boolean> => {
+  for (const mode of ['key', 'pointer', 'click', 'key']) {
+    if (mode === 'key') {
+      await js<boolean>(`window.__poo196.pressEnterOn('${rowMenu(assetId)}')`)
+    } else if (mode === 'pointer') {
+      await js<boolean>(`window.__poo196.click('${rowMenu(assetId)}')`)
+    } else {
+      await js<boolean>(`(() => { const el = document.querySelector('${rowMenu(assetId)}'); if (!el) return false; el.click(); return true })()`)
+    }
+    const opened = await probeUntil(() => js<boolean>(`window.__poo196.q('${rowAction(assetId, action)}')`), 3000)
+    if (opened) { mark(`menu-open=${assetId}/${mode}`); return true }
+    await pressEscape()
+    await delay(150)
+  }
+  return false
+}
+const rowAction = (assetId: string, action: string) => `[data-testid="pc-asset-action-${action}-${assetId}"]`
+
+const clickMenuAction = async (assetId: string, action: string) => {
+  const opened = await openRowMenu(assetId, action)
+  if (!opened) throw new Error(`row menu never opened for ${assetId}/${action}`)
+  // Radix MenuItem selection: focus + Enter is the production keyboard path
+  // (the menu hint copy documents exactly this: ↑↓ 选择 · Enter 确认).
+  const itemFocused = await js<boolean>(`window.__poo196.pressEnterOn('${rowAction(assetId, action)}')`)
+  if (!itemFocused) throw new Error(`menu item missing for ${assetId}/${action}`)
+  mark(`menu=${assetId}/${action} itemEnter=true`)
+  await delay(250)
+}
+
+const openUploadDialog = async () => {
+  // The upload button mounts only after capabilities report canShare — wait
+  // for it (production renders the same progressive toolbar).
+  await until(() => js<boolean>(`window.__poo196.q('${T.uploadButton}')`), 8000)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const clicked = await js<boolean>(`window.__poo196.click('${T.uploadButton}')`)
+    mark(`upload-click#${attempt}=${clicked} ${await js<string>(`String(window.__poo196.buttonInfo('${T.uploadButton}'))`)}`)
+    const opened = await probeUntil(() => js<boolean>(`window.__poo196.q('${T.uploadDialog}')`), 3000)
+    if (opened) return
+  }
+  throw new Error('upload dialog never opened')
+}
+
+const pressEscape = async () => {
+  host.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' } as unknown as Electron.InputInputEvent)
+  host.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' } as unknown as Electron.InputInputEvent)
+  await delay(350)
+}
+
+const toastText = () => js<string>('window.__poo196.toastText()')
+// The key rides JSON.stringify, not a quoted literal: the i18n coverage lint
+// treats quoted call shapes as static keys, and this stays genuinely dynamic.
+const i18nText = (key: string) => js<string>(`String(window.__poo196.t(${JSON.stringify(key)}))`)
+
+const clearInput = async () => {
+  await js<boolean>('window.__poo196.focusInput()')
+  await js<boolean>(`(() => { const el = document.querySelector('${T.input}'); el.focus(); document.execCommand('selectAll'); document.execCommand('insertText', false, ''); return true })()`)
+  await delay(150)
+  const len = await js<number>('window.__poo196.inputValue().length')
+  return len === 0
+}
+
+const clearSearch = async () => {
+  await js<boolean>(`(() => { const el = document.querySelector('${T.search}'); el.focus(); document.execCommand('selectAll'); document.execCommand('insertText', false, ''); return true })()`)
+  await delay(500)
+}
+
+const typeInto = async (selector: string, text: string) => {
+  await js<boolean>(`(() => { const el = document.querySelector('${selector}'); el.focus(); document.execCommand('insertText', false, '${text.replace(/'/g, "\\'")}'); return true })()`)
+}
+
+/**
+ * Real keyboard typing into the composer via trusted char events (the same
+ * channel a human keyboard uses). Used for the @ trigger: execCommand-driven
+ * text does not always reproduce the caret/IME path the mention detector
+ * reads.
+ */
+const typeChars = async (text: string) => {
+  for (const ch of text) {
+    host.webContents.sendInputEvent({ type: 'char', keyCode: ch } as unknown as Electron.InputInputEvent)
+    await delay(60)
+  }
+  await delay(150)
+}
+
+/** Clear the composer, then type a fresh @ query with real char events. */
+const typeMentionQuery = async (query: string) => {
+  await clearInput()
+  await typeChars(`@${query}`)
+}
+
+/* ── scenarios ──────────────────────────────────────────────────────────── */
+
+const FIXTURE_FILE_SMALL = join(BUILD, 'fixture', '__size2048_迭代纪要-1106.md')
+const FIXTURE_FILE_HUGE = join(BUILD, 'fixture', '__size99999999_巨幅设计稿.psd')
+
+async function scenarioSmoke() {
+  await until(() => js<boolean>('Boolean(window.__poo196 && window.__poo196.ready)'), 20000)
+  const viewport = await js<[number, number]>('[window.innerWidth, window.innerHeight]')
+  check('[S0] 宿主页就绪', true, { viewport })
+  check('[S0] 窗口视口 1440x900', viewport[0] === 1440 && viewport[1] === 900, viewport)
+  check('[S0] electronAPI.pc 桥可达', await js<boolean>('typeof window.electronAPI.pcListCapabilities === "function"'))
+  check('[S0] pc 通道全数暴露', await js<boolean>(`['pcGetSummary','pcUpdateAsset','pcRebuild','pcSearchAssets'].every(m => typeof window.electronAPI[m] === 'function')`))
+  check('[S0] 挂载面所需 electronAPI 方法齐备', await js<boolean>(`['getSessionMessages','openFileDialog','readFileBinary','getHomeDir','getWindowFocusState','onWindowFocusChange','getSendMessageKey','getPendingPlanExecution'].every(m => typeof window.electronAPI[m] === 'function')`))
+  await capture('s0-smoke-project-messages')
+}
+
+/** 旅程①: 非项目会话 ⇄ 项目会话切换（含边界真值: 非项目无 tab strip）。 */
+async function scenarioSessionSwitch() {
+  await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.personal)`)
+  await until(async () => (await js<string>(`document.querySelector('[data-testid="poo196-active-session"]')?.textContent`)) === SESSION_PERSONAL, 8000)
+  await delay(300)
+  check('[S1] 非项目会话不渲染 tab strip（截图证明）', await js<boolean>(`!window.__poo196.q('${T.tabs}')`))
+  check('[S1] 非项目会话无任何 pc- 残留 DOM', (await js<number>(`window.__poo196.count('[data-testid^="pc-"]')`)) === 0)
+  check('[S1] 非项目会话 composer 无引用草稿', (await js<number>(`window.__poo196.draftRefs(window.__poo196.sessions.personal).length`)) === 0)
+  await capture('s1-nonproject-session-no-tabs')
+
+  await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.project)`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.tabs}')`), 8000)
+  check('[S1] 项目会话出现三 tab strip', true)
+  const tabsText = await js<string>(`Array.from(document.querySelectorAll('${T.tabs} [role="tab"]')).map(el => el.textContent.trim()).join('|')`)
+  check('[S1] 三 tab 文案齐全(消息/文件/Pin)', tabsText.includes('消息') && tabsText.includes('文件') && tabsText.includes('Pin'), tabsText)
+  await capture('s1-project-session-tabs')
+}
+
+/** 交互回路①: 每 tab 开↔关↔再开 + 消息草稿在 tab 切换下保持。 */
+async function scenarioTabLoop() {
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.library}')`), 10000)
+  await until(async () => (await js<number>(`window.__poo196.count('[data-testid^="pc-asset-row-"]')`)) >= 6, 10000)
+  check('[S2] 文件 tab 打开出现资产行', true)
+  await capture('s2-files-open')
+
+  await clickTab(T.tabPins)
+  await until(() => js<boolean>(`window.__poo196.q('${T.pinPane}')`), 10000)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.pinPane} [data-testid^="pc-asset-row-"]')`)) >= 1, 10000)
+  check('[S2] Pin tab 打开出现条目', true)
+  await capture('s2-pins-open')
+
+  // The draft must be typed on the VISIBLE messages tab (focus() on the
+  // display:none composer is a no-op — that is production behavior too).
+  await clickTab(T.tabMessages)
+  await delay(150)
+  await typeInto(T.input, 'tab回路草稿')
+  await delay(150)
+  await clickTab(T.tabFiles)
+  await delay(120)
+  await clickTab(T.tabPins)
+  await delay(120)
+  await clickTab(T.tabMessages)
+  await delay(200)
+  const inputAfterLoop = await js<string>('window.__poo196.inputValue()')
+  check('[S2] tab 开↔关↔再开后 ChatDisplay 保持挂载（草稿未丢）', inputAfterLoop.includes('tab回路草稿'), { inputAfterLoop })
+  await clearInput()
+  await capture('s2-back-to-messages')
+}
+
+/** 旅程②: 上传全旅程 + 失败重试 + 超限 + 弹层 Esc 重开。 */
+async function scenarioUploadJourney() {
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.library}')`), 8000)
+
+  // 空态探针：过滤到一个不存在的搜索词
+  await typeInto(T.search, '不存在的文件名xyz')
+  await until(() => js<boolean>(`window.__poo196.q('${T.emptyFiltered}')`), 8000)
+  check('[S3] 搜索无结果空态出现', true)
+  await capture('s3-empty-filtered')
+  await clearSearch()
+
+  // 弹层开 → Esc → 重开
+  await openUploadDialog()
+  await capture('s3-upload-dialog-empty')
+  await pressEscape()
+  await until(() => js<boolean>(`!window.__poo196.q('${T.uploadDialog}')`), 5000)
+  check('[S3] 上传弹层 Esc 可关闭', true)
+  await openUploadDialog()
+  check('[S3] 上传弹层可重开', true)
+
+  // 选文件（fixture 对话框队列）→ 摘要
+  await runProgramDirect({ op: 'queueFileDialog', args: { paths: [FIXTURE_FILE_SMALL] } })
+  await js<boolean>(`window.__poo196.click('${T.uploadPick}')`)
+  await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-upload-file-summary"]')`), 8000)
+  const digest = await js<string>(`document.querySelector('[data-testid="pc-upload-digest"]').textContent`)
+  check('[S3] 选文件后摘要含 SHA-256 校验值', /^[0-9a-f]{64}$/.test(digest), { digest: digest.slice(0, 16) })
+
+  // 名称 + 预设标签 + 自定义标签
+  await typeInto(T.uploadName, '会议纪要-1106.md')
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-upload-preset-tag-meeting"]')`)
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-upload-preset-tag-stage"]')`)
+  await typeInto(T.uploadTagInput, '内部评审')
+  await delay(120)
+  await js<boolean>(`window.__poo196.click('${T.uploadSubmit}')`)
+  await until(() => js<boolean>(`!window.__poo196.q('${T.uploadDialog}')`), 10000)
+  await capture('s3-uploaded-processing')
+
+  const toast = await toastText()
+  check('[S3] 上传处理中 toast 出现', toast.includes('正在处理'), { toast: toast.slice(0, 120) })
+  const newRow = await until(async () => js<string | null>(`(Array.from(document.querySelectorAll('[data-testid^="pc-asset-row-"]')).find(el => el.textContent.includes('会议纪要-1106.md'))?.getAttribute('data-testid') ?? null)`), 8000) as string
+  const processingBadge = await js<string>(`document.querySelector('[data-testid="${newRow}"] [data-testid^="pc-asset-status-"]')?.textContent ?? ''`)
+  check('[S3] 新行状态徽标为处理中', processingBadge.includes('处理中'), { processingBadge })
+
+  // fixture: 索引完成 → 用户切 tab 触发 refetch → 可用
+  await runProgramDirect({ op: 'indexAsset', args: { assetId: newRow.replace('pc-asset-row-', '') } })
+  await clickTab(T.tabPins)
+  await clickTab(T.tabFiles)
+  await delay(600)
+  const readyBadge = await js<string>(`document.querySelector('[data-testid="${newRow}"] [data-testid^="pc-asset-status-"]')?.textContent ?? ''`)
+  check('[S3] 处理完成后(经列表刷新)徽标为可用', readyBadge === '可用', { readyBadge })
+  await capture('s3-uploaded-indexed')
+
+  // ── 上传失败 → 重试（once fault）
+  await runProgramDirect({ op: 'setFault', args: { method: 'pcUploadFile', fault: { code: 'pc_upload_failed', once: true } } })
+  await openUploadDialog()
+  await runProgramDirect({ op: 'queueFileDialog', args: { paths: [FIXTURE_FILE_SMALL] } })
+  await js<boolean>(`window.__poo196.click('${T.uploadPick}')`)
+  await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-upload-file-summary"]')`), 8000)
+  await typeInto(T.uploadName, '重试素材.md')
+  await js<boolean>(`window.__poo196.click('${T.uploadSubmit}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.uploadError}')`), 8000)
+  const uploadErrorText = (await js<string>(`document.querySelector('${T.uploadError}').textContent`)).trim()
+  const expectedUploadFail = (await i18nText('projectContext.errors.uploadFailed')).trim()
+  check('[S3] 上传失败内联错误为映射文案（非兜底）', uploadErrorText.length > 0 && uploadErrorText === expectedUploadFail, { uploadErrorText, expectedUploadFail })
+  check('[S3] 失败后弹层保持打开（表单不丢）', await js<boolean>(`window.__poo196.q('${T.uploadDialog}')`))
+  await capture('s3-upload-failed-inline')
+  await js<boolean>(`window.__poo196.click('${T.uploadSubmit}')`)
+  await until(() => js<boolean>(`!window.__poo196.q('${T.uploadDialog}')`), 10000)
+  check('[S3] 清除故障后重试成功关闭弹层', true)
+  await pressEscape()
+
+  // ── 超限（客户端 prep 拦截）
+  await runProgramDirect({ op: 'setCapabilities', args: { capabilities: { limits: { maxUploadBytes: 1024, downloadUrlTtlSeconds: 60 } } } })
+  await openUploadDialog()
+  await runProgramDirect({ op: 'queueFileDialog', args: { paths: [FIXTURE_FILE_HUGE] } })
+  await js<boolean>(`window.__poo196.click('${T.uploadPick}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.uploadError}')`), 8000)
+  const tooLargeText = (await js<string>(`document.querySelector('${T.uploadError}').textContent`)).trim()
+  const expectedTooLarge = (await i18nText('projectContext.errors.uploadTooLarge')).trim()
+  check('[S3] 超限文件被客户端拦截且文案映射', tooLargeText === expectedTooLarge, { tooLargeText })
+  await capture('s3-upload-too-large')
+  await pressEscape()
+  await runProgramDirect({ op: 'setCapabilities', args: { capabilities: { limits: { maxUploadBytes: 52_428_800, downloadUrlTtlSeconds: 60 } } } })
+  await runProgramDirect({ op: 'resetAssets' })
+  await delay(400)
+}
+
+/** 旅程③: @ 引用全旅程 + Esc 回路 + chip 增删 + 发送携带结构化引用 + 快照。 */
+async function scenarioMentionJourney() {
+  await clickTab(T.tabMessages)
+  await until(() => js<boolean>(`window.__poo196.q('${T.input}')`), 8000)
+  await clearInput()
+
+  // 输入 @ → 浮层开（空查询态）
+  await clearInput()
+  await typeChars('@')
+  await until(() => js<boolean>(`window.__poo196.q('${T.mentionPopover}')`), 8000)
+  check('[S4] 输入 @ 后浮层打开', true)
+  await capture('s4-mention-open-empty')
+
+  // Esc → 再开（回路）
+  await pressEscape()
+  await until(() => js<boolean>(`!window.__poo196.q('${T.mentionPopover}')`), 5000)
+  check('[S4] Esc 关闭 @ 浮层', true)
+  await typeMentionQuery('会')
+  await until(() => js<boolean>(`window.__poo196.q('${T.mentionPopover}')`), 5000)
+  check('[S4] Esc 后可再开', true)
+
+  // 防抖搜索 → 命中
+  await until(async () => (await js<number>(`window.__poo196.count('[data-testid^="pc-mention-option-"]')`)) >= 1, 8000)
+  const optionCount = await js<number>(`window.__poo196.count('[data-testid^="pc-mention-option-"]')`)
+  check('[S4] 查询「会」命中候选', optionCount >= 1, { optionCount })
+  const snippetShown = await js<boolean>(`Array.from(document.querySelectorAll('[data-testid^="pc-mention-option-"]')).some(el => (el.textContent || '').includes('迭代对齐'))`)
+  check('[S4] 候选带正文摘要', snippetShown)
+  await capture('s4-mention-options')
+
+  // 键盘: ↓ + Enter 选中
+  host.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' } as unknown as Electron.InputInputEvent)
+  host.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Down' } as unknown as Electron.InputInputEvent)
+  await delay(80)
+  const highlighted = await js<string>(`document.querySelector('[data-testid^="pc-mention-option-"][data-highlighted="true"]')?.getAttribute('data-testid') ?? ''`)
+  check('[S4] ↓ 移动高亮', highlighted.length > 0, { highlighted })
+  host.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' } as unknown as Electron.InputInputEvent)
+  host.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' } as unknown as Electron.InputInputEvent)
+  await delay(250)
+
+  const chips = await js<Array<{ assetId: string; name: string }>>(`window.__poo196.draftRefs(window.__poo196.sessions.project).map(d => ({ assetId: d.assetId, name: d.name }))`)
+  check('[S4] Enter 选中后草稿 chip 入队', chips.length === 1, { chips })
+  const popoverClosed = await js<boolean>(`!window.__poo196.q('${T.mentionPopover}')`)
+  const tokenStripped = await js<string>('window.__poo196.inputValue()')
+  check('[S4] 浮层关闭且 @query 不残留在正文', popoverClosed && !tokenStripped.includes('@会'), { tokenStripped })
+  await capture('s4-mention-chip-queued')
+
+  // 鼠标路径再选一个
+  await typeMentionQuery('需求')
+  await until(async () => (await js<number>(`window.__poo196.count('[data-testid^="pc-mention-option-"]')`)) >= 1, 8000)
+  await js<boolean>(`(() => { const el = document.querySelector('[data-testid^="pc-mention-option-"]'); const rect = el.getBoundingClientRect(); const base = { bubbles: true, cancelable: true, view: window, clientX: rect.x + 5, clientY: rect.y + 5, button: 0 }; el.dispatchEvent(new MouseEvent('mousedown', base)); el.dispatchEvent(new MouseEvent('mouseup', base)); el.dispatchEvent(new MouseEvent('click', base)); return true })()`)
+  await delay(250)
+  const chipsTwo = await js<number>(`window.__poo196.draftRefs(window.__poo196.sessions.project).length`)
+  check('[S4] 鼠标点选再入队一个 chip', chipsTwo === 2, { chipsTwo })
+
+  // chip 消选（移除一个）
+  const firstChipId = (await js<Array<{ assetId: string }>>('window.__poo196.draftRefs(window.__poo196.sessions.project).map(d => ({ assetId: d.assetId }))'))[0].assetId
+  await js<boolean>(`window.__poo196.click('[data-testid="project-asset-draft-chip-remove-${firstChipId}"]')`)
+  await delay(200)
+  check('[S4] 点 chip × 后移除', (await js<number>('window.__poo196.draftRefs(window.__poo196.sessions.project).length')) === 1)
+
+  // 发送（生产 craft:submit-input 通道）→ 结构化引用随 send 走，正文与 chips 清空
+  await typeInto(T.input, '请对照这份材料给出验收要点')
+  await js<boolean>('window.__poo196.send()')
+  await until(() => js<boolean>(`window.__poo196.sendMessageLog.length >= 1`), 8000)
+  const sent = await js<{ message: string; projectAssetRefs: Array<{ assetId: string; version: number; name: string }> }>(`window.__poo196.sendMessageLog[window.__poo196.sendMessageLog.length - 1]`)
+  check('[S4] 发送携带结构化 projectAssetRefs（assetId+version+name）', sent.projectAssetRefs.length === 1 && typeof sent.projectAssetRefs[0].version === 'number', sent)
+  check('[S4] 发送后草稿 chips 清空', (await js<number>('window.__poo196.draftRefs(window.__poo196.sessions.project).length')) === 0)
+  await capture('s4-sent-with-ref')
+
+  // 消息快照 chips（fixture 历史 ok/stale/missing 三态 + 新发送的引用）
+  await until(async () => (await js<number>(`window.__poo196.count('${T.snapshotChips}')`)) >= 1, 8000)
+  const snapshotChipCount = await js<number>(`window.__poo196.count('${T.snapshotChips} > span')`)
+  check('[S4] 消息快照 chips 渲染（历史 ok/stale/missing 三态）', snapshotChipCount === 3, { snapshotChipCount })
+  const staleLabel = await js<string>(`document.querySelector('[data-testid="project-asset-ref-status-stale"]')?.textContent ?? ''`)
+  const missingLabel = await js<string>(`document.querySelector('[data-testid="project-asset-ref-status-missing"]')?.textContent ?? ''`)
+  check('[S4] 快照含 stale 与 missing 结果标注', staleLabel.length > 0 && missingLabel.length > 0, { staleLabel, missingLabel })
+  await clearInput()
+  await js<boolean>(`(() => { const first = document.querySelector('${T.snapshotChips}'); first?.scrollIntoView({ block: 'center' }); return true })()`)
+  await capture('s4-message-snapshot-chips')
+
+  // 降级搜索提示
+  await runProgramDirect({ op: 'setDegraded', args: { degraded: true } })
+  await typeMentionQuery('数据')
+  await until(() => js<boolean>(`window.__poo196.q('${T.mentionDegraded}')`), 8000)
+  check('[S4] 降级搜索在浮层内提示「仅按名称与标签匹配」', true)
+  await capture('s4-mention-degraded')
+  await runProgramDirect({ op: 'setDegraded', args: { degraded: false } })
+  await clearInput()
+}
+
+/** 交互回路②: 行菜单 / Pin / 已确认 / 状态过滤往返 / 下载 / 预览。 */
+async function scenarioRowActionsAndPins() {
+  mark('S5:list-loaded')
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.library}')`), 8000)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)) >= 7, 10000)
+
+  // 行菜单开 → 点外部 → 重开
+  check('[S5] 行菜单打开', await openRowMenu('as-design-home', 'download'))
+  await js<boolean>(`window.__poo196.click('${T.search}')`)
+  await delay(300)
+  check('[S5] 点外部关闭行菜单', await js<boolean>(`!window.__poo196.q('${rowAction('as-design-home', 'download')}')`))
+  check('[S5] 行菜单可重开', await openRowMenu('as-design-home', 'download'))
+  await capture('s5-row-menu-open')
+  await pressEscape()
+
+  // Pin → toast → 行状态翻转 → Pin 面板（as-meeting-1030 起始未 Pin，动作将其翻转为已 Pin）
+  mark('S5:row-menu-captured')
+  await clickMenuAction('as-meeting-1030', 'pin')
+  mark('S5:pin-clicked')
+  // 行状态翻转为 gate；toast 单独记录（toast 渲染本身由 S3/S6 证明）
+  await until(async () => (await js<string>(`document.querySelector('[data-testid="pc-asset-row-as-meeting-1030"]')?.getAttribute('data-pinned')`)) === 'true', 8000)
+  const pinToastSeen = (await toastText()).includes('已 Pin')
+  check('[S5] Pin 操作 toast 反馈', pinToastSeen, { pinToastSeen })
+  const pinnedAttr = await js<string>(`document.querySelector('[data-testid="pc-asset-row-as-meeting-1030"]')?.getAttribute('data-pinned')`)
+  check('[S5] 行 data-pinned 翻转', pinnedAttr === 'true', { pinnedAttr })
+
+  mark('S5:pinned-attr-ok')
+  await clickTab(T.tabPins)
+  await until(() => js<boolean>(`window.__poo196.q('${T.pinPane}')`), 8000)
+  mark('S5:pin-pane')
+  await until(() => js<boolean>(`window.__poo196.q('${T.pinPane} [data-testid="pc-asset-row-as-meeting-1030"]')`), 8000)
+  mark('S5:pin-pane-entry')
+  check('[S5] Pin 面板出现刚 Pin 的行', true)
+  const reqDocCards = await js<number>(`window.__poo196.count('${T.pinPane} [data-testid="pc-asset-row-as-req-doc"]')`)
+  check('[S5] pinned+confirmed 资产在 Pin 面板只出现一次（合并视图）', reqDocCards === 1, { reqDocCards })
+  await capture('s5-pin-pane')
+
+  // Unpin 回路（Pin 面板内行菜单只有 取消 Pin）
+  for (const mode of ['key', 'pointer']) {
+    if (mode === 'key') await js<boolean>(`window.__poo196.pressEnterOn('${T.pinPane} ${rowMenu('as-meeting-1030')}')`)
+    else await js<boolean>(`window.__poo196.click('${T.pinPane} ${rowMenu('as-meeting-1030')}')`)
+    const opened = await until(() => js<boolean>(`window.__poo196.q('${rowAction('as-meeting-1030', 'pin')}')`), 3000)
+    if (opened) break
+    await pressEscape()
+    await delay(150)
+  }
+  const unpinLabel = (await js<string>(`document.querySelector('${rowAction('as-meeting-1030', 'pin')}').textContent`)).trim()
+  check('[S5] Pin 面板内菜单呈现「取消 Pin」', unpinLabel.includes('取消'), { unpinLabel })
+  await js<boolean>(`window.__poo196.pressEnterOn('${rowAction('as-meeting-1030', 'pin')}')`)
+  await delay(600)
+  check('[S5] Unpin 后从 Pin 面板消失', await js<boolean>(`!window.__poo196.q('${T.pinPane} [data-testid="pc-asset-row-as-meeting-1030"]')`))
+
+  // 已确认回路（manager 能力位）
+  await clickTab(T.tabFiles)
+  await delay(400)
+  await clickMenuAction('as-meeting-1030', 'confirm')
+  await delay(700)
+  check('[S5] 确认后行出现已确认徽标', await js<boolean>(`window.__poo196.q('[data-testid="pc-asset-confirmed-as-meeting-1030"]')`))
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-tag-filter-confirmed"]')`)
+  await delay(700)
+  const confirmedRows = await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)
+  check('[S5] 已确认过滤 chip 过滤列表', confirmedRows >= 2, { confirmedRows })
+  await capture('s5-filter-confirmed')
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-tag-filter-confirmed"]')`)
+  await delay(400)
+  check('[S5] 再点过滤 chip 取消过滤（选↔消）', await js<boolean>(`window.__poo196.q('${T.list}')`))
+
+  // 状态过滤往返
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-status-filter-processing"]')`)
+  await delay(400)
+  const processingRows = await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)
+  check('[S5] 处理中状态过滤只留处理中行', processingRows === 1, { processingRows })
+  await capture('s5-filter-processing')
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-status-filter-failed"]')`)
+  await delay(400)
+  const failedRows = await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)
+  check('[S5] 失败过滤切换生效', failedRows === 1, { failedRows })
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-status-filter-all"]')`)
+  await delay(400)
+  check('[S5] 回到全部过滤', (await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)) >= 7)
+
+  // 行菜单: 撤销已确认
+  await clickMenuAction('as-meeting-1030', 'confirm')
+  await delay(600)
+  check('[S5] 撤销确认后徽标消失', await js<boolean>(`!window.__poo196.q('[data-testid="pc-asset-confirmed-as-meeting-1030"]')`))
+
+  // 非上传者行不出现替换入口（D4.1）
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await js<boolean>(`window.__poo196.click('${rowMenu('as-req-doc')}')`)
+    const opened = await probeUntil(() => js<boolean>(`window.__poo196.q('${rowAction('as-req-doc', 'confirm')}')`), 4000)
+    if (opened) break
+    await pressEscape()
+    await delay(200)
+  }
+  await delay(150)
+  check('[S5] 非上传者行无「替换文件」入口（D4.1）', await js<boolean>(`!window.__poo196.q('${rowAction('as-req-doc', 'replace')}')`))
+  check('[S5] manager 对非上传者行仍有确认入口', await js<boolean>(`window.__poo196.q('${rowAction('as-req-doc', 'confirm')}')`))
+  await pressEscape()
+
+  // 下载（fixture 落盘 + toast）
+  await clickMenuAction('as-meeting-1030', 'download')
+  await until(async () => (await toastText()).includes('会议纪要-1030'), 10000)
+  check('[S5] 下载 toast 提示文件名', true)
+  check('[S5] 下载落盘到 fixture Downloads', existsSync(join(fixture.downloadDir, '会议纪要-1030.md')))
+
+  // 预览（text/html 行才有预览入口；短授权 → 隔离覆盖层）
+  await clickMenuAction('as-prototype-html', 'preview')
+  await until(() => js<boolean>(`window.__poo196.q('${T.previewOverlay}')`), 10000)
+  check('[S5] 预览覆盖层打开（隔离沙箱 + 授权 URL fetch）', result.previewHttpRequests.length >= 1, { requests: result.previewHttpRequests })
+  await capture('s5-preview-overlay')
+  await pressEscape()
+  await delay(300)
+}
+
+/**
+ * S-10 预览隔离：共享 HTML 是不可信内容。打开 S-10 夹具（自带放宽 CSP、
+ * 远程 fetch/XHR、外链 img/iframe、window.open、外链与表单提交），断言
+ * 四类向量全部被拦：CSP 违规事件发生、守卫脚本日志发生、预览服务器没有
+ * 收到任何 /beacon/* 请求（被拦截即无网络到达），且覆盖层保持原样。
+ */
+async function scenarioPreviewIsolation() {
+  mark('S5b:list-loaded')
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.library}')`), 8000)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.list} [data-testid="pc-asset-row-as-hostile-html"]')`)) === 1, 10000)
+
+  const guardMarkBefore = result.previewGuardEvents.length
+  const cspMarkBefore = result.previewCspViolations.length
+  const beaconBefore = result.previewHttpRequests.filter((entry) => entry.includes('/beacon/')).length
+
+  mark('S5b:preview-opening')
+  await clickMenuAction('as-hostile-html', 'preview')
+  await until(() => js<boolean>(`window.__poo196.q('${T.previewOverlay}')`), 10000)
+  await until(() => js<boolean>(`window.__poo196.q('${T.previewFrame}')`), 8000)
+  mark('S5b:preview-open')
+
+  // 静态隔离壳：sandbox 只保留脚本能力；注入的 CSP meta 位于文档自身 head
+  // 的最前（DOMParser 注入，完整文档保持原形）。
+  const frameSandbox = await js<string>(`document.querySelector('${T.previewFrame}')?.getAttribute('sandbox') ?? ''`)
+  check('[S5b] iframe sandbox 只保留 allow-scripts', frameSandbox === 'allow-scripts', { frameSandbox })
+  const srcDocHead = await js<string>(`(document.querySelector('${T.previewFrame}')?.getAttribute('srcdoc') ?? '').slice(0, 500)`)
+  check('[S5b] srcDoc 以 doctype+head+注入 CSP meta 开头', /^<!doctype html><html><head><meta http-equiv="Content-Security-Policy"/.test(srcDocHead), { head: srcDocHead.slice(0, 200) })
+  check('[S5b] 注入策略不放宽（default-src none）', srcDocHead.includes("default-src 'none'"), {})
+  check('[S5b] srcDoc 内嵌守卫脚本', srcDocHead.includes('[preview-guard]'), {})
+
+  // 给页面脚本一点时间把全部向量都打一遍（脚本在 load 时自触发）。
+  await delay(2500)
+
+  const beacons = result.previewHttpRequests.filter((entry) => entry.includes('/beacon/'))
+  check('[S5b] 信标零到达（CSP + 守卫拦截）', beacons.length === beaconBefore, { beacons: beacons.slice(0, 8) })
+  check('[S5b] 预览文档本身有到达（夹具授权链路未破坏）', result.previewHttpRequests.some((entry) => entry.includes('/preview/as-hostile-html')))
+
+  const guardNew = result.previewGuardEvents.slice(guardMarkBefore)
+  check('[S5b] 守卫拦下 window.open', guardNew.some((entry) => entry.includes('window.open blocked')), { guardNew: guardNew.slice(0, 6) })
+  check('[S5b] 守卫拦下外链导航', guardNew.some((entry) => entry.includes('link navigation blocked')), {})
+  // 表单向量的第一道闸是 sandbox（未授 allow-forms，submit 事件在派发前就被
+  // Chromium 短路），所以守卫日志与沙箱拒绝任一出现即算拦下。
+  check('[S5b] 表单提交被拦（守卫或沙箱）', guardNew.some((entry) => entry.includes('form submit blocked'))
+    || result.previewCspViolations.slice(cspMarkBefore).some((entry) => /Blocked form submission/i.test(entry)), {})
+
+  const cspNew = result.previewCspViolations.slice(cspMarkBefore)
+  check('[S5b] CSP 拒绝远程图片', cspNew.some((entry) => /Loading the image .*violates|Refused to load/i.test(entry)), { cspNew: cspNew.slice(0, 6) })
+  check('[S5b] CSP 拒绝远程 fetch/XHR', cspNew.some((entry) => /Refused to connect|Connecting to .*violates/i.test(entry)), {})
+  check('[S5b] CSP 拒绝内嵌外域 iframe', cspNew.some((entry) => /Framing .*violates|Refused to (load|frame)/i.test(entry)), {})
+  check('[S5b] CSP 违规事件 ≥ 4', cspNew.length >= 4, { count: cspNew.length })
+
+  // 页面自己的放宽 CSP meta 不可能反客为主：覆盖层仍挂在本体、frame 未逃逸。
+  check('[S5b] 覆盖层未被破坏', await js<boolean>(`window.__poo196.q('${T.previewOverlay}')`), {})
+  check('[S5b] frame 未发生自导航离开', await js<boolean>(`window.__poo196.q('${T.previewFrame}')`), {})
+  await capture('s5b-preview-isolation')
+
+  // Esc 关闭 + 焦点回归（X20）
+  await pressEscape()
+  await until(async () => !(await js<boolean>(`window.__poo196.q('${T.previewOverlay}')`)), 4000)
+  check('[S5b] Esc 关闭预览覆盖层', await js<boolean>(`!window.__poo196.q('${T.previewOverlay}')`), {})
+}
+
+/** 旅程④: 删除 → 回收站 → 恢复 → 再删。 */
+async function scenarioTrashJourney() {
+  await clickTab(T.tabFiles)
+  await delay(300)
+  await clickMenuAction('as-meeting-1030', 'delete')
+  await until(() => js<boolean>(`window.__poo196.q('${T.deleteConfirm}')`), 5000)
+  const confirmText = await js<string>(`document.querySelector('${T.deleteConfirm}')?.textContent ?? ''`)
+  check('[S6] 删除二次确认点名文件', confirmText.includes('会议纪要-1030'), { snippet: confirmText.slice(0, 120) })
+  await capture('s6-delete-confirm')
+  await js<boolean>(`window.__poo196.click('${T.deleteConfirmAction}')`)
+  await delay(500)
+  check('[S6] 确认后行从列表移除', await js<boolean>(`!window.__poo196.q('[data-testid="pc-asset-row-as-meeting-1030"]')`))
+  const trashedToast = await toastText()
+  check('[S6] 删除 toast 反馈「已移入回收站」', trashedToast.includes('已移入回收站'), { trashedToast: trashedToast.slice(0, 100) })
+
+  await clickTab(T.trashButton)
+  await until(() => js<boolean>(`window.__poo196.q('${T.trashView}')`), 8000)
+  await until(() => js<boolean>(`window.__poo196.q('${T.trashList} [data-testid="pc-asset-row-as-meeting-1030"]')`), 8000)
+  check('[S6] 回收站出现被删文件', true)
+  const rowText = await js<string>(`document.querySelector('${T.trashList} [data-testid="pc-asset-row-as-meeting-1030"]').textContent`)
+  const expectedExpires = await i18nText('projectContext.trash.expires')
+  check('[S6] 回收站行带保留期限', rowText.includes(expectedExpires.slice(0, 3)), { snippet: rowText.slice(-60) })
+  await capture('s6-trash-list')
+
+  // 恢复 → 回到列表
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-asset-restore-as-meeting-1030"]')`)
+  await until(async () => (await toastText()).includes('已恢复'), 10000)
+  check('[S6] 恢复 toast 反馈', true)
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-trash-back"]')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.library}')`), 8000)
+  await delay(800)
+  check('[S6] 恢复后文件重新出现在列表', await js<boolean>(`window.__poo196.q('[data-testid="pc-asset-row-as-meeting-1030"]')`))
+  await capture('s6-restored-back-in-library')
+
+  // 回收站 ↔ 文件库往返（back 键回路）
+  await clickTab(T.trashButton)
+  await until(() => js<boolean>(`window.__poo196.q('${T.trashView}')`), 8000)
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-trash-back"]')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.library}')`), 8000)
+  check('[S6] 回收站↔库往返后回到文件库', true)
+
+  // 再删（留存回收站）
+  await clickMenuAction('as-meeting-1030', 'delete')
+  await until(() => js<boolean>(`window.__poo196.q('${T.deleteConfirm}')`), 5000)
+  await js<boolean>(`window.__poo196.click('${T.deleteConfirmAction}')`)
+  await delay(400)
+  check('[S6] 再删成功（留存回收站）', await js<boolean>(`!window.__poo196.q('[data-testid="pc-asset-row-as-meeting-1030"]')`))
+}
+
+/** 错误态: 全部 17 个 pc_* 错误码至少一个 UI 呈现 + 专用呈现路径。 */
+async function scenarioErrorCodes() {
+  const codes = [
+    'pc_forbidden', 'pc_not_found', 'pc_feature_disabled', 'pc_read_only', 'pc_library_not_ready',
+    'pc_validation_error', 'pc_revision_conflict', 'pc_replace_not_uploader', 'pc_confirmed_required',
+    'pc_upload_not_found', 'pc_upload_expired', 'pc_upload_too_large', 'pc_upload_failed',
+    'pc_content_not_indexed', 'pc_trash_expired', 'pc_service_unavailable', 'pc_signin_required',
+  ] as const
+
+  const keyFor: Record<(typeof codes)[number], string> = {
+    pc_forbidden: 'projectContext.errors.forbidden',
+    pc_not_found: 'projectContext.errors.notFound',
+    pc_feature_disabled: 'projectContext.errors.featureDisabled',
+    pc_read_only: 'projectContext.errors.readOnly',
+    pc_library_not_ready: 'projectContext.errors.libraryNotReady',
+    pc_validation_error: 'projectContext.errors.validation',
+    pc_revision_conflict: 'projectContext.errors.revisionConflict',
+    pc_replace_not_uploader: 'projectContext.errors.replaceNotUploader',
+    pc_confirmed_required: 'projectContext.errors.confirmedRequired',
+    pc_upload_not_found: 'projectContext.errors.uploadNotFound',
+    pc_upload_expired: 'projectContext.errors.uploadExpired',
+    pc_upload_too_large: 'projectContext.errors.uploadTooLarge',
+    pc_upload_failed: 'projectContext.errors.uploadFailed',
+    pc_content_not_indexed: 'projectContext.errors.contentNotIndexed',
+    pc_trash_expired: 'projectContext.errors.trashExpired',
+    pc_service_unavailable: 'projectContext.errors.serviceUnavailable',
+    pc_signin_required: 'projectContext.errors.signinRequired',
+  }
+  const genericCopy = (await i18nText('projectContext.errors.generic')).trim()
+  const conflictCopy = (await i18nText('projectContext.errors.revisionConflict')).trim()
+  const unavailableCopy = (await i18nText('projectContext.errors.serviceUnavailable')).trim()
+
+  // 专用呈现先做（菜单/弹层在健康状态下最可靠），17 码横幅扫尾。
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)) >= 7, 10000)
+
+  // 专用呈现: 替换冲突（弹层保持打开）
+  await runProgramDirect({ op: 'setFault', args: { method: 'pcUploadFile', fault: { code: 'pc_revision_conflict' } } })
+  let replaceDialogOpened = false
+  for (let round = 0; round < 3 && !replaceDialogOpened; round++) {
+    if (!await openRowMenu('as-design-home', 'replace')) continue
+    await js<boolean>(`window.__poo196.pressEnterOn('${rowAction('as-design-home', 'replace')}')`)
+    replaceDialogOpened = await probeUntil(() => js<boolean>(`window.__poo196.q('${T.replaceDialog}')`), 2500)
+    if (!replaceDialogOpened) await pressEscape()
+  }
+  check('[S7] 替换弹层打开', replaceDialogOpened)
+  if (replaceDialogOpened) {
+    await runProgramDirect({ op: 'queueFileDialog', args: { paths: [FIXTURE_FILE_SMALL] } })
+    await js<boolean>(`window.__poo196.click('${T.replacePick}')`)
+    await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-replace-file-summary"]')`), 8000)
+    await js<boolean>(`window.__poo196.click('${T.replaceSubmit}')`)
+    await until(() => js<boolean>(`window.__poo196.q('${T.replaceError}')`), 8000)
+    const replaceErr = (await js<string>(`document.querySelector('${T.replaceError}').textContent`)).trim()
+    check('[S7] 替换冲突内联文案映射', replaceErr === conflictCopy, { replaceErr })
+    check('[S7] 冲突后替换弹层保持打开', await js<boolean>(`window.__poo196.q('${T.replaceDialog}')`))
+    await capture('s7-replace-conflict')
+  }
+  await runProgramDirect({ op: 'setFault', args: { method: 'pcUploadFile', fault: null } })
+  await pressEscape()
+
+  // 专用呈现: 恢复冲突 toast（回收站内；先让渲染器拿到回收站列表，再在其背后改版本制造 CAS 冲突）
+  await clickTab(T.trashButton)
+  await until(() => js<boolean>(`window.__poo196.q('${T.trashView}')`), 8000)
+  await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-asset-restore-as-meeting-1030"]')`), 8000)
+  await delay(300)
+  await runProgramDirect({ op: 'bumpAssetVersion', args: { assetId: 'as-meeting-1030' } })
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-asset-restore-as-meeting-1030"]')`)
+  // frozen older toasts stay in the stack — wait for the CONFLICT copy itself
+  await probeUntil(async () => (await toastText()).includes(conflictCopy.slice(0, 6)), 8000)
+  const restoreToast = await toastText()
+  check('[S7] 恢复冲突 toast 为冲突文案', restoreToast.includes(conflictCopy.slice(0, 6)), { restoreToast: restoreToast.slice(0, 120) })
+  await capture('s7-restore-conflict-toast')
+
+  // 专用呈现: 下载失败 toast
+  await js<boolean>(`window.__poo196.click('[data-testid="pc-trash-back"]')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 8000)
+  await runProgramDirect({ op: 'setFault', args: { method: 'pcDownloadAsset', fault: { code: 'pc_service_unavailable', once: true } } })
+  await clickMenuAction('as-design-home', 'download')
+  await probeUntil(async () => (await toastText()).includes(unavailableCopy.slice(0, 6)), 10000)
+  const downloadErrToast = await toastText()
+  check('[S7] 下载失败 toast 呈现服务不可用文案', downloadErrToast.includes(unavailableCopy.slice(0, 6)), { toast: downloadErrToast.slice(0, 120) })
+  await runProgramDirect({ op: 'setFault', args: { method: 'pcDownloadAsset', fault: null } })
+
+  // 专用呈现: Pin 面板冲突文案
+  await runProgramDirect({ op: 'setFault', args: { method: 'pcSetPinned', fault: { code: 'pc_revision_conflict', once: true } } })
+  mark('S7:download-tost-ok')
+  await clickTab(T.tabPins)
+  mark('S7:pins-tab-clicked')
+  await until(() => js<boolean>(`window.__poo196.q('${T.pinPane}')`), 8000)
+  mark('S7:pin-pane')
+  await until(() => js<boolean>(`window.__poo196.q('${T.pinPane} [data-testid^="pc-asset-row-"]')`), 8000)
+  mark('S7:pin-pane-rows')
+  let pinErrorShown = false
+  for (const mode of ['key', 'pointer']) {
+    if (mode === 'key') await js<boolean>(`window.__poo196.pressEnterOn('${T.pinPane} ${rowMenu('as-req-doc')}')`)
+    else await js<boolean>(`window.__poo196.click('${T.pinPane} ${rowMenu('as-req-doc')}')`)
+    const opened = await probeUntil(() => js<boolean>(`window.__poo196.q('${rowAction('as-req-doc', 'pin')}')`), 3000)
+    if (opened) {
+      await js<boolean>(`window.__poo196.pressEnterOn('${rowAction('as-req-doc', 'pin')}')`)
+      pinErrorShown = await probeUntil(() => js<boolean>(`window.__poo196.q('${T.pinError}')`), 4000)
+      if (pinErrorShown) break
+    }
+    await pressEscape()
+    await delay(150)
+  }
+  if (pinErrorShown) {
+    const pinErr = (await js<string>(`document.querySelector('${T.pinError}').textContent`)).trim()
+    // 横幅内含「重试」按钮文案，取 includes 而非全等。
+    check('[S7] Pin 面板冲突文案呈现', pinErr.includes(conflictCopy), { pinErr })
+    await capture('s7-pin-error')
+  } else {
+    check('[S7] Pin 面板冲突文案呈现', false)
+  }
+  await runProgramDirect({ op: 'setFault', args: { method: 'pcSetPinned', fault: null } })
+
+  // 专用呈现: 功能停用（featureEnabled=false）→ 持久态替换整块为中性能力通知
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+  await runProgramDirect({ op: 'setCapabilities', args: { capabilities: { featureEnabled: false, disabledReason: 'storage_unavailable', canShare: false, canManage: false, library: { status: 'none' } } } })
+  await clickTab(T.tabMessages)
+  await delay(150)
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-capability-notice"][data-state="storage_unavailable"]')`), 10000)
+  const disabledTitle = (await js<string>(`document.querySelector('[data-testid="pc-capability-title"]').textContent`)).trim()
+  const storageTitle = (await i18nText('projectContext.capability.storageUnavailableTitle')).trim()
+  check('[S7] featureEnabled=false 呈现中性能力通知（storage_unavailable）', disabledTitle === storageTitle, { disabledTitle, storageTitle })
+  check('[S7] 停用态替换文件库（列表不再渲染）', !(await js<boolean>(`window.__poo196.q('${T.list}')`)))
+  await capture('s7-feature-disabled')
+  await runProgramDirect({ op: 'resetAssets' })
+  // resetAssets resets the FIXTURE only; the keep-mounted pane re-reads
+  // capabilities on an active flip, so round-trip the tabs to clear the
+  // storage_unavailable notice before the 17-code scan below.
+  await clickTab(T.tabMessages)
+  await delay(200)
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+
+  // 17 码扫描（每码：注入→呈现映射文案→截图→清障→恢复回路）。
+  // 持久态（forbidden/signin_required/feature_disabled）按 S-08 二级降级替换
+  // 整块为中性通知（无引擎词、无重试）；其余瞬时码保持面板 + 可重试横幅。
+  const noticeStateFor: Partial<Record<(typeof codes)[number], string>> = {
+    pc_forbidden: 'forbidden',
+    pc_signin_required: 'signed_out',
+    pc_feature_disabled: 'not_configured',
+  }
+  const noticeTitleKeyFor: Record<string, string> = {
+    forbidden: 'projectContext.capability.forbiddenTitle',
+    signed_out: 'projectContext.capability.signedOutTitle',
+    not_configured: 'projectContext.capability.notConfiguredTitle',
+  }
+  await clickTab(T.tabMessages)
+  await delay(200)
+  let lastCode = ''
+  for (const code of codes) {
+    lastCode = code
+    const noticeState = noticeStateFor[code]
+    // Baseline must be clean BEFORE injecting the next fault: a banner left
+    // over from the previous code would otherwise satisfy the face probe below
+    // with the WRONG copy (run5 saw pc_not_found read pc_forbidden's banner).
+    // The keep-mounted pane pauses polling while hidden, so the round-trip
+    // (not waiting alone) is what actually re-reads capabilities here.
+    await clickTab(T.tabMessages)
+    await delay(200)
+    await clickTab(T.tabFiles)
+    await until(async () => !(await js<boolean>(`window.__poo196.q('${T.error}')`))
+      && !(await js<boolean>(`window.__poo196.q('[data-testid="pc-capability-notice"]')`)), 12000)
+    let faceShown = false
+    for (let attempt = 0; attempt < 2 && !faceShown; attempt++) {
+      await runProgramDirect({ op: 'setFault', args: { method: 'pcListCapabilities', fault: { code } } })
+      // The baseline round-trip above left the pane ON the files tab; flipping
+      // through messages is what forces the refresh that surfaces this code.
+      await clickTab(T.tabMessages)
+      await delay(120)
+      await clickTab(T.tabFiles)
+      faceShown = await probeUntil(
+        () => js<boolean>(noticeState
+          ? `window.__poo196.q('[data-testid="pc-capability-notice"][data-state="${noticeState}"]')`
+          : `window.__poo196.q('${T.error}')`),
+        6000,
+      )
+      if (!faceShown) { await clickTab(T.tabMessages); await delay(400) }
+    }
+    if (!faceShown) {
+      await runProgramDirect({ op: 'setFault', args: { method: 'pcListCapabilities', fault: null } })
+      check(`[S7] ${code} 呈现映射文案（非兜底）`, false, { note: 'face not reproduced in 2 attempts' })
+      continue
+    }
+    if (noticeState) {
+      const title = (await js<string>(`document.querySelector('[data-testid="pc-capability-title"]').textContent`)).trim()
+      const expected = (await i18nText(noticeTitleKeyFor[noticeState])).trim()
+      check(`[S7] ${code} 呈现映射文案（非兜底）`, title === expected && expected !== genericCopy, { title, expected })
+      await capture(`s7-notice-${code.replace(/_/g, '-')}`)
+    } else {
+      const shown = (await js<string>(`document.querySelector('${T.error}').textContent`)).trim()
+      const expected = (await i18nText(keyFor[code])).trim()
+      check(`[S7] ${code} 呈现映射文案（非兜底）`, shown.includes(expected) && expected !== genericCopy, { shown: shown.slice(0, 80), expected })
+      await capture(`s7-error-${code.replace(/_/g, '-')}`)
+    }
+    await runProgramDirect({ op: 'setFault', args: { method: 'pcListCapabilities', fault: null } })
+    if (noticeState) {
+      // 中性通知无重试——恢复走 tab 往返重读能力；横幅与通知都回到基线。
+      await clickTab(T.tabMessages)
+      await delay(200)
+      await clickTab(T.tabFiles)
+      await until(async () => !(await js<boolean>(`window.__poo196.q('[data-testid="pc-capability-notice"]')`))
+        && !(await js<boolean>(`window.__poo196.q('${T.error}')`)), 12000)
+    } else {
+      await js<boolean>(`window.__poo196.click('${T.errorRetry}')`)
+      await until(() => js<boolean>(`!window.__poo196.q('${T.error}')`), 10000)
+      await clickTab(T.tabMessages)
+      await delay(150)
+    }
+  }
+  check('[S7] 重试/往返清除错误呈现', lastCode !== '')
+  await clickTab(T.tabMessages)
+  await delay(200)
+}
+
+/** 会话生命周期: 切会话残留 / 连点 / 慢响应加载态。 */
+async function scenarioLifecycle() {
+  await runProgramDirect({ op: 'resetAssets' })
+  await clickTab(T.tabMessages)
+  await delay(250)
+  await clearInput()
+
+  // 草稿 chips 跨会话切换语义
+  await typeMentionQuery('会议')
+  await until(async () => (await js<number>(`window.__poo196.count('[data-testid^="pc-mention-option-"]')`)) >= 1, 8000)
+  await js<boolean>(`(() => { const el = document.querySelector('[data-testid^="pc-mention-option-"]'); const rect = el.getBoundingClientRect(); const base = { bubbles: true, cancelable: true, view: window, clientX: rect.x + 5, clientY: rect.y + 5, button: 0 }; el.dispatchEvent(new MouseEvent('mousedown', base)); el.dispatchEvent(new MouseEvent('mouseup', base)); el.dispatchEvent(new MouseEvent('click', base)); return true })()`)
+  await delay(250)
+  const before = await js<number>('window.__poo196.draftRefs(window.__poo196.sessions.project).length')
+  check('[S8] 项目会话入队草稿 chip', before === 1, { before })
+
+  await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.personal)`)
+  await until(() => js<boolean>(`!window.__poo196.q('${T.tabs}')`), 8000)
+  check('[S8] 切到非项目会话后 tab strip 消失', true)
+  check('[S8] 非项目会话 composer 无引用 chips 残留', (await js<number>(`window.__poo196.count('${T.draftChips}')`)) === 0)
+  await capture('s8-switched-personal')
+
+  await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.project)`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.tabs}')`), 8000)
+  await delay(200)
+  const tabAfterSwitch = await js<string>(`document.querySelector('${T.tabs} [data-state="active"]')?.getAttribute('data-testid') ?? ''`)
+  check('[S8] 切回项目会话 tab 重置为消息', tabAfterSwitch === 'pc-tab-messages', { tabAfterSwitch })
+  const draftAfter = await js<number>('window.__poo196.draftRefs(window.__poo196.sessions.project).length')
+  check('[S8] 未发送草稿按会话留存（切回仍在）', draftAfter === 1, { draftAfter })
+  await clearInput()
+
+  mark('S8:draft-left-intact')
+  // 连点上传提交 → 仅一次 RPC
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.library}')`), 8000)
+  await openUploadDialog()
+  await runProgramDirect({ op: 'queueFileDialog', args: { paths: [FIXTURE_FILE_SMALL] } })
+  await js<boolean>(`window.__poo196.click('${T.uploadPick}')`)
+  await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-upload-file-summary"]')`), 8000)
+  await runProgramDirect({ op: 'setLatency', args: { ms: 300 } })
+  await typeInto(T.uploadName, '连点测试.md')
+  const before1 = (await runProgramDirect({ op: 'pcCallStats' }) as { byMethod: Record<string, number> }).byMethod
+  await js<boolean>(`window.__poo196.click('${T.uploadSubmit}')`)
+  await js<boolean>(`window.__poo196.click('${T.uploadSubmit}')`)
+  await js<boolean>(`window.__poo196.click('${T.uploadSubmit}')`)
+  await until(() => js<boolean>(`!window.__poo196.q('${T.uploadDialog}')`), 15000)
+  await runProgramDirect({ op: 'setLatency', args: { ms: 40 } })
+  const stats1 = (await runProgramDirect({ op: 'pcCallStats' }) as { byMethod: Record<string, number> }).byMethod
+  const uploadDelta = (stats1.pcUploadFile ?? 0) - (before1.pcUploadFile ?? 0)
+  check('[S8] 连点提交只发一次 pcUploadFile（按钮 busy 防抖）', uploadDelta === 1, { uploadDelta, uploadCalls: stats1.pcUploadFile })
+
+  mark('S8:upload-single-rpc-ok')
+  // 连点删除确认
+  await delay(400)
+  if (!await openRowMenu('as-data-dict', 'delete')) throw new Error('delete menu never opened')
+  await js<boolean>(`window.__poo196.pressEnterOn('${rowAction('as-data-dict', 'delete')}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.deleteConfirm}')`), 5000)
+  const before2 = (await runProgramDirect({ op: 'pcCallStats' }) as { byMethod: Record<string, number> }).byMethod
+  await js<boolean>(`window.__poo196.click('${T.deleteConfirmAction}')`)
+  await js<boolean>(`window.__poo196.click('${T.deleteConfirmAction}')`)
+  await delay(700)
+  const stats2 = (await runProgramDirect({ op: 'pcCallStats' }) as { byMethod: Record<string, number> }).byMethod
+  const trashDelta = (stats2.pcTrashAsset ?? 0) - (before2.pcTrashAsset ?? 0)
+  check('[S8] 连点确认只发一次 pcTrashAsset', trashDelta === 1, { trashDelta, trashCalls: stats2.pcTrashAsset })
+
+  mark('S8:delete-single-rpc-ok')
+  // 慢响应加载态：keep-mounted 后 tab 往返不再重挂载文件库，改由会话切换
+  // 驱动重挂载（key=workspace::productSpace），挂载即发列表请求 → 加载态可见。
+  await runProgramDirect({ op: 'resetAssets' })
+  await runProgramDirect({ op: 'setLatency', args: { ms: 900 } })
+  await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.personal)`)
+  await until(() => js<boolean>(`!window.__poo196.q('${T.tabs}')`), 8000)
+  await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.project)`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.tabs}')`), 8000)
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.loading}')`), 8000)
+  check('[S8] 慢响应出现加载态文案', true)
+  await capture('s8-loading-state')
+  await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 15000)
+  await runProgramDirect({ op: 'setLatency', args: { ms: 40 } })
+  await clickTab(T.tabMessages)
+  await delay(150)
+}
+
+/** 平台集成: resize / 全屏 / 布局越界探针。 */
+async function scenarioPlatform() {
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+
+  const probeOverflow = async (label: string) => {
+    const overflow = await js<{ page: { scrollWidth: number; clientWidth: number }; overflowing: string[] }>('window.__poo196.overflow()')
+    const pageOk = overflow.page ? overflow.page.scrollWidth <= overflow.page.clientWidth + 1 : true
+    check(`[S9] ${label} 无页面级横向溢出`, pageOk, overflow.page)
+    check(`[S9] ${label} 无组件级横向溢出(data-testid)`, overflow.overflowing.length === 0, { overflowing: overflow.overflowing.slice(0, 6) })
+  }
+
+  host.setSize(1200, 800)
+  await delay(350)
+  check('[S9] resize 1200 列表仍渲染', await js<boolean>(`window.__poo196.q('${T.list}')`))
+  await probeOverflow('1200x800')
+  await capture('s9-resize-1200')
+
+  host.setSize(1600, 1000)
+  await delay(350)
+  await probeOverflow('1600x1000')
+  await capture('s9-resize-1600')
+
+  host.setSize(1440, 900)
+  await delay(300)
+  host.setFullScreen(true)
+  await delay(500)
+  await probeOverflow('全屏')
+  await capture('s9-fullscreen')
+  host.setFullScreen(false)
+  await delay(400)
+  const viewport = await js<[number, number]>('[window.innerWidth, window.innerHeight]')
+  check('[S9] 退出全屏恢复 1440 宽', viewport[0] === 1440, viewport)
+}
+
+/** 性能: 切 tab 延迟体感 + 100 行列表滚动。 */
+async function scenarioPerformance() {
+  await runProgramDirect({ op: 'resetAssets' })
+  await runProgramDirect({ op: 'add100Assets' })
+  await clickTab(T.tabMessages)
+  await delay(200)
+
+  const t0 = Date.now()
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 15000)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)) >= 50, 15000)
+  const rows50Ms = Date.now() - t0
+  check('[S10] 100 资产池首屏 50 行渲染', true, { rows50Ms })
+
+  await js<boolean>(`(() => { const el = document.querySelector('${T.loadMore}'); el?.scrollIntoView({ block: 'center' }); return true })()`)
+  await js<boolean>(`window.__poo196.click('${T.loadMore}')`)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)) >= 100, 15000)
+  check('[S10] 加载更多拉满 100 行', true)
+
+  const scrollProbe = await js<boolean>(`(() => { const el = document.querySelector('${T.list}'); if (!el) return false; el.scrollTop = el.scrollHeight; return el.scrollHeight > el.clientHeight })()`)
+  check('[S10] 列表容器可滚动（100 行）', scrollProbe)
+  await capture('s10-list-100-rows')
+
+  const durations: number[] = []
+  for (let i = 0; i < 3; i++) {
+    await clickTab(T.tabMessages)
+    await delay(150)
+    const start = Date.now()
+    await clickTab(T.tabFiles)
+    await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+    durations.push(Date.now() - start)
+  }
+  const median = durations.sort((a, b) => a - b)[1]
+  check('[S10] 切 tab 到列表可见中位延迟 <1500ms', median < 1500, { durations, median })
+  await runProgramDirect({ op: 'resetAssets' })
+  await clickTab(T.tabMessages)
+  await delay(150)
+}
+
+/** 视觉矩阵: 浅/深 × zh-Hans/en/de 逐表面截图 + de 长文本。 */
+async function scenarioVisualMatrix() {
+  const langs = ['zh-Hans', 'en', 'de'] as const
+  const themes = ['light', 'dark'] as const
+
+  for (const theme of themes) {
+    for (const lang of langs) {
+      await js<boolean>(`window.__poo196.setLang('${lang}')`)
+      await delay(250)
+      await js<boolean>(`window.__poo196.setTheme('${theme}')`)
+      await delay(450)
+      const effective = await js<string>('window.__poo196.theme()')
+      const langNow = await js<string>('window.__poo196.lang()')
+      check(`[S11] ${theme}/${langNow} 主题与语言生效`, effective === theme && langNow === lang, { effective, langNow })
+
+      await clickTab(T.tabFiles)
+      await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+      await capture(`s11-files-${theme}-${lang}`)
+
+      await openUploadDialog()
+      await capture(`s11-upload-${theme}-${lang}`)
+      await pressEscape()
+
+      await openRowMenu('as-design-home', 'download')
+      await capture(`s11-rowmenu-${theme}-${lang}`)
+      await pressEscape()
+
+      await clickTab(T.tabPins)
+      await until(() => js<boolean>(`window.__poo196.q('${T.pinPane}')`), 10000)
+      await capture(`s11-pins-${theme}-${lang}`)
+
+      await clickTab(T.tabMessages)
+      await delay(150)
+      await clickTab(T.tabFiles)
+      await until(() => js<boolean>(`window.__poo196.q('${T.trashButton}')`), 10000)
+      await clickTab(T.trashButton)
+      await until(() => js<boolean>(`window.__poo196.q('${T.trashView}')`), 10000)
+      await capture(`s11-trash-${theme}-${lang}`)
+      await js<boolean>(`window.__poo196.click('[data-testid="pc-trash-back"]')`)
+      await delay(250)
+
+      await clickTab(T.tabMessages)
+      await delay(250)
+      await clearInput()
+      await capture(`s11-messages-${theme}-${lang}`)
+      await typeMentionQuery('会')
+      await until(async () => (await js<number>(`window.__poo196.count('[data-testid^="pc-mention-option-"]')`)) >= 1, 10000)
+      await capture(`s11-mention-${theme}-${lang}`)
+      await clearInput()
+
+      const overflow = await js<{ page: { scrollWidth: number; clientWidth: number }; overflowing: string[] }>('window.__poo196.overflow()')
+      check(`[S11] ${theme}/${lang} 无横向溢出（页面级）`, overflow.page ? overflow.page.scrollWidth <= overflow.page.clientWidth + 1 : true, overflow.page)
+      check(`[S11] ${theme}/${lang} 无组件级横向溢出`, overflow.overflowing.length === 0, { overflowing: overflow.overflowing.slice(0, 8) })
+    }
+  }
+
+  // de 长名资产截断检查
+  await js<boolean>(`window.__poo196.setLang('de')`)
+  await delay(250)
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+  await js<boolean>(`(() => { const el = document.querySelector('[data-testid="pc-asset-row-${LONG_NAME_ASSET_ID}"]'); el?.scrollIntoView({ block: 'center' }); return true })()`)
+  await delay(250)
+  const longNameOk = await js<boolean>(`(() => {
+    const row = document.querySelector('[data-testid="pc-asset-row-${LONG_NAME_ASSET_ID}"]')
+    if (!row) return false
+    const name = row.querySelector('span[title]')
+    return !!name && name.scrollWidth <= name.clientWidth + 1 && getComputedStyle(name).textOverflow === 'ellipsis'
+  })()`)
+  check('[S11] de 超长文件名行内省略号截断', longNameOk)
+  await capture('s11-de-long-name-row')
+  await js<boolean>(`window.__poo196.setLang('zh-Hans')`)
+  await js<boolean>(`window.__poo196.setTheme('light')`)
+  await delay(300)
+  await clickTab(T.tabMessages)
+  await clearInput()
+}
+
+/** R8a 边界: 呈现 UI 文案里禁词 0 命中（surface innerText 扫描, 大小写敏感）。 */
+async function scenarioR8aSurfaceScan() {
+  const forbidden = [
+    'OpenViking', 'Viking', '向量', 'COS', '对象存储', 'bucket', 'presign', '预签名',
+    'embedding', '索引库', '全文检索', '解析上限', 'chunk', 'CHUNK',
+    'token 上限', 'STORAGE', 'S3', 'OSS',
+  ]
+  const surfaces: Array<{ label: string; prepare: () => Promise<void>; cleanup?: () => Promise<void> }> = [
+    { label: 'messages', prepare: async () => { await clickTab(T.tabMessages); await delay(250) } },
+    { label: 'files', prepare: async () => { await clickTab(T.tabMessages); await delay(150); await clickTab(T.tabFiles); await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000) } },
+    { label: 'pins', prepare: async () => { await clickTab(T.tabPins); await until(() => js<boolean>(`window.__poo196.q('${T.pinPane}')`), 10000) } },
+    {
+      label: 'trash',
+      prepare: async () => {
+        await clickTab(T.tabMessages)
+        await delay(150)
+        await clickTab(T.tabFiles)
+        await until(() => js<boolean>(`window.__poo196.q('${T.trashButton}')`), 10000)
+        await clickTab(T.trashButton)
+        await until(() => js<boolean>(`window.__poo196.q('${T.trashView}')`), 10000)
+      },
+      // 回收站是文件 tab 内的钻入态：离开前退回列表，后续表面才能见到文件库。
+      cleanup: async () => {
+        await js<boolean>(`window.__poo196.click('[data-testid="pc-trash-back"]')`)
+        await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 8000)
+      },
+    },
+    {
+      label: 'upload-dialog',
+      prepare: async () => {
+        await clickTab(T.tabMessages)
+        await delay(150)
+        await clickTab(T.tabFiles)
+        await until(() => js<boolean>(`window.__poo196.q('${T.uploadButton}')`), 10000)
+        await openUploadDialog()
+      },
+      cleanup: () => pressEscape(),
+    },
+    {
+      label: 'mention',
+      prepare: async () => {
+        await clickTab(T.tabMessages)
+        await delay(200)
+        await clearInput()
+        await typeMentionQuery('会')
+        await until(() => js<boolean>(`window.__poo196.q('${T.mentionPopover}')`), 8000)
+      },
+      cleanup: () => clearInput(),
+    },
+  ]
+
+  for (const lang of ['zh-Hans', 'en', 'de'] as const) {
+    await js<boolean>(`window.__poo196.setLang('${lang}')`)
+    await delay(250)
+    for (const surface of surfaces) {
+      await surface.prepare()
+      const text = await js<string>('window.__poo196.text()')
+      const hits = forbidden.filter((word) => text.includes(word))
+      check(`[S12] ${lang}/${surface.label} 表面文案禁词 0 命中`, hits.length === 0, { hits, sample: text.slice(0, 120) })
+      if (surface.cleanup) await surface.cleanup()
+    }
+  }
+  await js<boolean>(`window.__poo196.setLang('zh-Hans')`)
+  await delay(200)
+  await clickTab(T.tabMessages)
+  await clearInput()
+}
+
+/* ── main ───────────────────────────────────────────────────────────────── */
+
+async function main() {
+  app.setPath('userData', join(BUILD, 'profile'))
+  app.commandLine.appendSwitch('force-device-scale-factor', '1')
+  app.commandLine.appendSwitch('disable-features', 'MacWebContentsOcclusion')
+  await app.whenReady()
+  app.dock?.hide()
+  app.on('web-contents-created', (_e, wc) => observeWebContents(wc))
+
+  await startPreviewServer()
+  registerFixtureIpc()
+  mkdirSync(join(BUILD, 'fixture'), { recursive: true })
+  writeFileSync(FIXTURE_FILE_SMALL, '# 会议纪要 1106\n\nPOO-196 fixture 上传素材，正文用于检索。')
+  writeFileSync(FIXTURE_FILE_HUGE, Buffer.alloc(4096, 0x62))
+  mkdirSync(fixture.downloadDir, { recursive: true })
+
+  host = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    useContentSize: true,
+    frame: false,
+    enableLargerThanScreen: true,
+    show: false,
+    webPreferences: {
+      preload: join(BUILD, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  })
+
+  host.show()
+  await host.loadFile(join(BUILD, 'pages', 'host.html'), { search: 'lang=zh-Hans&theme=light' })
+  await delay(400)
+
+  const scenarios: Array<[string, () => Promise<void>]> = []
+  if (process.env.POO196_TOUR === '1') {
+    scenarios.push(['T-采集巡游', evidenceTour])
+  } else {
+    scenarios.push(
+      ['S0-冒烟', scenarioSmoke],
+      ['S1-会话切换旅程', scenarioSessionSwitch],
+      ['S2-tab开关回路', scenarioTabLoop],
+      ['S3-上传旅程', scenarioUploadJourney],
+      ['S4-引用旅程', scenarioMentionJourney],
+      ['S5-行操作与Pin回路', scenarioRowActionsAndPins],
+      ['S5b-预览隔离(S-10)', scenarioPreviewIsolation],
+      ['S6-回收站旅程', scenarioTrashJourney],
+      ['S7-错误态', scenarioErrorCodes],
+      ['S8-生命周期', scenarioLifecycle],
+      ['S9-平台集成', scenarioPlatform],
+      ['S10-性能', scenarioPerformance],
+      ['S11-视觉矩阵', scenarioVisualMatrix],
+      ['S12-R8a边界', scenarioR8aSurfaceScan],
+    )
+  }
+  for (const [name, run] of scenarios) {
+    steps.length = 0
+    host.show()
+    host.focus()
+    try {
+      await run()
+      result.scenarios.push({ name, ok: true })
+    } catch (error) {
+      result.scenarios.push({ name, ok: false, detail: `${String((error as Error).message).slice(0, 320)} | steps: ${steps.join(' → ')}` })
+      console.error(`SCENARIO FAIL ${name}:`, (error as Error).message, '| steps:', steps.join(' → '))
+      // Keep driving later scenarios: an isolated failure must not eat the rest.
+    }
+  }
+
+  check('[观测] console 零 error', result.consoleNoise.errors.length === 0, result.consoleNoise.errors.slice(0, 10))
+  check('[观测] i18next/react-i18next 零警告', result.consoleNoise.i18nWarnings.length === 0, result.consoleNoise.i18nWarnings.slice(0, 10))
+}
+
+/* ── A 档报告采集巡游（POO196_TOUR=1）────────────────────────────────────
+ * 外部 CDP 驱动（Playwright connect_over_cdp）逐状态截图并产出 capture 凭据。
+ * 巡游只负责把每个状态布置稳：布置完成后把状态名写进 window.__poo196.tourState，
+ * 然后等待 $POO196_TOUR_DIR/advance 出现同名内容才走向下一个状态。布置用
+ * probeUntil（有界等待）——同一状态名在 after 树有、在 before 树没有时，
+ * before 侧照常报告状态名，由驱动侧的状态检查判定该侧 absent。
+ */
+const TOUR_DIR = process.env.POO196_TOUR_DIR || '/tmp/poo196-tour'
+
+async function waitTourAdvance(name: string): Promise<void> {
+  const ack = join(TOUR_DIR, 'advance')
+  const end = Date.now() + 240_000
+  while (Date.now() < end) {
+    try {
+      if (readFileSync(ack, 'utf8').trim() === name) return
+    } catch { /* 尚未放行 */ }
+    await delay(150)
+  }
+  throw new Error(`tour advance for ${name} never arrived`)
+}
+
+const tourToFilesTab = async () => {
+  await runProgramDirect({ op: 'resetAssets' })
+  await clickTab(T.tabMessages)
+  await delay(150)
+  await clickTab(T.tabFiles)
+  await probeUntil(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+  await probeUntil(async () => (await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)) >= 6, 10000)
+}
+
+/** The tour shares one mounted page across states (unlike the scenarios, each
+ * of which starts fresh), so a state that leaves a dialog/confirm layer/
+ * trash drill-down behind would silently break every later setup's clicks.
+ * Loop until every transient surface is gone. */
+const tourResetOverlays = async () => {
+  for (let round = 0; round < 8; round++) {
+    let dirty = false
+    if (await js<boolean>(`window.__poo196.q('[data-testid="pc-upload-discard-confirm"]')`)) {
+      // CONFIRM the discard: cancelling would loop forever against a dialog
+      // whose draft keeps re-arming the guard on every close attempt.
+      await js<boolean>(`window.__poo196.click('[data-testid="confirm-dialog-action"]')`)
+      dirty = true
+    } else if (await js<boolean>(`window.__poo196.q('${T.previewOverlay}')`)) {
+      await pressEscape()
+      dirty = true
+    } else if (await js<boolean>(`window.__poo196.q('[data-testid="pc-upload-dialog"]')`)) {
+      await js<boolean>(`window.__poo196.click('[data-testid="pc-upload-cancel"]')`)
+      dirty = true
+    } else if (await js<boolean>(`window.__poo196.q('[data-testid="pc-replace-dialog"]')`)) {
+      await js<boolean>(`window.__poo196.click('[data-testid="pc-replace-cancel"]')`)
+      dirty = true
+    } else if (await js<boolean>(`window.__poo196.q('${T.mentionPopover}')`)) {
+      await clearInput()
+      dirty = true
+    } else if (await js<boolean>(`window.__poo196.q('[data-testid="pc-trash-back"]')`)) {
+      await js<boolean>(`window.__poo196.click('[data-testid="pc-trash-back"]')`)
+      dirty = true
+    }
+    if (!dirty) return
+    await delay(150)
+  }
+}
+
+async function evidenceTour() {
+  mkdirSync(TOUR_DIR, { recursive: true })
+  await until(() => js<boolean>('Boolean(window.__poo196 && window.__poo196.ready)'), 20000)
+  await clickTab(T.tabMessages)
+  await delay(200)
+
+  const states: Array<{ name: string; setup: () => Promise<void> }> = [
+    {
+      name: 'files-library',
+      setup: async () => {
+        await tourResetOverlays()
+        await tourToFilesTab()
+      },
+    },
+    {
+      // S-09：状态过滤补「可用」。before 树没有该 chip，点击落空 → 驱动侧判 absent。
+      name: 'files-available-filter',
+      setup: async () => {
+        await tourResetOverlays()
+        await tourToFilesTab()
+        await js<boolean>(`window.__poo196.click('[data-testid="pc-status-filter-available"]')`).catch(() => false)
+        await delay(900)
+      },
+    },
+    {
+      // S-08：中性能力通知替换整块（caps 面携带 disabledReason，pcListCapabilities
+      // 不被 fixture 关闭）。before 树没有该面。
+      name: 'capability-storage-disabled',
+      setup: async () => {
+        await tourResetOverlays()
+        await tourToFilesTab()
+        await runProgramDirect({ op: 'setCapabilities', args: { capabilities: { featureEnabled: false, disabledReason: 'storage_unavailable', canShare: false, canManage: false, library: { status: 'none' } } } })
+        await clickTab(T.tabMessages)
+        await delay(150)
+        await clickTab(T.tabFiles)
+        await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-capability-notice"][data-state="storage_unavailable"]')`), 8000)
+        await delay(300)
+      },
+    },
+    {
+      // X7+X8：上传弹层统一关闭语义 —— 已选文件待提交（含丢弃确认前置态）。
+      name: 'upload-dialog',
+      setup: async () => {
+        await tourResetOverlays()
+        await tourToFilesTab()
+        await openUploadDialog()
+        await runProgramDirect({ op: 'queueFileDialog', args: { paths: [FIXTURE_FILE_SMALL] } })
+        await js<boolean>(`window.__poo196.click('${T.uploadPick}')`)
+        await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-upload-file-summary"]')`), 8000)
+        await delay(250)
+      },
+    },
+    {
+      // X22：自定义标签被拒保留输入并 inline 显示原因（保留字 confirmed）。
+      name: 'upload-tag-reserved',
+      setup: async () => {
+        await tourResetOverlays()
+        await tourToFilesTab()
+        await openUploadDialog()
+        await runProgramDirect({ op: 'queueFileDialog', args: { paths: [FIXTURE_FILE_SMALL] } })
+        await js<boolean>(`window.__poo196.click('${T.uploadPick}')`)
+        await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-upload-file-summary"]')`), 8000)
+        await typeInto(T.uploadName, '巡游-标签被拒.md')
+        await typeInto(T.uploadTagInput, 'confirmed')
+        await js<boolean>(`window.__poo196.pressEnterOn('${T.uploadTagInput}')`)
+        await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-upload-tag-error"]')`), 5000)
+        await delay(250)
+      },
+    },
+    {
+      // X7：已选文件未提交时 Esc → 丢弃确认层（before 树直接关闭 → absent）。
+      name: 'upload-discard-guard',
+      setup: async () => {
+        await tourResetOverlays()
+        await tourToFilesTab()
+        await openUploadDialog()
+        await runProgramDirect({ op: 'queueFileDialog', args: { paths: [FIXTURE_FILE_SMALL] } })
+        await js<boolean>(`window.__poo196.click('${T.uploadPick}')`)
+        await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-upload-file-summary"]')`), 8000)
+        await typeInto(T.uploadName, '巡游-丢弃确认.md')
+        await pressEscape()
+        await until(() => js<boolean>(`window.__poo196.q('[data-testid="pc-upload-discard-confirm"]')`), 5000)
+        await delay(250)
+      },
+    },
+    {
+      // S-11：@ 浮层统一分组（项目文件/技能/来源）+ X4 引导文案区。
+      name: 'mention-popover',
+      setup: async () => {
+        await tourResetOverlays()
+        await clickTab(T.tabMessages)
+        await delay(200)
+        await clearInput()
+        await typeMentionQuery('会')
+        await until(() => js<boolean>(`window.__poo196.q('${T.mentionPopover}')`), 8000)
+        await delay(300)
+      },
+    },
+    {
+      // D5：Pin 面板仅 pinned active 投影。
+      name: 'pin-pane',
+      setup: async () => {
+        await tourResetOverlays()
+        await runProgramDirect({ op: 'resetAssets' })
+        await clickTab(T.tabMessages)
+        await delay(150)
+        await clickTab(T.tabPins)
+        await until(() => js<boolean>(`window.__poo196.q('${T.pinPane}')`), 8000)
+        await until(() => js<boolean>(`window.__poo196.count('[data-testid^="pc-asset-row-"]') >= 1`), 8000)
+        await delay(300)
+      },
+    },
+    {
+      // X25：回收站 nextCursor「加载更多」。stageTrashLoadMore 把活跃资产压入回收站使其超过一页。
+      name: 'trash-load-more',
+      setup: async () => {
+        await tourResetOverlays()
+        await runProgramDirect({ op: 'resetAssets' })
+        await runProgramDirect({ op: 'add100Assets' })
+        // PC_LIST_LIMIT_DEFAULT is 50: stage MORE than one page or the
+        // nextCursor (and the load-more entry) never appears.
+        await runProgramDirect({ op: 'stageTrashLoadMore', args: { count: 60 } })
+        // tourToFilesTab would resetAssets again and wipe the staged trash —
+        // flip tabs WITHOUT resetting to make the pane re-read the fixture.
+        await clickTab(T.tabMessages)
+        await delay(150)
+        await clickTab(T.tabFiles)
+        await until(() => js<boolean>(`window.__poo196.q('${T.list}')`), 10000)
+        await clickTab(T.trashButton)
+        await until(() => js<boolean>(`window.__poo196.q('${T.trashView}')`), 8000)
+        await delay(800)
+      },
+    },
+    {
+      // S-10 + X20：项目 HTML 预览隔离覆盖层（before 树不存在 → absent）。
+      name: 'preview-overlay',
+      setup: async () => {
+        await tourResetOverlays()
+        await tourToFilesTab()
+        await clickMenuAction('as-prototype-html', 'preview').catch(() => {})
+        await until(() => js<boolean>(`window.__poo196.q('${T.previewOverlay}')`), 8000)
+        await delay(600)
+      },
+    },
+  ]
+
+  for (const state of states) {
+    try {
+      await state.setup()
+    } catch (error) {
+      console.error(`TOUR setup ${state.name} failed:`, String(error).slice(0, 200))
+    }
+    await js<void>(`window.__poo196.tourState = ${JSON.stringify(state.name)}; true`)
+    await waitTourAdvance(state.name)
+    await js<void>(`window.__poo196.tourState = ''; true`)
+  }
+}
+
+process.on('unhandledRejection', (e) => console.error('UNHANDLED', String(e)))
+const timer = setTimeout(() => { result.error = 'global timeout'; finish(1) }, 900_000)
+
+async function finish(code: number) {
+  clearTimeout(timer)
+  try {
+    if (previewServer) previewServer.close()
+    if (host && !host.isDestroyed()) host.destroy()
+  } catch (e) { result.cleanupError = String(e) }
+  result.endedAt = new Date().toISOString()
+  writeFileSync(join(OUT, 'runtime.json'), JSON.stringify(result, null, 2))
+  writeFileSync(join(OUT, 'pc-calls.json'), JSON.stringify(result.pcCalls, null, 2))
+  app.exit(code)
+}
+
+main()
+  .then(() => {
+    const failed = result.checks.filter((c) => !c.ok)
+    // A scenario that threw mid-way still reports exit 0 through checks alone
+    // (its remaining checks never ran) — the exit gate must include every
+    // scenario reaching its end (run4 masked exactly this on S7).
+    const failedScenarios = result.scenarios.filter((s) => !s.ok)
+    console.log(`CHECKS ${result.checks.length - failed.length}/${result.checks.length} passed; captures=${result.captures.length}; scenarios=${result.scenarios.length - failedScenarios.length}/${result.scenarios.length} ok`)
+    for (const s of failedScenarios) console.error(`SCENARIO STILL FAILING: ${s.name}`)
+    return finish(failed.length || failedScenarios.length ? 1 : 0)
+  })
+  .catch((e) => {
+    result.error = String((e as Error).stack ?? e)
+    console.error(e)
+    finish(1)
+  })

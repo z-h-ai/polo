@@ -266,6 +266,7 @@ export async function pcListAssets(
     view?: string
     tag?: string
     pinned?: string
+    processing?: string
     q?: string
     limit?: number
     cursor?: string
@@ -278,6 +279,7 @@ export async function pcListAssets(
       view: input.view,
       tag: input.tag,
       pinned: input.pinned,
+      processing: input.processing,
       q: input.q,
       limit: input.limit,
       cursor: input.cursor,

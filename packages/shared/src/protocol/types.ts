@@ -10,7 +10,7 @@ import {
   type LocalAppErrorCode,
 } from './local-apps'
 import { KB_ERROR_CODES, type KbErrorCode } from './knowledge-base'
-import { PC_ERROR_CODES, type PcErrorCode } from './project-context'
+import { PC_ERROR_CODES, PC_LOCAL_ERROR_CODES, type PcErrorCode } from './project-context'
 
 // ---------------------------------------------------------------------------
 // Message envelope
@@ -139,6 +139,11 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   // to the renderer; without the spread the transport would rewrite them all
   // to HANDLER_ERROR.
   ...PC_ERROR_CODES,
+  // PcLocalErrorCode (POO-196): raised client-side at the workspace scope
+  // gate, so it never rides the admin wire — but the transport still must not
+  // rewrite it to HANDLER_ERROR or the renderer's recovery copy loses the
+  // "enterprise project required" distinction.
+  ...PC_LOCAL_ERROR_CODES,
 ])
 
 export function isErrorCode(value: unknown): value is ErrorCode {

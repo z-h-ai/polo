@@ -258,4 +258,53 @@ describe('ProjectFileLibrary interaction (POO-196)', () => {
     const error = await screen.findByTestId('pc-trash-error')
     expect(error.textContent).toContain('unreachable')
   })
+
+  it('a disabled capability replaces the pane with neutral guidance and never fires a list call', async () => {
+    const harness = makeHarness({
+      capabilities: { featureEnabled: false, disabledReason: 'storage_unavailable', role: 'member', canManage: false, canShare: false, library: { status: 'none' }, limits: { maxUploadBytes: 100, downloadUrlTtlSeconds: 60 } },
+    })
+    renderLibrary(harness)
+
+    const notice = await screen.findByTestId('pc-capability-notice')
+    expect(notice.getAttribute('data-state')).toBe('storage_unavailable')
+    expect(screen.getByTestId('pc-capability-title').textContent).toContain('storage')
+    expect(screen.queryByTestId('pc-asset-row-a-1')).toBeNull()
+    expect(screen.queryByTestId('pc-upload-button')).toBeNull()
+    // S-08+E-3: a disabled feature must not issue a doomed list call.
+    expect(harness.listCalls).toHaveLength(0)
+  })
+
+  it('the available status filter rides the wire as processing=available and keeps usable rows only', async () => {
+    const harness = makeHarness({
+      activeAssets: [
+        asset({ id: 'a-indexed' }),
+        asset({ id: 'a-unsupported', current: { version: 1, sizeBytes: 10, mime: 'application/x-unknown', checksumSha256: null, createdAt: '', createdById: 'u', processing: 'unsupported', confirmedAt: null, confirmedByUserId: null } as PcAssetDto['current'] }),
+        asset({ id: 'a-failed', current: { version: 1, sizeBytes: 10, mime: 'text/html', checksumSha256: null, createdAt: '', createdById: 'u', processing: 'failed', confirmedAt: null, confirmedByUserId: null } as PcAssetDto['current'] }),
+      ],
+    })
+    renderLibrary(harness)
+    await screen.findByTestId('pc-asset-row-a-indexed')
+
+    fireEvent.click(screen.getByTestId('pc-status-filter-available'))
+    await waitFor(() => {
+      expect(harness.listCalls.at(-1)).toMatchObject({ processing: 'available' })
+    })
+    // Unsupported content is still usable (S-09): it stays under 可用.
+    await screen.findByTestId('pc-asset-row-a-unsupported')
+    expect(screen.queryByTestId('pc-asset-row-a-failed')).toBeNull()
+  })
+
+  it('custom member tags from the loaded rows join the chip row and filter by their id', async () => {
+    const harness = makeHarness({
+      activeAssets: [asset({ id: 'a-1', tags: [{ id: 'risk-register', label: 'Risk register', preset: false }] })],
+    })
+    renderLibrary(harness)
+    await screen.findByTestId('pc-asset-row-a-1')
+
+    const chip = screen.getByTestId('pc-tag-filter-risk-register')
+    // The chip caption is the member's own label, never an i18n guess.
+    expect(chip.textContent).toBe('Risk register')
+    fireEvent.click(chip)
+    await waitFor(() => expect(harness.listCalls.at(-1)).toMatchObject({ tag: 'risk-register' }))
+  })
 })

@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PcAssetDto, PcUploadFileInput } from '@polo-ai/shared/protocol'
 import {
@@ -12,7 +13,7 @@ import {
   clientWorkbenchOverlayClassName,
   useClientWorkbenchStyle,
 } from '@/components/ui/client-workbench'
-import { AssetUploadForm, type AssetUploadInput } from './AssetUploadDialog'
+import { AssetUploadForm, useUploadDialogCloseGuard, type AssetUploadInput } from './AssetUploadDialog'
 import { replaceUploadInput } from './AssetUploadDialog'
 import type { PcScope } from './useProjectAssets'
 
@@ -22,7 +23,8 @@ import type { PcScope } from './useProjectAssets'
  * guard against the revision the caller saw. On `pc_revision_conflict` the
  * mapped copy tells the user the file changed under them; the dialog stays
  * open with the form intact for a deliberate retry — a stale revision never
- * re-fires silently.
+ * re-fires silently. Closing follows the SAME guarded state machine as the
+ * create upload (consensus X7+X8).
  */
 
 export interface AssetReplaceDialogProps {
@@ -38,6 +40,7 @@ export interface AssetReplaceDialogProps {
 export function AssetReplaceDialog({ open, asset, scope, maxUploadBytes, onClose, onSubmit }: AssetReplaceDialogProps) {
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
+  const { attemptClose, handleProgress, confirmElement, formState } = useUploadDialogCloseGuard(onClose)
 
   if (!asset) return null
 
@@ -46,32 +49,40 @@ export function AssetReplaceDialog({ open, asset, scope, maxUploadBytes, onClose
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent
-        style={workbenchStyle}
-        overlayStyle={workbenchStyle}
-        overlayClassName={clientWorkbenchOverlayClassName}
-        className={`${clientWorkbenchDialogClassName} max-w-[520px] sm:max-w-[520px]`}
-        data-testid="pc-replace-dialog"
-      >
-        <DialogHeader>
-          <DialogTitle>{t('projectContext.replace.title', { name: asset.name })}</DialogTitle>
-          <DialogDescription>{t('projectContext.replace.description')}</DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[70vh] overflow-y-auto px-[20px] pb-[18px]">
-          <AssetUploadForm
-            maxUploadBytes={maxUploadBytes}
-            initialName={asset.name}
-            initialTags={asset.tags.map((tag) => (tag.preset ? tag.id : tag.label))}
-            submitLabel={t('projectContext.replace.submit')}
-            busyLabel={t('projectContext.upload.submitting')}
-            pickLabel={t('projectContext.replace.pick')}
-            repickLabel={t('projectContext.replace.repick')}
-            testIdPrefix="pc-replace"
-            onSubmit={handleSubmit}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={(next) => { if (!next) attemptClose() }}>
+        <DialogContent
+          style={workbenchStyle}
+          overlayStyle={workbenchStyle}
+          overlayClassName={clientWorkbenchOverlayClassName}
+          className={`${clientWorkbenchDialogClassName} max-w-[520px] sm:max-w-[520px]`}
+          onEscapeKeyDown={(event) => { if (formState.submitting) event.preventDefault() }}
+          onInteractOutside={(event) => { if (formState.submitting) event.preventDefault() }}
+          showCloseButton={!formState.submitting}
+          data-testid="pc-replace-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle>{t('projectContext.replace.title', { name: asset.name })}</DialogTitle>
+            <DialogDescription>{t('projectContext.replace.description')}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-y-auto px-[20px] pb-[18px]">
+            <AssetUploadForm
+              maxUploadBytes={maxUploadBytes}
+              initialName={asset.name}
+              initialTags={asset.tags.map((tag) => (tag.preset ? tag.id : tag.label))}
+              submitLabel={t('projectContext.replace.submit')}
+              busyLabel={t('projectContext.upload.submitting')}
+              pickLabel={t('projectContext.replace.pick')}
+              repickLabel={t('projectContext.replace.repick')}
+              testIdPrefix="pc-replace"
+              onSubmit={handleSubmit}
+              onCancel={attemptClose}
+              onProgress={handleProgress}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+      {confirmElement}
+    </>
   )
 }

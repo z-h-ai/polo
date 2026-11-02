@@ -1495,6 +1495,8 @@ export class AdminClient {
       view?: string;
       tag?: string;
       pinned?: string;
+      /** Current-version processing state filter, applied before pagination. */
+      processing?: string;
       q?: string;
       limit?: number;
       cursor?: string;
@@ -1504,6 +1506,7 @@ export class AdminClient {
       view: query.view,
       tag: query.tag,
       pinned: query.pinned,
+      processing: query.processing,
       q: query.q,
       limit: query.limit,
       cursor: query.cursor,

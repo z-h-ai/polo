@@ -17,12 +17,17 @@ export interface ProjectTrashViewProps {
   loading: boolean
   errorKey: string | null
   busyAssetId: string | null
+  /** X7: the server returned a cursor — a page of rows is still unpaged. */
+  hasMore?: boolean
+  loadingMore?: boolean
+  /** X8: a failed next page re-fires from the retained rows. */
+  onLoadMore?: () => void
   onRestore: (asset: PcAssetDto) => void
   onRefresh: () => void
   onBack: () => void
 }
 
-export function ProjectTrashView({ assets, loading, errorKey, busyAssetId, onRestore, onRefresh, onBack }: ProjectTrashViewProps) {
+export function ProjectTrashView({ assets, loading, errorKey, busyAssetId, hasMore = false, loadingMore = false, onLoadMore, onRestore, onRefresh, onBack }: ProjectTrashViewProps) {
   const { t } = useTranslation()
 
   return (
@@ -93,6 +98,17 @@ export function ProjectTrashView({ assets, loading, errorKey, busyAssetId, onRes
                 ),
               })}
             </p>
+          )}
+          {hasMore && onLoadMore && (
+            <Button
+              variant="ghost"
+              className="h-8 text-[12px] text-muted-foreground"
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              data-testid="pc-trash-load-more"
+            >
+              {loadingMore ? t('projectContext.library.loadingMore') : t('projectContext.library.loadMore')}
+            </Button>
           )}
         </div>
       )}

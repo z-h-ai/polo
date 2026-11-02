@@ -50,6 +50,7 @@ export interface ProjectContextAdmin {
     view?: string
     tag?: string
     pinned?: string
+    processing?: string
     q?: string
     limit?: number
     cursor?: string

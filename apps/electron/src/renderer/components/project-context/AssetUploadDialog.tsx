@@ -12,6 +12,7 @@ import {
 } from '@polo-ai/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Dialog,
   DialogContent,
@@ -82,6 +83,12 @@ export function uploadTagCaption(tag: string, t: (key: string) => string): strin
 /**
  * The shared pick → digest → fields form. Both create and replace dialogs
  * render this; only the submit write and copy differ.
+ *
+ * Close discipline (consensus X7+X8): the form reports its submitting/draft
+ * state upward (`onProgress`) and offers an explicit Cancel; the owning dialog
+ * turns those into the guarded close (no close during the write, an explicit
+ * confirm before dropping a valid draft). The prep read/hash runs under an
+ * AbortController so a cancel/re-pick stops the wasted work.
  */
 export function AssetUploadForm({
   maxUploadBytes,
@@ -93,6 +100,8 @@ export function AssetUploadForm({
   repickLabel,
   onSubmit,
   testIdPrefix = 'pc-upload',
+  onCancel,
+  onProgress,
 }: {
   maxUploadBytes: number
   initialName?: string
@@ -103,6 +112,10 @@ export function AssetUploadForm({
   repickLabel: string
   onSubmit: (input: AssetUploadInput) => Promise<void>
   testIdPrefix?: string
+  /** Rendered as the secondary footer action; routes to the guarded close. */
+  onCancel?: () => void
+  /** Reports the state the owning dialog needs to guard closing. */
+  onProgress?: (state: { submitting: boolean; hasDraft: boolean }) => void
 }) {
   const { t } = useTranslation()
   const [picked, setPicked] = React.useState<PreparedAssetUpload | null>(null)
@@ -112,20 +125,37 @@ export function AssetUploadForm({
   const [name, setName] = React.useState(initialName ?? '')
   const [tags, setTags] = React.useState<string[]>(initialTags ?? [])
   const [customTag, setCustomTag] = React.useState('')
+  const [tagErrorKey, setTagErrorKey] = React.useState<string | null>(null)
   const [sourceNote, setSourceNote] = React.useState('')
 
+  // E-1: the state flag alone cannot stop a double click (React batches it),
+  // so the write is also guarded by a ref that flips SYNCHRONOUSLY.
+  const submittingRef = React.useRef(false)
+  const prepAbortRef = React.useRef<AbortController | null>(null)
+
+  React.useEffect(() => () => {
+    // A gone dialog must not keep hashing a file nobody will upload.
+    prepAbortRef.current?.abort()
+  }, [])
+
   const ingestPath = React.useCallback(async (filePath: string) => {
+    prepAbortRef.current?.abort()
+    const controller = new AbortController()
+    prepAbortRef.current = controller
     setPreparing(true)
     setErrorKey(null)
     try {
-      const prepared = await prepareAssetUploadFile(filePath, maxUploadBytes)
+      const prepared = await prepareAssetUploadFile(filePath, maxUploadBytes, { signal: controller.signal })
+      if (controller.signal.aborted) return
       setPicked(prepared)
       setName(initialName ?? prepared.name)
     } catch (error) {
+      if (controller.signal.aborted) return
       setPicked(null)
       setErrorKey(projectContextUploadErrorKey(error))
     } finally {
-      setPreparing(false)
+      if (!controller.signal.aborted) setPreparing(false)
+      if (prepAbortRef.current === controller) prepAbortRef.current = null
     }
   }, [maxUploadBytes, initialName])
 
@@ -140,19 +170,39 @@ export function AssetUploadForm({
 
   const addCustomTag = React.useCallback(() => {
     const label = customTag.trim()
-    setCustomTag('')
-    if (!label) return
+    if (!label) {
+      setTagErrorKey(null)
+      return
+    }
     const id = normalizeTagId(label)
-    if (!id || id.length > PC_TAG_MAX_CHARS) return
+    // A rejected tag keeps its input with the reason inline (consensus X22);
+    // only a valid entry clears the field and lands as a chip.
+    if (!id) {
+      setTagErrorKey('projectContext.upload.tagInvalid')
+      return
+    }
+    if (id.length > PC_TAG_MAX_CHARS) {
+      setTagErrorKey('projectContext.upload.tagTooLong')
+      return
+    }
     // The controlled tag is version-state, not a member tag — refuse it here
     // exactly like the contract's parseTagList does server-side.
-    if (id === PC_CONTROLLED_TAG_ID) return
-    setTags((prev) => {
-      if (prev.some((existing) => normalizeTagId(existing) === id)) return prev
-      if (prev.length >= PC_TAG_MAX_COUNT) return prev
-      return [...prev, label]
-    })
-  }, [customTag])
+    if (id === PC_CONTROLLED_TAG_ID) {
+      setTagErrorKey('projectContext.upload.tagReserved')
+      return
+    }
+    if (tags.some((existing) => normalizeTagId(existing) === id)) {
+      setTagErrorKey('projectContext.upload.tagDuplicate')
+      return
+    }
+    if (tags.length >= PC_TAG_MAX_COUNT) {
+      setTagErrorKey('projectContext.upload.tagLimit')
+      return
+    }
+    setTags((prev) => (prev.some((existing) => normalizeTagId(existing) === id) ? prev : [...prev, label]))
+    setCustomTag('')
+    setTagErrorKey(null)
+  }, [customTag, tags])
 
   const togglePreset = React.useCallback((id: string) => {
     setTags((prev) => {
@@ -160,12 +210,15 @@ export function AssetUploadForm({
       if (prev.length >= PC_TAG_MAX_COUNT) return prev
       return [...prev, id]
     })
+    setTagErrorKey(null)
   }, [])
 
   const canSubmit = !!picked && name.trim().length > 0 && !preparing && !submitting
 
   const handleSubmit = React.useCallback(async () => {
+    if (submittingRef.current) return
     if (!picked || !canSubmit) return
+    submittingRef.current = true
     setSubmitting(true)
     setErrorKey(null)
     try {
@@ -183,9 +236,23 @@ export function AssetUploadForm({
     } catch (error) {
       setErrorKey(projectContextUploadErrorKey(error))
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }, [picked, canSubmit, onSubmit, name, tags, sourceNote])
+
+  // Anything the user CHANGED counts as a draft the guarded close must ask
+  // about before dropping (consensus X7). Prefilled replace-mode values are
+  // not user input — Esc there closes without an ask.
+  const initialNameValue = initialName ?? ''
+  const hasDraft = picked !== null
+    || name.trim() !== initialNameValue.trim()
+    || tags.length !== (initialTags?.length ?? 0)
+    || tags.some((tag, index) => tag !== initialTags?.[index])
+    || sourceNote.trim().length > 0
+  React.useEffect(() => {
+    onProgress?.({ submitting, hasDraft })
+  }, [submitting, hasDraft, onProgress])
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid={`${testIdPrefix}-form`}>
@@ -277,8 +344,20 @@ export function AssetUploadForm({
           onBlur={addCustomTag}
           placeholder={t('projectContext.upload.tagPlaceholder')}
           maxLength={PC_TAG_MAX_CHARS}
+          aria-invalid={tagErrorKey ? true : undefined}
+          aria-describedby={tagErrorKey ? `${testIdPrefix}-tag-error` : undefined}
           data-testid={`${testIdPrefix}-tag-input`}
         />
+        {tagErrorKey && (
+          <p
+            className="text-[12px] text-destructive"
+            role="alert"
+            id={`${testIdPrefix}-tag-error`}
+            data-testid={`${testIdPrefix}-tag-error`}
+          >
+            {t(tagErrorKey, { count: PC_TAG_MAX_COUNT })}
+          </p>
+        )}
         {tags.length > 0 && (
           <div className="flex flex-wrap gap-1" data-testid={`${testIdPrefix}-selected-tags`}>
             {tags.map((tag) => (
@@ -313,8 +392,24 @@ export function AssetUploadForm({
           {t(errorKey)}
         </p>
       )}
+      {submitting && (
+        <p className="text-[12px] text-muted-foreground" role="status" data-testid={`${testIdPrefix}-submitting-note`}>
+          {t('projectContext.upload.submittingNote')}
+        </p>
+      )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {onCancel && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={submitting}
+            onClick={onCancel}
+            data-testid={`${testIdPrefix}-cancel`}
+          >
+            {t('common.cancel')}
+          </Button>
+        )}
         <Button
           type="button"
           disabled={!canSubmit}
@@ -328,35 +423,89 @@ export function AssetUploadForm({
   )
 }
 
+/**
+ * The one close path for BOTH dialogs (consensus X7+X8): a write in flight
+ * never closes (Esc/outside/✕ are all refused and the wait is stated), a valid
+ * unsubmitted draft needs an explicit discard confirm, everything else closes
+ * immediately. Success closes via the parent's `onSubmit` resolving.
+ */
+export function useUploadDialogCloseGuard(onClose: () => void) {
+  const { t } = useTranslation()
+  const { requestConfirm, confirmElement } = useConfirmDialog()
+  // The ref answers SYNCHRONOUSLY (an Esc keystroke must not race a just-fired
+  // submit); the state mirror is what the render and Radix handlers read.
+  const formStateRef = React.useRef({ submitting: false, hasDraft: false })
+  const [formState, setFormState] = React.useState({ submitting: false, hasDraft: false })
+
+  const handleProgress = React.useCallback((state: { submitting: boolean; hasDraft: boolean }) => {
+    formStateRef.current = state
+    setFormState(state)
+  }, [])
+
+  const attemptClose = React.useCallback(() => {
+    // The bytes are being written; closing now would orphan the user's view of
+    // the write (it would still finish server-side). Refuse and explain.
+    if (formStateRef.current.submitting) return
+    if (formStateRef.current.hasDraft) {
+      void requestConfirm({
+        testId: 'pc-upload-discard-confirm',
+        title: t('projectContext.upload.discardTitle'),
+        description: t('projectContext.upload.discardDescription'),
+        confirmLabel: t('projectContext.upload.discardConfirm'),
+        cancelLabel: t('common.cancel'),
+        onConfirm: () => {
+          formStateRef.current = { submitting: false, hasDraft: false }
+          setFormState({ submitting: false, hasDraft: false })
+          onClose()
+        },
+      })
+      return
+    }
+    onClose()
+  }, [onClose, requestConfirm, t])
+
+  return { attemptClose, handleProgress, confirmElement, formState }
+}
+
 export function AssetUploadDialog({ open, maxUploadBytes, onClose, onSubmit }: AssetUploadDialogProps) {
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
+  const { attemptClose, handleProgress, confirmElement, formState } = useUploadDialogCloseGuard(onClose)
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent
-        style={workbenchStyle}
-        overlayStyle={workbenchStyle}
-        overlayClassName={clientWorkbenchOverlayClassName}
-        className={`${clientWorkbenchDialogClassName} max-w-[520px] sm:max-w-[520px]`}
-        data-testid="pc-upload-dialog"
-      >
-        <DialogHeader>
-          <DialogTitle>{t('projectContext.upload.title')}</DialogTitle>
-          <DialogDescription>{t('projectContext.upload.description')}</DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[70vh] overflow-y-auto px-[20px] pb-[18px]">
-          <AssetUploadForm
-            maxUploadBytes={maxUploadBytes}
-            submitLabel={t('projectContext.upload.submit')}
-            busyLabel={t('projectContext.upload.submitting')}
-            pickLabel={t('projectContext.upload.pick')}
-            repickLabel={t('projectContext.upload.repick')}
-            onSubmit={onSubmit}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={(next) => { if (!next) attemptClose() }}>
+        <DialogContent
+          style={workbenchStyle}
+          overlayStyle={workbenchStyle}
+          overlayClassName={clientWorkbenchOverlayClassName}
+          className={`${clientWorkbenchDialogClassName} max-w-[520px] sm:max-w-[520px]`}
+          // The write owns the window until it settles (consensus X7).
+          onEscapeKeyDown={(event) => { if (formState.submitting) event.preventDefault() }}
+          onInteractOutside={(event) => { if (formState.submitting) event.preventDefault() }}
+          showCloseButton={!formState.submitting}
+          data-testid="pc-upload-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle>{t('projectContext.upload.title')}</DialogTitle>
+            <DialogDescription>{t('projectContext.upload.description')}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-y-auto px-[20px] pb-[18px]">
+            <AssetUploadForm
+              maxUploadBytes={maxUploadBytes}
+              submitLabel={t('projectContext.upload.submit')}
+              busyLabel={t('projectContext.upload.submitting')}
+              pickLabel={t('projectContext.upload.pick')}
+              repickLabel={t('projectContext.upload.repick')}
+              onSubmit={onSubmit}
+              onCancel={attemptClose}
+              onProgress={handleProgress}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+      {confirmElement}
+    </>
   )
 }
 
