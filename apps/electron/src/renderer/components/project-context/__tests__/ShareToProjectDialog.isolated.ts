@@ -30,8 +30,8 @@ mock.module('@/lib/client-workbench-style', () => ({
   useClientMaterialScope: () => ({}),
 }))
 
-const { cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
-const { createElement } = await import('react')
+const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
+const { createElement, useEffect, useState } = await import('react')
 const { ShareToProjectDialog } = await import('../ShareToProjectDialog')
 
 const MAX_BYTES = 100 * 1024 * 1024
@@ -106,7 +106,7 @@ function makeAsset(name: string): PcAssetDto {
   } as unknown as PcAssetDto
 }
 
-function renderShare(options: { failNames?: string[] } = {}) {
+function makeHarness(options: { failNames?: string[] } = {}): Harness {
   const harness: Harness = {
     storedTexts: [],
     storedPaths: [],
@@ -152,6 +152,11 @@ function renderShare(options: { failNames?: string[] } = {}) {
       },
     },
   })
+  return harness
+}
+
+function renderShare(options: { failNames?: string[] } = {}) {
+  const harness = makeHarness(options)
   const shared: PcAssetDto[][] = []
   render(createElement(
     I18nextProvider,
@@ -166,6 +171,44 @@ function renderShare(options: { failNames?: string[] } = {}) {
     }),
   ))
   return { harness, shared }
+}
+
+/**
+ * R2-1 harness: the dialog is rendered through a parent that re-hands its
+ * target as a brand-new object with equal content — the inline-literal shape
+ * ChatPage used to rebuild on every render (session streaming, metadata
+ * updates). `refreshTarget(overrides)` can also hand a genuinely different
+ * target to prove the init still runs on a real handover.
+ */
+function renderShareLive() {
+  const harness = makeHarness()
+  const shared: PcAssetDto[][] = []
+  let rehand: ((overrides?: Partial<ShareToProjectTarget>) => void) | null = null
+  function Wrapper() {
+    const [target, setTarget] = useState<ShareToProjectTarget>(() => makeTarget())
+    useEffect(() => {
+      rehand = (overrides) => {
+        setTarget({ ...makeTarget(), ...(overrides ?? {}) })
+      }
+    }, [])
+    return createElement(
+      ShareToProjectDialog as unknown as (props: Record<string, unknown>) => React.ReactElement,
+      {
+        open: true,
+        scope: SCOPE,
+        sessionId: 'sess-1',
+        target,
+        onClose: () => {},
+        onShared: (assets: PcAssetDto[]) => shared.push(assets),
+      },
+    )
+  }
+  render(createElement(I18nextProvider, { i18n }, createElement(Wrapper)))
+  return {
+    harness,
+    shared,
+    refreshTarget: (overrides?: Partial<ShareToProjectTarget>) => rehand?.(overrides),
+  }
 }
 
 beforeEach(async () => {
@@ -226,5 +269,39 @@ describe('ShareToProjectDialog (POO-196 S-01)', () => {
     expect(error.textContent).toContain('Something went wrong')
     expect(harness.uploads).toHaveLength(1)
     expect(shared).toHaveLength(0)
+  })
+
+  it('R2-1: keeps the edits when the parent re-renders with an equal-value target, and re-derives on a real handover', async () => {
+    const { refreshTarget } = renderShareLive()
+
+    await screen.findByTestId('pc-share-item-att:att-1')
+    const nameInput = screen.getByTestId('pc-share-item-name-text:message') as HTMLInputElement
+    const attachmentCheck = screen.getByTestId('pc-share-item-check-att:att-1') as HTMLInputElement
+    const sourceInput = screen.getByTestId('pc-share-source') as HTMLInputElement
+    expect(attachmentCheck.checked).toBe(true)
+    expect(sourceInput.value).toBe('From chat: Apollo kickoff')
+
+    // The user renames the artifact, drops the attachment, tags it and
+    // rewrites the source note while the dialog is open.
+    fireEvent.change(nameInput, { target: { value: '验收要点.md' } })
+    fireEvent.click(attachmentCheck)
+    fireEvent.click(screen.getByTestId('pc-share-preset-tag-source'))
+    fireEvent.change(sourceInput, { target: { value: '我的来源说明' } })
+
+    // A parent re-render re-hands an equal-value copy of the same target —
+    // the per-render literal shape this dialog used to choke on. Nothing the
+    // user typed may be reset.
+    act(() => { refreshTarget() })
+    expect((screen.getByTestId('pc-share-item-name-text:message') as HTMLInputElement).value).toBe('验收要点.md')
+    expect((screen.getByTestId('pc-share-item-check-att:att-1') as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByTestId('pc-share-source') as HTMLInputElement).value).toBe('我的来源说明')
+    expect(screen.getByTestId('pc-share-selected-tags')!.textContent).toContain('Raw material')
+
+    // A genuinely different message still re-derives the form from scratch.
+    act(() => { refreshTarget({ text: '另一条消息正文' }) })
+    expect((screen.getByTestId('pc-share-item-name-text:message') as HTMLInputElement).value).toBe('Message text.md')
+    expect((screen.getByTestId('pc-share-item-check-att:att-1') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByTestId('pc-share-source') as HTMLInputElement).value).toBe('From chat: Apollo kickoff')
+    expect(screen.queryByTestId('pc-share-selected-tags')).toBeNull()
   })
 })

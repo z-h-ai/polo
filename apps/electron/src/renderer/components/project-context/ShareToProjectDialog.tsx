@@ -115,6 +115,16 @@ function shareItemsOf(target: ShareToProjectTarget, t: (key: string) => string):
   return items
 }
 
+/** What the derived candidates depend on: the message text, which
+ * attachments ride along, and the title the source note is auto-filled from. */
+function targetSignature(target: ShareToProjectTarget): string {
+  return JSON.stringify([
+    target.text,
+    target.attachments.map((attachment) => [attachment.id, attachment.name, attachment.size]),
+    target.sessionTitle ?? null,
+  ])
+}
+
 export function ShareToProjectDialog({
   open,
   scope,
@@ -143,9 +153,24 @@ export function ShareToProjectDialog({
   // X1-style guard: the synchronous ref answers Esc while React batches state.
   const submittingRef = React.useRef(false)
 
-  // Re-derive the shareable candidates whenever a message is handed over.
+  // Re-derive the shareable candidates when a message is handed over — but
+  // only on a real handover. The init keyed on the `target` reference alone
+  // would also fire on a parent re-render that passes an equal-value copy of
+  // the same target (streaming tokens and session metadata re-render ChatPage
+  // all the time) and silently wipe what the user already typed here. So the
+  // signature arms the init and an equal-value re-reference is a no-op; the
+  // dialog close disarms it, so reopening the very same message still starts
+  // from a fresh form. A `t` change alone therefore no longer re-derives
+  // (edits win over relabeling the default text-item name mid-session).
+  const initializedRef = React.useRef<string | null>(null)
   React.useEffect(() => {
-    if (!open || !target) return
+    if (!open || !target) {
+      initializedRef.current = null
+      return
+    }
+    const signature = targetSignature(target)
+    if (initializedRef.current === signature) return
+    initializedRef.current = signature
     const derived = shareItemsOf(target, t)
     setItems(derived)
     setSelected(derived.map((item) => item.id))

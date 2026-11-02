@@ -35,7 +35,7 @@ import { projectAssetDraftRefsAtomFamily, type ProjectAssetMentionDraft } from '
 import { ProjectContextTabs, type ProjectContextTab } from '@/components/project-context/ProjectContextTabs'
 import { ProjectFileLibrary } from '@/components/project-context/ProjectFileLibrary'
 import { ProjectPinPane } from '@/components/project-context/ProjectPinPane'
-import { ShareToProjectDialog } from '@/components/project-context/ShareToProjectDialog'
+import { ShareToProjectDialog, type ShareToProjectTarget } from '@/components/project-context/ShareToProjectDialog'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
@@ -363,15 +363,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   // S-01: the message staged for "share to project". Non-null opens the
   // dialog; a successful share lands the files and flips to the Files tab.
-  const [shareTargetMessage, setShareTargetMessage] = React.useState<import('../../shared/types').Message | null>(null)
-  const handleShareToProject = React.useCallback((message: import('../../shared/types').Message) => {
-    setShareTargetMessage(message)
-  }, [])
-  const handleSharedToProject = React.useCallback((shared: import('@polo-ai/shared/protocol').PcAssetDto[]) => {
-    setShareTargetMessage(null)
-    setProjectTab('files')
-    toast.success(t('projectContext.toast.shared', { count: shared.length }))
-  }, [t])
+  const [shareTarget, setShareTarget] = React.useState<ShareToProjectTarget | null>(null)
 
   // Journey #8: a failed local send leaves a session-scoped prompt (not a
   // message). The explicit action restores the preserved draft into the
@@ -595,6 +587,25 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
     setRenameDialogOpen(false)
   }, [sessionId, renameName, displayTitle, onRenameSession])
+
+  // S-01: staging a share snapshots {text, attachments, sessionTitle} at
+  // share-click time instead of keeping the live message. ChatPage re-renders
+  // on session streaming and metadata updates; a target rebuilt per render
+  // would hand the dialog a fresh reference, re-run its init effect, and
+  // silently wipe whatever the user had already typed there (name, tags,
+  // source note). The stable snapshot keeps the dialog's edits intact.
+  const handleShareToProject = React.useCallback((message: import('../../shared/types').Message) => {
+    setShareTarget({
+      text: message.content,
+      attachments: message.attachments ?? [],
+      sessionTitle: displayTitle,
+    })
+  }, [displayTitle])
+  const handleSharedToProject = React.useCallback((shared: import('@polo-ai/shared/protocol').PcAssetDto[]) => {
+    setShareTarget(null)
+    setProjectTab('files')
+    toast.success(t('projectContext.toast.shared', { count: shared.length }))
+  }, [t])
 
   const handleFlag = React.useCallback(() => {
     onFlagSession(sessionId)
@@ -1053,17 +1064,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       />
       {projectScope && (
         <ShareToProjectDialog
-          open={shareTargetMessage !== null}
+          open={shareTarget !== null}
           scope={projectScope}
           sessionId={sessionId}
-          target={shareTargetMessage
-            ? {
-              text: shareTargetMessage.content,
-              attachments: shareTargetMessage.attachments ?? [],
-              sessionTitle: displayTitle,
-            }
-            : null}
-          onClose={() => setShareTargetMessage(null)}
+          target={shareTarget}
+          onClose={() => setShareTarget(null)}
           onShared={handleSharedToProject}
         />
       )}
