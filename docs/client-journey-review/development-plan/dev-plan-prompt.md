@@ -3,7 +3,7 @@
 参考 `/Users/wow/project/dev-plan-prompt.md`；以最新 Notma 全部直接依赖为准。
 
 ```text
-编排POO-70：读最新卡及polo-ai-design-system，继承integration/poo70-client-entry-r15设计源ac831ea7。
+编排POO-70：读最新卡及polo-client-design-system，继承integration/poo70-client-entry-r15设计源ac831ea7。
 
 1. POO-80核对基线；并行POO-81、82、83、84、85。
 2. POO-82→86；POO-85→87；POO-86+85→89。认证四卡集成后验收POO-77。

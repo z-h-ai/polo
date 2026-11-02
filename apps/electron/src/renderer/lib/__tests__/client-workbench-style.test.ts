@@ -3,8 +3,8 @@ import { describe, expect, it, mock } from 'bun:test'
 // The Vite-only theme loader is outside this CSS adapter contract.
 mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
 const { createClientWorkbenchStyle } = await import('../client-workbench-style')
-const base = (await import('../../../../../../.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css?raw')).default
-const review = (await import('../../../../../../.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css?raw')).default
+const base = (await import('../../../../../../.agents/skills/polo-client-design-system/assets/tokens/workbench-base.css?raw')).default
+const review = (await import('../../../../../../.agents/skills/polo-client-design-system/assets/tokens/workbench-review.css?raw')).default
 
 describe('canonical workbench CSS consumption', () => {
   it('loads actual raw source strings and retains the final review declaration without a semicolon', () => {

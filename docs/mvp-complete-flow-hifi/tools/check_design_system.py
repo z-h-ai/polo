@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 BUNDLE = ROOT / 'docs/mvp-complete-flow-hifi'
-DESIGN = ROOT / '.agents/skills/polo-ai-design-system'
+DESIGN = ROOT / '.agents/skills/polo-client-design-system'
 
 
 def digest(path):
@@ -119,7 +119,7 @@ def main():
     selected = {}
     for row in model['component_contracts']:
         for item in row['consumers']:
-            check('owned consumer manifest', item['manifest'] == '.agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json')
+            check('owned consumer manifest', item['manifest'] == '.agents/skills/polo-client-design-system/assets/prototypes/client-entry/prototype-manifest.json')
             selected.setdefault(item['scene'], []).append(row['name'])
     check('consumer scenes and components', consumer['scenes'] == [dict(scene, components=selected[scene['id']]) for scene in manifest['scenes'] if scene['id'] in selected])
     check('all selected scenes exist', set(selected) <= set(by_scene))

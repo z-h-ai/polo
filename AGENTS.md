@@ -28,7 +28,7 @@
 
 - 安装与启动说明见 `README.md`，目录内的具体约定见上述开发指引。
 - 客户端产品规则见 `docs/client-journey-review/spec.md`；UI 任务读取
-  `.agents/skills/polo-ai-design-system/SKILL.md` 并核对适用范围与来源绑定。
+  `.agents/skills/polo-client-design-system/SKILL.md` 并核对适用范围与来源绑定。
 - 在最终 main 集成候选锁定验收之前、依赖设计素材的新任务锁定依据之前，调用项目设计系统 Skill 的维护入口（`references/usage-playbook.md`）。只读检查；过期才在候选修源再生。维护不自动提交、push、tag 或发版。
 - 按改动范围运行检查，分别报告代码检查、实际运行和产品验收结果。
 - 工具输入与结果属于协议数据，包含可执行 HTML、命令与文件地址；会话层不得为了显示而改写其中的路径或模型标识。路径缩短只用于展示副本，不进入持久化或事件载荷。存储便携化与有明确旧格式边界的读取迁移由会话存储层统一处理，不能靠前端猜路径或放宽主进程安全门恢复。

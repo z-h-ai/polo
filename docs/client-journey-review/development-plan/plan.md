@@ -12,7 +12,7 @@
 
 本批只做登录（密码/验证码）、手机号首次自动注册、首页、我的圈子、圈子详情及这些流程必需的受信读取/异常恢复/浏览器交接。暂缓管理技能页面和打开助手后的Polo助手内置应用代码；助手打开按钮仅保留已有入口/回调兼容。圈子技能可只读呈现，管理/启用/安装等本批不实现。其他现有Runtime/App/安全切换能力只复用和回归，不扩成POO-44/47/48/52/55/59—66/74—76历史卡的重新派发。浏览器公开加入/支付/创作者管理由POL-114，身份约定POL-112，跨端独立联调POL-174，包格式POL-175（参考，不以整卡Done阻塞本批编码）。
 
-适用项目设计 `.agents/skills/polo-ai-design-system/SKILL.md`（SHA256 4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2）；只消费有效确认，b82fa1e5风格与§13.9—13.13入口/文案方向已明确，具体布局/视觉仍待复看。复用当前Renderer而非历史助手转译代码；visual smoke不等于parity或生产Acceptance。F0在执行前校验来源/政策继承，不新增未经确认政策。
+适用项目设计 `.agents/skills/polo-client-design-system/SKILL.md`（SHA256 4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2）；只消费有效确认，b82fa1e5风格与§13.9—13.13入口/文案方向已明确，具体布局/视觉仍待复看。复用当前Renderer而非历史助手转译代码；visual smoke不等于parity或生产Acceptance。F0在执行前校验来源/政策继承，不新增未经确认政策。
 
 Status: draft（有上游的实现卡为awaiting-upstream-repin）；Readiness: scenario_defined；Reviewed/Accepted: 尚未由用户确认执行计划。普通工程解析可自主完成，产品/权限/资金/责任变化用具体例子和推荐方案请求裁决。高风险卡需要与最新Plan hash绑定的技术会签。不得把本次建卡、自检或原型检查写成execution_ready/function_accepted。
 

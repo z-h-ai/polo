@@ -738,7 +738,7 @@ r14 页面入口：统一原型中的「新版工作台 · 应用、技能、圈
 
 ### 13.14 默认浅色微透材质与前景合同（POO-105，2026-10-19）
 
-用户指出 Header 与整体背景经迭代后失去早期「一点点透明」的层次感，要求恢复页面整体的材质层次，登录页等页面一并整体考虑，三栏分布通过阴影与不同颜色保持层次。用户在与 `explore-r5` 方向「A · 原生轻透」的逐轮确认后表示「同意，$supa-ai 出 spec，出plan」，接受以下合同（权威确认摘录：`.agents/skills/polo-ai-design-system/references/poo105-confirmation.md`；固定参考快照：`assets/prototypes/poo105-materials/approved-r5.html`）。
+用户指出 Header 与整体背景经迭代后失去早期「一点点透明」的层次感，要求恢复页面整体的材质层次，登录页等页面一并整体考虑，三栏分布通过阴影与不同颜色保持层次。用户在与 `explore-r5` 方向「A · 原生轻透」的逐轮确认后表示「同意，$supa-ai 出 spec，出plan」，接受以下合同（权威确认摘录：`.agents/skills/polo-client-design-system/references/poo105-confirmation.md`；固定参考快照：`assets/prototypes/poo105-materials/approved-r5.html`）。
 
 - 作用域：默认浅色主题。深色、自定义/Scenic 与第三方 App 内部不套用浅色材质值；材质由显式作用域标记开启，未标记宿主保持既有不透明样式。
 - Header 与底板同层同色，不另设分层背景；此条在本作用域内替代 §13.9「主体滚离顶部后显示细线」与 §13.10 相关细线行为——材质作用域内任何滚动状态都不显示 Header 细线；细线规则只对非材质作用域保留。Header 右侧字体、图标、头像等前景不参与透明，保持可见性。

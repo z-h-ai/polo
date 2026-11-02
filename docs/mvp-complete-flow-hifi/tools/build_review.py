@@ -9,7 +9,7 @@ from pathlib import Path
 BUNDLE=Path(__file__).resolve().parents[1]
 ROOT=BUNDLE.parents[1]
 ASSISTANT=ROOT/'design-demos/polo-client-source-baseline'
-DESIGN=ROOT/'.agents/skills/polo-ai-design-system'
+DESIGN=ROOT/'.agents/skills/polo-client-design-system'
 def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def main():
  subprocess.run(['node',str(ASSISTANT/'tools/export-single-file.mjs')],check=True)
@@ -75,22 +75,22 @@ def main():
  for source in manifest['design']['sources']:
   if source['path']=='apps/electron/src/renderer/index.css':source['path']='docs/mvp-complete-flow-hifi/sources/renderer-index.css'
  for source in manifest['design']['sources']:
-  if source['path']=='.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css':source['sha256']=digest(ROOT/source['path'])
- header_source='.agents/skills/polo-ai-design-system/assets/components/workbench-header-scroll.js'
+  if source['path']=='.agents/skills/polo-client-design-system/assets/tokens/workbench-review.css':source['sha256']=digest(ROOT/source['path'])
+ header_source='.agents/skills/polo-client-design-system/assets/components/workbench-header-scroll.js'
  manifest['sources']=[x for x in manifest['sources'] if x['id']!='workbench-header-scroll']+[{'id':'workbench-header-scroll','path':header_source,'label':'顶部 Header 滚动分隔线共享行为','revision':exported['revision'],'sha256':digest(ROOT/header_source)}]
  for key in ['space-switch-sequence','space-switch-progress','circle-membership-feedback']:
-  path=f'.agents/skills/polo-ai-design-system/assets/components/{key}.js'
+  path=f'.agents/skills/polo-client-design-system/assets/components/{key}.js'
   manifest['sources']=[x for x in manifest['sources'] if x['id']!=key]+[{'id':key,'path':path,'label':'空间切换系统进度','revision':exported['revision'],'sha256':digest(ROOT/path)}]
  model=json.loads((DESIGN/'references/design-system.json').read_text())
  manifest['design']['sha256']=digest(ROOT/manifest['design']['skill_path'])
  manifest['design']['revision']=model['revision']
- manifest['design']['model_path']='.agents/skills/polo-ai-design-system/references/design-system.json'
+ manifest['design']['model_path']='.agents/skills/polo-client-design-system/references/design-system.json'
  manifest['design']['sources']=[{'path':s['path'],'sha256':s['sha256']} for s in model['sources']]
  for key,path,label in [
-  ('client-workbench-template','.agents/skills/polo-ai-design-system/references/client-workbench.template.html','客户端产品页面唯一维护模板'),
-  ('workbench-base-css','.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css','最新原型提升的 b82fa1e5 基础样式'),
-  ('client-design-model','.agents/skills/polo-ai-design-system/references/design-system.json','当前客户端设计模型'),
-  ('client-design-foundations','.agents/skills/polo-ai-design-system/references/foundations.md','当前客户端设计来源和消费边界')]:
+  ('client-workbench-template','.agents/skills/polo-client-design-system/references/client-workbench.template.html','客户端产品页面唯一维护模板'),
+  ('workbench-base-css','.agents/skills/polo-client-design-system/assets/tokens/workbench-base.css','最新原型提升的 b82fa1e5 基础样式'),
+  ('client-design-model','.agents/skills/polo-client-design-system/references/design-system.json','当前客户端设计模型'),
+  ('client-design-foundations','.agents/skills/polo-client-design-system/references/foundations.md','当前客户端设计来源和消费边界')]:
   manifest['sources']=[s for s in manifest['sources'] if s['id']!=key]+[{'id':key,'path':path,'label':label,'revision':model['revision'],'sha256':digest(ROOT/path)}]
  manifest['change']={'summary':'统一入口选择 MVP 或新助手；旧助手退为历史，兼容链接仍可到达。新增布局与状态待复看。','changed_scenes':sorted(ids),'removed_scenes':sorted(set(before)-ids)}
  manifest['summary']=['统一入口，两份产品表面。','助手源码是助手的唯一维护来源。','业务规则沿用已接受 Spec；新增布局待复看。']
@@ -106,7 +106,7 @@ def main():
    manifest['sources']=[x for x in manifest['sources'] if x['id']!='workbench-r14-review']+[{'id':'workbench-r14-review','path':str(review_path.relative_to(ROOT)),'label':'工作台与全端 UI/UX 复看范围（派生摘要）','revision':closure['revision'],'sha256':digest(review_path)}]
   manifest['review']=closure;manifest['revision']=closure['revision'];manifest['change']=closure_change;manifest['summary']=[closure_change['summary']]
  for source in manifest['sources']:
-  if source['path'] in ['docs/client-journey-review/spec.md','.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css']:source['sha256']=digest(ROOT/source['path'])
+  if source['path'] in ['docs/client-journey-review/spec.md','.agents/skills/polo-client-design-system/assets/tokens/workbench-review.css']:source['sha256']=digest(ROOT/source['path'])
  encoded=json.dumps(manifest,ensure_ascii=False,separators=(',',':')).replace('</','<\\/')
  (BUNDLE/'prototype-manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
  # Legacy docs entry remains the only runnable MVP export. This Skill-owned
@@ -128,14 +128,14 @@ def main():
  cp.write_text(json.dumps(consumer_manifest,ensure_ascii=False,indent=2)+'\n')
  # Compatibility model is derived; references/design-system.json is canonical.
  (BUNDLE/'design-system.adoption.json').write_text(json.dumps(model,ensure_ascii=False,indent=2)+'\n')
- sequence_path='.agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js'
+ sequence_path='.agents/skills/polo-client-design-system/assets/components/space-switch-sequence.js'
  review=(BUNDLE/'tools/review-shell.html').read_text().replace('__MANIFEST__',encoded)
  review=review.replace('__SPACE_SWITCH_SEQUENCE__',(ROOT/sequence_path).read_text())
  (BUNDLE/'review.html').write_text(review)
  product=(DESIGN/'references/client-workbench.template.html').read_text()
  if product.count('__WORKBENCH_BASE_CSS__')!=1:raise ValueError('Expected one maintained base style marker')
  product=product.replace('__WORKBENCH_BASE_CSS__',(DESIGN/'assets/tokens/workbench-base.css').read_text())
- shared_style=ROOT/'.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css'
+ shared_style=ROOT/'.agents/skills/polo-client-design-system/assets/tokens/workbench-review.css'
  product=re.sub(r'<style id="workbench-review-style">[\s\S]*?</style>','',product)
  product=product.replace('</head>','<style id="workbench-review-style">'+shared_style.read_text()+'</style></head>')
  product=re.sub(r'<script data-product-script="workbench-header-scroll">[\s\S]*?</script>','',product)
@@ -148,7 +148,7 @@ def main():
 
  for script_name in ['space-switch-sequence','space-switch-progress','circle-membership-feedback']:
   product=re.sub(r'<script data-product-script="'+script_name+r'">[\s\S]*?</script>','',product)
-  script=(ROOT/'.agents/skills/polo-ai-design-system/assets/components'/f'{script_name}.js').read_text()
+  script=(ROOT/'.agents/skills/polo-client-design-system/assets/components'/f'{script_name}.js').read_text()
   product=product.replace('</body>','<script data-product-script="'+script_name+'">'+script+'</script></body>')
 
  # Scene roots are emitted on separate lines by the established MVP authoring path.

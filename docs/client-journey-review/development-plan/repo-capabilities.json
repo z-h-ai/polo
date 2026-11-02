@@ -25,7 +25,7 @@
       "scope": "apps/electron/src",
       "sources": [
         {
-          "path": ".agents/skills/polo-ai-design-system/SKILL.md",
+          "path": ".agents/skills/polo-client-design-system/SKILL.md",
           "sha256": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
           "role": "authority"
         }
@@ -39,7 +39,7 @@
       "scope": "apps/electron/src",
       "sources": [
         {
-          "path": ".agents/skills/polo-ai-design-system/SKILL.md",
+          "path": ".agents/skills/polo-client-design-system/SKILL.md",
           "sha256": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
           "role": "authority"
         },

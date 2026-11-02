@@ -19,6 +19,10 @@ interface CanvasEntry {
   poppedOut: boolean
   visible: boolean
   mountedIn: BrowserWindow | null
+  /** POO-198: last sidebar bounds — the view re-attaches there after yielding to window DOM. */
+  embedBounds: BrowserEmbedBounds | null
+  /** POO-198: off the window because window DOM covers the sidebar (not because the sidebar let it go). */
+  embedOccluded: boolean
   ready: Promise<void>
   cleanupHost: () => void
   scope: { token: TrustedSessionScopeToken | null; epoch: number; generation: number; fence: number }
@@ -67,6 +71,20 @@ export class CanvasPopupManager {
     if (entry.mountedIn && !entry.mountedIn.isDestroyed()) entry.mountedIn.removeBrowserView(entry.view)
     entry.mountedIn = null
   }
+  /** Clamp a sidebar bounds report and remember it for occlusion restores (POO-198). */
+  private placeEmbeddedView(entry: CanvasEntry, bounds: BrowserEmbedBounds): void {
+    const placed = { x: Math.max(0, Math.round(bounds.x)), y: Math.max(0, Math.round(bounds.y)), width: Math.max(1, Math.round(bounds.width)), height: Math.max(1, Math.round(bounds.height)) }
+    entry.embedBounds = placed
+    entry.view.setBounds(placed)
+  }
+  /** Mount into the sidebar host — unless window DOM currently covers the pane (POO-198). */
+  private mountEmbedded(entry: CanvasEntry, target: BrowserWindow): void {
+    this.mount(entry, target)
+    if (target === entry.host && this.occludedEmbedHosts.has(target)) {
+      entry.embedOccluded = true
+      this.unmount(entry)
+    }
+  }
   async embed(sessionId: string, app_: CanvasPaneApp, host: BrowserWindow, workspaceId: string | null | undefined, bounds: BrowserEmbedBounds): Promise<void> {
     let entry = this.assertOwner(sessionId, host.webContents.id, workspaceId)
     if (entry && (entry.app.appId !== app_.appId || entry.app.indexPath !== app_.indexPath)) {
@@ -78,7 +96,7 @@ export class CanvasPopupManager {
       const scope = { token, epoch: getAccountTransitionEpoch(), generation: getTrustedAccountGeneration(), fence: getRuntimeFenceGeneration() }
       if (!this.scopeCurrent(scope)) throw new Error('Canvas scope is unavailable')
       const view = new BrowserView({ webPreferences: { preload: join(__dirname, 'bootstrap-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false, webviewTag: true } })
-      entry = { view, host, popup: null, app: app_, workspaceId: workspaceId ?? null, poppedOut: false, visible: true, mountedIn: null, scope, ready: Promise.resolve(), cleanupHost: () => {} }
+      entry = { view, host, popup: null, app: app_, workspaceId: workspaceId ?? null, poppedOut: false, visible: true, mountedIn: null, embedBounds: null, embedOccluded: false, scope, ready: Promise.resolve(), cleanupHost: () => {} }
       this.popouts.set(sessionId, entry)
       registerGenUiCarrier(view.webContents.id, sessionId)
       this.windowManager?.registerAuxRenderer(view.webContents.id, host, entry.workspaceId)
@@ -105,8 +123,10 @@ export class CanvasPopupManager {
       })
     }
     if (entry.poppedOut) return
-    this.mount(entry, host)
-    entry.view.setBounds({ x: Math.max(0, Math.round(bounds.x)), y: Math.max(0, Math.round(bounds.y)), width: Math.max(1, Math.round(bounds.width)), height: Math.max(1, Math.round(bounds.height)) })
+    // A canvas opening while window DOM covers the sidebar waits it out too
+    // (POO-198) — otherwise the fresh view would cover the very overlay.
+    this.mountEmbedded(entry, host)
+    this.placeEmbeddedView(entry, bounds)
     entry.visible = true
     this.emit(sessionId, entry)
     await entry.ready
@@ -115,8 +135,38 @@ export class CanvasPopupManager {
   unembed(sessionId: string): void {
     const entry = this.popouts.get(sessionId)
     if (!entry || entry.poppedOut) return
+    // The sidebar container is gone for its own reasons — an in-flight window
+    // occlusion must not bring this view back on its own (POO-198).
+    entry.embedOccluded = false
     this.unmount(entry)
   }
+  /**
+   * POO-198: the sidebar's canvas is a native view composited above the window
+   * DOM, so a fullscreen overlay / modal scrim can never paint over it from the
+   * renderer. While window DOM covers the pane, the view leaves the window;
+   * when the DOM clears it comes back at its last sidebar bounds. Popped-out
+   * canvases live in their own window and are never touched, and a canvas the
+   * sidebar let go on purpose (unembed) stays gone.
+   */
+  setEmbedOcclusion(hostWindow: BrowserWindow, occluded: boolean): void {
+    if (occluded) this.occludedEmbedHosts.add(hostWindow)
+    else this.occludedEmbedHosts.delete(hostWindow)
+    for (const entry of this.popouts.values()) {
+      if (entry.poppedOut) continue
+      if (occluded) {
+        if (entry.mountedIn !== hostWindow) continue
+        entry.embedOccluded = true
+        this.unmount(entry)
+      } else {
+        if (!entry.embedOccluded) continue
+        entry.embedOccluded = false
+        this.mount(entry, entry.host)
+        if (entry.embedBounds) entry.view.setBounds(entry.embedBounds)
+      }
+    }
+  }
+  /** POO-198: windows whose sidebar DOM is currently covering its native views. */
+  private occludedEmbedHosts = new WeakSet<BrowserWindow>()
   detachToPopup(sessionId: string, _app?: CanvasPaneApp, _workspaceId?: string | null): void {
     const entry = this.popouts.get(sessionId)
     if (!entry) throw new Error('Open the canvas before detaching it')
@@ -124,7 +174,7 @@ export class CanvasPopupManager {
     // Construct before moving the carrier: a failed popup leaves the sidebar intact.
     const popup = new BrowserWindow({ width: 880, height: 720, minWidth: 480, minHeight: 360, show: false, title: entry.app.title, backgroundColor: nativeTheme.shouldUseDarkColors ? '#2b292e' : '#fafafb', autoHideMenuBar: true })
     const layout = () => { const [width, height] = popup.getContentSize(); entry.view.setBounds({ x: 0, y: 0, width, height }) }
-    try { this.mount(entry, popup); layout() } catch (error) { popup.destroy(); this.mount(entry, entry.host); throw error }
+    try { this.mount(entry, popup); layout() } catch (error) { popup.destroy(); this.mountEmbedded(entry, entry.host); throw error }
     entry.popup = popup
     entry.poppedOut = true
     entry.visible = true

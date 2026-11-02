@@ -559,6 +559,10 @@ export const RPC_CHANNELS = {
     // (tab switch / narrow viewport / session switch / hide) so it cannot
     // cover window content; re-attaches on the next valid bounds report.
     UNEMBED: 'browser-pane:unembed',
+    // POO-198: a native view composites above the window DOM, so while an
+    // overlay must paint over the sidebar (fullscreen preview, modal scrim)
+    // the embedded views leave the window and come back when the DOM clears.
+    SET_EMBED_OCCLUSION: 'browser-pane:set-embed-occlusion',
     SET_ELEMENT_PICKING: 'browser-pane:set-element-picking',
     STATE_CHANGED: 'browser-pane:state-changed',
     REMOVED: 'browser-pane:removed',
@@ -576,6 +580,8 @@ export const RPC_CHANNELS = {
   canvasPane: {
     EMBED: 'canvas-pane:embed',
     UNEMBED: 'canvas-pane:unembed',
+    // POO-198: same yield-to-window-DOM rule as the browser pane's channel.
+    SET_EMBED_OCCLUSION: 'canvas-pane:set-embed-occlusion',
     HIDE: 'canvas-pane:hide',
     DESTROY: 'canvas-pane:destroy',
     RELEASE: 'canvas-pane:release',

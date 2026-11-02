@@ -1613,6 +1613,13 @@ export interface ElectronAPI {
      * valid setEmbedBounds.
      */
     unembed(id: string): Promise<void>
+    /**
+     * POO-198: window DOM is covering (or has cleared from) this window's
+     * sidebar — every view embedded there leaves the window in Main and comes
+     * back at its last reported bounds. A native view always composites above
+     * the renderer DOM, so this is the only way overlays can paint over it.
+     */
+    setEmbedOcclusion(occluded: boolean): Promise<void>
     /** POO-135: toggle the in-page element picker for an instance. */
     setElementPicking(id: string, active: boolean, options?: { targetSessionId?: string | null }): Promise<void>
     emptyStateLaunch(payload: BrowserEmptyStateLaunchPayload): Promise<BrowserEmptyStateLaunchResult>
@@ -1635,6 +1642,8 @@ export interface ElectronAPI {
   canvasPane: {
     embed(sessionId: string, app: CanvasPaneApp, bounds: BrowserEmbedBounds): Promise<void>
     unembed(sessionId: string): Promise<void>
+    /** POO-198: window DOM covers (or has cleared from) this window's sidebar. */
+    setEmbedOcclusion(occluded: boolean): Promise<void>
     hide(sessionId: string): Promise<void>
     destroy(sessionId: string): Promise<void>
     release(): Promise<void>

@@ -8,8 +8,8 @@ import { describe, expect, it, mock } from 'bun:test'
 mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
 const indexCss = (await import('../index.css?raw')).default
 const mainTsx = (await import('../main.tsx?raw')).default
-const base = (await import('../../../../../.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css?raw')).default
-const review = (await import('../../../../../.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css?raw')).default
+const base = (await import('../../../../../.agents/skills/polo-client-design-system/assets/tokens/workbench-base.css?raw')).default
+const review = (await import('../../../../../.agents/skills/polo-client-design-system/assets/tokens/workbench-review.css?raw')).default
 const { createClientWorkbenchStyle } = await import('../lib/client-workbench-style')
 
 describe('reduced-motion fallback in the renderer stylesheet', () => {

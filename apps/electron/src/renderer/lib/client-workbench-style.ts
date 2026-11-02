@@ -1,6 +1,6 @@
 import { useLayoutEffect, type CSSProperties } from 'react'
-import baseCss from '../../../../../.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css?raw'
-import reviewCss from '../../../../../.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css?raw'
+import baseCss from '../../../../../.agents/skills/polo-client-design-system/assets/tokens/workbench-base.css?raw'
+import reviewCss from '../../../../../.agents/skills/polo-client-design-system/assets/tokens/workbench-review.css?raw'
 import { useOptionalTheme } from '@/context/ThemeContext'
 
 export type WorkbenchStyle = CSSProperties & Record<`--${string}`, string>

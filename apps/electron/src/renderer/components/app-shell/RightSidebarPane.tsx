@@ -24,6 +24,14 @@ import { OptionSelect } from '@polo-ai/ui/ui/option-select'
  * (spec suggested behavior 4). Narrow viewports keep the existing compact
  * single-column rule (the whole right sidebar, canvas included, is hidden by
  * AppShell's isAutoCompact).
+ *
+ * POO-198 layering: the pane's guest surfaces are native views composited
+ * above this window's DOM, so overlays painted over the pane (fullscreen
+ * previews, scrims, dropdowns) would lose to them — useNativePaneOcclusion
+ * has those views leave the window while DOM covers the pane. The root itself
+ * carries `z-panel`: same panel level as PanelStackContainer and the global
+ * settings surface, so the pane is never under conversation spill by DOM
+ * paint order either (higher-level portals and later siblings still win).
  */
 
 import { MIN_CHAT_WIDTH } from "./right-pane-layout"
@@ -70,6 +78,7 @@ import {
   sidebarBrowserOpenAtom,
 } from '@/atoms/sidebar-browser'
 import { useRightPanePresentation } from '@/hooks/use-right-pane-presentation'
+import { useNativePaneOcclusion } from '@/hooks/use-native-pane-occlusion'
 import { sessionMetaMapAtom } from '@/atoms/sessions'
 
 /** Fallback width-atom key when only the browser slot is open (no session canvas key). */
@@ -216,10 +225,15 @@ export function RightSidebarPane({
     setWidthRatio(clampCanvasPaneRatio(widthRatio + step))
   }, [setWidthRatio, widthRatio])
 
+  // The pane's guest surfaces are native views above this window's DOM, so a
+  // fullscreen overlay or a scrim painted over the pane would lose to them.
+  // While DOM covers the pane they leave the window (POO-198, see the hook).
+  useNativePaneOcclusion(rootRef, paneVisible)
+
   return (
     <motion.div
       ref={rootRef}
-      className="relative flex items-stretch shrink-0"
+      className="relative z-panel flex items-stretch shrink-0"
       initial={{ width: '0%' }}
       animate={{ width: paneVisible ? `${widthRatio * 100}%` : '0%' }}
       style={{ visibility: paneVisible ? undefined : 'hidden', overflow: paneVisible ? undefined : 'hidden', maxWidth: paneVisible ? `calc(100% - ${MIN_CHAT_WIDTH}px)` : undefined }}
@@ -675,6 +689,9 @@ function EmbeddedBrowserContainer({ instanceId }: { instanceId: string }) {
       <div
         ref={containerRef}
         data-testid="sidebar-browser-embedded-container"
+        // POO-198: marks the DOM placeholder a native view composites over —
+        // useNativePaneOcclusion probes exactly these rects.
+        data-native-surface="true"
         className="h-full w-full rounded-[6px] border border-border bg-surface"
       />
     </div>
