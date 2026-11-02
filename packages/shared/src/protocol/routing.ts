@@ -260,6 +260,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.browserPane.DETACH_TO_POPUP,
   RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS,
   RPC_CHANNELS.browserPane.UNEMBED,
+  // POO-198 — sidebar native views yield to window DOM (local view operation)
+  RPC_CHANNELS.browserPane.SET_EMBED_OCCLUSION,
   RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING,
   RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT,
 
@@ -267,6 +269,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // is local to this desktop; nothing here is workspace-server routable
   RPC_CHANNELS.canvasPane.EMBED,
   RPC_CHANNELS.canvasPane.UNEMBED,
+  // POO-198 — sidebar native views yield to window DOM (local view operation)
+  RPC_CHANNELS.canvasPane.SET_EMBED_OCCLUSION,
   RPC_CHANNELS.canvasPane.HIDE,
   RPC_CHANNELS.canvasPane.DESTROY,
   RPC_CHANNELS.canvasPane.RELEASE,

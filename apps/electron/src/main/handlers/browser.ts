@@ -29,6 +29,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.DETACH_TO_POPUP,
   RPC_CHANNELS.browserPane.SET_EMBED_BOUNDS,
   RPC_CHANNELS.browserPane.UNEMBED,
+  RPC_CHANNELS.browserPane.SET_EMBED_OCCLUSION,
   RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING,
 ] as const
 
@@ -151,6 +152,14 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
     const hostWindow = resolveHostWindow(ctx.webContentsId)
     if (!hostWindow) return
     browserPaneManager.unembedInstance(id)
+  })
+
+  // POO-198: window DOM is about to cover (or has cleared from) this window's
+  // sidebar — the embedded native views yield and come back in Main.
+  server.handle(RPC_CHANNELS.browserPane.SET_EMBED_OCCLUSION, (ctx, occluded: boolean) => {
+    const hostWindow = resolveHostWindow(ctx.webContentsId)
+    if (!hostWindow) return
+    browserPaneManager.setEmbedOcclusion(hostWindow, occluded)
   })
 
   server.handle(RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING, async (_ctx, id: string, active: boolean, options?: { targetSessionId?: string | null }) => {

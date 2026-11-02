@@ -411,6 +411,19 @@ interface BrowserInstance {
    * valid bounds report.
    */
   embeddedViewsAttached: boolean
+  /**
+   * POO-198: the bounds the sidebar last reported for the embedded view. The
+   * view is detached while window DOM must paint over the sidebar (fullscreen
+   * overlays, modal scrims — a native view always composites above DOM), and
+   * these bounds put it back exactly where the sidebar had it.
+   */
+  lastEmbedBounds: BrowserEmbedBounds | null
+  /**
+   * POO-198: the view is off the window because window DOM must paint over the
+   * sidebar (not because the sidebar container unmounted) — only such a view
+   * may be brought back when the DOM clears.
+   */
+  embedOccluded: boolean
   /** POO-135: whether the in-page element picker is armed on the page. */
   elementPicking: boolean
   /** POO-135: chat session the armed picker will target (renderer-declared). */
@@ -590,6 +603,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   private lastNetworkActivityByWebContentsId = new Map<number, number>()
   private popupWindowsByParentInstanceId = new Map<string, Set<BrowserWindow>>()
   private popupParentByWebContentsId = new Map<number, string>()
+  /** POO-198: windows whose sidebar DOM is currently covering its native views. */
+  private occludedEmbedWindows = new WeakSet<BrowserWindow>()
   private windowManager: WindowManager | null = null
   private sessionPathResolver: ((sessionId: string) => string | null) | null = null
   private sessionNameResolver: ((sessionId: string) => string | null) | null = null
@@ -789,6 +804,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       sidebarHostWindow: null,
       embeddedHostWindow: null,
       embeddedViewsAttached: false,
+      lastEmbedBounds: null,
+      embedOccluded: false,
       elementPicking: false,
       elementPickingTargetSessionId: null,
     }
@@ -1260,7 +1277,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     if (instance.hostMode === 'embedded') {
       if (instance.embeddedHostWindow === hostWindow) {
-        if (bounds) this.applyEmbedBounds(instance, bounds)
+        if (bounds) {
+          instance.lastEmbedBounds = bounds
+          this.applyEmbedBounds(instance, bounds)
+        }
         return
       }
       try {
@@ -1290,7 +1310,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     if (!instance.window.isDestroyed() && instance.window.isVisible()) {
       instance.window.hide()
     }
-    if (bounds) this.applyEmbedBounds(instance, bounds)
+    if (bounds) {
+      instance.lastEmbedBounds = bounds
+      this.applyEmbedBounds(instance, bounds)
+    }
+    // An embed landing while window DOM covers the sidebar waits it out too
+    // (POO-198) — otherwise the fresh view would cover the very overlay.
+    if (this.occludedEmbedWindows.has(hostWindow)) {
+      instance.embedOccluded = true
+      this.detachEmbedView(instance)
+    }
     mainLog.info(`[browser-pane] embedded into sidebar id=${id}`)
     this.emitStateChange(instance)
   }
@@ -1351,11 +1380,14 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       return
     }
     // Re-attach implicitly: the sidebar container remounted after an unembed.
+    // While window DOM covers the sidebar the view stays off (POO-198) — only
+    // the bounds are recorded for the later restore.
     const host = instance.embeddedHostWindow
-    if (!instance.embeddedViewsAttached && host && !host.isDestroyed()) {
+    if (!instance.embeddedViewsAttached && !instance.embedOccluded && host && !host.isDestroyed()) {
       host.addBrowserView(instance.pageView)
       instance.embeddedViewsAttached = true
     }
+    instance.lastEmbedBounds = bounds
     this.applyEmbedBounds(instance, bounds)
   }
 
@@ -1369,16 +1401,64 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   unembedInstance(id: string): void {
     const instance = this.instances.get(id)
     if (!instance || instance.hostMode !== 'embedded' || !instance.embeddedViewsAttached) return
+    // The sidebar container is gone for its own reasons — an in-flight window
+    // occlusion must not bring this view back on its own (POO-198).
+    instance.embedOccluded = false
+    this.detachEmbedView(instance)
+  }
+
+  /**
+   * POO-198: window DOM must paint over the sidebar's native view for a while
+   * (fullscreen overlays, modal scrims, a dropdown crossing the pane). A
+   * native view always composites above the renderer's DOM, so no z-index can
+   * put those surfaces in front — the only fix is to take the view off the
+   * window and put it back when the DOM clears. Detaching (not resizing to
+   * zero) keeps a mid-flight scroll transfer from re-flushing real bounds
+   * under the overlay, and reuses the POO-135 r1 detach path unchanged.
+   *
+   * Only views this method itself detached come back: a view detached because
+   * its sidebar container unmounted (unembed) stays off until that container
+   * reports bounds again.
+   */
+  setEmbedOcclusion(hostWindow: BrowserWindow, occluded: boolean): void {
+    if (occluded) this.occludedEmbedWindows.add(hostWindow)
+    else this.occludedEmbedWindows.delete(hostWindow)
+    for (const instance of this.instances.values()) {
+      if (instance.hostMode !== 'embedded' || instance.embeddedHostWindow !== hostWindow) continue
+      if (occluded) {
+        if (!instance.embeddedViewsAttached) continue
+        instance.embedOccluded = true
+        this.detachEmbedView(instance)
+      } else {
+        this.restoreEmbedInstance(instance)
+      }
+    }
+  }
+
+  /** Undo a POO-198 occlusion detach: back at the sidebar's last bounds. */
+  private restoreEmbedInstance(instance: BrowserInstance): void {
+    if (!instance.embedOccluded || instance.hostMode !== 'embedded') return
+    instance.embedOccluded = false
+    const host = instance.embeddedHostWindow
+    if (!host || host.isDestroyed()) return
+    host.addBrowserView(instance.pageView)
+    instance.embeddedViewsAttached = true
+    if (instance.lastEmbedBounds) this.applyEmbedBounds(instance, instance.lastEmbedBounds)
+    mainLog.info(`[browser-pane] re-embedded into sidebar id=${instance.id}`)
+  }
+
+  /** Take the embedded view off the host window without leaving embedded mode. */
+  private detachEmbedView(instance: BrowserInstance): void {
     const host = instance.embeddedHostWindow
     if (host && !host.isDestroyed()) {
       try {
         host.removeBrowserView(instance.pageView)
       } catch (error) {
-        mainLog.warn(`[browser-pane] unembed remove failed id=${id}: ${error instanceof Error ? error.message : String(error)}`)
+        mainLog.warn(`[browser-pane] unembed remove failed id=${instance.id}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
     instance.embeddedViewsAttached = false
-    mainLog.info(`[browser-pane] unembedded from sidebar id=${id}`)
+    mainLog.info(`[browser-pane] unembedded from sidebar id=${instance.id}`)
   }
 
   private applyEmbedBounds(instance: BrowserInstance, bounds: BrowserEmbedBounds): void {
