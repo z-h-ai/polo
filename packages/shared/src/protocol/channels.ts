@@ -455,6 +455,18 @@ export const RPC_CHANNELS = {
     SEARCH_ASSETS: 'pc:searchAssets',
     REBUILD: 'pc:rebuild',
   },
+  // Enterprise project members (POO-196 追加轮): the account-scoped create and
+  // create-receipt commands plus the committed-space roster/invitation reads.
+  // Every channel is LOCAL_ONLY (see routing.ts) and carries coded errors;
+  // none of them is exposed as an agent tool — membership stays an admin
+  // authority (adjudication D-A/D-C).
+  projectMembers: {
+    CREATE_ENTERPRISE: 'pm:createEnterprise',
+    QUERY_CREATE_RECEIPT: 'pm:queryCreateReceipt',
+    LIST_MEMBERS: 'pm:listMembers',
+    LIST_INVITATIONS: 'pm:listInvitations',
+    CREATE_INVITATION: 'pm:createInvitation',
+  },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',
     INSTALL: 'creatorSkills:install',

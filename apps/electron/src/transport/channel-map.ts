@@ -403,6 +403,18 @@ export const CHANNEL_MAP = {
   pcSearchAssets: invokeCoded(RPC_CHANNELS.projectContext.SEARCH_ASSETS),
   pcRebuild: invokeCoded(RPC_CHANNELS.projectContext.REBUILD),
 
+  // Enterprise project members (POO-196 追加轮). codedErrors for the same
+  // reason as the pc block: the renderer's recovery copy branches on the
+  // stable contract codes (phone_verification_required,
+  // account_enterprise_exists, forbidden …) which the context bridge would
+  // otherwise erase. No transfer URL and no invitation link ever rides the
+  // channel map — links live in the renderer's dialog state only.
+  pmCreateEnterprise: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_ENTERPRISE),
+  pmQueryCreateReceipt: invokeCoded(RPC_CHANNELS.projectMembers.QUERY_CREATE_RECEIPT),
+  pmListProjectMembers: invokeCoded(RPC_CHANNELS.projectMembers.LIST_MEMBERS),
+  pmListProjectInvitations: invokeCoded(RPC_CHANNELS.projectMembers.LIST_INVITATIONS),
+  pmCreateProjectInvitation: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_INVITATION),
+
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
   reorderStatuses: invoke(RPC_CHANNELS.statuses.REORDER),

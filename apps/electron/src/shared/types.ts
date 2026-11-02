@@ -1481,6 +1481,16 @@ export interface ElectronAPI {
   pcSearchAssets(input: import('@polo-ai/shared/protocol').PcSearchAssetsInput): Promise<import('@polo-ai/shared/protocol').PcSearchResponse>
   pcRebuild(input: import('@polo-ai/shared/protocol').PcRebuildInput): Promise<import('@polo-ai/shared/protocol').PcRebuildResponse>
 
+  // Enterprise project members (POO-196 追加轮). The create commands are
+  // account-scoped (reachable from the personal space); the roster and
+  // invitation commands are committed-space scoped and polo-admin decides
+  // owner/manager authority.
+  pmCreateEnterprise(input: import('@polo-ai/shared/protocol').PmCreateEnterpriseInput): Promise<import('@polo-ai/shared/protocol').ClientCreateEnterpriseResponse>
+  pmQueryCreateReceipt(input: import('@polo-ai/shared/protocol').PmQueryCreateReceiptInput): Promise<import('@polo-ai/shared/protocol').ClientCreateReceipt>
+  pmListProjectMembers(input: import('@polo-ai/shared/protocol').PmListMembersInput): Promise<import('@polo-ai/shared/protocol').ClientMemberRosterResponse>
+  pmListProjectInvitations(input: import('@polo-ai/shared/protocol').PmListInvitationsInput): Promise<import('@polo-ai/shared/protocol').ClientInvitationListResponse>
+  pmCreateProjectInvitation(input: import('@polo-ai/shared/protocol').PmCreateInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientCreateInvitationResponse>
+
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@polo-ai/shared/statuses').StatusConfig[]>
   reorderStatuses(workspaceId: string, orderedIds: string[]): Promise<void>

@@ -15,6 +15,17 @@ import { toBridgeCarriableError } from '../../src/shared/rpc-error-bridge'
 
 const invoke = (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args)
 
+/** Strips Electron's invoke-rejection prefix and re-carries the embedded
+ * polo-rpc-code marker exactly as the production preload bridge does. */
+const reCarryCoded = (error: unknown): unknown => {
+  const raw = String((error as Error)?.message ?? '')
+  const idx = raw.indexOf('polo-rpc-code:')
+  if (idx >= 0) {
+    return toBridgeCarriableError(new Error(raw.slice(idx)))
+  }
+  return toBridgeCarriableError(error)
+}
+
 const listen = (name: string) => (cb: (...args: unknown[]) => void) => {
   const h = (_: unknown, ...args: unknown[]) => cb(...args)
   ipcRenderer.on(name, h)
@@ -28,6 +39,12 @@ const pcMethods = [
   'pcDownloadAsset', 'pcGetPreviewUrl', 'pcReadAsset', 'pcSearchAssets', 'pcRebuild',
 ]
 
+// POO-196 追加轮 project-members channels (same coded-error bridge as pc*).
+const pmMethods = [
+  'pmCreateEnterprise', 'pmQueryCreateReceipt', 'pmListProjectMembers',
+  'pmListProjectInvitations', 'pmCreateProjectInvitation',
+]
+
 // Fixture-owned answers (login state / workspace config boundaries).
 const fixtureMethods = [
   'getSessionMessages', 'getSessions', 'getSession', 'sessionCommand', 'searchFiles',
@@ -37,6 +54,9 @@ const fixtureMethods = [
   'generateThumbnail', 'cancelProcessing', 'getFilePath', 'showInFolder',
   'kbListCollections', 'kbSetSessionCollections', 'adminPaymentHandoff',
   'getWindowFocusState',
+  // The refresh handover the create-project dialog awaits (created space
+  // materializes in the fixture store AFTER pmCreateEnterprise succeeds).
+  'productSpaceList',
 ]
 
 // Neutral answers for the rest of the renderer-used electronAPI surface.
@@ -65,7 +85,7 @@ const neutralMethods = [
   'organizationList', 'getRichToolDescriptions', 'setRichToolDescriptions',
   'setDraft', 'setHomeQuickAccess', 'readFile', 'readFileDataUrl', 'readFilePreviewDataUrl',
   'readUserAttachment', 'readWorkspaceImage', 'writeWorkspaceImage', 'storeAttachment',
-  'invokeOnServer', 'productSpaceList', 'productSpaceGetCatalog',
+  'invokeOnServer', 'productSpaceGetCatalog',
 ]
 
 // Event subscribers: never fire unless the orchestrator emits, always return
@@ -97,12 +117,16 @@ for (const method of pcMethods) {
     try {
       return await invoke('fixture-pc', method, input)
     } catch (error) {
-      const raw = String((error as Error)?.message ?? '')
-      const idx = raw.indexOf('polo-rpc-code:')
-      if (idx >= 0) {
-        throw toBridgeCarriableError(new Error(raw.slice(idx)))
-      }
-      throw toBridgeCarriableError(error)
+      throw reCarryCoded(error)
+    }
+  }
+}
+for (const method of pmMethods) {
+  api[method] = async (input: unknown) => {
+    try {
+      return await invoke('fixture-pm', method, input)
+    } catch (error) {
+      throw reCarryCoded(error)
     }
   }
 }

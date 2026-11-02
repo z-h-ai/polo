@@ -1,10 +1,11 @@
 import { WorkbenchMenuSubContent } from '@/components/ui/workbench-controls'
-import { Check, Building2 } from 'lucide-react'
+import { Check, Building2, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   DropdownMenuSub,
   StyledDropdownMenuSubTrigger,
   StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
 } from '@/components/ui/styled-dropdown'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { cn } from '@/lib/utils'
@@ -82,6 +83,25 @@ export function ProductSpaceSwitcher() {
             </StyledDropdownMenuItem>
           )
         })}
+        {/* POO-196 追加轮 D-D 1: the create + refresh entries close the
+            account/space menu. Personal-only accounts reach create exactly
+            here — never behind the multi-space select screen — and refresh
+            is the visible re-read after accepting an invite elsewhere. */}
+        <StyledDropdownMenuSeparator />
+        <StyledDropdownMenuItem
+          data-testid="product-space-create-project"
+          onClick={() => space.onOpenCreateProject?.()}
+        >
+          <Building2 className="size-3.5" />
+          {t('createProject.menuAction')}
+        </StyledDropdownMenuItem>
+        <StyledDropdownMenuItem
+          data-testid="product-space-refresh"
+          onClick={() => { void space.onRefreshProductSpaces() }}
+        >
+          <RefreshCw className="size-3.5" />
+          {t('createProject.refreshAction')}
+        </StyledDropdownMenuItem>
       </WorkbenchMenuSubContent>
     </DropdownMenuSub>
   )

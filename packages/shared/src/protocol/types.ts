@@ -11,6 +11,12 @@ import {
 } from './local-apps'
 import { KB_ERROR_CODES, type KbErrorCode } from './knowledge-base'
 import { PC_ERROR_CODES, PC_LOCAL_ERROR_CODES, type PcErrorCode } from './project-context'
+import {
+  CLIENT_ENTERPRISE_ERROR_CODES,
+  PM_LOCAL_ERROR_CODES,
+  type ClientEnterpriseErrorCode,
+  type PmLocalErrorCode,
+} from './project-members'
 
 // ---------------------------------------------------------------------------
 // Message envelope
@@ -102,6 +108,8 @@ export type ErrorCode =
   | LocalAppErrorCode
   | KbErrorCode
   | PcErrorCode
+  | ClientEnterpriseErrorCode
+  | PmLocalErrorCode
 
 /**
  * Every code the transport preserves across the wire. This set MUST stay in
@@ -144,6 +152,17 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   // rewrite it to HANDLER_ERROR or the renderer's recovery copy loses the
   // "enterprise project required" distinction.
   ...PC_LOCAL_ERROR_CODES,
+  // ClientEnterpriseErrorCode (POO-196 追加轮): the project-members channels
+  // surface the generated contract's stable codes (phone_verification_required,
+  // account_enterprise_exists, target_already_member, …). The admin client's
+  // alias table still normalizes seven of them to legacy uppercase spellings
+  // and server-core maps those back — both spellings must survive the
+  // transport, or the renderer's recovery copy collapses to a generic failure.
+  ...CLIENT_ENTERPRISE_ERROR_CODES,
+  // PmLocalErrorCode (POO-196 追加轮): raised at the trusted side's own gate
+  // (personal space, signed out, scope moved mid-command) so the renderer can
+  // tell "no project here" and "switching accounts" apart from a down service.
+  ...PM_LOCAL_ERROR_CODES,
 ])
 
 export function isErrorCode(value: unknown): value is ErrorCode {

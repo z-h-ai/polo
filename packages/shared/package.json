@@ -126,6 +126,7 @@
     "./task-events": "./src/task-events/index.ts",
     "./protocol": "./src/protocol/index.ts",
     "./admin/project-context-contract": "./src/admin/project-context-contract.ts",
+    "./admin/client-enterprise-contract": "./src/admin/client-enterprise-contract.ts",
     "./i18n": "./src/i18n/index.ts",
     "./resources": "./src/resources/index.ts",
     "./runtime-discovery": "./src/runtime-discovery.ts",

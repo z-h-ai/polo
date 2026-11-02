@@ -38,6 +38,24 @@ import {
   type PcUploadGrantResponse,
 } from './project-context-contract.ts';
 import {
+  CLIENT_ENTERPRISE_ERROR_CODES,
+  CLIENT_ENTERPRISE_PAGE_MAX_LIMIT,
+  clientCreateEnterpriseCommandSchema,
+  clientCreateEnterpriseResponseSchema,
+  clientCreateInvitationCommandSchema,
+  clientCreateInvitationResponseSchema,
+  clientCreateReceiptSchema,
+  clientInvitationListResponseSchema,
+  clientMemberRosterResponseSchema,
+  type ClientCreateEnterpriseCommand,
+  type ClientCreateEnterpriseResponse,
+  type ClientCreateInvitationCommand,
+  type ClientCreateInvitationResponse,
+  type ClientCreateReceipt,
+  type ClientInvitationListResponse,
+  type ClientMemberRosterResponse,
+} from './client-enterprise-contract.ts';
+import {
   AdminError,
   type AdminAuthConfig,
   type AdminErrorCode,
@@ -257,6 +275,15 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   // only returns codes present here, so without it every pc_* failure would
   // degrade to a generic status-derived code.
   ...PC_ERROR_CODES,
+  // POO-196 追加轮: the generated client-enterprise contract owns this list.
+  // Note the ordering discipline — ADMIN_ERROR_CODE_ALIASES still wins for the
+  // seven codes it already normalizes (unauthorized/forbidden/not_found/
+  // validation_error/token_revoked/account_disabled/…), so those arrive on
+  // AdminError as the legacy uppercase spelling; server-core's project-members
+  // service maps them back onto the contract spelling. The remaining pm codes
+  // (phone_verification_required, account_enterprise_exists, …) pass through
+  // verbatim only because they are registered here.
+  ...CLIENT_ENTERPRISE_ERROR_CODES,
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -1712,6 +1739,121 @@ export class AdminClient {
       { method: 'POST', accessToken, body: {} },
     );
     return this.readSuccessResponse(response, PcRebuildResponseSchema);
+  }
+
+  // -------------------------------------------------------------------------
+  // Client enterprise surface (POO-196 追加轮, adjudication D-A/D-B/D-C) — the
+  // narrow Bearer paths that let the desktop create a project (enterprise
+  // space) and manage targeted invitations. The idempotency key rides the
+  // REQUIRED `Idempotency-Key` header for create (never the body — the
+  // contract command schema is strict), and inside the command for
+  // invitations, exactly as the generated contract declares. Every response
+  // is validated against the generated contract schema; the stable error
+  // codes survive into AdminError.errorCode via the ADMIN_ERROR_CODES
+  // registration above.
+  // -------------------------------------------------------------------------
+
+  private static clientEnterpriseQuery(
+    params: Record<string, string | number | undefined>,
+  ): string {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) search.set(key, String(value));
+    }
+    const encoded = search.toString();
+    return encoded ? `?${encoded}` : '';
+  }
+
+  private clientEnterpriseSpacePath(productSpaceId: string, suffix: string): string {
+    return `/api/client/product-spaces/${encodeURIComponent(productSpaceId)}${suffix}`;
+  }
+
+  /** POST /api/client/enterprises — creates the enterprise aggregate under the
+   * caller's idempotency key; `replayed` means the SAME key + payload already
+   * committed. */
+  async createEnterprise(
+    accessToken: string,
+    input: ClientCreateEnterpriseCommand & { idempotencyKey: string },
+  ): Promise<ClientCreateEnterpriseResponse> {
+    const { idempotencyKey, ...command } = input;
+    const response = await this.request<unknown>('/api/client/enterprises', {
+      method: 'POST',
+      accessToken,
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: clientCreateEnterpriseCommandSchema.parse(command),
+    });
+    return this.readSuccessResponse(response, clientCreateEnterpriseResponseSchema);
+  }
+
+  /** GET /api/client/enterprises?createRequestKey=… — the caller's OWN original
+   * request lookup. `unknown` is not a failure and must never re-create. */
+  async queryMyCreateReceipt(
+    accessToken: string,
+    createRequestKey: string,
+  ): Promise<ClientCreateReceipt> {
+    const suffix = AdminClient.clientEnterpriseQuery({ createRequestKey });
+    const response = await this.request<unknown>(`/api/client/enterprises${suffix}`, {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, clientCreateReceiptSchema);
+  }
+
+  /** GET /api/client/product-spaces/{id}/members — owner/manager bounded
+   * roster read; a plain member is rejected before any roster data is read. */
+  async listProjectMembers(
+    accessToken: string,
+    productSpaceId: string,
+    query: { limit?: number; cursor?: string },
+  ): Promise<ClientMemberRosterResponse> {
+    const boundedLimit = query.limit === undefined
+      ? undefined
+      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
+    const suffix = AdminClient.clientEnterpriseQuery({
+      limit: boundedLimit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/members${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientMemberRosterResponseSchema);
+  }
+
+  /** GET /api/client/product-spaces/{id}/invitations — owner/manager targeted
+   * invitation projection (never a token or a link). */
+  async listProjectInvitations(
+    accessToken: string,
+    productSpaceId: string,
+    query: { limit?: number; cursor?: string },
+  ): Promise<ClientInvitationListResponse> {
+    const boundedLimit = query.limit === undefined
+      ? undefined
+      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
+    const suffix = AdminClient.clientEnterpriseQuery({
+      limit: boundedLimit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/invitations${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientInvitationListResponseSchema);
+  }
+
+  /** POST /api/client/product-spaces/{id}/invitations — one targeted invite
+   * under the command's `createRequestKey`; `replayed` returns the caller's
+   * own still-valid link for that same key. */
+  async createProjectInvitation(
+    accessToken: string,
+    productSpaceId: string,
+    input: ClientCreateInvitationCommand,
+  ): Promise<ClientCreateInvitationResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, '/invitations'),
+      { method: 'POST', accessToken, body: clientCreateInvitationCommandSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, clientCreateInvitationResponseSchema);
   }
 
   // -------------------------------------------------------------------------

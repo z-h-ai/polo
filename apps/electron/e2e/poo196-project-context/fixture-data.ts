@@ -475,6 +475,73 @@ export function initialCapabilities(): PcCapabilitiesResponse {
 /** Long-name row used by the de-locale overflow probe. */
 export const LONG_NAME_ASSET_ID = 'as-long-name'
 
+/* ── POO-196 追加轮：project-members fixture (D-C) ────────────────────── */
+
+/** The enterprise space the create flow materializes after a successful
+ * pmCreateEnterprise (id matching the pm fixture responses). */
+export const CREATED_ENTERPRISE_SPACE_ID = 'ps-apollo-created'
+
+/** Initial member roster — the viewer (林奕, manager) plus two teammates. */
+export const initialPmRoster = () => ({
+  productSpaceId: PRODUCT_SPACE_ID,
+  enterpriseName: 'Apollo 项目空间',
+  viewerRole: 'manager',
+  members: [
+    { membershipId: 'mb-lin', userId: CURRENT_USER_ID, displayName: '林奕', role: 'manager' },
+    { membershipId: 'mb-chen', userId: 'u-chen-02', displayName: '陈晓', role: 'member' },
+    { membershipId: 'mb-zhou', userId: 'u-zhou-03', displayName: '周然', role: 'member' },
+  ],
+  nextCursor: null,
+})
+
+/** One pending invitation, matching the roster's enterprise. */
+export const initialPmInvitations = () => [
+  {
+    invitationId: 'inv-seed-1',
+    status: 'active',
+    maskedPhone: '138****0000',
+    maskedEmail: null,
+    expiresAt: '2026-11-09T00:00:00+08:00',
+    createdAt: '2026-11-02T09:00:00+08:00',
+    acceptedAt: null,
+  },
+]
+
+/** The space list the create dialog's refresh handover reads (D-B 7). The
+ * created space appears only after the fixture records a successful create. */
+export function fixtureSpaceList(created: { productSpaceId: string; enterpriseName: string } | null) {
+  const list: Array<Record<string, unknown>> = [
+    {
+      id: PRODUCT_SPACE_ID,
+      kind: 'enterprise',
+      enterpriseId: 'ent-apollo-01',
+      name: 'Apollo 项目空间',
+      role: 'manager',
+      accessMode: 'active',
+      payer: { enterpriseId: 'ent-apollo-01', plan: 'enterprise' },
+    },
+    {
+      id: PERSONAL_SPACE_ID,
+      kind: 'personal',
+      name: '我的空间',
+      accessMode: 'active',
+      payer: { userId: ACCOUNT_ID, plan: 'pro' },
+    },
+  ]
+  if (created) {
+    list.unshift({
+      id: created.productSpaceId,
+      kind: 'enterprise',
+      enterpriseId: 'ent-created',
+      name: created.enterpriseName,
+      role: 'owner',
+      accessMode: 'active',
+      payer: { enterpriseId: 'ent-created', plan: 'enterprise' },
+    })
+  }
+  return list
+}
+
 export function initialSearchIndex(assets: PcAssetDto[]): Map<string, string> {
   const index = new Map<string, string>()
   index.set('as-meeting-1030', '迭代对齐会：POO-196 项目共享上下文进入开发收尾；验收要点围绕三 tab、@ 引用与标签体系。')

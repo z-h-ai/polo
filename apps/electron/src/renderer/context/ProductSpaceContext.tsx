@@ -36,6 +36,11 @@ export interface ProductSpaceContextValue {
    * never a successful empty list).
    */
   onRefreshProductSpaces: () => void | Promise<ProductSpaceSummary[] | null>
+  /** POO-196 追加轮 D-D 1: open the shared create-project dialog. The dialog
+   * itself is hosted once by App; both the account/space menu and the select
+   * screen call this, so the entry stays reachable for personal-only
+   * accounts. */
+  onOpenCreateProject?: () => void
   /** Recommit a revoked scope before publishing a recovered Catalog. */
   onRecoverActiveProductSpace?: () => Promise<boolean>
   onConfirmStopAndSwitch: () => void

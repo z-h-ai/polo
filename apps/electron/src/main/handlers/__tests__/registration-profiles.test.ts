@@ -107,6 +107,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     productSpace,
     resources,
     transfer,
+    projectMembers,
   ] = await Promise.all([
     import('@polo-ai/server-core/handlers/rpc/auth'),
     import('@polo-ai/server-core/handlers/rpc/automations'),
@@ -127,6 +128,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     import('@polo-ai/server-core/handlers/rpc/product-space'),
     import('@polo-ai/server-core/handlers/rpc/resources'),
     import('@polo-ai/server-core/handlers/rpc/transfer'),
+    import('@polo-ai/server-core/handlers/rpc/project-members'),
   ])
 
   return new Set([
@@ -149,6 +151,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     ...productSpace.HANDLED_CHANNELS,
     ...resources.HANDLED_CHANNELS,
     ...transfer.HANDLED_CHANNELS,
+    ...projectMembers.PROJECT_MEMBERS_HANDLED_CHANNELS,
   ])
 }
 

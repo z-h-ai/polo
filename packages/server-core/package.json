@@ -24,6 +24,8 @@
     "./handlers/rpc/knowledge-base": "./src/handlers/rpc/knowledge-base.ts",
     "./handlers/rpc/project-context": "./src/handlers/rpc/project-context.ts",
     "./project-context": "./src/project-context/service.ts",
+    "./project-members": "./src/project-members/service.ts",
+    "./handlers/rpc/project-members": "./src/handlers/rpc/project-members.ts",
     "./handlers/rpc/labels": "./src/handlers/rpc/labels.ts",
     "./handlers/rpc/llm-connections": "./src/handlers/rpc/llm-connections.ts",
     "./handlers/rpc/member-circles": "./src/handlers/rpc/member-circles.ts",

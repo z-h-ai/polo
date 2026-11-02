@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchButtonClassName, clientWorkbenchPrimaryClassName } from '@/components/ui/client-workbench'
 import { cn } from '@/lib/utils'
 import { productSpaceAvatarGlyph } from '@/lib/space-initial'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import type { ProductSpaceSelectionSource } from '@/hooks/useProductSpaceContext'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 
@@ -55,6 +56,7 @@ export function ProductSpaceSelectScreen({
 }) {
   const { t } = useTranslation()
   const style = useClientWorkbenchStyle()
+  const spaceContext = useOptionalProductSpaceContext()
 
   // M3 default selection: stored active → first-login recommended active
   // enterprise → bootstrap-committed active as the fallback. 'stored' means
@@ -240,6 +242,30 @@ export function ProductSpaceSelectScreen({
             {t('topbar.account.logout')}
           </Button>
         </div>
+
+        {/* POO-196 追加轮 D-D 1: the SAME create/refresh actions as the
+            account/space menu, sharing the one hosted dialog. Rendered only
+            when the ProductSpace provider is mounted around the gate. */}
+        {spaceContext ? (
+          <div className="mt-[12px] flex items-center justify-center gap-[8px]">
+            <Button
+              className={clientWorkbenchButtonClassName + ' shrink-0'}
+              data-testid="product-space-select-create-project"
+              disabled={submitting}
+              onClick={() => spaceContext.onOpenCreateProject?.()}
+            >
+              {t('createProject.menuAction')}
+            </Button>
+            <Button
+              className={clientWorkbenchButtonClassName + ' shrink-0'}
+              data-testid="product-space-select-refresh"
+              disabled={submitting}
+              onClick={() => { void spaceContext.onRefreshProductSpaces() }}
+            >
+              {t('createProject.refreshAction')}
+            </Button>
+          </div>
+        ) : null}
       </section>
     </div>
   )

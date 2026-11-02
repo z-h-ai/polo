@@ -110,6 +110,17 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.projectContext.SEARCH_ASSETS,
   RPC_CHANNELS.projectContext.REBUILD,
 
+  // pm — Enterprise project members (POO-196 追加轮). Creation and targeted
+  // invitations act through the device's trusted Admin session only; the
+  // roster/invitation reads are re-proved against the committed space fence on
+  // every call. There is no remote consumer for an account-scoped membership
+  // command, so every pm channel stays local.
+  RPC_CHANNELS.projectMembers.CREATE_ENTERPRISE,
+  RPC_CHANNELS.projectMembers.QUERY_CREATE_RECEIPT,
+  RPC_CHANNELS.projectMembers.LIST_MEMBERS,
+  RPC_CHANNELS.projectMembers.LIST_INVITATIONS,
+  RPC_CHANNELS.projectMembers.CREATE_INVITATION,
+
   // system — local OS info
   RPC_CHANNELS.system.VERSIONS,
   RPC_CHANNELS.system.HOME_DIR,

@@ -7,7 +7,7 @@
  * IPC / login state (see README). Every business component under ChatPage is
  * production source.
  */
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { Provider as JotaiProvider, createStore, useStore } from 'jotai'
 import { Toaster } from 'sonner'
@@ -21,11 +21,12 @@ import { FocusProvider } from '@/context/FocusContext'
 import { EscapeInterruptProvider } from '@/context/EscapeInterruptContext'
 import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
 import { ModalProvider } from '@/context/ModalContext'
-import { ProductSpaceProvider, type ProductSpaceContextValue } from '@/context/ProductSpaceContext'
+import { ProductSpaceProvider, useProductSpaceContext, type ProductSpaceContextValue } from '@/context/ProductSpaceContext'
 import { AppShellProvider, type AppShellContextType } from '@/context/AppShellContext'
 import { replaceLoadedSessionAtom } from '@/atoms/sessions'
 import { projectAssetDraftRefsAtomFamily } from '@/atoms/project-context'
 import ChatPage from '@/pages/ChatPage'
+import { CreateProjectDialog } from '@/components/product-space/CreateProjectDialog'
 import {
   SESSION_PERSONAL,
   SESSION_PROJECT,
@@ -50,6 +51,44 @@ const sendMessageLog: Array<{
 }> = []
 
 const openUrlLog: string[] = []
+
+/** POO-196 追加轮: the controlled space switches the create dialog hands to
+ * the host (D-B 7) — the orchestrator reads this instead of spying on atoms. */
+const spaceSwitchLog: string[] = []
+
+/** D-B 7 failure face: when set, the refreshed list deliberately OMITS the
+ * created space, so the auto-enter finds no target and the dialog must KEEP
+ * the「项目已创建」page (retry only — never a re-create). */
+let refreshMissingMode = false
+
+/** Host-side space context: the fixture value plus the create-project entry
+ * the real App hosts once next to the switch dialog. The dialog instance is
+ * PERMANENTLY mounted inside the provider (the App pattern), so an in-flight
+ * submit and its stored idempotency key survive closing the dialog. */
+function SpaceContextHost({ children }: { children: React.ReactNode }) {
+  const [createProjectOpen, setCreateProjectOpen] = useState(false)
+  const value = useMemo(() => ({
+    ...productSpaceContextValue,
+    onOpenCreateProject: () => { setCreateProjectOpen(true) },
+    onSelectProductSpace: (productSpaceId: string) => { spaceSwitchLog.push(productSpaceId) },
+    onRefreshProductSpaces: async () => {
+      const list = await (window as unknown as { electronAPI: { productSpaceList: () => Promise<unknown> } }).electronAPI.productSpaceList()
+      if (!Array.isArray(list) || list.length === 0) return null
+      const spaces = list as ProductSpaceContextValue['productSpaces']
+      return refreshMissingMode ? spaces.filter(item => item.id !== 'ps-apollo-created') : spaces
+    },
+  }), [])
+  return (
+    <ProductSpaceProvider value={value as unknown as ProductSpaceContextValue}>
+      {children}
+      <CreateProjectDialog
+        open={createProjectOpen}
+        onOpenChange={setCreateProjectOpen}
+        onVerifyPhone={() => { setCreateProjectOpen(false) }}
+      />
+    </ProductSpaceProvider>
+  )
+}
 
 /** R-1 证据通道：composer 的 RAW 文本模型经 onInputChange（生产 draft 同步
  * 通道，debounce 300ms）流出——DOM innerText 只能看到徽标 label，看不到
@@ -151,6 +190,7 @@ for (const session of Object.values(sessionsById)) {
 function HarnessBridge() {
   const store = useStore()
   const theme = useTheme()
+  const spaceContext = useProductSpaceContext()
   const [activeSession, setActiveSession] = useState(initialSession)
   const [ready, setReady] = useState(false)
   const setSessionRef = useRef<(id: string) => void>(() => {})
@@ -178,6 +218,17 @@ function HarnessBridge() {
       renderLog: () => renderLog.slice(-30),
       sessions: { project: SESSION_PROJECT, personal: SESSION_PERSONAL },
       session: () => activeSession,
+      /** D-D 1: the create entry lives in the space switcher / select screen
+       * (neither is mounted here); the orchestrator drives the shared dialog
+       * through the same context call those entries make. Returns whether the
+       * entry exists (the context call itself resolves void). */
+      openCreateProject: () => {
+        if (!spaceContext?.onOpenCreateProject) return false
+        spaceContext.onOpenCreateProject()
+        return true
+      },
+      setRefreshMissing: (next: boolean) => { refreshMissingMode = next; return true },
+      spaceSwitchLog: () => spaceSwitchLog.slice(),
       setSession: (id: string) => setSessionRef.current(id),
       lang: () => i18n.resolvedLanguage ?? i18n.language,
       // changeLanguage resolves with the t function (not structured-cloneable
@@ -311,11 +362,11 @@ function Root() {
                     onInputChange={() => {}}
                     getDraft={() => ''}
                   >
-                    <ProductSpaceProvider value={productSpaceContextValue as unknown as ProductSpaceContextValue}>
+                    <SpaceContextHost>
                       <AppShellProvider value={shellValue}>
                         <HarnessBridge />
                       </AppShellProvider>
-                    </ProductSpaceProvider>
+                    </SpaceContextHost>
                   </NavigationProvider>
                 </ModalProvider>
               </DismissibleLayerProvider>

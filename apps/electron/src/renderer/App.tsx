@@ -102,6 +102,7 @@ import {
 import { useProductSpaceContextState } from '@/hooks/useProductSpaceContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { ProductSpaceSwitchDialog } from '@/components/product-space/ProductSpaceSwitchDialog'
+import { CreateProjectDialog } from '@/components/product-space/CreateProjectDialog'
 import { ProductSpaceContractGate } from '@/components/product-space/ProductSpaceContractGate'
 import {
   emitAdminAuthFailure,
@@ -557,6 +558,11 @@ export default function App() {
   const [appTheme, setAppTheme] = useState<ThemeOverrides | null>(null)
   // Reset confirmation dialog
   const [showResetDialog, setShowResetDialog] = useState(false)
+  // POO-196 追加轮 D-D 1: the create-project dialog is hosted ONCE here so
+  // both entries (account/space menu + select screen) open the same instance
+  // and its submit/recovery state outlives menu close.
+  const [createProjectOpen, setCreateProjectOpen] = useState(false)
+  const handleOpenCreateProject = useCallback(() => setCreateProjectOpen(true), [])
 
   // Auto-update state
   const updateChecker = useUpdateChecker()
@@ -3384,6 +3390,7 @@ export default function App() {
       pendingSwitch: productSpace.pendingSwitch,
       onSelectProductSpace: handleSelectProductSpace,
       onRefreshProductSpaces: handleRefreshProductSpaces,
+      onOpenCreateProject: handleOpenCreateProject,
       onRecoverActiveProductSpace: productSpace.recoverActiveProductSpace,
       onConfirmStopAndSwitch: () => {
         void confirmStopAndSwitch()
@@ -3406,6 +3413,7 @@ export default function App() {
     confirmStopAndSwitch,
     currentAdminUser?.userId,
     dismissTargetAccessLost,
+    handleOpenCreateProject,
     handleRefreshProductSpaces,
     handleSelectProductSpace,
     productSpace.activeProductSpace,
@@ -3577,6 +3585,17 @@ export default function App() {
               }}
             />
             <ProductSpaceSwitchDialog />
+            <CreateProjectDialog
+              open={createProjectOpen}
+              onOpenChange={setCreateProjectOpen}
+              onVerifyPhone={() => {
+                // D-B 3: the existing sign-in challenge owns phone
+                // verification — hand off and let the user come back to
+                // re-read their identity and re-submit.
+                setCreateProjectOpen(false)
+                handleAdminRelogin()
+              }}
+            />
           </MaybeProductSpaceProvider>
         </ModalProvider>
       </DismissibleLayerProvider>
@@ -3912,6 +3931,14 @@ export default function App() {
             </ClientPageProvider>
             </MemberCatalogProvider>
             <ProductSpaceSwitchDialog />
+            <CreateProjectDialog
+              open={createProjectOpen}
+              onOpenChange={setCreateProjectOpen}
+              onVerifyPhone={() => {
+                setCreateProjectOpen(false)
+                handleAdminRelogin()
+              }}
+            />
           </MaybeProductSpaceProvider>
           </AppShellProvider>
         </TooltipProvider>

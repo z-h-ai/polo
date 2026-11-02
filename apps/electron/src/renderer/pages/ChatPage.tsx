@@ -36,6 +36,8 @@ import { ProjectContextTabs, type ProjectContextTab } from '@/components/project
 import { ProjectFileLibrary } from '@/components/project-context/ProjectFileLibrary'
 import { ProjectPinPane } from '@/components/project-context/ProjectPinPane'
 import { ShareToProjectDialog, type ShareToProjectTarget } from '@/components/project-context/ShareToProjectDialog'
+import { ProjectMembersDialog } from '@/components/project-context/ProjectMembersDialog'
+import { createEnterpriseWorkflowUrl } from '@/lib/enterprise-workflow-url'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
@@ -333,6 +335,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // shared-layer work, and structural reads keep this page compiling (and
   // correct at runtime) either way.
   const [projectTab, setProjectTab] = React.useState<ProjectContextTab>('messages')
+  // POO-196 追加轮 D-D 2: the members dialog is project-level and shared by
+  // BOTH ChatPage branches (with-messages and skeleton) — never a fourth tab.
+  const [projectMembersOpen, setProjectMembersOpen] = React.useState(false)
+  const handleOpenProjectMembers = React.useCallback(() => setProjectMembersOpen(true), [])
+  const handleCloseProjectMembers = React.useCallback((open: boolean) => setProjectMembersOpen(open), [])
   React.useEffect(() => {
     // A session switch resets to 消息 (default tab — the current behavior).
     setProjectTab('messages')
@@ -351,6 +358,41 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   ), [isProjectSession, activeWorkspaceId, sessionProductSpaceId])
   const showProjectTabs = isProjectSession && projectScope !== null
   const projectPaneVisible = showProjectTabs && projectTab !== 'messages'
+  // D-C: the controlled external「前往企业管理」handoff — the same fail-closed
+  // click-time check TopBar performs, re-derived from the LIVE scope at click
+  // time; the desktop Bearer never rides the URL.
+  const handleOpenEnterpriseManagement = React.useCallback(async () => {
+    const scope = productSpace
+    const space = scope?.activeProductSpace
+    if (!scope || scope.pendingSwitch || !space || space.kind !== 'enterprise') return
+    if (space.role !== 'owner' && space.role !== 'manager') return
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      if (!status.loggedIn || !status.adminUrl || status.userId !== scope.accountId) {
+        toast.error(t('topbar.account.enterpriseOpenFailed'), { description: t('homeApps.errors.staleContext') })
+        return
+      }
+      await window.electronAPI.openUrl(
+        createEnterpriseWorkflowUrl(status.adminUrl, space.enterpriseId, 'members'),
+      )
+    } catch {
+      toast.error(t('topbar.account.enterpriseOpenFailed'))
+    }
+  }, [productSpace, t])
+  // One dialog element, rendered inside BOTH return branches so the skeleton
+  // (messages-still-loading) session offers the same members entry.
+  const projectMembersDialog = showProjectTabs && projectScope && productSpace && activeProductSpace?.kind === 'enterprise'
+    ? (
+      <ProjectMembersDialog
+        open={projectMembersOpen}
+        onOpenChange={handleCloseProjectMembers}
+        scope={{ accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }}
+        projectName={activeProductSpace.name}
+        viewerRole={activeProductSpace.role}
+        onOpenEnterpriseManagement={() => { void handleOpenEnterpriseManagement() }}
+      />
+    )
+    : null
   // X6: both project panes stay MOUNTED (hidden) across tab flips, so a
   // 消息 round-trip no longer discards scroll position, in-flight previews or
   // an open upload dialog. The key folds the workspace + product space in, so
@@ -874,7 +916,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           <div className="h-full flex flex-col">
             <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
             {showProjectTabs && (
-              <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
+              <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} onOpenMembers={handleOpenProjectMembers} />
             )}
             <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
               <ChatDisplay
@@ -953,6 +995,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onSubmit={handleRenameSubmit}
             placeholder={t('chat.enterSessionName')}
           />
+          {projectMembersDialog}
         </>
       )
     }
@@ -974,7 +1017,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       <div className="h-full flex flex-col">
         <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         {showProjectTabs && (
-          <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
+          <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} onOpenMembers={handleOpenProjectMembers} />
         )}
         <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
           <ChatDisplay
@@ -1072,6 +1115,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           onShared={handleSharedToProject}
         />
       )}
+      {projectMembersDialog}
     </>
   )
 })
