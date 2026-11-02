@@ -12,7 +12,8 @@
  */
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { encodeRpcErrorCodeInMessage, readRpcErrorCode } from '../../src/shared/rpc-error-bridge'
@@ -57,6 +58,8 @@ const result: {
   /** S-10 证据：预览守卫日志与被 CSP 拒绝的越界尝试（预期存在，不算噪音）。 */
   previewGuardEvents: string[]
   previewCspViolations: string[]
+  /** R-4 证据：镜像生产 window-manager 的子帧导航守卫拦下的落点 URL。 */
+  frameNavBlocks: string[]
   captures: unknown[]
   error?: string
 } = {
@@ -73,6 +76,7 @@ const result: {
   previewHttpRequests: [],
   previewGuardEvents: [],
   previewCspViolations: [],
+  frameNavBlocks: [],
   captures: [],
 }
 
@@ -123,9 +127,9 @@ const in30d = () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(
 /**
  * S-10 夹具正文：不可信 HTML 的一次完整越界尝试。`base` 是运行期 preview
  * server 的地址（previewPort 只有起服后才知道，只能现填）。被试向量——远程
- * fetch/XHR、外链 img/iframe、window.open、程序化点链接、表单自动提交。
- * 注：iframe 自导航（location.href / meta refresh）没有 CSP 或脚本的拦截杠杆
- * （Chromium 限制），不进断言集，作为已知边界记录在报告里。
+ * fetch/XHR、外链 img/iframe、window.open、程序化点链接、表单自动提交、
+ * 子帧 meta refresh 自导航（POO-196 R-4：无脚本也能把沙箱帧导航出去，
+ * CSP 管不了导航，只有主进程 will-frame-navigate 能拦）。
  */
 const hostilePreviewContent = (base: string): string => [
   '<!doctype html><html><head>',
@@ -133,6 +137,9 @@ const hostilePreviewContent = (base: string): string => [
   // 不可信页面最常见的逃逸尝试：自带一份放宽的 CSP，期望与注入策略取并集。
   // 按规范浏览器对多策略取交集，这条必须无效。
   `<meta http-equiv="Content-Security-Policy" content="default-src *; img-src *; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src *; frame-src *">`,
+  // R-4 向量：0 秒自导航到信标落点。这条请求到达 preview server 即意味着
+  // 帧逃出了 srcdoc 注入策略的覆盖范围（落地文档不再受注入 CSP 约束）。
+  `<meta http-equiv="refresh" content="0;url=${base}/beacon/meta-refresh">`,
   '</head><body>',
   '<h1>POO-196 hostile preview</h1>',
   `<img src="${base}/beacon/img" alt="beacon">`,
@@ -146,6 +153,13 @@ const hostilePreviewContent = (base: string): string => [
   `try { window.open('${base}/beacon/popup'); } catch (e) {}`,
   `try { document.getElementById('l').click(); } catch (e) {}`,
   `try { document.getElementById('f').requestSubmit(); } catch (e) {}`,
+  // location.href 同类向量（R-4 的脚本变体），meta refresh 被拦后这条仍会试。
+  `try { location.href = '${base}/beacon/location-href'; } catch (e) {}`,
+  // R-4 探针：head 里的静态 meta refresh 是否被 Chromium 认账、运行期再追加
+  // 一条 1 秒延迟的 meta refresh 作对照（console.warn → 噪音 warnings 桶，
+  // 不碰「console 零 error」断言）。
+  `try { console.warn('[poo196-probe] meta-refresh-in-head=' + document.querySelectorAll('meta[http-equiv="refresh"]').length) } catch (e) {}`,
+  `try { var m = document.createElement('meta'); m.httpEquiv = 'refresh'; m.content = '1;url=${base}/beacon/meta-js'; document.head.appendChild(m); console.warn('[poo196-probe] meta-js appended') } catch (e) { console.warn('[poo196-probe] meta-js failed: ' + e) }`,
   '</script>',
   '</body></html>',
 ].join('')
@@ -501,6 +515,11 @@ function registerFixtureIpc() {
         return []
       case 'getLogoUrl':
         return ''
+      case 'readWorkspaceImage':
+        // 生产 IPC 对缺失文件答 null（icon-cache.ts 的静默回退依赖这一点）。
+        // 落到 default 的 {} 会把非字符串写进 icon 缓存，渲染徽标时以
+        // `cachedIconUrl.startsWith is not a function` 打崩 composer。
+        return null
       case 'getUnreadSummary':
         return { total: 0 }
       case 'getWorkspaceSettings':
@@ -661,6 +680,25 @@ const runProgramDirect = (program: { op: string; args?: Record<string, unknown> 
 
 let host: BrowserWindow
 
+/**
+ * R-4 镜像：与生产 window-manager 的子帧导航守卫同一份判定（main frame 放行、
+ * 自家 renderer 文件放行、about:* 放行——srcdoc 预览文档的初次 commit 就是
+ * about:srcdoc、其余子帧导航一律 preventDefault）。e2e 用自己的 main.ts，
+ * 不经过生产 window-manager，不镜像就测不到 R-4 的修复；拦下的落点记进
+ * frameNavBlocks 作为断言证据。
+ */
+function isHarnessAppUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'file:') return false
+    const filePath = fileURLToPath(parsed)
+    const harnessRoot = resolve(join(BUILD, 'pages'))
+    return filePath === join(harnessRoot, 'host.html') || filePath.startsWith(harnessRoot + sep)
+  } catch {
+    return false
+  }
+}
+
 function observeWebContents(wc: Electron.WebContents) {
   const tag = () => {
     try {
@@ -698,6 +736,16 @@ function observeWebContents(wc: Electron.WebContents) {
     }
   })
   wc.on('render-process-gone', (_e, d) => result.consoleNoise.errors.push(`[${tag()}] renderer gone: ${JSON.stringify(d)}`))
+  // R-4 镜像守卫（判定与生产 window-manager 逐条一致，见 isHarnessAppUrl 上方
+  // 的说明）。注意它同样接管了「内嵌外域 iframe」向量：这条子帧加载在导航层
+  // 就被拦，CSP 的 Framing 违规可能因此不再出现，S5b 断言按证据二选一。
+  wc.on('will-frame-navigate', (details) => {
+    if (details.isMainFrame) return
+    if (isHarnessAppUrl(details.url)) return
+    if (details.url.startsWith('about:')) return
+    details.preventDefault()
+    result.frameNavBlocks.push(`${tag()} ${details.url}`)
+  })
 }
 
 const js = async <T = unknown,>(expr: string): Promise<T> => {
@@ -1189,6 +1237,69 @@ async function scenarioMentionJourney() {
   await js<boolean>(`(() => { const first = document.querySelector('${T.snapshotChips}'); first?.scrollIntoView({ block: 'center' }); return true })()`)
   await capture('s4-message-snapshot-chips')
 
+  // R-1 回归（统一 @ 浮层 · 非资产行）：浮层里点技能行不得清空 composer 正文。
+  // 修前路径走 inlineMention 的陈旧触发快照，正文整段被重置为提及 token。
+  const pickExtraRow = (testId: string) => js<boolean>(`(() => {
+    const el = document.querySelector('[data-testid="${testId}"]')
+    if (!el) return false
+    const rect = el.getBoundingClientRect()
+    const base = { bubbles: true, cancelable: true, view: window, clientX: rect.x + 5, clientY: rect.y + 5, button: 0 }
+    el.dispatchEvent(new MouseEvent('mousedown', base))
+    el.dispatchEvent(new MouseEvent('mouseup', base))
+    el.dispatchEvent(new MouseEvent('click', base))
+    return true
+  })()`)
+  await clearInput()
+  await typeInto(T.input, '先把验收范围写清楚 ')
+  await typeChars('@')
+  await until(() => js<boolean>(`window.__poo196.q('${T.mentionPopover}')`), 8000)
+  await until(async () => (await js<number>(`window.__poo196.count('[data-testid="pc-mention-extra-skill:acceptance-checklist"]')`)) === 1, 8000)
+  check('[S4·R-1] 统一浮层出现技能组与技能行', true)
+  await capture('s4-r1-skill-row')
+  check('[S4·R-1] 点技能行前正文在', (await js<string>('window.__poo196.inputValue()')).includes('先把验收范围写清楚'))
+  const r1LogMark = await js<number>('window.__poo196.inputChangeLog.length')
+  check('[S4·R-1] 点技能行命中', await pickExtraRow('pc-mention-extra-skill:acceptance-checklist'))
+  // RAW 模型走 onInputChange（debounce 300ms）——等它流出再断言 token。
+  await until(async () => (await js<number>(`window.__poo196.inputChangeLog.length`)) > r1LogMark, 4000)
+  await delay(120)
+  const r1MouseValue = await js<string>('window.__poo196.inputValue()')
+  const r1MouseRaw = (await js<Array<string>>('window.__poo196.inputChangeLog')).at(-1) ?? ''
+  check('[S4·R-1] 鼠标点技能行后正文保留', r1MouseValue.includes('先把验收范围写清楚'), { r1MouseValue, r1MouseRaw })
+  check('[S4·R-1] 技能提及 token 落位（raw 模型）', r1MouseRaw.includes('[skill:ws-apollo:acceptance-checklist]'), { r1MouseRaw })
+  check('[S4·R-1] 徽标渲染技能名', r1MouseValue.includes('验收清单'), { r1MouseValue })
+  check('[S4·R-1] 触发 @ 不残留', !r1MouseValue.includes('@') && !r1MouseRaw.includes('@'), { r1MouseValue, r1MouseRaw })
+  await capture('s4-r1-skill-picked')
+
+  // 键盘路径（↓ + Enter）同验：另一段正文 + 裸 @ → 高亮停在第 0 行（无资产
+  // 命中时即技能行）→ Enter 走同一条 R-1 插入路径。
+  await clearInput()
+  await typeInto(T.input, '键盘路径也要保住这段 ')
+  await typeChars('@')
+  await until(() => js<boolean>(`window.__poo196.q('${T.mentionPopover}')`), 8000)
+  await until(async () => (await js<number>(`window.__poo196.count('[data-testid^="pc-mention-extra-"]')`)) >= 1, 8000)
+  host.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' } as unknown as Electron.InputInputEvent)
+  host.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Down' } as unknown as Electron.InputInputEvent)
+  await delay(80)
+  const r1Highlighted = await js<string>(`document.querySelector('[data-testid="pc-mention-extra-skill:acceptance-checklist"]')?.getAttribute('data-highlighted') ?? ''`)
+  check('[S4·R-1] ↓ 高亮落在技能行', r1Highlighted === 'true', { r1Highlighted })
+  const r1KeyLogMark = await js<number>('window.__poo196.inputChangeLog.length')
+  host.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' } as unknown as Electron.InputInputEvent)
+  host.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' } as unknown as Electron.InputInputEvent)
+  await until(async () => (await js<number>(`window.__poo196.inputChangeLog.length`)) > r1KeyLogMark, 4000)
+  await delay(120)
+  const r1KeyValue = await js<string>('window.__poo196.inputValue()')
+  const r1KeyRaw = (await js<Array<string>>('window.__poo196.inputChangeLog')).at(-1) ?? ''
+  check('[S4·R-1] Enter 选技能行后正文保留', r1KeyValue.includes('键盘路径也要保住这段'), { r1KeyValue, r1KeyRaw })
+  check('[S4·R-1] 键盘路径提及 token 落位（raw 模型）', r1KeyRaw.includes('[skill:ws-apollo:acceptance-checklist]'), { r1KeyRaw })
+
+  // 发送这条「正文 + 技能提及」：token 随生产 send 通道流出（wire 形状）。
+  await js<boolean>('window.__poo196.send()')
+  await until(() => js<boolean>(`window.__poo196.sendMessageLog.length >= 1`), 8000)
+  const r1Sent = await js<{ message: string }>(`window.__poo196.sendMessageLog[window.__poo196.sendMessageLog.length - 1]`)
+  check('[S4·R-1] 发送携带正文与技能 token', r1Sent.message.includes('键盘路径也要保住这段')
+    && r1Sent.message.includes('[skill:ws-apollo:acceptance-checklist]'), { message: r1Sent.message })
+  await clearInput()
+
   // 降级搜索提示
   await runProgramDirect({ op: 'setDegraded', args: { degraded: true } })
   await typeMentionQuery('数据')
@@ -1316,9 +1427,10 @@ async function scenarioRowActionsAndPins() {
 
 /**
  * S-10 预览隔离：共享 HTML 是不可信内容。打开 S-10 夹具（自带放宽 CSP、
- * 远程 fetch/XHR、外链 img/iframe、window.open、外链与表单提交），断言
- * 四类向量全部被拦：CSP 违规事件发生、守卫脚本日志发生、预览服务器没有
- * 收到任何 /beacon/* 请求（被拦截即无网络到达），且覆盖层保持原样。
+ * 远程 fetch/XHR、外链 img/iframe、window.open、外链与表单提交、子帧 meta
+ * refresh / location.href 自导航），断言全部向量被拦：CSP 违规事件发生、
+ * 守卫脚本日志发生、R-4 子帧导航守卫拦下自导航、预览服务器没有收到任何
+ * /beacon/* 请求（被拦截即无网络到达），且覆盖层保持原样。
  */
 async function scenarioPreviewIsolation() {
   mark('S5b:list-loaded')
@@ -1329,6 +1441,7 @@ async function scenarioPreviewIsolation() {
   const guardMarkBefore = result.previewGuardEvents.length
   const cspMarkBefore = result.previewCspViolations.length
   const beaconBefore = result.previewHttpRequests.filter((entry) => entry.includes('/beacon/')).length
+  const frameBlockBefore = result.frameNavBlocks.length
 
   mark('S5b:preview-opening')
   await clickMenuAction('as-hostile-html', 'preview')
@@ -1344,13 +1457,45 @@ async function scenarioPreviewIsolation() {
   check('[S5b] srcDoc 以 doctype+head+注入 CSP meta 开头', /^<!doctype html><html><head><meta http-equiv="Content-Security-Policy"/.test(srcDocHead), { head: srcDocHead.slice(0, 200) })
   check('[S5b] 注入策略不放宽（default-src none）', srcDocHead.includes("default-src 'none'"), {})
   check('[S5b] srcDoc 内嵌守卫脚本', srcDocHead.includes('[preview-guard]'), {})
+  const probeWarnings = () => result.consoleNoise.warnings.filter((entry) => entry.includes('[poo196-probe]'))
+  const probeFrameSrcdoc = await js<string>(`document.querySelector('${T.previewFrame}')?.getAttribute('srcdoc') ?? ''`)
+  // R-4 第一层（确定性）：hardenProjectPreviewHtml 在 DOMParser 阶段剥掉静态
+  // meta refresh——srcdoc 里不能再出现落点 URL。
+  check('[S5b·R-4] 静态 meta refresh 在入沙箱前被剥离', !probeFrameSrcdoc.includes('/beacon/meta-refresh')
+    && probeFrameSrcdoc.includes('meta-js appended'), {})
 
-  // 给页面脚本一点时间把全部向量都打一遍（脚本在 load 时自触发）。
+  // 给页面脚本一点时间把全部向量都打一遍（脚本在 load 时自触发；追加的
+  // meta-js 对照向量带 1 秒延迟，覆盖「0 秒 refresh 与首次 commit 合并」的
+  // 疑点——若它被拦而静态那条没有，结论就落在时序而非向量本身）。
   await delay(2500)
+
+  check('[S5b·R-4] 运行期追加的 refresh meta 被守卫脚本移除', probeWarnings().some((entry) => entry.includes('meta-refresh-in-head=0'))
+    && probeWarnings().some((entry) => entry.includes('meta-js appended')), { probes: probeWarnings().slice(0, 6) })
 
   const beacons = result.previewHttpRequests.filter((entry) => entry.includes('/beacon/'))
   check('[S5b] 信标零到达（CSP + 守卫拦截）', beacons.length === beaconBefore, { beacons: beacons.slice(0, 8) })
   check('[S5b] 预览文档本身有到达（夹具授权链路未破坏）', result.previewHttpRequests.some((entry) => entry.includes('/preview/as-hostile-html')))
+
+  // R-4：子帧自导航（meta refresh 无脚本变体 + location.href 脚本变体）必须
+  // 被双层防御拦下——静态向量入沙箱前剥离、动态向量守卫脚本移除 + 主进程
+  // 子帧导航守卫 preventDefault，请求一律零到达。
+  const frameBlocksNew = result.frameNavBlocks.slice(frameBlockBefore)
+  const guardNewEarly = result.previewGuardEvents.slice(guardMarkBefore)
+  // meta refresh 两层证据：静态向量在 DOMParser 阶段被剥（探针报
+  // meta-refresh-in-head=0）；运行期追加的那条由守卫脚本移除留痕，且
+  // Chromium 在移除前已武装的 refresh 导航被主进程子帧守卫拦下
+  // （frameNavBlocks 有落点）。两条向量都零网络到达。
+  const metaJsBlockedAtMainProcess = frameBlocksNew.some((entry) => entry.includes('/beacon/meta-js'))
+  check('[S5b·R-4] meta refresh 零到达且双层拦截', !beacons.some((entry) => entry.includes('/beacon/meta-refresh'))
+    && !beacons.some((entry) => entry.includes('/beacon/meta-js'))
+    && guardNewEarly.some((entry) => entry.includes('meta refresh removed'))
+    && metaJsBlockedAtMainProcess,
+  { frameBlocks: frameBlocksNew, guard: guardNewEarly.slice(0, 8) })
+  // location.href：主进程 will-frame-navigate 守卫的直接证据（preventDefault
+  // + 落点留痕），请求零到达。
+  check('[S5b·R-4] location.href 自导航被拦且零到达', !beacons.some((entry) => entry.includes('/beacon/location-href'))
+    && frameBlocksNew.some((entry) => entry.includes('/beacon/location-href')), {})
+  check('[S5b·R-4] srcdoc 预览未被守卫误伤（about:* 放行）', frameBlocksNew.every((entry) => !entry.includes('about:srcdoc')), { frameBlocks: frameBlocksNew })
 
   const guardNew = result.previewGuardEvents.slice(guardMarkBefore)
   check('[S5b] 守卫拦下 window.open', guardNew.some((entry) => entry.includes('window.open blocked')), { guardNew: guardNew.slice(0, 6) })
@@ -1363,8 +1508,11 @@ async function scenarioPreviewIsolation() {
   const cspNew = result.previewCspViolations.slice(cspMarkBefore)
   check('[S5b] CSP 拒绝远程图片', cspNew.some((entry) => /Loading the image .*violates|Refused to load/i.test(entry)), { cspNew: cspNew.slice(0, 6) })
   check('[S5b] CSP 拒绝远程 fetch/XHR', cspNew.some((entry) => /Refused to connect|Connecting to .*violates/i.test(entry)), {})
-  check('[S5b] CSP 拒绝内嵌外域 iframe', cspNew.some((entry) => /Framing .*violates|Refused to (load|frame)/i.test(entry)), {})
-  check('[S5b] CSP 违规事件 ≥ 4', cspNew.length >= 4, { count: cspNew.length })
+  // 内嵌外域 iframe：R-4 守卫在导航层拦截后，CSP 的 Framing 违规可能不再产
+  // 生——导航守卫记录与 CSP 违规任一出现即算隔离成立。
+  check('[S5b] 内嵌外域 iframe 被拦（CSP 或导航守卫）', cspNew.some((entry) => /Framing .*violates|Refused to (load|frame)/i.test(entry))
+    || frameBlocksNew.some((entry) => entry.includes('/beacon/iframe')), {})
+  check('[S5b] CSP 违规事件 ≥ 3', cspNew.length >= 3, { count: cspNew.length })
 
   // 页面自己的放宽 CSP meta 不可能反客为主：覆盖层仍挂在本体、frame 未逃逸。
   check('[S5b] 覆盖层未被破坏', await js<boolean>(`window.__poo196.q('${T.previewOverlay}')`), {})

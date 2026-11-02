@@ -200,6 +200,56 @@ export function isValidMentionTrigger(textBeforeCursor: string, atPosition: numb
   return /\s/.test(charBefore) || /[("']/.test(charBefore)
 }
 
+/** The trailing `@query` token this menu triggers on (shared by
+ *  `handleInputChange` and `handleSelectAt` so both agree on the trigger). */
+const INLINE_MENTION_TRIGGER = /@([\w\-\/.\s]{0,100})?$/
+
+/**
+ * Builds the post-selection composer value: the `@query` token starting at
+ * `triggerStart` is replaced by the item's mention text. Pure — no hook
+ * state — so both the live-menu select and the asset-popover select insert
+ * through the same code path.
+ */
+function insertMentionText(
+  currentValue: string,
+  cursorPosition: number,
+  triggerStart: number,
+  item: MentionItem,
+  workspaceId?: string,
+): { value: string; cursorPosition: number } {
+  const before = currentValue.slice(0, triggerStart)
+  const after = currentValue.slice(cursorPosition)
+
+  const buildMentionText = (kind: 'skill' | 'source' | 'file' | 'folder', value: string): string =>
+    '[' + kind + ':' + value + '] '
+
+  // Build the mention text based on type using bracket syntax.
+  // Skills use fully-qualified names (workspaceId:slug) because the SDK's
+  // Skill tool requires this format to resolve workspace-scoped skills.
+  let mentionText: string
+  if (item.type === 'skill') {
+    // Plugin name depends on which tier the skill came from:
+    //   workspace → workspaceId, project/global → ".agents"
+    const pluginName = item.skill?.source === 'workspace' ? workspaceId : AGENTS_PLUGIN_NAME
+    const qualifiedName = pluginName ? `${pluginName}:${item.id}` : item.id
+    mentionText = buildMentionText('skill', qualifiedName)
+  } else if (item.type === 'source') {
+    mentionText = buildMentionText('source', item.id)
+  } else if (item.type === 'file') {
+    // Use relative path for file mentions
+    mentionText = buildMentionText('file', item.file?.relativePath || item.id)
+  } else if (item.type === 'folder') {
+    mentionText = buildMentionText('folder', item.file?.relativePath || item.id)
+  } else {
+    mentionText = buildMentionText('skill', item.id)
+  }
+
+  return {
+    value: before + mentionText + after,
+    cursorPosition: before.length + mentionText.length,
+  }
+}
+
 // ============================================================================
 // InlineMentionMenu Component
 // ============================================================================
@@ -483,6 +533,18 @@ export interface UseInlineMentionReturn {
   handleInputChange: (value: string, cursorPosition: number) => void
   close: () => void
   handleSelect: (item: MentionItem) => { value: string; cursorPosition: number }
+  /**
+   * Select from an EXPLICIT live value/caret instead of this hook's committed
+   * snapshot. POO-196 review R-1: the project-asset popover's extra skill/source
+   * rows are picked while the ASSET trigger owns the `@`, so this hook never saw
+   * those keystrokes and its `atStart`/input snapshot is stale — the old path
+   * returned an empty value that wiped the whole composer.
+   */
+  handleSelectAt: (
+    value: string,
+    cursorPosition: number,
+    item: MentionItem,
+  ) => { value: string; cursorPosition: number }
 }
 
 export function useInlineMention({
@@ -697,35 +759,9 @@ export function useInlineMention({
 
     if (atStart >= 0) {
       const { value: currentValue, cursorPosition } = currentInputRef.current
-      const before = currentValue.slice(0, atStart)
-      const after = currentValue.slice(cursorPosition)
-
-      const buildMentionText = (kind: 'skill' | 'source' | 'file' | 'folder', value: string): string =>
-        '[' + kind + ':' + value + '] '
-
-      // Build the mention text based on type using bracket syntax.
-      // Skills use fully-qualified names (workspaceId:slug) because the SDK's
-      // Skill tool requires this format to resolve workspace-scoped skills.
-      let mentionText: string
-      if (item.type === 'skill') {
-        // Plugin name depends on which tier the skill came from:
-        //   workspace → workspaceId, project/global → ".agents"
-        const pluginName = item.skill?.source === 'workspace' ? workspaceId : AGENTS_PLUGIN_NAME
-        const qualifiedName = pluginName ? `${pluginName}:${item.id}` : item.id
-        mentionText = buildMentionText('skill', qualifiedName)
-      } else if (item.type === 'source') {
-        mentionText = buildMentionText('source', item.id)
-      } else if (item.type === 'file') {
-        // Use relative path for file mentions
-        mentionText = buildMentionText('file', item.file?.relativePath || item.id)
-      } else if (item.type === 'folder') {
-        mentionText = buildMentionText('folder', item.file?.relativePath || item.id)
-      } else {
-        mentionText = buildMentionText('skill', item.id)
-      }
-
-      result = before + mentionText + after
-      newCursorPosition = before.length + mentionText.length
+      const inserted = insertMentionText(currentValue, cursorPosition, atStart, item, workspaceId)
+      result = inserted.value
+      newCursorPosition = inserted.cursorPosition
     }
 
     onSelect(item)
@@ -756,6 +792,23 @@ export function useInlineMention({
     fileCache.current = []
   }, [])
 
+  const handleSelectAt = React.useCallback((value: string, cursorPosition: number, item: MentionItem): { value: string; cursorPosition: number } => {
+    // Recompute the trigger from the value the caller passes: this hook's own
+    // snapshot is stale whenever another `@` surface owned the caret. When no
+    // trigger resolves (the asset trigger accepts characters this menu does
+    // not), the mention still inserts AT THE CARET — never a composer reset.
+    const textBeforeCursor = value.slice(0, cursorPosition)
+    const atMatch = textBeforeCursor.match(INLINE_MENTION_TRIGGER)
+    const matchStart = atMatch ? textBeforeCursor.lastIndexOf('@') : -1
+    const triggerStart = atMatch && isValidMentionTrigger(textBeforeCursor, matchStart)
+      ? matchStart
+      : cursorPosition
+    const inserted = insertMentionText(value, cursorPosition, triggerStart, item, workspaceId)
+    onSelect(item)
+    close()
+    return inserted
+  }, [onSelect, close, workspaceId])
+
   return {
     isOpen,
     filter: committedFilter,
@@ -765,5 +818,6 @@ export function useInlineMention({
     handleInputChange,
     close,
     handleSelect,
+    handleSelectAt,
   }
 }

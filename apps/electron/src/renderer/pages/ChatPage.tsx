@@ -35,6 +35,7 @@ import { projectAssetDraftRefsAtomFamily, type ProjectAssetMentionDraft } from '
 import { ProjectContextTabs, type ProjectContextTab } from '@/components/project-context/ProjectContextTabs'
 import { ProjectFileLibrary } from '@/components/project-context/ProjectFileLibrary'
 import { ProjectPinPane } from '@/components/project-context/ProjectPinPane'
+import { ShareToProjectDialog } from '@/components/project-context/ShareToProjectDialog'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
@@ -359,6 +360,18 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const [pinsVersion, setPinsVersion] = React.useState(0)
   const handlePinsChanged = React.useCallback(() => setPinsVersion((version) => version + 1), [])
   const projectPaneKey = `${activeWorkspaceId ?? ''}::${sessionProductSpaceId ?? ''}`
+
+  // S-01: the message staged for "share to project". Non-null opens the
+  // dialog; a successful share lands the files and flips to the Files tab.
+  const [shareTargetMessage, setShareTargetMessage] = React.useState<import('../../shared/types').Message | null>(null)
+  const handleShareToProject = React.useCallback((message: import('../../shared/types').Message) => {
+    setShareTargetMessage(message)
+  }, [])
+  const handleSharedToProject = React.useCallback((shared: import('@polo-ai/shared/protocol').PcAssetDto[]) => {
+    setShareTargetMessage(null)
+    setProjectTab('files')
+    toast.success(t('projectContext.toast.shared', { count: shared.length }))
+  }, [t])
 
   // Journey #8: a failed local send leaves a session-scoped prompt (not a
   // message). The explicit action restores the preserved draft into the
@@ -894,6 +907,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 disabled={isChatInputDisabled}
                 inputStatusBanner={inputStatusBanner}
                 compactMode={!!isCompactMode}
+                projectShareEnabled={showProjectTabs}
+                onShareToProject={handleShareToProject}
               />
             </div>
             {showProjectTabs && projectScope && (
@@ -1001,6 +1016,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             disabled={isChatInputDisabled}
             inputStatusBanner={inputStatusBanner}
             compactMode={!!isCompactMode}
+            projectShareEnabled={showProjectTabs}
+            onShareToProject={handleShareToProject}
           />
         </div>
         {showProjectTabs && projectScope && (
@@ -1034,6 +1051,22 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {projectScope && (
+        <ShareToProjectDialog
+          open={shareTargetMessage !== null}
+          scope={projectScope}
+          sessionId={sessionId}
+          target={shareTargetMessage
+            ? {
+              text: shareTargetMessage.content,
+              attachments: shareTargetMessage.attachments ?? [],
+              sessionTitle: displayTitle,
+            }
+            : null}
+          onClose={() => setShareTargetMessage(null)}
+          onShared={handleSharedToProject}
+        />
+      )}
     </>
   )
 })

@@ -51,9 +51,27 @@ const sendMessageLog: Array<{
 
 const openUrlLog: string[] = []
 
+/** R-1 证据通道：composer 的 RAW 文本模型经 onInputChange（生产 draft 同步
+ * 通道，debounce 300ms）流出——DOM innerText 只能看到徽标 label，看不到
+ * `[skill:…]` token 本体。 */
+const inputChangeLog: string[] = []
+
 const noop = () => {}
 const noopAsync = async () => {}
 const noopAsyncTrue = async () => true
+
+/** R-1 回归夹具：统一 @ 浮层里的技能行。走生产 LoadedSkill 形状（name 取
+ * metadata.name，@token 落 `[skill:<plugin>:<slug>]`）。 */
+const HARNESS_SKILL = {
+  slug: 'acceptance-checklist',
+  metadata: {
+    name: '验收清单',
+    description: '生成一份验收要点清单',
+  },
+  content: '# 验收清单',
+  path: '/fixture/skills/acceptance-checklist/SKILL.md',
+  source: 'workspace' as const,
+}
 
 /** Stub callbacks object for the shell context (window manager / IPC boundary). */
 const shellValue = {
@@ -71,7 +89,7 @@ const shellValue = {
   getDraftAttachmentRefs: () => [],
   hydrateDraftAttachments: async () => [],
   enabledSources: [],
-  skills: [],
+  skills: [HARNESS_SKILL],
   labels: [],
   sessionStatuses: [],
   enabledModes: ['safe', 'ask', 'allow-all'],
@@ -112,7 +130,7 @@ const shellValue = {
   onReset: noop,
   onSessionOptionsChange: noop,
   onGoalCommand: noop,
-  onInputChange: noop,
+  onInputChange: (_sessionId: string, value: string) => { inputChangeLog.push(value) },
   onAttachmentsChange: noop,
   onSessionSourcesChange: noop,
   onSessionLabelsChange: noop,
@@ -174,6 +192,7 @@ function HarnessBridge() {
       draftRefs: (sessionId: string) => store.get(projectAssetDraftRefsAtomFamily(sessionId)),
       sendMessageLog,
       openUrlLog,
+      inputChangeLog,
       q: (selector: string) => Boolean(document.querySelector(selector)),
       count: (selector: string) => document.querySelectorAll(selector).length,
       text: () => document.body.innerText,

@@ -42,10 +42,13 @@ export * from '../admin/project-context-contract'
  * pc_* codes this client raises at its OWN boundary (never returned by the
  * admin wire, so they must not live in the generated PC_ERROR_CODES): the
  * workspace scope check that refuses to run project files outside an
- * enterprise project. Registered in the transport whitelist through
- * `./types.ts` so the coded-error bridge can carry them to the renderer.
+ * enterprise project, and the local download-to-disk failure (review R-6) —
+ * a missing name, a containment refusal or a broken stream is NOT the admin
+ * service being down, and the two must not share one "service unavailable"
+ * copy. Registered in the transport whitelist through `./types.ts` so the
+ * coded-error bridge can carry them to the renderer.
  */
-export const PC_LOCAL_ERROR_CODES = ['pc_unavailable_in_personal'] as const
+export const PC_LOCAL_ERROR_CODES = ['pc_unavailable_in_personal', 'pc_download_failed'] as const
 export type PcLocalErrorCode = (typeof PC_LOCAL_ERROR_CODES)[number]
 
 /**

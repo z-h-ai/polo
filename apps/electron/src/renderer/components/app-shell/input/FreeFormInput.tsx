@@ -1126,6 +1126,10 @@ export function FreeFormInput({
   // The generic select handler is declared further down (it needs the whole
   // inlineMention hook); the extra rows call it through this holder.
   const inlineMentionSelectRef = React.useRef<(item: MentionItem) => void>(() => {})
+  // POO-196 review R-1: the extra rows are picked while the asset trigger owns
+  // the `@`, so they go through the LIVE-value select (handleSelectAt) instead
+  // of the stale-snapshot path — declared further down, held here.
+  const inlineMentionSelectAtRef = React.useRef<(item: MentionItem) => void>(() => {})
   const assetMentionExtraSections = React.useMemo<AssetMentionExtraSection[]>(() => {
     const assetSections = filterSections(
       inlineMention.sections.filter((section) => section.id !== 'files'),
@@ -1153,8 +1157,12 @@ export function FreeFormInput({
             // Close the asset popover first: the mention insertion replaces the
             // `@query` token, which no longer matches the asset trigger, but the
             // popover state is only told about changes through its own handler.
+            // R-1: the insertion itself goes through the LIVE-value select — the
+            // generic path trusts this hook's committed trigger snapshot, which
+            // is stale while the asset popover owns the `@` and used to reset
+            // the whole composer text.
             assetMentionCloseRef.current()
-            inlineMentionSelectRef.current(item)
+            inlineMentionSelectAtRef.current(item)
           },
         })),
       }))
@@ -1713,6 +1721,26 @@ export function FreeFormInput({
     }, 0)
   }, [inlineMention, syncToParent])
   inlineMentionSelectRef.current = handleInlineMentionSelect
+
+  // POO-196 review R-1: the asset popover's skill/source rows insert with the
+  // LIVE composer value + caret (read off the element, not this hook's stale
+  // snapshot), so the mention replaces the `@query` token in place and the rest
+  // of the draft survives. Keyboard (Enter/Tab) and pointer picks share this
+  // closure through the extra rows' pick().
+  const handleInlineMentionSelectAt = React.useCallback((item: MentionItem) => {
+    const element = richInputRef.current
+    const liveValue = element?.value ?? input
+    const liveCursor = element ? element.selectionStart : liveValue.length
+    const { value: newValue, cursorPosition } = inlineMention.handleSelectAt(liveValue, liveCursor, item)
+    setInput(newValue)
+    syncToParent(newValue)
+    // Focus input and restore cursor position after badge renders
+    setTimeout(() => {
+      richInputRef.current?.focus()
+      richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
+    }, 0)
+  }, [inlineMention, syncToParent, input])
+  inlineMentionSelectAtRef.current = handleInlineMentionSelectAt
 
   // Handle inline label selection (removes the #label text from input)
   const handleInlineLabelSelect = React.useCallback((labelId: string) => {

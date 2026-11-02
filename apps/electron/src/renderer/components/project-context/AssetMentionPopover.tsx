@@ -392,10 +392,21 @@ export function AssetMentionPopover({ state, onChoose, onChooseExtra, onClose }:
   if (!isOpen) return null
 
   // Above the caret, viewport-clamped (consensus X1) — the same placement the
-  // generic mention menu has always used in this composer.
-  const bottomPosition = Math.max(
-    PC_MENTION_VIEWPORT_MARGIN,
-    window.innerHeight - Math.round(state.position.y) + PC_MENTION_VIEWPORT_MARGIN,
+  // generic mention menu has always used in this composer, plus a TOP clamp
+  // (review R-12): `bottom` positions the lower edge, so a caret near the
+  // window's top would otherwise push the whole list off-screen upward. Capping
+  // the lower edge keeps the top edge inside the viewport, the same way the
+  // left/right clamp works horizontally — matters if this surface is ever
+  // reused above a composer that is not pinned to the window bottom.
+  const bottomPosition = Math.min(
+    Math.max(
+      PC_MENTION_VIEWPORT_MARGIN,
+      window.innerHeight - Math.round(state.position.y) + PC_MENTION_VIEWPORT_MARGIN,
+    ),
+    Math.max(
+      PC_MENTION_VIEWPORT_MARGIN,
+      window.innerHeight - PC_MENTION_POPOVER_MAX_HEIGHT - PC_MENTION_VIEWPORT_MARGIN,
+    ),
   )
   const leftPosition = Math.min(
     Math.max(Math.round(state.position.x) - 10, PC_MENTION_VIEWPORT_MARGIN),

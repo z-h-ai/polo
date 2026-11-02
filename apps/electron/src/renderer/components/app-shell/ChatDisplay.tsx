@@ -9,6 +9,7 @@ import {
   ChevronUp,
   CircleAlert,
   ExternalLink,
+  FolderUp,
   Info,
   X,
 } from "lucide-react"
@@ -278,6 +279,11 @@ interface ChatDisplayProps {
   connectionUnavailable?: boolean
   /** Blocking account/config/quota state shown above the input */
   inputStatusBanner?: ChatInputStatusBanner | null
+  // POO-196 S-01: present only in an enterprise project session — it turns on
+  // the hover "share to project" action on user messages.
+  projectShareEnabled?: boolean
+  /** Called with the user message the user wants to land in the project library. */
+  onShareToProject?: (message: Message) => void
 }
 
 import {
@@ -536,6 +542,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Connection unavailable
   connectionUnavailable = false,
   inputStatusBanner,
+  projectShareEnabled = false,
+  onShareToProject,
 }, ref) {
   const { t } = useTranslation()
 
@@ -1816,6 +1824,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             sessionId={session?.id}
                             workspaceId={session?.workspaceId}
                             compactMode={compactMode}
+                            canShareToProject={projectShareEnabled}
+                            onShareToProject={onShareToProject}
                           />
                         </div>
                       )
@@ -2331,6 +2341,10 @@ interface MessageBubbleProps {
   compactMode?: boolean
   /** Callback to resend the user message that preceded an error */
   onRetry?: () => void
+  /** S-01: whether this session can share into the project library at all. */
+  canShareToProject?: boolean
+  /** S-01: opens the share dialog for this message. */
+  onShareToProject?: (message: Message) => void
 }
 
 /**
@@ -2420,13 +2434,30 @@ function MessageBubble({
   onPopOut,
   compactMode,
   onRetry,
+  canShareToProject = false,
+  onShareToProject,
 }: MessageBubbleProps) {
   const { t } = useTranslation()
 
   // === USER MESSAGE: Right-aligned bubble with attachments above ===
   if (message.role === 'user') {
     return (
-      <div>
+      <div className="group/msg relative">
+        {/* S-01: the share entry sits on the free left side of the right-aligned
+            bubble and appears on hover, mirroring the assistant pop-out. */}
+        {canShareToProject && onShareToProject && (
+          <button
+            type="button"
+            onClick={() => onShareToProject(message)}
+            data-touch-reveal="true"
+            className="absolute left-0 top-1 rounded-[8px] p-1.5 opacity-0 transition-opacity hover:bg-foreground/5 group-hover/msg:opacity-100"
+            title={t('projectContext.share.entryTitle')}
+            aria-label={t('projectContext.share.entryTitle')}
+            data-testid={`pc-share-message-${message.id}`}
+          >
+            <FolderUp className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+          </button>
+        )}
         <UserMessageBubble
           content={message.content}
           attachments={message.attachments}
@@ -2593,6 +2624,8 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.kbReferences === next.message.kbReferences &&
     prev.message.elementReferences === next.message.elementReferences &&
     readMessageProjectAssetRefs(prev.message) === readMessageProjectAssetRefs(next.message) &&
-    prev.compactMode === next.compactMode
+    prev.compactMode === next.compactMode &&
+    prev.canShareToProject === next.canShareToProject &&
+    prev.onShareToProject === next.onShareToProject
   )
 })

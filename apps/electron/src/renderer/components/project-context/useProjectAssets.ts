@@ -96,6 +96,7 @@ const PC_ERROR_KEYS: Record<string, string> = {
   pc_service_unavailable: 'projectContext.errors.serviceUnavailable',
   pc_signin_required: 'projectContext.errors.signinRequired',
   pc_unavailable_in_personal: 'projectContext.errors.unavailableInPersonal',
+  pc_download_failed: 'projectContext.errors.downloadFailed',
 }
 
 /**
@@ -238,7 +239,12 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
   const isActive = Boolean(scope) && enabled && active
   const requestSeq = React.useRef(0)
   const capsSeq = React.useRef(0)
-  const pollSeq = React.useRef(0)
+  // Per-asset run tokens (review R-2): a single hook-wide counter made N
+  // concurrently polling rows cancel EACH OTHER — the first response to land
+  // was always judged stale by the second run's increment, so only the last
+  // armed chain survived and the other rows stayed 处理中 until a manual
+  // refresh. Each asset's chain is now judged against its own token only.
+  const pollTokensRef = React.useRef<Map<string, number>>(new Map())
 
   // Latest-value holders: the poll chain and list calls stay stable per scope
   // and read the live values through refs instead of re-binding on every state
@@ -290,11 +296,14 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
     if (!entry) return
     window.clearTimeout(entry.timer)
     pollersRef.current.delete(assetId)
+    // Invalidate an in-flight run for this asset: its token no longer matches.
+    pollTokensRef.current.delete(assetId)
   }, [])
 
   const stopAllPolling = React.useCallback(() => {
     for (const entry of pollersRef.current.values()) window.clearTimeout(entry.timer)
     pollersRef.current.clear()
+    pollTokensRef.current.clear()
   }, [])
 
   // Property holder so the poll chain can recurse without a circular
@@ -332,7 +341,8 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
   pollRunRef.current.run = async (assetId, attempts, startedAt) => {
     const currentScope = scopeRef.current
     if (!currentScope || !activeRef.current) return
-    const seq = ++pollSeq.current
+    const token = (pollTokensRef.current.get(assetId) ?? 0) + 1
+    pollTokensRef.current.set(assetId, token)
     let next: PcAssetDto | null = null
     let gone = false
     try {
@@ -344,16 +354,23 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
       next = result.asset
     } catch (error) {
       // The asset vanished mid-poll: terminal, nothing to keep waiting for.
+      // Anything else (transport blip, transient 5xx) is a retryable tick, not
+      // a verdict — the budget below still bounds it (review R-2).
       gone = isPcError(error, 'pc_not_found')
       if (!gone) next = null
     }
-    if (seq !== pollSeq.current || scopeRef.current !== currentScope || !activeRef.current) return
+    // Stale only when THIS asset's chain was superseded (re-armed, removed, or
+    // the scope/deactivation cleared it) — never because a sibling asset
+    // polled in the same tick (review R-2: the old hook-wide counter did).
+    if (pollTokensRef.current.get(assetId) !== token
+      || scopeRef.current !== currentScope
+      || !activeRef.current) return
     if (gone) {
       stopPolling(assetId)
       return
     }
     if (next) upsertAsset(next)
-    if (!next || PC_POLL_TERMINAL_STATES.has(next.current.processing)) {
+    if (next && PC_POLL_TERMINAL_STATES.has(next.current.processing)) {
       stopPolling(assetId)
       return
     }
@@ -451,15 +468,14 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
     void refresh()
   }, [scopeKey, isActive, refresh, stopAllPolling])
 
-  // Scope switches and unmounts must not leave timers behind.
+  // Scope switches and unmounts must not leave timers behind (and must
+  // invalidate any in-flight poll run — stopAllPolling clears the tokens).
   React.useEffect(() => {
-    pollSeq.current += 1
     stopAllPolling()
   }, [scopeKey, stopAllPolling])
 
   React.useEffect(() => () => {
     stopAllPolling()
-    pollSeq.current += 1
   }, [stopAllPolling])
 
   // Committed filter changes re-fetch the list only — capabilities are stable

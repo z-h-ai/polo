@@ -478,7 +478,11 @@ export async function pcDownloadAsset(
       throw mapAdminFailure(error)
     }
     deps.platform.logger?.warn(`PC_DOWNLOAD: ${error instanceof Error ? error.message : String(error)}`)
-    throw pcError('pc_service_unavailable', 'The download failed')
+    // Review R-6: a local disk failure (missing file name, containment
+    // refusal, broken stream) is not the admin service being down — it gets
+    // its own code so the renderer shows "download failed" copy, and a real
+    // admin outage keeps pc_service_unavailable.
+    throw pcError('pc_download_failed', 'The download failed')
   }
 }
 

@@ -336,12 +336,19 @@ export async function downloadProjectContextFile(input: {
   let targetPath = path.join(root, slotPath(fileName, ordinal))
   const tempPath = path.join(root, `.${fileName}.${randomUUID()}.part`)
   let placed = false
+  // Identity of the bytes THIS download wrote (review R-5): the temp copy is
+  // hard-linked into place, so the published entry shares its device/inode. A
+  // third party that swaps the name between publish and the post-publish
+  // realpath re-check must not lose their file to our cleanup.
+  let writtenIdentity: { dev: number; ino: number } | null = null
   try {
     const { pipeline } = await import('node:stream/promises')
     const { createWriteStream } = await import('node:fs')
-    const { link } = await import('node:fs/promises')
+    const { link, stat } = await import('node:fs/promises')
     const nodeStream = projectContextBodyStream(response.body as ReadableStream<Uint8Array>)
     await pipeline(nodeStream, createWriteStream(tempPath, { flags: 'wx' }))
+    const written = await stat(tempPath)
+    writtenIdentity = { dev: written.dev, ino: written.ino }
     // Atomic no-clobber publish: EEXIST means a concurrent download claimed
     // the name between the probe and here — fall through to the next ordinal
     // instead of ever replacing an entry this download did not write.
@@ -368,8 +375,28 @@ export async function downloadProjectContextFile(input: {
   // Post-publish proof: the saved entry resolves back inside the real root.
   const savedPath = await realpath(targetPath)
   if (!savedPath.startsWith(rootWithSep)) {
-    await unlink(targetPath).catch(() => {})
+    // Remove the entry only if it is STILL the file this download wrote
+    // (review R-5): unlinking blind could delete a file a third party swapped
+    // in after our publish. Skipping cleanup is the safe failure mode — the
+    // call still rejects.
+    if (writtenIdentity && (await isSameFile(targetPath, writtenIdentity))) {
+      await unlink(targetPath).catch(() => {})
+    }
     throw new Error('The saved download resolved outside the downloads directory')
   }
   return savedPath
+}
+
+/** True when `targetPath` still names the very file this download wrote —
+ *  same device + inode as the temp copy it was hard-linked from. */
+async function isSameFile(
+  targetPath: string,
+  identity: { dev: number; ino: number },
+): Promise<boolean> {
+  try {
+    const current = await stat(targetPath)
+    return current.dev === identity.dev && current.ino === identity.ino
+  } catch {
+    return false
+  }
 }

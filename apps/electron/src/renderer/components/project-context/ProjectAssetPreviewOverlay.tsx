@@ -77,6 +77,19 @@ const PC_PREVIEW_GUARD_SCRIPT = `
         console.error('[preview-guard] middle-click navigation blocked');
       }
     }, true);
+    // R-4: refresh metas are stripped before the sandbox sees the document;
+    // this observer catches one re-appended after boot (script or parser).
+    var removeRefreshMeta = function () {
+      var metas = document.querySelectorAll('meta[http-equiv="refresh"], meta[http-equiv="Refresh"]');
+      for (var i = 0; i < metas.length; i++) {
+        metas[i].parentNode.removeChild(metas[i]);
+        console.error('[preview-guard] meta refresh removed');
+      }
+    };
+    removeRefreshMeta();
+    try {
+      new MutationObserver(removeRefreshMeta).observe(document.documentElement, { childList: true, subtree: true });
+    } catch (e) {}
   } catch (error) {
     console.error('[preview-guard] init failed: ' + String(error));
   }
@@ -95,6 +108,15 @@ const PC_PREVIEW_GUARD_SCRIPT = `
 export function hardenProjectPreviewHtml(content: string): string {
   // A leading byte-order mark would precede the doctype and confuse parsing.
   const doc = new DOMParser().parseFromString(content.replace(/^﻿/, ''), 'text/html')
+  // R-4 (POO-196 review): a `<meta http-equiv="refresh">` in untrusted HTML
+  // navigates the sandboxed frame with no script and no CSP lever. The
+  // main-process sub-frame guard is the second net (window-manager), but the
+  // event it relies on is not guaranteed to fire for every refresh-scheduled
+  // commit — so the deterministic fix happens here, in the document itself:
+  // refresh metas never reach the sandbox at all.
+  doc.querySelectorAll('meta[http-equiv], meta[httpEquiv]').forEach((node) => {
+    if ((node.getAttribute('http-equiv') ?? '').trim().toLowerCase() === 'refresh') node.remove()
+  })
   const head = doc.head
   if (head) {
     const guard = doc.createElement('script')

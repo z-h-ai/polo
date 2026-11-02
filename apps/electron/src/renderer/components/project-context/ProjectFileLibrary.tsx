@@ -41,6 +41,19 @@ import {
 /** The filter chips: the preset vocabulary plus the controlled confirmed state. */
 export const PC_FILTER_TAG_IDS: readonly string[] = [...PC_PRESET_TAG_IDS, PC_CONTROLLED_TAG_ID]
 
+/**
+ * Review R-7: the tag chips must not shrink to whatever the CURRENT result set
+ * carries — under a status/tag/query filter the loaded page stops being the
+ * library's tag inventory, and every chip not on that page would vanish until
+ * the filter was cleared. Custom tags discovered from any list response are
+ * therefore remembered per space (workspace+product space) for the renderer's
+ * lifetime. Trade-off: in-memory only (the repo's persistence rule rules out
+ * localStorage, and there is no admin tag-enumeration endpoint this round), so
+ * an app restart re-learns tags from the next unfiltered list; a chip whose
+ * assets are all gone filters to the existing "no matches" face.
+ */
+const discoveredTagsBySpace = new Map<string, Map<string, string>>()
+
 /** 状态 chips (Spec R8): 全部 / 可用 / 处理中 / 失败. `available` means
  * indexed + unsupported — a stored file that cannot be indexed is still
  * usable, never relabelled as full-text searchable (consensus S-09). */
@@ -109,23 +122,37 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
   const [preview, setPreview] = React.useState<PreviewState | null>(null)
   const [previewLoading, setPreviewLoading] = React.useState(false)
 
+  // Review R-11: the pane stays MOUNTED while hidden (X6), so a preview left
+  // open would keep its document-level capture Esc listener registered —
+  // pressing Esc on the messages pane would close an INVISIBLE overlay and
+  // swallow that keystroke. Dropping the preview when the pane deactivates is
+  // the smaller change vs. threading an active flag into the overlay's
+  // listeners, and re-opening is one click away.
+  React.useEffect(() => {
+    if (!active) setPreview(null)
+  }, [active])
+
   const maxUploadBytes = capabilities?.limits.maxUploadBytes ?? 0
-  // S-09: the tag chips grow with what the list actually returned (consensus
-  // #10) — custom member tags join the preset vocabulary, deduped, so a chip
-  // never filters into a guaranteed-empty result. Custom ids keep the member's
-  // own label for display.
+  // S-09 + review R-7: the tag chips grow with every list response, not just
+  // the current result set — custom member tags join the preset vocabulary,
+  // deduped, remembered per space (see discoveredTagsBySpace). Custom ids keep
+  // the member's own label for display.
   const customTagLabels = React.useMemo(() => {
     const preset = new Set<string>(PC_PRESET_TAG_IDS)
     preset.add(PC_CONTROLLED_TAG_ID)
-    const labels = new Map<string, string>()
+    const spaceKey = `${scope.workspaceId}::${scope.productSpaceId}`
+    const known = discoveredTagsBySpace.get(spaceKey) ?? new Map<string, string>()
     for (const asset of loadedAssets) {
       for (const tag of asset.tags) {
-        if (preset.has(tag.id) || labels.has(tag.id)) continue
-        labels.set(tag.id, tag.label || tag.id)
+        if (preset.has(tag.id)) continue
+        known.set(tag.id, tag.label || tag.id)
       }
     }
-    return labels
-  }, [loadedAssets])
+    discoveredTagsBySpace.set(spaceKey, known)
+    // Hand back a copy: the memo must produce a fresh reference when the
+    // discovered set grows, or the chip row would not re-render.
+    return new Map(known)
+  }, [loadedAssets, scope.workspaceId, scope.productSpaceId])
   const canShare = capabilities?.canShare ?? false
   const canManage = capabilities?.canManage ?? false
   const libraryReady = capabilities?.library.status === 'ready'
@@ -213,6 +240,37 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
 
   const handleReplace = (asset: PcAssetDto) => {
     setReplaceAsset(asset)
+  }
+
+  // S-05: the entry a failed row offers. The confirm names the real scope —
+  // the admin re-projects the WHOLE space's index, not just this one file — so
+  // nobody reads it as a per-file retry. The accepted job id is the only
+  // answer the wire gives; the status badge picks the result up on the next
+  // sync.
+  const handleRebuild = (asset: PcAssetDto) => {
+    const activeScope = scopeRef.current
+    void requestConfirm({
+      testId: 'pc-rebuild-confirm',
+      title: t('projectContext.rebuild.title', { name: asset.name }),
+      description: t('projectContext.rebuild.description'),
+      confirmLabel: t('projectContext.rebuild.confirm'),
+      cancelLabel: t('projectContext.rebuild.cancel'),
+      onConfirm: async () => {
+        try {
+          const result = await window.electronAPI.pcRebuild({
+            workspaceId: activeScope.workspaceId,
+            productSpaceId: activeScope.productSpaceId,
+          })
+          // `result.jobId` is the acceptance receipt; the user-facing answer is
+          // the toast plus the re-sync that picks up the new projection.
+          void result.jobId
+          toast.success(t('projectContext.toast.rebuildRequested'))
+          void refresh()
+        } catch (error) {
+          throw new Error(t(projectContextErrorKey(error)))
+        }
+      },
+    })
   }
 
   const handleDownload = async (asset: PcAssetDto) => {
@@ -521,6 +579,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
               onSetConfirmed={handleSetConfirmed}
               onSetPinned={handleSetPinned}
               onDelete={handleDelete}
+              onRebuild={handleRebuild}
             />
           ))}
           {hasMore && (

@@ -58,6 +58,9 @@ export interface AssetRowActionHandlers {
   onSetPinned?: (asset: PcAssetDto, pinned: boolean) => void
   onDelete?: (asset: PcAssetDto) => void
   onRestore?: (asset: PcAssetDto) => void
+  /** S-05: ask the admin to re-run the whole space's index build. Only shown
+   * for a failed current version — and only when the caller can act on it. */
+  onRebuild?: (asset: PcAssetDto) => void
 }
 
 export interface AssetRowProps extends AssetRowActionHandlers {
@@ -84,6 +87,7 @@ export function AssetRow({
   onSetPinned,
   onDelete,
   onRestore,
+  onRebuild,
 }: AssetRowProps) {
   const { t } = useTranslation()
   const status = assetStatusBadge(asset, t)
@@ -203,6 +207,26 @@ export function AssetRow({
                 <Icons.RefreshCw className="h-3.5 w-3.5" />
                 <span className="flex-1">{t('projectContext.actions.replace')}</span>
               </StyledDropdownMenuItem>
+            )}
+            {/* S-05: a failed read is a space-level index fault, never a
+                per-file retry, so the entry states the scope and stays visible
+                (disabled with who must act) for members without the right. */}
+            {onRebuild && asset.current.processing === 'failed' && (
+              canManage ? (
+                <StyledDropdownMenuItem onClick={() => onRebuild(asset)} data-testid={`pc-asset-action-rebuild-${asset.id}`}>
+                  <Icons.RotateCw className="h-3.5 w-3.5" />
+                  <span className="flex-1">{t('projectContext.actions.rebuild')}</span>
+                </StyledDropdownMenuItem>
+              ) : (
+                <StyledDropdownMenuItem
+                  disabled
+                  data-testid={`pc-asset-action-rebuild-${asset.id}`}
+                  data-rebuild-blocked="true"
+                >
+                  <Icons.RotateCw className="h-3.5 w-3.5" />
+                  <span className="flex-1">{t('projectContext.actions.rebuildNeedsManager')}</span>
+                </StyledDropdownMenuItem>
+              )
             )}
             {onSetConfirmed && canManage && (
               <StyledDropdownMenuItem
