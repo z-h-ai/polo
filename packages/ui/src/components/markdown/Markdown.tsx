@@ -19,7 +19,7 @@ import { MarkdownLatexBlock } from './MarkdownLatexBlock'
 import { MarkdownPdfBlock } from './MarkdownPdfBlock'
 import { MarkdownDocBlock } from './MarkdownDocBlock'
 import { preprocessLinks } from './linkify'
-import { resolveMarkdownLinkTarget } from './link-target'
+import { isOpenableMarkdownLinkText, resolveMarkdownLinkTarget } from './link-target'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
@@ -217,20 +217,33 @@ function createComponents(
     //   through `resolveMarkdownLinkTarget` so file URLs land in `onFileClick`
     //   and blocked URLs surface a meaningful error via `onUrlClick` →
     //   `classifyExternalUrl`.
+    // - Middle-click (auxclick button=1) is routed through the SAME handler.
+    //   Left alone it would fall through to Electron's default window-open
+    //   path (`setWindowOpenHandler` → `openExternalFromRenderer`), sending a
+    //   citation outside the built-in browser (POO-172/CITE-01). This is a
+    //   renderer-side interaction change only — Main's security policy and the
+    //   business `onOpenUrl` channel are untouched.
     a: ({ href, children }) => {
       const trimmedHref = href?.trim() ?? ''
       const sanitized = trimmedHref ? defaultUrlTransform(trimmedHref) : ''
       const safeHref = sanitized ? sanitized : undefined
 
-      const handleClick = (e: React.MouseEvent) => {
-        e.preventDefault()
+      // Some AI outputs include raw HTML anchors with empty href but path text content.
+      // Fallback to the anchor text when href is missing/empty — but only when that
+      // text actually resolves to something openable. Plain-text citation
+      // references must render as plain text, never as a fake link (POO-172/CITE-02).
+      const fallbackText = trimmedHref
+        ? ''
+        : React.Children.toArray(children)
+            .map((child) => (typeof child === 'string' ? child : ''))
+            .join('')
+            .trim()
+      if (!trimmedHref && !isOpenableMarkdownLinkText(fallbackText)) {
+        return <span>{children}</span>
+      }
 
-        // Some AI outputs include raw HTML anchors with empty href but path text content.
-        // Fallback to the anchor text when href is missing/empty.
-        const fallbackText = React.Children.toArray(children)
-          .map((child) => (typeof child === 'string' ? child : ''))
-          .join('')
-          .trim()
+      const dispatchLinkTarget = (e: { preventDefault: () => void }) => {
+        e.preventDefault()
 
         const target = trimmedHref || fallbackText
         if (!target) return
@@ -243,10 +256,34 @@ function createComponents(
         }
       }
 
+      const handleClick = (e: React.MouseEvent) => dispatchLinkTarget(e)
+
+      const handleAuxClick = (e: React.MouseEvent) => {
+        // Only the middle button needs intercepting; other auxclicks
+        // (right-click context menu, etc.) keep their default behavior.
+        if (e.button !== 1) return
+        dispatchLinkTarget(e)
+      }
+
+      // Keyboard parity. With a real `href` Chromium activates the link on
+      // Enter by synthesizing a click — `dispatchLinkTarget` preventDefault-s
+      // that first, so the callback fires exactly once either way. Space is
+      // only claimed for the URL-fallback anchor (no href): without it that
+      // anchor is not focusable/activatable at all, while a real link keeps
+      // the browser's native Space (page scroll) behavior.
+      const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key !== 'Enter' && (safeHref || e.key !== ' ')) return
+        dispatchLinkTarget(e)
+      }
+
       return (
         <a
           href={safeHref}
           onClick={handleClick}
+          onAuxClick={handleAuxClick}
+          onKeyDown={handleKeyDown}
+          tabIndex={safeHref ? undefined : 0}
+          role={safeHref ? undefined : 'link'}
           className="text-accent hover:underline cursor-pointer"
         >
           {children}

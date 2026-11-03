@@ -1,9 +1,19 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, mock } from 'bun:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
-import { classifyMarkdownLinkTarget, resolveMarkdownLinkTarget } from '../link-target'
+import { classifyMarkdownLinkTarget, isOpenableMarkdownLinkText, resolveMarkdownLinkTarget } from '../link-target'
 import { markdownUrlTransform } from '../url-transform'
+
+// The full Markdown tree pulls pdf.js via Vite's `?url` suffix, which bun
+// cannot resolve — stub the viewer modules before importing the component.
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'data:application/pdf' }))
+mock.module('react-pdf', () => ({
+  Document: () => null,
+  Page: () => null,
+  pdfjs: { GlobalWorkerOptions: { workerSrc: '' } },
+}))
+const { Markdown } = await import('../Markdown')
 
 describe('resolveMarkdownLinkTarget', () => {
   it('resolves absolute unix file paths as file targets', () => {
@@ -128,5 +138,58 @@ describe('classifyMarkdownLinkTarget', () => {
 
   it('classifies mailto links as url', () => {
     expect(classifyMarkdownLinkTarget('mailto:test@example.com')).toBe('url')
+  })
+})
+
+describe('isOpenableMarkdownLinkText (POO-172 CITE-02)', () => {
+  it('accepts filesystem paths and URLs with an explicit scheme', () => {
+    expect(isOpenableMarkdownLinkText('/Users/tester/report.pdf')).toBe(true)
+    expect(isOpenableMarkdownLinkText('file:///Users/tester/report.pdf')).toBe(true)
+    expect(isOpenableMarkdownLinkText('https://example.com/source')).toBe(true)
+    expect(isOpenableMarkdownLinkText('mailto:test@example.com')).toBe(true)
+  })
+
+  it('rejects plain-text citation references, schemeless domains and dangerous schemes', () => {
+    expect(isOpenableMarkdownLinkText('')).toBe(false)
+    expect(isOpenableMarkdownLinkText('Source 1')).toBe(false)
+    expect(isOpenableMarkdownLinkText('见来源 A')).toBe(false)
+    expect(isOpenableMarkdownLinkText('example.com')).toBe(false)
+    expect(isOpenableMarkdownLinkText('javascript:alert(1)')).toBe(false)
+    expect(isOpenableMarkdownLinkText('data:text/html,<b>x</b>')).toBe(false)
+  })
+})
+
+describe('Markdown empty-href anchors render as non-links (POO-172 CITE-02)', () => {
+  function renderWithCallbacks(markdown: string): string {
+    return renderToStaticMarkup(React.createElement(Markdown, { mode: 'minimal' }, markdown))
+  }
+
+  it('renders a plain-text citation reference as non-interactive text', () => {
+    const html = renderWithCallbacks('See [Source 1]() for details.')
+    expect(html).not.toContain('<a')
+    expect(html).toContain('Source 1')
+  })
+
+  it('renders a schemeless domain fallback as non-interactive text', () => {
+    const html = renderWithCallbacks('Read [example.com]() next.')
+    expect(html).not.toContain('<a')
+  })
+
+  it('keeps an anchor-text URL fallback clickable without a DOM href', () => {
+    const html = renderWithCallbacks('Read [https://example.com/source]() next.')
+    expect(html).toContain('<a')
+    // R1 fix (CITE-FALLBACK-KEYBOARD): the href-less fallback anchor gets real
+    // link semantics so keyboard users can focus and activate it.
+    expect(html).toContain('tabindex="0"')
+    expect(html).toContain('role="link"')
+  })
+
+  it('keeps normal markdown links clickable', () => {
+    const html = renderWithCallbacks('Read [site](https://example.com/path) next.')
+    expect(html).toContain('href="https://example.com/path"')
+    // A real link keeps its native focus/activation behavior — no manual
+    // tabindex/role injection.
+    expect(html).not.toContain('tabindex=')
+    expect(html).not.toContain('role="link"')
   })
 })

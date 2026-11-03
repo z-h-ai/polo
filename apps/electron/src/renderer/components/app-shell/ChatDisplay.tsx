@@ -148,6 +148,10 @@ interface ChatDisplayProps {
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
+  /** POO-172: dedicated channel for assistant-markdown citation sources
+   *  (built-in browser). Business URLs (error cards, user messages) keep
+   *  using `onOpenUrl`. */
+  onOpenSourceUrl?: (url: string) => void
   // Current model is read-only in the input; admin-managed settings choose it.
   currentModel: string
   /** @deprecated Manual model switching has been removed from the UI. */
@@ -463,6 +467,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onSendMessage,
   onOpenFile,
   onOpenUrl,
+  onOpenSourceUrl,
   currentModel,
   textareaRef: externalTextareaRef,
   disabled = false,
@@ -1867,6 +1872,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             message={turn.message}
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
+                            onOpenSourceUrl={onOpenSourceUrl}
                             sessionId={session?.id}
                             workspaceId={session?.workspaceId}
                             compactMode={compactMode}
@@ -1894,6 +1900,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             message={turn.message}
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
+                            onOpenSourceUrl={onOpenSourceUrl}
                             sessionId={session?.id}
                             onRetry={turn.message.role === 'error' ? () => {
                               const msgs = session?.messages
@@ -1973,6 +1980,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         todos={turn.todos}
                         onOpenFile={onOpenFile}
                         onOpenUrl={onOpenUrl}
+                        onOpenSourceUrl={onOpenSourceUrl}
                         isLastResponse={isLastResponse}
                         compactMode={compactMode}
                         sendMessageKey={sendMessageKey}
@@ -2351,7 +2359,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             isOpen={true}
             onClose={handleCloseOverlay}
             content={overlayState.content}
-            onOpenUrl={onOpenUrl}
+            // Turn-details shows the assistant's full answer — its links are
+            // citation sources and route through the dedicated channel.
+            onOpenUrl={onOpenSourceUrl ?? onOpenUrl}
             onOpenFile={onOpenFile}
           />
         )
@@ -2375,6 +2385,8 @@ interface MessageBubbleProps {
   message: Message
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
+  /** POO-172: citation-source channel for the assistant branch only. */
+  onOpenSourceUrl?: (url: string) => void
   sessionId?: string
   /** POO-108: KB chip previews resolve documents against the session workspace */
   workspaceId?: string
@@ -2474,6 +2486,7 @@ function MessageBubble({
   message,
   onOpenFile,
   onOpenUrl,
+  onOpenSourceUrl,
   sessionId,
   workspaceId,
   renderMode = 'minimal',
@@ -2532,14 +2545,14 @@ function MessageBubble({
               content={message.content}
               isStreaming={true}
               mode={renderMode}
-              onUrlClick={onOpenUrl}
+              onUrlClick={onOpenSourceUrl ?? onOpenUrl}
               onFileClick={onOpenFile}
             />
           ) : (
             <CollapsibleMarkdownProvider>
               <Markdown
                 mode={renderMode}
-                onUrlClick={onOpenUrl}
+                onUrlClick={onOpenSourceUrl ?? onOpenUrl}
                 onFileClick={onOpenFile}
                 id={message.id}
                 className="text-sm"
@@ -2645,6 +2658,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.workspaceId === next.workspaceId &&
     prev.message.kbReferences === next.message.kbReferences &&
     prev.message.elementReferences === next.message.elementReferences &&
-    prev.compactMode === next.compactMode
+    prev.compactMode === next.compactMode &&
+    prev.onOpenSourceUrl === next.onOpenSourceUrl
   )
 })

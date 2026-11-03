@@ -26,6 +26,7 @@ import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
 import { decideChatAccessBanner } from '@/lib/chat-access-banner'
+import { createCitationSourceOpener, type CitationSourceScope } from '@/lib/open-citation-source'
 import { formatQuotaResetTime } from '@/lib/quota-reset-time'
 import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
@@ -485,6 +486,34 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     [onOpenUrl]
   )
 
+  // POO-172: assistant-markdown citation sources get a dedicated channel —
+  // parsable http/https opens in the built-in browserPane (scoped to THIS
+  // session/workspace), file paths keep the file preview, dangerous schemes
+  // are rejected without any external fallback. Business URLs (error-card
+  // open_url, user messages, settings handoffs) keep using handleOpenUrl.
+  // The scope is read live so a click that races a session switch never
+  // steals another session's browser pane. `remoteWorkspaceId` is the same
+  // authoritative alias the browser tab strip filters by — a remote agent's
+  // instance carries the mirror id, not the local one.
+  const citationScopeRef = React.useRef<CitationSourceScope>({ sessionId: null, workspaceId: null, remoteWorkspaceId: null })
+  citationScopeRef.current = {
+    sessionId: session?.id ?? null,
+    workspaceId: session?.workspaceId ?? activeWorkspaceId ?? null,
+    remoteWorkspaceId: activeWorkspace?.remoteServer?.remoteWorkspaceId ?? null,
+  }
+  const openSourceUrl = React.useMemo(
+    () =>
+      createCitationSourceOpener({
+        getSessionScope: () => citationScopeRef.current,
+        onOpenFile: handleOpenFile,
+        onExternalUrl: onOpenUrl,
+        onBlocked: (reason) => {
+          toast.error(t('toast.citationSourceBlocked'), { description: reason })
+        },
+      }),
+    [handleOpenFile, onOpenUrl, t]
+  )
+
   // Perf: Mark when data is ready
   const dataReadyMarkedRef = React.useRef<string | null>(null)
   React.useLayoutEffect(() => {
@@ -808,6 +837,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onSendMessage={() => {}}
                 onOpenFile={handleOpenFile}
                 onOpenUrl={handleOpenUrl}
+                onOpenSourceUrl={openSourceUrl}
                 currentModel={effectiveModel}
                 pendingPermission={undefined}
                 onRespondToPermission={onRespondToPermission}
@@ -886,6 +916,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             }}
             onOpenFile={handleOpenFile}
             onOpenUrl={handleOpenUrl}
+            onOpenSourceUrl={openSourceUrl}
             currentModel={effectiveModel}
             pendingPermission={pendingPermission}
             onRespondToPermission={onRespondToPermission}

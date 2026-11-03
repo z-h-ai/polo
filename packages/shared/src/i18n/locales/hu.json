@@ -2574,6 +2574,7 @@
   "toast.cannotRemoveActiveWorkspace": "Az aktív munkaterület nem távolítható el",
   "toast.cannotSendRightNow": "Jelenleg nem lehet küldeni",
   "toast.cannotStopAgentTask": "A háttérben futó agentek leállítása még nem támogatott",
+  "toast.citationSourceBlocked": "Ez a forrás nem nyitható meg linkként",
   "toast.copied": "Vágólapra másolva",
   "toast.copyFailed": "A másolás nem sikerült",
   "toast.couldNotCreateBranch": "Nem sikerült létrehozni az ágat",
