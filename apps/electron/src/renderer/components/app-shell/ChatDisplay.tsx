@@ -553,6 +553,27 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
+  const [awayFromBottomSessionId, setAwayFromBottomSessionId] = useState<string | null>(null)
+  const [latestFeedback, setLatestFeedback] = useState<{ sessionId: string; turnKey: string } | null>(null)
+  const latestFeedbackTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Last viewport geometry observed by the scroll handler and the resize
+  // observer. It tells an upward user scroll apart from the sticky-bottom
+  // follow moving downward through a temporary growth gap (POO170-R1-01).
+  const settledScrollGeometryRef = React.useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
+  const clearLatestFeedback = useCallback(() => {
+    if (latestFeedbackTimerRef.current !== null) clearTimeout(latestFeedbackTimerRef.current)
+    latestFeedbackTimerRef.current = null
+    setLatestFeedback(null)
+  }, [])
+  // Key feedback to its conversation in render as well as cancelling its timer.
+  // A switch must never expose the previous conversation's announcement.
+  React.useLayoutEffect(() => {
+    clearLatestFeedback()
+    return () => {
+      if (latestFeedbackTimerRef.current !== null) clearTimeout(latestFeedbackTimerRef.current)
+      latestFeedbackTimerRef.current = null
+    }
+  }, [session?.id, isFocusedPanel, clearLatestFeedback])
   // Debounced bottom-follow with a fire-time sticky re-check, so a Recap click
   // that unstuck the bottom cannot be yanked back by an already-scheduled
   // resize scroll (POO-111 race).
@@ -1142,6 +1163,23 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }))
   }, [pendingFollowUpAnnotations])
 
+  // Resize can change whether the shortcut is needed without changing the
+  // user's sticky-bottom preference (e.g. while reading history). The sync is
+  // a pure geometry read: it never ends the arrival feedback (POO170-R1-01 —
+  // feedback only ends on an upward user scroll below, Recap, session/panel
+  // changes, the 1500ms expiry or unmount), and it never assumes that a
+  // parked viewport will be scrolled by a pending follow. Growth can land
+  // while the 500ms session-switch guard skips that follow, so skipping the
+  // entry sync on growth would leave real distance unsurfaced
+  // (POO170-R2-01); the entry simply reflects the geometry and the follow
+  // clears it again if it does run.
+  const updateLatestShortcut = useCallback(() => {
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    const away = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight >= 20
+    setAwayFromBottomSessionId(away ? session?.id ?? null : null)
+  }, [session?.id])
+
   // Track scroll position to toggle sticky-bottom behavior
   // - User scrolls up → unstick (stop auto-scrolling)
   // - User scrolls back to bottom → re-stick (resume auto-scrolling)
@@ -1153,6 +1191,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight
     // 20px threshold for "at bottom" detection
     isStickToBottomRef.current = distanceFromBottom < 20
+    updateLatestShortcut()
+    // Only a viewport that moved upward is the user leaving the latest
+    // position. The sticky-bottom follow itself also produces scroll events
+    // across a temporary gap (content grew below), and those move downward.
+    const settled = settledScrollGeometryRef.current
+    if (distanceFromBottom >= 20 && settled !== null && scrollTop < settled.scrollTop) clearLatestFeedback()
+    settledScrollGeometryRef.current = { scrollHeight, scrollTop }
 
     // Load more turns when scrolling near top (within 100px)
     if (scrollTop < 100) {
@@ -1173,7 +1218,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         return prev + TURNS_PER_PAGE
       })
     }
-  }, [])
+  }, [updateLatestShortcut, clearLatestFeedback])
 
   // Set up scroll event listener. Re-bound per session id so a null→session
   // caller attaches after the viewport mounts instead of never (POO-111
@@ -1183,8 +1228,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
     viewport.addEventListener('scroll', handleScroll)
+    updateLatestShortcut()
     return () => viewport.removeEventListener('scroll', handleScroll)
-  }, [handleScroll, session?.id])
+  }, [handleScroll, session?.id, updateLatestShortcut])
 
   // Auto-scroll using ResizeObserver for streaming content
   // Initial scroll is handled by ScrollOnMount (useLayoutEffect, before paint)
@@ -1199,6 +1245,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     // On session switch: reset UI state (scroll handled by ScrollOnMount)
     if (isSessionSwitch) {
       isStickToBottomRef.current = true
+      setAwayFromBottomSessionId(null)
       setVisibleTurnCount(TURNS_PER_PAGE)
       // P0-2 buffer hygiene: the previous session's ephemeral
       // tool_input_delta buffers have no live consumer once we switch away —
@@ -1214,6 +1261,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const stickyBottomScrollGate = stickyBottomScrollGateRef.current
 
     const resizeObserver = new ResizeObserver(() => {
+      // Refresh the settled baseline so a follow-on scroll event compares
+      // against post-resize geometry instead of stale pre-resize values.
+      settledScrollGeometryRef.current = { scrollHeight: viewport.scrollHeight, scrollTop: viewport.scrollTop }
+      updateLatestShortcut()
       // Unfocused panels: always scroll to bottom instantly (user isn't reading them)
       if (!isFocusedPanelRef.current) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
@@ -1236,12 +1287,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (content) {
       resizeObserver.observe(content)
     }
+    resizeObserver.observe(viewport)
 
     return () => {
       resizeObserver.disconnect()
       stickyBottomScrollGate?.cancel()
     }
-  }, [session?.id])
+  }, [session?.id, updateLatestShortcut])
 
   // Commit-time auto-scroll for new user messages.
   // This complements submit-time scrolling and covers cases where attachments delay
@@ -1522,10 +1574,36 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // so a streaming chunk's already-pending 200ms gate timer could still fire
   // with stickiness true and yank the user back down before that event lands.
   const handleRecapClick = useCallback(() => {
+    clearLatestFeedback()
     isStickToBottomRef.current = false
     stickyBottomScrollGateRef.current?.cancel()
     recap.reveal()
-  }, [recap])
+  }, [recap, clearLatestFeedback])
+
+  const showLatestFeedback = isFocusedPanel && latestFeedback?.sessionId === session?.id
+  const handleJumpToLatest = useCallback(() => {
+    const viewport = scrollViewportRef.current
+    const latestTurn = turns[turns.length - 1]
+    if (!session || !isFocusedPanelRef.current || !viewport || !latestTurn) return
+    clearLatestFeedback()
+    stickyBottomScrollGateRef.current?.cancel()
+    isStickToBottomRef.current = true
+    // Use the existing anchor, instantly: feedback is only emitted after the
+    // viewport has actually arrived, including with reduced motion enabled.
+    messagesEndRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' })
+    // The anchor precedes the message column's bottom padding. Include that
+    // padding so arrival uses the same 20px rule as ordinary user scrolling.
+    viewport.scrollTop = viewport.scrollHeight - viewport.clientHeight
+    updateLatestShortcut()
+    if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight >= 20) return
+    const turnKey = getTurnKey(latestTurn)
+    turnRefs.current.get(turnKey)?.focus({ preventScroll: true })
+    setLatestFeedback({ sessionId: session.id, turnKey })
+    latestFeedbackTimerRef.current = setTimeout(() => {
+      latestFeedbackTimerRef.current = null
+      setLatestFeedback(null)
+    }, 1500)
+  }, [session, turns, clearLatestFeedback, updateLatestShortcut])
 
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
@@ -1625,6 +1703,21 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <div className="flex flex-1 flex-col min-h-0 min-w-0 relative z-10">
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className="relative flex-1 min-h-0">
+            {isFocusedPanel && awayFromBottomSessionId === session.id && turns.length > 0 && !messagesLoading && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-3">
+                <button
+                  type="button"
+                  onClick={handleJumpToLatest}
+                  className="pointer-events-auto flex h-8 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 text-[13px] text-muted-foreground shadow-tinted transition-colors hover:border-border hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-info focus-visible:outline-offset-2"
+                >
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{t('chat.jumpToLatest')}</span>
+                </button>
+              </div>
+            )}
+            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+              {showLatestFeedback ? t('chat.latestReached') : ''}
+            </div>
             {/* Latest-user-message Recap — a sibling OUTSIDE the fade mask so the mask never dims it */}
             {recap.visible && recapTarget && (
               <UserMessageRecap
@@ -1749,6 +1842,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     const turnKey = getTurnKey(turn)
                     const isCurrentMatch = isSearchActive && matchingTurnIds[currentMatchIndex] === turnKey
                     const isAnyMatch = isSearchActive && matchingTurnIds.includes(turnKey)
+                    const isLatestHighlighted = showLatestFeedback && latestFeedback?.turnKey === turnKey
 
                     // User turns - render with MemoizedMessageBubble
                     // Extra padding creates visual separation from AI responses
@@ -1760,9 +1854,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           // Programmatic focus target for the Recap reveal
                           // (not tabbable; keeps focus when the button unmounts).
                           tabIndex={-1}
+                          data-latest-highlight={isLatestHighlighted || undefined}
                           className={cn(
                             compactMode ? "pt-2 pb-1" : CHAT_LAYOUT.userMessagePadding,
                             "rounded-lg transition-all duration-200",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1785,8 +1881,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         <div
                           key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                          tabIndex={-1}
+                          data-latest-highlight={isLatestHighlighted || undefined}
                           className={cn(
                             "rounded-lg transition-all duration-200",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1819,8 +1918,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         <div
                           key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                          tabIndex={-1}
+                          data-latest-highlight={isLatestHighlighted || undefined}
                           className={cn(
                             "mt-2 rounded-lg transition-all duration-200",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1844,9 +1946,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       <div
                         key={turnKey}
                         ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                        tabIndex={-1}
+                        data-latest-highlight={isLatestHighlighted || undefined}
                         className={cn(
                           "pt-2",
                           "rounded-lg transition-all duration-200",
+                          isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                           isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                           isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                         )}
