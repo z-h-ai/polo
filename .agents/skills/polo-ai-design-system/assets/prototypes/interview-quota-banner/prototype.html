@@ -1,0 +1,9 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Native component reference</title>
+<style>html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}</style></head>
+<body><iframe title="Frozen native component reference" id="reference"></iframe><script>
+const scenes={"quota-member-zh-Hans": {"desktop-1280x800": "views/quota-member-zh-Hans-desktop-1280x800.html", "desktop-1440x900": "views/quota-member-zh-Hans-desktop-1440x900.html", "compact-800x600": "views/quota-member-zh-Hans-compact-800x600.html"}, "quota-member-en": {"desktop-1280x800": "views/quota-member-en-desktop-1280x800.html", "desktop-1440x900": "views/quota-member-en-desktop-1440x900.html", "compact-800x600": "views/quota-member-en-compact-800x600.html"}, "quota-owner-zh-Hans": {"desktop-1280x800": "views/quota-owner-zh-Hans-desktop-1280x800.html", "desktop-1440x900": "views/quota-owner-zh-Hans-desktop-1440x900.html", "compact-800x600": "views/quota-owner-zh-Hans-compact-800x600.html"}, "quota-owner-en": {"desktop-1280x800": "views/quota-owner-en-desktop-1280x800.html", "desktop-1440x900": "views/quota-owner-en-desktop-1440x900.html", "compact-800x600": "views/quota-owner-en-compact-800x600.html"}}, sizes=[{"name": "desktop-1280x800", "width": 1280, "height": 800}, {"name": "desktop-1440x900", "width": 1440, "height": 900}, {"name": "compact-800x600", "width": 800, "height": 600}];
+const selected=new URLSearchParams(location.search).get('scene');
+const scene=Object.hasOwn(scenes,selected)?selected:Object.keys(scenes)[0];
+const viewport=[...sizes].sort((a,b)=>Math.abs(a.width-innerWidth)-Math.abs(b.width-innerWidth))[0].name;
+document.getElementById('reference').src=scenes[scene][viewport];
+</script></body></html>

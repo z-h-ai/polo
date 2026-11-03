@@ -486,6 +486,72 @@ export {
   billingRuntimeUsageResponseSchema as AdminRecordAppUsageResponseSchema,
   billingRuntimeFinishResponseSchema as AdminFinishAppRunResponseSchema,
 } from './billing-runtime-contract'
+
+// POO-177 (POL-288 consumer): the caller's own billing availability. The wire
+// contract is the locked POL-288 preflight DTO — strict at every layer, no
+// amounts, no remaining/allowed projection, no enterprise finance fields. A
+// response that speaks any other shape must be rejected by the client, never
+// downgraded into a billing verdict.
+export const SELF_BILLING_BLOCKED_REASONS = [
+  'payment_result_pending',
+  'payer_restricted',
+  'insufficient_credit',
+  'budget_exhausted',
+] as const
+export type SelfBillingBlockedReason = (typeof SELF_BILLING_BLOCKED_REASONS)[number]
+
+export const SELF_BILLING_UNKNOWN_REASONS = ['not_ready', 'billing_migration_in_progress'] as const
+export type SelfBillingUnknownReason = (typeof SELF_BILLING_UNKNOWN_REASONS)[number]
+
+const selfBillingAvailabilityOutcomeSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('available'), reason: z.literal(null) }).strict(),
+  z.object({ state: z.literal('blocked'), reason: z.enum(SELF_BILLING_BLOCKED_REASONS) }).strict(),
+  z.object({ state: z.literal('unknown'), reason: z.enum(SELF_BILLING_UNKNOWN_REASONS) }).strict(),
+])
+export type SelfBillingAvailabilityOutcome = z.infer<typeof selfBillingAvailabilityOutcomeSchema>
+
+// Legacy accounting facts only: non-negative integers travel as decimal
+// strings and are never coerced through Number. The desktop never displays
+// these fields — availability is the only consumed projection.
+const nonNegativeDecimalTokenString = z.string().regex(/^\d+$/, 'Expected a non-negative integer decimal string')
+export const SelfBillingLegacyQuotaSchema = z.object({
+  unit: z.literal('tokens'),
+  period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Expected a YYYY-MM period'),
+  enforcement: z.literal('not_applied_to_provider_metered'),
+  configuredLimitTokens: nonNegativeDecimalTokenString,
+  override: z.union([
+    z.literal(null),
+    z.object({
+      limitTokens: nonNegativeDecimalTokenString,
+      expiresAt: z.string().datetime({ offset: true }),
+    }).strict(),
+  ]),
+  usedTokens: nonNegativeDecimalTokenString,
+  reservedTokens: nonNegativeDecimalTokenString,
+}).strict()
+export type SelfBillingLegacyQuota = z.infer<typeof SelfBillingLegacyQuotaSchema>
+
+export const SelfBillingAvailabilityResponseSchema = z.object({
+  productSpaceId: AdminEntityIdSchema,
+  computedAt: z.string().datetime({ offset: true }),
+  billingMode: z.literal('provider_metered'),
+  preflightOnly: z.literal(true),
+  availability: selfBillingAvailabilityOutcomeSchema,
+  quota: SelfBillingLegacyQuotaSchema.nullable(),
+}).strict()
+export type SelfBillingAvailabilityResponse = z.infer<typeof SelfBillingAvailabilityResponseSchema>
+
+// POO-177 QUOTA-01: the renderer's manual billing refresh input. The three
+// fields exist ONLY so the Main process can fail closed against its own
+// trusted session/connection facts — they are never an identity or permission
+// source, and payer/account fields are deliberately absent.
+export const AdminRefreshBillingRpcInputSchema = z.object({
+  expectedProductSpaceId: AdminEntityIdSchema,
+  sessionId: AdminEntityIdSchema,
+  expectedConnectionSlug: nonBlankString(256),
+}).strict()
+export type AdminRefreshBillingRpcInput = z.infer<typeof AdminRefreshBillingRpcInputSchema>
+
 export const APP_BILLING_ERROR_CODES = ['insufficient_credit', 'idempotency_conflict', 'run_finalized'] as const
 export type AppBillingErrorCode = (typeof APP_BILLING_ERROR_CODES)[number]
 export function readAppBillingErrorCode(data: unknown): AppBillingErrorCode | null {

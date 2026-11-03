@@ -160,8 +160,14 @@ interface NavigationProviderProps {
   remoteWorkspaceId?: string | null
   /** U4: apply a failed deep-link send through the shared failure pipeline
    * (user-visible feedback + billing latch + draft recovery) — the SAME
-   * applier the manual send path uses. */
-  onApplySendFailure?: (sessionId: string, error: unknown, draft: string) => void
+   * applier the manual send path uses. The optional 4th argument is the
+   * POO-177 opaque send attempt captured before the RPC fired; an undefined
+   * attempt means the source could not be proven. */
+  onApplySendFailure?: (sessionId: string, error: unknown, draft: string, sendAttempt?: string) => void
+  /** POO-177 QUOTA-01: capture an opaque send attempt for a session at fire
+   * time — called immediately BEFORE the send RPC, never after a catch. An
+   * undefined return means the attempt source is unknown. */
+  onCaptureSendAttempt?: (sessionId: string) => string | undefined
   /** U4: asked at fire time — a latched access block stops the send before any
    * network call (a render-time closure would be stale inside the setTimeout). */
   isSendBlocked?: () => boolean
@@ -183,6 +189,7 @@ export function NavigationProvider({
   isSessionsReady = true,
   remoteWorkspaceId,
   onApplySendFailure,
+  onCaptureSendAttempt,
   isSendBlocked,
   onApplySendBlocked,
 }: NavigationProviderProps) {
@@ -817,6 +824,9 @@ export function NavigationProvider({
                     }
                     return
                   }
+                  // POO-177: capture the attempt at fire time — BEFORE the RPC,
+                  // never after a catch — so a later failure names its own send.
+                  const sendAttempt = onCaptureSendAttempt?.(session.id)
                   void window.electronAPI.sendMessage(
                     session.id,
                     parsed.params.input!,
@@ -826,7 +836,7 @@ export function NavigationProvider({
                   ).catch(error => {
                     // U4: same failure pipeline as the composer — billing
                     // answers latch the banner, the draft stays recoverable.
-                    onApplySendFailure?.(session.id, error, parsed.params.input!)
+                    onApplySendFailure?.(session.id, error, parsed.params.input!, sendAttempt)
                     if (callbackId) {
                       reportActionError(classifyActionCode(error), error)
                     } else {
@@ -873,13 +883,16 @@ export function NavigationProvider({
             break
           }
 
+          // POO-177: capture the attempt at fire time — BEFORE the RPC,
+          // never after a catch — so a late failure names its own send.
+          const sendAttempt = onCaptureSendAttempt?.(parsed.id)
           try {
             await window.electronAPI.sendMessage(parsed.id, parsed.params.input, undefined, undefined, { invocationSource: 'desktop' })
             reportActionResult({ sessionId: parsed.id })
           } catch (error) {
             // U4: same failure pipeline as the composer — billing answers
             // latch the banner, the draft stays recoverable in-session.
-            onApplySendFailure?.(parsed.id, error, parsed.params.input)
+            onApplySendFailure?.(parsed.id, error, parsed.params.input, sendAttempt)
             // SessionManager rejects with `Session ${id} not found` for missing
             // sessions; a billing rejection maps to the rate-limit action code;
             // anything else (transport, persistence, …) is internal.
@@ -959,7 +972,7 @@ export function NavigationProvider({
           console.warn('[Navigation] Unknown action:', parsed.name)
       }
     },
-    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta, t]
+    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta, t, onCaptureSendAttempt, onApplySendFailure]
   )
 
   // =========================================================================

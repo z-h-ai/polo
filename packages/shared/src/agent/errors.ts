@@ -21,6 +21,15 @@ export interface ProviderInfo {
   dashboardUrl?: string;
 }
 
+/**
+ * The admission HTTP status the `billing_error` code classifies: parseError
+ * maps an HTTP 402 (Payment Required) — and only that status — onto this
+ * code. POO-177 exports the fact so a producer forwarding the code onto the
+ * wire (session event stream) states the same classification once, instead
+ * of restating a bare literal at each emit site.
+ */
+export const BILLING_ERROR_HTTP_STATUS = 402;
+
 export interface RecoveryAction {
   /** Keyboard shortcut (single letter) */
   key: string;

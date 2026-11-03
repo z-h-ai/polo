@@ -276,6 +276,10 @@ import type {
   NewWindowFailureReason,
 } from '@polo-ai/shared/protocol'
 import type {
+  AdminRefreshBillingRpcInput,
+  SelfBillingAvailabilityResponse,
+} from '@polo-ai/shared/admin/schemas'
+import type {
   AcceptOrganizationJoinResponse,
   AdminUser,
   CreateOrganizationInput,
@@ -536,6 +540,19 @@ export type AdminSyncConnectionsResult =
 export type OrganizationRpcResult<T extends object> =
   | ({ success: true } & T)
   | ({ success: false } & AdminRpcErrorPayload)
+
+/**
+ * Manual billing refresh (POO-177 QUOTA-01). The comparison input is
+ * validated server-side against the trusted scope; the snapshot payload is
+ * the wire DTO parsed by AdminClient, echoed here for the renderer latch.
+ */
+export type AdminRefreshBillingRpcResult = OrganizationRpcResult<{
+  accountId: string
+  productSpaceId: string
+  sessionId: string
+  connectionSlug: string
+  snapshot: SelfBillingAvailabilityResponse
+}>
 
 /**
  * Member circle RPC result (POO-70 C1). errorCode uses the member-circle
@@ -878,6 +895,7 @@ export interface ElectronAPI {
   adminLogout(): Promise<SessionLogoutResult>
   adminGetStatus(): Promise<AdminStatusResult>
   adminPaymentHandoff(): Promise<{ success: true; url: string; accountId: string; productSpaceId: string } | { success: false; errorCode: string; message: string }>
+  adminRefreshBilling(input: AdminRefreshBillingRpcInput): Promise<AdminRefreshBillingRpcResult>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
   adminSyncAppCatalog(
     organizationId: string,

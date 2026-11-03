@@ -5,7 +5,7 @@
  * draft-preserving prompt with the raw error as collapsed detail, and the
  * optimistic user bubble is stripped WITHOUT appending any error message. */
 import { describe, expect, it } from 'bun:test'
-import { classifySendFailure, stripFailedOptimisticMessage } from '../send-failure'
+import { classifyEventBillingBlock, classifySendFailure, stripFailedOptimisticMessage } from '../send-failure'
 
 function errorWith(fields: Record<string, unknown>, message = 'boom'): Error {
   return Object.assign(new Error(message), fields)
@@ -79,5 +79,35 @@ describe('stripFailedOptimisticMessage(journey #8)', () => {
     const next = stripFailedOptimisticMessage(messages, 'opt-1')
     expect(messages).toHaveLength(1)
     expect(next).toHaveLength(0)
+  })
+})
+
+// POO-177 QUOTA-01: server-terminated turns ride the classification through
+// the SAME recognition table as a rejected send — the two production
+// rejection shapes acc4 observed, plus the guard rails.
+describe('classifyEventBillingBlock(POO-177 事件流分类)', () => {
+  it('post-persist admission 拒绝分类(budget_exhausted,409)→ billing-block(insufficient-credit)', () => {
+    const outcome = classifyEventBillingBlock({ errorCode: 'budget_exhausted', status: 409 })
+    expect(outcome).toEqual({ kind: 'billing-block', issue: 'insufficient-credit' })
+  })
+
+  it('provider 402 typed_error 分类(status:402)→ billing-block(insufficient-credit)', () => {
+    const outcome = classifyEventBillingBlock({ status: 402 })
+    expect(outcome).toEqual({ kind: 'billing-block', issue: 'insufficient-credit' })
+  })
+
+  it('429 分类 → billing-block(quota-exhausted),无服务器 reset 事实就不编造', () => {
+    expect(classifyEventBillingBlock({ status: 429 })).toEqual({
+      kind: 'billing-block', issue: 'quota-exhausted',
+    })
+  })
+
+  it('无分类字段的事件 → null,不猜测', () => {
+    expect(classifyEventBillingBlock(undefined)).toBeNull()
+  })
+
+  it('非计费类(无码无状态)→ null,不落 latch', () => {
+    expect(classifyEventBillingBlock({ errorCode: 'ECONNRESET' })).toBeNull()
+    expect(classifyEventBillingBlock({})).toBeNull()
   })
 })

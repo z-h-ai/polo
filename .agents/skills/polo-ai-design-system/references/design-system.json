@@ -12,18 +12,15 @@
       "packages/ui/src/components/markdown/Markdown.tsx",
       "packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx",
       "packages/ui/src/components/overlay/DataTableOverlay.tsx",
-      "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx",
-      "packages/ui/src/components/markdown/FileLinkContextMenu.tsx",
-      "packages/ui/src/components/markdown/__tests__/markdown-link-routing.test.ts",
-      "packages/ui/src/components/markdown/__tests__/file-link-context-menu.test.tsx",
-      "packages/shared/src/i18n/locales"
+      "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx"
     ],
     "platforms": [
       "desktop-electron"
     ],
     "modules": [
       "登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉",
-      "助手消息的共享Markdown/datatable/展开容器与会话文件链接右键菜单演示（对话卡透传）；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范"
+      "助手消息表格的共享Markdown/datatable/展开容器；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范",
+      "聊天输入区额度提醒横幅的当前实现状态（insufficient-credit 成员/所有者分岔与U2重新检查动作）；刷新行为属POO-177实现卡，本素材不预批新行为"
     ]
   },
   "mode": "extracted",
@@ -157,7 +154,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-      "sha256": "34e5bc0c9c1a87283c1c8087faf4edcdc62bc8e38603ea65bf31a35149b67eea",
+      "sha256": "cfd58dda1fb21efefcba534915662fa916d67bc2d0e2f4f7605c9897085e5fbd",
       "role": "implementation",
       "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
@@ -193,7 +190,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-      "sha256": "1aa292bd6867306661436a566bf770db70ee3fb8eae04089c9d3383bbb9bb25f",
+      "sha256": "5651eb03c7390e27eeaf5daa65c9e1faa2fbd338f8f362dce9a89663985e6e92",
       "role": "implementation",
       "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
     },
@@ -229,13 +226,13 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx",
-      "sha256": "9cc363e0014ba3bd07771d3306cb39f5706af0e402a3495465b5d15841e64f5c",
+      "sha256": "3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08",
       "role": "implementation",
       "scope": "implementation; real ChatDisplay and status-menu compositions with local data only"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-      "sha256": "166917c12420918a4532a89b7be517d1b4abd1422b37a1056b7d9070af12a09e",
+      "sha256": "09194d191e720d28a73a12c0010ada62ee46377a89c9cd7ccf43d9693ad3737c",
       "role": "implementation",
       "scope": "implementation; reproducible native render to static smoke reference; runtime remains React"
     },
@@ -304,6 +301,30 @@
       "sha256": "1815f4523e712a98d409676d349bae5be69be1cc51b73886a4ffe1904852ee61",
       "role": "implementation",
       "scope": "POO-171 real Markdown/datatable/GenUI fixture and observed smoke export; current styles only, no sticky fix or new design approval"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-quota-banner.tsx",
+      "sha256": "e6fec8aa3fcbc0b45b1b6aa3b1c503465cdc3a6435b8c962464b350ee90c386e",
+      "role": "implementation",
+      "scope": "POO-177 current billing-banner states (member/owner insufficient-credit, U2 recheck secondary action); actions are local no-ops; refresh behaviour belongs to the implementation card"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/tools/export-quota-banner-references.py",
+      "sha256": "0e745732553916d2e06631176b32b430e741cdf379981d0ee2c8c58719321a20",
+      "role": "implementation",
+      "scope": "POO-177 reproducible native render to static smoke reference; single destructive banner asserted per case; runtime remains React"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/source-baseline/entries/baseline.html",
+      "sha256": "43a54a84f2094b211c507e92fbadad2bfb39270c560aca53a0ece4f2a0e95b7b",
+      "role": "implementation",
+      "scope": "POO-177 regenerated entry bundle after the refreshable declaration fix; reviewed Skill asset rebind evidence, no new design approval"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/source-baseline/index.html",
+      "sha256": "3c42a6555b365a7381f22b3463906f920dc4732579c50fefa1a46a02fbc57405",
+      "role": "implementation",
+      "scope": "POO-177 regenerated build record (snapshot head, input fingerprint, output hashes) for the entry bundle; no new design approval"
     }
   ],
   "themes": [

@@ -8,6 +8,7 @@ import { isValidThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { pushTyped, type RpcServer, type RequestContext } from '@polo-ai/server-core/transport'
+import { readBillingErrorClassification } from '../../runtime/assistant-billing'
 import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession, unbindClientActiveSession } from './client-active-session'
@@ -575,10 +576,18 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
             return
           }
           // Post-persist error — route via the event stream as today.
+          // POO-177: the message text alone loses the failure's structured
+          // billing class (an Admin admission rejection carries errorCode +
+          // HTTP status on the error object, which the string drops). The
+          // optional classification rides the SAME event so the renderer can
+          // drive the identical chat-access latch a pre-persist rejection
+          // already does. Absent for every non-billing failure.
+          const billingClassification = readBillingErrorClassification(err)
           pushTyped(server, RPC_CHANNELS.sessions.EVENT, { to: 'client', clientId: callerClientId }, {
             type: 'error',
             sessionId,
-            error: err instanceof Error ? err.message : 'Unknown error'
+            error: err instanceof Error ? err.message : 'Unknown error',
+            ...(billingClassification ? { billingClassification } : {})
           } as SessionEvent)
           pushTyped(server, RPC_CHANNELS.sessions.EVENT, { to: 'client', clientId: callerClientId }, {
             type: 'complete',

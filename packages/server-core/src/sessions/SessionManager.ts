@@ -16,7 +16,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, realpath, rename, stat as fsStat, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, createBrowserFastDecider, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, createBrowserFastDecider, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult, BILLING_ERROR_HTTP_STATUS } from '@polo-ai/shared/agent'
 import { fingerprintOwnerToken, getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
@@ -12928,6 +12928,13 @@ export class SessionManager implements ISessionManager {
         }
         managed.messages.push(typedErrorMessage)
         // Send typed_error event with full structure for renderer to handle
+        // POO-177: the provider-side 402 class rides the same optional
+        // structured billing classification an admission rejection puts on
+        // the post-persist error event, so BOTH in-turn rejection paths can
+        // drive the identical chat-access latch in the renderer. Only the
+        // 402 class is forwarded: a provider rate_limited (429) is a
+        // transient, auto-retried condition — never an Admin period-quota
+        // latch.
         emit({
           type: 'typed_error',
           sessionId,
@@ -12940,6 +12947,9 @@ export class SessionManager implements ISessionManager {
             details: event.error.details,
             originalError: event.error.originalError,
           },
+          ...(event.error.code === 'billing_error'
+            ? { billingClassification: { status: BILLING_ERROR_HTTP_STATUS } }
+            : {}),
           timestamp: typedErrorMessage.timestamp,
         }, workspaceId)
         break

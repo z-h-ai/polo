@@ -1,0 +1,82 @@
+{
+  "e2e": {
+    "visual": {
+      "mode": "smoke",
+      "viewports": [
+        {
+          "name": "desktop-1280x800",
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "name": "desktop-1440x900",
+          "width": 1440,
+          "height": 900
+        },
+        {
+          "name": "compact-800x600",
+          "width": 800,
+          "height": 600
+        }
+      ],
+      "routes": [
+        {
+          "name": "quota-member-zh-Hans",
+          "state": "insufficient-credit",
+          "actual": "/entries/baseline.html?scene=interview-quota-member&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[data-testid=\"chat-status-banner\"]"
+            }
+          ]
+        },
+        {
+          "name": "quota-member-en",
+          "state": "insufficient-credit",
+          "actual": "/entries/baseline.html?scene=interview-quota-member&pure=1&lang=en",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[data-testid=\"chat-status-banner\"]"
+            }
+          ]
+        },
+        {
+          "name": "quota-owner-zh-Hans",
+          "state": "insufficient-credit",
+          "actual": "/entries/baseline.html?scene=interview-quota-owner&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[data-testid=\"chat-status-banner\"]"
+            }
+          ]
+        },
+        {
+          "name": "quota-owner-en",
+          "state": "insufficient-credit",
+          "actual": "/entries/baseline.html?scene=interview-quota-owner&pure=1&lang=en",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[data-testid=\"chat-status-banner\"]"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -340,6 +340,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
   // Payment handoff resolves on the local trusted Admin session.
   RPC_CHANNELS.admin.PAYMENT_HANDOFF,
+  // The billing refresh is a preflight read bound to the device's own trusted
+  // Admin session; it must never be proxied to a workspace server.
+  RPC_CHANNELS.admin.REFRESH_BILLING,
 
   // memberCircles — member-side circle reads run on the device's trusted
   // Admin session (same trust boundary as admin.*); never workspace-proxied.

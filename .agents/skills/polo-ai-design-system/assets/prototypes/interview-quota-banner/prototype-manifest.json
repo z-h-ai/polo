@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "kind": "frozen-native-quota-banner-reference",
+  "mode": "high_fidelity",
+  "revision": "poo177-native-reuse-r1",
+  "files": {
+    "prototype": "prototype.html",
+    "asset_1": "styles/088c433398e7b0688aa97b36bfb34a098e4ccdd47d82ee93b62309ac3c36f406.css",
+    "asset_2": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
+    "asset_3": "styles/bc641d85825b4ee17e33c8829f5219087a5d922202a1c5870eae2a9d0178463c.css",
+    "asset_4": "styles/bc9a11341ecbecefe913834cecc715cbc15a2ef3cecbda63eadcd89477b56dc0.css",
+    "asset_5": "styles/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.css",
+    "asset_6": "styles/f8f616f50b927b825b3314bfc82809909c6432ceff002ac4d6280b29f8312c28.css",
+    "asset_7": "views/quota-member-en-compact-800x600.html",
+    "asset_8": "views/quota-member-en-desktop-1280x800.html",
+    "asset_9": "views/quota-member-en-desktop-1440x900.html",
+    "asset_10": "views/quota-member-zh-Hans-compact-800x600.html",
+    "asset_11": "views/quota-member-zh-Hans-desktop-1280x800.html",
+    "asset_12": "views/quota-member-zh-Hans-desktop-1440x900.html",
+    "asset_13": "views/quota-owner-en-compact-800x600.html",
+    "asset_14": "views/quota-owner-en-desktop-1280x800.html",
+    "asset_15": "views/quota-owner-en-desktop-1440x900.html",
+    "asset_16": "views/quota-owner-zh-Hans-compact-800x600.html",
+    "asset_17": "views/quota-owner-zh-Hans-desktop-1280x800.html",
+    "asset_18": "views/quota-owner-zh-Hans-desktop-1440x900.html"
+  },
+  "target": {
+    "languages": [
+      "zh-Hans",
+      "en"
+    ],
+    "themes": [
+      "light"
+    ],
+    "viewports": [
+      {
+        "id": "desktop-1280x800",
+        "width": 1280,
+        "height": 800
+      },
+      {
+        "id": "desktop-1440x900",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "id": "compact-800x600",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "id": "quota-member-zh-Hans",
+      "state": "insufficient-credit",
+      "title": "quota-member-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "quota-member-en",
+      "state": "insufficient-credit",
+      "title": "quota-member-en",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "quota-owner-zh-Hans",
+      "state": "insufficient-credit",
+      "title": "quota-owner-zh-Hans",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "quota-owner-en",
+      "state": "insufficient-credit",
+      "title": "quota-owner-en",
+      "source_entry": "prototype.html"
+    }
+  ],
+  "design": {
+    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "sha256": "5d3fab1ef9c587bc689b4f8f38b06cc5f4f901087e6b1d8cad3a104febc6903f",
+    "sources": [
+      {
+        "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
+        "sha256": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d"
+      }
+    ]
+  },
+  "confirmations": [
+    {
+      "id": "D-ASSISTANT-REUSE",
+      "status": "confirmed",
+      "source": ".agents/skills/polo-ai-design-system/references/policy-alignment.json#D-ASSISTANT-REUSE",
+      "scope": "Preserve current renderer components/styles only; no new layout or fix outcome is visually approved."
+    }
+  ],
+  "provenance": {
+    "generator": ".agents/skills/polo-ai-design-system/tools/export-quota-banner-references.py",
+    "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
+    "source_input_fingerprint": "7a19c6b6557e424eb2bf9f47fbbfabab3b1246da5286c2ad5483d0307ad012e3",
+    "source_export_sha256": "43a54a84f2094b211c507e92fbadad2bfb39270c560aca53a0ece4f2a0e95b7b",
+    "method": "Actual Chromium render; cloned DOM with product scripts removed only from reference; single status banner asserted per case. Live React runtime remains unchanged.",
+    "fixed_reference_clock": "2026-10-29T12:00:00Z",
+    "scope": "Component smoke references of the current billing-banner states; not Electron/backend acceptance, not the POO-177 refresh behaviour, and not bug before/after proof. de/hu/pl narrow-viewport copy checks are acceptance-fixture scope (source-baseline router maps lang to en/zh-Hans only)."
+  }
+}

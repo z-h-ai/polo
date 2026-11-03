@@ -17,7 +17,11 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import { AppShellProvider, type AppShellContextType, type ChatAccessStatus } from '@/context/AppShellContext'
+import { AppShellProvider, type AppShellContextType, type ChatAccessIssue, type ChatAccessStatus } from '@/context/AppShellContext'
+import { isManagedBillingIssue, refreshResultApplies, resolveBillingRefreshOutcome, type BillingLatchSourceLease } from '@/lib/billing-refresh'
+import { useBillingRefresh } from '@/hooks/useBillingRefresh'
+import type { AdminRefreshBillingRpcInput } from '@polo-ai/shared/admin/schemas'
+import type { SessionBillingErrorClassification } from '@polo-ai/shared/protocol'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -69,7 +73,7 @@ import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
 import { extractBadges } from '@/lib/mentions'
 import { stripFailedOptimisticMessage } from '@/lib/send-failure'
-import { applySendBlockedByLatch, applySendFailure } from '@/lib/send-failure-apply'
+import { applyEventBillingBlock, applySendBlockedByLatch, applySendFailure } from '@/lib/send-failure-apply'
 import { getDefaultStore } from 'jotai'
 import {
   ShikiThemeProvider,
@@ -395,10 +399,44 @@ export default function App() {
   // the POO-144 sync states) never route through here. Journey #1: billing
   // blocks split into insufficient-credit (recharge handoff / member copy)
   // and period-quota (reset copy only with a server-provided reset fact).
-  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<'insufficient-credit' | 'quota-exhausted' | 'account-disabled' | null>(null)
+  // POO-177 adds the three canonical Admin classes (budget / payment /
+  // payer), each mapped from a POL-288 blocked reason.
+  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service' | 'ai-config-syncing' | 'ai-config-sync-failed'> | null>(null)
   // Journey #1: the server-provided period-reset fact accompanying a
   // quota-exhausted latch. Cleared with the latch; never synthesized.
   const [runtimeQuotaResetAt, setRuntimeQuotaResetAt] = useState<number | undefined>(undefined)
+  // Fire-time mirror for callbacks that must read the CURRENT latch without
+  // a render closure (the same pattern as chatAccessStatusRef below).
+  const runtimeChatAccessIssueRef = useRef<Exclude<ChatAccessIssue, 'no-ai-service' | 'ai-config-syncing' | 'ai-config-sync-failed'> | null>(null)
+  // POO-177 QUOTA-01: every latch write — send rejections (manual and
+  // deep-link), space/account resets, refresh re-blocks — goes through this
+  // helper so the revision increments synchronously with the write. A
+  // refresh captured against revision N can then never clear a latch that
+  // moved to N+1 while its GET was in flight, even on the same issue class.
+  const billingLatchRevisionRef = useRef(0)
+  const commitBillingLatch = useCallback((issue: Exclude<ChatAccessIssue, 'no-ai-service' | 'ai-config-syncing' | 'ai-config-sync-failed'> | null, quotaResetAt?: number) => {
+    billingLatchRevisionRef.current += 1
+    runtimeChatAccessIssueRef.current = issue
+    setRuntimeChatAccessIssue(issue)
+    setRuntimeQuotaResetAt(quotaResetAt)
+  }, [])
+  // POO-177 QUOTA-01: where the CURRENT billing latch came from. Only a send
+  // that provably rode the admin-managed connection of the trusted space may
+  // later be cleared by the Admin refresh; anything else stays 'unknown' and
+  // out of the refresh's reach.
+  const [billingLatchLease, setBillingLatchLease] = useState<BillingLatchSourceLease>({ source: 'unknown' })
+  const billingLatchLeaseRef = useRef<BillingLatchSourceLease>(billingLatchLease)
+  const bindBillingLatchLease = useCallback((lease: BillingLatchSourceLease) => {
+    billingLatchLeaseRef.current = lease
+    setBillingLatchLease(lease)
+  }, [])
+  const resetBillingLatchLease = useCallback(() => {
+    bindBillingLatchLease({ source: 'unknown' })
+  }, [bindBillingLatchLease])
+  // Opaque send attempts, captured before each send RPC and resolved once
+  // when its failure comes back. Bounded — a send that never fails ages out.
+  const sendAttemptLeasesRef = useRef(new Map<string, BillingLatchSourceLease & { productSpaceId: string | null; accountId: string | null }>())
+  const sendAttemptSeqRef = useRef(0)
   // POO-144: space AI-config sync state machine. The startup adminSyncConnections
   // (below) runs before the Main runtime fence exists, so it is a personal/global
   // sync; only the committed product space scopes the managed-connection sync.
@@ -476,6 +514,11 @@ export default function App() {
         ...(runtimeChatAccessIssue === 'quota-exhausted' && runtimeQuotaResetAt !== undefined
           ? { quotaResetAt: runtimeQuotaResetAt }
           : {}),
+        // POO-177 QUOTA-01: the manual refresh entry exists only for a latch
+        // whose failing send provably rode the admin-managed connection of
+        // the trusted space (the source lease). BYOK 402s, unknown sources
+        // and true HTTP-429 period latches keep their existing paths.
+        refreshable: isManagedBillingIssue(runtimeChatAccessIssue) && billingLatchLease.source === 'admin-managed',
       }
     }
     if (llmConnectionsLoaded && llmConnections.length === 0) {
@@ -490,13 +533,14 @@ export default function App() {
       return { issue: 'no-ai-service' }
     }
     return null
-  }, [aiConfigSyncPhase, llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue, runtimeQuotaResetAt])
+  }, [aiConfigSyncPhase, llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue, runtimeQuotaResetAt, billingLatchLease])
 
   // U4: a stable mirror for callbacks that must test the CURRENT access
   // block at fire time (the deep-link auto-send fires from a setTimeout —
   // a render-closure value would be stale by then).
   const chatAccessStatusRef = useRef<ChatAccessStatus | null>(chatAccessStatus)
   chatAccessStatusRef.current = chatAccessStatus
+  runtimeChatAccessIssueRef.current = runtimeChatAccessIssue
 
   // Journey #1: a billing block belongs to the space whose admission surface
   // produced it. A committed PRODUCT-SPACE switch discards it (the new space
@@ -510,10 +554,52 @@ export default function App() {
     const nextSpaceId = productSpace.activeProductSpaceId ?? null
     billingResetSpaceIdRef.current = nextSpaceId
     if (prevSpaceId !== null && prevSpaceId !== nextSpaceId) {
-      setRuntimeChatAccessIssue(prev => (prev === 'insufficient-credit' || prev === 'quota-exhausted') ? null : prev)
-      setRuntimeQuotaResetAt(undefined)
+      // POO-177: a space switch discards the managed billing classes too —
+      // the new space re-adjudicates on its own first send. account-disabled
+      // keeps standing (unchanged); only its stale reset fact is dropped.
+      const prev = runtimeChatAccessIssueRef.current
+      if (prev === null || isManagedBillingIssue(prev) || prev === 'quota-exhausted') {
+        commitBillingLatch(null)
+      } else {
+        setRuntimeQuotaResetAt(undefined)
+      }
+      resetBillingLatchLease()
     }
-  }, [productSpace.activeProductSpaceId])
+  }, [productSpace.activeProductSpaceId, commitBillingLatch, resetBillingLatchLease])
+
+  // POO-177 QUOTA-01: the source lease for a billing block that arrived on
+  // the session event stream. Same canonical evidence rule as
+  // captureSendAttempt — the session's ACTUAL admin-managed connection inside
+  // the committed space proves the Admin refresh's reach — but resolved from
+  // the session metadata at failure time, because an in-turn rejection has no
+  // renderer-captured send attempt to consume. Declared before the event
+  // subscription effect below consumes it.
+  const resolveSessionBillingLease = useCallback((sessionId: string): BillingLatchSourceLease => {
+    const meta = store.get(sessionMetaMapAtom).get(sessionId)
+    const connectionSlug = meta?.llmConnection
+    const connection = connectionSlug ? llmConnections.find(item => item.slug === connectionSlug) : undefined
+    const activeSpaceId = productSpaceRef.current.activeProductSpaceId ?? null
+    return {
+      source: connection?.managedBy === 'admin' && activeSpaceId ? 'admin-managed' : 'unknown',
+      sessionId,
+      connectionSlug,
+      productSpaceId: activeSpaceId,
+      accountId: currentAdminUserIdRef.current,
+    }
+  }, [store, llmConnections])
+
+  // POO-177 QUOTA-01: a turn the server terminated with a structured billing
+  // rejection — a blocked admission on the post-persist error event, a
+  // provider 402 on the in-stream typed_error — drives the SAME latch write
+  // (commitBillingLatch + lease) a synchronously rejected send does. The
+  // shared applier no-ops on anything that is not a billing block.
+  const applyEventBillingBlockForSession = useCallback((sessionId: string, classification: SessionBillingErrorClassification | undefined) => {
+    applyEventBillingBlock(sessionId, classification, {
+      setBillingLatch: commitBillingLatch,
+      onBindBillingLease: bindBillingLatchLease,
+      resolveLease: () => resolveSessionBillingLease(sessionId),
+    })
+  }, [commitBillingLatch, bindBillingLatchLease, resolveSessionBillingLease])
 
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Session selection state — declared with the other account-scoped state so
@@ -624,8 +710,8 @@ export default function App() {
     setSessionOptions(new Map())
     sessionDraftsRef.current.clear()
     setSession({ selected: null })
-    setRuntimeChatAccessIssue(null)
-    setRuntimeQuotaResetAt(undefined)
+    commitBillingLatch(null)
+    resetBillingLatchLease()
     // POO-144: the leaving account's in-flight scoped sync must not publish
     // into the next one — bump the epoch (its receipt is dropped) and reset
     // the banner state machine to idle.
@@ -652,7 +738,9 @@ export default function App() {
       ?.catch(() => undefined)
   }, [
     applyPendingQuestions,
+    commitBillingLatch,
     initializeSessions,
+    resetBillingLatchLease,
     setDefaultLlmConnectionSlug,
     setLlmConnections,
     setLlmConnectionsLoaded,
@@ -1964,6 +2052,16 @@ export default function App() {
       // Track activity for stale session watchdog
       trackSessionActivity(sessionId)
 
+      // POO-177 QUOTA-01: a turn the server terminated with a structured
+      // billing rejection never reaches a renderer catch block — the
+      // post-persist error event and the in-stream typed_error both absorb
+      // it. Classify the carried classification and drive the identical
+      // latch a rejected send writes, so the managed banner (and its 刷新)
+      // exists wherever a managed rejection actually lands.
+      if (event.type === 'error' || event.type === 'typed_error') {
+        applyEventBillingBlockForSession(sessionId, event.billingClassification)
+      }
+
       // Dispatch window event when compaction completes
       // This allows FreeFormInput to sequence the plan execution message after compaction
       // Note: markCompactionComplete is called on the backend (sessions.ts) to ensure
@@ -2067,6 +2165,7 @@ export default function App() {
     applyPermissionModeState,
     reconcilePermissionModeState,
     applyGoalProjection,
+    applyEventBillingBlockForSession,
   ])
 
   // Transport reconnect recovery — refresh session metadata plus active/processing
@@ -2313,11 +2412,54 @@ export default function App() {
     runtimeChatAccessIssue,
   ])
 
+  // POO-177 QUOTA-01: the opaque send attempt. Captured BEFORE any send RPC
+  // (manual composer here; deep-link/action sends through the NavigationContext
+  // callback below), resolved exactly once when its failure comes back — a
+  // late failure from send A can never be attributed to send B, and an
+  // unresolvable attempt degrades to an 'unknown' lease the Admin refresh
+  // never touches.
+  const captureSendAttempt = useCallback((sessionId: string): string | undefined => {
+    const attemptId = `attempt-${++sendAttemptSeqRef.current}`
+    const meta = store.get(sessionMetaMapAtom).get(sessionId)
+    const connectionSlug = meta?.llmConnection
+    const connection = connectionSlug ? llmConnections.find(item => item.slug === connectionSlug) : undefined
+    const activeSpaceId = productSpaceRef.current.activeProductSpaceId ?? null
+    sendAttemptLeasesRef.current.set(attemptId, {
+      // Canonical billing evidence only: the session's ACTUAL admin-managed
+      // connection inside the committed space. A slug prefix or the workspace
+      // default proves nothing.
+      source: connection?.managedBy === 'admin' && activeSpaceId ? 'admin-managed' : 'unknown',
+      sessionId,
+      connectionSlug,
+      productSpaceId: activeSpaceId,
+      accountId: currentAdminUserIdRef.current,
+    })
+    while (sendAttemptLeasesRef.current.size > 32) {
+      const oldest = sendAttemptLeasesRef.current.keys().next().value
+      if (oldest === undefined) break
+      sendAttemptLeasesRef.current.delete(oldest)
+    }
+    return attemptId
+  }, [store, llmConnections])
+
+  const resolveSendLease = useCallback((attemptId: string | undefined, sessionId: string): BillingLatchSourceLease | undefined => {
+    if (!attemptId) return undefined
+    const lease = sendAttemptLeasesRef.current.get(attemptId)
+    // Exactly-once consumption: a replayed failure cannot re-bind anything.
+    sendAttemptLeasesRef.current.delete(attemptId)
+    if (!lease || lease.sessionId !== sessionId) return undefined
+    return lease
+  }, [])
+
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => {
     // Journey #8: the optimistic bubble's id, hoisted so the catch block can
     // strip exactly that bubble (the send's server receipt is unknown — the
     // failed attempt must not linger as a half-confirmed message).
     let optimisticUserMessageId: string | null = null
+    // POO-177: the opaque send attempt — captured inside the try BEFORE the
+    // first await (the lease must describe the send that actually fires, not
+    // the model a later catch happens to find) and read in the catch.
+    let sendAttemptId: string | undefined
     try {
       if (chatAccessStatus) {
         return
@@ -2326,6 +2468,8 @@ export default function App() {
       if (llmConnectionsLoaded && llmConnections.length === 0) {
         return
       }
+
+      sendAttemptId = captureSendAttempt(sessionId)
 
       if (await checkAdminAccountDisabledBeforeSend()) {
         return
@@ -2520,12 +2664,13 @@ export default function App() {
         sessionId,
         draft: message,
         hadGoalStartIntent: !!goalStartIntentForSession(store.get, sessionId),
+        sendLease: resolveSendLease(sendAttemptId, sessionId),
       }, {
         store,
         setBillingLatch: (issue, quotaResetAt) => {
-          setRuntimeChatAccessIssue(issue)
-          setRuntimeQuotaResetAt(quotaResetAt)
+          commitBillingLatch(issue, quotaResetAt)
         },
+        onBindBillingLease: bindBillingLatchLease,
       })
       updateSessionById(sessionId, (s) => ({
         isProcessing: false,
@@ -2534,38 +2679,113 @@ export default function App() {
           : s.messages,
       }))
     }
-  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, store, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
+  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, store, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug, captureSendAttempt, resolveSendLease, commitBillingLatch, bindBillingLatchLease])
 
-  // U2 (product-closure 2026-10-27): the banner's "I've recharged — recheck"
-  // action. Only a balance-shaped block (insufficient-credit) is clearable by
-  // a payment the user claims to have made; hard blocks (no service, disabled
-  // account, exhausted quota) keep standing until the server says otherwise.
-  // quotaResetAt is intentionally left alone — it only surfaces under a
-  // quota-exhausted latch, which this action can never clear.
-  const handleRecheckBilling = useCallback(() => {
-    setRuntimeChatAccessIssue(prev => (prev === 'insufficient-credit') ? null : prev)
-  }, [])
+  // POO-177 QUOTA-01/02: the banner's manual billing refresh. The old U2
+  // synchronous latch-clear is replaced by a real read: the canonical Admin
+  // self-availability snapshot decides — an available receipt clears ONLY the
+  // managed latch it was captured against (same revision, proven source
+  // lease, unchanged connection), a blocked answer re-latches with the honest
+  // Admin class, and anything unconfirmed keeps the latch with one light
+  // feedback. No auto-send, no second quota store.
+  const billingRefreshRead = useCallback(
+    (input: AdminRefreshBillingRpcInput) => window.electronAPI.adminRefreshBilling(input),
+    [],
+  )
+  // Composite scope of one refresh: account, space, context version, switch
+  // state, epochs and the latch revision. The hook captures it at trigger and
+  // re-checks it at settle, so a receipt for a superseded account/space — or
+  // one computed while a NEW admission rejection already rewrote the latch —
+  // is dropped before it can touch anything.
+  const billingRefreshScopeKey = useCallback(() => [
+    currentAdminUserIdRef.current,
+    productSpaceRef.current.activeProductSpaceId,
+    productSpaceRef.current.productSpaceContextKey,
+    productSpaceRef.current.contextVersion,
+    productSpaceRef.current.pendingSwitch ? 'switching' : 'settled',
+    accountSessionEpochRef.current,
+    currentAdminUserGenerationRef.current,
+    billingLatchRevisionRef.current,
+  ].join('|'), [])
+  const billingRefresh = useBillingRefresh({
+    read: billingRefreshRead,
+    getScopeKey: billingRefreshScopeKey,
+  })
+
+  const handleRecheckBilling = useCallback(async () => {
+    const issue = runtimeChatAccessIssueRef.current
+    const lease = billingLatchLeaseRef.current
+    // Only a proven admin-managed source, on a managed billing latch, for the
+    // session/connection it actually failed on, is refreshable — a BYOK 402,
+    // an unknown source or a connection that has since changed never is.
+    if (!issue || !isManagedBillingIssue(issue)) return
+    if (lease.source !== 'admin-managed' || !lease.sessionId || !lease.connectionSlug) return
+    const activeSpaceId = productSpaceRef.current.activeProductSpaceId
+    if (!activeSpaceId || lease.productSpaceId !== activeSpaceId) return
+    const meta = store.get(sessionMetaMapAtom).get(lease.sessionId)
+    const connection = meta?.llmConnection
+      ? llmConnections.find(item => item.slug === meta.llmConnection)
+      : undefined
+    if (meta?.llmConnection !== lease.connectionSlug || connection?.managedBy !== 'admin') return
+
+    const capturedRevision = billingLatchRevisionRef.current
+    const settlement = await billingRefresh.refresh({
+      expectedProductSpaceId: activeSpaceId,
+      sessionId: lease.sessionId,
+      expectedConnectionSlug: lease.connectionSlug,
+    })
+    if (!settlement) return
+    // Defense in depth: the scope key already embeds the revision; this
+    // re-check keeps the apply decision local to the latch write.
+    if (!refreshResultApplies(capturedRevision, billingLatchRevisionRef.current)) return
+
+    const result = settlement.result
+    if (!result || !result.success) {
+      // 403 / 404 / contract / transport: keep the latch and its draft, one
+      // light retry feedback — never a logout, never a fake success.
+      toast.error(i18n.t('billingRecheck.refreshFailed'), { duration: 4000 })
+      return
+    }
+    const outcome = resolveBillingRefreshOutcome(result.snapshot)
+    if (outcome.kind === 'clears-latch') {
+      commitBillingLatch(null)
+      resetBillingLatchLease()
+      toast.success(i18n.t('billingRecheck.refreshed'), { duration: 4000 })
+      return
+    }
+    if (outcome.kind === 'reblocks') {
+      // The canonical answer re-latches with the honest class. No reset time
+      // is ever synthesized: a provider-metered read carries none.
+      commitBillingLatch(outcome.issue)
+      toast.success(i18n.t('billingRecheck.refreshed'), { duration: 4000 })
+      return
+    }
+    toast.info(i18n.t('billingRecheck.notReady'), { duration: 4000 })
+  }, [billingRefresh, commitBillingLatch, resetBillingLatchLease, store, llmConnections])
 
   // U4 (product-closure 2026-10-27): the deep-link send paths (send=true and
   // send-message) funnel their failures through the SAME applier as the
   // manual send above, so billing answers latch the banner and the draft is
-  // recoverable no matter which entry point tripped.
-  const applyDeepLinkSendFailure = useCallback((sessionId: string, error: unknown, draft: string) => {
+  // recoverable no matter which entry point tripped. POO-177: the optional
+  // 4th argument is the opaque attempt captured before the RPC fired; an
+  // unresolvable attempt degrades to an 'unknown' lease.
+  const applyDeepLinkSendFailure = useCallback((sessionId: string, error: unknown, draft: string, sendAttempt?: string) => {
     applySendFailure(error, {
       sessionId,
       draft,
       hadGoalStartIntent: !!goalStartIntentForSession(store.get, sessionId),
+      sendLease: resolveSendLease(sendAttempt, sessionId),
     }, {
       store,
       setBillingLatch: (issue, quotaResetAt) => {
-        setRuntimeChatAccessIssue(issue)
-        setRuntimeQuotaResetAt(quotaResetAt)
+        commitBillingLatch(issue, quotaResetAt)
       },
+      onBindBillingLease: bindBillingLatchLease,
     })
     // Deep-link sends carry no renderer-side optimistic bubble (the manual
     // path's strip above is manual-only); just clear the processing flag.
     updateSessionById(sessionId, (s) => ({ isProcessing: false }))
-  }, [store, updateSessionById])
+  }, [store, updateSessionById, resolveSendLease, commitBillingLatch, bindBillingLatchLease])
 
   // U4: asked at fire time (the deep-link auto-send runs from a setTimeout —
   // a render closure would be stale) so a latched block stops the send before
@@ -3230,6 +3450,7 @@ export default function App() {
     chatAccessStatus,
     onRetryAiConfigSync: runScopedAiConfigSync,
     onRecheckBilling: handleRecheckBilling,
+    billingRecheckPending: billingRefresh.busy,
     currentAdminUser,
     onAdminLogout: handleAdminLogout,
     refreshLlmConnections,
@@ -3293,6 +3514,7 @@ export default function App() {
     chatAccessStatus,
     runScopedAiConfigSync,
     handleRecheckBilling,
+    billingRefresh.busy,
     currentAdminUser,
     handleAdminLogout,
     refreshLlmConnections,
@@ -3820,6 +4042,7 @@ export default function App() {
                   isSessionsReady={sessionsLoaded}
                   remoteWorkspaceId={windowRemoteWorkspaceId}
                   onApplySendFailure={applyDeepLinkSendFailure}
+                  onCaptureSendAttempt={captureSendAttempt}
                   isSendBlocked={isChatSendBlocked}
                   onApplySendBlocked={handleApplySendBlocked}
                 >
