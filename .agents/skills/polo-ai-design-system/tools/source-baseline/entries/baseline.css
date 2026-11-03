@@ -11,7 +11,7 @@
 @source './gallery.tsx';
 @source './interview-input.tsx';
 @source './interview-conversation.tsx';
-@source './interview-table.tsx';
+@source './interview-localization.tsx';
 
 /* Browsing-shell override, scoped to this baseline document only.
    The renderer ships `overflow: hidden` on html/body because the Electron

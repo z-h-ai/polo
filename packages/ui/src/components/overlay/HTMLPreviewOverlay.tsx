@@ -84,7 +84,9 @@ export function HTMLPreviewOverlay({
   // Internal content cache (merges external + locally loaded)
   const [internalCache, setInternalCache] = React.useState<Record<string, string>>({})
   const [loadingItem, setLoadingItem] = React.useState(false)
-  const [loadError, setLoadError] = React.useState<string | null>(null)
+  // POO-179: keep the raw diagnostic (if any) in state; the self-produced
+  // fallback copy resolves at render time so a language switch re-translates.
+  const [loadError, setLoadError] = React.useState<{ raw: string | null } | null>(null)
 
   // Merge caches — external takes precedence, plus single html prop
   const mergedCache = React.useMemo(() => {
@@ -124,7 +126,7 @@ export function HTMLPreviewOverlay({
         setInternalCache((prev) => ({ ...prev, [activeItem.src]: content }))
       })
       .catch((err) => {
-        setLoadError(err instanceof Error ? err.message : 'Failed to load content')
+        setLoadError({ raw: err instanceof Error ? err.message : null })
       })
       .finally(() => setLoadingItem(false))
   }, [isOpen, activeItem?.src, mergedCache, onLoadContent])
@@ -165,7 +167,7 @@ export function HTMLPreviewOverlay({
   const headerActions = (
     <div className="flex items-center gap-2">
       <ItemNavigator items={resolvedItems} activeIndex={activeIdx} onSelect={setActiveIdx} size="md" />
-      <CopyButton content={activeContent || ''} label="Copy HTML" className="bg-background shadow-minimal" />
+      <CopyButton content={activeContent || ''} label={t('overlay.copyHtml')} className="bg-background shadow-minimal" />
     </div>
   )
 
@@ -179,7 +181,7 @@ export function HTMLPreviewOverlay({
         label: 'HTML',
         variant: 'blue',
       }}
-      title={title || activeItem?.label || 'HTML Preview'}
+      title={title || activeItem?.label || t('overlay.htmlPreview')}
       headerActions={headerActions}
     >
       <div className="px-6 pb-6">
@@ -187,7 +189,7 @@ export function HTMLPreviewOverlay({
           <div className="py-12 text-center text-muted-foreground text-sm">{t('common.loading')}</div>
         )}
         {loadError && !activeContent && (
-          <div className="py-12 text-center text-destructive/70 text-sm">{loadError}</div>
+          <div className="py-12 text-center text-destructive/70 text-sm">{loadError.raw ?? t('overlay.loadContentFailed')}</div>
         )}
         {processedHtml && (
           <div
@@ -204,7 +206,7 @@ export function HTMLPreviewOverlay({
               sandbox="allow-same-origin allow-top-navigation-by-user-activation"
               srcDoc={processedHtml}
               onLoad={handleLoad}
-              title={activeItem?.label || title || 'HTML Preview'}
+              title={activeItem?.label || title || t('overlay.htmlPreview')}
               className="w-full border-0"
               style={{ height: iframeHeight, minHeight: '400px' }}
             />

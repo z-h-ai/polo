@@ -1649,6 +1649,10 @@ export class PiAgent extends BaseAgent {
           rememberForMinutes: checkResult.rememberForMinutes,
           commandHash: checkResult.commandHash,
           approvalTtlSeconds: checkResult.approvalTtlSeconds,
+          // POO-179: Pi ignores `_alwaysAllow` in respondToPermission, so the
+          // origin metadata states false — the UI must not promise a session
+          // memory this backend will not honor.
+          canRememberForSession: false,
         });
 
         const allowed = await permissionPromise;

@@ -1,4 +1,6 @@
 import * as React from 'react'
+import { i18n } from '@polo-ai/shared/i18n'
+import type { TFunction } from 'i18next'
 import type { CSSProperties } from 'react'
 import type { StatusConfig } from '@polo-ai/shared/statuses'
 import { isEmoji } from '@polo-ai/shared/utils/icon-constants'
@@ -143,6 +145,25 @@ export function getStateColor(
   return states.find(s => s.id === stateId)?.resolvedColor
 }
 
+// Canonical labels from shared/statuses/storage.ts. These are identity checks,
+// not translated config: renamed defaults and custom states keep their own text.
+const SYSTEM_STATUS_LABELS: Record<string, { label: string; key: string }> = {
+  backlog: { label: 'Backlog', key: 'status.backlog' },
+  todo: { label: 'Todo', key: 'status.todo' },
+  'needs-review': { label: 'Needs Review', key: 'status.needs-review' },
+  done: { label: 'Done', key: 'status.done' },
+  cancelled: { label: 'Cancelled', key: 'status.cancelled' },
+}
+
+/** Resolve only unrenamed system defaults, at render/call time. */
+export function getStatusLabel(state: SessionStatus, t: TFunction = i18n.t): string {
+  const system = Object.hasOwn(SYSTEM_STATUS_LABELS, state.id) ? SYSTEM_STATUS_LABELS[state.id] : undefined
+  if (system && (state.isFixed || state.isDefault) && state.label === system.label) {
+    return t(system.key)
+  }
+  return state.label || state.id
+}
+
 /**
  * Get the label for a todo state
  */
@@ -151,7 +172,7 @@ export function getStateLabel(
   states: SessionStatus[]
 ): string {
   const state = states.find(s => s.id === stateId)
-  return state?.label ?? stateId
+  return state ? getStatusLabel(state) : stateId
 }
 
 /**

@@ -181,8 +181,12 @@ export function AddWorkspaceStep_ConnectRemote({
   )
 
   const showCreateMode = !isReconnectMode && (isCreateNew || isFreshServer)
-  const buttonLabel = isReconnectMode ? 'Reconnect' : showCreateMode ? 'Create and Connect' : 'Connect'
-  const buttonLoadingLabel = isReconnectMode ? 'Reconnecting...' : showCreateMode ? 'Creating...' : 'Connecting...'
+  const buttonLabel = isReconnectMode
+    ? t('workspace.actionReconnect')
+    : showCreateMode ? t('workspace.actionCreateAndConnect') : t('common.connect')
+  const buttonLoadingLabel = isReconnectMode
+    ? t('workspace.reconnecting')
+    : showCreateMode ? t('workspace.creating') : t('common.connecting')
 
   return (
     <AddWorkspaceContainer>
@@ -197,21 +201,21 @@ export function AddWorkspaceStep_ConnectRemote({
         )}
       >
         <ArrowLeft className="h-4 w-4" />
-        Back
+        {t('common.back')}
       </button>
 
       <AddWorkspaceStepHeader
-        title={isReconnectMode ? t("workspace.reconnect", { name: reconnectWorkspace!.name }) : "Connect to remote server"}
+        title={isReconnectMode ? t("workspace.reconnect", { name: reconnectWorkspace!.name }) : t("workspace.connectRemote")}
         description={isReconnectMode
-          ? "Update the server URL or token to restore the connection."
-          : "Connect to a remote Polo AI Server for this workspace."}
+          ? t("workspace.connectRemoteDescUpdate")
+          : t("workspace.connectRemoteDescThis")}
       />
 
       <div className="mt-6 w-full space-y-5">
         {/* Server URL */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-foreground">
-            Server URL
+            {t("workspace.serverUrl")}
           </label>
           <div className="bg-background shadow-minimal rounded-lg">
             <Input
@@ -228,7 +232,7 @@ export function AddWorkspaceStep_ConnectRemote({
         {/* Token */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-foreground">
-            Token
+            {t("workspace.token")}
           </label>
           <div className="bg-background shadow-minimal rounded-lg">
             <Input
@@ -248,24 +252,26 @@ export function AddWorkspaceStep_ConnectRemote({
             onClick={handleTestConnection}
             disabled={!serverUrl || !token || testState === 'testing' || isCreating}
           >
-            {testState === 'testing' ? 'Testing...' : 'Test Connection'}
+            {testState === 'testing' ? t('workspace.testing') : t('workspace.testConnection')}
           </AddWorkspaceSecondaryButton>
           {testState === 'ok' && !isFreshServer && (
             <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
               <CheckCircle className="h-3.5 w-3.5" />
-              Connected{serverVersion ? ` — v${serverVersion}` : ''}
+              {serverVersion ? t('workspace.connectedVersion', { version: serverVersion }) : t('workspace.connected')}
             </span>
           )}
           {testState === 'ok' && isFreshServer && (
             <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
               <CheckCircle className="h-3.5 w-3.5" />
-              Connected{serverVersion ? ` — v${serverVersion}` : ''} — no workspaces yet
+              {serverVersion
+                ? t('workspace.connectedFreshServer', { version: serverVersion })
+                : t('workspace.connectedFreshNoVersion')}
             </span>
           )}
           {testState === 'error' && (
             <span className="flex items-center gap-1 text-xs text-destructive">
               <XCircle className="h-3.5 w-3.5" />
-              {testError || 'Failed'}
+              {testError || t('common.failed')}
             </span>
           )}
         </div>
@@ -285,7 +291,7 @@ export function AddWorkspaceStep_ConnectRemote({
         {!isReconnectMode && testState === 'ok' && remoteWorkspaces.length > 0 && !isCreateNew && (
           <div className="space-y-2">
             <label className="block text-sm font-medium text-foreground">
-              Workspace
+              {t("workspace.workspaceLabel")}
             </label>
             <div className="bg-background shadow-minimal rounded-lg">
               <Select
@@ -312,7 +318,7 @@ export function AddWorkspaceStep_ConnectRemote({
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               <Plus className="h-3 w-3" />
-              Create new workspace on server
+              {t("workspace.createNewOnServer")}
             </button>
           </div>
         )}
@@ -321,7 +327,7 @@ export function AddWorkspaceStep_ConnectRemote({
         {!isReconnectMode && testState === 'ok' && showCreateMode && (
           <div className="space-y-2">
             <label className="block text-sm font-medium text-foreground">
-              Workspace name
+              {t("workspace.nameLabel")}
             </label>
             <div className="bg-background shadow-minimal rounded-lg">
               <Input
@@ -333,7 +339,7 @@ export function AddWorkspaceStep_ConnectRemote({
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              A workspace will be created on the remote server with this name.
+              {t("workspace.remoteCreateNote")}
             </p>
             {isCreateNew && remoteWorkspaces.length > 0 && (
               <button
@@ -346,7 +352,7 @@ export function AddWorkspaceStep_ConnectRemote({
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <ArrowLeft className="h-3 w-3" />
-                Use existing workspace
+                {t("workspace.useExisting")}
               </button>
             )}
           </div>

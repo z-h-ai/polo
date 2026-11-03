@@ -124,42 +124,8 @@ POLO_REVIEW_EVIDENCE="$(mktemp -d /tmp/polo-navigation.XXXXXX)" python3 docs/mvp
 最终集成 main 前、创建新任务前均回到本 Skill，按 [使用手册的维护步骤](usage-playbook.md#维护时机与-git-边界)
 检查三层素材。检查只读，过期才修源再生。维护不自动提交、push、tag 或发版；源码未变则复用素材。
 
-## 已采用的 POO-178 局部侧栏布局
+### POO-179 完整本地化的原生补充
 
-`tools/sidebar-runtime/` 独立装配真实 AppShell，继承生产样式/provider，只替换后端数据；
-其 README 给出运行、宽度持久化 fixture 和来源边界。`reference-source.json` 固定已存在的
-root 工程采用记录及原候选hash。`tools/export-sidebar-reference.py --source-export <已归档候选>`
-真实重放既有180px+More候选后提取小型 DOM/CSS，`--check` 重放校验；不重复入库原21MB bundle。
-`assets/prototypes/interview-sidebar/` 只为该已采用局部布局提供 smoke 引用，runtime 直接消费当前生产 AppShell。
-这不批准 POO-180 的其他设计；原候选字号不代表14px，POO-168集成后必须重采真实同状态证据。
+`interview-localization.tsx` 只import真实ChatDisplay/structured输入、共享MarkdownDatatableBlock/overlay、设置与目录组件；provider/样式沿上文，平台动作仅在fixture边界记录原始参数。正式smoke的新增代表状态由既有export-conversation-references.py全量生成，保留原18状态单元，不增第二manifest/loader或task专属生成机制。
 
-## POO-171 原生消息表格
-
-`entries/interview-table.tsx` 只提供20列100行（`?short=1`为3列2行）数据和文件读取fixture。
-三个 `interview-table-{terminal,minimal,full}` 场景直接复用生产 Markdown，
-`interview-table-datatable` 复用 MarkdownDatatableBlock 并可点其真实全屏入口；
-`interview-table-genui` 通过真正 GenUICard→DataTableView→MarkdownDatatableBlock 加载同一文件数据、筛选与行操作。
-外层仅模拟会话阅读viewport，表格高度、overflow、thead与overlay均由生产组件负责，没有fixture sticky CSS。
-GenUI 文件读取为受控 PlatformProvider，按钮事件不向后端发送；这些证据不证明真实文件系统/执行/完整消息页。
-
-`tools/export-table-reference.py --evidence <忽略目录>` 真实采集三模式、短表、datatable内嵌/展开、GenUI，共7态×3视口；
-`--check` 重放后逐字节核对。`assets/prototypes/interview-table/` 为冻结DOM/CSS，runtime仍是原生React。
-当前表头未sticky的事实如实保留；本引用只继承 D-ASSISTANT-REUSE 的既有样式，不宣称修复前后或新目标设计已通过。
-纵横滚动、排序/筛选、row-action头、overlay关闭及长短表几何须由171实际实现卡按同数据/视口/状态验证。
-
-设计policy对共享源码仅覆盖这次真实消费者 Markdown.tsx、MarkdownDatatableBlock.tsx、DataTableOverlay.tsx及对应新增测试路径。
-它沿助手当前renderer组件/样式复用语义，不向packages/ui其他组件或WebUI整页授予工作台目标规范。
-
-## POO-177 额度提醒区域
-
-`entries/interview-quota-banner.tsx` 复刻 ChatPage 决策映射（`decideChatAccessBanner`）驱动的
-真实 ChatDisplay→ChatInputZone 状态横幅：`interview-quota-member`（成员文案+U2 重新检查动作，无充值按钮）、
-`interview-quota-owner`（充值交接+U2 重新检查）。动作仅本地空操作；不发起 GET、不清 latch、不模拟充值。
-刷新 pending/完成/失败是 POO-177 实现后的行为态，本基线不渲染也不预批。
-
-`tools/export-quota-banner-references.py --evidence <忽略目录>` 真实采集两态×zh-Hans/en×三视口共4态12视图，
-每 case 断言恰好一个 `data-testid="chat-status-banner"` 且 variant=destructive、无横向溢出；`--check` 逐字节重放核对。
-`assets/prototypes/interview-quota-banner/` 为冻结DOM/CSS，runtime仍是原生React。
-基线路由 `lang` 仅支持 en/zh-Hans（baseline.tsx 二元映射）；Plan 要求的 de/hu/pl 窄宽文案检查属验收 fixture 范围，
-不在本基线虚报。本引用只继承 D-ASSISTANT-REUSE 的既有样式；QUOTA-01/02 的刷新入口、busy/完成反馈
-须由 177 实际实现卡按同数据/视口/状态验证。
+功能输入为 `tools/source-baseline/localization-functional-cases.json`，driver为同目录 `verify-interview-localization.py`。`--mode inventory --output-dir <ignored>`明确列出所有43顶层用例和实际缺失planned测试；`--mode baseline`只采当前真实行为与已知漏译，不产生Acceptance PASS；`--mode verify`仍须满足完整原需求与后端origin/记忆合同，不把浏览器假数据当授权证明。通过`--frontend-url`消费调用者服务时driver不停止该服务，未传时自建本树Vite并在finally关闭；每用例独立context。输出到本次ignored目录，禁止回写旧sealed evidence。

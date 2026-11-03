@@ -2472,6 +2472,99 @@ export class SessionManager implements ISessionManager {
     if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
   }
 
+  /**
+   * Body of the guarded `agent.onPermissionRequest` callback (extracted verbatim
+   * from the inline wiring so the guard + event transparency stay testable).
+   *
+   * POO-179: the request (including the read-only `canRememberForSession`
+   * presentation metadata) is forwarded to the renderer through the existing
+   * spread unchanged. Nothing here reads back any renderer-supplied
+   * presentation flag: `PermissionResponseOptions` gains no such field, and
+   * grant/remember behavior is untouched.
+   */
+  private handleAgentPermissionRequest(managed: ManagedSession, request: {
+    requestId: string;
+    toolName: string;
+    command?: string;
+    description: string;
+    type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action';
+    appName?: string;
+    reason?: string;
+    impact?: string;
+    requiresSystemPrompt?: boolean;
+    rememberForMinutes?: number;
+    commandHash?: string;
+    approvalTtlSeconds?: number;
+    canRememberForSession?: boolean;
+  }): void {
+    if (this.isOwnedCliSession(managed)) {
+      managed.agent?.respondToPermission(request.requestId, false, false)
+      return
+    }
+    sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
+    let brokerMetadata: {
+      commandHash?: string
+      approvalTtlSeconds?: number
+    } = {}
+
+    if (request.type === 'admin_approval' && request.command) {
+      const brokerRequest = this.privilegedExecutionBroker.createRequest({
+        requestId: request.requestId,
+        sessionId: managed.id,
+        command: request.command,
+        reason: request.reason,
+        impact: request.impact,
+        approvalTtlSeconds: request.approvalTtlSeconds,
+      })
+
+      brokerMetadata = {
+        commandHash: brokerRequest.commandHash,
+        approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
+      }
+    }
+
+    const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
+
+    this.pendingPermissionRequests.set(request.requestId, {
+      sessionId: managed.id,
+      type: request.type,
+      commandHash: effectiveCommandHash,
+    })
+
+    if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
+      const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
+        expectedCommandHash: effectiveCommandHash,
+      })
+
+      this.pendingPermissionRequests.delete(request.requestId)
+
+      if (brokerResult.ok) {
+        this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
+          sessionId: managed.id,
+          requestId: request.requestId,
+          commandHash: effectiveCommandHash,
+        })
+        const liveAgent = managed.agent
+        if (liveAgent) {
+          liveAgent.respondToPermission(request.requestId, true, false)
+          return
+        }
+      }
+
+      sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
+    }
+
+    this.sendEvent({
+      type: 'permission_request',
+      sessionId: managed.id,
+      request: {
+        ...request,
+        ...brokerMetadata,
+        sessionId: managed.id,
+      }
+    }, managed.workspace.id)
+  }
+
   private getRuntimeWorkspaces(): Workspace[] {
     return this.runtimeWorkspace ? [this.runtimeWorkspace] : getWorkspaces()
   }
@@ -6616,73 +6709,10 @@ export class SessionManager implements ISessionManager {
         rememberForMinutes?: number;
         commandHash?: string;
         approvalTtlSeconds?: number;
+        /** POO-179 read-only presentation metadata; passed through verbatim. */
+        canRememberForSession?: boolean;
       }) => {
-        if (this.isOwnedCliSession(managed)) {
-          managed.agent?.respondToPermission(request.requestId, false, false)
-          return
-        }
-        sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
-        let brokerMetadata: {
-          commandHash?: string
-          approvalTtlSeconds?: number
-        } = {}
-
-        if (request.type === 'admin_approval' && request.command) {
-          const brokerRequest = this.privilegedExecutionBroker.createRequest({
-            requestId: request.requestId,
-            sessionId: managed.id,
-            command: request.command,
-            reason: request.reason,
-            impact: request.impact,
-            approvalTtlSeconds: request.approvalTtlSeconds,
-          })
-
-          brokerMetadata = {
-            commandHash: brokerRequest.commandHash,
-            approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
-          }
-        }
-
-        const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
-
-        this.pendingPermissionRequests.set(request.requestId, {
-          sessionId: managed.id,
-          type: request.type,
-          commandHash: effectiveCommandHash,
-        })
-
-        if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
-          const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
-            expectedCommandHash: effectiveCommandHash,
-          })
-
-          this.pendingPermissionRequests.delete(request.requestId)
-
-          if (brokerResult.ok) {
-            this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
-              sessionId: managed.id,
-              requestId: request.requestId,
-              commandHash: effectiveCommandHash,
-            })
-            const liveAgent = managed.agent
-            if (liveAgent) {
-              liveAgent.respondToPermission(request.requestId, true, false)
-              return
-            }
-          }
-
-          sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
-        }
-
-        this.sendEvent({
-          type: 'permission_request',
-          sessionId: managed.id,
-          request: {
-            ...request,
-            ...brokerMetadata,
-            sessionId: managed.id,
-          }
-        }, managed.workspace.id)
+        this.handleAgentPermissionRequest(managed, request)
       })
 
       // Note: Credential requests now flow through onAuthRequest (unified auth flow)

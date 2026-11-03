@@ -131,6 +131,357 @@
               "selector": "[role=\"dialog\"]"
             }
           ]
+        },
+        {
+          "name": "localization-context-zh-Hans",
+          "state": "context-ready",
+          "actual": "/entries/baseline.html?scene=interview-localization-context-zh-Hans&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "hover",
+              "selector": "[data-localization-case=\"context-ready\"] button:has-text(\"90%\")"
+            },
+            {
+              "action": "wait",
+              "duration": 1200
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[role=\"tooltip\"]"
+            },
+            {
+              "type": "textContent",
+              "selector": "[role=\"tooltip\"]",
+              "expected": "90%"
+            }
+          ]
+        },
+        {
+          "name": "localization-context-en",
+          "state": "context-ready",
+          "actual": "/entries/baseline.html?scene=interview-localization-context-en&pure=1&lang=en",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "hover",
+              "selector": "[data-localization-case=\"context-ready\"] button:has-text(\"90%\")"
+            },
+            {
+              "action": "wait",
+              "duration": 1200
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[role=\"tooltip\"]"
+            },
+            {
+              "type": "textContent",
+              "selector": "[role=\"tooltip\"]",
+              "expected": "90%"
+            }
+          ]
+        },
+        {
+          "name": "localization-permission-zh-Hans",
+          "state": "permission-known",
+          "actual": "/entries/baseline.html?scene=interview-localization-permission-zh-Hans&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[data-tutorial=\"permission-banner\"]:visible"
+            },
+            {
+              "type": "visible",
+              "selector": "[data-tutorial=\"permission-allow-button\"]:visible"
+            },
+            {
+              "type": "countMin",
+              "selector": "[data-tutorial=\"permission-banner\"]:visible button:visible",
+              "expected": "2"
+            }
+          ]
+        },
+        {
+          "name": "localization-permission-en",
+          "state": "permission-unsupported",
+          "actual": "/entries/baseline.html?scene=interview-localization-permission-en&pure=1&lang=en",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[data-tutorial=\"permission-banner\"]:visible"
+            },
+            {
+              "type": "visible",
+              "selector": "[data-tutorial=\"permission-allow-button\"]:visible"
+            },
+            {
+              "type": "countMin",
+              "selector": "[data-tutorial=\"permission-banner\"]:visible button:visible",
+              "expected": "2"
+            }
+          ]
+        },
+        {
+          "name": "localization-credential-zh-Hans",
+          "state": "credential-filled",
+          "actual": "/entries/baseline.html?scene=interview-localization-credential-zh-Hans&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "fill",
+              "selector": "#credential-username:visible",
+              "value": "fixture-user"
+            },
+            {
+              "action": "fill",
+              "selector": "#credential-password:visible",
+              "value": "fixture-secret-not-real"
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "inputValue",
+              "selector": "#credential-username:visible",
+              "expected": "fixture-user"
+            },
+            {
+              "type": "attribute",
+              "selector": "#credential-password:visible",
+              "attribute": "type",
+              "expected": "password"
+            }
+          ]
+        },
+        {
+          "name": "localization-credential-en",
+          "state": "credential-filled",
+          "actual": "/entries/baseline.html?scene=interview-localization-credential-en&pure=1&lang=en",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "fill",
+              "selector": "#credential-username:visible",
+              "value": "fixture-user"
+            },
+            {
+              "action": "fill",
+              "selector": "#credential-password:visible",
+              "value": "fixture-secret-not-real"
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "inputValue",
+              "selector": "#credential-username:visible",
+              "expected": "fixture-user"
+            },
+            {
+              "type": "attribute",
+              "selector": "#credential-password:visible",
+              "attribute": "type",
+              "expected": "password"
+            }
+          ]
+        },
+        {
+          "name": "localization-table-zh-Hans",
+          "state": "table-expanded",
+          "actual": "/entries/baseline.html?scene=interview-localization-table-zh-Hans&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "hover",
+              "selector": "[data-localization-case=\"table-expanded\"] table"
+            },
+            {
+              "action": "click",
+              "selector": "[data-localization-case=\"table-expanded\"] button[title=\"全屏查看\"]"
+            },
+            {
+              "action": "click",
+              "selector": ".fixed.z-50 button[title=\"表格控制\"], [role=\"dialog\"] button[title=\"表格控制\"]"
+            },
+            {
+              "action": "hover",
+              "selector": "[role=\"menuitem\"]:has-text(\"分组依据\")"
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[role=\"menu\"]"
+            },
+            {
+              "type": "textContent",
+              "selector": "body",
+              "expected": "Fixture Orders"
+            },
+            {
+              "type": "countMin",
+              "selector": "[role=\"menuitem\"]",
+              "expected": "2"
+            }
+          ]
+        },
+        {
+          "name": "localization-table-en",
+          "state": "table-expanded",
+          "actual": "/entries/baseline.html?scene=interview-localization-table-en&pure=1&lang=en",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "hover",
+              "selector": "[data-localization-case=\"table-expanded\"] table"
+            },
+            {
+              "action": "click",
+              "selector": "[data-localization-case=\"table-expanded\"] button[title=\"View Fullscreen\"]"
+            },
+            {
+              "action": "click",
+              "selector": ".fixed.z-50 button[title=\"Table Controls\"], [role=\"dialog\"] button[title=\"Table Controls\"]"
+            },
+            {
+              "action": "hover",
+              "selector": "[role=\"menuitem\"]:has-text(\"Group by\")"
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[role=\"menu\"]"
+            },
+            {
+              "type": "textContent",
+              "selector": "body",
+              "expected": "Fixture Orders"
+            },
+            {
+              "type": "countMin",
+              "selector": "[role=\"menuitem\"]",
+              "expected": "2"
+            }
+          ]
+        },
+        {
+          "name": "localization-overlay-zh-Hans",
+          "state": "tool-path-menu",
+          "actual": "/entries/baseline.html?scene=interview-localization-overlay-zh-Hans&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "click",
+              "selector": "[data-localization-case=\"tool-path-menu\"] [data-search-exclude=\"true\"] > button"
+            },
+            {
+              "action": "click",
+              "selector": "[data-localization-case=\"tool-path-menu\"] [data-search-exclude=\"true\"] [class~=\"group/row\"]"
+            },
+            {
+              "action": "click",
+              "selector": "button[title=\"/fixture/work/原名 Report.md\"]"
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[role=\"menu\"]"
+            },
+            {
+              "type": "count",
+              "selector": "[role=\"menu\"] [role=\"menuitem\"]",
+              "expected": "2"
+            }
+          ]
+        },
+        {
+          "name": "localization-turn-zh-Hans",
+          "state": "turn-executing",
+          "actual": "/entries/baseline.html?scene=interview-localization-turn-zh-Hans&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[data-localization-case=\"turn-executing\"] [data-radix-scroll-area-viewport]"
+            },
+            {
+              "type": "visible",
+              "selector": "[data-localization-case=\"turn-executing\"] button.send-btn"
+            }
+          ]
+        },
+        {
+          "name": "localization-settings-zh-Hans",
+          "state": "settings-no-results",
+          "actual": "/entries/baseline.html?scene=interview-localization-settings-zh-Hans&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "click",
+              "selector": "[data-localization-case=\"settings-no-results\"] button"
+            },
+            {
+              "action": "fill",
+              "selector": "[role=\"dialog\"] input",
+              "value": "no-match-179"
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[role=\"dialog\"]"
+            },
+            {
+              "type": "inputValue",
+              "selector": "[role=\"dialog\"] input",
+              "expected": "no-match-179"
+            },
+            {
+              "type": "count",
+              "selector": "[role=\"dialog\"] button",
+              "expected": "0"
+            }
+          ]
+        },
+        {
+          "name": "localization-remote-zh-Hans",
+          "state": "remote-empty",
+          "actual": "/entries/baseline.html?scene=interview-localization-remote-zh-Hans&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "[role=\"dialog\"]"
+            },
+            {
+              "type": "inputValue",
+              "selector": "[role=\"dialog\"] input",
+              "expected": "/fixture/work"
+            }
+          ]
         }
       ]
     }

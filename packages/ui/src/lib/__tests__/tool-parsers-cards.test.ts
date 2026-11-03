@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, beforeAll, afterEach } from 'bun:test'
 import type { ActivityItem } from '../../components/chat/TurnCard'
 import { extractOverlayCards } from '../tool-parsers'
 import type { OverlayData } from '../tool-parsers'
+import { setupI18n, i18n } from '@polo-ai/shared/i18n'
 
 function makeActivity(overrides: Partial<ActivityItem>): ActivityItem {
   return {
@@ -16,6 +17,12 @@ function makeActivity(overrides: Partial<ActivityItem>): ActivityItem {
   }
 }
 
+// POO-179: card labels and fallback titles are display copy resolved through
+// i18n at call time, so the parser tests run against the initialized en locale.
+beforeAll(() => {
+  setupI18n().changeLanguage('en')
+})
+
 describe('extractOverlayCards', () => {
   it('uses wrapper command verbatim for browser_tool input cards', () => {
     const activity = makeActivity({
@@ -26,6 +33,7 @@ describe('extractOverlayCards', () => {
 
     const cards = extractOverlayCards(activity)
     expect(cards[0]?.label).toBe('Input')
+    // POO-179 payload invariance: the wrapper command passes through verbatim.
     expect(cards[0]?.commandPreview).toBe('navigate https://example.com')
   })
 
@@ -54,6 +62,43 @@ describe('extractOverlayCards', () => {
     // No meaningful input → output only
     expect(cards.length).toBeGreaterThanOrEqual(1)
     expect(cards[cards.length - 1]?.label).toBe('Output')
+  })
+
+  it('localizes card labels and fallback titles without touching tool payload data', () => {
+    const activity = makeActivity({
+      displayName: 'Browser',
+      toolName: 'mcp__session__browser_tool',
+      toolInput: { command: 'snapshot' },
+      content: '',
+    })
+
+    const cards = extractOverlayCards(activity)
+    const input = cards.find(card => card.id === 'input')
+    const output = cards.find(card => card.id === 'output')
+
+    expect(input?.label).toBe('Input')
+    expect(output?.label).toBe('Output')
+    if (output?.data.type === 'generic') {
+      expect(output.data.title).toBe('Browser Output')
+      expect(output.data.content).toBe('No output captured for this tool call.')
+    }
+    // Empty output falls back to the localized placeholder; activity.error
+    // still rides along untouched.
+    expect(output?.data.error).toBeUndefined()
+  })
+
+  it('keeps a missing display name on the localized generic fallback title', () => {
+    const activity = makeActivity({
+      toolName: '',
+      toolInput: {},
+      content: '',
+    })
+
+    const cards = extractOverlayCards(activity)
+    const output = cards.find(card => card.id === 'output')
+    if (output?.data.type === 'generic') {
+      expect(output.data.title).toBe('Activity')
+    }
   })
 
   it('marks Write markdown output as document card data', () => {
@@ -88,6 +133,61 @@ describe('extractOverlayCards', () => {
     expect((output?.data as OverlayData).type).toBe('generic')
     if (output?.data.type === 'generic') {
       expect(output.data.content).toBe(markdownText)
+    }
+  })
+})
+
+// F18 regression (POO-179): the no-output placeholder must resolve through
+// i18n, never stay an English literal. The rawContent-fallback branch in
+// extractOverlayCards (:546 area) is defensive and unreachable — `!activity`
+// returns [] above and extractOverlayData never returns null for a live
+// activity — so the reachable mirror-fallback branch is the assertion
+// surface for the same `overlay.noOutputCaptured` key both branches share.
+describe('extractOverlayCards — no-output placeholder localization (F18)', () => {
+  afterEach(() => {
+    i18n.changeLanguage('en')
+  })
+
+  /** Unknown tool + input and no captured output → input-mirror fallback. */
+  function noOutputActivity(): ActivityItem {
+    return makeActivity({
+      toolName: 'mcp__custom__unified_search',
+      toolInput: { query: 'status page' },
+      content: '',
+    })
+  }
+
+  it('resolves the placeholder through overlay.noOutputCaptured in English', () => {
+    i18n.changeLanguage('en')
+    const cards = extractOverlayCards(noOutputActivity())
+    const output = cards.find(card => card.id === 'output')
+    expect(output?.data.type).toBe('generic')
+    if (output?.data.type === 'generic') {
+      expect(output.data.content).toBe('No output captured for this tool call.')
+    }
+  })
+
+  it('re-translates the placeholder after a language switch', () => {
+    i18n.changeLanguage('zh-Hans')
+    const cards = extractOverlayCards(noOutputActivity())
+    const output = cards.find(card => card.id === 'output')
+    expect(output?.data.type).toBe('generic')
+    if (output?.data.type === 'generic') {
+      expect(output.data.content).toBe('未捕获此工具调用的输出。')
+    }
+  })
+
+  it('keeps captured raw content verbatim — the placeholder only fills empty output', () => {
+    i18n.changeLanguage('zh-Hans')
+    const cards = extractOverlayCards(makeActivity({
+      toolName: 'mcp__custom__unified_search',
+      toolInput: { query: 'status page' },
+      content: 'total 0\n-rw-r--r--',
+    }))
+    const output = cards.find(card => card.id === 'output')
+    expect(output?.data.type).toBe('generic')
+    if (output?.data.type === 'generic') {
+      expect(output.data.content).toBe('total 0\n-rw-r--r--')
     }
   })
 })

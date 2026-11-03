@@ -50,7 +50,9 @@ export function ServerDirectoryBrowser({
 
   const [listing, setListing] = useState<DirectoryListingResult | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // POO-179: raw diagnostic kept verbatim; self-produced failure copy resolves at
+  // render time from a stable kind so a language switch re-translates.
+  const [error, setError] = useState<{ raw: string | null; kind: 'listFailed' | 'wrongPlatform' } | null>(null)
   const [pathInput, setPathInput] = useState('')
   const [selectedEntry, setSelectedEntry] = useState<string | null>(null)
   const [serverHomePath, setServerHomePath] = useState<string | null>(null)
@@ -66,8 +68,7 @@ export function ServerDirectoryBrowser({
       setListing(result)
       setPathInput(result.currentPath)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to list directory'
-      setError(message)
+      setError({ raw: err instanceof Error ? err.message : null, kind: 'listFailed' })
     } finally {
       setLoading(false)
     }
@@ -120,7 +121,7 @@ export function ServerDirectoryBrowser({
             }
           }
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Failed to list directory')
+          setError({ raw: err instanceof Error ? err.message : null, kind: 'listFailed' })
         } finally {
           setLoading(false)
         }
@@ -140,7 +141,7 @@ export function ServerDirectoryBrowser({
 
     // Client-side rejection of wrong-platform paths (avoids round-trip)
     if (isWrongPlatformPath(trimmed, serverHomePath)) {
-      setError('This looks like a path from a different OS. Enter a path that exists on the server.')
+      setError({ raw: null, kind: 'wrongPlatform' })
       return
     }
 
@@ -194,7 +195,7 @@ export function ServerDirectoryBrowser({
           className="flex-1 font-mono text-xs"
         />
         <Button variant="outline" size="sm" onClick={handlePathSubmit} disabled={loading}>
-          Go
+          {t('directory.go')}
         </Button>
       </div>
 
@@ -222,25 +223,27 @@ export function ServerDirectoryBrowser({
           {loading && (
             <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
               <Spinner className="text-sm" />
-              Loading...
+              {t('common.loading')}
             </div>
           )}
 
           {error && (
             <div className="px-3 py-4 text-sm text-destructive">
-              {error}
+              {error.raw ?? (error.kind === 'wrongPlatform'
+                ? t('directory.wrongPlatformPath')
+                : t('directory.listFailed'))}
             </div>
           )}
 
           {!loading && !error && listing?.truncated && (
             <div className="border-b border-foreground/10 px-3 py-2 text-xs text-muted-foreground">
-              Showing the first {listing.entries.length} folders out of {listing.totalEntries}. Narrow the path if the folder you want is missing.
+              {t('directory.showingFirst', { shown: listing.entries.length, total: listing.totalEntries })}
             </div>
           )}
 
           {!loading && !error && listing && listing.entries.length === 0 && (
             <div className="px-3 py-4 text-sm text-muted-foreground">
-              No subdirectories. Use the path input above to navigate.
+              {t('directory.noSubdirectories')}
             </div>
           )}
 
@@ -273,7 +276,7 @@ export function ServerDirectoryBrowser({
   const renderManualMode = () => (
     <>
       <p className="text-sm text-muted-foreground">
-        Enter the full path on the server:
+        {t('directory.enterFullPath')}
       </p>
       <Input
         ref={inputRef}
@@ -302,13 +305,13 @@ export function ServerDirectoryBrowser({
 
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleSelect}
             disabled={mode === 'manual' ? !pathInput.trim() : (!listing && !pathInput.trim())}
           >
-            Select
+            {t('common.select')}
           </Button>
         </DialogFooter>
       </DialogContent>

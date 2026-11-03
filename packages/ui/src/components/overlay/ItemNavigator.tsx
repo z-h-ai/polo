@@ -83,7 +83,7 @@ export function ItemNavigator({ items, activeIndex, onSelect, size = 'sm' }: Ite
               onSelect={() => onSelect(idx)}
             >
               <span className="flex-1 truncate">
-                {item.label || `Item ${idx + 1}`}
+                {item.label || t('overlay.itemNumber', { index: idx + 1 })}
               </span>
               {idx === activeIndex && <Check className="w-3.5 h-3.5 text-accent" />}
             </StyledDropdownMenuItem>

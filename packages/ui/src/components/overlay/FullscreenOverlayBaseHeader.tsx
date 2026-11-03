@@ -101,7 +101,10 @@ interface FilePathBadgeProps {
  */
 function FilePathBadge({ filePath }: FilePathBadgeProps) {
   const { onOpenFileExternal, onRevealInFinder, fileManagerName } = usePlatform()
-  const revealLabel = `Reveal in ${fileManagerName || 'Finder'}`
+  const { t } = useTranslation()
+  // POO-179: menu actions localize; the file-manager name (Finder/Explorer)
+  // and the real path stay as provided.
+  const revealLabel = t('chat.showInFileManager', { fileManager: fileManagerName || 'Finder' })
 
   const handleOpen = useCallback(() => {
     onOpenFileExternal?.(filePath)
@@ -119,7 +122,7 @@ function FilePathBadge({ filePath }: FilePathBadgeProps) {
       {onOpenFileExternal && (
         <StyledDropdownMenuItem onSelect={handleOpen}>
           <ExternalLink />
-          Open
+          {t('common.open')}
         </StyledDropdownMenuItem>
       )}
       {onRevealInFinder && (
@@ -136,7 +139,7 @@ function FilePathBadge({ filePath }: FilePathBadgeProps) {
       {onOpenFileExternal && (
         <ContextMenu.Item className={contextMenuItemClasses} onSelect={handleOpen}>
           <ExternalLink />
-          Open
+          {t('common.open')}
         </ContextMenu.Item>
       )}
       {onRevealInFinder && (

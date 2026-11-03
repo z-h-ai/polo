@@ -85,6 +85,13 @@ export type PermissionCallback = (request: {
   rememberForMinutes?: number;
   commandHash?: string;
   approvalTtlSeconds?: number;
+  /**
+   * POO-179 read-only presentation metadata: whether the prompt's "Always
+   * Allow" action would remember this request for the session. Missing,
+   * unknown or false must never show the action; it is not an authorization
+   * credential and never enters PermissionResponseOptions.
+   */
+  canRememberForSession?: boolean;
 }) => void;
 
 /**

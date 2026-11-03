@@ -9,17 +9,16 @@
       "apps/electron/src/preload",
       "docs/mvp-complete-flow-hifi",
       ".agents/skills/polo-ai-design-system",
-      "packages/ui/src/components/markdown/Markdown.tsx",
-      "packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx",
-      "packages/ui/src/components/overlay/DataTableOverlay.tsx",
-      "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx"
+      "packages/ui/src/components/chat",
+      "packages/ui/src/components/markdown",
+      "packages/ui/src/components/overlay",
+      "packages/ui/src/lib/tool-parsers.ts"
     ],
     "platforms": [
       "desktop-electron"
     ],
     "modules": [
-      "登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉",
-      "助手消息的共享Markdown/datatable/展开容器与会话文件链接右键菜单演示（对话卡透传）；仅当前renderer原生组件与样式复用，不扩张工作台整页目标规范"
+      "登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉"
     ]
   },
   "mode": "extracted",
@@ -105,7 +104,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/page-baselines.md",
-      "sha256": "1f8f5207d773719b1ea9806adc4567fbaf0c364d9c45e540bd3b9eb1ad4efbb4",
+      "sha256": "05c1fecb02eb4c4330a4fb274bd1f9a8a40e6bc71d4126ab91d8b92fcfff20b8",
       "role": "authority",
       "scope": "页面/区域高保真基线索引：当前实现基线与目标设计模板分层、场景ID→打开方式→生产落点；覆盖缺口明确列出"
     },
@@ -153,7 +152,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-      "sha256": "34e5bc0c9c1a87283c1c8087faf4edcdc62bc8e38603ea65bf31a35149b67eea",
+      "sha256": "da2370a6e03c58d293db9fe406b4168432b1a4b428e2937974a14db46cbd191f",
       "role": "implementation",
       "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
@@ -177,7 +176,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/baseline.css",
-      "sha256": "25f962fa35b37376ce1552d7ae1c352281eeaf0bb0515a8fc6b4c3dfcd04b53d",
+      "sha256": "280684296a5d545025d897a2874e3bb1d8f29b00afe5391b9cd52f3bd4c11037",
       "role": "implementation",
       "scope": "基线浏览壳样式：@import renderer index.css + 本目录入口/场景/画廊的 Tailwind @source 扫描声明 + 仅基线文档的滚动覆盖"
     },
@@ -189,7 +188,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/references/native-reuse.md",
-      "sha256": "1aa292bd6867306661436a566bf770db70ee3fb8eae04089c9d3383bbb9bb25f",
+      "sha256": "f890013512d9953e2689bc21191b8725c89fcc8dc061c73501688fd134d8ce4d",
       "role": "implementation",
       "scope": "当前实现复用范围与已确认设计范围分离；原生源码→任务内候选→预览/导出与环境入口"
     },
@@ -225,81 +224,33 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx",
-      "sha256": "9cc363e0014ba3bd07771d3306cb39f5706af0e402a3495465b5d15841e64f5c",
+      "sha256": "3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08",
       "role": "implementation",
       "scope": "implementation; real ChatDisplay and status-menu compositions with local data only"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-      "sha256": "166917c12420918a4532a89b7be517d1b4abd1422b37a1056b7d9070af12a09e",
+      "sha256": "7313d54b193d04883311a21157d7fb070321e1b8c5e0a6a297e7c7802bf3d467",
       "role": "implementation",
       "scope": "implementation; reproducible native render to static smoke reference; runtime remains React"
     },
     {
-      "path": ".agents/skills/polo-ai-design-system/tools/export-sidebar-reference.py",
-      "sha256": "7eff812f20e90e979acff43ddb8f3d2d1112783d78a3ffba62445daa2a68addb",
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-localization.tsx",
+      "sha256": "09ac26520a75292039343c7228417156ac94748bef4ffd649bbdcc667f941ba9",
       "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+      "scope": "Current real renderer/shared component compositions and local typed data only; no product localization or permission/grant change"
     },
     {
-      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/vite.config.mjs",
-      "sha256": "0a426033f45e2f3bc41e4c5e83055355db57d6bc7851e1acbadce700cf84d69d",
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/verify-interview-localization.py",
+      "sha256": "d05ec9f83983748d97a82007d61b658f78dbff1d12554b6d7d0df09e4dd05449",
       "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
+      "scope": "Source-bound native interaction driver and explicit coverage gaps; baseline is not Acceptance"
     },
     {
-      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/README.md",
-      "sha256": "792250219cdfcad790ad3c86c56fad49da67603c278c7c3bdabbd545552e3358",
+      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/localization-functional-cases.json",
+      "sha256": "222b46309acdb2d68fbfb7593b53ba6ae6112a593a64d322076e9dcabeec66c6",
       "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
-    },
-    {
-      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/reference-source.json",
-      "sha256": "8f0d8e49cb9e85751885e9180b5dc4371fe871e59412566cc99bb406bb2c314e",
-      "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
-    },
-    {
-      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/tsconfig.json",
-      "sha256": "d44587d2e842fbba853fe2f3e50054579d27fbfebb050d6948ac5d3c253e4eb8",
-      "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
-    },
-    {
-      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/entries/baseline.css",
-      "sha256": "1f2b0ad31447d637453a6adad05af5241b356b2b1d6af6d50e9c42e8024b26a7",
-      "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
-    },
-    {
-      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/entries/fixtures.ts",
-      "sha256": "16d112a8ecf51088bae3a5a49a220da399f5c7e872e9c16ea28aa0dcf5f9324c",
-      "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
-    },
-    {
-      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/entries/baseline.tsx",
-      "sha256": "89dd945ef29966348ee60dbe28d44eae1d375022924a06bf399129c9f4233817",
-      "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
-    },
-    {
-      "path": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime/entries/baseline.html",
-      "sha256": "4b1e55d7e66a3814cf5ae36e345be8b98921e568e4c2e848adc9f7db7307b791",
-      "role": "implementation",
-      "scope": "POO-178 adopted layout provenance and portable real AppShell smoke fixture; no business implementation or new product decision"
-    },
-    {
-      "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-table.tsx",
-      "sha256": "2fb492db89e6a5f1142481b97dc65a7ccdefd202bef68c5506a24d7f33eece19",
-      "role": "implementation",
-      "scope": "POO-171 real Markdown/datatable/GenUI fixture and observed smoke export; current styles only, no sticky fix or new design approval"
-    },
-    {
-      "path": ".agents/skills/polo-ai-design-system/tools/export-table-reference.py",
-      "sha256": "1815f4523e712a98d409676d349bae5be69be1cc51b73886a4ffe1904852ee61",
-      "role": "implementation",
-      "scope": "POO-171 real Markdown/datatable/GenUI fixture and observed smoke export; current styles only, no sticky fix or new design approval"
+      "scope": "Complete same-card functional case inputs; actual missing implementation tests fail closed rather than become coverage claims"
     }
   ],
   "themes": [

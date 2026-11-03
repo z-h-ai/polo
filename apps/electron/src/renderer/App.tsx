@@ -1802,7 +1802,7 @@ export default function App() {
           description: t('toast.vcRedistNotFoundDesc'),
           duration: Infinity,
           action: {
-            label: 'Install',
+            label: t('common.install'),
             onClick: () => window.electronAPI.openUrl(warnings.downloadUrl ?? 'https://aka.ms/vs/17/release/vc_redist.x64.exe'),
           },
         })
@@ -3143,7 +3143,7 @@ export default function App() {
       try {
         await window.electronAPI.openFile(path)
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
+        const message = error instanceof Error ? error.message : t('chat.unknownError')
         console.error('Failed to open file:', error)
         toast.error(t('toast.failedToOpenFile'), {
           description: message,
@@ -3156,7 +3156,7 @@ export default function App() {
           await openSessionBrowserLink(url)
         } else await window.electronAPI.openUrl(url)
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
+        const message = error instanceof Error ? error.message : t('chat.unknownError')
         console.error('Failed to open URL:', error)
         // The blocked-URL classifier already explains WHY and (for file:)
         // points the user at preview blocks. Don't append the generic
@@ -3173,7 +3173,7 @@ export default function App() {
       try {
         await window.electronAPI.showInFolder(path)
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
+        const message = error instanceof Error ? error.message : t('chat.unknownError')
         console.error('Failed to show in folder:', error)
         toast.error(t("toast.failedToReveal", { fileManager: getFileManagerName() }), {
           description: message,
@@ -3216,7 +3216,7 @@ export default function App() {
 
   const handleReconnectTransport = useCallback(() => {
     void window.electronAPI.reconnectTransport().catch((error) => {
-      const message = error instanceof Error ? error.message : 'Unknown error'
+      const message = error instanceof Error ? error.message : t('chat.unknownError')
       toast.error(t('toast.reconnectFailed'), { description: message })
     })
   }, [])

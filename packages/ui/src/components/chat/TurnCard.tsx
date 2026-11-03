@@ -549,13 +549,14 @@ function isResponseBuffering(response: ResponseContent | undefined): boolean {
 function getToolDisplayName(name: string): string {
   const stripped = name.replace(/^mcp__[^_]+__/, '')
 
-  // Friendly display names for specific tools
+  // Friendly display names for specific tools. POO-179: these are display
+  // copy resolved at call time; the raw tool name stays as the fallback.
   const displayNames: Record<string, string> = {
-    'TodoWrite': 'Todo List Updated',
-    'set_session_labels': 'Set Session Labels',
-    'set_session_status': 'Set Session Status',
-    'get_session_info': 'Get Session Info',
-    'list_sessions': 'List Sessions',
+    'TodoWrite': i18n.t('turnCard.todoListUpdated'),
+    'set_session_labels': i18n.t('turnCard.setSessionLabels'),
+    'set_session_status': i18n.t('turnCard.setSessionStatus'),
+    'get_session_info': i18n.t('turnCard.getSessionInfo'),
+    'list_sessions': i18n.t('turnCard.listSessions'),
   }
 
   return displayNames[stripped] || stripped
@@ -926,13 +927,14 @@ function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) 
 
 /** Single activity row in expanded view */
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
+  const { t } = useTranslation()
   const depth = activity.depth || 0
 
   // Intermediate messages (LLM commentary) - render with dashed circle icon
   // Show "Thinking" while streaming, stripped markdown content when complete
   if (activity.type === 'intermediate') {
     const isThinking = activity.status === 'running'
-    const displayContent = isThinking ? 'Thinking...' : stripMarkdown(activity.content || '')
+    const displayContent = isThinking ? t('chat.processing.thinking') : stripMarkdown(activity.content || '')
     const isComplete = activity.status === 'completed'
     return (
       <div className="flex items-stretch">
@@ -1012,7 +1014,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // - Params: Remaining tool input summary
   const toolDisplay = formatToolDisplay(activity)
   const fullDisplayName = toolDisplay.name
-    || (activity.type === 'thinking' ? 'Thinking' : 'Processing')
+    || (activity.type === 'thinking' ? t('turnCard.thinking') : t('turnCard.processing'))
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
@@ -1039,12 +1041,16 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const isComplete = activity.status === 'completed' || activity.status === 'error'
   const isBackgrounded = activity.status === 'backgrounded'
 
-  // For backgrounded tasks, show task/shell ID and elapsed time
+  // For backgrounded tasks, show task/shell ID and elapsed time.
+  // POO-179: the template is display copy; the task/shell id and duration stay verbatim.
+  const elapsedSuffix = activity.elapsedSeconds
+    ? t('turnCard.elapsedSuffix', { duration: formatDuration(activity.elapsedSeconds * 1000) })
+    : ''
   const backgroundInfo = isBackgrounded
     ? activity.taskId
-      ? `Task ID: ${activity.taskId}${activity.elapsedSeconds ? `, ${formatDuration(activity.elapsedSeconds * 1000)} elapsed` : ''}`
+      ? t('turnCard.taskIdInfo', { id: activity.taskId, elapsed: elapsedSuffix })
       : activity.shellId
-        ? `Shell ID: ${activity.shellId}${activity.elapsedSeconds ? `, ${formatDuration(activity.elapsedSeconds * 1000)} elapsed` : ''}`
+        ? t('turnCard.shellIdInfo', { id: activity.shellId, elapsed: elapsedSuffix })
         : null
     : null
 
@@ -1169,7 +1175,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
                 className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
                 style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
               >
-                Error
+                {t('common.error')}
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-[400px]">
@@ -1256,6 +1262,7 @@ interface ActivityGroupRowProps {
  * Provides visual containment and collapsible children.
  */
 function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+  const { t } = useTranslation()
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
   const expandedGroups = externalExpandedGroups ?? localExpandedGroups
@@ -1310,7 +1317,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
         {/* Subagent type badge */}
         <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium">
-          {subagentType || 'Task'}
+          {subagentType || t('turnCard.taskFallback')}
         </span>
 
         {/* Task description or fallback */}
@@ -1318,7 +1325,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
           "truncate",
           hasError && "text-destructive"
         )}>
-          {description || 'Task'}
+          {description || t('turnCard.taskFallback')}
         </span>
 
         {/* Duration and token stats from TaskOutput (only when complete) */}
@@ -2465,7 +2472,7 @@ export function ResponseCard({
               )}
             >
               <ListTodo className={cn(SIZE_CONFIG.iconSize, "text-success")} />
-              <span className="font-medium text-success">Plan</span>
+              <span className="font-medium text-success">{t('overlay.plan')}</span>
             </div>
           )}
 
@@ -2631,7 +2638,7 @@ export function ResponseCard({
           <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Spinner className={SIZE_CONFIG.spinnerSize} />
-              <span>Streaming...</span>
+              <span>{t('turnCard.streaming')}</span>
             </div>
           </div>
         )}
@@ -2695,13 +2702,14 @@ interface TodoListProps {
  * Styled to blend with TurnCard activities
  */
 function TodoList({ todos }: TodoListProps) {
+  const { t } = useTranslation()
   if (todos.length === 0) return null
 
   return (
     <div className="pl-4 pr-2 pt-2.5 pb-1.5 space-y-0.5 border-l-2 border-muted ml-[13px]">
       {/* Header */}
       <div className={cn("text-muted-foreground pb-1", SIZE_CONFIG.fontSize)}>
-        Todo List
+        {t('turnCard.todoList')}
       </div>
       {/* Todo items */}
       {todos.map((todo, index) => (
@@ -2771,6 +2779,7 @@ export const TurnCard = React.memo(function TurnCard({
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
+  const { t } = useTranslation()
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
   // replacing the old ad-hoc boolean combinations.
@@ -3166,7 +3175,7 @@ export const TurnCard = React.memo(function TurnCard({
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
                     >
                       <Spinner className={SIZE_CONFIG.spinnerSize} />
-                      <span>{isBuffering ? 'Preparing response...' : 'Thinking...'}</span>
+                      <span>{isBuffering ? t('turnCard.preparingResponse') : t('chat.processing.thinking')}</span>
                     </motion.div>
                   )}
                   </AnimatePresence>
@@ -3226,7 +3235,7 @@ export const TurnCard = React.memo(function TurnCard({
       {!hasActivities && isThinking && !animateResponse && (
         <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
           <Spinner className={SIZE_CONFIG.spinnerSize} />
-          <span>{isBuffering ? 'Preparing response...' : 'Thinking...'}</span>
+          <span>{isBuffering ? t('turnCard.preparingResponse') : t('chat.processing.thinking')}</span>
         </div>
       )}
 

@@ -219,7 +219,7 @@ export function LabelValuePopover({
                   <PopoverTrigger asChild>
                     <button
                       type="button"
-                      aria-label="Select date"
+                      aria-label={t('common.selectDate')}
                       className={cn(
                         'flex items-center justify-center w-7 h-7 rounded-[5px]',
                         'hover:bg-foreground/5 transition-colors cursor-pointer',

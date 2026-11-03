@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze actual native component renders for POO-170/179/173 smoke references.
+"""Freeze actual native component renders for POO-170/179 smoke references.
 
 Runtime remains the live React components. The reference removes product scripts
 and only restores observed scroll offsets. The full ChatDisplay bundle contains
@@ -31,10 +31,21 @@ CASES = [
     *[{'id': f'status-{surface}-{language}', 'scene': f'interview-status-{surface}',
        'state': 'status', 'lang': language, 'task': 'POO-179'}
       for surface in ('picker', 'desktop', 'compact') for language in ('zh-Hans', 'en')],
-    *[{'id': f'file-link-context-menu-{language}', 'scene': 'interview-file-link',
-       'state': 'file-link', 'lang': language, 'task': 'POO-173'}
-      for language in ('zh-Hans', 'en')],
 ]
+
+
+# POO-179 retains all original routes. These are real component compositions,
+# not a second product UI or an approval of the currently untranslated copy.
+LOCALIZATION_CASES = [
+    ('context', 'context-ready', 'zh-Hans'), ('context', 'context-ready', 'en'),
+    ('permission', 'permission-known', 'zh-Hans'), ('permission', 'permission-unsupported', 'en'),
+    ('credential', 'credential-filled', 'zh-Hans'), ('credential', 'credential-filled', 'en'),
+    ('table', 'table-expanded', 'zh-Hans'), ('table', 'table-expanded', 'en'),
+    ('overlay', 'tool-path-menu', 'zh-Hans'), ('turn', 'turn-executing', 'zh-Hans'),
+    ('settings', 'settings-no-results', 'zh-Hans'), ('remote', 'remote-empty', 'zh-Hans'),
+]
+CASES += [{'id': f'localization-{name}-{lang}', 'scene': f'interview-localization-{name}-{lang}',
+           'state': state, 'lang': lang, 'task': 'POO-179'} for name, state, lang in LOCALIZATION_CASES]
 
 
 def sha(data: bytes) -> str:
@@ -46,19 +57,35 @@ def encode(value) -> bytes:
 
 
 def steps(case):
+    state, lang = case['state'], case['lang']
+    wrapper = f'[data-localization-case="{state}"]'
+    if state == 'context-ready':
+        return [{'action': 'hover', 'selector': wrapper + ' button:has-text("90%")'}]
+    if state == 'credential-filled':
+        return [{'action': 'fill', 'selector': '#credential-username:visible', 'value': 'fixture-user'},
+                {'action': 'fill', 'selector': '#credential-password:visible', 'value': 'fixture-secret-not-real'}]
+    if state == 'table-expanded':
+        fullscreen = 'View Fullscreen' if lang == 'en' else '全屏查看'
+        controls = 'Table Controls' if lang == 'en' else '表格控制'
+        group = 'Group by' if lang == 'en' else '分组依据'
+        return [{'action': 'hover', 'selector': wrapper + ' table'},
+                {'action': 'click', 'selector': wrapper + f' button[title="{fullscreen}"]'},
+                {'action': 'click', 'selector': f'.fixed.z-50 button[title="{controls}"], [role="dialog"] button[title="{controls}"]'},
+                {'action': 'hover', 'selector': f'[role="menuitem"]:has-text("{group}")'}]
+    if state == 'tool-path-menu':
+        return [{'action': 'click', 'selector': wrapper + ' [data-search-exclude="true"] > button'},
+                {'action': 'click', 'selector': wrapper + ' [data-search-exclude="true"] [class~="group/row"]'},
+                {'action': 'click', 'selector': 'button[title="/fixture/work/原名 Report.md"]'}]
+    if state == 'settings-no-results':
+        return [{'action': 'click', 'selector': wrapper + ' button'},
+                {'action': 'fill', 'selector': '[role="dialog"] input', 'value': 'no-match-179'}]
+    if case['id'].startswith('localization-'):
+        return []
     if case['task'] == 'POO-170':
         result = [{'action': 'press', 'selector': '[data-radix-scroll-area-viewport]', 'key': 'End'}]
         if case['state'] == 'history':
             result.append({'action': 'press', 'selector': '[data-radix-scroll-area-viewport]', 'key': 'PageUp'})
         return result
-    if case['task'] == 'POO-173':
-        # The contextmenu composition opens asynchronously (radix portal);
-        # every triggering step is followed by an explicit wait so the runner
-        # (zero-wait assertions) never reads the menu before it mounts.
-        return [
-            {'action': 'click', 'selector': '[data-file-link-demo="open"]'},
-            {'action': 'wait', 'duration': 1200},
-        ]
     if '-desktop-' in case['id']:
         return [{'action': 'click', 'selector': '[data-interview-status="desktop"] button'}]
     if '-compact-' in case['id']:
@@ -71,52 +98,61 @@ def steps(case):
 
 
 def assertions(case):
+    state = case['state']
+    wrapper = f'[data-localization-case="{state}"]'
+    if state == 'context-ready':
+        return [{'type': 'visible', 'selector': '[role="tooltip"]'},
+                {'type': 'textContent', 'selector': '[role="tooltip"]', 'expected': '90%'}]
+    if state.startswith('permission-'):
+        return [{'type': 'visible', 'selector': '[data-tutorial="permission-banner"]:visible'},
+                {'type': 'visible', 'selector': '[data-tutorial="permission-allow-button"]:visible'},
+                {'type': 'countMin', 'selector': '[data-tutorial="permission-banner"]:visible button:visible', 'expected': '2'}]
+    if state == 'credential-filled':
+        return [{'type': 'inputValue', 'selector': '#credential-username:visible', 'expected': 'fixture-user'},
+                {'type': 'attribute', 'selector': '#credential-password:visible', 'attribute': 'type', 'expected': 'password'}]
+    if state == 'table-expanded':
+        return [{'type': 'visible', 'selector': '[role="menu"]'},
+                {'type': 'textContent', 'selector': 'body', 'expected': 'Fixture Orders'},
+                {'type': 'countMin', 'selector': '[role="menuitem"]', 'expected': '2'}]
+    if state == 'tool-path-menu':
+        return [{'type': 'visible', 'selector': '[role="menu"]'},
+                {'type': 'count', 'selector': '[role="menu"] [role="menuitem"]', 'expected': '2'}]
+    if state == 'settings-no-results':
+        return [{'type': 'visible', 'selector': '[role="dialog"]'},
+                {'type': 'inputValue', 'selector': '[role="dialog"] input', 'expected': 'no-match-179'},
+                {'type': 'count', 'selector': '[role="dialog"] button', 'expected': '0'}]
+    if state == 'remote-empty':
+        return [{'type': 'visible', 'selector': '[role="dialog"]'},
+                {'type': 'inputValue', 'selector': '[role="dialog"] input', 'expected': '/fixture/work'}]
+    if state == 'turn-executing':
+        return [{'type': 'visible', 'selector': wrapper + ' [data-radix-scroll-area-viewport]'},
+                {'type': 'visible', 'selector': wrapper + ' button.send-btn'}]
     if case['task'] == 'POO-170':
         return [{'type': 'visible', 'selector': '[data-radix-scroll-area-viewport]'}]
-    if case['task'] == 'POO-173':
-        return [
-            {'type': 'visible', 'selector': 'section[aria-label="文件链接右键菜单"]'},
-            {'type': 'visible', 'selector': '[role="menu"]'},
-        ]
     if '-picker-' in case['id']:
         return [{'type': 'visible', 'selector': '[cmdk-root]'}]
     return [{'type': 'visible', 'selector': '[role="dialog"]' if '-compact-' in case['id'] else '[role="menu"]'}]
 
 
-def freeze_native_reference(page):
-    """Read a clone of an actual native page; retain CSS and observed scrolls."""
-    frozen = page.locator('html').evaluate('''element => {
-      const clone = element.cloneNode(true), styles = [], scrolls = [];
-      const original = element.querySelectorAll('*'), copies = clone.querySelectorAll('*');
-      original.forEach((node, index) => {
-        if (node.scrollTop || node.scrollLeft) {
-          const id = String(scrolls.length);
-          copies[index].setAttribute('data-reference-scroll', id);
-          scrolls.push({id, top:node.scrollTop, left:node.scrollLeft});
-        }
-      });
-      clone.querySelectorAll('script').forEach(node => node.remove());
-      clone.querySelectorAll('style').forEach(node => {
-        styles.push(node.textContent || '');
-        const link = document.createElement('link');
-        link.rel = 'stylesheet'; link.href = `__STYLE_${styles.length - 1}__`;
-        node.replaceWith(link);
-      });
-      return {html:'<!doctype html>' + clone.outerHTML,styles,scrolls,window:[scrollX,scrollY]};
-    }''')
-    text = frozen['html']
-    restore = '<script>const observed=' + json.dumps({'nodes': frozen['scrolls'], 'window': frozen['window']}) + ''';
-const restore=()=>requestAnimationFrame(()=>{
-  for(const item of observed.nodes){const node=document.querySelector('[data-reference-scroll="'+item.id+'"]');if(node){node.scrollTop=item.top;node.scrollLeft=item.left;}}
-  window.scrollTo(...observed.window);
-});window.addEventListener('load',()=>document.fonts.ready.then(restore));</script>'''
-    text = text.replace('</body>', restore + '</body>')
-    styles = {}
-    for index, style in enumerate(frozen['styles']):
-        data = style.encode(); name = f'styles/{sha(data)}.css'
-        styles[name] = data
-        text = text.replace(f'__STYLE_{index}__', '../' + name)
-    return text.encode(), styles
+def assert_native_state(page, case):
+    """Check the real arranged DOM; the fixture never inserts an expected result."""
+    for assertion in assertions(case):
+        target = page.locator(assertion['selector'])
+        kind, expected = assertion['type'], assertion.get('expected')
+        if kind == 'visible':
+            target.first.wait_for(state='visible')
+        elif kind == 'textContent':
+            if str(expected) not in target.first.inner_text(): raise ValueError(f"{case['id']}: text state differs")
+        elif kind in {'count', 'countMin'}:
+            count = target.count()
+            if (count != int(expected)) if kind == 'count' else (count < int(expected)):
+                raise ValueError(f"{case['id']}: expected {kind} {expected}, observed {count}")
+        elif kind == 'attribute':
+            if target.first.get_attribute(assertion['attribute']) != expected: raise ValueError(f"{case['id']}: attribute state differs")
+        elif kind == 'inputValue':
+            if target.first.input_value() != expected: raise ValueError(f"{case['id']}: input state differs")
+        else:
+            raise ValueError('unsupported native state assertion: ' + kind)
 
 
 def expected_outputs(evidence: Path | None):
@@ -134,6 +170,12 @@ def expected_outputs(evidence: Path | None):
                     page = browser.new_page(viewport={k: viewport[k] for k in ('width', 'height')}, device_scale_factor=1)
                     errors = []
                     page.on('pageerror', lambda error: errors.append(str(error)))
+                    # Deterministic capture entropy. Product logic is untouched; only the
+                    # environment's randomness (per-mount placeholder shuffle, processing
+                    # verb pick) is pinned so an actual render is reproducible byte for byte.
+                    page.add_init_script('let __referenceSeed = 0x9e3779b9;'
+                                         ' Math.random = () => { __referenceSeed = (__referenceSeed * 1664525 + 1013904223) >>> 0;'
+                                         ' return __referenceSeed / 4294967296; }')
                     try:
                         page.clock.set_fixed_time(datetime(2026, 10, 28, 12, tzinfo=timezone.utc))
                         page.emulate_media(reduced_motion='reduce')
@@ -141,13 +183,115 @@ def expected_outputs(evidence: Path | None):
                         page.locator('[data-radix-scroll-area-viewport]' if case['task'] == 'POO-170' else 'section').first.wait_for(state='visible')
                         page.wait_for_timeout(500)
                         for step in steps(case):
-                            if step['action'] == 'wait':
-                                page.wait_for_timeout(step['duration'])
-                                continue
                             target = page.locator(step['selector'])
-                            target.press(step['key']) if step['action'] == 'press' else target.click()
+                            if step['action'] == 'press': target.press(step['key'])
+                            elif step['action'] == 'hover': target.hover()
+                            elif step['action'] == 'fill': target.fill(step['value'])
+                            elif step['action'] == 'click': target.click()
+                            else: raise ValueError('unsupported native action: ' + step['action'])
                             page.wait_for_timeout(300)
                         page.evaluate('document.fonts.ready')
+                        assert_native_state(page, case)
+                        if case['state'] == 'tool-path-menu':
+                            # The overlay target is the expanded TurnCard container
+                            # (TurnCard.tsx:1371-1376): framer-motion drives it with Web
+                            # Animations, which never touch the inline style mid-flight —
+                            # measured on the real render, the inline opacity stays '0'
+                            # and the inline height stays 'auto' for the whole animation
+                            # and only the finished values ('1'/'auto') are written back.
+                            # A global mid-opacity quiet window therefore cannot see this
+                            # animation at all, so this state waits on the target itself:
+                            # the selector requires a direct 'group select-none' parent,
+                            # which the input container (also .overflow-hidden, but with
+                            # a fixed pixel inline height like 130.25px and a plain
+                            # relative parent) does not have; requiring inline height
+                            # 'auto' excludes it a second time. Terminal means inline
+                            # opacity '1', a positive rendered height, no running
+                            # animations on the target itself (subtree animations are not
+                            # awaited, so permanent decorations can never block), and a
+                            # stable signature for a bounded 100ms window.
+                            page.wait_for_function('''wrapper => {
+                              const root = document.querySelector('[data-localization-case="' + wrapper + '"]')
+                              if (!root) return false
+                              const targets = [...root.querySelectorAll('.group.select-none > .overflow-hidden')]
+                                .filter(node => node.style && node.style.height === 'auto')
+                              if (!targets.length) return false
+                              for (const node of targets) {
+                                if (node.style.opacity !== '1') return false
+                                if (!(node.getBoundingClientRect().height > 0)) return false
+                                const animations = typeof node.getAnimations === 'function' ? node.getAnimations() : []
+                                if (animations.some(item => item.playState === 'running')) return false
+                              }
+                              const signature = targets.map(node => node.style.opacity + ':' + node.style.height +
+                                ':' + Math.round(node.getBoundingClientRect().height * 100) / 100).join('|')
+                              if (window.__referenceOverlayTerminal === signature &&
+                                  performance.now() - window.__referenceOverlaySince > 100) return true
+                              if (window.__referenceOverlayTerminal !== signature) {
+                                window.__referenceOverlayTerminal = signature
+                                window.__referenceOverlaySince = performance.now()
+                              }
+                              return false
+                            }''', arg=case['state'], timeout=10000)
+                        elif case['state'] == 'turn-executing':
+                            # The turn state shows the ProcessingIndicator, not an
+                            # expanded tool group. Its real animated target is the label
+                            # crossfade (ChatDisplay.tsx:408-419): a motion.span rendered
+                            # as a plain classless <span style="opacity: …"> inside the
+                            # exact 'relative h-5 flex items-center' holder, animated via
+                            # Web Animations — the inline opacity reads '0' mid-flight and
+                            # '1' only once finished. The exact className match excludes
+                            # the other h-5 holder (a 6-class variant) and its children;
+                            # the inline-opacity filter keeps the elapsed counter out.
+                            # The label animates opacity only — there is no height
+                            # expansion to wait for, and the decorative w-3 h-3 Spinner
+                            # (ChatDisplay.tsx:404-406) rotates forever by design and is
+                            # deliberately never awaited. Terminal means inline opacity
+                            # '1', no running animations on the target itself, and a
+                            # stable signature (opacity, label text, height) for a
+                            # bounded 100ms window.
+                            page.wait_for_function('''wrapper => {
+                              const root = document.querySelector('[data-localization-case="' + wrapper + '"]')
+                              if (!root) return false
+                              const targets = [...root.querySelectorAll('span.relative.h-5.flex.items-center')]
+                                .filter(node => node.className === 'relative h-5 flex items-center')
+                                .flatMap(node => [...node.children])
+                                .filter(node => node.style && node.style.opacity !== '')
+                              if (!targets.length) return false
+                              for (const node of targets) {
+                                if (node.style.opacity !== '1') return false
+                                const animations = typeof node.getAnimations === 'function' ? node.getAnimations() : []
+                                if (animations.some(item => item.playState === 'running')) return false
+                              }
+                              const signature = targets.map(node => node.style.opacity + ':' + node.textContent +
+                                ':' + Math.round(node.getBoundingClientRect().height * 100) / 100).join('|')
+                              if (window.__referenceTurnTerminal === signature &&
+                                  performance.now() - window.__referenceTurnSince > 100) return true
+                              if (window.__referenceTurnTerminal !== signature) {
+                                window.__referenceTurnTerminal = signature
+                                window.__referenceTurnSince = performance.now()
+                              }
+                              return false
+                            }''', arg=case['state'], timeout=10000)
+                        else:
+                            # Settle entry/fade animations before freezing. Entry animations
+                            # emit a mid-flight inline opacity on every frame and never loop,
+                            # so requiring a 200ms window with none of them (the product also
+                            # keeps a few permanently hidden opacity:0 spans) means the clone
+                            # captures a resting state, never a random frame. The two states
+                            # handled above are waited on via their real targets instead,
+                            # because their animations are Web Animations driven and leave
+                            # the inline style untouched mid-flight.
+                            page.wait_for_function('''() => {
+                              const mid = [...document.querySelectorAll('*')].some(node => {
+                                const value = node.style && node.style.opacity
+                                if (!value) return false
+                                const opacity = parseFloat(value)
+                                return opacity > 0 && opacity < 1
+                              })
+                              if (mid) { window.__referenceCalm = 0; return false }
+                              if (!window.__referenceCalm) window.__referenceCalm = performance.now()
+                              return performance.now() - window.__referenceCalm > 200
+                            }''', timeout=20000)
                         if errors:
                             raise ValueError(f'{case["id"]}: actual component failed: {errors}')
                         metrics = None
@@ -156,16 +300,46 @@ def expected_outputs(evidence: Path | None):
                             distance = metrics['total'] - metrics['height'] - metrics['top']
                             if (case['state'] == 'latest' and distance > 20) or (case['state'] == 'history' and distance <= 20):
                                 raise ValueError(f'{case["id"]}: native keyboard replay did not arrange state: {metrics}')
-                        text, styles = freeze_native_reference(page)
-                        files.update(styles)
+                        # Clone only. The actual runtime DOM and handlers remain untouched.
+                        frozen = page.locator('html').evaluate('''element => {
+                          const clone = element.cloneNode(true), styles = [], scrolls = [];
+                          const original = element.querySelectorAll('*'), copies = clone.querySelectorAll('*');
+                          original.forEach((node, index) => {
+                            if (node.scrollTop || node.scrollLeft) {
+                              const id = String(scrolls.length);
+                              copies[index].setAttribute('data-reference-scroll', id);
+                              scrolls.push({id, top:node.scrollTop, left:node.scrollLeft});
+                            }
+                          });
+                          clone.querySelectorAll('script').forEach(node => node.remove());
+                          clone.querySelectorAll('style').forEach(node => {
+                            styles.push(node.textContent || '');
+                            const link = document.createElement('link');
+                            link.rel = 'stylesheet'; link.href = `__STYLE_${styles.length - 1}__`;
+                            node.replaceWith(link);
+                          });
+                          return {html:'<!doctype html>' + clone.outerHTML,styles,scrolls,window:[scrollX,scrollY]};
+                        }''')
+                        text = frozen['html']
+                        restore = '<script>const observed=' + json.dumps({'nodes': frozen['scrolls'], 'window': frozen['window']}) + ''';
+const restore=()=>requestAnimationFrame(()=>{
+  for(const item of observed.nodes){const node=document.querySelector('[data-reference-scroll="'+item.id+'"]');if(node){node.scrollTop=item.top;node.scrollLeft=item.left;}}
+  window.scrollTo(...observed.window);
+});window.addEventListener('load',()=>document.fonts.ready.then(restore));</script>'''
+                        text = text.replace('</body>', restore + '</body>')
+                        for index, style in enumerate(frozen['styles']):
+                            data = style.encode(); name = f'styles/{sha(data)}.css'
+                            files[name] = data
+                            text = text.replace(f'__STYLE_{index}__', '../' + name)
                         name = f'views/{case["id"]}-{viewport["name"]}.html'
-                        files[name] = text
+                        files[name] = text.encode()
                         record = {'case': case['id'], 'viewport': viewport['name'], 'page_errors': [], 'scroll': metrics,
                                   'horizontal_overflow': page.evaluate('document.documentElement.scrollWidth > innerWidth')}
                         if evidence:
                             evidence.mkdir(parents=True, exist_ok=True)
                             screenshot = evidence / f'{case["id"]}-{viewport["name"]}.png'
                             page.screenshot(path=str(screenshot), caret='hide')
+                            assert_native_state(page, case)
                             record['screenshot'] = str(screenshot)
                         records.append(record)
                     finally:
@@ -187,7 +361,7 @@ document.getElementById('reference').src=scenes[scene][viewport];
     sources = [{'path': f'{PREFIX}/references/foundations.md', 'sha256': sha((SKILL / 'references/foundations.md').read_bytes())}]
     manifest = {
         'schema_version': 1, 'kind': 'frozen-native-conversation-reference', 'mode': 'high_fidelity',
-        'revision': 'poo170-poo179-poo173-native-reuse-r2',
+        'revision': 'poo170-poo179-native-reuse-r1',
         'files': {'prototype': 'prototype.html', **{f'asset_{i}': name for i, name in enumerate(sorted(files)) if name != 'prototype.html'}},
         'target': {'languages': ['zh-Hans', 'en'], 'themes': ['light'],
                    'viewports': [{'id': v['name'], 'width': v['width'], 'height': v['height']} for v in VIEWPORTS]},
@@ -195,7 +369,10 @@ document.getElementById('reference').src=scenes[scene][viewport];
         'design': {'skill_path': f'{PREFIX}/SKILL.md', 'sha256': sha((SKILL / 'SKILL.md').read_bytes()), 'sources': sources},
         'confirmations': [{'id': 'D-ASSISTANT-REUSE', 'status': 'confirmed',
                            'source': f'{PREFIX}/references/policy-alignment.json#D-ASSISTANT-REUSE',
-                           'scope': 'Preserve current renderer components/styles only; no new layout or fix outcome is visually approved.'}],
+                           'scope': 'Preserve current renderer components/styles only; no new layout or fix outcome is visually approved.'},
+                          {'id': 'D-CURRENT-STYLE', 'status': 'confirmed',
+                           'source': f'{PREFIX}/references/policy-alignment.json#D-CURRENT-STYLE',
+                           'scope': 'Existing settings, forms and dialogs keep their real renderer styles. Current untranslated copy is implementation evidence, not a new product design.'}],
         'provenance': {'generator': f'{PREFIX}/tools/export-conversation-references.py',
                        'source_manifest': f'{PREFIX}/assets/source-baseline/baseline-manifest.json',
                        'source_input_fingerprint': baseline['input_fingerprint'], 'source_export_sha256': sha(html.read_bytes()),
@@ -204,7 +381,7 @@ document.getElementById('reference').src=scenes[scene][viewport];
                        'scope': 'Component smoke references; not Electron/backend acceptance and not bug before/after proof.'},
     }
     files['prototype-manifest.json'] = encode(manifest)
-    for task, port in [('POO-170', 43170), ('POO-179', 43179), ('POO-173', 43173)]:
+    for task, port in [('POO-170', 43170), ('POO-179', 43179)]:
         routes = [{'name': case['id'], 'state': case['state'],
                    'actual': f'/entries/baseline.html?scene={case["scene"]}&pure=1&lang={case["lang"]}',
                    'whole_page': True, 'capture_full_page': True, 'actual_steps': steps(case), 'state_assertions': assertions(case)}

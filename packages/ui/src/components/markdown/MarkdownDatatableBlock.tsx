@@ -46,6 +46,7 @@ import {
   StyledDropdownMenuSubContent,
 } from '../ui/StyledDropdown'
 import { useTranslation } from 'react-i18next'
+import i18n from 'i18next'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ function formatCell(value: unknown, col: ColumnDef): React.ReactNode {
       return <span className="tabular-nums">{n.toLocaleString()}</span>
     }
     case 'boolean':
-      return value ? <span className="text-success">Yes</span> : <span className="text-muted-foreground">No</span>
+      return value ? <span className="text-success">{i18n.t('datatable.yes')}</span> : <span className="text-muted-foreground">{i18n.t('datatable.no')}</span>
     case 'badge': {
       const color = resolveBadgeChipClass(String(value), col.badgeColors)
       return <span className={cn('inline-block px-1.5 py-0.5 rounded text-[11px] font-medium', color)}>{String(value)}</span>
@@ -192,12 +193,16 @@ interface GranularityOption {
   value: string
 }
 
-const DATE_GRANULARITIES: GranularityOption[] = [
-  { label: 'Hour', value: 'hour' },
-  { label: 'Day', value: 'day' },
-  { label: 'Month', value: 'month' },
-  { label: 'Year', value: 'year' },
-]
+// POO-179: granularity labels are display copy resolved at call time; the
+// stored/compared value stays the raw protocol string ('hour'/'day'/…).
+function dateGranularityOptions(): GranularityOption[] {
+  return [
+    { label: i18n.t('datatable.granularityHour'), value: 'hour' },
+    { label: i18n.t('datatable.granularityDay'), value: 'day' },
+    { label: i18n.t('datatable.granularityMonth'), value: 'month' },
+    { label: i18n.t('datatable.granularityYear'), value: 'year' },
+  ]
+}
 
 function formatCompact(n: number): string {
   const abs = Math.abs(n)
@@ -217,7 +222,7 @@ function computeNumericGranularities(values: number[], type: 'number' | 'currenc
 
   const tickCounts = [3, 5, 8, 15]
   const seen = new Set<number>()
-  const options: GranularityOption[] = [{ label: 'Exact', value: 'exact' }]
+  const options: GranularityOption[] = [{ label: i18n.t('datatable.granularityExact'), value: 'exact' }]
 
   for (const count of tickCounts) {
     const ticks = niceTicks(min, max, count)
@@ -241,7 +246,7 @@ function computeNumericGranularities(values: number[], type: 'number' | 'currenc
 }
 
 function computeDateGranularities(values: number[]): GranularityOption[] {
-  if (values.length < 2) return DATE_GRANULARITIES
+  if (values.length < 2) return dateGranularityOptions()
   const min = Math.min(...values)
   const max = Math.max(...values)
   const spanMs = max - min
@@ -252,11 +257,11 @@ function computeDateGranularities(values: number[]): GranularityOption[] {
   const YEAR = 365 * DAY
 
   const opts: GranularityOption[] = []
-  if (spanMs < 2 * YEAR) opts.push({ label: 'Hour', value: 'hour' })
-  if (spanMs >= 2 * DAY || spanMs < 2 * YEAR) opts.push({ label: 'Day', value: 'day' })
-  if (spanMs >= 2 * MONTH) opts.push({ label: 'Month', value: 'month' })
-  if (spanMs >= 2 * YEAR) opts.push({ label: 'Year', value: 'year' })
-  return opts.length ? opts : DATE_GRANULARITIES
+  if (spanMs < 2 * YEAR) opts.push({ label: i18n.t('datatable.granularityHour'), value: 'hour' })
+  if (spanMs >= 2 * DAY || spanMs < 2 * YEAR) opts.push({ label: i18n.t('datatable.granularityDay'), value: 'day' })
+  if (spanMs >= 2 * MONTH) opts.push({ label: i18n.t('datatable.granularityMonth'), value: 'month' })
+  if (spanMs >= 2 * YEAR) opts.push({ label: i18n.t('datatable.granularityYear'), value: 'year' })
+  return opts.length ? opts : dateGranularityOptions()
 }
 
 function computeGranularityOptions(data: DatatableData): Map<string, GranularityOption[]> {
@@ -680,8 +685,11 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
   const granularityOptions = React.useMemo(() => {
     if (!parsed) return new Map<string, GranularityOption[]>()
+    // POO-179: labels resolve inside compute* at call time; `t` is the
+    // language-change signal (react-i18next rotates its reference on switch)
+    // so cached options re-translate without invalidating `parsed`.
     return computeGranularityOptions(parsed)
-  }, [parsed])
+  }, [parsed, t])
 
   const groupedData = React.useMemo(() => {
     if (!groupKey || !parsed) return null
@@ -900,7 +908,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
           )) : processedRows.length ? renderRows(processedRows) : (
             <tr>
               <td colSpan={columnCount} className="py-6 text-center text-muted-foreground text-[13px]">
-                No rows
+                {t('datatable.noRows')}
               </td>
             </tr>
           )}

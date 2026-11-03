@@ -12,12 +12,13 @@
 import * as React from 'react'
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Webhook } from 'lucide-react'
+import { Search, Webhook } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@polo-ai/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { EntityRow } from '@/components/ui/entity-row'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
+import { HeaderIconButton } from '@/components/ui/HeaderIconButton'
 import { SessionSearchHeader } from '@/components/app-shell/SessionSearchHeader'
 import { AutomationMenu } from './AutomationMenu'
 import { BatchAutomationMenu } from './BatchAutomationMenu'
@@ -200,6 +201,12 @@ export function AutomationsListPanel({
   const { t } = useTranslation()
   const [searchQuery, setSearchQuery] = useState('')
   const [searchActive, setSearchActive] = useState(false)
+  const searchInputRef = React.useRef<HTMLInputElement>(null)
+  // Focus the input when the search opens — the header mounts only in
+  // search mode, so the ref resolves on the render after activation.
+  React.useEffect(() => {
+    if (searchActive) searchInputRef.current?.focus()
+  }, [searchActive])
   const { workspaces, activeWorkspaceId } = useAppShellContext()
   const hasOtherWorkspaces = workspaces.length > 1
 
@@ -359,8 +366,10 @@ export function AutomationsListPanel({
 
   return (
     <div className={cn('flex flex-col flex-1 min-h-0', className)}>
-      {/* Search header */}
-      {searchActive && (
+      {/* Search — panel-local entry: the trigger row opens the search header
+          (the input matches name, summary and the localized event display
+          name), and the trigger is replaced by the header while searching. */}
+      {searchActive ? (
         <SessionSearchHeader
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
@@ -370,7 +379,17 @@ export function AutomationsListPanel({
           }}
           placeholder={t('automations.searchPlaceholder')}
           resultCount={isSearchMode ? filteredAutomations.length : undefined}
+          inputRef={searchInputRef}
         />
+      ) : (
+        <div className="shrink-0 flex justify-end px-2 pt-2 pb-1.5">
+          <HeaderIconButton
+            icon={<Search className="h-3.5 w-3.5" />}
+            tooltip={t('sidebar.search')}
+            aria-label={t('sidebar.search')}
+            onClick={() => setSearchActive(true)}
+          />
+        </div>
       )}
 
       {/* Filtered empty state */}
