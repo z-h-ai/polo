@@ -455,7 +455,7 @@
   "default_story": "UI-refinement",
   "design": {
     "revision": "native-materials-r5-lifecycle-candidate-20261023",
-    "sha256": "6d63260a7a60a373c8d6c8206812b58b8d81f57be964ab17702bbb83dcdbb09b",
+    "sha256": "6360459445b644767d6c875f06b45d7b25c38493e145470a6bf8012941ee486e",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {
@@ -544,7 +544,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-        "sha256": "da2370a6e03c58d293db9fe406b4168432b1a4b428e2937974a14db46cbd191f"
+        "sha256": "b0013f2c3ecc2290ff233df86c0b028823b6cec1ee66d7691b1d53f94379ea5f"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx",
@@ -592,11 +592,11 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx",
-        "sha256": "3da52a1a7c20c4bc524040fc981d3aaa47a534eee4da2faee36cd7b00055cc08"
+        "sha256": "5d3057b03da0c2e2184a66f073c4dcc6d929f7af52b78f9d7211def95b8196cf"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-        "sha256": "7313d54b193d04883311a21157d7fb070321e1b8c5e0a6a297e7c7802bf3d467"
+        "sha256": "414a4fe1e34a6b3282a70f6c0312a547c9c21d45f07608cab4dd50059169ad3f"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-localization.tsx",
