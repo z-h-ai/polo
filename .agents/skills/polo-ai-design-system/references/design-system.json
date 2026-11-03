@@ -52,13 +52,13 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/assets/source-baseline/entries/baseline.html",
-      "sha256": "802e508a026bf266fdaa2e9310e65300ff7081501d3336699992cdaa494718e1",
+      "sha256": "a7394ad50fa9dae5af0074da58f1520085f2269cdd04fa8d35754071b5aa824c",
       "role": "implementation",
       "scope": "POO-177 regenerated entry bundle after the refreshable declaration fix; reviewed Skill asset rebind evidence, no new design approval"
     },
     {
       "path": ".agents/skills/polo-ai-design-system/assets/source-baseline/index.html",
-      "sha256": "6d788c5586b73cc46be32cdd0e37cdc657cf0704b0f4d9a1cb527b3b242e0d90",
+      "sha256": "6e54c21153d847d45137a9ad4219229e8532e35d7d4a2ac6c474869a0e08b584",
       "role": "implementation",
       "scope": "POO-177 regenerated build record (snapshot head, input fingerprint, output hashes) for the entry bundle; no new design approval"
     },
@@ -112,7 +112,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-      "sha256": "7313d54b193d04883311a21157d7fb070321e1b8c5e0a6a297e7c7802bf3d467",
+      "sha256": "414a4fe1e34a6b3282a70f6c0312a547c9c21d45f07608cab4dd50059169ad3f",
       "role": "implementation",
       "scope": "implementation; reproducible native render to static smoke reference; runtime remains React"
     },
@@ -268,7 +268,7 @@
     },
     {
       "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-      "sha256": "da2370a6e03c58d293db9fe406b4168432b1a4b428e2937974a14db46cbd191f",
+      "sha256": "b0013f2c3ecc2290ff233df86c0b028823b6cec1ee66d7691b1d53f94379ea5f",
       "role": "implementation",
       "scope": "基线场景注册表（组件画廊/登录/工作台整页/首页/圈子/助手/设置注册表子页+未登录独立态）；清单由真实模块求值机制化提取，与运行时集合强一致"
     },
