@@ -19,6 +19,7 @@
 - `entries/fixtures.tsx`：只替代 IPC/后端数据，不代表真实服务、支付或持久化。新增本地交互结果需明确内存 fixture 边界。
 - `entries/gallery.tsx`：复用生产注册的 component/wrapper/props/mockData，不复制生产组件库。
 - `interview-input` 场景只挂载真实 `RichTextInput`，本地受控文本用于 POO-169 输入与占位复验；不模拟发送结果、不提供新的助手设计方向。
+- `interview-scroll` 复用真实 `ChatDisplay`、Focus/Navigation providers 与固定长会话，发送只追加本地用户消息；`interview-status-*` 复用真实状态选择器、共享桌面菜单项与紧凑菜单。`?lang=en` 仅为原生场景切换真实 i18n 资源，默认仍为中文。
 - `entries/baseline.css`：真实 renderer index.css + 任务布局的 Tailwind 扫描。设置使用 renderer 体系；圈子组件自行装配 workbench 样式。新增任务文件要加入扫描，不能只把类名粘入无扫描的 JSX。
 
 ## 环境和现有导出（cwd：仓库根）
@@ -38,6 +39,13 @@ POO-169 的任务 smoke 引用由同一原生输出派生，不能手改副本�
 该 manifest 的 D-ASSISTANT-REUSE 仅继承当前生产组件/样式，不声称新布局或修复结果已获视觉确认。
 smoke plan/runtime 仅驱动本地真实组件可见性与布局检查，不进行目标像素 parity；
 完整 Electron 输入法、草稿、发送与真实后端仍由任务独立验收承担。
+
+POO-170/179 使用 `tools/export-conversation-references.py --evidence <任务忽略目录>`
+从真实 Chromium 运行采集长会话 latest/history、三类菜单中英文状态，各覆盖1280×800、1440×900、800×600；
+`--check` 会真实重放并逐字节核对生成物。导出在 `assets/prototypes/interview-conversation/`。
+引用HTML冻结实际DOM并提取复用CSS，只回放采集的滚动位置；移除的产品脚本仅属于不可交互的reference；
+runtime仍运行原生React组件，保留真实按键/菜单交互。此分离避免第三方动态import使严格native引用检查无法闭合，
+不修改框架、不把静态快照当产品runtime。快照只代表当前状态覆盖，不是bug前后对照或已接受的新设计。
 
 共享包构建生成忽略的 `packages/shared/dist` 浏览器 exports，缺失时 Vite 无法解析 `@polo-ai/shared/product-spaces`。
 `build.py` 先 tsc，再求值真实注册表，最后 Vite 打包；输出在 `assets/source-baseline/`。`--check` 到临时目录真实再生成并逐字节比较输入记录/输出，不能只重写 hash。
@@ -115,3 +123,29 @@ POLO_REVIEW_EVIDENCE="$(mktemp -d /tmp/polo-navigation.XXXXXX)" python3 docs/mvp
 
 最终集成 main 前、创建新任务前均回到本 Skill，按 [使用手册的维护步骤](usage-playbook.md#维护时机与-git-边界)
 检查三层素材。检查只读，过期才修源再生。维护不自动提交、push、tag 或发版；源码未变则复用素材。
+
+## 已采用的 POO-178 局部侧栏布局
+
+`tools/sidebar-runtime/` 独立装配真实 AppShell，继承生产样式/provider，只替换后端数据；
+其 README 给出运行、宽度持久化 fixture 和来源边界。`reference-source.json` 固定已存在的
+root 工程采用记录及原候选hash。`tools/export-sidebar-reference.py --source-export <已归档候选>`
+真实重放既有180px+More候选后提取小型 DOM/CSS，`--check` 重放校验；不重复入库原21MB bundle。
+`assets/prototypes/interview-sidebar/` 只为该已采用局部布局提供 smoke 引用，runtime 直接消费当前生产 AppShell。
+这不批准 POO-180 的其他设计；原候选字号不代表14px，POO-168集成后必须重采真实同状态证据。
+
+## POO-171 原生消息表格
+
+`entries/interview-table.tsx` 只提供20列100行（`?short=1`为3列2行）数据和文件读取fixture。
+三个 `interview-table-{terminal,minimal,full}` 场景直接复用生产 Markdown，
+`interview-table-datatable` 复用 MarkdownDatatableBlock 并可点其真实全屏入口；
+`interview-table-genui` 通过真正 GenUICard→DataTableView→MarkdownDatatableBlock 加载同一文件数据、筛选与行操作。
+外层仅模拟会话阅读viewport，表格高度、overflow、thead与overlay均由生产组件负责，没有fixture sticky CSS。
+GenUI 文件读取为受控 PlatformProvider，按钮事件不向后端发送；这些证据不证明真实文件系统/执行/完整消息页。
+
+`tools/export-table-reference.py --evidence <忽略目录>` 真实采集三模式、短表、datatable内嵌/展开、GenUI，共7态×3视口；
+`--check` 重放后逐字节核对。`assets/prototypes/interview-table/` 为冻结DOM/CSS，runtime仍是原生React。
+当前表头未sticky的事实如实保留；本引用只继承 D-ASSISTANT-REUSE 的既有样式，不宣称修复前后或新目标设计已通过。
+纵横滚动、排序/筛选、row-action头、overlay关闭及长短表几何须由171实际实现卡按同数据/视口/状态验证。
+
+设计policy对共享源码仅覆盖这次真实消费者 Markdown.tsx、MarkdownDatatableBlock.tsx、DataTableOverlay.tsx及对应新增测试路径。
+它沿助手当前renderer组件/样式复用语义，不向packages/ui其他组件或WebUI整页授予工作台目标规范。

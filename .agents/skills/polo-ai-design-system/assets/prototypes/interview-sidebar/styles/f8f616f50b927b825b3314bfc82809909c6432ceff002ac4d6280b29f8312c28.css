@@ -1,0 +1,4 @@
+
+      ::highlight(search-passive) { background-color: rgb(253 224 71 / 0.3); color: inherit; }
+      ::highlight(search-active) { background-color: rgb(253 224 71); color: rgb(0 0 0 / 0.9); }
+    

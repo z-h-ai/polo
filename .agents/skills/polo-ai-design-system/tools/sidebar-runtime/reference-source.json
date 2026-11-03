@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "task_id": "POO-178",
+  "role": "versioned provenance for adopted task reference; Notma task remains requirement authority",
+  "confirmation": {
+    "id": "POO-178-native-sidebar-adopted-r1",
+    "status": "confirmed",
+    "accepted_by": "root工程统筹",
+    "source": "Notma POO-178 revision 9f7ccde5fd3c073dc3352c75d2e629c2a4c313fe731bdccb041ce02deaa81677",
+    "body_sha256": "930a3f39c75d78bb22877fa287a371fe65bc27164390929df028c3f2962495ce",
+    "quote": "root已逐张检查1280三态，明确采用“默认180+数据源/技能更多折叠”作为既有授权范围内工程选择；已进一步确认上述持久化策略。",
+    "scope": "default180px and sources/skills More disclosure; preserve saved user width; current entry placement unchanged. Font14 integration requires new actual captures."
+  },
+  "candidate": {
+    "baseline": "4f9e6e6fdf6bbd1fb1d69e82c618c97aeafa27ca",
+    "source": "apps/electron/src/renderer/components/app-shell/AppShell.tsx",
+    "source_sha256": "50729360a863da43c45e1d8e6c013e66f47543842272b5f600fff7f34cce3f04",
+    "candidate_delta": [
+      "default width 220 to180 for after",
+      "group sources/skills into more, default collapsed",
+      "visible keyboard list reflects collapsed group"
+    ],
+    "production_edits": false,
+    "candidate_sha256": "b2e9805f32b4cf53e749e8152b6848f1146a29a93d68287af776bfd500b58060",
+    "bundle_sha256": "e6dd2b22de189e14bc77eb0d91bd2db556fb1cd9edd3ae76ecdf051eaef52e21",
+    "render_kind": "real native AppShell components with backend-only isolated fixture",
+    "build_command": "POLO_TOOLCHAIN_ROOT=<repo> POLO_BASELINE_DIST=<candidate>/dist <repo>/node_modules/.bin/vite build --config vite.config.mjs",
+    "font_scope": "same production styles on both sides; POO-168 typography changes not implemented",
+    "candidate_only": true,
+    "runtime_external_requests": 0
+  },
+  "fixture_origin": {
+    "source": "POO-178 accepted candidate/implementation-handoff; curated portable provider and backend-data fixture only",
+    "files": {
+      "baseline.tsx": "aeb9bcddca243fdab0118ce8d957b9c0e024c520f866dd6f76756fdbf5c999f5",
+      "fixtures.ts": "21cb8ce9bb4e38d109bfb8ef8fbb68b047915aa37bb2840aecab1dfd1c83d034",
+      "baseline.css": "bbcb15786433e4d2618e10e9bdbf5b6d9403c571bfd9e342224adf1167070ae8"
+    },
+    "production_component": "apps/electron/src/renderer/components/app-shell/AppShell.tsx",
+    "production_hash_binding": false
+  },
+  "retained_input": "Existing report 2026-10-28-poo178-sidebar-candidate/prototype.html; supply via --source-export, verify bundle_sha256 before import; no duplicate JS bundle in repository"
+}

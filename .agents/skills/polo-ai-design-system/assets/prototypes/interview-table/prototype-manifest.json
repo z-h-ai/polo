@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "kind": "frozen-native-table-reference",
+  "mode": "high_fidelity",
+  "revision": "poo171-native-reuse-r1",
+  "files": {
+    "prototype": "prototype.html",
+    "asset_1": "styles/088c433398e7b0688aa97b36bfb34a098e4ccdd47d82ee93b62309ac3c36f406.css",
+    "asset_2": "styles/55ec4263cfdd75f197f3a4efc916ea2a76e4bf3a5eb53de6ae063e2f354a4139.css",
+    "asset_3": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
+    "asset_4": "styles/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.css",
+    "asset_5": "views/table-datatable-compact-800x600.html",
+    "asset_6": "views/table-datatable-desktop-1280x800.html",
+    "asset_7": "views/table-datatable-desktop-1440x900.html",
+    "asset_8": "views/table-expanded-compact-800x600.html",
+    "asset_9": "views/table-expanded-desktop-1280x800.html",
+    "asset_10": "views/table-expanded-desktop-1440x900.html",
+    "asset_11": "views/table-full-compact-800x600.html",
+    "asset_12": "views/table-full-desktop-1280x800.html",
+    "asset_13": "views/table-full-desktop-1440x900.html",
+    "asset_14": "views/table-genui-compact-800x600.html",
+    "asset_15": "views/table-genui-desktop-1280x800.html",
+    "asset_16": "views/table-genui-desktop-1440x900.html",
+    "asset_17": "views/table-minimal-compact-800x600.html",
+    "asset_18": "views/table-minimal-desktop-1280x800.html",
+    "asset_19": "views/table-minimal-desktop-1440x900.html",
+    "asset_20": "views/table-short-compact-800x600.html",
+    "asset_21": "views/table-short-desktop-1280x800.html",
+    "asset_22": "views/table-short-desktop-1440x900.html",
+    "asset_23": "views/table-terminal-compact-800x600.html",
+    "asset_24": "views/table-terminal-desktop-1280x800.html",
+    "asset_25": "views/table-terminal-desktop-1440x900.html"
+  },
+  "target": {
+    "languages": [
+      "zh-Hans"
+    ],
+    "themes": [
+      "light"
+    ],
+    "viewports": [
+      {
+        "id": "desktop-1280x800",
+        "width": 1280,
+        "height": 800
+      },
+      {
+        "id": "desktop-1440x900",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "id": "compact-800x600",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "id": "table-terminal",
+      "state": "long",
+      "title": "table-terminal",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "table-minimal",
+      "state": "long",
+      "title": "table-minimal",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "table-full",
+      "state": "long",
+      "title": "table-full",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "table-short",
+      "state": "short",
+      "title": "table-short",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "table-datatable",
+      "state": "inline",
+      "title": "table-datatable",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "table-expanded",
+      "state": "expanded",
+      "title": "table-expanded",
+      "source_entry": "prototype.html"
+    },
+    {
+      "id": "table-genui",
+      "state": "file-backed",
+      "title": "table-genui",
+      "source_entry": "prototype.html"
+    }
+  ],
+  "design": {
+    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "sha256": "ca9c7fa69619572572d983d68790c17cf31224354aa12846f47fa586f3b57810",
+    "sources": [
+      {
+        "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
+        "sha256": "64c5dddd0bef2af4f5a2a648f8b5af3a7d5a26d06f7a8d5fade051909c25e90d"
+      }
+    ]
+  },
+  "confirmations": [
+    {
+      "id": "D-ASSISTANT-REUSE",
+      "status": "confirmed",
+      "source": ".agents/skills/polo-ai-design-system/references/policy-alignment.json#D-ASSISTANT-REUSE",
+      "scope": "Preserve existing assistant Markdown/datatable styles only; current component reference does not approve a new layout or prove sticky behavior."
+    }
+  ],
+  "provenance": {
+    "generator": ".agents/skills/polo-ai-design-system/tools/export-table-reference.py",
+    "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
+    "source_input_fingerprint": "4cedf9552088f76bc4236efecfb81b425d697c6c7ebb294702e2a93fecb0af2a",
+    "source_export_sha256": "8283e5362f5a9a1e5a69bb2439b43c4829e9c3eaa9fcbe512999ace84bd0337a",
+    "method": "Actual Chromium render and native expand click, cloned DOM/CSS only in reference; live React runtime imports production components.",
+    "scope": "Component smoke and state coverage only; current header position is not the target sticky result. Full Electron, scroll geometry, row actions, source IO and actual bug before/after remain task acceptance."
+  }
+}

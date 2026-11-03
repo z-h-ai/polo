@@ -1,0 +1,10 @@
+{
+  "services": {
+    "frontend": {
+      "url": "http://127.0.0.1:43178",
+      "cwd": ".agents/skills/polo-ai-design-system/tools/sidebar-runtime",
+      "start": "../../../../../node_modules/.bin/vite --config vite.config.mjs --host 127.0.0.1 --port 43178 --strictPort",
+      "health_check": "/entries/baseline.html"
+    }
+  }
+}

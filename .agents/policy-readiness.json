@@ -11,7 +11,11 @@
         "apps/electron/src/main",
         "apps/electron/src/preload",
         "docs/mvp-complete-flow-hifi",
-        ".agents/skills/polo-ai-design-system"
+        ".agents/skills/polo-ai-design-system",
+        "packages/ui/src/components/markdown/Markdown.tsx",
+        "packages/ui/src/components/markdown/MarkdownDatatableBlock.tsx",
+        "packages/ui/src/components/overlay/DataTableOverlay.tsx",
+        "packages/ui/src/components/markdown/__tests__/table-sticky-header.test.tsx"
       ],
       "prototype_manifest": null
     }
