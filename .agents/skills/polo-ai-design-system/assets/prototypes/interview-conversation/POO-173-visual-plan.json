@@ -1,0 +1,80 @@
+{
+  "e2e": {
+    "visual": {
+      "mode": "smoke",
+      "viewports": [
+        {
+          "name": "desktop-1280x800",
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "name": "desktop-1440x900",
+          "width": 1440,
+          "height": 900
+        },
+        {
+          "name": "compact-800x600",
+          "width": 800,
+          "height": 600
+        }
+      ],
+      "routes": [
+        {
+          "name": "file-link-context-menu-zh-Hans",
+          "state": "file-link",
+          "actual": "/entries/baseline.html?scene=interview-file-link&pure=1&lang=zh-Hans",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "click",
+              "selector": "[data-file-link-demo=\"open\"]"
+            },
+            {
+              "action": "wait",
+              "duration": 1200
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "section[aria-label=\"文件链接右键菜单\"]"
+            },
+            {
+              "type": "visible",
+              "selector": "[role=\"menu\"]"
+            }
+          ]
+        },
+        {
+          "name": "file-link-context-menu-en",
+          "state": "file-link",
+          "actual": "/entries/baseline.html?scene=interview-file-link&pure=1&lang=en",
+          "whole_page": true,
+          "capture_full_page": true,
+          "actual_steps": [
+            {
+              "action": "click",
+              "selector": "[data-file-link-demo=\"open\"]"
+            },
+            {
+              "action": "wait",
+              "duration": 1200
+            }
+          ],
+          "state_assertions": [
+            {
+              "type": "visible",
+              "selector": "section[aria-label=\"文件链接右键菜单\"]"
+            },
+            {
+              "type": "visible",
+              "selector": "[role=\"menu\"]"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

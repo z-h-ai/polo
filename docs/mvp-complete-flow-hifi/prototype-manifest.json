@@ -455,7 +455,7 @@
   "default_story": "UI-refinement",
   "design": {
     "revision": "native-materials-r5-lifecycle-candidate-20261023",
-    "sha256": "3a181a048b45e9c935f08089a0367d4c683c54c8ae5cc805c00dacfecf5eb0c1",
+    "sha256": "6878a5fd524cb92ef6a807764906147fe4f3c9ebbc514f06e92f3c57b6ae6314",
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
     "sources": [
       {
@@ -544,7 +544,7 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/scenes.tsx",
-        "sha256": "4486fdfbb9d7372fd05fd8ffa9f8240fc0a8a10c259450f8e3878d4159f87afa"
+        "sha256": "34e5bc0c9c1a87283c1c8087faf4edcdc62bc8e38603ea65bf31a35149b67eea"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/gallery.tsx",
@@ -592,11 +592,11 @@
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-conversation.tsx",
-        "sha256": "4c5ef01e89b33ed350779bc648099938045361df662c9f760e8f0aa2c9766fa4"
+        "sha256": "9cc363e0014ba3bd07771d3306cb39f5706af0e402a3495465b5d15841e64f5c"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
-        "sha256": "d299757f8bbc9cc85a1b99ede04298306cad5185cb69471f6c6afc75f27e56c2"
+        "sha256": "166917c12420918a4532a89b7be517d1b4abd1422b37a1056b7d9070af12a09e"
       },
       {
         "path": ".agents/skills/polo-ai-design-system/tools/export-sidebar-reference.py",
@@ -45717,7 +45717,7 @@
       "path": ".agents/skills/polo-ai-design-system/references/design-system.json",
       "label": "当前客户端设计模型",
       "revision": "native-materials-r5-lifecycle-candidate-20261023",
-      "sha256": "9f188ddb7658342c5e40abfbaaed9e4fe09543f7fa51b8ee8b8c9d4e4ea920fd"
+      "sha256": "ad4ddbcb21758e6021088022df6220e95a0291622a36bfa1487fe5c254c6388e"
     },
     {
       "id": "client-design-foundations",
