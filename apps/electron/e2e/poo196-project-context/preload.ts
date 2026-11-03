@@ -54,6 +54,10 @@ const fixtureMethods = [
   'generateThumbnail', 'cancelProcessing', 'getFilePath', 'showInFolder',
   'kbListCollections', 'kbSetSessionCollections', 'adminPaymentHandoff',
   'getWindowFocusState',
+  // E2-2: the admin status receipt the copy-link path resolves a
+  // root-relative invitation link against (the fixture deployment's trusted
+  // admin origin).
+  'adminGetStatus',
   // The refresh handover the create-project dialog awaits (created space
   // materializes in the fixture store AFTER pmCreateEnterprise succeeds).
   'productSpaceList',

@@ -442,10 +442,6 @@ export function useProjectMembers(scope: {
     }
   }, [composeRequest, composeSubmitting, composeTarget, emailDeliveryAvailable, loadInvitations, scope])
 
-  /** S2-ENG-3/X2-7 hook surface: when the compose still holds an unresolved
-   * request, the NEXT submit replays it. */
-  const hasPendingComposeRequest = composeRequest !== null
-
   /** E2-2: the clipboard only ever receives an ABSOLUTE https link under the
    * trusted admin origin's `/invite/` path. A root-relative value (an admin
    * deployed without its public origin — the real response shape observed in
@@ -514,7 +510,6 @@ export function useProjectMembers(scope: {
     composeTarget,
     composeErrorKey,
     composeSubmitting,
-    hasPendingComposeRequest,
     outcome,
     copied,
     copyFailed,
@@ -541,7 +536,6 @@ export function useProjectMembers(scope: {
     copied,
     copyFailed,
     copyLink,
-    hasPendingComposeRequest,
     invitations,
     loadMoreInvitations,
     loadMoreRoster,

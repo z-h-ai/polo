@@ -691,6 +691,17 @@ function registerFixtureIpc() {
         return []
       case 'adminPaymentHandoff':
         return { ok: false }
+      case 'adminGetStatus':
+        // E2-2: the same receipt shape as the real admin:getStatus (the
+        // adminUrl the desktop is signed in to rides beside the login state),
+        // pinned to the fixture's trusted invitation origin.
+        return {
+          adminUrl: 'https://fixture-admin.polo.invalid',
+          loggedIn: true,
+          userId: 'fixture-admin-user',
+          username: 'fixture-admin',
+          displayName: 'Fixture Admin',
+        }
       case 'getTabBrowserApps':
       case 'organizationList':
       case 'getRichToolDescriptions':
@@ -2973,6 +2984,44 @@ async function scenarioInviteLoops() {
   check('[S15][E2-2] replay 链接复制为受信 origin 的绝对 https（非裸路径）',
     replayClip.startsWith('https://fixture-admin.polo.invalid/invite/') && !replayClip.startsWith('/'),
     { replayClip: replayClip.slice(0, 60) })
+  await closeMembersDialog()
+  await forceCloseDialog(T.membersDialog)
+  await runProgramDirect({ op: 'resetPm' })
+  await js<boolean>('window.__poo196Space.setRole("manager")')
+  await delay(200)
+
+  // E2-2（共识 #7）相对链接臂：没有公开 origin 的 admin 交出 path-only 链接
+  // （review 观察到的真实响应形态）。客户端必须向它本人登录的受信 admin
+  // origin（fixture 的 adminGetStatus 应答）解析，剪贴板只落拼全后的绝对
+  // https——绝不落裸路径，也不落在别的 origin 上。
+  mark('S15:invite-relative-link')
+  await runProgramDirect({ op: 'resetPm' })
+  await js<boolean>('window.__poo196Space.setRole("manager")')
+  await openMembersDialog()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
+  await js<boolean>(`window.__poo196.click('${T.membersInviteAction}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersCompose}')`), 8000)
+  await clearAndType(T.membersInviteTarget, '13500000000')
+  await runProgramDirect({ op: 'setPmInviteScript', args: { script: 'relative' } })
+  await js<boolean>(`window.__poo196.click('${T.membersInviteSubmit}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersResult}')`), 8000)
+  const relativeResultKind = await js<string>(`document.querySelector('${T.membersResult}')?.getAttribute('data-result') ?? 'missing'`)
+  check('[S15][E2-2] relative 臂到达 created 结果页（fixture 交出 path-only 链接）', relativeResultKind === 'created', { relativeResultKind })
+  await js<boolean>(`(() => {
+    window.__clipboardLog = []
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text) => { window.__clipboardLog.push(text); return true } },
+    })
+    return true
+  })()`)
+  await js<boolean>(`window.__poo196.click('${T.membersCopyLink}')`)
+  await until(async () => (await js<number>('window.__clipboardLog.length')) > 0, 8000)
+  const relativeClip = await js<string>('window.__clipboardLog[0] ?? ""')
+  check('[S15][E2-2] path-only 链接复制为受信 origin 拼全的绝对 https（非裸路径/无 query·hash）',
+    /^https:\/\/fixture-admin\.polo\.invalid\/invite\/[A-Za-z0-9_-]+$/.test(relativeClip),
+    { relativeClip: relativeClip.slice(0, 80) })
+  await capture('s15-invite-relative')
   await closeMembersDialog()
   await forceCloseDialog(T.membersDialog)
   await runProgramDirect({ op: 'resetPm' })

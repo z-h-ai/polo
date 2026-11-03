@@ -65,6 +65,7 @@ interface Harness {
   invitationsCalls: Array<Record<string, unknown>>
   inviteCalls: Array<Record<string, unknown>>
   clipboard: string[]
+  adminStatusCalls: number
 }
 
 function makeHarness(options: {
@@ -75,12 +76,16 @@ function makeHarness(options: {
    * calls answer with `inviteResponse` — the replay path. */
   inviteError?: Error
   inviteResponse?: Record<string, unknown>
+  /** E2-2: the admin status receipt a root-relative invitation link is
+   * resolved against; omitted means the bridge never answers that call. */
+  adminStatus?: () => Promise<{ adminUrl: string | null }>
 } = {}): Harness {
   const harness: Harness = {
     membersCalls: [],
     invitationsCalls: [],
     inviteCalls: [],
     clipboard: [],
+    adminStatusCalls: 0,
   }
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
@@ -114,6 +119,14 @@ function makeHarness(options: {
           invitationUrl: INVITE_URL,
         }
       },
+      ...(options.adminStatus
+        ? {
+            adminGetStatus: async () => {
+              harness.adminStatusCalls += 1
+              return options.adminStatus!()
+            },
+          }
+        : {}),
     },
   })
   Object.defineProperty(navigator, 'clipboard', {
@@ -319,6 +332,53 @@ describe('ProjectMembersDialog (POO-196 追加轮 D-C)', () => {
     expect((harness.inviteCalls[1]!.command as Record<string, string>).createRequestKey).toBe(heldKey)
     fireEvent.click(screen.getByTestId('project-members-copy-link'))
     await waitFor(() => expect(harness.clipboard).toEqual([INVITE_URL]))
+  })
+
+  // E2-2 (consensus #7): an admin deployed WITHOUT its public origin hands
+  // out a root-relative link — the exact response shape observed in review.
+  // The clipboard must receive the link resolved against the trusted admin
+  // origin the desktop itself is signed in to, never the bare path.
+  it('E2-2: a path-only invitation link copies as the absolute https link under the trusted admin origin', async () => {
+    const { harness } = renderMembers({
+      viewerRole: 'owner',
+      inviteResponse: { result: 'created', invitation: INVITATION, invitationUrl: '/invite/pm-invite-1' },
+      adminStatus: async () => ({ adminUrl: 'https://admin.example.com' }),
+    })
+    await screen.findAllByTestId('project-members-roster-row')
+
+    fireEvent.click(screen.getByTestId('project-members-invite-action'))
+    fireEvent.change(screen.getByTestId('project-members-invite-target'), { target: { value: '13800000000' } })
+    fireEvent.submit(document.getElementById('project-invite-form')!)
+    expect(await screen.findByTestId('project-members-invite-result')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('project-members-copy-link'))
+    await waitFor(() => expect(harness.clipboard).toEqual(['https://admin.example.com/invite/pm-invite-1']))
+    expect(screen.getByTestId('project-members-copy-link').textContent).toContain('已复制')
+    // The resolution really went through the status receipt — the admin URL
+    // the desktop is signed in to, not renderer input or a request Host.
+    expect(harness.adminStatusCalls).toBe(1)
+  })
+
+  // The other half of the same branch: an admin receipt WITHOUT a usable
+  // origin never lets the bare path reach the clipboard — the existing
+  // copy-failure face is the answer.
+  it('E2-2: a path-only link with no trusted admin origin takes the copy-failure face and writes nothing', async () => {
+    const { harness } = renderMembers({
+      viewerRole: 'owner',
+      inviteResponse: { result: 'created', invitation: INVITATION, invitationUrl: '/invite/pm-invite-1' },
+      adminStatus: async () => ({ adminUrl: null }),
+    })
+    await screen.findAllByTestId('project-members-roster-row')
+
+    fireEvent.click(screen.getByTestId('project-members-invite-action'))
+    fireEvent.change(screen.getByTestId('project-members-invite-target'), { target: { value: '13800000000' } })
+    fireEvent.submit(document.getElementById('project-invite-form')!)
+    expect(await screen.findByTestId('project-members-invite-result')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('project-members-copy-link'))
+    await waitFor(() => expect(screen.getByTestId('project-members-copy-failed')).toBeTruthy())
+    expect(harness.clipboard).toHaveLength(0)
+    expect(screen.getByTestId('project-members-copy-link').textContent).not.toContain('已复制')
   })
 
   // X2-9 (consensus #14): a deployment without invitation email delivery
