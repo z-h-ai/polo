@@ -19,6 +19,7 @@ import { NavigationProvider } from '@/contexts/NavigationContext'
 import { ActionRegistryProvider } from '@/actions/registry'
 import { chatComponents } from '@/playground/registry/chat'
 import { ComponentGallery } from './gallery'
+import { InterviewInputScene } from './interview-input'
 import { productSpaceFixture } from './fixtures'
 
 /**
@@ -241,6 +242,13 @@ const chatScenes = [
 ].filter((s): s is BaselineScene => s !== null)
 
 export const baselineScenes: BaselineScene[] = [
+  {
+    id: 'interview-input',
+    region: '助手',
+    title: 'RichTextInput（访谈输入占位复验）',
+    note: '真实生产编辑器及受控文本状态；仅提供本地输入数据，不代表发送或后端验收。',
+    render: () => <InterviewInputScene />,
+  },
   {
     id: 'components-gallery',
     region: '组件画廊',
