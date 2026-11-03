@@ -52,7 +52,7 @@ export function ElementReferenceChips({ references, mode, onRemove }: {
         {references.map((reference) => (
           <span
             key={reference.id}
-            className="inline-flex max-w-[280px] items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-foreground-70 shadow-minimal"
+            className="inline-flex max-w-[280px] items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[14px] text-foreground-70 shadow-minimal"
           >
             <button
               type="button"
@@ -89,19 +89,19 @@ export function ElementReferenceChips({ references, mode, onRemove }: {
             <DialogTitle>{t('browserPane.elementReference.previewTitle')}</DialogTitle>
             <DialogDescription>{t('browserPane.elementReference.previewCaption')}</DialogDescription>
           </DialogHeader>
-          <div className="max-h-[60vh] space-y-3 overflow-y-auto px-[20px] pb-[18px] text-[13px] leading-[1.6]">
+          <div className="max-h-[60vh] space-y-3 overflow-y-auto px-[20px] pb-[18px] text-[14px] leading-[1.6]">
             <ElementReferenceField label={t('browserPane.elementReference.fieldPage')}>
               <div className="text-foreground-80">{preview?.pageTitle}</div>
-              <div className="break-all text-[12px] text-muted-foreground">{preview?.url}</div>
+              <div className="break-all text-[14px] text-muted-foreground">{preview?.url}</div>
             </ElementReferenceField>
             <ElementReferenceField label={t('browserPane.elementReference.fieldElement')}>
               <div className="flex flex-wrap items-center gap-2 text-foreground-80">
-                <code className="rounded bg-surface px-1.5 py-0.5 text-[12px]">&lt;{preview?.tag}&gt;</code>
+                <code className="rounded bg-surface px-1.5 py-0.5 text-[14px]">&lt;{preview?.tag}&gt;</code>
                 {preview?.aria && <span className="text-muted-foreground">{preview.aria}</span>}
               </div>
             </ElementReferenceField>
             <ElementReferenceField label={t('browserPane.elementReference.fieldLocator')}>
-              <code className="block break-all rounded bg-surface px-1.5 py-0.5 text-[12px] text-foreground-80">{preview?.locator}</code>
+              <code className="block break-all rounded bg-surface px-1.5 py-0.5 text-[14px] text-foreground-80">{preview?.locator}</code>
             </ElementReferenceField>
             {preview?.text && (
               <ElementReferenceField label={t('browserPane.elementReference.fieldSummary')}>
@@ -121,7 +121,7 @@ function ElementReferenceField({ label, children }: {
 }) {
   return (
     <div>
-      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mb-1 text-[14px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
       {children}
     </div>
   )

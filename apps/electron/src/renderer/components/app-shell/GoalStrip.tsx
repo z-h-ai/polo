@@ -167,7 +167,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
           aria-controls={panelId}
           onClick={() => setExpanded(v => !v)}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-1 pr-1.5 text-left text-[13px]',
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-1 pr-1.5 text-left text-[14px]',
             'outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-1 focus-visible:ring-accent/50',
           )}
         >
@@ -192,7 +192,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
             data-testid="goal-strip-status"
             title={badge.hintKey ? t(badge.hintKey) : undefined}
             className={cn(
-              'shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none',
+              'shrink-0 rounded-full px-1.5 py-0.5 text-[14px] font-medium leading-none',
               badge.className,
             )}
           >
@@ -245,7 +245,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
             {emptyKey ? (
               <div
                 data-testid="goal-todos-empty"
-                className="py-2 text-[13px] text-muted-foreground"
+                className="py-2 text-[14px] text-muted-foreground"
               >
                 {t(emptyKey)}
               </div>
@@ -262,7 +262,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                       key={td.id}
                       data-testid={`goal-todo-item-${td.id}`}
                       data-todo-status={td.status}
-                      className="flex items-start gap-2 text-[13px] leading-5 text-foreground/85"
+                      className="flex items-start gap-2 text-[14px] leading-5 text-foreground/85"
                     >
                       <span
                         aria-label={t(meta.labelKey)}
@@ -297,7 +297,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                   <span
                     data-testid="goal-verification-status"
                     className={cn(
-                      'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none',
+                      'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[14px] font-medium leading-none',
                       VERIFICATION_STATUS_META[verification.status].className,
                     )}
                   >
@@ -305,7 +305,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                     {t(VERIFICATION_STATUS_META[verification.status].labelKey)}
                   </span>
                 </div>
-                <div data-testid="goal-verification-meta" className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                <div data-testid="goal-verification-meta" className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[14px] text-muted-foreground">
                   <span data-testid="goal-verification-model">
                     {t('goal.verificationModel', {
                       model: verification.model ?? t('goal.evidenceUnknown'),
@@ -324,7 +324,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                         key={i}
                         data-testid={`goal-criterion-${i}`}
                         data-criterion-passed={c.passed}
-                        className="flex items-start gap-2 text-[13px] leading-5 text-foreground/85"
+                        className="flex items-start gap-2 text-[14px] leading-5 text-foreground/85"
                       >
                         <span
                           aria-label={t(c.passed ? 'goal.criterionPassed' : 'goal.criterionNotSatisfied')}
@@ -342,7 +342,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                         <span className="min-w-0 break-words">
                           {c.criterion}
                           {c.note && (
-                            <span className="block text-[11px] text-muted-foreground">{c.note}</span>
+                            <span className="block text-[14px] text-muted-foreground">{c.note}</span>
                           )}
                           {c.evidence.length > 0 && (
                             <span className="mt-0.5 flex flex-wrap gap-1" data-testid="goal-criterion-evidence">
@@ -355,7 +355,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                                   onClick={() => onOpenFile?.(ev.path!)}
                                   title={t('goal.evidenceOpenFile')}
                                   className={cn(
-                                    'inline-flex max-w-full items-center gap-1 rounded border border-foreground/15 px-1 py-0.5 text-[11px]',
+                                    'inline-flex max-w-full items-center gap-1 rounded border border-foreground/15 px-1 py-0.5 text-[14px]',
                                     'text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-accent/50',
                                   )}
                                 >
@@ -368,7 +368,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                                   data-testid={`goal-evidence-message-${j}`}
                                   data-evidence-kind="message"
                                   title={ev.messageId}
-                                  className="inline-flex max-w-full items-center gap-1 rounded border border-foreground/15 px-1 py-0.5 text-[11px] text-muted-foreground"
+                                  className="inline-flex max-w-full items-center gap-1 rounded border border-foreground/15 px-1 py-0.5 text-[14px] text-muted-foreground"
                                 >
                                   <MessageSquareText className="h-2.5 w-2.5 shrink-0" />
                                   <span className="truncate">{ev.label}</span>
@@ -378,7 +378,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                                   key={j}
                                   data-testid={`goal-evidence-unknown-${j}`}
                                   data-evidence-kind="unknown"
-                                  className="inline-flex items-center gap-1 rounded border border-dashed border-foreground/20 px-1 py-0.5 text-[11px] text-muted-foreground/70"
+                                  className="inline-flex items-center gap-1 rounded border border-dashed border-foreground/20 px-1 py-0.5 text-[14px] text-muted-foreground/70"
                                 >
                                   <AlertCircle className="h-2.5 w-2.5 shrink-0" />
                                   {t('goal.evidenceUnknown')}
@@ -392,7 +392,7 @@ export function GoalStrip({ sessionId, goal, onPause, onResume, onOpenFile }: Go
                   </ul>
                 )}
                 {(verification.warning || verification.executionFactsNote || verification.error) && (
-                  <div data-testid="goal-verification-notes" className="mt-1.5 space-y-0.5 text-[11px] text-muted-foreground">
+                  <div data-testid="goal-verification-notes" className="mt-1.5 space-y-0.5 text-[14px] text-muted-foreground">
                     {verification.warning && <p>{t('goal.verificationWarning', { warning: verification.warning })}</p>}
                     {verification.executionFactsNote && <p>{verification.executionFactsNote}</p>}
                     {verification.error && <p>{t('goal.verificationError', { error: verification.error })}</p>}

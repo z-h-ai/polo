@@ -106,10 +106,10 @@ export function MemberAppCard({
           : <span className="text-[17px] font-semibold">{app.name.slice(0, 1)}</span>}
       </span>
       <h3 className="m-0 text-[16px] font-bold leading-[normal]">{app.name}</h3>
-      <p className="mt-[4px] truncate text-[12px] leading-[normal] text-muted-foreground">
+      <p className="mt-[4px] truncate text-[14px] leading-[normal] text-muted-foreground">
         {sourceLine}
       </p>
-      <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+      <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
         {app.description || t('homeApps.noDescription')}
       </p>
       <div
@@ -120,7 +120,7 @@ export function MemberAppCard({
         }
       >
         {running && (
-          <span className="inline-flex min-h-[20px] items-center gap-[5px] whitespace-nowrap rounded-[4px] bg-info/10 px-[7px] text-[10px] font-medium text-info">
+          <span className="inline-flex min-h-[20px] items-center gap-[5px] whitespace-nowrap rounded-[4px] bg-info/10 px-[7px] text-[14px] font-medium text-info">
             <span className="size-[5px] rounded-full bg-info" aria-hidden="true" />
             {t('homeApps.status.running')}
           </span>
@@ -134,8 +134,8 @@ export function MemberAppCard({
           disabled={busy || openDisabled}
           className={
             openDisabled
-              ? 'inline-flex min-h-[30px] cursor-not-allowed items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[12px] font-medium text-foreground-60 opacity-60'
-              : 'inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground'
+              ? 'inline-flex min-h-[30px] cursor-not-allowed items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[14px] font-medium text-foreground-60 opacity-60'
+              : 'inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[14px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground'
           }
           onClick={(event) => {
             event.stopPropagation()

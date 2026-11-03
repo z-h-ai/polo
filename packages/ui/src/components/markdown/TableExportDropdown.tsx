@@ -76,7 +76,7 @@ export function TableExportDropdown({ columns, rows, filename, shownRows, totalR
       <StyledDropdownMenuContent sideOffset={6} align="end" style={{ zIndex: 'var(--z-floating-menu, 400)' }}>
         {scope && (
           <>
-            <div className="px-2 py-1.5 text-[11px] text-muted-foreground whitespace-nowrap" aria-live="polite">
+            <div className="px-2 py-1.5 text-[14px] text-muted-foreground whitespace-nowrap" aria-live="polite">
               {t('table.exportScopeRows', { count: scope.shown, shown: scope.shown, total: scope.total })}
             </div>
             <StyledDropdownMenuSeparator />

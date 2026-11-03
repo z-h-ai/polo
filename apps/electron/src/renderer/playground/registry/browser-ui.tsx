@@ -448,7 +448,7 @@ function BrowserFramePlayground({
                   <BrowserEdgeShaderFx className="absolute inset-0" rounded />
 
                   <div
-                    className="absolute text-[11px]"
+                    className="absolute text-[14px]"
                     style={{
                       top: '8px',
                       right: '8px',

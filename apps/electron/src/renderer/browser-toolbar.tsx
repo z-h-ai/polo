@@ -225,7 +225,7 @@ function BrowserToolbarApp() {
           <span
             data-testid="browser-toolbar-bound-session"
             title={state.boundSessionName}
-            className="mr-1.5 max-w-[140px] shrink-0 truncate rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-foreground-70 shadow-minimal"
+            className="mr-1.5 max-w-[140px] shrink-0 truncate rounded-full border border-border bg-surface px-2 py-0.5 text-[14px] text-foreground-70 shadow-minimal"
           >
             {state.boundSessionName}
           </span>

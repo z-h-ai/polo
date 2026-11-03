@@ -402,10 +402,10 @@ export function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndi
   const displayMessage = statusMessage || t(PROCESSING_MESSAGE_KEYS[messageIndex])
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[13px] text-muted-foreground">
+    <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[14px] text-muted-foreground">
       {/* Spinner in same location as TurnCard chevron */}
       <div className="w-3 h-3 flex items-center justify-center shrink-0">
-        <Spinner className="text-[10px]" />
+        <Spinner className="text-[14px]" />
       </div>
       {/* Label with crossfade animation on content change only */}
       <span className="relative h-5 flex items-center">
@@ -1713,7 +1713,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 <button
                   type="button"
                   onClick={handleJumpToLatest}
-                  className="pointer-events-auto flex h-8 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 text-[13px] text-muted-foreground shadow-tinted transition-colors hover:border-border hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-info focus-visible:outline-offset-2"
+                  className="pointer-events-auto flex h-8 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 text-[14px] text-muted-foreground shadow-tinted transition-colors hover:border-border hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-info focus-visible:outline-offset-2"
                 >
                   <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span className="truncate">{t('chat.jumpToLatest')}</span>
@@ -2579,10 +2579,10 @@ function MessageBubble({
   // === STATUS MESSAGE: Matches ProcessingIndicator layout for visual consistency ===
   if (message.role === 'status') {
     return (
-      <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[13px] text-muted-foreground">
+      <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[14px] text-muted-foreground">
         {/* Spinner in same location as TurnCard chevron */}
         <div className="w-3 h-3 flex items-center justify-center shrink-0">
-          <Spinner className="text-[10px]" />
+          <Spinner className="text-[14px]" />
         </div>
         <span>{message.content}</span>
       </div>
@@ -2615,7 +2615,7 @@ function MessageBubble({
     const Icon = config.icon
 
     return (
-      <div className={cn('flex items-center gap-2 px-3 py-1 text-[13px] select-none', config.className)}>
+      <div className={cn('flex items-center gap-2 px-3 py-1 text-[14px] select-none', config.className)}>
         <div className="w-3 h-3 flex items-center justify-center shrink-0">
           <Icon className="w-3 h-3" />
         </div>

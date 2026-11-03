@@ -251,7 +251,7 @@ export function BrowserControls({
           onKeyDown={handleKeyDown}
           placeholder={t('browser.urlPlaceholder')}
           className={cn(
-            'w-full rounded-[8px] bg-transparent px-3 pl-8 text-[13px] text-foreground/70 outline-none transition-all',
+            'w-full rounded-[8px] bg-transparent px-3 pl-8 text-[14px] text-foreground/70 outline-none transition-all',
             compact ? 'h-[28px]' : 'h-[30px]',
             !safeThemeColor && (isFocused
               ? 'bg-background border border-transparent shadow-minimal'
@@ -271,7 +271,7 @@ export function BrowserControls({
         <span className="absolute inset-y-0 left-3 flex items-center justify-center">
           {loading ? (
             <span className="flex items-center justify-center h-3.5 w-3.5" style={safeThemeColor ? { color: isFocused ? 'var(--tb-fg)' : 'var(--tb-fg-muted)' } : undefined}>
-              <Spinner className="text-[11px] text-foreground/40" />
+              <Spinner className="text-[14px] text-foreground/40" />
             </span>
           ) : (
             <Globe className="h-3.5 w-3.5 text-foreground/30" style={safeThemeColor ? { color: isFocused ? 'var(--tb-fg)' : 'var(--tb-fg-muted)' } : undefined} />

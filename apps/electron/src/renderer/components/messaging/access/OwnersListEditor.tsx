@@ -99,12 +99,12 @@ function OwnerRow({
         <div className="flex items-baseline gap-2">
           <span className="truncate text-sm">{primary}</span>
           {isCurrentUser && (
-            <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+            <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[14px] font-medium text-emerald-700 dark:text-emerald-400">
               {t('settings.messaging.telegram.access.owners.youBadge')}
             </span>
           )}
           {!enforced && (
-            <span className="shrink-0 text-[10px] uppercase tracking-wide text-foreground/40">
+            <span className="shrink-0 text-[14px] uppercase tracking-wide text-foreground/40">
               {t('settings.messaging.telegram.access.owners.notEnforced')}
             </span>
           )}

@@ -271,7 +271,7 @@ function CircleUpdatesFailure({
         <button
           type="button"
           data-testid="circle-updates-retry"
-          className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+          className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
           onClick={onRetry}
         >
           {t('poo70.c5.retry')}
@@ -341,7 +341,7 @@ function CircleUpdatesReady({
         >
           <div className="flex flex-wrap items-center gap-[8px]">
             <span
-              className="inline-flex min-h-[18px] items-center rounded-full bg-foreground/6 px-[7px] text-[10px] font-medium text-muted-foreground"
+              className="inline-flex min-h-[18px] items-center rounded-full bg-foreground/6 px-[7px] text-[14px] font-medium text-muted-foreground"
               data-testid={`circle-update-entry-version-${index}`}
             >
               {entry.version}
@@ -351,7 +351,7 @@ function CircleUpdatesReady({
             {entry.summary}
           </p>
           <p
-            className="m-0 mt-[4px] text-[12px] leading-[1.6] text-muted-foreground"
+            className="m-0 mt-[4px] text-[14px] leading-[1.6] text-muted-foreground"
             data-testid={`circle-update-entry-published-at-${index}`}
           >
             {t('poo70.c5.entryPublishedAt', {

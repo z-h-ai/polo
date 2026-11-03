@@ -124,7 +124,7 @@ function AppAvailability({
       <p
         className={cn(
           'm-0 mb-[16px] mt-[16px]',
-          plain ? 'text-[16px] leading-[22px]' : 'text-[11px] leading-[1.4] text-muted-foreground',
+          plain ? 'text-[16px] leading-[22px]' : 'text-[14px] leading-[1.4] text-muted-foreground',
         )}
         data-testid="all-apps-row-status"
       >
@@ -132,7 +132,7 @@ function AppAvailability({
       </p>
     )
   }
-  return <span className="text-[11px] text-muted-foreground">{label}</span>
+  return <span className="text-[14px] text-muted-foreground">{label}</span>
 }
 
 /**
@@ -212,7 +212,7 @@ function AppDetail({
         </div>
       </dl>
       <div>
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <p className="text-[14px] font-medium uppercase tracking-wide text-muted-foreground">
           {t('homeApps.install.permissions')}
         </p>
         <p className="mt-2 text-xs text-muted-foreground">
@@ -310,7 +310,7 @@ function AllAppsRow({
           {app.sourceNames.map(sourceName => (
             <span
               key={sourceName}
-              className="inline-flex items-center rounded-full bg-accent/12 px-[7px] py-[3px] text-[10px] leading-[1.4] text-accent"
+              className="inline-flex items-center rounded-full bg-accent/12 px-[7px] py-[3px] text-[14px] leading-[1.4] text-accent"
               data-testid="all-apps-row-source"
             >
               {t('homeApps.allApps.fromSource', { source: sourceName })}
@@ -318,15 +318,15 @@ function AllAppsRow({
           ))}
         </div>
       ) : (
-        <p className="mt-[8px] text-[12px] leading-[17px] text-muted-foreground">
+        <p className="mt-[8px] text-[14px] leading-[17px] text-muted-foreground">
           {app.creatorName?.trim() || t('homeApps.allApps.unknownSource')}
         </p>
       )}
-      <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+      <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
         {app.description || t('homeApps.noDescription')}
       </p>
       {(app.creatorName?.trim() || app.catalogVersion?.version) && (
-        <p className="mt-[4px] text-[12px] leading-[17px] text-muted-foreground">
+        <p className="mt-[4px] text-[14px] leading-[17px] text-muted-foreground">
           {[
             app.creatorName?.trim(),
             app.catalogVersion?.version ? `v${app.catalogVersion.version}` : null,
@@ -336,7 +336,7 @@ function AllAppsRow({
       <AppAvailability app={app} installState={installState} offline={offline} spaceKind={spaceKind} variant="row" />
       <div className="mt-auto flex flex-wrap items-center justify-end gap-[7px] pt-[14px]">
         {blocked && (
-          <span className="inline-flex min-h-[20px] items-center gap-[5px] rounded-md bg-destructive/12 px-[7px] py-[2px] text-[10px] text-destructive before:block before:size-[5px] before:rounded-full before:bg-current">
+          <span className="inline-flex min-h-[20px] items-center gap-[5px] rounded-md bg-destructive/12 px-[7px] py-[2px] text-[14px] text-destructive before:block before:size-[5px] before:rounded-full before:bg-current">
             {t('homeApps.status.blocked')}
           </span>
         )}
@@ -348,7 +348,7 @@ function AllAppsRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
+            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[14px] text-muted-foreground hover:text-foreground"
             onClick={() => onPin(app)}
             data-testid={`all-apps-pin-${identityKey}`}
           >
@@ -362,7 +362,7 @@ function AllAppsRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
+            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[14px] text-muted-foreground hover:text-foreground"
             aria-expanded={reasonOpen}
             aria-controls={`all-apps-reason-text-${identityKey}`}
             onClick={() => setReasonOpen(open => !open)}
@@ -374,7 +374,7 @@ function AllAppsRow({
           <Button
             type="button"
             size="sm"
-            className="min-h-[32px] rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white hover:bg-accent/90"
+            className="min-h-[32px] rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-semibold text-white hover:bg-accent/90"
             disabled={unavailable || installState?.state === 'installing'}
             onClick={() => onOpen(app)}
             data-testid={`all-apps-action-${identityKey}`}
@@ -388,7 +388,7 @@ function AllAppsRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
+            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[14px] text-muted-foreground hover:text-foreground"
             onClick={() => onUninstall(app)}
             data-testid={`all-apps-uninstall-${identityKey}`}
           >
@@ -399,7 +399,7 @@ function AllAppsRow({
       {blocked && reasonOpen && (
         <p
           id={`all-apps-reason-text-${identityKey}`}
-          className="mt-[10px] text-[12px] leading-[1.6] text-muted-foreground"
+          className="mt-[10px] text-[14px] leading-[1.6] text-muted-foreground"
           data-testid={`all-apps-reason-text-${identityKey}`}
         >
           {t(catalogAppBlockedStatusKey(app, spaceKind))}
@@ -458,7 +458,7 @@ export function AllAppsView({
     <section aria-labelledby="all-apps-heading" data-testid="all-apps-view" className="text-[16px]">
       <div className="mb-[26px] flex items-end justify-between gap-[20px]">
         <div className="min-w-0">
-          <p className="m-0 mb-[7px] text-[11px] uppercase leading-[16px] tracking-[.08em] text-muted-foreground">{spaceName}</p>
+          <p className="m-0 mb-[7px] text-[14px] uppercase leading-[16px] tracking-[.08em] text-muted-foreground">{spaceName}</p>
           <h1
             id="all-apps-heading"
             className="m-0 text-[28px] font-bold leading-[1.08] tracking-[-.05em]"
@@ -473,7 +473,7 @@ export function AllAppsView({
           type="button"
           data-testid="all-apps-back"
           onClick={onBack}
-          className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[14px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
         >
           {t('homeApps.allApps.back')}
         </button>
@@ -481,7 +481,7 @@ export function AllAppsView({
 
       <div className="mb-[24px] flex items-end justify-between gap-[18px]">
         <label className="grid w-[min(480px,100%)] gap-[7px]">
-          <span className="text-[12px] leading-[17px] text-muted-foreground">{t('homeApps.allApps.searchLabel')}</span>
+          <span className="text-[14px] leading-[17px] text-muted-foreground">{t('homeApps.allApps.searchLabel')}</span>
           <input
             type="search"
             value={query}
@@ -491,7 +491,7 @@ export function AllAppsView({
             data-testid="all-apps-search"
           />
         </label>
-        <span className="shrink-0 text-[12px] leading-[17px] text-muted-foreground" data-testid="all-apps-count">
+        <span className="shrink-0 text-[14px] leading-[17px] text-muted-foreground" data-testid="all-apps-count">
           {/* visible = the MOUNTED (paginated) rows, not the filtered total —
               the label must never claim rows that are not rendered yet. */}
           {t('homeApps.allApps.countVisible', { visible: displayedCount, total: apps.length })}
@@ -520,7 +520,7 @@ export function AllAppsView({
         if (restricted) {
           return (
             <div
-              className="mb-4 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2 text-[12px] text-destructive-text"
+              className="mb-4 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2 text-[14px] text-destructive-text"
               data-testid="all-apps-restricted-banner"
             >
               {catalogStateMessage(t, errorCode ?? 'FORBIDDEN', 'error', spaceKind)}
@@ -530,7 +530,7 @@ export function AllAppsView({
         if (cachedFailure) {
           return (
             <div
-              className="mb-4 rounded-lg border border-info/20 bg-info/8 px-3 py-2 text-[12px] text-info-text"
+              className="mb-4 rounded-lg border border-info/20 bg-info/8 px-3 py-2 text-[14px] text-info-text"
               data-testid="all-apps-stale-catalog-banner"
             >
               {t('homeApps.organization.refreshWarning')}
@@ -539,7 +539,7 @@ export function AllAppsView({
         }
         if (warningCode || offline) {
           return (
-            <div className="mb-4 rounded-lg border border-info/20 bg-info/8 px-3 py-2 text-[12px] text-info-text">
+            <div className="mb-4 rounded-lg border border-info/20 bg-info/8 px-3 py-2 text-[14px] text-info-text">
               {offline
                 ? t('homeApps.organization.offlineWarning')
                 : catalogStateMessage(t, warningCode, 'warning', spaceKind)}

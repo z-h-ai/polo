@@ -41,7 +41,7 @@ const {
 /** Tiny inline badge used for event name and action type in automation rows */
 function MicroBadge({ children, colorClass }: { children: React.ReactNode; colorClass: string }) {
   return (
-    <span className={cn('shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded', colorClass)}>
+    <span className={cn('shrink-0 px-1.5 py-0.5 text-[14px] font-medium rounded', colorClass)}>
       {children}
     </span>
   )
@@ -138,7 +138,7 @@ function AutomationItem({
         automation.lastExecutedAt ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="shrink-0 text-[11px] text-foreground/40 whitespace-nowrap cursor-default">
+              <span className="shrink-0 text-[14px] text-foreground/40 whitespace-nowrap cursor-default">
                 {formatShortRelativeTime(automation.lastExecutedAt)}
               </span>
             </TooltipTrigger>

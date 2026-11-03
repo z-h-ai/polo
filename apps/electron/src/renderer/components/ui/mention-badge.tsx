@@ -48,7 +48,7 @@ export function MentionBadge({
     <span
       className={cn(
         'inline-flex items-center gap-1.5 h-6 pl-1 pr-1.5 rounded-[6px]',
-        'bg-foreground/5 text-[12px] text-foreground',
+        'bg-foreground/5 text-[14px] text-foreground',
         'transition-colors hover:bg-foreground/8',
         className
       )}

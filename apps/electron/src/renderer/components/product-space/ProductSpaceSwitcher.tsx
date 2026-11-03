@@ -36,7 +36,7 @@ export function ProductSpaceSwitcher() {
       >
         {/* Review #6: readable section label — muted token (AA-compliant),
             not the decorative fg-40. */}
-        <div className="px-[9px] pb-[5px] pt-[8px] text-[11px] font-medium text-muted-foreground">
+        <div className="px-[9px] pb-[5px] pt-[8px] text-[14px] font-medium text-muted-foreground">
           {t('productSpace.switcher.menuLabel')}
         </div>
         {space.productSpaces.map(item => {
@@ -56,7 +56,7 @@ export function ProductSpaceSwitcher() {
             >
               <span
                 className={cn(
-                  'flex size-[26px] shrink-0 items-center justify-center rounded-[6px] text-[11px] font-semibold text-accent',
+                  'flex size-[26px] shrink-0 items-center justify-center rounded-[6px] text-[14px] font-semibold text-accent',
                   'bg-[var(--accent-soft)]',
                 )}
               >
@@ -70,12 +70,12 @@ export function ProductSpaceSwitcher() {
               <span className="min-w-0 flex-1 truncate">
                 {item.name}
                 {restricted ? (
-                  <span className="ml-1 text-[11px] text-muted-foreground">
+                  <span className="ml-1 text-[14px] text-muted-foreground">
                     {t('productSpace.restricted')}
                   </span>
                 ) : null}
               </span>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-[14px] text-muted-foreground">
                 {t(spaceRoleKey(item.kind, item.kind === 'enterprise' ? item.role : 'personal'))}
               </span>
               {selected ? <Check className="size-3.5 text-success" /> : null}
@@ -95,9 +95,9 @@ export function CurrentProductSpaceLabel() {
   return (
     <div data-testid="product-space-current-label" className="flex h-[36px] max-w-[190px] items-center gap-[8px] px-[10px] [@media(max-width:760px)]:max-w-[110px]">
       <span className="size-2 shrink-0 rounded-full bg-accent" />
-      <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">{active.name}</span>
+      <span className="min-w-0 truncate text-[14px] font-semibold text-foreground">{active.name}</span>
       {active.kind === 'enterprise' && active.accessMode === 'read_only' ? (
-        <span className="shrink-0 rounded bg-foreground-10 px-1 text-[10px] text-muted-foreground">{t('productSpace.restricted')}</span>
+        <span className="shrink-0 rounded bg-foreground-10 px-1 text-[14px] text-muted-foreground">{t('productSpace.restricted')}</span>
       ) : null}
     </div>
   )

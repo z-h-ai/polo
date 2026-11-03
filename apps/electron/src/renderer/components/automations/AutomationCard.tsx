@@ -76,7 +76,7 @@ export function AutomationCard({
         <div className="border-t border-border/30 px-4 py-3 space-y-3">
           {/* Trigger info */}
           <div className="space-y-1">
-            <h5 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{t('automations.sectionWhen')}</h5>
+            <h5 className="text-[14px] font-medium text-muted-foreground uppercase tracking-wider">{t('automations.sectionWhen')}</h5>
             <div className="text-xs text-foreground/70">
               <span className="font-medium">{getEventDisplayName(automation.event)}</span>
               {automation.matcher && (
@@ -94,7 +94,7 @@ export function AutomationCard({
 
           {/* Actions */}
           <div className="space-y-1">
-            <h5 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{t('automations.sectionThen')}</h5>
+            <h5 className="text-[14px] font-medium text-muted-foreground uppercase tracking-wider">{t('automations.sectionThen')}</h5>
             <AutomationActionPreview actions={automation.actions} />
           </div>
 

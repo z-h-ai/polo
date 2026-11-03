@@ -308,7 +308,7 @@ function RightPaneTabs({ tab, onSwitch }: { tab: 'canvas' | 'browser'; onSwitch:
         aria-pressed={tab === 'canvas'}
         onClick={() => onSwitch('canvas')}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[12px] font-medium transition-colors',
+          'inline-flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[14px] font-medium transition-colors',
           tab === 'canvas'
             ? 'bg-background text-foreground shadow-minimal'
             : 'text-muted-foreground hover:text-foreground',
@@ -323,7 +323,7 @@ function RightPaneTabs({ tab, onSwitch }: { tab: 'canvas' | 'browser'; onSwitch:
         aria-pressed={tab === 'browser'}
         onClick={() => onSwitch('browser')}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[12px] font-medium transition-colors',
+          'inline-flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[14px] font-medium transition-colors',
           tab === 'browser'
             ? 'bg-background text-foreground shadow-minimal'
             : 'text-muted-foreground hover:text-foreground',
@@ -437,7 +437,7 @@ function SidebarBrowserSection({
       <div className="px-2 py-1.5 bg-muted/50 border-b flex items-center gap-1.5 shrink-0">
         <Globe className="w-3.5 h-3.5 text-muted-foreground/70 shrink-0" />
         <span
-          className="text-[12px] text-muted-foreground font-medium truncate flex-1 min-w-0"
+          className="text-[14px] text-muted-foreground font-medium truncate flex-1 min-w-0"
           data-testid="sidebar-browser-title"
         >
           {ownershipTitle}
@@ -452,7 +452,7 @@ function SidebarBrowserSection({
               onSwitchAway()
               setSelectedId(value)
             }}
-            className="h-auto w-auto shrink-0 max-w-[110px] rounded-[6px] border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground-80"
+            className="h-auto w-auto shrink-0 max-w-[110px] rounded-[6px] border border-border bg-background px-1.5 py-0.5 text-[14px] text-foreground-80"
             options={visible.map(item => ({
               value: item.id,
               label: `${item.ownerSessionId ? t('browserPane.sidebar.thisSession') : t('browserPane.sidebar.workspaceTitle')} · ${item.id}`,
@@ -595,7 +595,7 @@ function BrowserNavLayer({ instance, targetSessionId, currentSessionId, isPickin
         aria-label={t('browserPane.sidebar.urlPlaceholder')}
         data-testid="sidebar-browser-url-input"
         spellCheck={false}
-        className="min-w-0 flex-1 rounded-[6px] border border-border bg-background px-2 py-1 text-[12px] text-foreground-80 outline-none focus:border-accent/60"
+        className="min-w-0 flex-1 rounded-[6px] border border-border bg-background px-2 py-1 text-[14px] text-foreground-80 outline-none focus:border-accent/60"
       />
       <button
         type="button"
@@ -611,7 +611,7 @@ function BrowserNavLayer({ instance, targetSessionId, currentSessionId, isPickin
         }
         onClick={() => void togglePicking()}
         className={cn(
-          'shrink-0 inline-flex items-center gap-1 rounded-[6px] px-1.5 py-1 text-[11px] font-medium transition-colors',
+          'shrink-0 inline-flex items-center gap-1 rounded-[6px] px-1.5 py-1 text-[14px] font-medium transition-colors',
           isPicking
             ? 'bg-accent text-background hover:bg-accent/90'
             : 'text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -689,13 +689,13 @@ function SidebarBrowserEmptyState({ onCreate }: { onCreate: () => Promise<void> 
       data-testid="sidebar-browser-empty-state"
     >
       <Globe className="w-5 h-5 text-muted-foreground/60" />
-      <div className="text-[13px] font-medium text-foreground-80">{t('browserPane.sidebar.emptyTitle')}</div>
-      <div className="max-w-[240px] text-[12px] text-muted-foreground">{t('browserPane.sidebar.emptyBody')}</div>
+      <div className="text-[14px] font-medium text-foreground-80">{t('browserPane.sidebar.emptyTitle')}</div>
+      <div className="max-w-[240px] text-[14px] text-muted-foreground">{t('browserPane.sidebar.emptyBody')}</div>
       <button
         type="button"
         data-testid="sidebar-browser-create"
         onClick={() => void onCreate()}
-        className="mt-1 inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-background px-2.5 py-1 text-[12px] text-foreground-80 transition-colors hover:border-foreground/20 hover:text-foreground"
+        className="mt-1 inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-background px-2.5 py-1 text-[14px] text-foreground-80 transition-colors hover:border-foreground/20 hover:text-foreground"
       >
         <Globe className="w-3.5 h-3.5" />
         {t('browserPane.sidebar.emptyAction')}

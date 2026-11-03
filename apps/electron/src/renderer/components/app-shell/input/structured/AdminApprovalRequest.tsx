@@ -110,7 +110,7 @@ export function AdminApprovalRequest({
             onCheckedChange={setRememberChoice}
             aria-label={t('chat.adminApproval.rememberMinutesAria', { count: rememberForMinutes })}
           />
-          <Label className="text-[11px] text-muted-foreground cursor-pointer" onClick={() => setRememberChoice(!rememberChoice)}>
+          <Label className="text-[14px] text-muted-foreground cursor-pointer" onClick={() => setRememberChoice(!rememberChoice)}>
             {t('chat.adminApproval.rememberMinutes', { count: rememberForMinutes })}
           </Label>
         </div>

@@ -111,7 +111,7 @@ export function ProductSpaceSwitchDialog() {
 
         {executions.length > 0 ? (
           <div>
-            <div className="mb-[8px] mt-[18px] flex items-center justify-between text-[11px] text-foreground-60">
+            <div className="mb-[8px] mt-[18px] flex items-center justify-between text-[14px] text-foreground-60">
               <span data-testid="product-space-switch-progress-label">
                 {t('productSpace.switch.stoppedCount', { stopped: stoppedCount, total: executions.length })}
               </span>
@@ -144,17 +144,17 @@ export function ProductSpaceSwitchDialog() {
                     data-execution-status={status}
                     className="flex items-center justify-between gap-[10px] border-b border-border p-[11px] last:border-b-0"
                   >
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{execution.name}</span>
-                    <span className="text-[10px] text-foreground-50">
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{execution.name}</span>
+                    <span className="text-[14px] text-foreground-50">
                       {detailKey ? t(detailKey) : t(executionStatusKey(status))}
                     </span>
                     <span
                       className={
                         status === 'failed'
-                          ? 'text-[10px] font-medium text-destructive'
+                          ? 'text-[14px] font-medium text-destructive'
                           : status === 'stopped'
-                            ? 'text-[10px] font-medium text-success'
-                            : 'text-[10px] font-medium text-info'
+                            ? 'text-[14px] font-medium text-success'
+                            : 'text-[14px] font-medium text-info'
                       }
                     >
                       {status === 'failed'
@@ -179,7 +179,7 @@ export function ProductSpaceSwitchDialog() {
           </div>
         ) : null}
 
-        <p className="mt-[11px] text-[11px] leading-[1.45] text-foreground-50" data-testid="product-space-switch-note">
+        <p className="mt-[11px] text-[14px] leading-[1.45] text-foreground-50" data-testid="product-space-switch-note">
           {t('productSpace.switch.currentSpaceNote', { name: currentName })}
         </p>
 

@@ -65,7 +65,7 @@ function SlashCommandDemo() {
               <button
                 key={id}
                 onClick={() => setActiveCommands(prev => prev.filter(c => c !== id))}
-                className="h-6 px-2 text-[11px] font-medium rounded flex items-center gap-1.5 transition-all border"
+                className="h-6 px-2 text-[14px] font-medium rounded flex items-center gap-1.5 transition-all border"
                 style={{
                   backgroundColor: `${color}1A`, // 10% opacity
                   color: color,

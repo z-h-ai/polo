@@ -244,7 +244,7 @@ export function SendResourceToWorkspaceDialog({
                     src={workspaceIconMap.get(workspace.id)}
                     alt={workspace.name}
                     className="h-5 w-5 rounded-full ring-1 ring-border/50 shrink-0"
-                    fallbackClassName="bg-muted text-[10px] rounded-full"
+                    fallbackClassName="bg-muted text-[14px] rounded-full"
                     fallback={workspace.name?.charAt(0) || 'W'}
                   />
                   <span className="flex-1 truncate">{workspace.name}</span>

@@ -323,13 +323,13 @@ export function MyCirclesPage() {
             type="button"
             data-testid="my-circles-back"
             onClick={handleBack}
-            className="inline-flex min-h-[30px] w-fit shrink-0 items-center gap-[5px] rounded-[6px] border-0 bg-transparent px-[8px] text-[11px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
+            className="inline-flex min-h-[30px] w-fit shrink-0 items-center gap-[5px] rounded-[6px] border-0 bg-transparent px-[8px] text-[14px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
           >
             {t('poo70.c3.page.back')}
           </button>
           <div className="min-w-0 flex-1">
             {/* Review #6: readable eyebrow — muted token (AA-compliant). */}
-            <p className="m-0 mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-muted-foreground">
+            <p className="m-0 mb-[7px] text-[14px] font-medium uppercase tracking-[0.75px] text-muted-foreground">
               {t('poo70.c3.page.eyebrow')}
             </p>
             <h1
@@ -338,7 +338,7 @@ export function MyCirclesPage() {
             >
               {t('poo70.c3.page.title')}
             </h1>
-            <p className="m-0 mt-[7px] text-[13px] leading-[1.5] text-foreground-60">
+            <p className="m-0 mt-[7px] text-[14px] leading-[1.5] text-foreground-60">
               {t('poo70.c3.page.subtitle')}
             </p>
           </div>
@@ -379,7 +379,7 @@ export function MyCirclesPage() {
             data-testid="my-circles-empty"
           >
             <h2 className="m-0 text-[18px] font-bold text-foreground">{t('poo70.c3.state.emptyTitle')}</h2>
-            <p className="m-0 max-w-[440px] text-[13px] leading-[1.6] text-muted-foreground">
+            <p className="m-0 max-w-[440px] text-[14px] leading-[1.6] text-muted-foreground">
               {t('poo70.c3.state.emptyHint')}
             </p>
             {/* Deliberately NO share-link input, NO join button, NO marketplace
@@ -397,7 +397,7 @@ export function MyCirclesPage() {
               type="button"
               data-testid="my-circles-retry"
               onClick={handleRetry}
-              className="mt-[10px] inline-flex min-h-[30px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="mt-[10px] inline-flex min-h-[30px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             >
               {t('poo70.c3.action.retry')}
             </button>
@@ -414,7 +414,7 @@ export function MyCirclesPage() {
               type="button"
               data-testid="my-circles-retry"
               onClick={handleRetry}
-              className="mt-[10px] inline-flex min-h-[30px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="mt-[10px] inline-flex min-h-[30px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             >
               {t('poo70.c3.action.retry')}
             </button>
@@ -452,7 +452,7 @@ export function MyCirclesPage() {
               type="button"
               data-testid="my-circles-stale-retry"
               onClick={handleRetry}
-              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             >
               {t('poo70.c3.action.retry')}
             </button>
@@ -465,7 +465,7 @@ export function MyCirclesPage() {
         P-M07-EMPTY). */}
         {rowsAvailable && phase !== 'empty' && (
           <div className="mb-[24px] flex flex-wrap items-end gap-[16px]" data-testid="my-circles-toolbar">
-            <label className="grid min-w-[220px] flex-1 gap-[6px] text-[12px] text-muted-foreground">
+            <label className="grid min-w-[220px] flex-1 gap-[6px] text-[14px] text-muted-foreground">
               <span>{t('poo70.c3.search.label')}</span>
               <input
                 type="search"
@@ -476,7 +476,7 @@ export function MyCirclesPage() {
                 className="min-h-[38px] w-full appearance-none rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
               />
             </label>
-            <label className="grid gap-[6px] text-[12px] text-muted-foreground">
+            <label className="grid gap-[6px] text-[14px] text-muted-foreground">
               <span>{t('poo70.c3.filter.label')}</span>
               <WorkbenchSelect<MyCirclesEntitlementFilter>
                 value={filter}
@@ -494,7 +494,7 @@ export function MyCirclesPage() {
         )}
 
         {rowsAvailable && phase !== 'empty' && resource.state.refreshing && (
-          <span className="mt-[12px] inline-block text-[12px] text-muted-foreground" data-testid="my-circles-refreshing">
+          <span className="mt-[12px] inline-block text-[14px] text-muted-foreground" data-testid="my-circles-refreshing">
             {t('poo70.c3.state.refreshing')}
           </span>
         )}
@@ -505,7 +505,7 @@ export function MyCirclesPage() {
             data-testid="my-circles-no-match"
           >
             <p className="m-0 text-[14px] text-foreground">{t('poo70.c3.state.noMatch')}</p>
-            <p className="m-0 text-[12px] text-muted-foreground">{t('poo70.c3.state.noMatchHint')}</p>
+            <p className="m-0 text-[14px] text-muted-foreground">{t('poo70.c3.state.noMatchHint')}</p>
             <button
               type="button"
               data-testid="my-circles-clear-filters"
@@ -513,7 +513,7 @@ export function MyCirclesPage() {
                 setQuery('')
                 setFilter('all')
               }}
-              className="inline-flex min-h-[30px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="inline-flex min-h-[30px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             >
               {t('poo70.c3.action.clearFilters')}
             </button>

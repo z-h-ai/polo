@@ -102,7 +102,7 @@ function IslandOptions({
         Morph from target (separate source offset): {useMorph ? 'On' : 'Off'}
       </button>
 
-      <div className="rounded-xl border border-border/40 bg-foreground/3 p-2.5 text-[11px] text-foreground/70 space-y-2">
+      <div className="rounded-xl border border-border/40 bg-foreground/3 p-2.5 text-[14px] text-foreground/70 space-y-2">
         <div className="flex items-center justify-between">
           <span>Angle</span>
           <span className="tabular-nums">{Math.round(angleDeg)}°</span>
@@ -161,11 +161,11 @@ function IslandOptions({
         Clear island
       </button>
 
-      <div className="rounded-xl border border-border/40 bg-foreground/3 p-2 text-[11px] text-foreground/65">
+      <div className="rounded-xl border border-border/40 bg-foreground/3 p-2 text-[14px] text-foreground/65">
         Backstack: {navigation.stack.join(' → ')}
       </div>
 
-      <div className="rounded-xl border border-border/40 bg-foreground/3 p-2 text-[11px] text-foreground/65">
+      <div className="rounded-xl border border-border/40 bg-foreground/3 p-2 text-[14px] text-foreground/65">
         Active view size:{' '}
         {activeViewSize
           ? `${activeViewSize.width}px × ${activeViewSize.height}px`
@@ -263,7 +263,7 @@ function ToolbarToConfirmTransitionDemo({ initialView = 'compact' }: ToolbarToCo
                       type="button"
                       onClick={() => navigation.push('confirm-follow-up')}
                       className={cn(
-                        'h-[30px] px-2.5 rounded-[6px] text-[13px] font-medium inline-flex items-center gap-1.5',
+                        'h-[30px] px-2.5 rounded-[6px] text-[14px] font-medium inline-flex items-center gap-1.5',
                         'text-foreground/85 hover:text-foreground hover:bg-foreground/5',
                         'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring'
                       )}
@@ -276,7 +276,7 @@ function ToolbarToConfirmTransitionDemo({ initialView = 'compact' }: ToolbarToCo
                       type="button"
                       onClick={() => navigation.push('confirm-ask-inline')}
                       className={cn(
-                        'h-[30px] px-2.5 rounded-[6px] text-[13px] font-medium inline-flex items-center gap-1.5',
+                        'h-[30px] px-2.5 rounded-[6px] text-[14px] font-medium inline-flex items-center gap-1.5',
                         'text-foreground/85 hover:text-foreground hover:bg-foreground/5',
                         'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring'
                       )}
@@ -315,7 +315,7 @@ function ToolbarToConfirmTransitionDemo({ initialView = 'compact' }: ToolbarToCo
                     </div>
 
                     <div className="rounded-[8px] border border-border/70 bg-foreground/3 px-3 py-2">
-                      <div className="text-[11px] uppercase tracking-wide text-foreground/50 mb-1">Selection preview</div>
+                      <div className="text-[14px] uppercase tracking-wide text-foreground/50 mb-1">Selection preview</div>
                       <div className="text-xs text-foreground/75 line-clamp-2">
                         “...requestAnimationFrame + intersectsNode checks with diff-style add/remove...”
                       </div>

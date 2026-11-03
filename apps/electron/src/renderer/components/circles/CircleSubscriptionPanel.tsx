@@ -394,13 +394,13 @@ export function CircleSubscriptionPanel({
           {t('poo70.c6.title')}
         </h2>
         <span
-          className="m-0 text-[13px] font-medium text-foreground"
+          className="m-0 text-[14px] font-medium text-foreground"
           data-testid="circle-subscription-circle-name"
         >
           {circle.circle.name}
         </span>
         <span
-          className={`inline-flex min-h-[20px] items-center rounded-full px-[8px] text-[11px] font-medium ${
+          className={`inline-flex min-h-[20px] items-center rounded-full px-[8px] text-[14px] font-medium ${
             status === 'active'
               ? 'bg-success/10 text-success-text'
               : 'bg-foreground/6 text-muted-foreground'
@@ -428,7 +428,7 @@ export function CircleSubscriptionPanel({
         <div className="flex flex-wrap items-baseline justify-between gap-[8px]">
           <dt className="m-0 text-muted-foreground">{t('poo70.c6.detail.periodLabel')}</dt>
           <dd
-            className="m-0 text-right text-[13px] font-medium text-foreground"
+            className="m-0 text-right text-[14px] font-medium text-foreground"
             data-testid="circle-subscription-period-value"
           >
             {!isPaid && t('poo70.c6.detail.period.free')}
@@ -462,7 +462,7 @@ export function CircleSubscriptionPanel({
         <div className="mt-[8px] flex flex-wrap items-baseline justify-between gap-[8px] border-t border-border pt-[8px]">
           <dt className="m-0 text-muted-foreground">{t('poo70.c6.detail.validityLabel')}</dt>
           <dd
-            className="m-0 text-right text-[13px] font-medium text-foreground"
+            className="m-0 text-right text-[14px] font-medium text-foreground"
             data-testid="circle-subscription-validity-value"
           >
             {!isPaid && t(status === 'active'
@@ -484,7 +484,7 @@ export function CircleSubscriptionPanel({
       {/* Authoritative price-change fact (价格变化重新确认), shown once. */}
       {isPaid && nextPrice !== '' && nextPriceDate && (
         <p
-          className="m-0 mt-[8px] text-[12px] text-muted-foreground"
+          className="m-0 mt-[8px] text-[14px] text-muted-foreground"
           data-testid="circle-subscription-next-price"
         >
           {t('poo70.c6.detail.nextPrice', { date: nextPriceDate, price: nextPrice })}
@@ -498,7 +498,7 @@ export function CircleSubscriptionPanel({
         <div className="mt-[14px] rounded-[13px] border border-border bg-surface client-material-card px-4 py-3 text-xs">
           <p className="m-0 text-muted-foreground">{t('poo70.c6.preview.projectedTermLabel')}</p>
           <p
-            className="m-0 mt-[4px] text-[13px] font-medium text-foreground"
+            className="m-0 mt-[4px] text-[14px] font-medium text-foreground"
             data-testid="circle-subscription-projected-term"
           >
             {t('poo70.c6.preview.projectedTerm', {
@@ -508,13 +508,13 @@ export function CircleSubscriptionPanel({
           </p>
           {previewPriceChanged && (
             <p
-              className="m-0 mt-[8px] text-[12px] text-info-text"
+              className="m-0 mt-[8px] text-[14px] text-info-text"
               data-testid="circle-subscription-preview-price-changed"
             >
               {t('poo70.c6.preview.priceChanged', { price: previewPrice })}
             </p>
           )}
-          <p className="m-0 mt-[8px] text-[12px] text-muted-foreground">
+          <p className="m-0 mt-[8px] text-[14px] text-muted-foreground">
             {t('poo70.c6.preview.noAutoRenew')}
           </p>
         </div>
@@ -541,7 +541,7 @@ export function CircleSubscriptionPanel({
             <button
               type="button"
               data-testid="circle-subscription-preview-retry"
-              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
               onClick={handleRetryPreview}
             >
               {t('poo70.c3.action.retry')}
@@ -578,7 +578,7 @@ export function CircleSubscriptionPanel({
             <button
               type="button"
               data-testid="circle-subscription-view-order"
-              className="mt-[10px] inline-flex min-h-[28px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="mt-[10px] inline-flex min-h-[28px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
               onClick={handleViewOriginalOrder}
             >
               {t('poo70.c6.action.viewOriginalOrder')}
@@ -609,7 +609,7 @@ export function CircleSubscriptionPanel({
             <button
               type="button"
               data-testid="circle-subscription-view-order-cta"
-              className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5"
+              className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
               onClick={handleViewOriginalOrder}
             >
               {t('poo70.c6.action.viewOriginalOrder')}
@@ -647,7 +647,7 @@ export function CircleSubscriptionPanel({
           <button
             type="button"
             data-testid="circle-subscription-open-retry"
-            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             onClick={handleRetryLaunch}
           >
             {t('poo70.c3.action.retry')}
@@ -677,7 +677,7 @@ export function CircleSubscriptionPanel({
           <button
             type="button"
             data-testid="circle-subscription-order-retry"
-            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             onClick={handleViewOriginalOrder}
           >
             {t('poo70.c3.action.retry')}
@@ -713,7 +713,7 @@ export function CircleSubscriptionPanel({
 
       {/* Section notes (each once): exit-impact rule + the
       subscription≠compute-credits independence fact. */}
-      <div className="mt-[14px] text-[12px] leading-[1.6] text-muted-foreground">
+      <div className="mt-[14px] text-[14px] leading-[1.6] text-muted-foreground">
         <p className="m-0" data-testid="circle-subscription-note-exit">
           {t('poo70.c6.note.exitImpact')}
         </p>

@@ -154,7 +154,7 @@ function formatCell(value: unknown, col: ColumnDef): React.ReactNode {
       return value ? <span className="text-success">{i18n.t('datatable.yes')}</span> : <span className="text-muted-foreground">{i18n.t('datatable.no')}</span>
     case 'badge': {
       const color = resolveBadgeChipClass(String(value), col.badgeColors)
-      return <span className={cn('inline-block px-1.5 py-0.5 rounded text-[11px] font-medium', color)}>{String(value)}</span>
+      return <span className={cn('inline-block px-1.5 py-0.5 rounded text-[14px] font-medium', color)}>{String(value)}</span>
     }
     default:
       return String(value)
@@ -734,9 +734,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     return (
       <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
         </div>
-        <div className="py-8 text-center text-muted-foreground text-[13px]">{t('datatable.loadingData')}</div>
+        <div className="py-8 text-center text-muted-foreground text-[14px]">{t('datatable.loadingData')}</div>
       </div>
     )
   }
@@ -746,9 +746,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     return (
       <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
         </div>
-        <div className="py-6 text-center text-destructive/70 text-[13px]">{fileError}</div>
+        <div className="py-6 text-center text-destructive/70 text-[14px]">{fileError}</div>
       </div>
     )
   }
@@ -788,9 +788,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             onChange={(e) => setRangeFilter(col.key, 'min', e.target.value)}
             placeholder={t('datatable.filterMin')}
             aria-label={`${col.label} ${t('datatable.filterMin')}`}
-            className="w-14 px-1 py-0.5 text-[11px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="w-14 px-1 py-0.5 text-[14px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
-          <span className="text-muted-foreground/50 text-[11px]">–</span>
+          <span className="text-muted-foreground/50 text-[14px]">–</span>
           <input
             type="text"
             inputMode="decimal"
@@ -798,7 +798,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             onChange={(e) => setRangeFilter(col.key, 'max', e.target.value)}
             placeholder={t('datatable.filterMax')}
             aria-label={`${col.label} ${t('datatable.filterMax')}`}
-            className="w-14 px-1 py-0.5 text-[11px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="w-14 px-1 py-0.5 text-[14px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
         </div>
       )
@@ -819,7 +819,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
               aria-pressed={isActive}
               onClick={() => toggleTextFilter(col.key, chip)}
               className={cn(
-                'px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors max-w-full truncate',
+                'px-1.5 py-0.5 rounded-[4px] text-[14px] border transition-colors max-w-full truncate',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 isActive
                   ? 'bg-accent/10 text-accent border-accent/30 hover:bg-accent/15'
@@ -863,7 +863,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
         WebkitMaskImage: maskImage,
       } : undefined}
     >
-      <table className="w-max min-w-full text-[13px]">
+      <table className="w-max min-w-full text-[14px]">
         <thead>
           <tr className="border-b border-foreground/[0.06] bg-foreground/[0.02]">
             {parsed.columns.map((col) => (
@@ -872,7 +872,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
                 // Only filter controls need top alignment under the label.
                 className={cn(
                   tableHeaderClass,
-                  'py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap',
+                  'py-2 px-3 text-[14px] cursor-pointer select-none whitespace-nowrap',
                   enableColumnFilters && 'align-top',
                   colAlign(col.type, col.align),
                 )}
@@ -896,7 +896,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
                 onClick={() => toggleCollapsed(group.value)}
               >
                 <td colSpan={columnCount} className="py-2 px-3 bg-foreground/[0.03] border-b border-foreground/[0.06]">
-                  <span className="inline-flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
+                  <span className="inline-flex items-center gap-2 text-[14px] font-medium text-muted-foreground">
                     <ChevronRight className={cn('w-3 h-3 transition-transform', !collapsedGroups.has(group.value) && 'rotate-90')} />
                     {groupColumnLabel}: {group.value}
                     <span className="text-muted-foreground/50">({group.rows.length})</span>
@@ -907,7 +907,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             </React.Fragment>
           )) : processedRows.length ? renderRows(processedRows) : (
             <tr>
-              <td colSpan={columnCount} className="py-6 text-center text-muted-foreground text-[13px]">
+              <td colSpan={columnCount} className="py-6 text-center text-muted-foreground text-[14px]">
                 {t('datatable.noRows')}
               </td>
             </tr>
@@ -1047,13 +1047,13 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
   // hides why its row set is a subset).
   const renderFilterStatusBar = () => activeFilterCount > 0 ? (
     <div className="px-3 py-1.5 border-b bg-accent/[0.04] flex items-center justify-between gap-2">
-      <span className="text-[12px] text-muted-foreground" aria-live="polite">
+      <span className="text-[14px] text-muted-foreground" aria-live="polite">
         {t('datatable.filterStatus', { shown: filteredRows.length, total: parsed.rows.length })}
       </span>
       <button
         type="button"
         onClick={clearFilters}
-        className="text-[12px] text-accent hover:underline cursor-pointer rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="text-[14px] text-accent hover:underline cursor-pointer rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         {t('datatable.clearFilters')}
       </button>
@@ -1085,7 +1085,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
         {/* Header */}
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">
+          <span className="text-[14px] text-muted-foreground font-medium">
             {parsed.title || t('datatable.defaultTitle')}
           </span>
         </div>

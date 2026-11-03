@@ -20,7 +20,7 @@ export function WorkbenchSelect<T extends string>({ className, contentClassName,
   const workbenchStyle = useClientWorkbenchStyle()
   return <OptionSelect {...props}
     className={cn('h-auto min-h-[38px] w-auto min-w-0 max-w-full rounded-[8px] border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground', className)}
-    contentClassName={cn('rounded-[14px] border border-border bg-surface p-[2px] shadow-modal-small text-foreground client-material-card [&_[role=option]]:min-h-[36px] [&_[role=option]]:rounded-[6px] [&_[role=option]]:text-[13px]', contentClassName)}
+    contentClassName={cn('rounded-[14px] border border-border bg-surface p-[2px] shadow-modal-small text-foreground client-material-card [&_[role=option]]:min-h-[36px] [&_[role=option]]:rounded-[6px] [&_[role=option]]:text-[14px]', contentClassName)}
     contentStyle={{ ...workbenchStyle, ...contentStyle }}
   />
 }

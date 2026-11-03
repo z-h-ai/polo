@@ -332,7 +332,7 @@ export function TopBar() {
           aria-label={t("topbar.home")}
           aria-current={isHome ? "page" : undefined}
           className={cn(
-            "titlebar-no-drag inline-flex h-[36px] flex-none items-center justify-center gap-[8px] rounded-[9px] px-[12px] text-[12px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:w-9 max-md:px-0",
+            "titlebar-no-drag inline-flex h-[36px] flex-none items-center justify-center gap-[8px] rounded-[9px] px-[12px] text-[14px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:w-9 max-md:px-0",
             isHome
               ? "bg-background text-foreground shadow-minimal client-material-card"
               : "text-muted-foreground hover:bg-foreground/5 client-material-fg-hover hover:text-foreground client-material-fg-secondary",
@@ -348,7 +348,7 @@ export function TopBar() {
             <div
               key={tab.id}
               className={cn(
-                "titlebar-no-drag inline-flex h-[36px] min-w-[98px] max-w-[190px] flex-none items-center gap-[6px] rounded-[9px] px-[10px] text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring max-md:min-w-[96px] max-md:max-w-[140px]",
+                "titlebar-no-drag inline-flex h-[36px] min-w-[98px] max-w-[190px] flex-none items-center gap-[6px] rounded-[9px] px-[10px] text-[14px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring max-md:min-w-[96px] max-md:max-w-[140px]",
                 active
                   ? "bg-background font-medium text-foreground shadow-minimal client-material-card"
                   : "text-muted-foreground hover:bg-foreground/5 client-material-fg-hover hover:text-foreground client-material-fg-secondary",
@@ -445,7 +445,7 @@ export function TopBar() {
           </DropdownMenuTrigger>
           <WorkbenchMenuContent className="w-[min(294px,calc(100vw-24px))]" align="end" minWidth="min-w-0">
             {visibleUnreadSessions.length === 0 ? (
-              <div className="px-2 py-1.5 text-[12px] text-muted-foreground">
+              <div className="px-2 py-1.5 text-[14px] text-muted-foreground">
                 {t("topbar.notifications.empty")}
               </div>
             ) : (
@@ -470,7 +470,7 @@ export function TopBar() {
               type="button"
               data-testid="topbar-account"
               aria-label={t("topbar.account.label")}
-              className="titlebar-no-drag ml-[3px] grid size-[28px] place-items-center rounded-full bg-foreground text-[11px] font-semibold text-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="titlebar-no-drag ml-[3px] grid size-[28px] place-items-center rounded-full bg-foreground text-[14px] font-semibold text-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {userInitial || <UserRound className="size-3.5" strokeWidth={1.7} />}
             </button>

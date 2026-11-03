@@ -118,14 +118,14 @@ export function ConfirmDialog({
           {spec.title}
         </DialogTitle>
         {spec.description && (
-          <DialogDescription className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
+          <DialogDescription className="mt-1.5 text-[14px] leading-5 text-muted-foreground">
             {spec.description}
           </DialogDescription>
         )}
         {errorText && (
           <div
             data-testid="confirm-dialog-error"
-            className="mt-2 flex items-start gap-1.5 rounded-[6px] bg-destructive/10 px-2 py-1.5 text-[12px] leading-4 text-destructive"
+            className="mt-2 flex items-start gap-1.5 rounded-[6px] bg-destructive/10 px-2 py-1.5 text-[14px] leading-4 text-destructive"
           >
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span className="min-w-0 break-words">{errorText}</span>

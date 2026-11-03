@@ -122,7 +122,7 @@ function AttachmentBubble({ attachment, onRemove, disabled }: AttachmentBubblePr
             <span className="text-xs font-medium line-clamp-2 break-all" title={attachment.name}>
               {attachment.name}
             </span>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[14px] text-muted-foreground">
               {getFileTypeLabel(attachment.type, attachment.mimeType, attachment.name)}
             </span>
           </div>

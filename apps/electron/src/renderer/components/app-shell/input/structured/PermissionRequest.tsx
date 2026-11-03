@@ -112,7 +112,7 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
 
         {/* Tip text */}
         {canRememberForSession && (
-          <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
+          <span className="min-w-0 flex-1 basis-full text-[14px] text-muted-foreground sm:basis-auto sm:text-right">
             {t('chat.permission.rememberForSession', { action: t('chat.permission.alwaysAllow') })}
           </span>
         )}

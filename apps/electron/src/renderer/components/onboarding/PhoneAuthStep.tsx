@@ -121,7 +121,7 @@ export function PhoneAuthStep({
   // Prototype `.button.primary.auth-primary`: accent fill, on-accent 12px
   // label, hover darkens to accent 86% + black.
   const primaryButtonClassName
-    = "inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50 client-material-control"
+    = "inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50 client-material-control"
 
   if (form.mode === "entry") {
     return (
@@ -130,15 +130,15 @@ export function PhoneAuthStep({
         <h2 className="m-0 text-[22px] font-bold text-foreground">
           {t("onboarding.adminLogin.phoneAuth")}
         </h2>
-        <p className="mt-[8px] text-[12px] leading-[1.55] text-foreground-50">
+        <p className="mt-[8px] text-[14px] leading-[1.55] text-foreground-50">
           {t("onboarding.adminLogin.phoneAuthSubtitle")}
         </p>
         {errorNode}
         <form data-testid="phone-auth-entry" onSubmit={handleSend} className="mt-[20px] grid gap-[15px]">
-          <div className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
+          <div className="grid gap-[7px] text-[14px] font-semibold text-foreground-60">
             <label htmlFor="phone-auth-phone">{t("onboarding.adminLogin.phone")}</label>
             <span className="flex h-[44px] overflow-hidden rounded-[10px] border border-border bg-foreground-3 focus-within:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]">
-              <span className="flex w-[54px] shrink-0 items-center justify-center border-r border-border text-[12px] font-medium text-foreground-50">+86</span>
+              <span className="flex w-[54px] shrink-0 items-center justify-center border-r border-border text-[14px] font-medium text-foreground-50">+86</span>
               <Input
                 id="phone-auth-phone"
                 aria-label={t("onboarding.adminLogin.phone")}
@@ -151,7 +151,7 @@ export function PhoneAuthStep({
                   onClearError()
                 }}
                 disabled={isBusy}
-                className="h-full min-w-0 flex-1 px-[12px] text-[11px] md:text-[11px] rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                className="h-full min-w-0 flex-1 px-[12px] text-[14px] md:text-[14px] rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
               />
             </span>
           </div>
@@ -181,7 +181,7 @@ export function PhoneAuthStep({
               type="button"
               data-testid="phone-auth-cancel"
               onClick={onCancel}
-              className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+              className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[14px] font-medium hover:bg-foreground-5"
             >
               {t('common.cancel')}
             </button>
@@ -211,7 +211,7 @@ export function PhoneAuthStep({
       <h2 className="m-0 text-[22px] font-bold text-foreground">
         {t("onboarding.adminLogin.code")}
       </h2>
-      <p className="mt-[8px] text-[12px] leading-[1.55] text-foreground-50">
+      <p className="mt-[8px] text-[14px] leading-[1.55] text-foreground-50">
         {t("onboarding.adminLogin.codeSubtitle", { phone: maskedPhone })}
       </p>
       {errorNode}
@@ -228,7 +228,7 @@ export function PhoneAuthStep({
           </button>
         </div>
 
-        <label className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
+        <label className="grid gap-[7px] text-[14px] font-semibold text-foreground-60">
           {t("onboarding.adminLogin.code")}
           <Input
             id="phone-auth-code"
@@ -242,7 +242,7 @@ export function PhoneAuthStep({
             }}
             disabled={isBusy}
             autoFocus
-            className="h-[44px] min-w-0 rounded-[10px] border-border bg-foreground-3 px-[12px] text-[11px] md:text-[11px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0 tracking-[0.25em]"
+            className="h-[44px] min-w-0 rounded-[10px] border-border bg-foreground-3 px-[12px] text-[14px] md:text-[14px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0 tracking-[0.25em]"
           />
         </label>
 
@@ -275,7 +275,7 @@ export function PhoneAuthStep({
             type="button"
             data-testid="phone-auth-cancel"
             onClick={onCancel}
-            className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+            className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[14px] font-medium hover:bg-foreground-5"
           >
             {t('common.cancel')}
           </button>
@@ -288,7 +288,7 @@ export function PhoneAuthStep({
           type="button"
           disabled={isBusy || !canSend}
           onClick={sendCode}
-          className="inline-flex min-h-[28px] w-full items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground transition-colors hover:bg-foreground-5 disabled:pointer-events-none disabled:opacity-50 client-material-control"
+          className="inline-flex min-h-[28px] w-full items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground transition-colors hover:bg-foreground-5 disabled:pointer-events-none disabled:opacity-50 client-material-control"
         >
           {resendSeconds > 0
             ? t("onboarding.adminLogin.resendIn", { count: resendSeconds })
@@ -296,7 +296,7 @@ export function PhoneAuthStep({
         </button>
       </form>
 
-      <p className="mt-[8px] text-[10px] leading-[1.4] text-foreground-50">
+      <p className="mt-[8px] text-[14px] leading-[1.4] text-foreground-50">
         {t("onboarding.adminLogin.codeExpires")}
       </p>
 

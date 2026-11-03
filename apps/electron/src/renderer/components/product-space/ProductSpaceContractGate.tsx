@@ -57,7 +57,7 @@ export function ProductSpaceContractGate() {
               ? t('productSpace.contract.downloadingTitle')
               : t('productSpace.contract.failedTitle')}
         </h1>
-        <p className="mt-[9px] text-[13px] leading-[1.58] text-foreground-60">
+        <p className="mt-[9px] text-[14px] leading-[1.58] text-foreground-60">
           {stage === 'required'
             ? t('productSpace.contract.requiredDesc')
             : stage === 'downloading'

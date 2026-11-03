@@ -18,7 +18,7 @@ export function ProductSpaceErrorScreen({ onLogout, onRetry }: {
           <AlertTriangle className="size-[25px]" />
         </span>
         <h1 className="m-0 text-[24px] font-[720] tracking-[-0.035em] text-foreground">{t('productSpace.error.loadTitle')}</h1>
-        <p className="mt-[9px] text-[13px] leading-[1.58] text-foreground-60">{t('productSpace.error.loadDesc')}</p>
+        <p className="mt-[9px] text-[14px] leading-[1.58] text-foreground-60">{t('productSpace.error.loadDesc')}</p>
         <div className="mt-[22px] flex flex-wrap items-center justify-center gap-[8px]">
           <Button className={clientWorkbenchButtonClassName} variant="ghost" data-testid="product-space-error-logout" onClick={onLogout}>{t('productSpace.error.logout')}</Button>
           <Button className={clientWorkbenchPrimaryClassName} data-testid="product-space-error-retry" onClick={onRetry}>{t('productSpace.error.retry')}</Button>

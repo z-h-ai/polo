@@ -168,7 +168,7 @@ function FilePathBadge({ filePath }: FilePathBadgeProps) {
             <button
               className={cn(
                 'flex items-center gap-1.5 h-[26px] px-2.5 rounded-[6px]',
-                'font-sans text-[13px] font-medium text-foreground/70',
+                'font-sans text-[14px] font-medium text-foreground/70',
                 'bg-background shadow-minimal',
                 'min-w-0 cursor-pointer group'
               )}

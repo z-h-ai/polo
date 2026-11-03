@@ -141,7 +141,7 @@ function renderBadgeHTML(
     // Check for emoji marker - render as text, not image
     if (cachedIconUrl.startsWith(EMOJI_ICON_PREFIX)) {
       const emoji = cachedIconUrl.slice(EMOJI_ICON_PREFIX.length)
-      iconHtml = `<span class="h-[12px] w-[12px] flex items-center justify-center text-[10px] leading-none shrink-0">${emoji}</span>`
+      iconHtml = `<span class="h-[12px] w-[12px] flex items-center justify-center text-[14px] leading-none shrink-0">${emoji}</span>`
     } else {
       // Use cached icon as img (data URL or external URL)
       iconHtml = `<img src="${cachedIconUrl}" class="h-[12px] w-[12px] rounded-[2px] shrink-0" alt="" />`
@@ -165,7 +165,7 @@ function renderBadgeHTML(
 
   // Line height is increased when badges are present (see hasMentions in component)
   // Use transform for upward shift - doesn't affect layout flow (works even at start of line)
-  return `<span contenteditable="false" data-mention="true"${titleAttr} class="mention-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-1 rounded-[5px] bg-background shadow-minimal text-[12px] text-foreground select-none [&_*]:selection:bg-transparent selection:bg-transparent" style="vertical-align: middle; transform: translateY(-1px)">${iconHtml}<span class="truncate max-w-[200px]">${escapedLabel}</span></span>`
+  return `<span contenteditable="false" data-mention="true"${titleAttr} class="mention-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-1 rounded-[5px] bg-background shadow-minimal text-[14px] text-foreground select-none [&_*]:selection:bg-transparent selection:bg-transparent" style="vertical-align: middle; transform: translateY(-1px)">${iconHtml}<span class="truncate max-w-[200px]">${escapedLabel}</span></span>`
 }
 
 // ============================================================================

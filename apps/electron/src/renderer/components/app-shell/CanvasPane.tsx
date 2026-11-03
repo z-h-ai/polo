@@ -195,9 +195,9 @@ function CanvasGuestCard({ sessionId, app, onPopOut, headerActions }: {
     >
       <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-1.5 shrink-0">
         <AppWindow className="w-3.5 h-3.5 text-muted-foreground/70 shrink-0" />
-        <span className="text-[12px] text-muted-foreground font-medium truncate flex-1 min-w-0">{app.title}</span>
+        <span className="text-[14px] text-muted-foreground font-medium truncate flex-1 min-w-0">{app.title}</span>
         {typeof app.version === 'number' && (
-          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/80 tabular-nums">
+          <span className="shrink-0 text-[14px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/80 tabular-nums">
             {t('genui.app.version', { version: app.version })}
           </span>
         )}
@@ -223,7 +223,7 @@ function CanvasGuestCard({ sessionId, app, onPopOut, headerActions }: {
         </button>
       </div>
       {loadFailed ? (
-        <div role="alert" className="flex-1 flex flex-col gap-2 items-center justify-center text-[12px] text-muted-foreground/70">
+        <div role="alert" className="flex-1 flex flex-col gap-2 items-center justify-center text-[14px] text-muted-foreground/70">
           {t('genui.app.loadError')}
           <button type="button" className="rounded border px-2 py-1" onClick={() => { setLoadFailed(false); setAttempt(value => value + 1) }}>{t('common.retry')}</button>
         </div>

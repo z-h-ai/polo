@@ -51,10 +51,10 @@ export interface InlineMentionMenuProps {
 
 const MENU_CONTAINER_STYLE = 'overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small'
 const MENU_LIST_STYLE = 'max-h-[240px] overflow-y-auto py-1'
-const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-3 rounded-[6px] mx-1 px-2 py-1.5 text-[13px]'
+const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-3 rounded-[6px] mx-1 px-2 py-1.5 text-[14px]'
 const MENU_ITEM_SELECTED = 'bg-foreground/5'
 // Type badge shown to the right of each item label (e.g. "Skill", "Source")
-const MENU_TYPE_BADGE = 'rounded-[4px] shadow-minimal bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shrink-0'
+const MENU_TYPE_BADGE = 'rounded-[4px] shadow-minimal bg-background px-1.5 py-0.5 text-[14px] text-muted-foreground shrink-0'
 const MENU_REVOKED_BADGE = 'bg-destructive/10 text-destructive'
 
 // ============================================================================
@@ -301,13 +301,13 @@ export function InlineMentionMenu({
       }}
     >
       {/* Menu header — sticky above scroll area */}
-      <div className="px-3 py-1.5 text-[12px] font-medium text-muted-foreground border-b border-foreground/5">
+      <div className="px-3 py-1.5 text-[14px] font-medium text-muted-foreground border-b border-foreground/5">
         {t('chat.mentionFilesSkillsSources')}
       </div>
 
       <div ref={listRef} className={MENU_LIST_STYLE}>
         {flatItems.length === 0 && filter && (
-          <div className="px-3 py-2 text-[12px] text-muted-foreground/60">{t('chat.noResults')}</div>
+          <div className="px-3 py-2 text-[14px] text-muted-foreground/60">{t('chat.noResults')}</div>
         )}
         {flatItems.map((item, itemIndex) => {
           const isSelected = itemIndex === selectedIndex
@@ -350,7 +350,7 @@ export function InlineMentionMenu({
                   {/* File/folder: filename then parent path fading out on overflow */}
                   <span className="shrink-0">{item.label}</span>
                   {item.file?.relativePath && getParentDir(item.file.relativePath) && (
-                    <FadingText className="text-[11px] text-muted-foreground min-w-0 opacity-50" fadeWidth={20}>
+                    <FadingText className="text-[14px] text-muted-foreground min-w-0 opacity-50" fadeWidth={20}>
                       {getParentDir(item.file.relativePath)}
                     </FadingText>
                   )}

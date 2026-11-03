@@ -217,13 +217,13 @@ function computeEditWriteDiffStats(
 /** Shared size configuration for activity UI - exported for reuse in inline execution */
 export const SIZE_CONFIG = {
   /** Base font size class for all text */
-  fontSize: 'text-[13px]',
+  fontSize: 'text-[14px]',
   /** Icon size class (width and height) */
   iconSize: 'w-3 h-3',
   /** Spinner text size class */
-  spinnerSize: 'text-[10px]',
+  spinnerSize: 'text-[14px]',
   /** Small spinner for header */
-  spinnerSizeSmall: 'text-[8px]',
+  spinnerSizeSmall: 'text-[14px]',
   /** Activity row height in pixels (approx for calculation) */
   activityRowHeight: 24,
   /** Max visible activities before scrolling (show ~15 items) */
@@ -833,7 +833,7 @@ export function ActivityStatusIcon({
       const isLikelyEmoji = customIcon.length <= 8 && !/^(https?:\/\/|data:)/.test(customIcon)
       if (isLikelyEmoji) {
         return (
-          <span className={cn(SIZE_CONFIG.iconSize, "shrink-0 flex items-center justify-center text-[10px] leading-none")}>
+          <span className={cn(SIZE_CONFIG.iconSize, "shrink-0 flex items-center justify-center text-[14px] leading-none")}>
             {customIcon}
           </span>
         )
@@ -1074,7 +1074,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
+                    className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[14px] text-destructive font-medium cursor-default shrink-0"
                     style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
                   >
                     {i18n.t('common.error')}
@@ -1087,7 +1087,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
             )}
             {/* Model badge for LLM Query */}
             {activity.toolName === 'mcp__session__call_llm' && activity.toolInput?.model && (
-              <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[10px] text-foreground/60 shrink-0">
+              <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[14px] text-foreground/60 shrink-0">
                 {String(activity.toolInput.model)}
               </span>
             )}
@@ -1121,7 +1121,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         )}
         {/* Diff stats and filename badges - after tool name */}
         {!isMcpOrApiTool && !isBackgrounded && diffStats && (
-          <span className="flex items-center gap-1.5 text-[10px] shrink-0">
+          <span className="flex items-center gap-1.5 text-[14px] shrink-0">
             {diffStats.deletions > 0 && (
               <span
                 className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_5%,var(--background))] shadow-tinted rounded-[4px] text-destructive"
@@ -1139,7 +1139,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
               // Claude Code format: file_path
               if (typeof activity.toolInput?.file_path === 'string') {
                 return (
-                  <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+                  <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[14px] text-foreground/70">
                     {normalizePath(activity.toolInput.file_path).split('/').pop()}
                   </span>
                 )
@@ -1149,7 +1149,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
                 const firstChange = activity.toolInput.changes[0] as { path?: string } | undefined
                 if (firstChange?.path) {
                   return (
-                    <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+                    <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[14px] text-foreground/70">
                       {normalizePath(firstChange.path).split('/').pop()}
                     </span>
                   )
@@ -1161,8 +1161,8 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         )}
         {/* Filename badge for Read tool (no diff stats) */}
         {!isMcpOrApiTool && !isBackgrounded && !diffStats && activity.toolName === 'Read' && typeof activity.toolInput?.file_path === 'string' && (
-          <span className="flex items-center gap-1.5 text-[10px] shrink-0">
-            <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+          <span className="flex items-center gap-1.5 text-[14px] shrink-0">
+            <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[14px] text-foreground/70">
               {normalizePath(activity.toolInput.file_path).split('/').pop()}
             </span>
           </span>
@@ -1172,7 +1172,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
           <Tooltip>
             <TooltipTrigger asChild>
               <span
-                className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
+                className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[14px] text-destructive font-medium cursor-default shrink-0"
                 style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
               >
                 {t('common.error')}
@@ -1316,7 +1316,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
         <ActivityStatusIcon status={group.parent.status} toolName={group.parent.toolName} />
 
         {/* Subagent type badge */}
-        <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium">
+        <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[14px] font-medium">
           {subagentType || t('turnCard.taskFallback')}
         </span>
 
@@ -1503,7 +1503,7 @@ function BranchDropdown({ onBranch }: BranchDropdownProps) {
       <StyledDropdownMenuContent align="end" minWidth="min-w-64" sideOffset={6}>
         <StyledDropdownMenuItem onClick={handleBranchClick} className="items-start py-2">
           <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] leading-tight">{t('chat.branchFromThisMessage')}</span>
+            <span className="text-[14px] leading-tight">{t('chat.branchFromThisMessage')}</span>
             <span className="max-w-[220px] whitespace-normal text-xs leading-tight text-muted-foreground">
               {t('chat.branchFromThisMessageDescription')}
             </span>
@@ -3045,7 +3045,7 @@ export const TurnCard = React.memo(function TurnCard({
             </motion.div>
 
             {/* Step count badge */}
-            <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
+            <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[14px] font-medium tabular-nums">
               {activities.length}
             </span>
 
@@ -3204,7 +3204,7 @@ export const TurnCard = React.memo(function TurnCard({
               className="rounded-[8px] border bg-muted/10 px-3 py-2.5 flex items-center gap-2"
             >
               <Spinner className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-              <span className="text-[13px] text-muted-foreground truncate">
+              <span className="text-[14px] text-muted-foreground truncate">
                 {skeleton.title
                   ? i18n.t('genui.skeleton.buildingNamed', {
                       name: skeletonTypeDisplayName(skeleton.type),

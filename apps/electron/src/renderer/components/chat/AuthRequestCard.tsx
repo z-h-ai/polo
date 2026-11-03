@@ -108,7 +108,7 @@ function AuthCardActions({ primary, secondary, hint }: AuthCardActionsProps) {
         data-tutorial={primary.dataTutorial}
       >
         {primary.loading ? (
-          <Spinner className="text-[10px]" />
+          <Spinner className="text-[14px]" />
         ) : PrimaryIcon ? (
           <PrimaryIcon className="h-3.5 w-3.5" />
         ) : null}
@@ -129,7 +129,7 @@ function AuthCardActions({ primary, secondary, hint }: AuthCardActionsProps) {
       {hint && (
         <>
           <div className="flex-1" />
-          <span className="text-[10px] text-muted-foreground">{hint}</span>
+          <span className="text-[14px] text-muted-foreground">{hint}</span>
         </>
       )}
     </div>
@@ -414,7 +414,7 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
     if (isOAuth && isSubmitting) {
       return (
         <div className="flex gap-3">
-          <Spinner className="text-[10px] shrink-0 mt-1" />
+          <Spinner className="text-[14px] shrink-0 mt-1" />
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium leading-5">
               {t('auth.authenticating', { source: authSourceName })}
@@ -584,7 +584,7 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
 
         {/* Hint */}
         {authHint && (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[14px] text-muted-foreground">
             {authHint}
           </p>
         )}

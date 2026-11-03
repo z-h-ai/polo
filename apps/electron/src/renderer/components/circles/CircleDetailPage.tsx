@@ -217,7 +217,7 @@ function CircleUnavailableState({
           <button
             type="button"
             data-testid="circle-detail-unavailable-retry"
-            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             onClick={onRetry}
           >
             {t('homeApps.actions.tryAgain')}
@@ -239,7 +239,7 @@ function CircleUnavailableState({
       <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
         {t('poo70.c4.content.exitedTitle')}
       </h2>
-      <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+      <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
         {t('poo70.c4.content.exitedHint')}
       </p>
     </div>
@@ -464,13 +464,13 @@ export function CircleDetailPage({
             type="button"
             data-testid="circle-detail-back"
             onClick={handleBack}
-            className="inline-flex min-h-[30px] w-fit shrink-0 items-center gap-[5px] rounded-[6px] border-0 bg-transparent px-[8px] text-[11px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
+            className="inline-flex min-h-[30px] w-fit shrink-0 items-center gap-[5px] rounded-[6px] border-0 bg-transparent px-[8px] text-[14px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
           >
             {t('poo70.c9.page.back')}
           </button>
           <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-[16px]">
             <div>
-              <p className="m-0 mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-foreground-50">
+              <p className="m-0 mb-[7px] text-[14px] font-medium uppercase tracking-[0.75px] text-foreground-50">
                 {t('poo70.c9.page.eyebrow')}
               </p>
               {circleReady && (
@@ -482,7 +482,7 @@ export function CircleDetailPage({
                     {detail.circle.circle.name}
                   </h1>
                   <p
-                    className="m-0 mt-[7px] text-[13px] leading-[1.5] text-foreground-60"
+                    className="m-0 mt-[7px] text-[14px] leading-[1.5] text-foreground-60"
                     data-testid="circle-detail-meta"
                   >
                     {countsLine}
@@ -504,7 +504,7 @@ export function CircleDetailPage({
                   data-status={heading.restricted ? 'restore' : 'valid'}
                 >
                   <span
-                    className={`inline-flex min-h-[24px] items-center rounded-full px-[10px] text-[12px] font-medium ${
+                    className={`inline-flex min-h-[24px] items-center rounded-full px-[10px] text-[14px] font-medium ${
                       heading.restricted
                         ? 'bg-foreground/6 text-muted-foreground'
                         : 'bg-success/10 text-success-text'
@@ -514,7 +514,7 @@ export function CircleDetailPage({
                     {statusLabel}
                   </span>
                   {section !== 'subscription' && termText !== '' && termText !== statusLabel && (
-                    <small className="text-[12px] text-muted-foreground" data-testid="circle-detail-term">
+                    <small className="text-[14px] text-muted-foreground" data-testid="circle-detail-term">
                       {termText}
                     </small>
                   )}
@@ -540,8 +540,8 @@ export function CircleDetailPage({
               onClick={() => handleSectionChange(entry)}
               className={
                 section === entry
-                  ? 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-transparent bg-[var(--accent-soft)] px-[12px] text-[12px] font-medium text-accent'
-                  : 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5'
+                  ? 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-transparent bg-[var(--accent-soft)] px-[12px] text-[14px] font-medium text-accent'
+                  : 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5'
               }
             >
               {t(sectionTabKey(entry))}
@@ -557,7 +557,7 @@ export function CircleDetailPage({
               type="button"
               data-testid="circle-detail-support-entry"
               onClick={() => setSupportOpen(true)}
-              className="inline-flex min-h-[30px] items-center gap-[6px] rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="inline-flex min-h-[30px] items-center gap-[6px] rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             >
               <Icons.LifeBuoy className="size-[14px]" aria-hidden="true" />
               {t('poo70.c9.support.entry')}
@@ -619,7 +619,7 @@ export function CircleDetailPage({
                     type="button"
                     data-testid="circle-detail-exit"
                     onClick={handleRequestLeave}
-                    className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-destructive bg-transparent px-[12px] text-[12px] font-medium text-destructive hover:bg-destructive/8"
+                    className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-destructive bg-transparent px-[12px] text-[14px] font-medium text-destructive hover:bg-destructive/8"
                   >
                     {t('poo70.c9.exit.button')}
                   </button>
@@ -657,7 +657,7 @@ export function CircleDetailPage({
                     data-testid="circle-detail-leave-reverify"
                     disabled={leave.state.reverifying}
                     onClick={leave.reverify}
-                    className="mt-[10px] inline-flex min-h-[28px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-[10px] inline-flex min-h-[28px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('poo70.c7.result.reverify')}
                   </button>

@@ -127,7 +127,7 @@ export function KbUploadDialog(props: KbUploadDialogProps) {
               <Icons.FileUp className="size-[14px]" aria-hidden="true" />
               {t('knowledgeBase.actions.pickFile')}
             </Button>
-            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+            <span className="min-w-0 truncate text-[14px] text-muted-foreground">
               {t('knowledgeBase.upload.queue.dragHint')}
             </span>
             <input
@@ -148,7 +148,7 @@ export function KbUploadDialog(props: KbUploadDialogProps) {
               per-file reasons, never overwritten by a later empty batch. */}
           {rejected.length > 0 && (
             <div
-              className="grid gap-[7px] rounded-[10px] border border-destructive/30 bg-destructive/10 px-[12px] py-[10px] text-[12px]"
+              className="grid gap-[7px] rounded-[10px] border border-destructive/30 bg-destructive/10 px-[12px] py-[10px] text-[14px]"
               data-testid="kb-pick-summary"
             >
               <div className="flex flex-wrap items-center gap-[8px]">
@@ -157,7 +157,7 @@ export function KbUploadDialog(props: KbUploadDialogProps) {
                 </b>
                 <button
                   type="button"
-                  className="min-h-[22px] rounded-[6px] px-[8px] text-[11px] font-bold text-destructive underline underline-offset-2 hover:bg-destructive/10"
+                  className="min-h-[22px] rounded-[6px] px-[8px] text-[14px] font-bold text-destructive underline underline-offset-2 hover:bg-destructive/10"
                   data-testid="kb-pick-summary-toggle"
                   onClick={onToggleRejections}
                 >
@@ -227,7 +227,7 @@ export function KbUploadDialog(props: KbUploadDialogProps) {
                         </span>
                       )}
                     </span>
-                    <span className="shrink-0 rounded-full bg-foreground/8 px-[8px] py-[1px] text-[10px] font-semibold text-foreground-70">
+                    <span className="shrink-0 rounded-full bg-foreground/8 px-[8px] py-[1px] text-[14px] font-semibold text-foreground-70">
                       {t('knowledgeBase.pending.stageQueued')}
                     </span>
                     <button
@@ -265,7 +265,7 @@ export function KbUploadDialog(props: KbUploadDialogProps) {
           {selectedItem ? (
             <div className="grid gap-[12px] min-[721px]:grid-cols-2">
               <div className="grid min-w-0 content-start gap-[6px]">
-                <h4 className="m-0 text-[11px] font-semibold tracking-[0.4px] text-foreground-50">
+                <h4 className="m-0 text-[14px] font-semibold tracking-[0.4px] text-foreground-50">
                   {t('knowledgeBase.previewRawLabel')}
                 </h4>
                 <Input
@@ -278,24 +278,24 @@ export function KbUploadDialog(props: KbUploadDialogProps) {
                 <Textarea
                   value={selectedItem.text}
                   rows={10}
-                  className="resize-y font-mono text-[12px] leading-[1.6]"
+                  className="resize-y font-mono text-[14px] leading-[1.6]"
                   data-testid="kb-document-content-input"
                   onChange={event => onUpdateItem(selectedItem.qid, {
                     text: event.target.value,
                     sizeBytes: new TextEncoder().encode(event.target.value).length,
                   })}
                 />
-                <span className={`text-[11px] ${selectedItem.sizeBytes > KB_MAX_CONTENT_BYTES ? 'font-bold text-destructive' : 'text-foreground-40'}`}>
+                <span className={`text-[14px] ${selectedItem.sizeBytes > KB_MAX_CONTENT_BYTES ? 'font-bold text-destructive' : 'text-foreground-40'}`}>
                   {t('knowledgeBase.contentBytes', { bytes: selectedItem.sizeBytes })}
                 </span>
                 {overLimitQid === selectedItem.qid && (
-                  <span className="text-[11px] font-bold text-destructive" data-testid="kb-up-byte-error">
+                  <span className="text-[14px] font-bold text-destructive" data-testid="kb-up-byte-error">
                     {t('knowledgeBase.pending.byteOver')}
                   </span>
                 )}
               </div>
               <div className="grid min-w-0 content-start gap-[6px]">
-                <h4 className="m-0 text-[11px] font-semibold tracking-[0.4px] text-foreground-50">
+                <h4 className="m-0 text-[14px] font-semibold tracking-[0.4px] text-foreground-50">
                   {t('knowledgeBase.previewRenderedLabel')}
                 </h4>
                 <div
@@ -307,7 +307,7 @@ export function KbUploadDialog(props: KbUploadDialogProps) {
               </div>
             </div>
           ) : (
-            <p className="m-0 text-[11px] text-muted-foreground" data-testid="kb-upload-preview-empty">
+            <p className="m-0 text-[14px] text-muted-foreground" data-testid="kb-upload-preview-empty">
               {t('knowledgeBase.upload.queue.previewEmpty')}
             </p>
           )}

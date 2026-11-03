@@ -90,7 +90,7 @@ function FactRow({
   children: ReactNode
 }) {
   return (
-    <div className="grid grid-cols-[116px_minmax(0,1fr)] gap-[12px] border-b border-border px-[13px] py-[11px] text-[12px] last:border-b-0" data-testid={testId}>
+    <div className="grid grid-cols-[116px_minmax(0,1fr)] gap-[12px] border-b border-border px-[13px] py-[11px] text-[14px] last:border-b-0" data-testid={testId}>
       <dt className="m-0 text-muted-foreground">{label}</dt>
       <dd className="m-0 min-w-0 [overflow-wrap:anywhere] font-medium text-foreground">{children}</dd>
     </div>
@@ -166,7 +166,7 @@ export function CircleReturnPanel({
       data-return-kind={state.kind}
       data-return-phase={state.phase}
     >
-      <p className="m-0 text-[12px] font-medium uppercase tracking-[0.04em] text-foreground-50">
+      <p className="m-0 text-[14px] font-medium uppercase tracking-[0.04em] text-foreground-50">
         {t('poo70.c8.eyebrow')}
       </p>
       <h1
@@ -180,7 +180,7 @@ export function CircleReturnPanel({
             : title}
       </h1>
       <p
-        className="m-0 mt-[9px] text-[13px] leading-[1.58] text-foreground-60"
+        className="m-0 mt-[9px] text-[14px] leading-[1.58] text-foreground-60"
         data-testid="circle-return-subtitle"
       >
         {state.phase === 'failed'
@@ -260,7 +260,7 @@ export function CircleReturnPanel({
           </FactRow>
           {state.orderFacts.checkoutUnknown && (
             <div
-              className="py-[8px] text-[12px] leading-[1.6] text-info-text"
+              className="py-[8px] text-[14px] leading-[1.6] text-info-text"
               data-testid="circle-return-order-unknown-note"
             >
               {t('poo70.c8.order.checkoutUnknown')}
@@ -348,7 +348,7 @@ export function CircleReturnPanel({
         note replaces it. */}
         {state.phase === 'account-mismatch' && !onReauthenticate && (
           <p
-            className="m-0 max-w-[460px] text-[12px] leading-[1.6] text-muted-foreground"
+            className="m-0 max-w-[460px] text-[14px] leading-[1.6] text-muted-foreground"
             data-testid="circle-return-mismatch-no-entry"
           >
             {t('poo70.c8.mismatch.noReloginEntry')}

@@ -287,7 +287,7 @@ export function BrowserTabStrip({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="h-[26px] px-1.5 rounded-lg text-[11px] text-foreground/50 bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors cursor-pointer titlebar-no-drag"
+              className="h-[26px] px-1.5 rounded-lg text-[14px] text-foreground/50 bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors cursor-pointer titlebar-no-drag"
             >
               +{overflow.length}
             </button>
@@ -300,7 +300,7 @@ export function BrowserTabStrip({
                 <DropdownMenuSub key={instance.id}>
                   <StyledDropdownMenuSubTrigger>
                     {instance.isLoading ? (
-                      <Spinner className="text-[10px]" />
+                      <Spinner className="text-[14px]" />
                     ) : (
                       <Icons.Globe className="h-3.5 w-3.5" />
                     )}

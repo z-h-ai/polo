@@ -2329,7 +2329,7 @@ function AppShellContent({
                             <Button
                               variant="ghost"
                               onClick={(e) => handleNewChat(e.metaKey || e.ctrlKey)}
-                              className="w-full justify-start gap-2 py-[7px] px-2 text-[13px] font-normal rounded-[6px] shadow-minimal bg-background"
+                              className="w-full justify-start gap-2 py-[7px] px-2 text-[14px] font-normal rounded-[6px] shadow-minimal bg-background"
                               data-tutorial="new-chat-button"
                             >
                               <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />
@@ -3013,7 +3013,7 @@ function AppShellContent({
                                 {/* Matched statuses */}
                                 {filterDropdownResults.states.length > 0 && (
                                   <>
-                                    <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
+                                    <div className="px-3 pt-1.5 pb-1 text-[14px] font-medium text-muted-foreground/60 uppercase tracking-wider">
                                       Statuses
                                     </div>
                                     {filterDropdownResults.states.map((state, index) => {
@@ -3101,7 +3101,7 @@ function AppShellContent({
                                 {/* Matched labels — flat list with parent breadcrumbs */}
                                 {filterDropdownResults.labels.length > 0 && (
                                   <>
-                                    <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
+                                    <div className="px-3 pt-1.5 pb-1 text-[14px] font-medium text-muted-foreground/60 uppercase tracking-wider">
                                       Labels
                                     </div>
                                     {filterDropdownResults.labels.map((item, index) => {

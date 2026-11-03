@@ -274,7 +274,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
 
             {/* Hint */}
             {request.hint && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[14px] text-muted-foreground">
                 {request.hint}
               </p>
             )}
@@ -304,7 +304,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
             {t('common.cancel')}
           </Button>
 
-          <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
+          <span className="min-w-0 flex-1 basis-full text-[14px] text-muted-foreground sm:basis-auto sm:text-right">
             {t('auth.encryptedAtRest')}
           </span>
         </div>

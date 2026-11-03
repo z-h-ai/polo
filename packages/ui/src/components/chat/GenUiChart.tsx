@@ -293,7 +293,7 @@ function ChartCard({ title, children }: { title?: string; children: React.ReactN
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
       {title && (
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{title}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{title}</span>
         </div>
       )}
       <div className="px-3 py-2.5">{children}</div>
@@ -328,7 +328,7 @@ function SeriesLegendChips({
             aria-pressed={!isHidden}
             onClick={() => onToggle(series.name)}
             className={cn(
-              'flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors',
+              'flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[14px] border transition-colors',
               'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
               isHidden
                 ? 'bg-background text-muted-foreground/50 border-foreground/10 line-through'
@@ -391,10 +391,10 @@ function ChartPlaceholder({
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
       <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-1.5">
         <AlertTriangle className="w-3 h-3 text-muted-foreground/60 shrink-0" />
-        <span className="text-[12px] text-muted-foreground font-medium">{message}</span>
+        <span className="text-[14px] text-muted-foreground font-medium">{message}</span>
       </div>
       {reason === 'unknown-chart-type' && (
-        <pre className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground overflow-x-auto select-text max-h-[240px]">
+        <pre className="px-3 py-2 text-[14px] leading-relaxed text-muted-foreground overflow-x-auto select-text max-h-[240px]">
           {JSON.stringify(component, null, 2)}
         </pre>
       )}
@@ -613,7 +613,7 @@ function InteractiveChartBody({ component, plan }: { component: GenUiChart; plan
         {component.chartType === 'funnel' && <FunnelChartView plan={displayPlan} />}
       </div>
       {activeRange && (
-        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+        <div className="mt-1.5 flex items-center gap-2 text-[14px] text-muted-foreground">
           <span>
             {t('genui.chart.filterStatus', {
               shown: activeRange.endIndex - activeRange.startIndex + 1,

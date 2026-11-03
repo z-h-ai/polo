@@ -466,9 +466,9 @@ export function HomePage() {
           >
             <Icons.UserRoundPlus className="size-4 text-accent" aria-hidden="true" />
             <span className="grid gap-[3px]">
-              <strong className="text-[13px] font-semibold">{t('homeSpace.context.myCircles')}</strong>
+              <strong className="text-[14px] font-semibold">{t('homeSpace.context.myCircles')}</strong>
               {/* Review #6: readable 11px metadata — muted token (AA-compliant). */}
-              <small className="text-[11px] text-muted-foreground">
+              <small className="text-[14px] text-muted-foreground">
                 {t('homeSpace.context.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
               </small>
             </span>
@@ -504,7 +504,7 @@ export function HomePage() {
           className="mb-[24px] flex flex-wrap items-end gap-[16px]"
           data-testid="home-directory-toolbar"
         >
-          <label className="grid min-w-[220px] flex-1 gap-[6px] text-[12px] text-muted-foreground">
+          <label className="grid min-w-[220px] flex-1 gap-[6px] text-[14px] text-muted-foreground">
             <span>{t('poo70.h3.home.searchLabel')}</span>
             <input
               type="search"
@@ -515,7 +515,7 @@ export function HomePage() {
               className="min-h-[38px] w-full appearance-none rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[9px] text-[15px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
             />
           </label>
-          <label className="grid gap-[6px] text-[12px] text-muted-foreground">
+          <label className="grid gap-[6px] text-[14px] text-muted-foreground">
             <span>{t('homeApps.allApps.sourceLabel')}</span>
             <WorkbenchSelect
               value={sourceFilter}
@@ -525,7 +525,7 @@ export function HomePage() {
               options={[{ value: 'all', label: t('poo70.h3.home.sourceAll') }, ...sourceOptions.map(option => ({ value: option.key, label: option.label }))]}
             />
           </label>
-          <label className="grid gap-[6px] text-[12px] text-muted-foreground">
+          <label className="grid gap-[6px] text-[14px] text-muted-foreground">
             <span>{t('poo70.h3.home.sortLabel')}</span>
             <WorkbenchSelect<HomeAppSortMode>
               value={sortMode}
@@ -588,7 +588,7 @@ export function HomePage() {
           <button
             type="button"
             data-testid="home-directory-stale-retry"
-            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             onClick={() => { void catalog.sync(true) }}
           >
             {t('homeApps.actions.tryAgain')}
@@ -609,8 +609,8 @@ export function HomePage() {
               <Icons.Sparkles className="size-[18px]" aria-hidden="true" />
             </span>
             <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
-            <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
-            <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+            <p className="mt-[4px] text-[14px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
+            <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
               {t('homeApps.home.poloDescription')}
             </p>
             <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
@@ -622,7 +622,7 @@ export function HomePage() {
               shadow-middle on hover. */}
               <button
                 type="button"
-                className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
+                className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
                 onClick={(event) => {
                   event.stopPropagation()
                   openPoloAssistant()
@@ -646,14 +646,14 @@ export function HomePage() {
               <Icons.Library className="size-[18px]" aria-hidden="true" />
             </span>
             <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('builtinApp.enterpriseKnowledge.name')}</h3>
-            <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('builtinApp.enterpriseKnowledge.source')}</p>
-            <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+            <p className="mt-[4px] text-[14px] leading-[normal] text-muted-foreground">{t('builtinApp.enterpriseKnowledge.source')}</p>
+            <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
               {t('builtinApp.enterpriseKnowledge.description')}
             </p>
             <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
               <button
                 type="button"
-                className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
+                className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
                 onClick={(event) => {
                   event.stopPropagation()
                   openKnowledgeBase()
@@ -683,7 +683,7 @@ export function HomePage() {
               {/* Explicit retry only — a failure never auto-executes. */}
               <button
                 type="button"
-                className="mt-3 inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                className="mt-3 inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
                 onClick={() => { void catalog.sync(true) }}
               >
                 {t('homeApps.actions.tryAgain')}
@@ -712,7 +712,7 @@ export function HomePage() {
                     />
                     {entry.launchBlocked && (
                       <p
-                        className="m-0 mt-[6px] px-[2px] text-[11px] leading-[1.5] text-muted-foreground"
+                        className="m-0 mt-[6px] px-[2px] text-[14px] leading-[1.5] text-muted-foreground"
                         data-testid={`home-directory-app-unavailable-${entry.identityKey}`}
                       >
                         {sourceLost
@@ -776,10 +776,10 @@ export function HomePage() {
           >
             <div className="flex items-center gap-[8px]">
               <Icons.EyeOff className="size-[14px] text-muted-foreground" aria-hidden="true" />
-              <h2 className="m-0 text-[13px] font-semibold tracking-[-0.01em] text-muted-foreground">
+              <h2 className="m-0 text-[14px] font-semibold tracking-[-0.01em] text-muted-foreground">
                 {t('poo70.h3.home.hiddenSectionTitle')}
               </h2>
-              <span className="inline-flex min-h-[18px] items-center rounded-full bg-foreground/6 px-[7px] text-[10px] font-medium text-muted-foreground">
+              <span className="inline-flex min-h-[18px] items-center rounded-full bg-foreground/6 px-[7px] text-[14px] font-medium text-muted-foreground">
                 {hiddenVisibleEntries.length}
               </span>
             </div>
@@ -790,11 +790,11 @@ export function HomePage() {
                   className="flex min-h-[34px] items-center justify-between gap-[12px] rounded-[10px] px-[10px] hover:bg-foreground-4"
                   data-testid={`home-directory-hidden-item-${entry.identityKey}`}
                 >
-                  <span className="min-w-0 truncate text-[13px] text-foreground-70">{entry.app.name}</span>
+                  <span className="min-w-0 truncate text-[14px] text-foreground-70">{entry.app.name}</span>
                   <button
                     type="button"
                     data-testid={`home-directory-hidden-restore-${entry.identityKey}`}
-                    className="inline-flex min-h-[26px] shrink-0 items-center justify-center whitespace-nowrap rounded-[7px] border border-border bg-transparent px-[10px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                    className="inline-flex min-h-[26px] shrink-0 items-center justify-center whitespace-nowrap rounded-[7px] border border-border bg-transparent px-[10px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
                     onClick={() => handleRestoreApp(entry)}
                   >
                     {t('poo70.h3.home.hiddenRestore')}
@@ -816,12 +816,12 @@ export function HomePage() {
             <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
               {t('poo70.h3.home.rejectedTitle')}
             </h2>
-            <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+            <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
               {t('poo70.h3.home.rejectedHint')}
             </p>
             <button
               type="button"
-              className="mt-[4px] inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="mt-[4px] inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
               onClick={() => { void catalog.sync(true) }}
             >
               {t('homeApps.actions.tryAgain')}
@@ -843,7 +843,7 @@ export function HomePage() {
                 <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
                   {t('homeApps.allApps.empty')}
                 </h2>
-                <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+                <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
                   {t('poo70.h3.home.emptyEnterprise')}
                 </p>
               </>
@@ -855,7 +855,7 @@ export function HomePage() {
                 <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
                   {t('poo70.h3.home.emptyPersonalTitle')}
                 </h2>
-                <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+                <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
                   {t('poo70.h3.home.emptyPersonalHint')}
                 </p>
               </>
@@ -874,12 +874,12 @@ export function HomePage() {
             <h2 className="m-0 text-[16px] font-bold tracking-[-0.02em]">
               {t('poo70.h3.home.noMatch')}
             </h2>
-            <p className="m-0 text-[12px] leading-[1.5] text-muted-foreground">
+            <p className="m-0 text-[14px] leading-[1.5] text-muted-foreground">
               {t('poo70.h3.home.noMatchHint')}
             </p>
             <button
               type="button"
-              className="mt-[2px] inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="mt-[2px] inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
               onClick={() => {
                 setQuery('')
                 setSourceFilter('all')

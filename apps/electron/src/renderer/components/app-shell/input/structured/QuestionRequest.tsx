@@ -211,7 +211,7 @@ export function QuestionRequest({
             <span className="text-sm font-medium leading-tight text-foreground">{label}</span>
             {recommended && (
               <span
-                className="inline-flex items-center rounded-[4px] border border-accent/50 bg-accent/5 px-1.5 text-[10px] font-medium leading-[18px] text-accent"
+                className="inline-flex items-center rounded-[4px] border border-accent/50 bg-accent/5 px-1.5 text-[14px] font-medium leading-[18px] text-accent"
                 data-testid={`question-recommended-${question.id}-${id}`}
               >
                 {t('chat.questionRecommended')}
@@ -241,15 +241,15 @@ export function QuestionRequest({
             <div className="mb-1.5 flex items-center gap-2">
               <span className="text-sm font-semibold text-foreground">{question.header}</span>
               {question.multiple && (
-                <span className="text-[10px] font-medium text-muted-foreground">{t('chat.questionMultiple')}</span>
+                <span className="text-[14px] font-medium text-muted-foreground">{t('chat.questionMultiple')}</span>
               )}
             </div>
-            <div className="text-[13px] leading-[18px] text-muted-foreground">{question.question}</div>
+            <div className="text-[14px] leading-[18px] text-muted-foreground">{question.question}</div>
           </div>
           {request.questions.length > 1 && (
             <span
               data-testid="question-step-counter"
-              className="inline-flex h-[22px] min-w-[42px] shrink-0 items-center justify-center rounded-full bg-foreground/5 px-2 text-[11px] font-medium text-muted-foreground"
+              className="inline-flex h-[22px] min-w-[42px] shrink-0 items-center justify-center rounded-full bg-foreground/5 px-2 text-[14px] font-medium text-muted-foreground"
             >
               {step + 1} / {request.questions.length}
             </span>
@@ -314,7 +314,7 @@ export function QuestionRequest({
           aria-live="polite"
           data-testid="question-status"
           className={cn(
-            'min-w-0 flex-1 text-[10px] leading-[1.35]',
+            'min-w-0 flex-1 text-[14px] leading-[1.35]',
             error ? 'text-destructive' : 'text-muted-foreground',
           )}
         >

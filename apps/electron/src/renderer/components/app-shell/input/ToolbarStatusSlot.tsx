@@ -175,7 +175,7 @@ function BrowserStatusBar({
 
       <span className={`shrink-0 flex items-center justify-center ${isDarkTheme ? 'h-4 w-4' : 'h-3.5 w-3.5'}`}>
         {instance.isLoading ? (
-          <Spinner className="text-[10px] leading-none" />
+          <Spinner className="text-[14px] leading-none" />
         ) : instance.favicon && !faviconFailed ? (
           isDarkTheme ? (
             <span className="inline-flex h-4 w-4 items-center justify-center rounded-[5px] bg-white/90 p-[1px] leading-none">

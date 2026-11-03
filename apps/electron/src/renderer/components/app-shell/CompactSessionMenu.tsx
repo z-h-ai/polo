@@ -682,7 +682,7 @@ function Separator() {
 
 function CountBadge({ count }: { count: number }) {
   return (
-    <span className="text-[11px] tabular-nums text-foreground/50">
+    <span className="text-[14px] tabular-nums text-foreground/50">
       {count}
     </span>
   )

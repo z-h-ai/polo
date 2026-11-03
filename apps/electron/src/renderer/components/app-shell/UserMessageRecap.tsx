@@ -46,7 +46,7 @@ export function UserMessageRecap({ preview, ariaLabel, onClick, compactMode = fa
             'pointer-events-auto flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-background text-muted-foreground shadow-tinted',
             'transition-colors hover:border-border hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/60',
-            compactMode ? 'h-7 px-2.5 text-xs' : 'h-8 px-3 text-[13px]',
+            compactMode ? 'h-7 px-2.5 text-xs' : 'h-8 px-3 text-[14px]',
           )}
         >
           <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

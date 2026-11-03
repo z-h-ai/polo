@@ -173,7 +173,7 @@ export function MarkdownPdfBlock({ code, className, onCreateRegionAnnotation: _o
         {/* Header */}
         <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-2">
           <FileText className="w-3.5 h-3.5 text-muted-foreground/50" />
-          <span className="text-[12px] text-muted-foreground font-medium flex-1">
+          <span className="text-[14px] text-muted-foreground font-medium flex-1">
             {spec.title || t('preview.pdfPreview')}
           </span>
           <div className="flex items-center gap-1">
@@ -201,8 +201,8 @@ export function MarkdownPdfBlock({ code, className, onCreateRegionAnnotation: _o
             <div className="flex items-start justify-center bg-white p-4">
               <Document
                 file={activeFileObj}
-                loading={<div className="py-8 text-center text-muted-foreground text-[13px]">{t('common.rendering')}</div>}
-                error={<div className="py-6 text-center text-destructive/70 text-[13px]">{t('preview.failedToRenderPdf')}</div>}
+                loading={<div className="py-8 text-center text-muted-foreground text-[14px]">{t('common.rendering')}</div>}
+                error={<div className="py-6 text-center text-destructive/70 text-[14px]">{t('preview.failedToRenderPdf')}</div>}
               >
                 <Page
                   pageNumber={1}
@@ -216,12 +216,12 @@ export function MarkdownPdfBlock({ code, className, onCreateRegionAnnotation: _o
 
           {/* Loading state for uncached active item */}
           {!activePdfData && loading && (
-            <div className="py-8 text-center text-muted-foreground text-[13px]">{t('common.loading')}</div>
+            <div className="py-8 text-center text-muted-foreground text-[14px]">{t('common.loading')}</div>
           )}
 
           {/* Error state for uncached active item */}
           {!activePdfData && !loading && error && (
-            <div className="py-6 text-center text-destructive/70 text-[13px]">{error}</div>
+            <div className="py-6 text-center text-destructive/70 text-[14px]">{error}</div>
           )}
 
           {/* Bottom fade gradient */}

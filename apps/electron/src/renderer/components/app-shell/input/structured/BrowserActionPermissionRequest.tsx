@@ -58,7 +58,7 @@ export function BrowserActionPermissionRequest({ request, onResponse, unstyled =
         </Button>
 
         {/* Tip text */}
-        <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
+        <span className="min-w-0 flex-1 basis-full text-[14px] text-muted-foreground sm:basis-auto sm:text-right">
           {t(outcomeUnknown ? 'browserAuthorization.outcomeNotice' : awaiting ? 'browserAuthorization.notice' : 'browserAuthorization.invalidatedNotice')}
         </span>
       </div>

@@ -128,7 +128,7 @@ export function TerminalOutput({
             <span>{t('terminal.output')}</span>
             {exitCode !== undefined && (
               <span
-                className="px-1.5 py-0.5 rounded text-[10px]"
+                className="px-1.5 py-0.5 rounded text-[14px]"
                 style={{
                   backgroundColor: exitCode === 0 ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
                   color: exitCode === 0 ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)',

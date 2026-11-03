@@ -108,11 +108,11 @@ export function CircleSkillSummary({ skills }: CircleSkillSummaryProps) {
           <div className="min-w-0">
             <h3 className="m-0 text-[14px] font-bold leading-[1.4]">{skill.name}</h3>
             {skill.summary && (
-              <p className="m-0 mt-[2px] text-[12px] leading-[1.6] text-muted-foreground">
+              <p className="m-0 mt-[2px] text-[14px] leading-[1.6] text-muted-foreground">
                 {skill.summary}
               </p>
             )}
-            <p className="m-0 mt-[6px] text-[11px] leading-[1.5] text-foreground-50">
+            <p className="m-0 mt-[6px] text-[14px] leading-[1.5] text-foreground-50">
               {skill.version
                 ? t('poo70.c4.content.versionValue', { version: skill.version })
                 : null}

@@ -118,7 +118,7 @@ export function ProductSpaceSelectScreen({
           <Building2 className="size-[25px]" />
         </span>
         <h1 className="m-0 text-[24px] font-[720] tracking-[-0.035em] text-foreground">{t('spaceSelect.title')}</h1>
-        <p className="mt-[9px] text-[13px] leading-[1.58] text-foreground-60">
+        <p className="mt-[9px] text-[14px] leading-[1.58] text-foreground-60">
           {t(recommendedEnterprise !== undefined
             ? (selectionSource === 'fresh'
               ? 'spaceSelect.subtitleFirstLogin'
@@ -161,7 +161,7 @@ export function ProductSpaceSelectScreen({
               >
                 <span
                   className={cn(
-                    'flex size-[26px] shrink-0 items-center justify-center rounded-[6px] text-[11px] font-semibold text-accent',
+                    'flex size-[26px] shrink-0 items-center justify-center rounded-[6px] text-[14px] font-semibold text-accent',
                     'bg-[var(--accent-soft)]',
                   )}
                   aria-hidden="true"
@@ -174,25 +174,25 @@ export function ProductSpaceSelectScreen({
                   })()}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className={cn('block truncate text-[13px] font-semibold leading-[1.3]', !isSelected && 'text-foreground')}>
+                  <span className={cn('block truncate text-[14px] font-semibold leading-[1.3]', !isSelected && 'text-foreground')}>
                     {space.name}
                   </span>
                   <span className="mt-[2px] flex items-center gap-[6px]">
-                    <span className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] text-[11px] leading-[1.6] text-foreground-60">
+                    <span className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] text-[14px] leading-[1.6] text-foreground-60">
                       {space.kind === 'enterprise'
                         ? t('spaceSelect.enterpriseTag', { role: t(spaceRoleKey(space.kind, space.role)) })
                         : t(spaceRoleKey(space.kind, 'personal'))}
                     </span>
                     {recommended ? (
                       <span
-                        className="inline-flex items-center whitespace-nowrap rounded-full bg-[var(--accent-soft)] px-[7px] py-[1px] text-[11px] font-semibold leading-[1.6] text-accent"
+                        className="inline-flex items-center whitespace-nowrap rounded-full bg-[var(--accent-soft)] px-[7px] py-[1px] text-[14px] font-semibold leading-[1.6] text-accent"
                         data-testid="product-space-select-recommended-tag"
                       >
                         {t('spaceSelect.recommended')}
                       </span>
                     ) : null}
                     {restricted ? (
-                      <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[var(--destructive-soft)] px-[7px] py-[1px] text-[11px] leading-[1.6] text-destructive">
+                      <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[var(--destructive-soft)] px-[7px] py-[1px] text-[14px] leading-[1.6] text-destructive">
                         {t('productSpace.restricted')}
                       </span>
                     ) : null}
@@ -206,7 +206,7 @@ export function ProductSpaceSelectScreen({
 
         {selectedRestricted && selected ? (
           <p
-            className="mt-[14px] m-0 flex items-start gap-[8px] rounded-[10px] bg-[var(--destructive-soft)] px-[12px] py-[10px] text-left text-[12px] leading-[1.55] text-destructive"
+            className="mt-[14px] m-0 flex items-start gap-[8px] rounded-[10px] bg-[var(--destructive-soft)] px-[12px] py-[10px] text-left text-[14px] leading-[1.55] text-destructive"
             role="status"
             data-testid="product-space-select-restricted-note"
           >
@@ -216,7 +216,7 @@ export function ProductSpaceSelectScreen({
         ) : null}
 
         <Button
-          className={clientWorkbenchPrimaryClassName + ' mt-[22px] min-h-[40px] w-full text-[13px] font-semibold'}
+          className={clientWorkbenchPrimaryClassName + ' mt-[22px] min-h-[40px] w-full text-[14px] font-semibold'}
           disabled={submitting || selected === null}
           data-testid="product-space-select-confirm"
           onClick={confirm}
@@ -229,12 +229,12 @@ export function ProductSpaceSelectScreen({
           data-testid="product-space-select-account"
           aria-label={t('spaceSelect.accountAriaLabel')}
         >
-          <span className="flex size-[28px] shrink-0 items-center justify-center rounded-full bg-foreground-10 text-[12px] font-semibold text-foreground-70" aria-hidden="true">
+          <span className="flex size-[28px] shrink-0 items-center justify-center rounded-full bg-foreground-10 text-[14px] font-semibold text-foreground-70" aria-hidden="true">
             {account?.displayName?.trim()?.[0] ?? '·'}
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-[12px] font-semibold leading-[1.35] text-foreground">{account?.displayName ?? ''}</span>
-            <span className="block truncate text-[11px] leading-[1.35] text-foreground-50">{account?.username ?? ''}</span>
+            <span className="block truncate text-[14px] font-semibold leading-[1.35] text-foreground">{account?.displayName ?? ''}</span>
+            <span className="block truncate text-[14px] leading-[1.35] text-foreground-50">{account?.username ?? ''}</span>
           </span>
           <Button className={clientWorkbenchButtonClassName + ' ml-auto shrink-0'} data-testid="product-space-select-logout" onClick={onLogout}>
             {t('topbar.account.logout')}
