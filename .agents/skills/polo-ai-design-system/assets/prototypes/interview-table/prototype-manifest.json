@@ -6,8 +6,8 @@
   "files": {
     "prototype": "prototype.html",
     "asset_1": "styles/088c433398e7b0688aa97b36bfb34a098e4ccdd47d82ee93b62309ac3c36f406.css",
-    "asset_2": "styles/55ec4263cfdd75f197f3a4efc916ea2a76e4bf3a5eb53de6ae063e2f354a4139.css",
-    "asset_3": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
+    "asset_2": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
+    "asset_3": "styles/8efb16879e1d48aa0cc99d3dae2ef4b6e971a7f4909b11c568d985a6aa0f9ec6.css",
     "asset_4": "styles/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.css",
     "asset_5": "views/table-datatable-compact-800x600.html",
     "asset_6": "views/table-datatable-desktop-1280x800.html",
@@ -102,7 +102,7 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "ca9c7fa69619572572d983d68790c17cf31224354aa12846f47fa586f3b57810",
+    "sha256": "6360459445b644767d6c875f06b45d7b25c38493e145470a6bf8012941ee486e",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -121,8 +121,8 @@
   "provenance": {
     "generator": ".agents/skills/polo-ai-design-system/tools/export-table-reference.py",
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "4cedf9552088f76bc4236efecfb81b425d697c6c7ebb294702e2a93fecb0af2a",
-    "source_export_sha256": "8283e5362f5a9a1e5a69bb2439b43c4829e9c3eaa9fcbe512999ace84bd0337a",
+    "source_input_fingerprint": "6678eb0fac22992c8e80470cf675cd6b4f47570edcf5ad7e503663220ceac796",
+    "source_export_sha256": "a7394ad50fa9dae5af0074da58f1520085f2269cdd04fa8d35754071b5aa824c",
     "method": "Actual Chromium render and native expand click, cloned DOM/CSS only in reference; live React runtime imports production components.",
     "scope": "Component smoke and state coverage only; current header position is not the target sticky result. Full Electron, scroll geometry, row actions, source IO and actual bug before/after remain task acceptance."
   }

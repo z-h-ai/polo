@@ -41,7 +41,7 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "ca9c7fa69619572572d983d68790c17cf31224354aa12846f47fa586f3b57810",
+    "sha256": "6360459445b644767d6c875f06b45d7b25c38493e145470a6bf8012941ee486e",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -60,8 +60,8 @@
   ],
   "provenance": {
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "4cedf9552088f76bc4236efecfb81b425d697c6c7ebb294702e2a93fecb0af2a",
-    "reference_html_sha256": "90e2998be14ec9b5b1fc2f41a7028ac5f35f9fcf481ba7e7bf09f27100c8bc94",
+    "source_input_fingerprint": "6678eb0fac22992c8e80470cf675cd6b4f47570edcf5ad7e503663220ceac796",
+    "reference_html_sha256": "0a195b836d015728333372721b68b8569e75d1263dab2d92079d080f0dc4e755",
     "source_entry": ".agents/skills/polo-ai-design-system/tools/source-baseline/entries/interview-input-entry.tsx",
     "generator": ".agents/skills/polo-ai-design-system/tools/export-interview-reference.py",
     "role": "Existing production component reference, not a newly accepted target design"

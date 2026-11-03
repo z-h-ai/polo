@@ -12,6 +12,7 @@
         "apps/electron/src/preload",
         "apps/electron/src/renderer",
         "docs/mvp-complete-flow-hifi",
+        "packages/shared/src/i18n/locales",
         "packages/ui/src/components/chat",
         "packages/ui/src/components/markdown",
         "packages/ui/src/components/overlay",

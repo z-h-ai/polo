@@ -142,10 +142,6 @@
             {
               "action": "hover",
               "selector": "[data-localization-case=\"context-ready\"] button:has-text(\"90%\")"
-            },
-            {
-              "action": "wait",
-              "duration": 1200
             }
           ],
           "state_assertions": [
@@ -170,10 +166,6 @@
             {
               "action": "hover",
               "selector": "[data-localization-case=\"context-ready\"] button:has-text(\"90%\")"
-            },
-            {
-              "action": "wait",
-              "duration": 1200
             }
           ],
           "state_assertions": [

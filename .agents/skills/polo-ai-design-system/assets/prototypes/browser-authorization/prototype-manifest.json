@@ -67,11 +67,11 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "5f970abd0efee8e6074f6f0c904b9aafc96c9b746e4cd25affedf7484fdb17e8",
+    "sha256": "6360459445b644767d6c875f06b45d7b25c38493e145470a6bf8012941ee486e",
     "sources": [
       {
         "path": "apps/electron/src/renderer/index.css",
-        "sha256": "b3dabc1562cf3a91e45f055935ff749183e87b75a0d9a8158a67948a1cf8eeeb"
+        "sha256": "018a4b1deebbda05b79da843b598cf5055a04c8623528fc4124f07b57a5c87f1"
       }
     ]
   },

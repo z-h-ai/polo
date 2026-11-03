@@ -7,8 +7,8 @@
     "prototype": "prototype.html",
     "asset_1": "styles/088c433398e7b0688aa97b36bfb34a098e4ccdd47d82ee93b62309ac3c36f406.css",
     "asset_2": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
-    "asset_3": "styles/bc641d85825b4ee17e33c8829f5219087a5d922202a1c5870eae2a9d0178463c.css",
-    "asset_4": "styles/bc9a11341ecbecefe913834cecc715cbc15a2ef3cecbda63eadcd89477b56dc0.css",
+    "asset_3": "styles/8efb16879e1d48aa0cc99d3dae2ef4b6e971a7f4909b11c568d985a6aa0f9ec6.css",
+    "asset_4": "styles/bc641d85825b4ee17e33c8829f5219087a5d922202a1c5870eae2a9d0178463c.css",
     "asset_5": "styles/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.css",
     "asset_6": "styles/f8f616f50b927b825b3314bfc82809909c6432ceff002ac4d6280b29f8312c28.css",
     "asset_7": "views/quota-member-en-compact-800x600.html",
@@ -78,7 +78,7 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "5d3fab1ef9c587bc689b4f8f38b06cc5f4f901087e6b1d8cad3a104febc6903f",
+    "sha256": "6360459445b644767d6c875f06b45d7b25c38493e145470a6bf8012941ee486e",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -97,8 +97,8 @@
   "provenance": {
     "generator": ".agents/skills/polo-ai-design-system/tools/export-quota-banner-references.py",
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "7a19c6b6557e424eb2bf9f47fbbfabab3b1246da5286c2ad5483d0307ad012e3",
-    "source_export_sha256": "43a54a84f2094b211c507e92fbadad2bfb39270c560aca53a0ece4f2a0e95b7b",
+    "source_input_fingerprint": "6678eb0fac22992c8e80470cf675cd6b4f47570edcf5ad7e503663220ceac796",
+    "source_export_sha256": "a7394ad50fa9dae5af0074da58f1520085f2269cdd04fa8d35754071b5aa824c",
     "method": "Actual Chromium render; cloned DOM with product scripts removed only from reference; single status banner asserted per case. Live React runtime remains unchanged.",
     "fixed_reference_clock": "2026-10-29T12:00:00Z",
     "scope": "Component smoke references of the current billing-banner states; not Electron/backend acceptance, not the POO-177 refresh behaviour, and not bug before/after proof. de/hu/pl narrow-viewport copy checks are acceptance-fixture scope (source-baseline router maps lang to en/zh-Hans only)."

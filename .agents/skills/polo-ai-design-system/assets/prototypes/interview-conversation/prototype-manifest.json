@@ -6,8 +6,8 @@
   "files": {
     "prototype": "prototype.html",
     "asset_1": "styles/088c433398e7b0688aa97b36bfb34a098e4ccdd47d82ee93b62309ac3c36f406.css",
-    "asset_2": "styles/55ec4263cfdd75f197f3a4efc916ea2a76e4bf3a5eb53de6ae063e2f354a4139.css",
-    "asset_3": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
+    "asset_2": "styles/6088c0ac79b6ae46f927b857f6550cd5b9d0dcaa7ad4c4df96e30692ec8ac03c.css",
+    "asset_3": "styles/8efb16879e1d48aa0cc99d3dae2ef4b6e971a7f4909b11c568d985a6aa0f9ec6.css",
     "asset_4": "styles/9f34e06335d80cd7ba0401e2888ecd3657caf27fdabae380861dadf7662fb97a.css",
     "asset_5": "styles/bc641d85825b4ee17e33c8829f5219087a5d922202a1c5870eae2a9d0178463c.css",
     "asset_6": "styles/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.css",
@@ -223,7 +223,7 @@
   ],
   "design": {
     "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
-    "sha256": "63ab97c636e4c0f823f2224797a021c1f42721198b0391b6b21ceaebe02ad147",
+    "sha256": "6360459445b644767d6c875f06b45d7b25c38493e145470a6bf8012941ee486e",
     "sources": [
       {
         "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
@@ -248,8 +248,8 @@
   "provenance": {
     "generator": ".agents/skills/polo-ai-design-system/tools/export-conversation-references.py",
     "source_manifest": ".agents/skills/polo-ai-design-system/assets/source-baseline/baseline-manifest.json",
-    "source_input_fingerprint": "e58b3d38a491323ae9557af891597fa14e20df2e6c0e241b6373071fea4d8387",
-    "source_export_sha256": "802e508a026bf266fdaa2e9310e65300ff7081501d3336699992cdaa494718e1",
+    "source_input_fingerprint": "6678eb0fac22992c8e80470cf675cd6b4f47570edcf5ad7e503663220ceac796",
+    "source_export_sha256": "a7394ad50fa9dae5af0074da58f1520085f2269cdd04fa8d35754071b5aa824c",
     "method": "Actual Chromium render and native click/key replay; cloned DOM with product scripts removed only from reference. Reference-only script restores observed scroll offsets. Live React runtime remains unchanged.",
     "fixed_reference_clock": "2026-10-28T12:00:00Z",
     "scope": "Component smoke references; not Electron/backend acceptance and not bug before/after proof."

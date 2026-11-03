@@ -20,7 +20,9 @@ import { ActionRegistryProvider } from '@/actions/registry'
 import { chatComponents } from '@/playground/registry/chat'
 import { ComponentGallery } from './gallery'
 import { InterviewInputScene } from './interview-input'
-import { InterviewScrollScene, InterviewStatusPickerScene, InterviewStatusDesktopScene, InterviewStatusCompactScene } from './interview-conversation'
+import { InterviewCitationScene, InterviewScrollScene, InterviewStatusPickerScene, InterviewStatusDesktopScene, InterviewStatusCompactScene } from './interview-conversation'
+import { InterviewMarkdownTableScene, InterviewDatatableScene, InterviewGenUiTableScene } from './interview-table'
+import { InterviewQuotaMemberScene, InterviewQuotaOwnerScene } from './interview-quota-banner'
 import { productSpaceFixture } from './fixtures'
 import { localizationScenes } from './interview-localization'
 
@@ -244,7 +246,18 @@ const chatScenes = [
 ].filter((s): s is BaselineScene => s !== null)
 
 export const baselineScenes: BaselineScene[] = [
+  ...(['terminal', 'minimal', 'full'] as const).map(mode => ({
+    id: `interview-table-${mode}`, region: '助手', title: `Markdown · ${mode} 宽长表格`, fullBleed: true,
+    note: '真实 Markdown；20列100行固定数据，?short=1为3列2行。表格布局与滚动由生产组件处理。',
+    render: () => <InterviewMarkdownTableScene mode={mode} />,
+  })),
+  { id: 'interview-table-datatable', region: '助手', title: 'MarkdownDatatableBlock · 宽长表格', fullBleed: true,
+    note: '真实 datatable 的内部滚动/排序/展开；仅固定表格数据。', render: () => <InterviewDatatableScene /> },
+  { id: 'interview-table-genui', region: '助手', title: 'GenUICard · 文件数据表及行操作', fullBleed: true,
+    note: '真实 GenUI→MarkdownDatatableBlock，保留筛选/行操作；文件读取为本地fixture，不向服务发送。', render: () => <InterviewGenUiTableScene /> },
   ...localizationScenes,
+  { id: 'interview-citation', region: '助手', title: 'ChatDisplay（引用来源链接）', fullBleed: true,
+    note: '真实对话显示组件与固定引用来源会话：带 URL 的 Markdown 链接来源与纯文本来源并存；点击不连接后端。', render: () => <InterviewCitationScene /> },
   { id: 'interview-scroll', region: '助手', title: 'ChatDisplay（长对话阅读）', fullBleed: true,
     note: '真实对话显示组件及固定长会话；发送仅改变内存数据，不代表服务端或计费。', render: () => <InterviewScrollScene /> },
   { id: 'interview-status-picker', region: '助手', title: 'SessionStatusMenu（状态选择与搜索）',
@@ -253,6 +266,10 @@ export const baselineScenes: BaselineScene[] = [
     note: '真实共享状态菜单项与Radix菜单容器。', render: () => <InterviewStatusDesktopScene /> },
   { id: 'interview-status-compact', region: '助手', title: 'CompactSessionMenu（紧凑状态菜单）',
     note: '真实紧凑菜单；授权/分享/文件操作不连接后端。', render: () => <InterviewStatusCompactScene /> },
+  { id: 'interview-quota-member', region: '助手', title: '额度提醒（成员）',
+    note: '真实 ChatInputZone 状态横幅与 ChatPage 决策映射（insufficient-credit 成员态：成员文案+U2 重新检查动作）；动作仅本地空操作，不发起 GET/清 latch/充值。', render: () => <InterviewQuotaMemberScene /> },
+  { id: 'interview-quota-owner', region: '助手', title: '额度提醒（所有者）',
+    note: '真实 ChatInputZone 状态横幅与 ChatPage 决策映射（insufficient-credit 所有者态：充值交接+U2 重新检查）；动作仅本地空操作，不发起 GET/清 latch/充值。', render: () => <InterviewQuotaOwnerScene /> },
   {
     id: 'interview-input',
     region: '助手',

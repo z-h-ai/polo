@@ -52,6 +52,41 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def freeze_native_reference(page):
+    """Read a clone of an actual native page; retain CSS and observed scrolls."""
+    frozen = page.locator('html').evaluate('''element => {
+      const clone = element.cloneNode(true), styles = [], scrolls = [];
+      const original = element.querySelectorAll('*'), copies = clone.querySelectorAll('*');
+      original.forEach((node, index) => {
+        if (node.scrollTop || node.scrollLeft) {
+          const id = String(scrolls.length);
+          copies[index].setAttribute('data-reference-scroll', id);
+          scrolls.push({id, top:node.scrollTop, left:node.scrollLeft});
+        }
+      });
+      clone.querySelectorAll('script').forEach(node => node.remove());
+      clone.querySelectorAll('style').forEach(node => {
+        styles.push(node.textContent || '');
+        const link = document.createElement('link');
+        link.rel = 'stylesheet'; link.href = `__STYLE_${styles.length - 1}__`;
+        node.replaceWith(link);
+      });
+      return {html:'<!doctype html>' + clone.outerHTML,styles,scrolls,window:[scrollX,scrollY]};
+    }''')
+    text = frozen['html']
+    restore = '<script>const observed=' + json.dumps({'nodes': frozen['scrolls'], 'window': frozen['window']}) + ''';
+const restore=()=>requestAnimationFrame(()=>{
+  for(const item of observed.nodes){const node=document.querySelector('[data-reference-scroll="'+item.id+'"]');if(node){node.scrollTop=item.top;node.scrollLeft=item.left;}}
+  window.scrollTo(...observed.window);
+});window.addEventListener('load',()=>document.fonts.ready.then(restore));</script>'''
+    text = text.replace('</body>', restore + '</body>')
+    styles = {}
+    for index, style in enumerate(frozen['styles']):
+        data = style.encode(); name = f'styles/{sha(data)}.css'
+        styles[name] = data
+        text = text.replace(f'__STYLE_{index}__', '../' + name)
+    return text.encode(), styles
+
 def encode(value) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + '\n').encode()
 
