@@ -23,6 +23,8 @@ import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
 import { ModalProvider } from '@/context/ModalContext'
 import { ProductSpaceProvider, useProductSpaceContext, type ProductSpaceContextValue } from '@/context/ProductSpaceContext'
 import { AppShellProvider, type AppShellContextType } from '@/context/AppShellContext'
+import { ProductSpaceSwitcher } from '@/components/product-space/ProductSpaceSwitcher'
+import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent } from '@/components/ui/styled-dropdown'
 import { replaceLoadedSessionAtom } from '@/atoms/sessions'
 import { projectAssetDraftRefsAtomFamily } from '@/atoms/project-context'
 import ChatPage from '@/pages/ChatPage'
@@ -30,6 +32,7 @@ import { CreateProjectDialog } from '@/components/product-space/CreateProjectDia
 import {
   SESSION_PERSONAL,
   SESSION_PROJECT,
+  SESSION_PROJECT_EMPTY,
   WORKSPACE_ID,
   productSpaceContextValue,
   sessionsById,
@@ -61,31 +64,92 @@ const spaceSwitchLog: string[] = []
  * the「项目已创建」page (retry only — never a re-create). */
 let refreshMissingMode = false
 
+/** R2 扩展: viewer-role / space-list overrides for the members two-state and
+ * the space-menu reachability surfaces. Mutated ONLY through the
+ * window.__poo196Space setters (each bumps the override tick so the context
+ * value is rebuilt — the same refresh the real App performs after
+ * refreshProductSpaces). */
+const spaceOverride = {
+  role: 'manager' as 'owner' | 'manager' | 'member',
+  personalOnly: false,
+}
+const spaceMenuLog: string[] = []
+const spaceRefreshLog: number[] = []
+
+/** Applies the override to the fixture context value (fresh object each call).
+ * `personalOnly` keeps the ACTIVE space untouched (ChatPage stability) while
+ * the switcher LIST shows only the personal space — the D-D 1 reachability
+ * claim under test is that the create entry renders from the LIST alone. */
+function overriddenSpaceContext(): ProductSpaceContextValue {
+  const base = productSpaceContextValue as unknown as {
+    activeProductSpace: { role: string }
+    productSpaces: Array<{ id: string; role?: string }>
+    allProductSpaces: Array<{ id: string; role?: string }>
+  }
+  const value = JSON.parse(JSON.stringify(productSpaceContextValue)) as ProductSpaceContextValue
+  const record = value as unknown as typeof base
+  record.activeProductSpace.role = spaceOverride.role
+  const enterpriseOf = (list: typeof base.productSpaces) => {
+    for (const item of list) if (item.id === base.productSpaces[0].id) item.role = spaceOverride.role
+  }
+  enterpriseOf(record.productSpaces)
+  enterpriseOf(record.allProductSpaces)
+  if (spaceOverride.personalOnly) {
+    record.productSpaces = record.productSpaces.filter(item => item.id !== base.productSpaces[0].id) as ProductSpaceContextValue['productSpaces']
+    record.allProductSpaces = record.allProductSpaces.filter(item => item.id !== base.productSpaces[0].id) as ProductSpaceContextValue['allProductSpaces']
+  }
+  return value
+}
+
 /** Host-side space context: the fixture value plus the create-project entry
  * the real App hosts once next to the switch dialog. The dialog instance is
  * PERMANENTLY mounted inside the provider (the App pattern), so an in-flight
  * submit and its stored idempotency key survive closing the dialog. */
 function SpaceContextHost({ children }: { children: React.ReactNode }) {
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
+  const [overrideTick, setOverrideTick] = useState(0)
+  const bumpOverride = () => setOverrideTick(t => t + 1)
+  // R2 扩展: imperative control surface for the orchestrator (assigned during
+  // render so it is always fresh — never stale-closure bridge state).
+  ;(window as unknown as Record<string, unknown>).__poo196Space = {
+    setRole: (role: 'owner' | 'manager' | 'member') => { spaceOverride.role = role; bumpOverride() },
+    setPersonalOnly: (next: boolean) => { spaceOverride.personalOnly = next; bumpOverride() },
+    role: () => spaceOverride.role,
+  }
   const value = useMemo(() => ({
-    ...productSpaceContextValue,
-    onOpenCreateProject: () => { setCreateProjectOpen(true) },
+    ...overriddenSpaceContext(),
+    onOpenCreateProject: () => { spaceMenuLog.push('open-create'); setCreateProjectOpen(true) },
     onSelectProductSpace: (productSpaceId: string) => { spaceSwitchLog.push(productSpaceId) },
     onRefreshProductSpaces: async () => {
+      spaceRefreshLog.push(Date.now())
       const list = await (window as unknown as { electronAPI: { productSpaceList: () => Promise<unknown> } }).electronAPI.productSpaceList()
       if (!Array.isArray(list) || list.length === 0) return null
       const spaces = list as ProductSpaceContextValue['productSpaces']
       return refreshMissingMode ? spaces.filter(item => item.id !== 'ps-apollo-created') : spaces
     },
-  }), [])
+  }), [overrideTick])
   return (
     <ProductSpaceProvider value={value as unknown as ProductSpaceContextValue}>
       {children}
       <CreateProjectDialog
         open={createProjectOpen}
         onOpenChange={setCreateProjectOpen}
-        onVerifyPhone={() => { setCreateProjectOpen(false) }}
+        onVerifyPhone={() => { spaceMenuLog.push('verify-phone'); setCreateProjectOpen(false) }}
       />
+      {/* R2 扩展 (D-D 1): the production space switcher, composed exactly as
+          the account menu hosts it, but mounted offscreen so screenshots stay
+          untouched and no baseline scenario observes it. Assertions are
+          DOM-based via the orchestrator probes. */}
+      <div style={{ position: 'fixed', left: -9999, top: 0 }} data-testid="poo196-space-menu-rig">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" data-testid="poo196-space-menu-trigger">space menu</button>
+          </DropdownMenuTrigger>
+          <StyledDropdownMenuContent align="start" sideOffset={4} data-testid="poo196-space-menu-content">
+            <ProductSpaceSwitcher />
+          </StyledDropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </ProductSpaceProvider>
   )
 }
@@ -216,7 +280,7 @@ function HarnessBridge() {
     const api = {
       ready: true,
       renderLog: () => renderLog.slice(-30),
-      sessions: { project: SESSION_PROJECT, personal: SESSION_PERSONAL },
+      sessions: { project: SESSION_PROJECT, personal: SESSION_PERSONAL, projectEmpty: SESSION_PROJECT_EMPTY },
       session: () => activeSession,
       /** D-D 1: the create entry lives in the space switcher / select screen
        * (neither is mounted here); the orchestrator drives the shared dialog
@@ -229,6 +293,8 @@ function HarnessBridge() {
       },
       setRefreshMissing: (next: boolean) => { refreshMissingMode = next; return true },
       spaceSwitchLog: () => spaceSwitchLog.slice(),
+      spaceMenuLog: () => spaceMenuLog.slice(),
+      spaceRefreshLog: () => spaceRefreshLog.slice(),
       setSession: (id: string) => setSessionRef.current(id),
       lang: () => i18n.resolvedLanguage ?? i18n.language,
       // changeLanguage resolves with the t function (not structured-cloneable

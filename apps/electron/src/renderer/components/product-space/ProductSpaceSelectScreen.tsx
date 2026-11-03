@@ -8,6 +8,7 @@ import { productSpaceAvatarGlyph } from '@/lib/space-initial'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import type { ProductSpaceSelectionSource } from '@/hooks/useProductSpaceContext'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
+import { useProductSpacesRefresh } from './useProductSpacesRefresh'
 
 export type ProductSpaceSelectAccount = {
   displayName: string
@@ -57,6 +58,8 @@ export function ProductSpaceSelectScreen({
   const { t } = useTranslation()
   const style = useClientWorkbenchStyle()
   const spaceContext = useOptionalProductSpaceContext()
+  // X2-11: the same progress/failure wrapper the account menu refresh uses.
+  const { refreshProductSpaces } = useProductSpacesRefresh()
 
   // M3 default selection: stored active → first-login recommended active
   // enterprise → bootstrap-committed active as the fallback. 'stored' means
@@ -260,7 +263,7 @@ export function ProductSpaceSelectScreen({
               className={clientWorkbenchButtonClassName + ' shrink-0'}
               data-testid="product-space-select-refresh"
               disabled={submitting}
-              onClick={() => { void spaceContext.onRefreshProductSpaces() }}
+              onClick={() => { void refreshProductSpaces(() => spaceContext.onRefreshProductSpaces()) }}
             >
               {t('createProject.refreshAction')}
             </Button>

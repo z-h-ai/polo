@@ -5,6 +5,7 @@ import {
   clientEnterprisePaymentResponsibilityTermsVersion,
   type ClientEnterpriseErrorCode,
 } from '@polo-ai/shared/admin/client-enterprise-contract'
+import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
 
 /**
  * POO-196 追加轮 create-project state hook (adjudication D-B).
@@ -68,7 +69,15 @@ export type CreateProjectPhase =
 
 /** Local validation failures are definite; transport-level codes we cannot
  * classify (timeout, socket drop, unknown envelope) mean the server may or
- * may not have committed — recovery, never an automatic resend. */
+ * may not have committed — recovery, never an automatic resend.
+ *
+ * `idempotency_recovery_failed` and `enterprise_unique_constraint_conflict`
+ * stay OUT of this set (consensus S2-ENG-2): both mean the server could NOT
+ * prove the aggregate was not committed, so the stored key survives and the
+ * receipt query stays available. `legacy_projection_inconsistent` remains
+ * definite deliberately: the projection repair path is a server-side fix for
+ * an already-settled aggregate — the receipt query cannot change its outcome,
+ * and keeping the form editable is the only exit that exists. */
 const DEFINITE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   ...([
     'unauthorized',
@@ -81,9 +90,7 @@ const DEFINITE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
     'account_enterprise_exists',
     'account_changed',
     'idempotency_conflict',
-    'idempotency_recovery_failed',
     'legacy_projection_inconsistent',
-    'enterprise_unique_constraint_conflict',
   ] as readonly ClientEnterpriseErrorCode[]),
   'pm_signin_required',
   'pm_scope_changed',
@@ -98,9 +105,14 @@ function newIdempotencyKey(): string {
   return `pm-create-${uuid}`
 }
 
-function errorCodeOf(error: unknown): string | null {
-  const record = (error ?? {}) as Record<string, unknown>
-  return typeof record.code === 'string' ? record.code : null
+/** S2-ENG-1: "unchanged" means every field — the trimmed text is what the
+ * fingerprint covers, so trailing whitespace is not a payload change; the
+ * acknowledgement itself IS (consent is part of the command). */
+function areValuesEqual(a: CreateProjectFormValues, b: CreateProjectFormValues): boolean {
+  return a.name.trim() === b.name.trim()
+    && a.ownerName.trim() === b.ownerName.trim()
+    && a.purpose.trim() === b.purpose.trim()
+    && a.responsibilityConfirmed === b.responsibilityConfirmed
 }
 
 export function useCreateProject(accountId: string) {
@@ -179,8 +191,16 @@ export function useCreateProject(accountId: string) {
     setPhase('submitting')
     setSubmitError(null)
     setQueryNotFound(false)
-    // D-B 5: minted at explicit submit time, then retained per account.
-    const stored: StoredRequest = { accountId, idempotencyKey: newIdempotencyKey(), values }
+    // S2-ENG-1: an unchanged explicit re-submit of a stored request REUSES its
+    // key — the server answers the same aggregate (replayed), it never builds
+    // a second one. A changed payload (setField drops the stored request) or a
+    // first submit mints the key here, at the only moment consent exists.
+    const previousStored = storedRequests.get(accountId) ?? null
+    const samePayload = previousStored !== null && areValuesEqual(previousStored.values, values)
+    const idempotencyKey = samePayload && previousStored
+      ? previousStored.idempotencyKey
+      : newIdempotencyKey()
+    const stored: StoredRequest = { accountId, idempotencyKey, values }
     storedRequests.set(accountId, stored)
     setHasStoredRequest(true)
     try {
@@ -202,7 +222,9 @@ export function useCreateProject(accountId: string) {
       return next
     } catch (error) {
       if (generation !== submitGenerationRef.current) return null
-      const code = errorCodeOf(error)
+      // E2-5: the pm channels carry their codes through the context bridge's
+      // message marker — a bare `.code` read never sees them.
+      const code = readRpcErrorCode(error)
       const definite = code !== null && DEFINITE_ERROR_CODES.has(code)
       if (code === 'validation_error') {
         // Field bounds are enforced locally, so a server-side validation
@@ -210,6 +232,11 @@ export function useCreateProject(accountId: string) {
         // acknowledgement and make the user confirm again (never silent).
         setVersionMismatch(true)
         setValues(previous => ({ ...previous, responsibilityConfirmed: false }))
+        // The server classified this payload as rejected BEFORE any write, and
+        // its terms cannot be satisfied by replaying it — the request identity
+        // is abandoned so the re-confirmed submit mints a fresh key.
+        storedRequests.delete(accountId)
+        setHasStoredRequest(false)
       }
       setSubmitError({ code, kind: definite ? 'definite' : 'unresolved' })
       if (definite) {
@@ -219,13 +246,15 @@ export function useCreateProject(accountId: string) {
         setHasStoredRequest(false)
         setPhase('form')
       } else {
-        // Unresolved (timeout / disconnected / unclassified): keep the key,
-        // offer the receipt query. Never a silent resend.
+        // Unresolved (timeout / disconnected / unclassified, including the
+        // S2-ENG-2 codes that cannot prove non-commit): keep the key, offer
+        // the receipt query and the explicit same-key retry. Never a silent
+        // resend and never a new key.
         setPhase('recovery')
       }
       return null
     }
-  }, [accountId, buildCommand, validate])
+  }, [accountId, buildCommand, validate, values])
 
   /** D-B 6: query the ORIGINAL request's receipt with the stored key. */
   const queryReceipt = useCallback(async (): Promise<CreateProjectOutcome | null> => {
@@ -265,13 +294,14 @@ export function useCreateProject(accountId: string) {
     }
   }, [accountId, querying])
 
-  /** Back to the form from recovery. The stored key stays valid ONLY while
-   * the payload is unchanged — submit() re-mints a key only when none is
-   * stored, so an unchanged re-submit replays the original request. */
+  /** Back to the form from recovery (consensus E2-6): a REAL exit, and the
+   * stored key stays put — submit() reuses a stored key for an unchanged
+   * payload, so the explicit re-submit replays the original request instead
+   * of building a second aggregate (D-B 6). */
   const backToForm = useCallback(() => {
-    setPhase(storedRequests.has(accountId) ? 'recovery' : 'form')
+    setPhase('form')
     setQueryNotFound(false)
-  }, [accountId])
+  }, [])
 
   const dismissSubmitError = useCallback(() => setSubmitError(null), [])
 
@@ -284,6 +314,16 @@ export function useCreateProject(accountId: string) {
     setQuerying(false)
     setQueryNotFound(false)
     setVersionMismatch(false)
+    // E2-3 (D-B 1): reopening NEVER carries the previous consent — the
+    // acknowledgement returns to its unchecked default. The text draft and
+    // the stored recovery snapshot are deliberately untouched: the draft is a
+    // consensus-r2 minimum (keep, pending a product call), and the stored
+    // request is what keeps an unknown outcome queryable. Clearing the
+    // checkbox must never discard that key.
+    setValues(previous => ({
+      ...previous,
+      responsibilityConfirmed: clientEnterpriseCreatePresentation.responsibility.confirmDefaultChecked,
+    }))
   }, [accountId])
 
   return {

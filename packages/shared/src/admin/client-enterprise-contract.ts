@@ -1,7 +1,7 @@
 // GENERATED FILE — do not edit by hand.
 // Source of truth: polo-admin `src/lib/enterprises/client-contracts.ts` and the
 // CLIENT-CONTRACT block of `src/lib/enterprises/create-presentation.ts`.
-// Contract: poo196-client-enterprise-r1 · contracts sha256: e4e2bcdf9c99ac7597428ef75de2b2aad799af5f47e2098d8cdc2172fc310816 · presentation sha256: 929fc0b70fd2189a359a3f84be82478ec8135458121c30ebd8ea6c883acc7d1c
+// Contract: poo196-client-enterprise-r2 · contracts sha256: 0a57f8deacdb896999bd8334689db255cc7050218b00032cfc4532041dfb83b5 · presentation sha256: 929fc0b70fd2189a359a3f84be82478ec8135458121c30ebd8ea6c883acc7d1c
 // Regenerate: `tsx scripts/export-client-enterprise-contract.ts <this-file>` (polo-admin repo);
 // `--check` verifies no drift between the two repos.
 import { z } from 'zod'
@@ -25,7 +25,7 @@ import { z } from 'zod'
  *   body field: it comes from the verified session.
  */
 
-export const CLIENT_ENTERPRISE_CONTRACT_VERSION = "poo196-client-enterprise-r1";
+export const CLIENT_ENTERPRISE_CONTRACT_VERSION = "poo196-client-enterprise-r2";
 
 /** Bound to the admin `idempotencyKeySchema` (parity regression in
  * tests/client-enterprise.contract.test.ts). */
@@ -124,6 +124,11 @@ export const clientMemberRosterResponseSchema = z
     viewerRole: clientMemberRoleSchema,
     members: z.array(clientMemberEntrySchema),
     nextCursor: z.string().nullable(),
+    /** X2-9: whether THIS deployment can deliver invitation emails. The client
+     * renders phone-only compose while it is false. Optional so an older admin
+     * deployment simply means "unknown" — the client keeps the combined input
+     * and the server's `email_delivery_unavailable` stays the authority. */
+    emailDeliveryAvailable: z.boolean().optional(),
   })
   .strict();
 
@@ -142,6 +147,28 @@ export const clientInvitationStatusSchema = z.enum([
   "exhausted",
 ]);
 export type ClientInvitationStatus = z.infer<typeof clientInvitationStatusSchema>;
+
+/** E2-2: the copyable link is ALWAYS an absolute https URL under the
+ * deployment's canonical public origin. A path-only value used to be handed to
+ * the client as a broken link; the route now refuses to create the invitation
+ * at all when the origin is missing or malformed, so the contract only ever
+ * admits the trusted form (no userinfo, no query, no fragment). */
+export const clientInvitationUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      return false;
+    }
+    if (parsed.protocol !== "https:") return false;
+    // Userinfo (https://user:pass@host) must never leak into a shared link.
+    if (parsed.username || parsed.password) return false;
+    if (parsed.search || parsed.hash) return false;
+    return parsed.pathname.startsWith("/invite/");
+  }, "The invitation link must be an absolute https URL under the deployment's /invite/ path");
 
 /** A projected invitation NEVER carries a token, a token hash, a creator
  * identity or a shared-application payload — the management cookie surface
@@ -197,14 +224,14 @@ export const clientCreateInvitationResponseSchema = z.discriminatedUnion("result
     .object({
       result: z.literal("created"),
       invitation: clientInvitationEntrySchema,
-      invitationUrl: z.string(),
+      invitationUrl: clientInvitationUrlSchema,
     })
     .strict(),
   z
     .object({
       result: z.literal("replayed"),
       invitation: clientInvitationEntrySchema,
-      invitationUrl: z.string(),
+      invitationUrl: clientInvitationUrlSchema,
     })
     .strict(),
   z
@@ -257,6 +284,10 @@ export const CLIENT_ENTERPRISE_ERROR_CODES = [
   "target_already_member",
   "email_delivery_unavailable",
   "enterprise_unique_constraint_conflict",
+  /** E2-2: the deployment's public origin is missing or malformed, so no
+   * trusted link can be built and the invitation is NOT created (zero write).
+   * Additive: never reuse a removed code. */
+  "invitation_origin_unavailable",
 ] as const;
 
 export type ClientEnterpriseErrorCode = (typeof CLIENT_ENTERPRISE_ERROR_CODES)[number];

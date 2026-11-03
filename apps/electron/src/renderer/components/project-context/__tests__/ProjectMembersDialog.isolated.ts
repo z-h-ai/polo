@@ -71,6 +71,9 @@ function makeHarness(options: {
   membersResponse?: () => ClientMemberRosterResponse
   membersError?: { code: string }
   invitationsError?: { code: string }
+  /** S2-ENG-3: the FIRST invite call throws this (transport-style), later
+   * calls answer with `inviteResponse` — the replay path. */
+  inviteError?: Error
   inviteResponse?: Record<string, unknown>
 } = {}): Harness {
   const harness: Harness = {
@@ -103,6 +106,7 @@ function makeHarness(options: {
       },
       pmCreateProjectInvitation: async (input: Record<string, unknown>) => {
         harness.inviteCalls.push(input)
+        if (options.inviteError && harness.inviteCalls.length === 1) throw options.inviteError
         if (options.inviteResponse) return options.inviteResponse
         return {
           result: 'created',
@@ -283,5 +287,79 @@ describe('ProjectMembersDialog (POO-196 追加轮 D-C)', () => {
     expect(screen.queryByTestId('project-members-roster')).toBeNull()
     expect(screen.queryByTestId('project-members-invitation-row')).toBeNull()
     expect(screen.queryByTestId('project-members-invite-action')).toBeNull()
+  })
+
+  // S2-ENG-3 (consensus #6): a LOST response keeps the request key of THIS
+  // compose — the user's explicit retry replays the SAME key and the server
+  // hands back the still-valid link, which copies as an absolute https URL.
+  it('S2-ENG-3: an unresolved failure keeps the request key; the explicit retry replays and brings the link back', async () => {
+    const replayed = { result: 'replayed', invitation: INVITATION, invitationUrl: INVITE_URL }
+    const { harness } = renderMembers({
+      viewerRole: 'owner',
+      inviteError: new Error('fixture transport dropped mid-request'),
+      inviteResponse: replayed,
+    })
+    await screen.findAllByTestId('project-members-roster-row')
+
+    fireEvent.click(screen.getByTestId('project-members-invite-action'))
+    fireEvent.change(screen.getByTestId('project-members-invite-target'), { target: { value: '13800000000' } })
+    fireEvent.submit(document.getElementById('project-invite-form')!)
+    await waitFor(() => expect(harness.inviteCalls).toHaveLength(1))
+    // The failure stays in compose with a visible message — no invented
+    // result page, no silent resend.
+    expect(screen.getByTestId('project-members-compose')).toBeTruthy()
+    expect(screen.getByTestId('project-members-compose').textContent).toContain('邀请创建失败')
+    const heldKey = (harness.inviteCalls[0]!.command as Record<string, string>).createRequestKey
+
+    // Explicit retry of the SAME target → the SAME key → the replayed
+    // result page with the link.
+    fireEvent.submit(document.getElementById('project-invite-form')!)
+    const result = await screen.findByTestId('project-members-invite-result')
+    expect(result.getAttribute('data-result')).toBe('replayed')
+    expect((harness.inviteCalls[1]!.command as Record<string, string>).createRequestKey).toBe(heldKey)
+    fireEvent.click(screen.getByTestId('project-members-copy-link'))
+    await waitFor(() => expect(harness.clipboard).toEqual([INVITE_URL]))
+  })
+
+  // X2-9 (consensus #14): a deployment without invitation email delivery
+  // composes phone-only — the placeholder says so BEFORE any input, and an
+  // email target is rejected locally with zero requests.
+  it('X2-9: without email delivery the compose guides phone-only and rejects an email target locally', async () => {
+    const { harness } = renderMembers({
+      viewerRole: 'owner',
+      membersResponse: () => ({ ...ROSTER, emailDeliveryAvailable: false }),
+    })
+    await screen.findAllByTestId('project-members-roster-row')
+
+    fireEvent.click(screen.getByTestId('project-members-invite-action'))
+    const placeholder = screen.getByTestId('project-members-invite-target').getAttribute('placeholder') ?? ''
+    expect(placeholder).toContain('手机号')
+
+    fireEvent.change(screen.getByTestId('project-members-invite-target'), { target: { value: 'wang@example.com' } })
+    fireEvent.submit(document.getElementById('project-invite-form')!)
+    await waitFor(() => expect(screen.getByTestId('project-members-compose').textContent).toContain('邮箱邀请暂时不可用'))
+    expect(harness.inviteCalls).toHaveLength(0)
+  })
+
+  // X2-7 (consensus #12): a failed FIRST roster page offers an in-place
+  // retry; clearing the fault and pressing it recovers the rows.
+  it('X2-7: a failed first roster page offers an in-place retry that recovers the rows', async () => {
+    // 传引用而非展开拷贝：重试前清除 fault 靠同一对象的 delete 生效。
+    const options: Parameters<typeof makeHarness>[0] & { viewerRole?: 'owner' } = {
+      viewerRole: 'owner',
+      membersError: { code: 'pm_service_unavailable' },
+    }
+    const { harness } = renderMembers(options)
+    const errorRow = await screen.findByTestId('project-members-roster-error')
+    expect(errorRow.textContent.length).toBeGreaterThan(0)
+    expect(screen.getByTestId('project-members-roster-retry')).toBeTruthy()
+    expect(screen.queryByTestId('project-members-roster-row')).toBeNull()
+
+    // The fault clears (fixture-side) — the in-place retry recovers.
+    delete options.membersError
+    fireEvent.click(screen.getByTestId('project-members-roster-retry'))
+    await screen.findAllByTestId('project-members-roster-row')
+    expect(harness.membersCalls.length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByTestId('project-members-roster-error')).toBeNull()
   })
 })

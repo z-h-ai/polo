@@ -21,6 +21,9 @@ export const PERSONAL_SPACE_ID = 'ps-personal-lin'
 
 export const SESSION_PROJECT = 'sess-apollo-24'
 export const SESSION_PERSONAL = 'sess-personal-notes'
+/** R2 扩展: a PROJECT session with NO messages — drives ChatPage's second
+ * assembly branch (D-D: 两处装配都要覆盖 the members button). */
+export const SESSION_PROJECT_EMPTY = 'sess-apollo-empty'
 
 const now = Date.parse('2026-10-31T09:30:00+08:00')
 const iso = (s: string) => s
@@ -658,7 +661,28 @@ export const personalSession: Session = {
   isFlagged: false,
 }
 
+/** R2 扩展: the empty project session — same committed enterprise space, zero
+ * transcript. ChatPage renders its second assembly (empty state) there; the
+ * tab strip + members button must exist on BOTH branches. */
+export const projectEmptySession: Session = {
+  id: SESSION_PROJECT_EMPTY,
+  workspaceId: WORKSPACE_ID,
+  workspaceName: 'Apollo 项目空间',
+  productSpaceId: PRODUCT_SPACE_ID,
+  accountId: ACCOUNT_ID,
+  name: '新项目会话（空）',
+  preview: '',
+  createdAt: Date.parse('2026-10-31T10:00:00+08:00'),
+  lastMessageAt: Date.parse('2026-10-31T10:00:00+08:00'),
+  lastUsedAt: Date.parse('2026-10-31T10:00:00+08:00'),
+  isProcessing: false,
+  messages: [],
+  messageCount: 0,
+  isFlagged: false,
+}
+
 export const sessionsById: Record<string, Session> = {
   [SESSION_PROJECT]: projectSession,
   [SESSION_PERSONAL]: personalSession,
+  [SESSION_PROJECT_EMPTY]: projectEmptySession,
 }

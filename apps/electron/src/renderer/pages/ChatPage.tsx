@@ -341,8 +341,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const handleOpenProjectMembers = React.useCallback(() => setProjectMembersOpen(true), [])
   const handleCloseProjectMembers = React.useCallback((open: boolean) => setProjectMembersOpen(open), [])
   React.useEffect(() => {
-    // A session switch resets to 消息 (default tab — the current behavior).
+    // A session switch resets to 消息 (default tab — the current behavior) and
+    // closes the members panel with it (E2-4: the dialog instance survives the
+    // switch, so a stale `open` state would resurrect it on the way back).
     setProjectTab('messages')
+    setProjectMembersOpen(false)
   }, [sessionId])
   const sessionProductSpaceId = (session as { productSpaceId?: string } | null)?.productSpaceId
     ?? (sessionMeta as { productSpaceId?: string } | null)?.productSpaceId

@@ -87,14 +87,20 @@ export function ProjectMembersDialog({
   // Escape during compose OR the result page closes the UNCOMMITTED STEP
   // (back to the roster), not the whole dialog (HIG sheets: one related task
   // per sheet). Only the overview Esc actually dismisses the dialog.
+  // X2-4: while an invitation submit is in flight, NO entry can dismiss the
+  // compose step — a late response must never hijack the panel back to a
+  // result page the user already walked away from (the hook also keeps a
+  // generation guard for the entries that bypass this dialog-level block).
+  const composeSubmitting = members.composeSubmitting
   const handleOpenChange = useCallback((next: boolean) => {
     if (!next && members.step !== 'overview') {
+      if (composeSubmitting) return
       if (members.step === 'compose') members.cancelCompose()
       else members.closeResult()
       return
     }
     onOpenChange(next)
-  }, [members.step, members.cancelCompose, members.closeResult, onOpenChange])
+  }, [composeSubmitting, members.step, members.cancelCompose, members.closeResult, onOpenChange])
 
   const rosterCount = members.roster.items.length
 
@@ -108,6 +114,12 @@ export function ProjectMembersDialog({
         overlayStyle={workbenchStyle}
         overlayClassName={clientWorkbenchOverlayClassName}
         className={clientWorkbenchDialogClassName}
+        // X2-4: an in-flight invitation submit cannot be dismissed (Escape,
+        // clicking outside, or the X) — the same discipline the upload dialog
+        // applies while its form is writing.
+        onEscapeKeyDown={event => { if (composeSubmitting) event.preventDefault() }}
+        onInteractOutside={event => { if (composeSubmitting) event.preventDefault() }}
+        showCloseButton={!composeSubmitting}
       >
         <DialogHeader>
           <DialogTitle data-testid="project-members-title">
@@ -146,12 +158,16 @@ export function ProjectMembersDialog({
                   >
                     {t(members.manageErrorKey)}
                   </p>
-                ) : (
-                  <p className="text-[11px] leading-[1.45] text-foreground-50">{t('projectMembers.subtitle')}</p>
-                )}
+                ) : null}
+                {/* X2-10: the roster/invitation description is manager-panel
+                    content — a plain member sees only their own role and the
+                    contact note, never a list they cannot read. */}
               </div>
             ) : (
               <div className="flex min-h-[220px] flex-col gap-[12px]" data-testid="project-members-manage-surface">
+                <p className="text-[11px] leading-[1.45] text-foreground-50" data-testid="project-members-subtitle">
+                  {t('projectMembers.subtitle')}
+                </p>
                 {members.manageErrorKey ? (
                   <div
                     role="status"
@@ -179,9 +195,20 @@ export function ProjectMembersDialog({
                       <span>{t('projectMembers.loadingMore')}</span>
                     </p>
                   ) : members.roster.errorKey ? (
-                    <p className="mt-[8px] text-[12px] text-destructive" data-testid="project-members-roster-error">
-                      {t(members.roster.errorKey)}
-                    </p>
+                    <div className="mt-[8px] flex items-center gap-[10px]" data-testid="project-members-roster-error">
+                      <p className="text-[12px] text-destructive">
+                        {t(members.roster.errorKey)}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className={clientWorkbenchButtonClassName}
+                        data-testid="project-members-roster-retry"
+                        onClick={members.retryRoster}
+                      >
+                        {t('projectMembers.retry')}
+                      </Button>
+                    </div>
                   ) : members.roster.items.length === 0 ? (
                     <p className="mt-[8px] text-[12px] text-muted-foreground" data-testid="project-members-roster-empty">
                       {t('projectMembers.roster.empty')}
@@ -234,9 +261,20 @@ export function ProjectMembersDialog({
                       <span>{t('projectMembers.loadingMore')}</span>
                     </p>
                   ) : members.invitations.errorKey ? (
-                    <p className="mt-[8px] text-[12px] text-destructive" data-testid="project-members-invitations-error">
-                      {t(members.invitations.errorKey)}
-                    </p>
+                    <div className="mt-[8px] flex items-center gap-[10px]" data-testid="project-members-invitations-error">
+                      <p className="text-[12px] text-destructive">
+                        {t(members.invitations.errorKey)}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className={clientWorkbenchButtonClassName}
+                        data-testid="project-members-invitations-retry"
+                        onClick={members.retryInvitations}
+                      >
+                        {t('projectMembers.retry')}
+                      </Button>
+                    </div>
                   ) : members.invitations.items.length === 0 ? (
                     <p className="mt-[8px] text-[12px] text-muted-foreground" data-testid="project-members-invitations-empty">
                       {t('projectMembers.invitations.empty')}
@@ -305,14 +343,25 @@ export function ProjectMembersDialog({
                 <Input
                   data-testid="project-members-invite-target"
                   value={members.composeTarget}
-                  placeholder={t('projectMembers.invite.targetPlaceholder')}
+                  // X2-9: a deployment without email delivery composes by
+                  // phone only — the placeholder says so before any input.
+                  placeholder={t(members.emailDeliveryAvailable
+                    ? 'projectMembers.invite.targetPlaceholder'
+                    : 'projectMembers.invite.targetPlaceholderPhone')}
                   disabled={members.composeSubmitting}
                   onChange={event => {
                     members.editComposeTarget(event.target.value)
                   }}
                   aria-invalid={Boolean(members.composeErrorKey)}
+                  // X2-18: the validation message is reachable as THIS
+                  // control's description (same pattern as the create form).
+                  aria-describedby="project-members-invite-target-error"
                 />
-                <span className="mt-[4px] block text-[11px] leading-[1.45] text-destructive" role={members.composeErrorKey ? 'alert' : undefined}>
+                <span
+                  id="project-members-invite-target-error"
+                  className="mt-[4px] block text-[11px] leading-[1.45] text-destructive"
+                  role={members.composeErrorKey ? 'alert' : undefined}
+                >
                   {members.composeErrorKey ? t(members.composeErrorKey) : ''}
                 </span>
               </label>
@@ -365,6 +414,21 @@ export function ProjectMembersDialog({
                   ) : null}
                 </>
               )}
+              {/* X2-13: a result WITHOUT a copyable link still needs its
+                  management destination — the same controlled handoff the
+                  overview uses (live permission re-checked at click time). */}
+              {members.outcome.result !== 'created' && members.outcome.result !== 'replayed' ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className={clientWorkbenchButtonClassName}
+                  data-testid="project-members-result-management"
+                  onClick={onOpenEnterpriseManagement}
+                >
+                  <ExternalLink className="size-3.5" aria-hidden="true" />
+                  {t('projectMembers.manage.open')}
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </div>

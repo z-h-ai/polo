@@ -35,8 +35,10 @@ import { useCreateProject } from './useCreateProject'
  *
  * HIG: single primary action; Enter submits only when the form validates AND
  * the responsibility checkbox is explicitly checked; Escape closes an
- * uncommitted step; errors sit next to their field; the "created" state is
- * separate from the "entered" state and never re-creates.
+ * uncommitted step (an in-flight submit is protected against dismissal — X2-5);
+ * errors sit next to their field; the "created" state is separate from the
+ * "entered" state and never re-creates. Reopening never carries the previous
+ * consent (E2-3/D-B 1): the checkbox returns to its unchecked default.
  */
 
 function submitErrorKey(code: string | null): string {
@@ -108,8 +110,9 @@ export function CreateProjectDialog({
       }
       // The auto-enter dismisses the dialog with the SAME semantics as a
       // user close: reset the form (the created page must not resurface on
-      // the next open — reopening offers a FRESH form, or the D-B 6 recovery
-      // query when a stored key remains).
+      // the next open — reopening offers a fresh consent (E2-3: the
+      // responsibility checkbox never survives), the text draft stays, or the
+      // D-B 6 recovery query when a stored key remains).
       creator.reset()
       onOpenChange(false)
       if (productSpaceId !== space.activeProductSpaceId) {
@@ -165,6 +168,14 @@ export function CreateProjectDialog({
         overlayStyle={workbenchStyle}
         overlayClassName={clientWorkbenchOverlayClassName}
         className={clientWorkbenchDialogClassName}
+        // X2-5 (consensus 方案 A): an in-flight submit cannot be dismissed —
+        // Escape / clicking outside / the X would silently drop the ONLY
+        // callback that can still route the result, and a closed dialog gives
+        // no way to see the outcome. The stored key keeps recovery available
+        // afterwards, but blocking is the honest surface while writing.
+        onEscapeKeyDown={event => { if (phase === 'submitting') event.preventDefault() }}
+        onInteractOutside={event => { if (phase === 'submitting') event.preventDefault() }}
+        showCloseButton={phase !== 'submitting'}
         onOpenAutoFocus={event => {
           // Focus moves into the form, not back to a trigger inside a menu
           // that has already closed.
@@ -355,8 +366,11 @@ export function CreateProjectDialog({
                   disabled={phase === 'submitting'}
                   onChange={event => creator.setField('purpose', event.target.value)}
                   aria-invalid={Boolean(fieldErrors.purpose)}
+                  // X2-18: the error text is reachable as THIS control's
+                  // description, matching the name/owner field pattern.
+                  aria-describedby="create-project-purpose-hint"
                 />
-                <span className="mt-[4px] block text-[11px] leading-[1.45] text-foreground-50">
+                <span id="create-project-purpose-hint" className="mt-[4px] block text-[11px] leading-[1.45] text-foreground-50">
                   {fieldErrors.purpose ? t(fieldErrors.purpose) : ''}
                 </span>
               </label>
@@ -410,7 +424,9 @@ export function CreateProjectDialog({
                 data-testid="create-project-back-to-form"
                 onClick={creator.backToForm}
               >
-                {t('common.close')}
+                {/* E2-6: a REAL exit back to the form — the stored banner
+                    there offers the query and the unchanged re-submit. */}
+                {t('createProject.recovery.backToForm')}
               </Button>
               <Button
                 type="button"
@@ -419,7 +435,9 @@ export function CreateProjectDialog({
                 disabled={querying}
                 onClick={() => { void creator.queryReceipt() }}
               >
-                {querying ? t('createProject.submitting') : t('createProject.recovery.queryAction')}
+                {/* X2-6: querying is a READ — the verb must not re-claim the
+                    create action in a payment-responsibility context. */}
+                {querying ? t('createProject.recovery.querying') : t('createProject.recovery.queryAction')}
               </Button>
             </>
           ) : (

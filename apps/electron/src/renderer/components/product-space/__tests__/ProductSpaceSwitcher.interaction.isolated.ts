@@ -21,6 +21,10 @@ mock.module('@/components/ui/styled-dropdown', () => ({
   DropdownMenuSub: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   StyledDropdownMenuSubTrigger: ({ children, ...props }: { children?: ReactNode }) => createElement('div', props, children),
   DropdownMenuContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  // workbench-controls 静态命名导入这两个（WorkbenchMenuContent/SubContent
+  // 的基元），mock 工厂必须提供完整的命名绑定，否则模块图加载即抛
+  // SyntaxError（bun 对静态 import 做导出名校验）。
+  StyledDropdownMenuContent: ({ children, ...props }: { children?: ReactNode }) => createElement('div', props, children),
   StyledDropdownMenuSubContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   StyledDropdownMenuItem: ({ children, ...props }: { children?: ReactNode }) =>
     createElement('button', { type: 'button', ...props }, children),

@@ -10,6 +10,7 @@ import {
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { cn } from '@/lib/utils'
 import { productSpaceAvatarGlyph } from '@/lib/space-initial'
+import { useProductSpacesRefresh } from './useProductSpacesRefresh'
 
 function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
   return kind === 'personal'
@@ -20,6 +21,8 @@ function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
 export function ProductSpaceSwitcher() {
   const { t } = useTranslation()
   const space = useOptionalProductSpaceContext()
+  // X2-11: called before the early returns — hooks never sit behind them.
+  const { refreshProductSpaces } = useProductSpacesRefresh()
   if (!space) return null
 
   const active = space.activeProductSpace
@@ -97,7 +100,7 @@ export function ProductSpaceSwitcher() {
         </StyledDropdownMenuItem>
         <StyledDropdownMenuItem
           data-testid="product-space-refresh"
-          onClick={() => { void space.onRefreshProductSpaces() }}
+          onClick={() => { void refreshProductSpaces(() => space.onRefreshProductSpaces()) }}
         >
           <RefreshCw className="size-3.5" />
           {t('createProject.refreshAction')}
