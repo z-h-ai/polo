@@ -217,13 +217,13 @@ function computeEditWriteDiffStats(
 /** Shared size configuration for activity UI - exported for reuse in inline execution */
 export const SIZE_CONFIG = {
   /** Base font size class for all text */
-  fontSize: 'text-[13px]',
+  fontSize: 'text-[14px]',
   /** Icon size class (width and height) */
   iconSize: 'w-3 h-3',
   /** Spinner text size class */
-  spinnerSize: 'text-[10px]',
+  spinnerSize: 'text-[14px]',
   /** Small spinner for header */
-  spinnerSizeSmall: 'text-[8px]',
+  spinnerSizeSmall: 'text-[14px]',
   /** Activity row height in pixels (approx for calculation) */
   activityRowHeight: 24,
   /** Max visible activities before scrolling (show ~15 items) */
@@ -338,6 +338,9 @@ export interface TurnCardProps {
   onOpenFile?: (path: string) => void
   /** Callback when URL is clicked */
   onOpenUrl?: (url: string) => void
+  /** POO-172: dedicated channel for assistant-markdown citation sources
+   *  (opens in the built-in browser). Falls back to `onOpenUrl`. */
+  onOpenSourceUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
   onPopOut?: (text: string) => void
   /** Callback to open turn details in a new window */
@@ -546,13 +549,14 @@ function isResponseBuffering(response: ResponseContent | undefined): boolean {
 function getToolDisplayName(name: string): string {
   const stripped = name.replace(/^mcp__[^_]+__/, '')
 
-  // Friendly display names for specific tools
+  // Friendly display names for specific tools. POO-179: these are display
+  // copy resolved at call time; the raw tool name stays as the fallback.
   const displayNames: Record<string, string> = {
-    'TodoWrite': 'Todo List Updated',
-    'set_session_labels': 'Set Session Labels',
-    'set_session_status': 'Set Session Status',
-    'get_session_info': 'Get Session Info',
-    'list_sessions': 'List Sessions',
+    'TodoWrite': i18n.t('turnCard.todoListUpdated'),
+    'set_session_labels': i18n.t('turnCard.setSessionLabels'),
+    'set_session_status': i18n.t('turnCard.setSessionStatus'),
+    'get_session_info': i18n.t('turnCard.getSessionInfo'),
+    'list_sessions': i18n.t('turnCard.listSessions'),
   }
 
   return displayNames[stripped] || stripped
@@ -829,7 +833,7 @@ export function ActivityStatusIcon({
       const isLikelyEmoji = customIcon.length <= 8 && !/^(https?:\/\/|data:)/.test(customIcon)
       if (isLikelyEmoji) {
         return (
-          <span className={cn(SIZE_CONFIG.iconSize, "shrink-0 flex items-center justify-center text-[10px] leading-none")}>
+          <span className={cn(SIZE_CONFIG.iconSize, "shrink-0 flex items-center justify-center text-[14px] leading-none")}>
             {customIcon}
           </span>
         )
@@ -923,13 +927,14 @@ function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) 
 
 /** Single activity row in expanded view */
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
+  const { t } = useTranslation()
   const depth = activity.depth || 0
 
   // Intermediate messages (LLM commentary) - render with dashed circle icon
   // Show "Thinking" while streaming, stripped markdown content when complete
   if (activity.type === 'intermediate') {
     const isThinking = activity.status === 'running'
-    const displayContent = isThinking ? 'Thinking...' : stripMarkdown(activity.content || '')
+    const displayContent = isThinking ? t('chat.processing.thinking') : stripMarkdown(activity.content || '')
     const isComplete = activity.status === 'completed'
     return (
       <div className="flex items-stretch">
@@ -1009,7 +1014,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // - Params: Remaining tool input summary
   const toolDisplay = formatToolDisplay(activity)
   const fullDisplayName = toolDisplay.name
-    || (activity.type === 'thinking' ? 'Thinking' : 'Processing')
+    || (activity.type === 'thinking' ? t('turnCard.thinking') : t('turnCard.processing'))
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
@@ -1036,12 +1041,16 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const isComplete = activity.status === 'completed' || activity.status === 'error'
   const isBackgrounded = activity.status === 'backgrounded'
 
-  // For backgrounded tasks, show task/shell ID and elapsed time
+  // For backgrounded tasks, show task/shell ID and elapsed time.
+  // POO-179: the template is display copy; the task/shell id and duration stay verbatim.
+  const elapsedSuffix = activity.elapsedSeconds
+    ? t('turnCard.elapsedSuffix', { duration: formatDuration(activity.elapsedSeconds * 1000) })
+    : ''
   const backgroundInfo = isBackgrounded
     ? activity.taskId
-      ? `Task ID: ${activity.taskId}${activity.elapsedSeconds ? `, ${formatDuration(activity.elapsedSeconds * 1000)} elapsed` : ''}`
+      ? t('turnCard.taskIdInfo', { id: activity.taskId, elapsed: elapsedSuffix })
       : activity.shellId
-        ? `Shell ID: ${activity.shellId}${activity.elapsedSeconds ? `, ${formatDuration(activity.elapsedSeconds * 1000)} elapsed` : ''}`
+        ? t('turnCard.shellIdInfo', { id: activity.shellId, elapsed: elapsedSuffix })
         : null
     : null
 
@@ -1065,7 +1074,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
+                    className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[14px] text-destructive font-medium cursor-default shrink-0"
                     style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
                   >
                     {i18n.t('common.error')}
@@ -1078,7 +1087,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
             )}
             {/* Model badge for LLM Query */}
             {activity.toolName === 'mcp__session__call_llm' && activity.toolInput?.model && (
-              <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[10px] text-foreground/60 shrink-0">
+              <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[14px] text-foreground/60 shrink-0">
                 {String(activity.toolInput.model)}
               </span>
             )}
@@ -1112,7 +1121,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         )}
         {/* Diff stats and filename badges - after tool name */}
         {!isMcpOrApiTool && !isBackgrounded && diffStats && (
-          <span className="flex items-center gap-1.5 text-[10px] shrink-0">
+          <span className="flex items-center gap-1.5 text-[14px] shrink-0">
             {diffStats.deletions > 0 && (
               <span
                 className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_5%,var(--background))] shadow-tinted rounded-[4px] text-destructive"
@@ -1130,7 +1139,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
               // Claude Code format: file_path
               if (typeof activity.toolInput?.file_path === 'string') {
                 return (
-                  <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+                  <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[14px] text-foreground/70">
                     {normalizePath(activity.toolInput.file_path).split('/').pop()}
                   </span>
                 )
@@ -1140,7 +1149,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
                 const firstChange = activity.toolInput.changes[0] as { path?: string } | undefined
                 if (firstChange?.path) {
                   return (
-                    <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+                    <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[14px] text-foreground/70">
                       {normalizePath(firstChange.path).split('/').pop()}
                     </span>
                   )
@@ -1152,8 +1161,8 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         )}
         {/* Filename badge for Read tool (no diff stats) */}
         {!isMcpOrApiTool && !isBackgrounded && !diffStats && activity.toolName === 'Read' && typeof activity.toolInput?.file_path === 'string' && (
-          <span className="flex items-center gap-1.5 text-[10px] shrink-0">
-            <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+          <span className="flex items-center gap-1.5 text-[14px] shrink-0">
+            <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[14px] text-foreground/70">
               {normalizePath(activity.toolInput.file_path).split('/').pop()}
             </span>
           </span>
@@ -1163,10 +1172,10 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
           <Tooltip>
             <TooltipTrigger asChild>
               <span
-                className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
+                className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[14px] text-destructive font-medium cursor-default shrink-0"
                 style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
               >
-                Error
+                {t('common.error')}
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-[400px]">
@@ -1253,6 +1262,7 @@ interface ActivityGroupRowProps {
  * Provides visual containment and collapsible children.
  */
 function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+  const { t } = useTranslation()
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
   const expandedGroups = externalExpandedGroups ?? localExpandedGroups
@@ -1306,8 +1316,8 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
         <ActivityStatusIcon status={group.parent.status} toolName={group.parent.toolName} />
 
         {/* Subagent type badge */}
-        <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium">
-          {subagentType || 'Task'}
+        <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[14px] font-medium">
+          {subagentType || t('turnCard.taskFallback')}
         </span>
 
         {/* Task description or fallback */}
@@ -1315,7 +1325,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
           "truncate",
           hasError && "text-destructive"
         )}>
-          {description || 'Task'}
+          {description || t('turnCard.taskFallback')}
         </span>
 
         {/* Duration and token stats from TaskOutput (only when complete) */}
@@ -1418,6 +1428,9 @@ export interface ResponseCardProps {
   onOpenFile?: (path: string) => void
   /** Callback to open URL */
   onOpenUrl?: (url: string) => void
+  /** POO-172: dedicated channel for assistant-markdown citation sources
+   *  (opens in the built-in browser). Falls back to `onOpenUrl`. */
+  onOpenSourceUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
   onPopOut?: () => void
   /** Card variant - 'response' for AI messages, 'plan' for plan messages */
@@ -1490,7 +1503,7 @@ function BranchDropdown({ onBranch }: BranchDropdownProps) {
       <StyledDropdownMenuContent align="end" minWidth="min-w-64" sideOffset={6}>
         <StyledDropdownMenuItem onClick={handleBranchClick} className="items-start py-2">
           <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] leading-tight">{t('chat.branchFromThisMessage')}</span>
+            <span className="text-[14px] leading-tight">{t('chat.branchFromThisMessage')}</span>
             <span className="max-w-[220px] whitespace-normal text-xs leading-tight text-muted-foreground">
               {t('chat.branchFromThisMessageDescription')}
             </span>
@@ -1676,6 +1689,7 @@ export function ResponseCard({
   streamStartTime,
   onOpenFile,
   onOpenUrl,
+  onOpenSourceUrl,
   onPopOut,
   variant = 'response',
   sessionId,
@@ -2458,7 +2472,7 @@ export function ResponseCard({
               )}
             >
               <ListTodo className={cn(SIZE_CONFIG.iconSize, "text-success")} />
-              <span className="font-medium text-success">Plan</span>
+              <span className="font-medium text-success">{t('overlay.plan')}</span>
             </div>
           )}
 
@@ -2472,7 +2486,7 @@ export function ResponseCard({
             <div ref={contentLayerRef} className="relative">
               <Markdown
                 mode="minimal"
-                onUrlClick={onOpenUrl}
+                onUrlClick={onOpenSourceUrl ?? onOpenUrl}
                 onFileClick={onOpenFile}
               >
                 {text}
@@ -2577,7 +2591,7 @@ export function ResponseCard({
           isOpen={isFullscreen}
           onClose={() => setIsFullscreen(false)}
           variant={isPlan ? 'plan' : undefined}
-          onOpenUrl={onOpenUrl}
+          onOpenUrl={onOpenSourceUrl ?? onOpenUrl}
           onOpenFile={onOpenFile}
           sessionId={sessionId}
           messageId={messageId}
@@ -2609,7 +2623,7 @@ export function ResponseCard({
           <div ref={contentLayerRef} className="relative">
             <Markdown
               mode="minimal"
-              onUrlClick={onOpenUrl}
+              onUrlClick={onOpenSourceUrl ?? onOpenUrl}
               onFileClick={onOpenFile}
             >
               {displayedText}
@@ -2624,7 +2638,7 @@ export function ResponseCard({
           <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Spinner className={SIZE_CONFIG.spinnerSize} />
-              <span>Streaming...</span>
+              <span>{t('turnCard.streaming')}</span>
             </div>
           </div>
         )}
@@ -2688,13 +2702,14 @@ interface TodoListProps {
  * Styled to blend with TurnCard activities
  */
 function TodoList({ todos }: TodoListProps) {
+  const { t } = useTranslation()
   if (todos.length === 0) return null
 
   return (
     <div className="pl-4 pr-2 pt-2.5 pb-1.5 space-y-0.5 border-l-2 border-muted ml-[13px]">
       {/* Header */}
       <div className={cn("text-muted-foreground pb-1", SIZE_CONFIG.fontSize)}>
-        Todo List
+        {t('turnCard.todoList')}
       </div>
       {/* Todo items */}
       {todos.map((todo, index) => (
@@ -2739,6 +2754,7 @@ export const TurnCard = React.memo(function TurnCard({
   onExpandedActivityGroupsChange,
   onOpenFile,
   onOpenUrl,
+  onOpenSourceUrl,
   onPopOut,
   onOpenDetails,
   onOpenActivityDetails,
@@ -2763,6 +2779,7 @@ export const TurnCard = React.memo(function TurnCard({
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
+  const { t } = useTranslation()
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
   // replacing the old ad-hoc boolean combinations.
@@ -3028,7 +3045,7 @@ export const TurnCard = React.memo(function TurnCard({
             </motion.div>
 
             {/* Step count badge */}
-            <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
+            <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[14px] font-medium tabular-nums">
               {activities.length}
             </span>
 
@@ -3158,7 +3175,7 @@ export const TurnCard = React.memo(function TurnCard({
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
                     >
                       <Spinner className={SIZE_CONFIG.spinnerSize} />
-                      <span>{isBuffering ? 'Preparing response...' : 'Thinking...'}</span>
+                      <span>{isBuffering ? t('turnCard.preparingResponse') : t('chat.processing.thinking')}</span>
                     </motion.div>
                   )}
                   </AnimatePresence>
@@ -3187,7 +3204,7 @@ export const TurnCard = React.memo(function TurnCard({
               className="rounded-[8px] border bg-muted/10 px-3 py-2.5 flex items-center gap-2"
             >
               <Spinner className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-              <span className="text-[13px] text-muted-foreground truncate">
+              <span className="text-[14px] text-muted-foreground truncate">
                 {skeleton.title
                   ? i18n.t('genui.skeleton.buildingNamed', {
                       name: skeletonTypeDisplayName(skeleton.type),
@@ -3218,7 +3235,7 @@ export const TurnCard = React.memo(function TurnCard({
       {!hasActivities && isThinking && !animateResponse && (
         <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
           <Spinner className={SIZE_CONFIG.spinnerSize} />
-          <span>{isBuffering ? 'Preparing response...' : 'Thinking...'}</span>
+          <span>{isBuffering ? t('turnCard.preparingResponse') : t('chat.processing.thinking')}</span>
         </div>
       )}
 
@@ -3231,6 +3248,7 @@ export const TurnCard = React.memo(function TurnCard({
             sessionId={sessionId}
             onOpenFile={onOpenFile}
             onOpenUrl={onOpenUrl}
+            onOpenSourceUrl={onOpenSourceUrl}
             onPopOut={onPopOut ? () => onPopOut(planActivity.content || '') : undefined}
             variant="plan"
             messageId={planActivity.messageId}
@@ -3270,6 +3288,7 @@ export const TurnCard = React.memo(function TurnCard({
                 sessionId={sessionId}
                 onOpenFile={onOpenFile}
                 onOpenUrl={onOpenUrl}
+                onOpenSourceUrl={onOpenSourceUrl}
                 onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
                 variant={response.isPlan ? 'plan' : 'response'}
                 messageId={response.messageId}
@@ -3302,6 +3321,7 @@ export const TurnCard = React.memo(function TurnCard({
             sessionId={sessionId}
             onOpenFile={onOpenFile}
             onOpenUrl={onOpenUrl}
+            onOpenSourceUrl={onOpenSourceUrl}
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
             variant={response.isPlan ? 'plan' : 'response'}
             messageId={response.messageId}
@@ -3361,6 +3381,10 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render when active follow-up annotation state changes (plan CTA label)
   if (prev.hasActiveFollowUpAnnotations !== next.hasActiveFollowUpAnnotations) return false
+
+  // Re-render when a callback changed — e.g. POO-172 swaps in the dedicated
+  // citation-source channel after mount; a cached card would keep the old one.
+  if (prev.onOpenSourceUrl !== next.onOpenSourceUrl) return false
 
   // For complete, non-streaming turns: skip re-render only when both
   // session and turn identities match. Prevents stale local UI state from

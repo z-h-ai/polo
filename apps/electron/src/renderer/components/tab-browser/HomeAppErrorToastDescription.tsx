@@ -39,7 +39,7 @@ export function HomeAppErrorToastDescription({ presentation }: { presentation: H
           event.stopPropagation()
           void copyCode()
         }}
-        className="inline-flex max-w-full items-center gap-1.5 rounded-[6px] border border-border bg-background px-2 py-1 text-[11px] font-medium text-foreground-70 outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex max-w-full items-center gap-1.5 rounded-[6px] border border-border bg-background px-2 py-1 text-[14px] font-medium text-foreground-70 outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring"
         title={t('infraError.copyErrorCode')}
         aria-label={t('infraError.copyErrorCode')}
       >

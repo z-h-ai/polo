@@ -16,7 +16,7 @@ import { resolveEntityColor } from '@polo-ai/shared/colors'
 import { useTheme } from '@/context/ThemeContext'
 import { useDynamicStack } from '@/hooks/useDynamicStack'
 import type { SessionStatus } from '@/config/session-status-config'
-import { getState } from '@/config/session-status-config'
+import { getState, getStatusLabel } from '@/config/session-status-config'
 import { SessionStatusMenu } from '@/components/ui/session-status-menu'
 import { MetadataBadge } from '@/components/ui/metadata-badge'
 import { SessionInfoPopover } from './SessionInfoPopover'
@@ -363,8 +363,7 @@ function StateBadge({
   const badgeColor = state.resolvedColor || 'var(--foreground)'
   const applyColor = state.iconColorable
 
-  const DEFAULT_STATUS_IDS = new Set(['backlog', 'todo', 'needs-review', 'done', 'cancelled'])
-  const stateLabel = DEFAULT_STATUS_IDS.has(state.id) ? t(`status.${state.id}`, state.label) : state.label
+  const stateLabel = getStatusLabel(state, t)
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

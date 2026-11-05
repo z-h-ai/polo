@@ -45,7 +45,7 @@ export const BrowserTabBadge = forwardRef<HTMLButtonElement, BrowserTabBadgeProp
       type="button"
       className={`
         group flex items-center gap-1 h-[26px] pl-2.5 pr-1.5 rounded-lg cursor-pointer select-none titlebar-no-drag
-        text-[11px] leading-tight transition-colors max-w-[160px] shadow-minimal
+        text-[14px] leading-tight transition-colors max-w-[160px] shadow-minimal
         bg-background
         ${foregroundClass}
         ${instance.agentControlActive ? 'border border-accent' : ''}
@@ -61,7 +61,7 @@ export const BrowserTabBadge = forwardRef<HTMLButtonElement, BrowserTabBadgeProp
     >
       <span className={`shrink-0 flex items-center justify-center ${isDarkThemeColor ? 'h-3.5 w-3.5' : 'h-3 w-3'}`}>
         {instance.isLoading ? (
-          <Spinner className="text-[9px] leading-none" />
+          <Spinner className="text-[14px] leading-none" />
         ) : instance.favicon && !faviconFailed ? (
           isDarkThemeColor ? (
             <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-[4px] bg-white/90 p-[1px] leading-none">

@@ -186,7 +186,7 @@ function SessionListSearchPreview({
               <div className="flex flex-col pb-4">
                 {/* Date header */}
                 <div className="px-4 py-2">
-                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  <span className="text-[14px] font-medium text-muted-foreground uppercase tracking-wider">
                     Today
                   </span>
                 </div>

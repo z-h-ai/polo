@@ -143,7 +143,7 @@ export function AdminLoginStep({
         <div className="flex flex-col justify-between bg-foreground-3 p-[54px] client-material-brand [@media(max-width:760px)]:hidden">
           <div>
             <div className="flex items-center gap-[9px] pb-[16px] pl-[8px] pt-[4px]">
-              <span className="grid size-[26px] flex-none place-items-center rounded-[8px] bg-foreground text-[13px] font-extrabold text-background">
+              <span className="grid size-[26px] flex-none place-items-center rounded-[8px] bg-foreground text-[14px] font-extrabold text-background">
                 P
               </span>
               <span className="text-[14px] font-bold text-foreground">
@@ -159,7 +159,7 @@ export function AdminLoginStep({
           </div>
           <div className="flex flex-col gap-[12px]">
             {STORY_POINTS.map(({ key }) => (
-              <div key={key} className="flex items-center gap-[10px] text-[12px] text-foreground">
+              <div key={key} className="flex items-center gap-[10px] text-[14px] text-foreground">
                 <span className="grid size-[21px] flex-none place-items-center rounded-full bg-success/10 text-success">
                   <Check className="size-3" strokeWidth={2.4} />
                 </span>
@@ -171,7 +171,7 @@ export function AdminLoginStep({
 
         {/* === RIGHT: login panel (existing auth logic, prototype `.login-panel`) === */}
         <div className="flex flex-col justify-center p-[46px] [@media(max-width:760px)]:px-[22px] [@media(max-width:760px)]:py-[28px]">
-          <p className="m-0 mb-[7px] text-[11px] font-medium tracking-[0.75px] text-foreground-50 uppercase">
+          <p className="m-0 mb-[7px] text-[14px] font-medium tracking-[0.75px] text-foreground-50 uppercase">
             {t("onboarding.adminLogin.eyebrow")}
           </p>
 
@@ -206,7 +206,7 @@ export function AdminLoginStep({
               <h2 className="m-0 text-[22px] font-bold text-foreground">
                 {t("onboarding.adminLogin.passwordLogin")}
               </h2>
-              <p className="mt-[8px] text-[12px] leading-[1.55] text-foreground-50">
+              <p className="mt-[8px] text-[14px] leading-[1.55] text-foreground-50">
                 {t("onboarding.adminLogin.subtitle")}
               </p>
               {errorBlock}
@@ -215,7 +215,7 @@ export function AdminLoginStep({
                 onSubmit={handleSubmit}
                 className="mt-[20px] grid gap-[15px]"
               >
-                <label className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
+                <label className="grid gap-[7px] text-[14px] font-semibold text-foreground-60">
                   {t("onboarding.adminLogin.identifier")}
                   <Input
                     id="admin-identifier"
@@ -227,12 +227,12 @@ export function AdminLoginStep({
                       onClearError()
                     }}
                     disabled={isLoading}
-                    className="h-[44px] rounded-[10px] border-border bg-foreground-3 px-[12px] text-[11px] md:text-[11px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0"
+                    className="h-[44px] rounded-[10px] border-border bg-foreground-3 px-[12px] text-[14px] md:text-[14px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0"
                   />
                 </label>
 
-                <div className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
-                  <Label htmlFor="admin-password" className="text-[11px] font-semibold text-foreground-60">
+                <div className="grid gap-[7px] text-[14px] font-semibold text-foreground-60">
+                  <Label htmlFor="admin-password" className="text-[14px] font-semibold text-foreground-60">
                     {t("onboarding.adminLogin.password")}
                   </Label>
                   <div className="relative">
@@ -247,7 +247,7 @@ export function AdminLoginStep({
                         onClearError()
                       }}
                       disabled={isLoading}
-                      className="h-[44px] rounded-[10px] border-border bg-foreground-3 px-[12px] text-[11px] md:text-[11px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0 pr-11"
+                      className="h-[44px] rounded-[10px] border-border bg-foreground-3 px-[12px] text-[14px] md:text-[14px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0 pr-11"
                     />
                     <button
                       type="button"
@@ -269,7 +269,7 @@ export function AdminLoginStep({
                 <button
                   type="submit"
                   disabled={isLoading || !identifier.trim() || !password || !consented}
-                  className="inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50 client-material-control"
+                  className="inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50 client-material-control"
                 >
                   {isLoading ? (
                     <>
@@ -285,7 +285,7 @@ export function AdminLoginStep({
                   <button
                     type="button"
                     onClick={onCancel}
-                    className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[12px] font-medium hover:bg-foreground-5"
+                    className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-border px-[12px] text-[14px] font-medium hover:bg-foreground-5"
                   >
                     {t('common.cancel')}
                   </button>

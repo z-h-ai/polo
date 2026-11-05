@@ -14,6 +14,7 @@ import { computeNextRuns } from './utils'
 import type { PermissionMode } from '../../../shared/types'
 import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
 import { DEFAULT_WEBHOOK_METHOD } from './constants'
+import i18n from 'i18next'
 
 // ============================================================================
 // Automation System Types (mirrored from packages/shared/src/automations/types.ts)
@@ -121,7 +122,9 @@ const FIELD_LABELS: Record<string, string> = {
 
 /** Get a readable field name, falling back to the raw field */
 function fieldLabel(field: string): string {
-  return FIELD_LABELS[field] ?? field
+  // POO-179: display copy resolves at call time so a language switch re-translates;
+  // the raw field name stays untouched as the ultimate fallback.
+  return i18n.t(`automations.field.${field}`, { defaultValue: FIELD_LABELS[field] ?? field })
 }
 
 /** Produce a short human-readable label for a single leaf condition */
@@ -130,38 +133,55 @@ function describeLeaf(c: AutomationConditionUI): string {
     case 'time': {
       const parts: string[] = []
       if (c.weekday?.length) parts.push(c.weekday.join(', '))
-      if (c.after) parts.push(`after ${c.after}`)
-      if (c.before) parts.push(`before ${c.before}`)
+      if (c.after) parts.push(i18n.t('automations.cond.after', { time: c.after }))
+      if (c.before) parts.push(i18n.t('automations.cond.before', { time: c.before }))
       if (c.timezone) parts.push(`(${c.timezone})`)
-      return parts.length ? parts.join(' ') : 'any time'
+      return parts.length ? parts.join(' ') : i18n.t('automations.cond.anyTime')
     }
     case 'state': {
       const label = fieldLabel(c.field)
       if (c.from !== undefined || c.to !== undefined) {
         const from = c.from !== undefined ? String(c.from) : 'any'
         const to = c.to !== undefined ? String(c.to) : 'any'
-        return `${label} changed from ${from} to ${to}`
+        return i18n.t('automations.cond.changedFromTo', { field: label, from, to })
       }
-      if (c.contains) return `has ${label} "${c.contains}"`
+      if (c.contains) return i18n.t('automations.cond.has', { field: label, value: c.contains })
       if (c.not_value !== undefined) {
-        if (c.field === 'isFlagged') return c.not_value ? 'not flagged' : 'is flagged'
-        return `${label} is not ${String(c.not_value)}`
+        if (c.field === 'isFlagged') return i18n.t(c.not_value ? 'automations.cond.notFlagged' : 'automations.cond.isFlagged')
+        return i18n.t('automations.cond.isNotValue', { field: label, value: String(c.not_value) })
       }
       if (c.value !== undefined) {
-        if (c.field === 'isFlagged') return c.value ? 'is flagged' : 'not flagged'
-        return `${label} is ${String(c.value)}`
+        if (c.field === 'isFlagged') return i18n.t(c.value ? 'automations.cond.isFlagged' : 'automations.cond.notFlagged')
+        return i18n.t('automations.cond.isValue', { field: label, value: String(c.value) })
       }
       return label
     }
     case 'and':
     case 'or':
     case 'not': {
-      const sep = c.condition === 'not' ? ' and not ' : ` ${c.condition} `
+      const sep = conditionSeparator(c.condition)
       return c.conditions.map(describeLeaf).join(sep)
     }
     default:
-      return 'unknown condition'
+      return i18n.t('automations.cond.unknown')
   }
+}
+
+/** Localized joiner for logical conditions (display copy only) */
+function conditionSeparator(condition: 'and' | 'or' | 'not'): string {
+  const word = condition === 'not'
+    ? i18n.t('automations.cond.andNot')
+    : condition === 'or'
+      ? i18n.t('automations.cond.or')
+      : i18n.t('automations.cond.and')
+  return ` ${word} `
+}
+
+/** Localized row label for a condition node (display copy only) */
+function conditionLabel(condition?: AutomationConditionUI['condition']): string {
+  if (condition === 'time') return i18n.t('automations.condLabel.time')
+  if (condition === 'state') return i18n.t('automations.condLabel.state')
+  return i18n.t('automations.condLabel.condition')
 }
 
 /**
@@ -174,19 +194,14 @@ export function flattenConditions(conditions: AutomationConditionUI[]): { label:
   for (const c of conditions) {
     if (c.condition === 'and' || c.condition === 'or' || c.condition === 'not') {
       // Flatten: join inner descriptions with the operator
-      const sep = c.condition === 'not' ? ' and not ' : ` ${c.condition} `
+      const sep = conditionSeparator(c.condition)
       const inner = c.conditions.map(describeLeaf).join(sep)
       // Use the label of the first child type, or 'Condition' as fallback
       const firstChild = c.conditions[0]
-      const label = firstChild
-        ? firstChild.condition === 'time' ? 'Time'
-          : firstChild.condition === 'state' ? 'State'
-          : 'Condition'
-        : 'Condition'
+      const label = conditionLabel(firstChild ? firstChild.condition : undefined)
       rows.push({ label, description: inner })
     } else {
-      const label = c.condition === 'time' ? 'Time' : c.condition === 'state' ? 'State' : 'Condition'
-      rows.push({ label, description: describeLeaf(c) })
+      rows.push({ label: conditionLabel(c.condition), description: describeLeaf(c) })
     }
   }
   return rows
@@ -330,7 +345,9 @@ export const EVENT_DISPLAY_NAMES: Record<AutomationTrigger, string> = {
 }
 
 export function getEventDisplayName(event: AutomationTrigger): string {
-  return EVENT_DISPLAY_NAMES[event] ?? event
+  // POO-179: resolves at call time; the English constant is the defaultValue
+  // ladder before the raw event name. The stored event value is never rewritten.
+  return i18n.t(`automations.event.${event}`, { defaultValue: EVENT_DISPLAY_NAMES[event] ?? event })
 }
 
 /** Maps permission mode values to user-friendly labels */
@@ -341,8 +358,8 @@ export const PERMISSION_DISPLAY_NAMES: Record<PermissionMode, string> = {
 }
 
 export function getPermissionDisplayName(mode?: PermissionMode): string {
-  if (!mode) return 'Explore'
-  return PERMISSION_DISPLAY_NAMES[mode] ?? mode
+  if (!mode) return i18n.t('mode.safe')
+  return i18n.t(`mode.${mode}`, { defaultValue: PERMISSION_DISPLAY_NAMES[mode] ?? mode })
 }
 
 // ============================================================================

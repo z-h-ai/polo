@@ -372,7 +372,7 @@ export function EntityRow({
           {subtitle && (
             <div
               data-testid={subtitleTestId}
-              className="flex items-start gap-[10px] w-full text-[12px] text-foreground/55 min-w-0 -mt-1"
+              className="flex items-start gap-[10px] w-full text-[14px] text-foreground/55 min-w-0 -mt-1"
             >
               {icon && (
                 <div className="shrink-0 flex items-center gap-[10px] [&>*]:w-3 [&>*]:h-3 invisible" aria-hidden="true">

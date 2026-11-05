@@ -79,7 +79,7 @@ export function MermaidPreviewOverlay({
       onClose={onClose}
       typeBadge={{
         icon: GitGraph,
-        label: 'Diagram',
+        label: t('overlay.diagram'),
         variant: 'purple',
       }}
       title={t('overlay.mermaidDiagram')}

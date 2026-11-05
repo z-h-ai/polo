@@ -889,14 +889,14 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
         data-testid={`kb-doc-pending-${row.qid}`}
         data-stage={row.stage}
       >
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground-70" title={row.fileName}>
+        <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-foreground-70" title={row.fileName}>
           {row.title}
         </span>
-        <span className={`inline-flex min-h-[20px] shrink-0 items-center gap-[5px] rounded-full px-[8px] text-[10px] font-semibold ${badge.className}`}>
+        <span className={`inline-flex min-h-[20px] shrink-0 items-center gap-[5px] rounded-full px-[8px] text-[14px] font-semibold ${badge.className}`}>
           {badge.spin && <Icons.LoaderCircle className="size-[11px] animate-spin" aria-hidden="true" />}
           {badge.label}
         </span>
-        <span className="shrink-0 text-[11px] text-foreground-40">{row.fileName}</span>
+        <span className="shrink-0 text-[14px] text-foreground-40">{row.fileName}</span>
         <span className="flex shrink-0 items-center gap-[6px]">
           {row.stage === 'queued' && (
             <Button
@@ -922,7 +922,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
           )}
           {row.stage === 'failed' && (
             <>
-              <span className="text-[11px] text-destructive" data-testid={`kb-upload-failed-${row.qid}`}>
+              <span className="text-[14px] text-destructive" data-testid={`kb-upload-failed-${row.qid}`}>
                 {row.errorText ?? t('knowledgeBase.pending.failedHint')}
               </span>
               <Button
@@ -938,7 +938,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
           )}
           {row.stage === 'unknown' && (
             <>
-              <span className="text-[11px] text-destructive">
+              <span className="text-[14px] text-destructive">
                 {t('knowledgeBase.pending.unknownHint')}
               </span>
               <Button
@@ -966,7 +966,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
           )}
           {row.verifyMissed && (
             <>
-              <span className="text-[11px] text-destructive" data-testid={`kb-upload-verify-missed-${row.qid}`}>
+              <span className="text-[14px] text-destructive" data-testid={`kb-upload-verify-missed-${row.qid}`}>
                 {t('knowledgeBase.pending.verifiedMissing')}
               </span>
               <Button
@@ -997,7 +997,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
             <h1 className="m-0 text-[clamp(26px,2.6vw,32px)] font-[750] leading-[1.1] tracking-[-0.05em]">
               {t('knowledgeBase.title')}
             </h1>
-            <p className="mt-[8px] max-w-[690px] text-[13px] leading-[1.6] text-foreground-60">
+            <p className="mt-[8px] max-w-[690px] text-[14px] leading-[1.6] text-foreground-60">
               {t('knowledgeBase.lead')}
             </p>
           </div>
@@ -1017,7 +1017,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
 
         {syncFailed && !loading && (
           <div
-            className="mb-[12px] flex flex-wrap items-center gap-[10px] rounded-[10px] border border-destructive/25 bg-destructive/10 px-[12px] py-[8px] text-[12px]"
+            className="mb-[12px] flex flex-wrap items-center gap-[10px] rounded-[10px] border border-destructive/25 bg-destructive/10 px-[12px] py-[8px] text-[14px]"
             data-testid="kb-sync-banner"
           >
             <Icons.CloudOff className="size-[14px] shrink-0 text-destructive" aria-hidden="true" />
@@ -1050,7 +1050,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
             data-testid="kb-load-error"
           >
             <Icons.CloudOff className="size-5 text-destructive" aria-hidden="true" />
-            <p className="m-0 text-[13px] text-destructive">{loadError}</p>
+            <p className="m-0 text-[14px] text-destructive">{loadError}</p>
             <Button
               type="button"
               variant="secondary"
@@ -1067,7 +1067,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
           >
             <Icons.Library className="size-[24px] text-muted-foreground" aria-hidden="true" />
             <h2 className="m-0 text-[15px] font-bold">{t('knowledgeBase.emptyTitle')}</h2>
-            <p className="m-0 max-w-[460px] text-[12px] leading-[1.6] text-muted-foreground">
+            <p className="m-0 max-w-[460px] text-[14px] leading-[1.6] text-muted-foreground">
               {t('knowledgeBase.emptyHint')}
             </p>
           </div>
@@ -1091,13 +1091,13 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                     }`}
                   >
                     <span className="flex w-full items-center gap-[6px]">
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{collection.name}</span>
-                      <span className="inline-flex min-h-[18px] shrink-0 items-center rounded-full bg-foreground/8 px-[7px] text-[10px] font-medium text-foreground-70">
+                      <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{collection.name}</span>
+                      <span className="inline-flex min-h-[18px] shrink-0 items-center rounded-full bg-foreground/8 px-[7px] text-[14px] font-medium text-foreground-70">
                         {collection.documentCounts.published}
                       </span>
                     </span>
                     {collection.description && (
-                      <span className="line-clamp-2 text-[11px] leading-[1.5] text-foreground-50">
+                      <span className="line-clamp-2 text-[14px] leading-[1.5] text-foreground-50">
                         {collection.description}
                       </span>
                     )}
@@ -1112,9 +1112,9 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                   data-pending-name={row.name}
                 >
                   <span className="flex w-full items-center gap-[6px]">
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{row.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{row.name}</span>
                     <span
-                      className="inline-flex min-h-[18px] shrink-0 items-center gap-[5px] rounded-full bg-accent/10 px-[7px] text-[10px] font-semibold text-accent"
+                      className="inline-flex min-h-[18px] shrink-0 items-center gap-[5px] rounded-full bg-accent/10 px-[7px] text-[14px] font-semibold text-accent"
                       data-testid="kb-pending-collection-badge"
                     >
                       <Icons.LoaderCircle className="size-[11px] animate-spin" aria-hidden="true" />
@@ -1122,7 +1122,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                     </span>
                   </span>
                   {row.description && (
-                    <span className="line-clamp-2 text-[11px] leading-[1.5] text-foreground-50">
+                    <span className="line-clamp-2 text-[14px] leading-[1.5] text-foreground-50">
                       {row.description}
                     </span>
                   )}
@@ -1141,7 +1141,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                     {selectedCollection?.name ?? t('knowledgeBase.documentsTitle')}
                   </h2>
                   {selectedCollection?.description && (
-                    <p className="m-0 mt-[2px] truncate text-[11px] text-muted-foreground">
+                    <p className="m-0 mt-[2px] truncate text-[14px] text-muted-foreground">
                       {selectedCollection.description}
                     </p>
                   )}
@@ -1166,7 +1166,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                   <Icons.LoaderCircle className="size-4 animate-spin text-muted-foreground" />
                 </div>
               ) : documents.length === 0 && visibleUploads.length === 0 ? (
-                <p className="m-0 px-[16px] py-[28px] text-center text-[12px] text-muted-foreground">
+                <p className="m-0 px-[16px] py-[28px] text-center text-[14px] text-muted-foreground">
                   {canManage ? t('knowledgeBase.documentsEmptyManage') : t('knowledgeBase.documentsEmptyMember')}
                 </p>
               ) : (
@@ -1185,14 +1185,14 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                         <button
                           type="button"
                           onClick={() => openPreview(doc)}
-                          className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground hover:text-accent"
+                          className="min-w-0 flex-1 truncate text-left text-[14px] font-medium text-foreground hover:text-accent"
                           title={doc.title}
                         >
                           {doc.title}
                         </button>
                         {pending ? (
                           <span
-                            className="inline-flex min-h-[20px] shrink-0 items-center gap-[5px] rounded-full bg-accent/10 px-[8px] text-[10px] font-semibold text-accent"
+                            className="inline-flex min-h-[20px] shrink-0 items-center gap-[5px] rounded-full bg-accent/10 px-[8px] text-[14px] font-semibold text-accent"
                             data-testid={`kb-row-pending-${doc.id}`}
                           >
                             <Icons.LoaderCircle className="size-[11px] animate-spin" aria-hidden="true" />
@@ -1200,13 +1200,13 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                           </span>
                         ) : (
                           <span
-                            className={`inline-flex min-h-[20px] shrink-0 items-center rounded-full px-[8px] text-[10px] font-semibold ${KB_STATUS_BADGE[doc.status]}`}
+                            className={`inline-flex min-h-[20px] shrink-0 items-center rounded-full px-[8px] text-[14px] font-semibold ${KB_STATUS_BADGE[doc.status]}`}
                             data-testid={`kb-document-status-${doc.id}`}
                           >
                             {statusLabel(doc.status)}
                           </span>
                         )}
-                        <span className="shrink-0 text-[11px] text-foreground-40">
+                        <span className="shrink-0 text-[14px] text-foreground-40">
                           {t('knowledgeBase.versionShort', { version: doc.version })}
                         </span>
                         <span className="flex shrink-0 items-center gap-[6px]">
@@ -1214,12 +1214,12 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                         </span>
                         {failed && (
                           <span className="flex shrink-0 items-center gap-[6px]">
-                            <span className="text-[11px] text-destructive" data-testid={`kb-trans-failed-${doc.id}`}>
+                            <span className="text-[14px] text-destructive" data-testid={`kb-trans-failed-${doc.id}`}>
                               {failed.message}
                             </span>
                             <button
                               type="button"
-                              className="min-h-[22px] rounded-[6px] px-[6px] text-[11px] font-bold text-destructive underline underline-offset-2 hover:bg-destructive/10"
+                              className="min-h-[22px] rounded-[6px] px-[6px] text-[14px] font-bold text-destructive underline underline-offset-2 hover:bg-destructive/10"
                               data-testid={`kb-trans-retry-${doc.id}`}
                               onClick={() => startTransition(doc, failed.op, { reason: failed.reason })}
                             >
@@ -1228,7 +1228,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                           </span>
                         )}
                         {doc.status === 'rejected' && doc.rejectReason && (
-                          <p className="m-0 w-full text-[11px] leading-[1.5] text-destructive/80">
+                          <p className="m-0 w-full text-[14px] leading-[1.5] text-destructive/80">
                             {t('knowledgeBase.rejectReasonDetail', { reason: doc.rejectReason })}
                           </p>
                         )}
@@ -1256,7 +1256,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
             <DialogDescription>{t('knowledgeBase.createCollectionDescription')}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-[12px] px-[20px] pb-[18px]">
-            <label className="grid gap-[6px] text-[12px] text-muted-foreground">
+            <label className="grid gap-[6px] text-[14px] text-muted-foreground">
               <span>{t('knowledgeBase.collectionName')}</span>
               <Input
                 value={collectionDraft.name}
@@ -1265,7 +1265,7 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
                 onChange={event => setCollectionDraft(draft => ({ ...draft, name: event.target.value }))}
               />
             </label>
-            <label className="grid gap-[6px] text-[12px] text-muted-foreground">
+            <label className="grid gap-[6px] text-[14px] text-muted-foreground">
               <span>{t('knowledgeBase.collectionDescription')}</span>
               <Textarea
                 value={collectionDraft.description}
@@ -1418,26 +1418,26 @@ export function KnowledgeBaseApp({ pollIntervalMs }: KnowledgeBaseAppProps = {})
             {preview?.loading ? (
               <div className="grid min-h-[200px] content-center place-items-center" data-testid="kb-preview-shimmer">
                 <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-                <span className="mt-[8px] text-[12px] text-muted-foreground">
+                <span className="mt-[8px] text-[14px] text-muted-foreground">
                   {t('knowledgeBase.previewLoading')}
                 </span>
               </div>
             ) : preview?.error ? (
               <div className="grid min-h-[120px] content-center justify-items-center gap-[10px]" data-testid="kb-preview-error">
-                <p className="m-0 text-[13px] text-destructive">{preview.error}</p>
+                <p className="m-0 text-[14px] text-destructive">{preview.error}</p>
               </div>
             ) : (
               <div className="grid gap-[12px] min-[721px]:grid-cols-2">
                 <div className="grid min-w-0 content-start gap-[6px]">
-                  <h4 className="m-0 text-[11px] font-semibold tracking-[0.4px] text-foreground-50">
+                  <h4 className="m-0 text-[14px] font-semibold tracking-[0.4px] text-foreground-50">
                     {t('knowledgeBase.previewRawLabel')}
                   </h4>
-                  <pre className="m-0 max-h-[46vh] min-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded-[10px] border border-border bg-surface-strong px-[11px] py-[9px] font-mono text-[12px] leading-[1.6] text-foreground-80">
+                  <pre className="m-0 max-h-[46vh] min-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded-[10px] border border-border bg-surface-strong px-[11px] py-[9px] font-mono text-[14px] leading-[1.6] text-foreground-80">
                     {preview?.content}
                   </pre>
                 </div>
                 <div className="grid min-w-0 content-start gap-[6px]">
-                  <h4 className="m-0 text-[11px] font-semibold tracking-[0.4px] text-foreground-50">
+                  <h4 className="m-0 text-[14px] font-semibold tracking-[0.4px] text-foreground-50">
                     {t('knowledgeBase.previewRenderedLabel')}
                   </h4>
                   <div

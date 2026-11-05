@@ -141,7 +141,7 @@ function renderBadgeHTML(
     // Check for emoji marker - render as text, not image
     if (cachedIconUrl.startsWith(EMOJI_ICON_PREFIX)) {
       const emoji = cachedIconUrl.slice(EMOJI_ICON_PREFIX.length)
-      iconHtml = `<span class="h-[12px] w-[12px] flex items-center justify-center text-[10px] leading-none shrink-0">${emoji}</span>`
+      iconHtml = `<span class="h-[12px] w-[12px] flex items-center justify-center text-[14px] leading-none shrink-0">${emoji}</span>`
     } else {
       // Use cached icon as img (data URL or external URL)
       iconHtml = `<img src="${cachedIconUrl}" class="h-[12px] w-[12px] rounded-[2px] shrink-0" alt="" />`
@@ -165,7 +165,7 @@ function renderBadgeHTML(
 
   // Line height is increased when badges are present (see hasMentions in component)
   // Use transform for upward shift - doesn't affect layout flow (works even at start of line)
-  return `<span contenteditable="false" data-mention="true"${titleAttr} class="mention-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-1 rounded-[5px] bg-background shadow-minimal text-[12px] text-foreground select-none [&_*]:selection:bg-transparent selection:bg-transparent" style="vertical-align: middle; transform: translateY(-1px)">${iconHtml}<span class="truncate max-w-[200px]">${escapedLabel}</span></span>`
+  return `<span contenteditable="false" data-mention="true"${titleAttr} class="mention-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-1 rounded-[5px] bg-background shadow-minimal text-[14px] text-foreground select-none [&_*]:selection:bg-transparent selection:bg-transparent" style="vertical-align: middle; transform: translateY(-1px)">${iconHtml}<span class="truncate max-w-[200px]">${escapedLabel}</span></span>`
 }
 
 // ============================================================================
@@ -523,6 +523,8 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const divRef = React.useRef<HTMLDivElement>(null)
     const [isFocused, setIsFocused] = React.useState(false)
     const isComposing = React.useRef(false)
+    // IME may already draw text before the controlled value is committed.
+    const [hasEditorContent, setHasEditorContent] = React.useState(Boolean(safeValue))
     const lastValueRef = React.useRef(safeValue)
     const cursorPositionRef = React.useRef(0)
     const lastMentionSignatureRef = React.useRef('')
@@ -590,11 +592,21 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }), [])
 
     // Handle input events
-    const handleInput = React.useCallback(() => {
-      if (isComposing.current) return
+    const handleInput = React.useCallback((event?: React.FormEvent<HTMLDivElement>) => {
       if (!divRef.current) return
 
-      const newText = getTextFromElement(divRef.current)
+      const inputType = (event?.nativeEvent as InputEvent | undefined)?.inputType ?? ''
+      const isSingleBreak = divRef.current.childNodes.length === 1
+        && divRef.current.firstChild?.nodeName === 'BR'
+      // A lone BR is ambiguous: Chromium's empty caret host or a real newline.
+      // Resolve it only at the editor root, retaining a known/inserted newline.
+      // Range fragments must always count their BRs when measuring the cursor.
+      const isRealNewline = inputType === 'insertLineBreak' || inputType === 'insertParagraph'
+        || (lastValueRef.current === '\n' && !inputType.startsWith('delete'))
+      const newText = isSingleBreak && !isRealNewline ? '' : getTextFromElement(divRef.current)
+      setHasEditorContent(Boolean(newText))
+      // Keep unfinished IME text local while still showing what the editor draws.
+      if (isComposing.current) return
       const cursorPos = getCursorPosition(divRef.current, cursorPositionRef.current)
 
       lastValueRef.current = newText
@@ -692,6 +704,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
       const html = textToHTML(safeValue, skills, sources, workspaceId)
       divRef.current.innerHTML = html || '<br>'
+      setHasEditorContent(Boolean(safeValue))
 
       // Restore cursor position after innerHTML update.
       // Only restore if:
@@ -758,7 +771,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }, [])
 
     // Show placeholder when input is empty (regardless of focus state)
-    const showPlaceholder = !safeValue
+    const showPlaceholder = !safeValue && !hasEditorContent
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {

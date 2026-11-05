@@ -220,14 +220,14 @@ export function WorkspaceSwitcher({
             <button
               type="button"
               data-workspace-switcher="topbar"
-              className="header-icon-btn titlebar-no-drag ml-1 flex-1 min-w-0 flex items-center justify-start gap-0.5 h-[30px] px-3 rounded-[8px] border border-foreground/6 text-[13px] text-foreground/50 hover:bg-foreground/5 hover:text-foreground transition-colors cursor-pointer data-[state=open]:bg-foreground/5 data-[state=open]:text-foreground"
+              className="header-icon-btn titlebar-no-drag ml-1 flex-1 min-w-0 flex items-center justify-start gap-0.5 h-[30px] px-3 rounded-[8px] border border-foreground/6 text-[14px] text-foreground/50 hover:bg-foreground/5 hover:text-foreground transition-colors cursor-pointer data-[state=open]:bg-foreground/5 data-[state=open]:text-foreground"
               aria-label={t('workspace.selectWorkspace')}
             >
               <CrossfadeAvatar
                 src={selectedWorkspace ? workspaceIconMap.get(selectedWorkspace.id) : undefined}
                 alt={selectedWorkspace?.name}
                 className="h-4 w-4 mr-1.5 rounded-full ring-1 ring-border/50"
-                fallbackClassName="bg-muted text-[10px] rounded-full"
+                fallbackClassName="bg-muted text-[14px] rounded-full"
                 fallback={selectedWorkspace?.name?.charAt(0) || 'W'}
               />
               <span className="truncate min-w-0 flex-1 text-left">{selectedWorkspace?.name || 'Workspace'}</span>
@@ -253,7 +253,7 @@ export function WorkspaceSwitcher({
                 src={selectedWorkspace ? workspaceIconMap.get(selectedWorkspace.id) : undefined}
                 alt={selectedWorkspace?.name}
                 className="h-4 w-4 rounded-full ring-1 ring-border/50"
-                fallbackClassName="bg-foreground text-background text-[10px] rounded-full"
+                fallbackClassName="bg-foreground text-background text-[14px] rounded-full"
                 fallback={selectedWorkspace?.name?.charAt(0) || 'W'}
               />
               {!isCollapsed && (

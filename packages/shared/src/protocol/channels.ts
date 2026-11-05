@@ -266,6 +266,9 @@ export const RPC_CHANNELS = {
     GET_CREATOR_SKILL_DOWNLOAD_GRANT: 'admin:getCreatorSkillDownloadGrant',
     GET_CREATOR_SKILL_SAFETY_STATUS: 'admin:getCreatorSkillSafetyStatus',
     PUBLISH_CREATOR_APP: 'admin:publishCreatorApp',
+    // POO-177 QUOTA-01: manual billing refresh, preflight read on the local
+    // trusted Admin session.
+    REFRESH_BILLING: 'admin:refreshBilling',
   },
   memberCircles: {
     // Member-side circle reads/writes (POO-70 C1). Trusted-session only:

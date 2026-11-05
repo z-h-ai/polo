@@ -3,6 +3,8 @@
  * Used by both CredentialRequest and AuthRequestCard components
  */
 
+import { i18n } from '@polo-ai/shared/i18n'
+
 /**
  * Validate basic auth credentials based on whether password is required
  *
@@ -40,21 +42,40 @@ export function getPasswordValue(
 }
 
 /**
+ * Resolve display copy with the historical English string as the floor.
+ *
+ * POO-179: i18next returns undefined when called before `setupI18n` (unit
+ * tests, early module evaluation); the English fallback keeps those callers
+ * byte-identical to the pre-localization output.
+ */
+function translateOr(key: string, fallback: string, options?: Record<string, unknown>): string {
+  const translated = i18n.t(key, { ...options, defaultValue: fallback })
+  return typeof translated === 'string' ? translated : fallback
+}
+
+/**
  * Get the password label with optional suffix
+ *
+ * POO-179: the "optional" suffix is display copy, resolved at call time.
+ * Validation/submit behavior is unchanged.
  *
  * @param baseLabel - The base label (e.g., "Password")
  * @param passwordRequired - Whether password is required
- * @returns The label with " (optional)" suffix if not required
+ * @returns The label with the localized " (optional)" suffix if not required
  */
 export function getPasswordLabel(
   baseLabel: string,
   passwordRequired: boolean = true
 ): string {
-  return passwordRequired ? baseLabel : `${baseLabel} (optional)`
+  return passwordRequired
+    ? baseLabel
+    : translateOr('auth.optionalField', `${baseLabel} (optional)`, { field: baseLabel })
 }
 
 /**
  * Get the password placeholder text
+ *
+ * POO-179: placeholder templates are display copy, resolved at call time.
  *
  * @param baseLabel - The base label (e.g., "Password")
  * @param passwordRequired - Whether password is required
@@ -65,6 +86,8 @@ export function getPasswordPlaceholder(
   passwordRequired: boolean = true
 ): string {
   return passwordRequired
-    ? `Enter ${baseLabel.toLowerCase()}`
-    : 'Optional - leave blank'
+    ? translateOr('auth.enterField', `Enter ${baseLabel.toLowerCase()}`, {
+        field: baseLabel.toLowerCase(),
+      })
+    : translateOr('auth.optionalLeaveBlank', 'Optional - leave blank')
 }

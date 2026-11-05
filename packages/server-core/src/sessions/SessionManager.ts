@@ -16,7 +16,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, realpath, rename, stat as fsStat, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, createBrowserFastDecider, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, createBrowserFastDecider, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult, BILLING_ERROR_HTTP_STATUS } from '@polo-ai/shared/agent'
 import { fingerprintOwnerToken, getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
@@ -2470,6 +2470,99 @@ export class SessionManager implements ISessionManager {
       return
     }
     if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+  }
+
+  /**
+   * Body of the guarded `agent.onPermissionRequest` callback (extracted verbatim
+   * from the inline wiring so the guard + event transparency stay testable).
+   *
+   * POO-179: the request (including the read-only `canRememberForSession`
+   * presentation metadata) is forwarded to the renderer through the existing
+   * spread unchanged. Nothing here reads back any renderer-supplied
+   * presentation flag: `PermissionResponseOptions` gains no such field, and
+   * grant/remember behavior is untouched.
+   */
+  private handleAgentPermissionRequest(managed: ManagedSession, request: {
+    requestId: string;
+    toolName: string;
+    command?: string;
+    description: string;
+    type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action';
+    appName?: string;
+    reason?: string;
+    impact?: string;
+    requiresSystemPrompt?: boolean;
+    rememberForMinutes?: number;
+    commandHash?: string;
+    approvalTtlSeconds?: number;
+    canRememberForSession?: boolean;
+  }): void {
+    if (this.isOwnedCliSession(managed)) {
+      managed.agent?.respondToPermission(request.requestId, false, false)
+      return
+    }
+    sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
+    let brokerMetadata: {
+      commandHash?: string
+      approvalTtlSeconds?: number
+    } = {}
+
+    if (request.type === 'admin_approval' && request.command) {
+      const brokerRequest = this.privilegedExecutionBroker.createRequest({
+        requestId: request.requestId,
+        sessionId: managed.id,
+        command: request.command,
+        reason: request.reason,
+        impact: request.impact,
+        approvalTtlSeconds: request.approvalTtlSeconds,
+      })
+
+      brokerMetadata = {
+        commandHash: brokerRequest.commandHash,
+        approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
+      }
+    }
+
+    const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
+
+    this.pendingPermissionRequests.set(request.requestId, {
+      sessionId: managed.id,
+      type: request.type,
+      commandHash: effectiveCommandHash,
+    })
+
+    if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
+      const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
+        expectedCommandHash: effectiveCommandHash,
+      })
+
+      this.pendingPermissionRequests.delete(request.requestId)
+
+      if (brokerResult.ok) {
+        this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
+          sessionId: managed.id,
+          requestId: request.requestId,
+          commandHash: effectiveCommandHash,
+        })
+        const liveAgent = managed.agent
+        if (liveAgent) {
+          liveAgent.respondToPermission(request.requestId, true, false)
+          return
+        }
+      }
+
+      sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
+    }
+
+    this.sendEvent({
+      type: 'permission_request',
+      sessionId: managed.id,
+      request: {
+        ...request,
+        ...brokerMetadata,
+        sessionId: managed.id,
+      }
+    }, managed.workspace.id)
   }
 
   private getRuntimeWorkspaces(): Workspace[] {
@@ -6616,73 +6709,10 @@ export class SessionManager implements ISessionManager {
         rememberForMinutes?: number;
         commandHash?: string;
         approvalTtlSeconds?: number;
+        /** POO-179 read-only presentation metadata; passed through verbatim. */
+        canRememberForSession?: boolean;
       }) => {
-        if (this.isOwnedCliSession(managed)) {
-          managed.agent?.respondToPermission(request.requestId, false, false)
-          return
-        }
-        sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
-        let brokerMetadata: {
-          commandHash?: string
-          approvalTtlSeconds?: number
-        } = {}
-
-        if (request.type === 'admin_approval' && request.command) {
-          const brokerRequest = this.privilegedExecutionBroker.createRequest({
-            requestId: request.requestId,
-            sessionId: managed.id,
-            command: request.command,
-            reason: request.reason,
-            impact: request.impact,
-            approvalTtlSeconds: request.approvalTtlSeconds,
-          })
-
-          brokerMetadata = {
-            commandHash: brokerRequest.commandHash,
-            approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
-          }
-        }
-
-        const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
-
-        this.pendingPermissionRequests.set(request.requestId, {
-          sessionId: managed.id,
-          type: request.type,
-          commandHash: effectiveCommandHash,
-        })
-
-        if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
-          const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
-            expectedCommandHash: effectiveCommandHash,
-          })
-
-          this.pendingPermissionRequests.delete(request.requestId)
-
-          if (brokerResult.ok) {
-            this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
-              sessionId: managed.id,
-              requestId: request.requestId,
-              commandHash: effectiveCommandHash,
-            })
-            const liveAgent = managed.agent
-            if (liveAgent) {
-              liveAgent.respondToPermission(request.requestId, true, false)
-              return
-            }
-          }
-
-          sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
-        }
-
-        this.sendEvent({
-          type: 'permission_request',
-          sessionId: managed.id,
-          request: {
-            ...request,
-            ...brokerMetadata,
-            sessionId: managed.id,
-          }
-        }, managed.workspace.id)
+        this.handleAgentPermissionRequest(managed, request)
       })
 
       // Note: Credential requests now flow through onAuthRequest (unified auth flow)
@@ -12928,6 +12958,13 @@ export class SessionManager implements ISessionManager {
         }
         managed.messages.push(typedErrorMessage)
         // Send typed_error event with full structure for renderer to handle
+        // POO-177: the provider-side 402 class rides the same optional
+        // structured billing classification an admission rejection puts on
+        // the post-persist error event, so BOTH in-turn rejection paths can
+        // drive the identical chat-access latch in the renderer. Only the
+        // 402 class is forwarded: a provider rate_limited (429) is a
+        // transient, auto-retried condition — never an Admin period-quota
+        // latch.
         emit({
           type: 'typed_error',
           sessionId,
@@ -12940,6 +12977,9 @@ export class SessionManager implements ISessionManager {
             details: event.error.details,
             originalError: event.error.originalError,
           },
+          ...(event.error.code === 'billing_error'
+            ? { billingClassification: { status: BILLING_ERROR_HTTP_STATUS } }
+            : {}),
           timestamp: typedErrorMessage.timestamp,
         }, workspaceId)
         break

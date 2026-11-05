@@ -59,7 +59,7 @@ export function KnowledgeBaseSelectorPopover({
         onToggle={() => {}}
         filterPlaceholder=""
         emptyState={(
-          <span className="flex items-center justify-center gap-2 py-2 text-[13px] text-muted-foreground">
+          <span className="flex items-center justify-center gap-2 py-2 text-[14px] text-muted-foreground">
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
             {t('chat.knowledgeBase.loading')}
           </span>
@@ -87,7 +87,7 @@ export function KnowledgeBaseSelectorPopover({
           <button
             type="button"
             onClick={onRetry}
-            className="w-full cursor-pointer rounded-[6px] px-3 py-2 text-left text-[13px] text-muted-foreground hover:bg-foreground/5"
+            className="w-full cursor-pointer rounded-[6px] px-3 py-2 text-left text-[14px] text-muted-foreground hover:bg-foreground/5"
           >
             {t('chat.knowledgeBase.loadFailed')}
           </button>
@@ -113,7 +113,7 @@ export function KnowledgeBaseSelectorPopover({
       {selected.map(collection => (
         <span
           key={collection.id}
-          className="inline-flex max-w-[200px] items-center gap-1 rounded-full bg-foreground/5 py-0.5 pl-2 pr-1 text-[11px] text-foreground-70"
+          className="inline-flex max-w-[200px] items-center gap-1 rounded-full bg-foreground/5 py-0.5 pl-2 pr-1 text-[14px] text-foreground-70"
         >
           <span className="truncate">{collection.name}</span>
           <button
@@ -129,7 +129,7 @@ export function KnowledgeBaseSelectorPopover({
       <button
         type="button"
         onClick={onClear}
-        className="ml-auto shrink-0 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        className="ml-auto shrink-0 text-[14px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
       >
         {t('chat.knowledgeBase.clearAll')}
       </button>
@@ -155,7 +155,7 @@ export function KnowledgeBaseSelectorPopover({
       renderItem={(collection, state) => (
         <div
           className={cn(
-            'flex cursor-pointer select-none items-center gap-3 rounded-[6px] px-3 py-2 text-[13px]',
+            'flex cursor-pointer select-none items-center gap-3 rounded-[6px] px-3 py-2 text-[14px]',
             state.highlighted && 'bg-foreground/5',
             state.selected && 'bg-foreground/3',
           )}
@@ -165,7 +165,7 @@ export function KnowledgeBaseSelectorPopover({
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate">{collection.name}</div>
-            <div className="truncate text-[11px] text-muted-foreground">
+            <div className="truncate text-[14px] text-muted-foreground">
               {t('chat.knowledgeBase.publishedCount', { count: collection.documentCounts.published })}
             </div>
           </div>

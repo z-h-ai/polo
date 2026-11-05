@@ -1714,7 +1714,7 @@ export function FreeFormInput({
             {...addLabelEditConfig}
             defaultValue={addLabelPrefill}
             secondaryAction={workspaceRootPath ? {
-              label: 'Edit File',
+              label: t('common.editFile'),
               filePath: `${workspaceRootPath}/labels/config.json`,
             } : undefined}
             side="top"
@@ -1786,7 +1786,7 @@ export function FreeFormInput({
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.98 }}
                           transition={{ duration: 0.16, ease: [0.2, 0, 0.2, 1] }}
-                          className="inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[6px] bg-foreground/2 pl-1.5 pr-2 py-1 text-[13px] text-foreground/80 select-none transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring client-material-fg-secondary"
+                          className="inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[6px] bg-foreground/2 pl-1.5 pr-2 py-1 text-[14px] text-foreground/80 select-none transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring client-material-fg-secondary"
                           onClick={(event) => {
                             const rect = event.currentTarget.getBoundingClientRect()
                             onFollowUpClick?.(item, {
@@ -1800,7 +1800,7 @@ export function FreeFormInput({
                               <span
                                 role="button"
                                 tabIndex={0}
-                                className="inline-flex h-4 min-w-4 cursor-pointer items-center justify-center rounded-[4px] bg-background px-0.5 text-[10px] font-medium text-foreground shadow-minimal focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                className="inline-flex h-4 min-w-4 cursor-pointer items-center justify-center rounded-[4px] bg-background px-0.5 text-[14px] font-medium text-foreground shadow-minimal focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 onMouseDown={(event) => {
                                   event.preventDefault()
                                   event.stopPropagation()
@@ -1940,7 +1940,7 @@ export function FreeFormInput({
                             ))}
                             {remainingCount > 0 && (
                               <div
-                                className="-ml-1 h-5 w-5 rounded-[4px] bg-background shadow-minimal flex items-center justify-center text-[8px] font-medium text-muted-foreground"
+                                className="-ml-1 h-5 w-5 rounded-[4px] bg-background shadow-minimal flex items-center justify-center text-[14px] font-medium text-muted-foreground"
                                 style={{ zIndex: displaySources.length + 1 }}
                               >
                                 +{remainingCount}
@@ -2076,7 +2076,7 @@ export function FreeFormInput({
                             ))}
                             {remainingCount > 0 && (
                               <div
-                                className="-ml-1 h-5 w-5 rounded-[4px] bg-background shadow-minimal flex items-center justify-center text-[8px] font-medium text-muted-foreground"
+                                className="-ml-1 h-5 w-5 rounded-[4px] bg-background shadow-minimal flex items-center justify-center text-[14px] font-medium text-muted-foreground"
                                 style={{ zIndex: displaySources.length + 1 }}
                               >
                                 +{remainingCount}
@@ -2226,7 +2226,7 @@ export function FreeFormInput({
                     type="button"
                     onClick={handleCompactClick}
                     disabled={isProcessing}
-                    className="inline-flex items-center h-6 px-2 text-[12px] font-medium bg-info/10 rounded-[6px] shadow-tinted select-none cursor-pointer hover:bg-info/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center h-6 px-2 text-[14px] font-medium bg-info/10 rounded-[6px] shadow-tinted select-none cursor-pointer hover:bg-info/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{
                       '--shadow-color': 'var(--info-rgb)',
                       color: 'color-mix(in oklab, var(--info) 30%, var(--foreground))',
@@ -2237,8 +2237,8 @@ export function FreeFormInput({
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {isProcessing
-                    ? `${usagePercent}% context used — wait for current operation`
-                    : `${usagePercent}% context used — click to compact`
+                    ? t('chat.contextUsage.wait', { usagePercent })
+                    : t('chat.contextUsage.compact', { usagePercent })
                   }
                 </TooltipContent>
               </Tooltip>
@@ -2358,7 +2358,7 @@ function WorkingDirectoryBadge({
   // Styles matching todo-filter-menu.tsx for consistency
   const MENU_CONTAINER_STYLE = 'min-w-[200px] max-w-[400px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small p-0'
   const MENU_LIST_STYLE = 'max-h-[200px] overflow-y-auto p-1 [&_[cmdk-list-sizer]]:space-y-px'
-  const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-2 rounded-[6px] px-3 py-1.5 text-[13px] outline-none'
+  const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-2 rounded-[6px] px-3 py-1.5 text-[14px] outline-none'
 
   return (
     <>
@@ -2367,7 +2367,7 @@ function WorkingDirectoryBadge({
         <span className="shrink min-w-0 overflow-hidden">
           <FreeFormInputContextBadge
             icon={<Icon_Home className="h-4 w-4" />}
-            label={folderName ?? 'Work in Folder'}
+            label={folderName ?? t('chat.workInFolder')}
             isExpanded={isEmptySession}
             hasSelection={hasFolder}
             showChevron={true}
@@ -2423,7 +2423,7 @@ function WorkingDirectoryBadge({
 
             {/* Recent Directories - filterable (current directory already filtered out via filteredRecent) */}
             {filteredRecent.map((path) => {
-              const recentFolderName = getPathBasename(path) || 'Folder'
+              const recentFolderName = getPathBasename(path) || t('chat.folderFallback')
               return (
                 <CommandPrimitive.Item
                   key={path}

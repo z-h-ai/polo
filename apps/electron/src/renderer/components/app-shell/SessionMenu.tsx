@@ -173,7 +173,7 @@ export function SessionMenu({
             <Tag className="h-3.5 w-3.5" />
             <span className="flex-1">{t("sessionMenu.labels")}</span>
             {sessionLabels.length > 0 && (
-              <span className="text-[10px] text-muted-foreground tabular-nums -mr-2.5">
+              <span className="text-[14px] text-muted-foreground tabular-nums -mr-2.5">
                 {sessionLabels.length}
               </span>
             )}

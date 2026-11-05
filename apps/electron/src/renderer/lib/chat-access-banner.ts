@@ -59,21 +59,40 @@ export function decideChatAccessBanner(
     case 'insufficient-credit':
       // Role split: the handoff exists ONLY where the payer is this user.
       // A member must never see a recharge button that mints someone else's
-      // ticket. BOTH variants get the U2 recheck action: the member copy
-      // stays honest (an admin recharges) while the latch still yields to
-      // the next server answer.
-      return scope.canOpenPayment
-        ? {
-            variant: 'destructive',
-            messageKey: 'chat.statusBanner.insufficientCredit',
-            action: 'recharge',
-            secondaryAction: 'recheck-billing',
-          }
-        : {
-            variant: 'destructive',
-            messageKey: 'chat.statusBanner.insufficientCreditMember',
-            secondaryAction: 'recheck-billing',
-          }
+      // ticket. POO-177: the U2 client-only recheck became the REAL Admin
+      // refresh — same single secondary action, now offered only when the
+      // latch's source lease proves the admin-managed connection (a BYOK 402
+      // or an unknown source keeps its existing error path, no refresh).
+      return {
+        variant: 'destructive',
+        messageKey: scope.canOpenPayment
+          ? 'chat.statusBanner.insufficientCredit'
+          : 'chat.statusBanner.insufficientCreditMember',
+        ...(scope.canOpenPayment ? { action: 'recharge' as const } : {}),
+        ...(status.refreshable ? { secondaryAction: 'recheck-billing' as const } : {}),
+      }
+    case 'billing-budget-exhausted':
+      // POO-177: the period budget is spent. Honest copy only — recharging
+      // never promises an in-place lift, so no recharge action for any role.
+      return {
+        variant: 'destructive',
+        messageKey: 'chat.statusBanner.billingBudgetExhausted',
+        ...(status.refreshable ? { secondaryAction: 'recheck-billing' as const } : {}),
+      }
+    case 'billing-payment-pending':
+      // POO-177: a payment is still settling on the Admin side.
+      return {
+        variant: 'destructive',
+        messageKey: 'chat.statusBanner.billingPaymentPending',
+        ...(status.refreshable ? { secondaryAction: 'recheck-billing' as const } : {}),
+      }
+    case 'billing-payer-restricted':
+      // POO-177: the payer account cannot pay for this space right now.
+      return {
+        variant: 'destructive',
+        messageKey: 'chat.statusBanner.billingPayerRestricted',
+        ...(status.refreshable ? { secondaryAction: 'recheck-billing' as const } : {}),
+      }
     case 'quota-exhausted':
       // Conditional reset copy: the promise exists only with the server's own
       // reset fact; a plain 429 says the period quota is exhausted and stops.

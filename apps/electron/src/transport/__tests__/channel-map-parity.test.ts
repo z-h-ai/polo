@@ -145,6 +145,31 @@ describe('CHANNEL_MAP runtime contract', () => {
       [RPC_CHANNELS.admin.SET_PASSWORD, 'password-123'],
     ])
   })
+
+  it('routes billing refresh through the local-only admin channel (POO-177 QUOTA-01)', async () => {
+    expect(CHANNEL_MAP.adminRefreshBilling).toEqual({
+      type: 'invoke',
+      channel: RPC_CHANNELS.admin.REFRESH_BILLING,
+    })
+    const calls: unknown[][] = []
+    const client = {
+      invoke: mock(async (...args: unknown[]) => {
+        calls.push(args)
+        return { success: true }
+      }),
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+    const input = {
+      expectedProductSpaceId: '11111111-2222-3333-4444-555555555555',
+      sessionId: 'session-1',
+      expectedConnectionSlug: 'polo-space-11111111-2222-3333-4444-555555555555',
+    }
+
+    await api.adminRefreshBilling(input)
+
+    expect(calls).toEqual([[RPC_CHANNELS.admin.REFRESH_BILLING, input]])
+  })
 })
 
 it('R8 preload returns cloneable admission guidance for install/full START without losing successful results', async () => {

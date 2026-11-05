@@ -14,7 +14,7 @@ export function ProductSpacePreparationScreen({ onCancel }: { onCancel: () => vo
           <LoaderCircle className="size-[25px] animate-spin" />
         </span>
         <h1 role="status" className="m-0 text-[24px] font-[720] tracking-[-0.035em] text-foreground">{t('productSpace.exec.status.preparing')}</h1>
-        <p className="mt-[9px] text-[13px] leading-[1.58] text-foreground-60">{t('common.loading')}</p>
+        <p className="mt-[9px] text-[14px] leading-[1.58] text-foreground-60">{t('common.loading')}</p>
         <Button className={clientWorkbenchButtonClassName + ' mt-[22px]'} variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
       </section>
     </div>

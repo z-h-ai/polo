@@ -20,7 +20,9 @@ interface ReauthScreenProps {
 export function ReauthScreen({ onLogin, onReset }: ReauthScreenProps) {
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // POO-179: keep the raw diagnostic (if any) in state; the self-produced
+  // fallback copy resolves at render time so a language switch re-translates.
+  const [error, setError] = useState<{ raw: string | null } | null>(null)
 
   const handleLogin = async () => {
     setIsLoading(true)
@@ -28,7 +30,7 @@ export function ReauthScreen({ onLogin, onReset }: ReauthScreenProps) {
     try {
       await onLogin()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      setError({ raw: err instanceof Error ? err.message : null })
       setIsLoading(false)
     }
   }
@@ -92,7 +94,7 @@ export function ReauthScreen({ onLogin, onReset }: ReauthScreenProps) {
         >
           {error && (
             <div className="mt-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-sm text-destructive">{error.raw ?? t('reauth.loginFailed')}</p>
             </div>
           )}
         </StepFormLayout>

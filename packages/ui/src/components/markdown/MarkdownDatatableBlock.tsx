@@ -46,6 +46,7 @@ import {
   StyledDropdownMenuSubContent,
 } from '../ui/StyledDropdown'
 import { useTranslation } from 'react-i18next'
+import i18n from 'i18next'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -150,10 +151,10 @@ function formatCell(value: unknown, col: ColumnDef): React.ReactNode {
       return <span className="tabular-nums">{n.toLocaleString()}</span>
     }
     case 'boolean':
-      return value ? <span className="text-success">Yes</span> : <span className="text-muted-foreground">No</span>
+      return value ? <span className="text-success">{i18n.t('datatable.yes')}</span> : <span className="text-muted-foreground">{i18n.t('datatable.no')}</span>
     case 'badge': {
       const color = resolveBadgeChipClass(String(value), col.badgeColors)
-      return <span className={cn('inline-block px-1.5 py-0.5 rounded text-[11px] font-medium', color)}>{String(value)}</span>
+      return <span className={cn('inline-block px-1.5 py-0.5 rounded text-[14px] font-medium', color)}>{String(value)}</span>
     }
     default:
       return String(value)
@@ -192,12 +193,16 @@ interface GranularityOption {
   value: string
 }
 
-const DATE_GRANULARITIES: GranularityOption[] = [
-  { label: 'Hour', value: 'hour' },
-  { label: 'Day', value: 'day' },
-  { label: 'Month', value: 'month' },
-  { label: 'Year', value: 'year' },
-]
+// POO-179: granularity labels are display copy resolved at call time; the
+// stored/compared value stays the raw protocol string ('hour'/'day'/…).
+function dateGranularityOptions(): GranularityOption[] {
+  return [
+    { label: i18n.t('datatable.granularityHour'), value: 'hour' },
+    { label: i18n.t('datatable.granularityDay'), value: 'day' },
+    { label: i18n.t('datatable.granularityMonth'), value: 'month' },
+    { label: i18n.t('datatable.granularityYear'), value: 'year' },
+  ]
+}
 
 function formatCompact(n: number): string {
   const abs = Math.abs(n)
@@ -217,7 +222,7 @@ function computeNumericGranularities(values: number[], type: 'number' | 'currenc
 
   const tickCounts = [3, 5, 8, 15]
   const seen = new Set<number>()
-  const options: GranularityOption[] = [{ label: 'Exact', value: 'exact' }]
+  const options: GranularityOption[] = [{ label: i18n.t('datatable.granularityExact'), value: 'exact' }]
 
   for (const count of tickCounts) {
     const ticks = niceTicks(min, max, count)
@@ -241,7 +246,7 @@ function computeNumericGranularities(values: number[], type: 'number' | 'currenc
 }
 
 function computeDateGranularities(values: number[]): GranularityOption[] {
-  if (values.length < 2) return DATE_GRANULARITIES
+  if (values.length < 2) return dateGranularityOptions()
   const min = Math.min(...values)
   const max = Math.max(...values)
   const spanMs = max - min
@@ -252,11 +257,11 @@ function computeDateGranularities(values: number[]): GranularityOption[] {
   const YEAR = 365 * DAY
 
   const opts: GranularityOption[] = []
-  if (spanMs < 2 * YEAR) opts.push({ label: 'Hour', value: 'hour' })
-  if (spanMs >= 2 * DAY || spanMs < 2 * YEAR) opts.push({ label: 'Day', value: 'day' })
-  if (spanMs >= 2 * MONTH) opts.push({ label: 'Month', value: 'month' })
-  if (spanMs >= 2 * YEAR) opts.push({ label: 'Year', value: 'year' })
-  return opts.length ? opts : DATE_GRANULARITIES
+  if (spanMs < 2 * YEAR) opts.push({ label: i18n.t('datatable.granularityHour'), value: 'hour' })
+  if (spanMs >= 2 * DAY || spanMs < 2 * YEAR) opts.push({ label: i18n.t('datatable.granularityDay'), value: 'day' })
+  if (spanMs >= 2 * MONTH) opts.push({ label: i18n.t('datatable.granularityMonth'), value: 'month' })
+  if (spanMs >= 2 * YEAR) opts.push({ label: i18n.t('datatable.granularityYear'), value: 'year' })
+  return opts.length ? opts : dateGranularityOptions()
 }
 
 function computeGranularityOptions(data: DatatableData): Map<string, GranularityOption[]> {
@@ -680,8 +685,11 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
   const granularityOptions = React.useMemo(() => {
     if (!parsed) return new Map<string, GranularityOption[]>()
+    // POO-179: labels resolve inside compute* at call time; `t` is the
+    // language-change signal (react-i18next rotates its reference on switch)
+    // so cached options re-translate without invalidating `parsed`.
     return computeGranularityOptions(parsed)
-  }, [parsed])
+  }, [parsed, t])
 
   const groupedData = React.useMemo(() => {
     if (!groupKey || !parsed) return null
@@ -726,9 +734,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     return (
       <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
         </div>
-        <div className="py-8 text-center text-muted-foreground text-[13px]">{t('datatable.loadingData')}</div>
+        <div className="py-8 text-center text-muted-foreground text-[14px]">{t('datatable.loadingData')}</div>
       </div>
     )
   }
@@ -738,9 +746,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
     return (
       <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
         </div>
-        <div className="py-6 text-center text-destructive/70 text-[13px]">{fileError}</div>
+        <div className="py-6 text-center text-destructive/70 text-[14px]">{fileError}</div>
       </div>
     )
   }
@@ -760,6 +768,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
   // The optional GenUI action column widens every grid span by one.
   const columnCount = parsed.columns.length + (renderRowAction ? 1 : 0)
+  // The scroll host owns its padding; adding it to top would offset headers
+  // twice in the overlay. Scenic backgrounds also need an explicit alpha of 1.
+  const tableHeaderClass = 'sticky top-0 z-10 bg-[oklch(from_var(--background)_l_c_h_/_1)] shadow-bottom-border-thin'
 
   // Per-column filter control rendered under the header label. Clicks are
   // stopped so they never trigger the th's sort handler.
@@ -777,9 +788,9 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             onChange={(e) => setRangeFilter(col.key, 'min', e.target.value)}
             placeholder={t('datatable.filterMin')}
             aria-label={`${col.label} ${t('datatable.filterMin')}`}
-            className="w-14 px-1 py-0.5 text-[11px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="w-14 px-1 py-0.5 text-[14px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
-          <span className="text-muted-foreground/50 text-[11px]">–</span>
+          <span className="text-muted-foreground/50 text-[14px]">–</span>
           <input
             type="text"
             inputMode="decimal"
@@ -787,7 +798,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             onChange={(e) => setRangeFilter(col.key, 'max', e.target.value)}
             placeholder={t('datatable.filterMax')}
             aria-label={`${col.label} ${t('datatable.filterMax')}`}
-            className="w-14 px-1 py-0.5 text-[11px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="w-14 px-1 py-0.5 text-[14px] rounded-[4px] border border-foreground/10 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
         </div>
       )
@@ -808,7 +819,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
               aria-pressed={isActive}
               onClick={() => toggleTextFilter(col.key, chip)}
               className={cn(
-                'px-1.5 py-0.5 rounded-[4px] text-[11px] border transition-colors max-w-full truncate',
+                'px-1.5 py-0.5 rounded-[4px] text-[14px] border transition-colors max-w-full truncate',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 isActive
                   ? 'bg-accent/10 text-accent border-accent/30 hover:bg-accent/15'
@@ -844,24 +855,24 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
   const tableContent = (maxHeight?: boolean, scrollable?: boolean) => (
     <div
       ref={scrollable ? scrollRef : undefined}
-      className={cn(maxHeight && 'max-h-[400px]', 'overflow-y-auto')}
+      // Expanded tables use the overlay's scroll host. An unbounded overflow
+      // wrapper here would intercept sticky without ever scrolling vertically.
+      className={maxHeight ? 'isolate max-h-[400px] overflow-auto' : undefined}
       style={scrollable ? {
-        overflowX: 'auto',
         maskImage,
         WebkitMaskImage: maskImage,
-      } : { overflowX: 'auto' }}
+      } : undefined}
     >
-      <table className="w-max min-w-full text-[13px]">
+      <table className="w-max min-w-full text-[14px]">
         <thead>
           <tr className="border-b border-foreground/[0.06] bg-foreground/[0.02]">
             {parsed.columns.map((col) => (
               <th
                 key={col.key}
-                // align-top only when a filter control may stack under the
-                // label — the markdown rich-block path (no filters) keeps the
-                // exact pre-filter class list.
+                // Only filter controls need top alignment under the label.
                 className={cn(
-                  'py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap',
+                  tableHeaderClass,
+                  'py-2 px-3 text-[14px] cursor-pointer select-none whitespace-nowrap',
                   enableColumnFilters && 'align-top',
                   colAlign(col.type, col.align),
                 )}
@@ -874,7 +885,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
                 {renderColumnFilterControl(col)}
               </th>
             ))}
-            {renderRowAction && <th className="py-2 px-3 whitespace-nowrap" aria-hidden="true" />}
+            {renderRowAction && <th className={cn(tableHeaderClass, 'py-2 px-3 whitespace-nowrap')} aria-hidden="true" />}
           </tr>
         </thead>
         <tbody>
@@ -885,7 +896,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
                 onClick={() => toggleCollapsed(group.value)}
               >
                 <td colSpan={columnCount} className="py-2 px-3 bg-foreground/[0.03] border-b border-foreground/[0.06]">
-                  <span className="inline-flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
+                  <span className="inline-flex items-center gap-2 text-[14px] font-medium text-muted-foreground">
                     <ChevronRight className={cn('w-3 h-3 transition-transform', !collapsedGroups.has(group.value) && 'rotate-90')} />
                     {groupColumnLabel}: {group.value}
                     <span className="text-muted-foreground/50">({group.rows.length})</span>
@@ -896,8 +907,8 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
             </React.Fragment>
           )) : processedRows.length ? renderRows(processedRows) : (
             <tr>
-              <td colSpan={columnCount} className="py-6 text-center text-muted-foreground text-[13px]">
-                No rows
+              <td colSpan={columnCount} className="py-6 text-center text-muted-foreground text-[14px]">
+                {t('datatable.noRows')}
               </td>
             </tr>
           )}
@@ -1036,13 +1047,13 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
   // hides why its row set is a subset).
   const renderFilterStatusBar = () => activeFilterCount > 0 ? (
     <div className="px-3 py-1.5 border-b bg-accent/[0.04] flex items-center justify-between gap-2">
-      <span className="text-[12px] text-muted-foreground" aria-live="polite">
+      <span className="text-[14px] text-muted-foreground" aria-live="polite">
         {t('datatable.filterStatus', { shown: filteredRows.length, total: parsed.rows.length })}
       </span>
       <button
         type="button"
         onClick={clearFilters}
-        className="text-[12px] text-accent hover:underline cursor-pointer rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="text-[14px] text-accent hover:underline cursor-pointer rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         {t('datatable.clearFilters')}
       </button>
@@ -1074,7 +1085,7 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
 
         {/* Header */}
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">
+          <span className="text-[14px] text-muted-foreground font-medium">
             {parsed.title || t('datatable.defaultTitle')}
           </span>
         </div>
@@ -1105,8 +1116,8 @@ export function MarkdownDatatableBlock({ code, className, renderColumnCell, rend
           </div>
         }
       >
-        <div className="px-6">
-          <div className="bg-background shadow-minimal rounded-[12px] overflow-hidden">
+        <div className="px-6 w-max min-w-full">
+          <div className="bg-background shadow-minimal rounded-[12px] overflow-clip">
             {/* F2: filters stay visible in fullscreen — the overlayed table's
                 subset is explainable and its clear control stays reachable. */}
             {renderFilterStatusBar()}

@@ -123,7 +123,7 @@ export function LeaveCircleDialog({
             >
               {t('poo70.c7.dialog.title', { name: state.circleName })}
             </DialogTitle>
-            <DialogDescription className="m-[6px_0_0] text-[13px] leading-[1.5] text-foreground-60" data-testid="leave-circle-dialog-subtitle">
+            <DialogDescription className="m-[6px_0_0] text-[14px] leading-[1.5] text-foreground-60" data-testid="leave-circle-dialog-subtitle">
               {t('poo70.c7.dialog.subtitle')}
             </DialogDescription>
           </div>
@@ -162,14 +162,14 @@ export function LeaveCircleDialog({
                   </p>
                 </div>
               )}
-              <p className="m-0 text-[13px] leading-[1.6] text-foreground-80">
+              <p className="m-0 text-[14px] leading-[1.6] text-foreground-80">
                 {state.lastSourceWorkNames.length > 0
                   ? t('poo70.c7.dialog.bodyLastSource')
                   : t('poo70.c7.dialog.bodyDefault')}
               </p>
               {state.lastSourceWorkNames.length > 0 && (
                 <ul
-                  className="m-[8px_0_0] list-none p-0 text-[13px] leading-[1.6] text-foreground"
+                  className="m-[8px_0_0] list-none p-0 text-[14px] leading-[1.6] text-foreground"
                   data-testid="leave-circle-dialog-last-source"
                 >
                   {state.lastSourceWorkNames.map(name => (
@@ -179,7 +179,7 @@ export function LeaveCircleDialog({
                   ))}
                 </ul>
               )}
-              <p className="m-[10px_0_0] text-[11px] leading-[1.45] text-foreground-50">
+              <p className="m-[10px_0_0] text-[14px] leading-[1.45] text-foreground-50">
                 {t('poo70.c7.dialog.note')}
               </p>
             </>
@@ -192,7 +192,7 @@ export function LeaveCircleDialog({
             data-testid="leave-circle-dialog-cancel"
             ref={cancelRef}
             disabled={cancelDisabled}
-            className="inline-flex min-h-[28px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-[28px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={cancel}
           >
             {t('poo70.c7.dialog.cancel')}
@@ -201,7 +201,7 @@ export function LeaveCircleDialog({
             type="button"
             data-testid="leave-circle-dialog-confirm"
             disabled={confirmDisabled}
-            className="inline-flex min-h-[32px] items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-destructive bg-destructive px-[12px] text-[12px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-[32px] items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-destructive bg-destructive px-[12px] text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={onConfirm}
           >
             {confirming ? t('poo70.c7.dialog.confirming') : t('poo70.c7.dialog.confirm')}

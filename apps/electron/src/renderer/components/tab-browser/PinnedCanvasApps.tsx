@@ -50,10 +50,10 @@ export function PinnedCanvasApps() {
         <h2 className="m-0 text-[14px] font-semibold tracking-[-0.01em]" data-testid="home-canvas-apps-title">
           {t('homeApps.canvas.title')}
         </h2>
-        <span className="inline-flex min-h-[18px] items-center rounded-full bg-foreground/6 px-[7px] text-[10px] font-medium text-muted-foreground">
+        <span className="inline-flex min-h-[18px] items-center rounded-full bg-foreground/6 px-[7px] text-[14px] font-medium text-muted-foreground">
           {canvasApps.length}
         </span>
-        <p className="m-0 ml-auto truncate text-[11px] text-muted-foreground">{t('homeApps.canvas.hint')}</p>
+        <p className="m-0 ml-auto truncate text-[14px] text-muted-foreground">{t('homeApps.canvas.hint')}</p>
       </div>
       <ul className="m-0 grid list-none gap-[12px] p-0 grid-cols-1 min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
         {canvasApps.map((app) => (
@@ -67,7 +67,7 @@ export function PinnedCanvasApps() {
                 <span className="grid size-[32px] shrink-0 place-items-center rounded-[9px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
                   <Icons.Shapes className="size-[16px]" aria-hidden="true" />
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold" title={pinnedCanvasAppLabel(app, t)}>
+                <span className="min-w-0 flex-1 truncate text-[14px] font-semibold" title={pinnedCanvasAppLabel(app, t)}>
                   {pinnedCanvasAppLabel(app, t)}
                 </span>
               </div>
@@ -86,7 +86,7 @@ export function PinnedCanvasApps() {
                 <button
                   type="button"
                   data-testid={`home-canvas-app-open-${app.id}`}
-                  className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
+                  className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
                   onClick={(event) => {
                     event.stopPropagation()
                     openApp(app)

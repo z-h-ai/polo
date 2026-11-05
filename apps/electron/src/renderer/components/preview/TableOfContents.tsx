@@ -117,7 +117,7 @@ export function TableOfContents({
                 key={`${heading.line}-${heading.text}`}
                 onClick={() => onHeadingClick(heading.line)}
                 className={cn(
-                  'block w-full text-left text-[13px] py-1.5 px-3 rounded-md transition-colors',
+                  'block w-full text-left text-[14px] py-1.5 px-3 rounded-md transition-colors',
                   'hover:bg-foreground/5',
                   isActive
                     ? 'text-foreground font-medium bg-foreground/5'

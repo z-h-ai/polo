@@ -43,7 +43,7 @@ export function WindowWidthGuard() {
           at this size, wrapping the frozen description one glyph early — the
           +6px restores the frozen wrap point. */}
       <div className="max-w-[326px]">
-        <p className="mb-[7px] text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+        <p className="mb-[7px] text-[14px] uppercase tracking-[0.08em] text-muted-foreground">
           {t('productSpace.windowGuard.eyebrow')}
         </p>
         <h1 className="m-0 text-[24px] font-bold leading-[1.08] tracking-[-0.05em] text-foreground">

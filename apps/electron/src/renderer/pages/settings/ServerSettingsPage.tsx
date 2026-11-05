@@ -190,7 +190,7 @@ export default function ServerSettingsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-6 text-[11px] px-2"
+                  className="h-6 text-[14px] px-2"
                   onClick={() => window.electronAPI.relaunchApp()}
                 >
                   {t("settings.server.restartNow")}
@@ -244,7 +244,7 @@ export default function ServerSettingsPage() {
                     <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                       {form.tlsCertPath || 'Not configured'}
                     </span>
-                    <Button variant="outline" size="sm" className="h-6 text-[11px] px-2 shrink-0" onClick={handleBrowseCert}>
+                    <Button variant="outline" size="sm" className="h-6 text-[14px] px-2 shrink-0" onClick={handleBrowseCert}>
                       Browse
                     </Button>
                   </div>
@@ -255,7 +255,7 @@ export default function ServerSettingsPage() {
                     <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                       {form.tlsKeyPath || 'Not configured'}
                     </span>
-                    <Button variant="outline" size="sm" className="h-6 text-[11px] px-2 shrink-0" onClick={handleBrowseKey}>
+                    <Button variant="outline" size="sm" className="h-6 text-[14px] px-2 shrink-0" onClick={handleBrowseKey}>
                       Browse
                     </Button>
                   </div>

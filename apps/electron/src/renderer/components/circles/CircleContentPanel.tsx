@@ -250,7 +250,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
             <button
               type="button"
               data-testid="circle-content-relations-retry"
-              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
               onClick={onRefreshRelations}
             >
               {t('homeApps.actions.tryAgain')}
@@ -282,7 +282,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
         <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
           {t('poo70.c4.content.exitedTitle')}
         </h2>
-        <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+        <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
           {t('poo70.c4.content.exitedHint')}
         </p>
       </div>
@@ -332,7 +332,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
             <button
               type="button"
               data-testid="circle-content-relations-retry"
-              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
               onClick={onRefreshRelations}
             >
               {t('homeApps.actions.tryAgain')}
@@ -352,7 +352,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
           <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
             {t('poo70.c4.content.emptyTitle')}
           </h2>
-          <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+          <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
             {t('poo70.c4.content.emptyHint')}
           </p>
         </div>
@@ -398,7 +398,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
                 <button
                   type="button"
                   data-testid="circle-content-catalog-retry"
-                  className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                  className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
                   onClick={() => { void catalog.sync(true) }}
                 >
                   {t('homeApps.actions.tryAgain')}
@@ -424,7 +424,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
             )}
             {directoryVerifiable && rows.length === 0 && appClassEntitlements === 0 && (
               <p
-                className="m-0 mt-[10px] text-[12px] leading-[1.5] text-muted-foreground"
+                className="m-0 mt-[10px] text-[14px] leading-[1.5] text-muted-foreground"
                 data-testid="circle-content-apps-empty"
               >
                 {t('poo70.c4.content.appsEmpty')}
@@ -468,7 +468,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
                       explanation, never a silent dead card). */}
                       {(version !== null || reason !== null) && (
                         <p
-                          className="m-0 mt-[6px] px-[2px] text-[11px] leading-[1.5] text-muted-foreground"
+                          className="m-0 mt-[6px] px-[2px] text-[14px] leading-[1.5] text-muted-foreground"
                           data-testid={`circle-content-app-reason-${row.entry.identityKey}`}
                           data-reason={reason ?? ''}
                         >

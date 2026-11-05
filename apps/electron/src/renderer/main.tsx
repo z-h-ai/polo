@@ -6,6 +6,7 @@ import { captureConsoleIntegration } from '@sentry/react'
 import { Provider as JotaiProvider, useAtomValue } from 'jotai'
 import { MotionConfig } from 'motion/react'
 import App from './App'
+import { CrashFallback } from './components/CrashFallback'
 import { ThemeProvider } from './context/ThemeContext'
 import { windowWorkspaceIdAtom } from './atoms/sessions'
 import { Toaster } from '@/components/ui/sonner'
@@ -83,25 +84,6 @@ sentryInit(
   },
   Sentry.init,
 )
-
-/**
- * Minimal fallback UI shown when the entire React tree crashes.
- * Sentry.ErrorBoundary captures the error and sends it to Sentry automatically.
- */
-function CrashFallback() {
-  return (
-    <div className="flex flex-col items-center justify-center h-screen font-sans text-foreground/50 gap-3">
-      <p className="text-base font-medium">Something went wrong</p>
-      <p className="text-[13px]">Please restart the app. The error has been reported.</p>
-      <button
-        onClick={() => window.location.reload()}
-        className="mt-2 px-4 py-1.5 rounded-md bg-background shadow-minimal text-[13px] text-foreground/70 cursor-pointer"
-      >
-        Reload
-      </button>
-    </div>
-  )
-}
 
 /**
  * Root component - loads workspace ID for theme context and renders App

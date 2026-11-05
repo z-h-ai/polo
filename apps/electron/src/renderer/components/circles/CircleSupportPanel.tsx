@@ -246,17 +246,17 @@ export function CircleSupportPanel({
       <h2 className="m-0 text-[15px] font-semibold tracking-[-0.01em] text-foreground">
         {t('poo70.s1.title')}
       </h2>
-      <p className="m-0 mt-[6px] text-[12px] leading-[1.6] text-muted-foreground">
+      <p className="m-0 mt-[6px] text-[14px] leading-[1.6] text-muted-foreground">
         {t('poo70.s1.description')}
       </p>
 
       <dl className="m-0 mt-[14px] grid gap-[10px]">
         <div className="grid gap-[2px]" data-testid="circle-support-channel-fact">
-          <dt className="text-[12px] text-muted-foreground">{t('poo70.s1.channelLabel')}</dt>
-          <dd className="m-0 text-[13px] text-foreground">
+          <dt className="text-[14px] text-muted-foreground">{t('poo70.s1.channelLabel')}</dt>
+          <dd className="m-0 text-[14px] text-foreground">
             {readState.phase === 'loading' && (
               <span
-                className="text-[12px] text-muted-foreground"
+                className="text-[14px] text-muted-foreground"
                 data-testid="circle-support-loading"
                 role="status"
               >
@@ -266,7 +266,7 @@ export function CircleSupportPanel({
 
             {readState.phase === 'failed' && !permissionBlocked && (
               <span
-                className="text-[12px] text-destructive"
+                className="text-[14px] text-destructive"
                 data-testid="circle-support-error"
                 role="alert"
               >
@@ -298,7 +298,7 @@ export function CircleSupportPanel({
 
             {support?.availability === 'load_failed' && (
               <span
-                className="text-[12px] text-destructive"
+                className="text-[14px] text-destructive"
                 data-testid="circle-support-load-failed"
                 role="alert"
               >
@@ -308,7 +308,7 @@ export function CircleSupportPanel({
 
             {support?.availability === 'available' && !support.configured && (
               <span
-                className="text-[12px] text-muted-foreground"
+                className="text-[14px] text-muted-foreground"
                 data-testid="circle-support-unconfigured"
                 role="status"
               >
@@ -318,11 +318,11 @@ export function CircleSupportPanel({
 
             {support?.availability === 'available' && support.configured && (
               imageFailed ? (
-                <span data-testid="circle-support-load-failed" className="text-[12px] text-destructive" role="alert">
+                <span data-testid="circle-support-load-failed" className="text-[14px] text-destructive" role="alert">
                   {t('poo70.s1.loadFailed')}
                 </span>
               ) : (
-                <span data-testid="circle-support-configured" className="block text-[12px]">
+                <span data-testid="circle-support-configured" className="block text-[14px]">
                   <img
                     key={imageReceiptVersionRef.current}
                     src={support.qrDataUri}
@@ -340,14 +340,14 @@ export function CircleSupportPanel({
           </dd>
         </div>
         <div className="grid gap-[2px]" data-testid="circle-support-status-fact">
-          <dt className="text-[12px] text-muted-foreground">{t('poo70.s1.statusLabel')}</dt>
-          <dd className="m-0 text-[12px] text-muted-foreground">
+          <dt className="text-[14px] text-muted-foreground">{t('poo70.s1.statusLabel')}</dt>
+          <dd className="m-0 text-[14px] text-muted-foreground">
             {t('poo70.s1.statusNote')}
           </dd>
         </div>
       </dl>
 
-      <label className="mt-[14px] grid gap-[6px] text-[12px] text-muted-foreground">
+      <label className="mt-[14px] grid gap-[6px] text-[14px] text-muted-foreground">
         {t('poo70.s1.copyLabel')}
         <textarea
           readOnly
@@ -355,11 +355,11 @@ export function CircleSupportPanel({
           value={copyText}
           aria-label={t('poo70.s1.copyLabel')}
           data-testid="circle-support-info-text"
-          className="min-h-[64px] w-full resize-y rounded-[10px] border border-border bg-background px-[12px] py-[8px] text-[13px] leading-[1.6] text-foreground outline-none focus-visible:border-accent"
+          className="min-h-[64px] w-full resize-y rounded-[10px] border border-border bg-background px-[12px] py-[8px] text-[14px] leading-[1.6] text-foreground outline-none focus-visible:border-accent"
         />
       </label>
       <p
-        className="m-0 mt-[6px] min-h-[18px] text-[12px] text-muted-foreground"
+        className="m-0 mt-[6px] min-h-[18px] text-[14px] text-muted-foreground"
         role="status"
         data-testid="circle-support-copy-status"
       >
@@ -371,7 +371,7 @@ export function CircleSupportPanel({
         <button
           type="button"
           data-testid="circle-support-copy"
-          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
           onClick={handleCopy}
         >
           {t('poo70.s1.copy')}
@@ -380,7 +380,7 @@ export function CircleSupportPanel({
           <button
             type="button"
             data-testid="circle-support-reload"
-            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             onClick={() => void refreshSupport()}
           >
             {t('poo70.s1.reload')}
@@ -390,7 +390,7 @@ export function CircleSupportPanel({
           <button
             type="button"
             data-testid="circle-support-recheck"
-            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
             onClick={onRecheck}
           >
             {t('poo70.s1.recheck')}
@@ -399,7 +399,7 @@ export function CircleSupportPanel({
         <button
           type="button"
           data-testid="circle-support-back"
-          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[14px] font-medium text-foreground hover:bg-foreground-5"
           onClick={onBack}
         >
           {backLabel}

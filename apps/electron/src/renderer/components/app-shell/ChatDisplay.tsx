@@ -119,7 +119,6 @@ interface MultiDiffOverlayState {
 interface MarkdownOverlayState {
   type: 'markdown'
   content: string
-  title: string
   /** When true, show raw markdown source in code viewer instead of rendered preview */
   forceCodeView?: boolean
 }
@@ -148,6 +147,10 @@ interface ChatDisplayProps {
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
+  /** POO-172: dedicated channel for assistant-markdown citation sources
+   *  (built-in browser). Business URLs (error cards, user messages) keep
+   *  using `onOpenUrl`. */
+  onOpenSourceUrl?: (url: string) => void
   // Current model is read-only in the input; admin-managed settings choose it.
   currentModel: string
   /** @deprecated Manual model switching has been removed from the UI. */
@@ -399,10 +402,10 @@ export function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndi
   const displayMessage = statusMessage || t(PROCESSING_MESSAGE_KEYS[messageIndex])
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[13px] text-muted-foreground">
+    <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[14px] text-muted-foreground">
       {/* Spinner in same location as TurnCard chevron */}
       <div className="w-3 h-3 flex items-center justify-center shrink-0">
-        <Spinner className="text-[10px]" />
+        <Spinner className="text-[14px]" />
       </div>
       {/* Label with crossfade animation on content change only */}
       <span className="relative h-5 flex items-center">
@@ -463,6 +466,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onSendMessage,
   onOpenFile,
   onOpenUrl,
+  onOpenSourceUrl,
   currentModel,
   textareaRef: externalTextareaRef,
   disabled = false,
@@ -518,7 +522,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   connectionUnavailable = false,
   inputStatusBanner,
 }, ref) {
-  const { t } = useTranslation()
+  const { t, i18n: i18nInstance } = useTranslation()
 
   // Panel focus state (for multi-panel auto-scroll behavior)
   const appShellContext = useAppShellContext()
@@ -553,6 +557,27 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
+  const [awayFromBottomSessionId, setAwayFromBottomSessionId] = useState<string | null>(null)
+  const [latestFeedback, setLatestFeedback] = useState<{ sessionId: string; turnKey: string } | null>(null)
+  const latestFeedbackTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Last viewport geometry observed by the scroll handler and the resize
+  // observer. It tells an upward user scroll apart from the sticky-bottom
+  // follow moving downward through a temporary growth gap (POO170-R1-01).
+  const settledScrollGeometryRef = React.useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
+  const clearLatestFeedback = useCallback(() => {
+    if (latestFeedbackTimerRef.current !== null) clearTimeout(latestFeedbackTimerRef.current)
+    latestFeedbackTimerRef.current = null
+    setLatestFeedback(null)
+  }, [])
+  // Key feedback to its conversation in render as well as cancelling its timer.
+  // A switch must never expose the previous conversation's announcement.
+  React.useLayoutEffect(() => {
+    clearLatestFeedback()
+    return () => {
+      if (latestFeedbackTimerRef.current !== null) clearTimeout(latestFeedbackTimerRef.current)
+      latestFeedbackTimerRef.current = null
+    }
+  }, [session?.id, isFocusedPanel, clearLatestFeedback])
   // Debounced bottom-follow with a fire-time sticky re-check, so a Recap click
   // that unstuck the bottom cannot be yanked back by an already-scheduled
   // resize scroll (POO-111 race).
@@ -1068,13 +1093,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const overlayCards = useMemo(() => {
     if (!overlayState || overlayState.type !== 'activity') return []
     return extractOverlayCards(overlayState.activity)
-  }, [overlayState])
+    // POO-179: card labels/fallbacks are display copy — re-derive on language change.
+  }, [overlayState, i18nInstance.language])
 
   // Parsed output data for legacy output-only activity overlays
   const activityOutputOverlayData = useMemo(() => {
     if (!overlayState || overlayState.type !== 'activity') return null
     return extractOverlayData(overlayState.activity)
-  }, [overlayState])
+    // POO-179: derived titles/fallbacks are display copy — re-derive on language change.
+  }, [overlayState, i18nInstance.language])
 
   // Stacked input/output cards are only enabled for Bash and MCP tools
   const useStackedActivityOverlay = useMemo(() => {
@@ -1088,7 +1115,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     setOverlayState({
       type: 'markdown',
       content: message.content,
-      title: 'Message Preview',
     })
   }, [session])
 
@@ -1142,6 +1168,23 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }))
   }, [pendingFollowUpAnnotations])
 
+  // Resize can change whether the shortcut is needed without changing the
+  // user's sticky-bottom preference (e.g. while reading history). The sync is
+  // a pure geometry read: it never ends the arrival feedback (POO170-R1-01 —
+  // feedback only ends on an upward user scroll below, Recap, session/panel
+  // changes, the 1500ms expiry or unmount), and it never assumes that a
+  // parked viewport will be scrolled by a pending follow. Growth can land
+  // while the 500ms session-switch guard skips that follow, so skipping the
+  // entry sync on growth would leave real distance unsurfaced
+  // (POO170-R2-01); the entry simply reflects the geometry and the follow
+  // clears it again if it does run.
+  const updateLatestShortcut = useCallback(() => {
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    const away = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight >= 20
+    setAwayFromBottomSessionId(away ? session?.id ?? null : null)
+  }, [session?.id])
+
   // Track scroll position to toggle sticky-bottom behavior
   // - User scrolls up → unstick (stop auto-scrolling)
   // - User scrolls back to bottom → re-stick (resume auto-scrolling)
@@ -1153,6 +1196,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight
     // 20px threshold for "at bottom" detection
     isStickToBottomRef.current = distanceFromBottom < 20
+    updateLatestShortcut()
+    // Only a viewport that moved upward is the user leaving the latest
+    // position. The sticky-bottom follow itself also produces scroll events
+    // across a temporary gap (content grew below), and those move downward.
+    const settled = settledScrollGeometryRef.current
+    if (distanceFromBottom >= 20 && settled !== null && scrollTop < settled.scrollTop) clearLatestFeedback()
+    settledScrollGeometryRef.current = { scrollHeight, scrollTop }
 
     // Load more turns when scrolling near top (within 100px)
     if (scrollTop < 100) {
@@ -1173,7 +1223,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         return prev + TURNS_PER_PAGE
       })
     }
-  }, [])
+  }, [updateLatestShortcut, clearLatestFeedback])
 
   // Set up scroll event listener. Re-bound per session id so a null→session
   // caller attaches after the viewport mounts instead of never (POO-111
@@ -1183,8 +1233,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
     viewport.addEventListener('scroll', handleScroll)
+    updateLatestShortcut()
     return () => viewport.removeEventListener('scroll', handleScroll)
-  }, [handleScroll, session?.id])
+  }, [handleScroll, session?.id, updateLatestShortcut])
 
   // Auto-scroll using ResizeObserver for streaming content
   // Initial scroll is handled by ScrollOnMount (useLayoutEffect, before paint)
@@ -1199,6 +1250,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     // On session switch: reset UI state (scroll handled by ScrollOnMount)
     if (isSessionSwitch) {
       isStickToBottomRef.current = true
+      setAwayFromBottomSessionId(null)
       setVisibleTurnCount(TURNS_PER_PAGE)
       // P0-2 buffer hygiene: the previous session's ephemeral
       // tool_input_delta buffers have no live consumer once we switch away —
@@ -1214,6 +1266,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const stickyBottomScrollGate = stickyBottomScrollGateRef.current
 
     const resizeObserver = new ResizeObserver(() => {
+      // Refresh the settled baseline so a follow-on scroll event compares
+      // against post-resize geometry instead of stale pre-resize values.
+      settledScrollGeometryRef.current = { scrollHeight: viewport.scrollHeight, scrollTop: viewport.scrollTop }
+      updateLatestShortcut()
       // Unfocused panels: always scroll to bottom instantly (user isn't reading them)
       if (!isFocusedPanelRef.current) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
@@ -1236,12 +1292,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (content) {
       resizeObserver.observe(content)
     }
+    resizeObserver.observe(viewport)
 
     return () => {
       resizeObserver.disconnect()
       stickyBottomScrollGate?.cancel()
     }
-  }, [session?.id])
+  }, [session?.id, updateLatestShortcut])
 
   // Commit-time auto-scroll for new user messages.
   // This complements submit-time scrolling and covers cases where attachments delay
@@ -1348,7 +1405,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     if (isInputDisabled || disableSend || connectionUnavailable) {
       toast.error(t('toast.cannotSendRightNow'), {
-        description: 'Sending is currently disabled for this session.',
+        description: t('chat.sendingDisabled'),
       })
       return
     }
@@ -1522,10 +1579,36 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // so a streaming chunk's already-pending 200ms gate timer could still fire
   // with stickiness true and yank the user back down before that event lands.
   const handleRecapClick = useCallback(() => {
+    clearLatestFeedback()
     isStickToBottomRef.current = false
     stickyBottomScrollGateRef.current?.cancel()
     recap.reveal()
-  }, [recap])
+  }, [recap, clearLatestFeedback])
+
+  const showLatestFeedback = isFocusedPanel && latestFeedback?.sessionId === session?.id
+  const handleJumpToLatest = useCallback(() => {
+    const viewport = scrollViewportRef.current
+    const latestTurn = turns[turns.length - 1]
+    if (!session || !isFocusedPanelRef.current || !viewport || !latestTurn) return
+    clearLatestFeedback()
+    stickyBottomScrollGateRef.current?.cancel()
+    isStickToBottomRef.current = true
+    // Use the existing anchor, instantly: feedback is only emitted after the
+    // viewport has actually arrived, including with reduced motion enabled.
+    messagesEndRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' })
+    // The anchor precedes the message column's bottom padding. Include that
+    // padding so arrival uses the same 20px rule as ordinary user scrolling.
+    viewport.scrollTop = viewport.scrollHeight - viewport.clientHeight
+    updateLatestShortcut()
+    if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight >= 20) return
+    const turnKey = getTurnKey(latestTurn)
+    turnRefs.current.get(turnKey)?.focus({ preventScroll: true })
+    setLatestFeedback({ sessionId: session.id, turnKey })
+    latestFeedbackTimerRef.current = setTimeout(() => {
+      latestFeedbackTimerRef.current = null
+      setLatestFeedback(null)
+    }, 1500)
+  }, [session, turns, clearLatestFeedback, updateLatestShortcut])
 
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
@@ -1625,6 +1708,21 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <div className="flex flex-1 flex-col min-h-0 min-w-0 relative z-10">
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className="relative flex-1 min-h-0">
+            {isFocusedPanel && awayFromBottomSessionId === session.id && turns.length > 0 && !messagesLoading && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-3">
+                <button
+                  type="button"
+                  onClick={handleJumpToLatest}
+                  className="pointer-events-auto flex h-8 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 text-[14px] text-muted-foreground shadow-tinted transition-colors hover:border-border hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-info focus-visible:outline-offset-2"
+                >
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{t('chat.jumpToLatest')}</span>
+                </button>
+              </div>
+            )}
+            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+              {showLatestFeedback ? t('chat.latestReached') : ''}
+            </div>
             {/* Latest-user-message Recap — a sibling OUTSIDE the fade mask so the mask never dims it */}
             {recap.visible && recapTarget && (
               <UserMessageRecap
@@ -1688,7 +1786,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           } as React.CSSProperties}
                         >
                           <AlertTriangle className="mx-auto mb-2 h-4 w-4 text-destructive/70" />
-                          <div className="text-sm font-medium text-destructive">Failed to load conversation</div>
+                          <div className="text-sm font-medium text-destructive">{t('chat.loadConversationFailed')}</div>
                           <p className="mt-1 break-words text-xs text-destructive/70">{messagesLoadError}</p>
                           {onRetryMessagesLoad && (
                             <button
@@ -1697,7 +1795,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                               disabled={messagesRetrying}
                               className="mt-3 rounded border border-destructive/20 px-2 py-0.5 text-xs text-destructive/70 transition-colors hover:border-destructive/40 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {messagesRetrying ? 'Retrying…' : 'Retry'}
+                              {messagesRetrying ? t('chat.retrying') : t('common.retry')}
                             </button>
                           )}
                         </div>
@@ -1733,8 +1831,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     <div className="flex h-64 items-center justify-center px-4 text-center">
                       <div className="max-w-sm rounded-[8px] border border-border/50 bg-foreground/[0.03] px-4 py-3">
                         <CircleAlert className="mx-auto mb-2 h-4 w-4 text-foreground/50" />
-                        <div className="text-sm font-medium text-foreground/70">Conversation loaded, but no renderable messages were found.</div>
-                        <p className="mt-1 text-xs text-foreground/50">Try reloading the session. If this persists, the message history may contain an unsupported format.</p>
+                        <div className="text-sm font-medium text-foreground/70">{t('chat.noRenderableMessages')}</div>
+                        <p className="mt-1 text-xs text-foreground/50">{t('chat.reloadUnsupportedHistory')}</p>
                       </div>
                     </div>
                   )}
@@ -1749,6 +1847,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     const turnKey = getTurnKey(turn)
                     const isCurrentMatch = isSearchActive && matchingTurnIds[currentMatchIndex] === turnKey
                     const isAnyMatch = isSearchActive && matchingTurnIds.includes(turnKey)
+                    const isLatestHighlighted = showLatestFeedback && latestFeedback?.turnKey === turnKey
 
                     // User turns - render with MemoizedMessageBubble
                     // Extra padding creates visual separation from AI responses
@@ -1760,9 +1859,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           // Programmatic focus target for the Recap reveal
                           // (not tabbable; keeps focus when the button unmounts).
                           tabIndex={-1}
+                          data-latest-highlight={isLatestHighlighted || undefined}
                           className={cn(
                             compactMode ? "pt-2 pb-1" : CHAT_LAYOUT.userMessagePadding,
                             "rounded-lg transition-all duration-200",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1771,6 +1872,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             message={turn.message}
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
+                            onOpenSourceUrl={onOpenSourceUrl}
                             sessionId={session?.id}
                             workspaceId={session?.workspaceId}
                             compactMode={compactMode}
@@ -1785,8 +1887,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         <div
                           key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                          tabIndex={-1}
+                          data-latest-highlight={isLatestHighlighted || undefined}
                           className={cn(
                             "rounded-lg transition-all duration-200",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1795,6 +1900,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             message={turn.message}
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
+                            onOpenSourceUrl={onOpenSourceUrl}
                             sessionId={session?.id}
                             onRetry={turn.message.role === 'error' ? () => {
                               const msgs = session?.messages
@@ -1819,8 +1925,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         <div
                           key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                          tabIndex={-1}
+                          data-latest-highlight={isLatestHighlighted || undefined}
                           className={cn(
                             "mt-2 rounded-lg transition-all duration-200",
+                            isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                             isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
@@ -1844,9 +1953,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       <div
                         key={turnKey}
                         ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                        tabIndex={-1}
+                        data-latest-highlight={isLatestHighlighted || undefined}
                         className={cn(
                           "pt-2",
                           "rounded-lg transition-all duration-200",
+                          isLatestHighlighted && "outline outline-2 outline-info outline-offset-2",
                           isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
                           isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                         )}
@@ -1868,6 +1980,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         todos={turn.todos}
                         onOpenFile={onOpenFile}
                         onOpenUrl={onOpenUrl}
+                        onOpenSourceUrl={onOpenSourceUrl}
                         isLastResponse={isLastResponse}
                         compactMode={compactMode}
                         sendMessageKey={sendMessageKey}
@@ -1880,6 +1993,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                               {
                                 branchFromMessageId: messageId,
                                 branchFromSessionId: session.id,
+                                // POO-179: the branch name is persisted session
+                                // metadata, so it stays the untranslated baseline
+                                // form; localizing it here would freeze a
+                                // translation into the session list forever.
                                 name: `Branch of ${session.name || 'Untitled'}`,
                                 // Keep branch on the same backend/provider by inheriting parent session settings.
                                 llmConnection: session.llmConnection,
@@ -1891,10 +2008,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             )
                             navigate(routes.view.allSessions(child.id), { newPanel: resolveBranchNewPanelOption(options) })
                           } catch (error) {
-                            const rawMessage = error instanceof Error ? error.message : 'Failed to create branch'
+                            const rawMessage = error instanceof Error ? error.message : t('chat.failedToCreateBranch')
+                            // Matching stays on the raw server error text; only the
+                            // replacement guidance copy is localized.
                             const message = rawMessage.includes('source and target providers must match')
                               || rawMessage.includes('same provider/backend')
-                              ? 'Branching is only supported within the same provider/backend. Switch this panel connection and try again.'
+                              ? t('chat.branchProviderMismatch')
                               : rawMessage
                             toast.error(t('toast.couldNotCreateBranch'), { description: message })
                           }
@@ -1909,7 +2028,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             })
                           } catch (error) {
                             toast.error(t('toast.couldNotSaveHighlight'), {
-                              description: error instanceof Error ? error.message : 'Unknown error',
+                              description: error instanceof Error ? error.message : t('chat.unknownError'),
                             })
                             throw error
                           }
@@ -1924,7 +2043,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             })
                           } catch (error) {
                             toast.error(t('toast.couldNotRemoveHighlight'), {
-                              description: error instanceof Error ? error.message : 'Unknown error',
+                              description: error instanceof Error ? error.message : t('chat.unknownError'),
                             })
                           }
                         }}
@@ -1939,7 +2058,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             })
                           } catch (error) {
                             toast.error(t('toast.couldNotUpdateHighlight'), {
-                              description: error instanceof Error ? error.message : 'Unknown error',
+                              description: error instanceof Error ? error.message : t('chat.unknownError'),
                             })
                             throw error
                           }
@@ -1976,7 +2095,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           setOverlayState({
                             type: 'markdown',
                             content: text,
-                            title: 'Response Preview',
                             forceCodeView: true,
                           })
                         }}
@@ -1986,7 +2104,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           setOverlayState({
                             type: 'markdown',
                             content: markdown,
-                            title: 'Turn Details',
                           })
                         }}
                         onOpenActivityDetails={(activity) => {
@@ -2128,7 +2245,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           isOpen={true}
           onClose={handleCloseOverlay}
           cards={overlayCards}
-          title={overlayState.activity.displayName || overlayState.activity.toolName || 'Activity'}
+          title={overlayState.activity.displayName || overlayState.activity.toolName || t('overlay.activity')}
           theme={isDark ? 'dark' : 'light'}
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
@@ -2196,7 +2313,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             onOpenFile={onOpenFile}
             typeBadge={{
               icon: Info,
-              label: overlayState.activity.displayName || overlayState.activity.toolName || 'Activity',
+              label: overlayState.activity.displayName || overlayState.activity.toolName || t('overlay.activity'),
               variant: 'blue',
             }}
             error={activityOutputOverlayData.error}
@@ -2246,7 +2363,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             isOpen={true}
             onClose={handleCloseOverlay}
             content={overlayState.content}
-            onOpenUrl={onOpenUrl}
+            // Turn-details shows the assistant's full answer — its links are
+            // citation sources and route through the dedicated channel.
+            onOpenUrl={onOpenSourceUrl ?? onOpenUrl}
             onOpenFile={onOpenFile}
           />
         )
@@ -2270,6 +2389,8 @@ interface MessageBubbleProps {
   message: Message
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
+  /** POO-172: citation-source channel for the assistant branch only. */
+  onOpenSourceUrl?: (url: string) => void
   sessionId?: string
   /** POO-108: KB chip previews resolve documents against the session workspace */
   workspaceId?: string
@@ -2369,6 +2490,7 @@ function MessageBubble({
   message,
   onOpenFile,
   onOpenUrl,
+  onOpenSourceUrl,
   sessionId,
   workspaceId,
   renderMode = 'minimal',
@@ -2427,14 +2549,14 @@ function MessageBubble({
               content={message.content}
               isStreaming={true}
               mode={renderMode}
-              onUrlClick={onOpenUrl}
+              onUrlClick={onOpenSourceUrl ?? onOpenUrl}
               onFileClick={onOpenFile}
             />
           ) : (
             <CollapsibleMarkdownProvider>
               <Markdown
                 mode={renderMode}
-                onUrlClick={onOpenUrl}
+                onUrlClick={onOpenSourceUrl ?? onOpenUrl}
                 onFileClick={onOpenFile}
                 id={message.id}
                 className="text-sm"
@@ -2457,10 +2579,10 @@ function MessageBubble({
   // === STATUS MESSAGE: Matches ProcessingIndicator layout for visual consistency ===
   if (message.role === 'status') {
     return (
-      <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[13px] text-muted-foreground">
+      <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[14px] text-muted-foreground">
         {/* Spinner in same location as TurnCard chevron */}
         <div className="w-3 h-3 flex items-center justify-center shrink-0">
-          <Spinner className="text-[10px]" />
+          <Spinner className="text-[14px]" />
         </div>
         <span>{message.content}</span>
       </div>
@@ -2493,7 +2615,7 @@ function MessageBubble({
     const Icon = config.icon
 
     return (
-      <div className={cn('flex items-center gap-2 px-3 py-1 text-[13px] select-none', config.className)}>
+      <div className={cn('flex items-center gap-2 px-3 py-1 text-[14px] select-none', config.className)}>
         <div className="w-3 h-3 flex items-center justify-center shrink-0">
           <Icon className="w-3 h-3" />
         </div>
@@ -2540,6 +2662,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.workspaceId === next.workspaceId &&
     prev.message.kbReferences === next.message.kbReferences &&
     prev.message.elementReferences === next.message.elementReferences &&
-    prev.compactMode === next.compactMode
+    prev.compactMode === next.compactMode &&
+    prev.onOpenSourceUrl === next.onOpenSourceUrl
   )
 })

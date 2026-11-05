@@ -101,7 +101,10 @@ interface FilePathBadgeProps {
  */
 function FilePathBadge({ filePath }: FilePathBadgeProps) {
   const { onOpenFileExternal, onRevealInFinder, fileManagerName } = usePlatform()
-  const revealLabel = `Reveal in ${fileManagerName || 'Finder'}`
+  const { t } = useTranslation()
+  // POO-179: menu actions localize; the file-manager name (Finder/Explorer)
+  // and the real path stay as provided.
+  const revealLabel = t('chat.showInFileManager', { fileManager: fileManagerName || 'Finder' })
 
   const handleOpen = useCallback(() => {
     onOpenFileExternal?.(filePath)
@@ -119,7 +122,7 @@ function FilePathBadge({ filePath }: FilePathBadgeProps) {
       {onOpenFileExternal && (
         <StyledDropdownMenuItem onSelect={handleOpen}>
           <ExternalLink />
-          Open
+          {t('common.open')}
         </StyledDropdownMenuItem>
       )}
       {onRevealInFinder && (
@@ -136,7 +139,7 @@ function FilePathBadge({ filePath }: FilePathBadgeProps) {
       {onOpenFileExternal && (
         <ContextMenu.Item className={contextMenuItemClasses} onSelect={handleOpen}>
           <ExternalLink />
-          Open
+          {t('common.open')}
         </ContextMenu.Item>
       )}
       {onRevealInFinder && (
@@ -165,7 +168,7 @@ function FilePathBadge({ filePath }: FilePathBadgeProps) {
             <button
               className={cn(
                 'flex items-center gap-1.5 h-[26px] px-2.5 rounded-[6px]',
-                'font-sans text-[13px] font-medium text-foreground/70',
+                'font-sans text-[14px] font-medium text-foreground/70',
                 'bg-background shadow-minimal',
                 'min-w-0 cursor-pointer group'
               )}

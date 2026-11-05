@@ -68,9 +68,9 @@ export const ICON_SIZE_CLASSES: Record<IconSize, string> = {
 
 /** Size → Tailwind emoji font size (visually balanced within container) */
 export const ICON_EMOJI_SIZES: Record<IconSize, string> = {
-  xs: 'text-[10px]',
-  sm: 'text-[11px]',
-  md: 'text-[13px]',
+  xs: 'text-[14px]',
+  sm: 'text-[14px]',
+  md: 'text-[14px]',
   lg: 'text-[16px]',
   xl: 'text-[18px]',
 }

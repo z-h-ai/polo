@@ -772,12 +772,12 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
         data-genui-canvas-placeholder={appId}
       >
         <AppWindow className="w-3.5 h-3.5 text-muted-foreground/70 shrink-0" />
-        <span className="text-[12px] text-muted-foreground font-medium truncate flex-1 min-w-0">{title}</span>
-        <span className="shrink-0 text-[11px] text-muted-foreground/70">{t('genui.app.openedInCanvas')}</span>
+        <span className="text-[14px] text-muted-foreground font-medium truncate flex-1 min-w-0">{title}</span>
+        <span className="shrink-0 text-[14px] text-muted-foreground/70">{t('genui.app.openedInCanvas')}</span>
         <button
           type="button"
           onClick={handleFocusCanvas}
-          className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border border-border text-muted-foreground hover:text-accent hover:border-accent/40 transition-colors"
+          className="shrink-0 inline-flex items-center gap-1 text-[14px] font-medium rounded-[6px] px-2 py-1 border border-border text-muted-foreground hover:text-accent hover:border-accent/40 transition-colors"
         >
           {t('genui.app.showInCanvas')}
         </button>
@@ -789,9 +789,9 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
     <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
       <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-1.5">
         <AppWindow className="w-3.5 h-3.5 text-muted-foreground/70 shrink-0" />
-        <span className="text-[12px] text-muted-foreground font-medium truncate flex-1 min-w-0">{title}</span>
+        <span className="text-[14px] text-muted-foreground font-medium truncate flex-1 min-w-0">{title}</span>
         {typeof version === 'number' && (
-          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/80 tabular-nums">
+          <span className="shrink-0 text-[14px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/80 tabular-nums">
             {t('genui.app.version', { version })}
           </span>
         )}
@@ -799,7 +799,7 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
           <button
             type="button"
             onClick={handleOpenCanvas}
-            className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border border-accent/30 bg-accent/[0.07] text-accent hover:bg-accent/[0.12] hover:border-accent/50 transition-colors"
+            className="shrink-0 inline-flex items-center gap-1 text-[14px] font-medium rounded-[6px] px-2 py-1 border border-accent/30 bg-accent/[0.07] text-accent hover:bg-accent/[0.12] hover:border-accent/50 transition-colors"
           >
             <PanelRight className="w-3 h-3" />
             {t('genui.app.openInCanvas')}
@@ -811,7 +811,7 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
             onClick={isPinned ? handleUnpin : handlePin}
             disabled={pinState === 'pending'}
             className={cn(
-              'shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border transition-colors',
+              'shrink-0 inline-flex items-center gap-1 text-[14px] font-medium rounded-[6px] px-2 py-1 border transition-colors',
               isPinned
                 ? 'border-success/30 text-success bg-success/[0.06] hover:border-success/50'
                 : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -832,7 +832,7 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
             }
             title={publishTitle}
             className={cn(
-              'shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-[6px] px-2 py-1 border transition-colors',
+              'shrink-0 inline-flex items-center gap-1 text-[14px] font-medium rounded-[6px] px-2 py-1 border transition-colors',
               publishState === 'published'
                 ? 'border-success/30 text-success bg-success/[0.06]'
                 : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -845,7 +845,7 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       </div>
       {(pinError || publishError) && (
         <div
-          className="px-3 py-1.5 text-[11px] text-destructive/80 bg-destructive/[0.04] border-b"
+          className="px-3 py-1.5 text-[14px] text-destructive/80 bg-destructive/[0.04] border-b"
           title={publishErrorDetail ?? undefined}
         >
           {publishError ?? pinError}
@@ -855,12 +855,12 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
         // POO-154: a disabled button with only a hover tooltip reads as a dead
         // control. When the bridge knows there is no publish target, say so
         // inline — the state must be visible, not merely discoverable.
-        <div className="px-3 py-1.5 text-[11px] text-muted-foreground/80 bg-muted/30 border-b">
+        <div className="px-3 py-1.5 text-[14px] text-muted-foreground/80 bg-muted/30 border-b">
           {t('genui.app.publishNoTargetHint')}
         </div>
       )}
       {loadFailed ? (
-        <div className="h-[320px] flex items-center justify-center text-[12px] text-muted-foreground/70">
+        <div className="h-[320px] flex items-center justify-center text-[14px] text-muted-foreground/70">
           {t('genui.app.loadError')}
         </div>
       ) : (

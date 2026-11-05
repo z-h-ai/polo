@@ -19,7 +19,8 @@ import { MarkdownLatexBlock } from './MarkdownLatexBlock'
 import { MarkdownPdfBlock } from './MarkdownPdfBlock'
 import { MarkdownDocBlock } from './MarkdownDocBlock'
 import { preprocessLinks } from './linkify'
-import { resolveMarkdownLinkTarget } from './link-target'
+import { isOpenableMarkdownLinkText, resolveMarkdownLinkTarget } from './link-target'
+import { FileLinkContextMenu } from './FileLinkContextMenu'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
@@ -52,6 +53,24 @@ export type DisablablePreviewBlock =
  *   Best for: Documentation, long-form content, when presentation matters
  */
 export type RenderMode = 'terminal' | 'minimal' | 'full'
+
+// Scenic themes give --background an alpha channel. Keep its color channels
+// but make the header opaque so scrolling rows cannot show through the label.
+const TABLE_HEADER_CLASS = 'sticky top-0 z-10 bg-[oklch(from_var(--background)_l_c_h_/_1)] shadow-bottom-border-thin'
+
+function MarkdownTable({ children, className, tableClassName }: {
+  children?: React.ReactNode
+  className?: string
+  tableClassName: string
+}) {
+  // Both axes must share a bounded scroll host: overflow-x alone would trap
+  // sticky headers in an ancestor that never scrolls vertically.
+  return (
+    <div className={cn('isolate max-h-[400px] max-w-full overflow-auto', className)}>
+      <table className={tableClassName}>{children}</table>
+    </div>
+  )
+}
 
 export interface MarkdownProps {
   children: string
@@ -199,41 +218,94 @@ function createComponents(
     //   through `resolveMarkdownLinkTarget` so file URLs land in `onFileClick`
     //   and blocked URLs surface a meaningful error via `onUrlClick` →
     //   `classifyExternalUrl`.
+    // - Middle-click (auxclick button=1) is routed through the SAME handler.
+    //   Left alone it would fall through to Electron's default window-open
+    //   path (`setWindowOpenHandler` → `openExternalFromRenderer`), sending a
+    //   citation outside the built-in browser (POO-172/CITE-01). This is a
+    //   renderer-side interaction change only — Main's security policy and the
+    //   business `onOpenUrl` channel are untouched.
     a: ({ href, children }) => {
       const trimmedHref = href?.trim() ?? ''
       const sanitized = trimmedHref ? defaultUrlTransform(trimmedHref) : ''
       const safeHref = sanitized ? sanitized : undefined
 
-      const handleClick = (e: React.MouseEvent) => {
+      // Some AI outputs include raw HTML anchors with empty href but path text content.
+      // Fallback to the anchor text when href is missing/empty — but only when that
+      // text actually resolves to something openable. Plain-text citation
+      // references must render as plain text, never as a fake link (POO-172/CITE-02).
+      const fallbackText = trimmedHref
+        ? ''
+        : React.Children.toArray(children)
+            .map((child) => (typeof child === 'string' ? child : ''))
+            .join('')
+            .trim()
+      if (!trimmedHref && !isOpenableMarkdownLinkText(fallbackText)) {
+        return <span>{children}</span>
+      }
+
+      // Resolved once here instead of per-dispatch: the classification decides
+      // both click routing and whether the anchor gets the file-link context
+      // menu (POO-173/FILELINK-01). Web URLs and plain text never get wrapped,
+      // so their native right-click (selection copy etc.) is untouched
+      // (FILELINK-02).
+      const linkTarget = (trimmedHref || fallbackText)
+        ? resolveMarkdownLinkTarget(trimmedHref || fallbackText)
+        : null
+
+      const dispatchLinkTarget = (e: { preventDefault: () => void }) => {
         e.preventDefault()
 
-        // Some AI outputs include raw HTML anchors with empty href but path text content.
-        // Fallback to the anchor text when href is missing/empty.
-        const fallbackText = React.Children.toArray(children)
-          .map((child) => (typeof child === 'string' ? child : ''))
-          .join('')
-          .trim()
+        if (!linkTarget) return
 
-        const target = trimmedHref || fallbackText
-        if (!target) return
-
-        const resolvedTarget = resolveMarkdownLinkTarget(target)
-        if (resolvedTarget.kind === 'file' && onFileClick) {
-          onFileClick(resolvedTarget.path)
-        } else if (resolvedTarget.kind === 'url' && onUrlClick) {
-          onUrlClick(resolvedTarget.url)
+        if (linkTarget.kind === 'file' && onFileClick) {
+          onFileClick(linkTarget.path)
+        } else if (linkTarget.kind === 'url' && onUrlClick) {
+          onUrlClick(linkTarget.url)
         }
       }
 
-      return (
+      const handleClick = (e: React.MouseEvent) => dispatchLinkTarget(e)
+
+      const handleAuxClick = (e: React.MouseEvent) => {
+        // Only the middle button needs intercepting; other auxclicks
+        // (right-click context menu, etc.) keep their default behavior.
+        if (e.button !== 1) return
+        dispatchLinkTarget(e)
+      }
+
+      // Keyboard parity. With a real `href` Chromium activates the link on
+      // Enter by synthesizing a click — `dispatchLinkTarget` preventDefault-s
+      // that first, so the callback fires exactly once either way. Space is
+      // only claimed for the URL-fallback anchor (no href): without it that
+      // anchor is not focusable/activatable at all, while a real link keeps
+      // the browser's native Space (page scroll) behavior.
+      const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key !== 'Enter' && (safeHref || e.key !== ' ')) return
+        dispatchLinkTarget(e)
+      }
+
+      const anchor = (
         <a
           href={safeHref}
           onClick={handleClick}
+          onAuxClick={handleAuxClick}
+          onKeyDown={handleKeyDown}
+          tabIndex={safeHref ? undefined : 0}
+          role={safeHref ? undefined : 'link'}
           className="text-accent hover:underline cursor-pointer"
         >
           {children}
         </a>
       )
+
+      // Only filesystem targets get the right-click menu (FILELINK-01); the
+      // component itself no-ops to the raw anchor when the platform offers
+      // neither reveal nor copy. Radix `Trigger asChild` merges into the <a>
+      // above — no wrapper element, so layout and streaming output are stable.
+      if (linkTarget?.kind === 'file') {
+        return <FileLinkContextMenu path={linkTarget.path}>{anchor}</FileLinkContextMenu>
+      }
+      return anchor
     },
   }
 
@@ -256,9 +328,9 @@ function createComponents(
       li: ({ children }) => <li className="my-0.5">{children}</li>,
       // Plain tables
       table: ({ children }) => (
-        <table className="my-2 font-mono text-sm">{children}</table>
+        <MarkdownTable className="my-2" tableClassName="font-mono text-sm">{children}</MarkdownTable>
       ),
-      th: ({ children }) => <th className="text-left pr-4">{children}</th>,
+      th: ({ children }) => <th className={cn(TABLE_HEADER_CLASS, 'text-left pr-4')}>{children}</th>,
       td: ({ children }) => <td className="pr-4">{children}</td>,
     }
   }
@@ -373,13 +445,11 @@ function createComponents(
       },
       // Clean tables
       table: ({ children }) => (
-        <div className="my-3 overflow-x-auto">
-          <table className="min-w-full text-sm">{children}</table>
-        </div>
+        <MarkdownTable className="my-3" tableClassName="min-w-full text-sm">{children}</MarkdownTable>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
       th: ({ children }) => (
-        <th className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
+        <th className={cn(TABLE_HEADER_CLASS, 'text-left py-2 px-3 font-semibold text-muted-foreground')}>{children}</th>
       ),
       td: ({ children }) => (
         <td className="py-2 px-3 border-b border-border/50">{children}</td>
@@ -493,14 +563,12 @@ function createComponents(
     ),
     // Beautiful tables
     table: ({ children }) => (
-      <div className="my-4 overflow-x-auto rounded-md border">
-        <table className="min-w-full divide-y divide-border">{children}</table>
-      </div>
+      <MarkdownTable className="my-4 rounded-md border" tableClassName="min-w-full divide-y divide-border">{children}</MarkdownTable>
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
     th: ({ children }) => (
-      <th className="text-left py-3 px-4 font-semibold text-sm">{children}</th>
+      <th className={cn(TABLE_HEADER_CLASS, 'text-left py-3 px-4 font-semibold text-sm')}>{children}</th>
     ),
     td: ({ children }) => (
       <td className="py-3 px-4 text-sm">{children}</td>

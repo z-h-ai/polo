@@ -595,6 +595,13 @@ export interface PermissionRequest {
   commandHash?: string;
   /** Approval validity window */
   approvalTtlSeconds?: number;
+  /**
+   * POO-179 read-only presentation metadata: whether the "Always Allow" action
+   * would remember this request for the session. Strict `true` shows the
+   * action; missing/unknown/false never do. Not an authorization credential
+   * and never part of PermissionResponseOptions.
+   */
+  canRememberForSession?: boolean;
 }
 
 /**

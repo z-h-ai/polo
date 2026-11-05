@@ -66,7 +66,7 @@ export function ConnectionIcon({ connection, size = 16, className = '', showTool
       <TooltipContent side="bottom" sideOffset={4}>
         <div className="text-center">
           <div>{connection.name}</div>
-          {connection.defaultModel && <div className="text-[10px] opacity-60">{getModelDisplayName(connection.defaultModel)}</div>}
+          {connection.defaultModel && <div className="text-[14px] opacity-60">{getModelDisplayName(connection.defaultModel)}</div>}
         </div>
       </TooltipContent>
     </Tooltip>
