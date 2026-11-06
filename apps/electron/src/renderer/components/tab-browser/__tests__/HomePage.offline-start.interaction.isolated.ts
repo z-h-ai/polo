@@ -109,6 +109,9 @@ function AppHomeHarness() {
       onSelectProductSpace: (productSpaceId: string) => {
         void context.requestSwitch(productSpaceId)
       },
+      // POO-196 R3 (D13): the awaitable switch primitive the context now
+      // requires — same delegate as the fire-and-forget select above.
+      onRequestSwitch: (productSpaceId: string) => context.requestSwitch(productSpaceId),
       onRefreshProductSpaces: () => {},
       onConfirmStopAndSwitch: () => {},
       onStopSwitchExecution: () => {},

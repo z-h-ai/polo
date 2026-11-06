@@ -43,6 +43,12 @@ const pcMethods = [
 const pmMethods = [
   'pmCreateEnterprise', 'pmQueryCreateReceipt', 'pmListProjectMembers',
   'pmListProjectInvitations', 'pmCreateProjectInvitation',
+  // POO-196 R3 (D3–D6): colleague directory, collaboration roster, the
+  // per-object colleague invitation bridge + recovery, the negotiated R3
+  // space list.
+  'pmListColleagueOptions', 'pmListCollaborationRoster',
+  'pmCreateColleagueInvitation', 'pmQueryColleagueInvitation',
+  'pmListProductSpacesR3',
 ]
 
 // Fixture-owned answers (login state / workspace config boundaries).

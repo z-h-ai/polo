@@ -20,25 +20,37 @@ import {
   clientWorkbenchPrimaryClassName,
   useClientWorkbenchStyle,
 } from '@/components/ui/client-workbench'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { useProductSpaceContext } from '@/context/ProductSpaceContext'
+import { useProjectEntry } from '@/hooks/useProjectEntry'
 import { useCreateProject } from './useCreateProject'
 
 /**
- * POO-196 追加轮 create-project dialog (adjudication D-B / D-D 1).
+ * POO-196 R3 minimal create-project dialog (consensus P5, adjudication D7).
  *
  * One shared instance hosted by App next to the product-space switch dialog —
- * BOTH entries (account/space menu and the select screen) open the same
- * component, and the component stays mounted so a lost-response recovery and
- * an in-flight submit survive closing the dialog (D-B 6: closing the view
- * never implies the server write was cancelled — the stored key keeps the
- * receipt queryable).
+ * the home「项目」区域 is the only entry (P11) — and the component stays
+ * mounted so a lost-response recovery and an in-flight submit survive closing
+ * the dialog (D-B 6: closing the view never implies the server write was
+ * cancelled — the stored key keeps the receipt queryable).
  *
- * HIG: single primary action; Enter submits only when the form validates AND
- * the responsibility checkbox is explicitly checked; Escape closes an
- * uncommitted step (an in-flight submit is protected against dismissal — X2-5);
- * errors sit next to their field; the "created" state is separate from the
- * "entered" state and never re-creates. Reopening never carries the previous
- * consent (E2-3/D-B 1): the checkbox returns to its unchecked default.
+ * R3 form surface: title (required, autofocus) + optional introduction only.
+ * There is NO standing owner-name input — the current account's effective
+ * display name (App shell admin user) is the owner automatically; the
+ * 「你的姓名」completion field appears ONLY when that name is blank or over
+ * the 64-code-unit bound, with the "syncs to the account display name"
+ * disclosure (admin create-service writes ownerName into user.displayName —
+ * the member must know). The payment responsibility consent is a single
+ * checkbox plus one small fact line hugging the submit area.
+ *
+ * HIG (retained): single primary action; Enter submits only when the form
+ * validates AND the responsibility checkbox is explicitly checked; an IME
+ * composition Enter (isComposing / keyCode 229) never submits; Escape closes
+ * an uncommitted step (an in-flight submit is protected against dismissal —
+ * X2-5); errors sit next to their field; the "created" state is separate from
+ * the "entered" state and never re-creates. Reopening never carries the
+ * previous consent (E2-3/D-B 1): the checkbox returns to its unchecked
+ * default.
  */
 
 function submitErrorKey(code: string | null): string {
@@ -49,6 +61,10 @@ function submitErrorKey(code: string | null): string {
       return 'createProject.error.enterpriseExists'
     case 'idempotency_conflict':
       return 'createProject.error.conflict'
+    // D7: the admin deployment pre-dates the r3 negotiation (unknown contract
+    // version → 409). Definite, never resolved by retrying the same wire.
+    case 'contract_version_unsupported':
+      return 'createProject.error.versionUnsupported'
     case 'unauthorized':
     case 'token_revoked':
     case 'account_disabled':
@@ -76,8 +92,15 @@ export function CreateProjectDialog({
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
   const space = useProductSpaceContext()
+  // P5/D7 owner-name source: the signed-in account's display name comes from
+  // the App shell's admin user (App-owned; optional so isolated mounts simply
+  // fall into the completion case). Never the username — D7 forbids standing
+  // in for a missing display name.
+  const accountDisplayName = useOptionalAppShellContext()?.currentAdminUser?.displayName ?? null
   const accountId = space.accountId
-  const creator = useCreateProject(accountId)
+  // R3 (D13): the create-success auto-enter rides the project-entry flow.
+  const { enterProject } = useProjectEntry()
+  const creator = useCreateProject(accountId, accountDisplayName)
   const {
     presentation,
     phase,
@@ -89,6 +112,7 @@ export function CreateProjectDialog({
     queryNotFound,
     hasStoredRequest,
     versionMismatch,
+    ownerNeedsInput,
   } = creator
 
   const [enterFailed, setEnterFailed] = useState(false)
@@ -115,15 +139,19 @@ export function CreateProjectDialog({
       // D-B 6 recovery query when a stored key remains).
       creator.reset()
       onOpenChange(false)
-      if (productSpaceId !== space.activeProductSpaceId) {
-        space.onSelectProductSpace(productSpaceId)
-      }
+      // R3 (D13): enter through the project-entry flow — committed switch →
+      // most recent conversation (none: the editable empty state) → visit
+      // record. The refreshed list is passed explicitly: the context value
+      // may still hold the pre-refresh spaces when this continuation runs.
+      // A failed entry shows「项目已创建，暂时无法进入」and the retry NEVER
+      // re-creates (the outcome stays queryable server-side).
+      enterProject(productSpaceId, { knownSpaces: list ?? undefined })
     } catch {
       setEnterFailed(true)
     } finally {
       setEntering(false)
     }
-  }, [creator.reset, onOpenChange, space])
+  }, [creator.reset, enterProject, onOpenChange, space])
 
   // Auto-enter exactly once per outcome; afterwards only the visible action
   // retries (never a re-create).
@@ -152,6 +180,14 @@ export function CreateProjectDialog({
     }
     onOpenChange(next)
   }, [creator, onOpenChange])
+
+  // D7: an Enter that only confirms an IME composition (isComposing, or the
+  // Safari/Chrome keyCode 229 marker) is text input, not a submit intent.
+  const handleFormKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' && (event.nativeEvent?.isComposing || event.nativeEvent.keyCode === 229)) {
+      event.preventDefault()
+    }
+  }, [])
 
   const existingEnterpriseSpace = space.productSpaces.find(item => item.kind === 'enterprise') ?? null
   const showEnterpriseExists = submitError?.code === 'account_enterprise_exists'
@@ -227,6 +263,7 @@ export function CreateProjectDialog({
           <form
             id="create-project-form"
             className="px-[20px] pb-[6px]"
+            onKeyDown={handleFormKeyDown}
             onSubmit={event => {
               event.preventDefault()
               runSubmit()
@@ -272,6 +309,10 @@ export function CreateProjectDialog({
               </div>
             ) : null}
             {showEnterpriseExists ? (
+              // P6/D2: after the r3 capacity guard this branch no longer fires
+              // for client project creation (an organization membership no
+              // longer blocks a new project). Kept as a DEFENSIVE surface for
+              // a server that still answers the legacy code.
               <div
                 role="alert"
                 data-testid="create-project-enterprise-exists"
@@ -332,55 +373,67 @@ export function CreateProjectDialog({
                   aria-describedby="create-project-name-hint"
                 />
                 <span id="create-project-name-hint" className="mt-[4px] block text-[11px] leading-[1.45] text-foreground-50">
-                  {fieldErrors.name ? t(fieldErrors.name) : t('createProject.field.nameHint')}
+                  {fieldErrors.name ? t(fieldErrors.name, { max: presentation.fieldLimits.nameMax }) : t('createProject.field.nameHint')}
                 </span>
               </label>
+              {ownerNeedsInput ? (
+                // P5/D7: the ONLY owner-name surface — the completion field for
+                // a missing or over-limit account display name. A usable
+                // display name never renders an input here.
+                <label className="block">
+                  <span className="mb-[5px] block text-[12px] font-medium text-foreground">
+                    {t('createProject.field.yourName')}
+                  </span>
+                  <Input
+                    data-testid="create-project-owner-input"
+                    value={values.ownerName}
+                    maxLength={presentation.fieldLimits.ownerNameMax}
+                    placeholder={t('createProject.field.ownerPlaceholder')}
+                    disabled={phase === 'submitting'}
+                    onChange={event => creator.setField('ownerName', event.target.value)}
+                    aria-invalid={Boolean(fieldErrors.ownerName)}
+                    aria-describedby="create-project-owner-sync-hint"
+                  />
+                  <span id="create-project-owner-sync-hint" data-testid="create-project-owner-sync-hint" className="mt-[4px] block text-[11px] leading-[1.45] text-foreground-50">
+                    {t('createProject.field.nameSyncHint')}
+                  </span>
+                  {fieldErrors.ownerName ? (
+                    <span className="mt-[2px] block text-[11px] leading-[1.45] text-destructive">
+                      {t(fieldErrors.ownerName, { max: presentation.fieldLimits.ownerNameMax })}
+                    </span>
+                  ) : null}
+                </label>
+              ) : null}
               <label className="block">
                 <span className="mb-[5px] block text-[12px] font-medium text-foreground">
-                  {t('createProject.field.ownerLabel')}
-                </span>
-                <Input
-                  data-testid="create-project-owner-input"
-                  value={values.ownerName}
-                  maxLength={presentation.fieldLimits.ownerNameMax}
-                  placeholder={t('createProject.field.ownerPlaceholder')}
-                  disabled={phase === 'submitting'}
-                  onChange={event => creator.setField('ownerName', event.target.value)}
-                  aria-invalid={Boolean(fieldErrors.ownerName)}
-                  aria-describedby="create-project-owner-hint"
-                />
-                <span id="create-project-owner-hint" className="mt-[4px] block text-[11px] leading-[1.45] text-foreground-50">
-                  {fieldErrors.ownerName ? t(fieldErrors.ownerName) : t('createProject.field.ownerHint')}
-                </span>
-              </label>
-              <label className="block">
-                <span className="mb-[5px] block text-[12px] font-medium text-foreground">
-                  {t('createProject.field.purposeLabel')}
+                  {t('createProject.field.purposeOptional')}
                 </span>
                 <Textarea
                   data-testid="create-project-purpose-input"
                   value={values.purpose}
                   maxLength={presentation.fieldLimits.purposeMax}
                   placeholder={t('createProject.field.purposePlaceholder')}
-                  rows={3}
+                  rows={2}
                   disabled={phase === 'submitting'}
                   onChange={event => creator.setField('purpose', event.target.value)}
                   aria-invalid={Boolean(fieldErrors.purpose)}
                   // X2-18: the error text is reachable as THIS control's
-                  // description, matching the name/owner field pattern.
+                  // description, matching the name field pattern.
                   aria-describedby="create-project-purpose-hint"
                 />
                 <span id="create-project-purpose-hint" className="mt-[4px] block text-[11px] leading-[1.45] text-foreground-50">
-                  {fieldErrors.purpose ? t(fieldErrors.purpose) : ''}
+                  {fieldErrors.purpose ? t(fieldErrors.purpose, { max: presentation.fieldLimits.purposeMax }) : ''}
                 </span>
               </label>
             </div>
 
-            <p className="mt-[14px] rounded-[10px] border border-border bg-foreground-5 px-[12px] py-[10px] text-[12px] leading-[1.55] text-foreground-60" data-testid="create-project-budget-fact">
+            {/* P5: the responsibility consent hugs the submit area — one
+            small fact line and the checkbox, no boxed billing display. */}
+            <p className="mt-[14px] mb-0 text-[11px] leading-[1.5] text-muted-foreground" data-testid="create-project-budget-fact">
               {t('createProject.budgetFact')}
             </p>
 
-            <div className="mt-[12px]">
+            <div className="mt-[10px]">
               <label className="flex cursor-pointer items-start gap-[9px]" data-testid="create-project-responsibility">
                 <Checkbox
                   checked={values.responsibilityConfirmed}
@@ -388,7 +441,7 @@ export function CreateProjectDialog({
                   onChange={event => creator.setResponsibilityConfirmed(event.target.checked)}
                   className="mt-[2px]"
                 />
-                <span className="text-[12px] font-medium leading-[1.55] text-foreground">
+                <span className="text-[12px] leading-[1.55] text-foreground">
                   {t('createProject.responsibilityConfirm')}
                 </span>
               </label>

@@ -3,6 +3,11 @@ import { getAdminUrl } from '@polo-ai/shared/config'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import {
   CLIENT_ENTERPRISE_ERROR_CODES,
+  type ClientColleagueInvitationReceipt,
+  type ClientColleagueOptionsResponse,
+  type ClientCollaborationRosterResponse,
+  type ClientCreateColleagueInvitationCommand,
+  type ClientCreateColleagueInvitationResponse,
   type ClientCreateEnterpriseCommand,
   type ClientCreateEnterpriseResponse,
   type ClientCreateInvitationCommand,
@@ -12,6 +17,7 @@ import {
   type ClientInvitationListResponse,
   type ClientMemberRosterResponse,
 } from '@polo-ai/shared/admin/client-enterprise-contract'
+import type { PmProductSpacesListR3Response } from '@polo-ai/shared/protocol'
 
 /**
  * The project-members admin adapter (POO-196 追加轮, adjudication D-A).
@@ -22,6 +28,10 @@ import {
  * this round. Failure shape: admin-unreachable / signed-out resolve per-call
  * and the service turns them into stable pm_* codes; nothing here invents
  * fallbacks.
+ *
+ * POO-196 R3 (D3–D6): the colleague directory / collaboration roster reads,
+ * the per-object colleague invitation bridge with its recovery query, and the
+ * negotiated R3 product-space list read ride the same adapter.
  */
 
 const PM_REQUEST_TIMEOUT_MS = 15_000
@@ -32,6 +42,16 @@ export interface ProjectMembersAdmin {
   listProjectMembers(productSpaceId: string, query: { limit?: number; cursor?: string }): Promise<ClientMemberRosterResponse>
   listProjectInvitations(productSpaceId: string, query: { limit?: number; cursor?: string }): Promise<ClientInvitationListResponse>
   createProjectInvitation(productSpaceId: string, input: ClientCreateInvitationCommand): Promise<ClientCreateInvitationResponse>
+  /** R3 (D3): the caller's own organization projected into the target project. */
+  listColleagueOptions(productSpaceId: string, query: { q?: string; limit?: number; cursor?: string }): Promise<ClientColleagueOptionsResponse>
+  /** R3 (D4): the all-role minimal roster of the target project. */
+  listCollaborationRoster(productSpaceId: string, query: { q?: string; limit?: number; cursor?: string }): Promise<ClientCollaborationRosterResponse>
+  /** R3 (D5): one selected colleague per call, resolved server-side. */
+  createColleagueInvitation(productSpaceId: string, input: ClientCreateColleagueInvitationCommand): Promise<ClientCreateColleagueInvitationResponse>
+  /** R3 (D5): recovery query for the caller's own createRequestKey. */
+  queryColleagueInvitation(productSpaceId: string, createRequestKey: string): Promise<ClientColleagueInvitationReceipt>
+  /** R3 (D6): negotiated R3 product-space list for the signed-in account. */
+  listProductSpacesR3(): Promise<PmProductSpacesListR3Response>
 }
 
 export class ProjectMembersAdminUnavailableError extends Error {
@@ -87,5 +107,15 @@ export function getProjectMembersAdmin(): ProjectMembersAdmin {
       withAdmin((client, token) => client.listProjectInvitations(token, productSpaceId, query)),
     createProjectInvitation: (productSpaceId, input) =>
       withAdmin((client, token) => client.createProjectInvitation(token, productSpaceId, input)),
+    listColleagueOptions: (productSpaceId, query) =>
+      withAdmin((client, token) => client.listColleagueOptions(token, productSpaceId, query)),
+    listCollaborationRoster: (productSpaceId, query) =>
+      withAdmin((client, token) => client.listCollaborationRoster(token, productSpaceId, query)),
+    createColleagueInvitation: (productSpaceId, input) =>
+      withAdmin((client, token) => client.createColleagueInvitation(token, productSpaceId, input)),
+    queryColleagueInvitation: (productSpaceId, createRequestKey) =>
+      withAdmin((client, token) => client.queryColleagueInvitation(token, productSpaceId, createRequestKey)),
+    listProductSpacesR3: () =>
+      withAdmin((client, token) => client.listProductSpacesR3(token)),
   }
 }

@@ -1491,6 +1491,16 @@ export interface ElectronAPI {
   pmListProjectInvitations(input: import('@polo-ai/shared/protocol').PmListInvitationsInput): Promise<import('@polo-ai/shared/protocol').ClientInvitationListResponse>
   pmCreateProjectInvitation(input: import('@polo-ai/shared/protocol').PmCreateInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientCreateInvitationResponse>
 
+  // Enterprise project members R3 (POO-196 D3–D6). The colleague directory
+  // and collaboration roster are committed-space scoped reads; the colleague
+  // invitation bridge is one object per call with its own recovery query; the
+  // negotiated R3 list read is account-scoped.
+  pmListColleagueOptions(input: import('@polo-ai/shared/protocol').PmListColleagueOptionsInput): Promise<import('@polo-ai/shared/protocol').ClientColleagueOptionsResponse>
+  pmListCollaborationRoster(input: import('@polo-ai/shared/protocol').PmListCollaborationRosterInput): Promise<import('@polo-ai/shared/protocol').ClientCollaborationRosterResponse>
+  pmCreateColleagueInvitation(input: import('@polo-ai/shared/protocol').PmCreateColleagueInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientCreateColleagueInvitationResponse>
+  pmQueryColleagueInvitation(input: import('@polo-ai/shared/protocol').PmQueryColleagueInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientColleagueInvitationReceipt>
+  pmListProductSpacesR3(input: import('@polo-ai/shared/protocol').PmListProductSpacesR3Input): Promise<import('@polo-ai/shared/protocol').PmProductSpacesListR3Response>
+
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@polo-ai/shared/statuses').StatusConfig[]>
   reorderStatuses(workspaceId: string, orderedIds: string[]): Promise<void>

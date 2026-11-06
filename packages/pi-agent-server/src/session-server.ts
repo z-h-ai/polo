@@ -561,6 +561,7 @@ async function ensureSession(): Promise<AgentSession> {
     mkdirSync(agentDir, { recursive: true });
     sessionOptions.agentDir = agentDir;
 
+
     // Session resume: use a per-Polo AI-session directory so the Pi SDK can
     // persist and resume its own session across subprocess restarts.
     // continueRecent() loads the existing session if one exists, otherwise

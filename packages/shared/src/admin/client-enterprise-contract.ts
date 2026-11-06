@@ -1,7 +1,7 @@
 // GENERATED FILE — do not edit by hand.
 // Source of truth: polo-admin `src/lib/enterprises/client-contracts.ts` and the
 // CLIENT-CONTRACT block of `src/lib/enterprises/create-presentation.ts`.
-// Contract: poo196-client-enterprise-r2 · contracts sha256: 0a57f8deacdb896999bd8334689db255cc7050218b00032cfc4532041dfb83b5 · presentation sha256: 929fc0b70fd2189a359a3f84be82478ec8135458121c30ebd8ea6c883acc7d1c
+// Contract: poo196-client-enterprise-r3 · contracts sha256: 98b8703995f38d342bd66f3f3a382a415babc5050f0bc6f9fef22bd243562626 · presentation sha256: 929fc0b70fd2189a359a3f84be82478ec8135458121c30ebd8ea6c883acc7d1c
 // Regenerate: `tsx scripts/export-client-enterprise-contract.ts <this-file>` (polo-admin repo);
 // `--check` verifies no drift between the two repos.
 import { z } from 'zod'
@@ -25,7 +25,13 @@ import { z } from 'zod'
  *   body field: it comes from the verified session.
  */
 
-export const CLIENT_ENTERPRISE_CONTRACT_VERSION = "poo196-client-enterprise-r2";
+export const CLIENT_ENTERPRISE_CONTRACT_VERSION = "poo196-client-enterprise-r3";
+
+/** POO-196 R3 (D7): the previous wire version. A request without a
+ * negotiation header is still validated and fingerprinted as r2 — the r3
+ * capabilities (optional purpose, versioned fingerprint domain) are opt-in
+ * via `X-Polo-Client-Enterprise-Contract`. */
+export const CLIENT_ENTERPRISE_CONTRACT_VERSION_R2 = "poo196-client-enterprise-r2";
 
 /** Bound to the admin `idempotencyKeySchema` (parity regression in
  * tests/client-enterprise.contract.test.ts). */
@@ -50,6 +56,24 @@ export const clientEnterprisePaymentResponsibilityTermsVersion = "POL-79-payment
  * bounds, same literals). The idempotency key arrives in the REQUIRED
  * `Idempotency-Key` header, never in the body. */
 export const clientCreateEnterpriseCommandSchema = z
+  .object({
+    name: z.string().trim().min(1).max(128),
+    ownerName: z.string().trim().min(1).max(64),
+    // D7 (r3): the introduction is OPTIONAL — omitting it, sending "" or
+    // whitespace all normalise to "" (stored on the NOT NULL varchar column;
+    // no placeholder text is ever synthesised). null and non-strings stay
+    // rejected.
+    purpose: z.string().trim().max(512).optional().default(""),
+    paymentResponsibilityAccepted: z.literal(true),
+    paymentResponsibilityTermsVersion: z.literal(
+      clientEnterprisePaymentResponsibilityTermsVersion,
+    ),
+  })
+  .strict();
+
+/** The r2 wire shape: purpose is REQUIRED. A legacy-headered request is
+ * validated against this so an old client can never rely on the relaxation. */
+export const clientCreateEnterpriseCommandLegacySchema = z
   .object({
     name: z.string().trim().min(1).max(128),
     ownerName: z.string().trim().min(1).max(64),
@@ -257,6 +281,158 @@ export const clientCreateInvitationResponseSchema = z.discriminatedUnion("result
 export type ClientCreateInvitationResponse = z.infer<typeof clientCreateInvitationResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// POO-196 R3 (D6): negotiated list envelope — metadata schema + version
+// literal authority. The envelope composes with each end's existing strict v1
+// `ListProductSpacesResponse`; the default v1 response itself never gains a
+// field.
+// ---------------------------------------------------------------------------
+
+/** The query parameter that opts a client list request into the R3 envelope. */
+export const CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER = "clientEnterpriseContract";
+
+export const clientEnterpriseKindSchema = z.enum(["organization", "project"]);
+export type ClientEnterpriseKind = z.infer<typeof clientEnterpriseKindSchema>;
+
+/** One metadata row per enterprise entry in the negotiated `spaces` payload.
+ * The ids are the join keys: exactly one row per enterprise space, no
+ * duplicates, no metadata for spaces outside the list. Unknown statistics are
+ * omitted (`activeMemberCount` stays absent this round) — never fabricated. */
+export const clientEnterpriseSpaceSummarySchema = z
+  .object({
+    productSpaceId: uuidSchema,
+    enterpriseId: uuidSchema,
+    enterpriseKind: clientEnterpriseKindSchema,
+    purpose: z.string().max(512).optional(),
+    activeMemberCount: z.number().int().min(0).optional(),
+  })
+  .strict();
+export type ClientEnterpriseSpaceSummary = z.infer<typeof clientEnterpriseSpaceSummarySchema>;
+
+/** `spaces` is intentionally `unknown` HERE: this module is self-contained
+ * (zod-only) and must not re-declare the published v1 list schema. Both ends
+ * compose this envelope with their own authoritative
+ * `ListProductSpacesResponseSchema` before validating a full payload. */
+export const clientEnterpriseListR3ResponseSchema = z
+  .object({
+    contractVersion: z.literal(CLIENT_ENTERPRISE_CONTRACT_VERSION),
+    spaces: z.unknown(),
+    enterpriseSummaries: z.array(clientEnterpriseSpaceSummarySchema),
+  })
+  .strict();
+export type ClientEnterpriseListR3Response = z.infer<typeof clientEnterpriseListR3ResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// POO-196 R3 (D3): restricted colleague directory projection
+// ---------------------------------------------------------------------------
+
+export const clientColleagueProjectStateSchema = z.enum([
+  "joined",
+  "pending",
+  "available",
+  "unavailable",
+]);
+export type ClientColleagueProjectState = z.infer<typeof clientColleagueProjectStateSchema>;
+
+/** The directory NEVER carries a contact field, a username or an avatar URL:
+ * the client renders a localized placeholder for a missing name and a
+ * first-letter avatar for the always-null image. */
+export const clientColleagueOptionSchema = z
+  .object({
+    userId: uuidSchema,
+    displayName: z.string().nullable(),
+    avatarUrl: z.null(),
+    projectState: clientColleagueProjectStateSchema,
+  })
+  .strict();
+export type ClientColleagueOption = z.infer<typeof clientColleagueOptionSchema>;
+
+export const clientColleagueSourceSchema = z
+  .object({
+    enterpriseId: uuidSchema,
+    name: z.string(),
+  })
+  .strict();
+export type ClientColleagueSource = z.infer<typeof clientColleagueSourceSchema>;
+
+/** `none` and `ambiguous` are SUCCESS bodies (an empty source state), never
+ * errors — the client falls back to the direct phone/email invitation path. */
+export const clientColleagueOptionsResponseSchema = z
+  .object({
+    sourceState: z.enum(["none", "ambiguous", "available"]),
+    source: clientColleagueSourceSchema.nullable(),
+    members: z.array(clientColleagueOptionSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type ClientColleagueOptionsResponse = z.infer<typeof clientColleagueOptionsResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// POO-196 R3 (D4): minimal collaboration roster — every active role reads the
+// same scoped projection. No contact, no governance fields, no invitation
+// records; the count comes from the same snapshot as the page.
+// ---------------------------------------------------------------------------
+
+export const clientCollaborationRosterMemberSchema = z
+  .object({
+    userId: uuidSchema,
+    displayName: z.string().nullable(),
+    avatarUrl: z.null(),
+    role: clientMemberRoleSchema,
+    isSelf: z.boolean(),
+  })
+  .strict();
+export type ClientCollaborationRosterMember = z.infer<typeof clientCollaborationRosterMemberSchema>;
+
+export const clientCollaborationRosterResponseSchema = z
+  .object({
+    productSpaceId: uuidSchema,
+    enterpriseName: z.string(),
+    viewerRole: clientMemberRoleSchema,
+    totalActiveMembers: z.number().int().min(0),
+    members: z.array(clientCollaborationRosterMemberSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type ClientCollaborationRosterResponse = z.infer<typeof clientCollaborationRosterResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// POO-196 R3 (D5): colleague invitation bridge — one selected person per
+// request, resolved server-side onto the existing targeted invitation.
+// ---------------------------------------------------------------------------
+
+export const clientCreateColleagueInvitationCommandSchema = z
+  .object({
+    sourceEnterpriseId: uuidSchema,
+    targetUserId: uuidSchema,
+    createRequestKey: clientEnterpriseIdempotencyKeySchema,
+  })
+  .strict();
+export type ClientCreateColleagueInvitationCommand = z.infer<
+  typeof clientCreateColleagueInvitationCommandSchema
+>;
+
+/** The create response reuses the targeted-invitation outcome union exactly —
+ * the bridge resolves to the SAME invitation kind, so `created`/`replayed`
+ * carry the copyable link and every other outcome carries only the masked
+ * invitation state. */
+export type ClientCreateColleagueInvitationResponse = ClientCreateInvitationResponse;
+
+/** GET ?createRequestKey=… recovery: `unknown` (202) is not a failure; a found
+ * invitation projects its current masked state and — only while the caller's
+ * own key is still spendable and the credential re-derives — the link. */
+export const clientColleagueInvitationReceiptSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("unknown") }).strict(),
+  z
+    .object({
+      state: z.literal("found"),
+      invitation: clientInvitationEntrySchema,
+      invitationUrl: clientInvitationUrlSchema.optional(),
+    })
+    .strict(),
+]);
+export type ClientColleagueInvitationReceipt = z.infer<typeof clientColleagueInvitationReceiptSchema>;
+
+// ---------------------------------------------------------------------------
 // Pagination + stable errors
 // ---------------------------------------------------------------------------
 
@@ -288,6 +464,17 @@ export const CLIENT_ENTERPRISE_ERROR_CODES = [
    * trusted link can be built and the invitation is NOT created (zero write).
    * Additive: never reuse a removed code. */
   "invitation_origin_unavailable",
+  /** POO-196 R3 (D5): the caller has no (or an ambiguous) valid organization
+   * membership to source colleagues from, or the referenced source enterprise
+   * is not that membership. Additive. */
+  "colleague_source_unavailable",
+  /** POO-196 R3 (D5): the selected colleague has no verified contact the
+   * server may resolve a targeted invitation onto (or their account cannot
+   * receive one). Additive. */
+  "colleague_target_unavailable",
+  /** POO-196 R3 (D6/D7): the negotiated contract version is not implemented
+   * by this deployment. Additive. */
+  "contract_version_unsupported",
 ] as const;
 
 export type ClientEnterpriseErrorCode = (typeof CLIENT_ENTERPRISE_ERROR_CODES)[number];

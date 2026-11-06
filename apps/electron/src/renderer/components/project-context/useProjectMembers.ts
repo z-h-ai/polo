@@ -143,6 +143,37 @@ function inviteErrorKey(code: string | null): string {
   }
 }
 
+/** E2-2: the clipboard only ever receives an ABSOLUTE https link under the
+ * trusted admin origin's `/invite/` path. A root-relative value (an admin
+ * deployed without its public origin — the real response shape observed in
+ * review) is resolved against the admin URL the desktop itself is signed in
+ * to; never against a request Host, renderer input or an `http:` origin.
+ * Module-level so the R3 panel can apply the SAME discipline to the
+ * per-colleague links (D5) — anything else takes the copy-failure face. */
+export async function resolveInvitationUrlValue(value: string): Promise<string | null> {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  let candidate = trimmed
+  if (trimmed.startsWith('/')) {
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      const adminUrl = status.adminUrl
+      if (!adminUrl) return null
+      candidate = new URL(trimmed, adminUrl).toString()
+    } catch {
+      return null
+    }
+  }
+  try {
+    const parsed = new URL(candidate)
+    if (parsed.protocol !== 'https:') return null
+    if (!parsed.pathname.startsWith('/invite/') || parsed.search || parsed.hash) return null
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
 export function useProjectMembers(scope: {
   accountId: string
   productSpaceId: string
@@ -315,6 +346,15 @@ export function useProjectMembers(scope: {
     void loadInvitations()
   }, [loadInvitations, loadRoster, scope, viewerRole])
 
+  /** R3 panel: load ONLY the invitation records (the roster projection comes
+   * from useCollaborationRoster — the management roster of the old dialog is
+   * not read by the new panel). Permission semantics unchanged: a 403 lands
+   * on applyForbidden and clears everything. */
+  const refreshInvitations = useCallback(() => {
+    if (!scope) return
+    void loadInvitations()
+  }, [loadInvitations, scope])
+
   const loadMoreRoster = useCallback(() => {
     if (!roster.nextCursor || roster.loadingMore) return
     void loadRoster({ cursor: roster.nextCursor })
@@ -442,54 +482,24 @@ export function useProjectMembers(scope: {
     }
   }, [composeRequest, composeSubmitting, composeTarget, emailDeliveryAvailable, loadInvitations, scope])
 
-  /** E2-2: the clipboard only ever receives an ABSOLUTE https link under the
-   * trusted admin origin's `/invite/` path. A root-relative value (an admin
-   * deployed without its public origin — the real response shape observed in
-   * review) is resolved against the admin URL the desktop itself is signed in
-   * to; never against a request Host, renderer input or an `http:` origin.
-   * Anything else takes the existing copy-failure face. */
-  const resolveInvitationUrl = useCallback(async (value: string): Promise<string | null> => {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    let candidate = trimmed
-    if (trimmed.startsWith('/')) {
-      try {
-        const status = await window.electronAPI.adminGetStatus()
-        const adminUrl = status.adminUrl
-        if (!adminUrl) return null
-        candidate = new URL(trimmed, adminUrl).toString()
-      } catch {
-        return null
-      }
-    }
-    try {
-      const parsed = new URL(candidate)
-      if (parsed.protocol !== 'https:') return null
-      if (!parsed.pathname.startsWith('/invite/') || parsed.search || parsed.hash) return null
-      return parsed.toString()
-    } catch {
-      return null
-    }
-  }, [])
-
-  const copyLink = useCallback(async (): Promise<boolean> => {
-    if (!outcome?.invitationUrl) return false
-    setCopied(false)
-    setCopyFailed(false)
-    const resolved = await resolveInvitationUrl(outcome.invitationUrl)
-    if (!resolved) {
-      setCopyFailed(true)
-      return false
-    }
-    try {
-      await navigator.clipboard.writeText(resolved)
-      setCopied(true)
-      return true
-    } catch {
-      setCopyFailed(true)
-      return false
-    }
-  }, [outcome, resolveInvitationUrl])
+const copyLink = useCallback(async (): Promise<boolean> => {
+  if (!outcome?.invitationUrl) return false
+  setCopied(false)
+  setCopyFailed(false)
+  const resolved = await resolveInvitationUrlValue(outcome.invitationUrl)
+  if (!resolved) {
+    setCopyFailed(true)
+    return false
+  }
+  try {
+    await navigator.clipboard.writeText(resolved)
+    setCopied(true)
+    return true
+  } catch {
+    setCopyFailed(true)
+    return false
+  }
+}, [outcome])
 
   const statusKeyOf = useCallback((status: ClientInvitationEntry['status']): string => {
     return `projectMembers.invitations.status.${status}`
@@ -515,6 +525,7 @@ export function useProjectMembers(scope: {
     copyFailed,
     editComposeTarget,
     openOverview,
+    refreshInvitations,
     loadMoreRoster,
     loadMoreInvitations,
     retryRoster,
@@ -543,6 +554,7 @@ export function useProjectMembers(scope: {
     openCompose,
     openOverview,
     outcome,
+    refreshInvitations,
     retryInvitations,
     retryRoster,
     roleKeyOf,

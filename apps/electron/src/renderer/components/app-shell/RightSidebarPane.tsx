@@ -69,6 +69,7 @@ import {
   sidebarBrowserInstanceIdAtom,
   sidebarBrowserOpenAtom,
 } from '@/atoms/sidebar-browser'
+import { rightPaneNativeSuspendAtom } from '@/atoms/right-pane-suspension'
 import { useRightPanePresentation } from '@/hooks/use-right-pane-presentation'
 import { sessionMetaMapAtom } from '@/atoms/sessions'
 
@@ -639,9 +640,17 @@ function BrowserNavLayer({ instance, targetSessionId, currentSessionId, isPickin
  * POO-135 r1: on unmount the view is detached in Main (unembed) — every
  * route off this container (tab switch, narrow viewport, session switch,
  * hide) must stop the native view from covering window content.
+ *
+ * POO-196 R3 (D8): while a members drawer is open the view is temporarily
+ * withdrawn through the SAME unembed IPC (a native WebContentsView cannot be
+ * covered by CSS); closing the drawer re-reports the bounds, which Main uses
+ * to re-attach the still-alive instance at its exact position.
  */
 function EmbeddedBrowserContainer({ instanceId }: { instanceId: string }) {
   const containerRef = React.useRef<HTMLDivElement | null>(null)
+  const suspended = useAtomValue(rightPaneNativeSuspendAtom)
+  const reportRef = React.useRef<(() => void) | null>(null)
+  const wasSuspendedRef = React.useRef<boolean | null>(null)
 
   useEffect(() => {
     const el = containerRef.current
@@ -659,16 +668,33 @@ function EmbeddedBrowserContainer({ instanceId }: { instanceId: string }) {
         },
       ).catch(() => {})
     }
+    reportRef.current = report
     report()
     const observer = new ResizeObserver(report)
     observer.observe(el)
     window.addEventListener('resize', report)
     return () => {
+      reportRef.current = null
       observer.disconnect()
       window.removeEventListener('resize', report)
       void window.electronAPI?.browserPane?.unembed?.(instanceId).catch(() => {})
     }
   }, [instanceId])
+
+  useEffect(() => {
+    const was = wasSuspendedRef.current
+    wasSuspendedRef.current = suspended
+    // Mount: the embed effect above just reported — nothing to do.
+    if (was === null) return
+    if (!suspended) {
+      // Resume: re-report the bounds — Main re-attaches implicitly on a
+      // valid setEmbedBounds. The layout never changed, so no ResizeObserver
+      // event would fire on its own.
+      reportRef.current?.()
+      return
+    }
+    void window.electronAPI?.browserPane?.unembed?.(instanceId).catch(() => {})
+  }, [instanceId, suspended])
 
   return (
     <div className="flex-1 min-h-0 p-2">

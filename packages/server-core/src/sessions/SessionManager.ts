@@ -899,6 +899,10 @@ interface ManagedSession {
   /** Immutable trusted Admin account bound at creation (R32-2). Space-bound
    *  legacy records without it are quarantined (fail-closed). */
   accountId?: string
+  /** POO-196 R3 P12-5: the project's title (+ optional introduction) captured
+   *  at creation for space-bound sessions; re-sent on EVERY agent spawn so the
+   *  model request context carries it for first and restored sessions alike. */
+  projectContext?: { name: string; purpose?: string }
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
@@ -4441,6 +4445,10 @@ export class SessionManager implements ISessionManager {
       isFlagged: options?.isFlagged,
       productSpaceId: trustedScope?.productSpaceId,
       accountId: trustedScope?.accountId,
+      // P12-5: capture the project's context metadata only for a session the
+      // server itself binds to an enterprise space — the renderer-supplied
+      // values are a projection of THAT space, never a client-asserted scope.
+      projectContext: trustedScope?.productSpaceId ? options?.projectContext : undefined,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -5890,6 +5898,9 @@ export class SessionManager implements ISessionManager {
         lastUsedAt: managed.lastMessageAt,
         workingDirectory: managed.workingDirectory,
         sdkCwd: managed.sdkCwd,
+        // P12-5: re-sent on every spawn (create, auth-retry, restart/resume)
+        // so the model request context always carries the project metadata.
+        projectContext: managed.projectContext,
         model: managed.model,
         llmConnection: managed.llmConnection,
         permissionMode: managed.permissionMode,

@@ -34,6 +34,7 @@ import { useNotifications } from '@/hooks/useNotifications'
 import { useSession } from '@/hooks/useSession'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
+import { readProjectPurpose } from '@/lib/project-directory'
 import { navigate, openGlobalSettings, routes } from './lib/navigate'
 import { DEFAULT_SETTINGS_SUBPAGE } from '../shared/settings-registry'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
@@ -2157,13 +2158,25 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createSession(workspaceId, options)
+    // POO-196 R3 P12-5: carry the committed project's authoritative context
+    // metadata (title + cached introduction) on creation. The server stores it
+    // ONLY under its own trustedScope space binding, and every spawn/resume of
+    // the session re-injects it into the model request context.
+    const activeSpace = productSpace.activeProductSpace
+    const projectContext = activeSpace?.kind === 'enterprise' && currentAdminUser?.userId
+      ? {
+        name: activeSpace.name,
+        purpose: readProjectPurpose(currentAdminUser.userId, activeSpace.id),
+      }
+      : undefined
+    const attachedOptions = { ...options, ...(projectContext ? { projectContext } : {}) }
+    const session = await window.electronAPI.createSession(workspaceId, attachedOptions)
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
 
     return session
-  }, [addSession, syncSessionOptionsFromSession])
+  }, [addSession, currentAdminUser?.userId, productSpace.activeProductSpace, syncSessionOptionsFromSession])
 
   // Dedicated, trusted creation path for the Edit Popover session: the server
   // stamps the 'edit-popover' origin + owner identity. The generic
@@ -3389,6 +3402,7 @@ export default function App() {
       contextVersion: productSpace.contextVersion,
       pendingSwitch: productSpace.pendingSwitch,
       onSelectProductSpace: handleSelectProductSpace,
+      onRequestSwitch: requestSwitch,
       onRefreshProductSpaces: handleRefreshProductSpaces,
       onOpenCreateProject: handleOpenCreateProject,
       onRecoverActiveProductSpace: productSpace.recoverActiveProductSpace,
@@ -3416,6 +3430,7 @@ export default function App() {
     handleOpenCreateProject,
     handleRefreshProductSpaces,
     handleSelectProductSpace,
+    requestSwitch,
     productSpace.activeProductSpace,
     productSpace.activeProductSpaceId,
     productSpace.allProductSpaces,

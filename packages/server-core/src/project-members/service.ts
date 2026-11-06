@@ -2,16 +2,26 @@ import { AdminError } from '@polo-ai/shared/admin'
 import { getProductSpaceContextStorage } from '@polo-ai/shared/config'
 import type { TrustedProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 import type {
+  ClientColleagueInvitationReceipt,
+  ClientColleagueOptionsResponse,
+  ClientCollaborationRosterResponse,
+  ClientCreateColleagueInvitationResponse,
   ClientCreateEnterpriseResponse,
   ClientCreateInvitationResponse,
   ClientCreateReceipt,
   ClientEnterpriseErrorCode,
   ClientInvitationListResponse,
   ClientMemberRosterResponse,
+  PmCreateColleagueInvitationInput,
   PmCreateEnterpriseInput,
   PmCreateInvitationInput,
+  PmListColleagueOptionsInput,
+  PmListCollaborationRosterInput,
   PmListInvitationsInput,
   PmListMembersInput,
+  PmListProductSpacesR3Input,
+  PmProductSpacesListR3Response,
+  PmQueryColleagueInvitationInput,
   PmQueryCreateReceiptInput,
 } from '@polo-ai/shared/protocol'
 import type { TrustedAggregateScopeToken } from '../handlers/rpc/trusted-product-space-account'
@@ -314,6 +324,111 @@ export async function pmCreateProjectInvitation(
   try {
     const result = await theAdmin().createProjectInvitation(input.productSpaceId, input.command)
     assertSpaceScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* R3 commands (POO-196 redesign, adjudication D3–D6)                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * pm:listColleagueOptions — D3 restricted directory. The local gate is the
+ * committed-space fence only (target must BE the committed enterprise
+ * project); WHO may read the directory (target invite capability + the
+ * caller's own unique organization membership as source) is re-authorized by
+ * polo-admin on every page — the source enterprise is derived server-side and
+ * is never a caller field.
+ */
+export async function pmListColleagueOptions(
+  input: PmListColleagueOptionsInput,
+): Promise<ClientColleagueOptionsResponse> {
+  const scope = await requireMemberScope(input)
+  try {
+    const result = await theAdmin().listColleagueOptions(input.productSpaceId, {
+      q: input.q,
+      limit: input.limit,
+      cursor: input.cursor,
+    })
+    assertSpaceScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/**
+ * pm:listCollaborationRoster — D4 all-role minimal roster. Every active role
+ * (owner/manager/member) reads the same scoped projection; read_only access
+ * keeps the read, removal/suspension is the admin's rejection.
+ */
+export async function pmListCollaborationRoster(
+  input: PmListCollaborationRosterInput,
+): Promise<ClientCollaborationRosterResponse> {
+  const scope = await requireMemberScope(input)
+  try {
+    const result = await theAdmin().listCollaborationRoster(input.productSpaceId, {
+      q: input.q,
+      limit: input.limit,
+      cursor: input.cursor,
+    })
+    assertSpaceScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/**
+ * pm:createColleagueInvitation — D5 bridge. One selected colleague per call:
+ * the renderer's multi-select fans out into per-object commands, so the wire
+ * never carries a batch and every object keeps its own idempotent outcome.
+ */
+export async function pmCreateColleagueInvitation(
+  input: PmCreateColleagueInvitationInput,
+): Promise<ClientCreateColleagueInvitationResponse> {
+  const scope = await requireMemberScope(input)
+  try {
+    const result = await theAdmin().createColleagueInvitation(input.productSpaceId, input.command)
+    assertSpaceScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/** pm:queryColleagueInvitation — D5 recovery for the caller's own key;
+ * `unknown` (202) is a success body and never re-creates. */
+export async function pmQueryColleagueInvitation(
+  input: PmQueryColleagueInvitationInput,
+): Promise<ClientColleagueInvitationReceipt> {
+  const scope = await requireMemberScope(input)
+  try {
+    const result = await theAdmin().queryColleagueInvitation(input.productSpaceId, input.createRequestKey)
+    assertSpaceScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/**
+ * pm:listProductSpacesR3 — D6 negotiated list read. ACCOUNT-scoped like the
+ * create commands: the project collection covers the whole signed-in account
+ * (P2), never just the committed space. No committed enterprise space is
+ * required — the personal-space fence is enough. The v1+R3 composition is
+ * validated inside the AdminClient, so a deployment that ignored the
+ * negotiation surfaces here as `contract_version_unsupported`.
+ */
+export async function pmListProductSpacesR3(
+  input: PmListProductSpacesR3Input,
+): Promise<PmProductSpacesListR3Response> {
+  const scope = await requireAccountScope(input)
+  try {
+    const result = await theAdmin().listProductSpacesR3()
+    assertAccountScopeCurrent(scope)
     return result
   } catch (error) {
     throw mapAdminFailure(error)

@@ -169,6 +169,14 @@ export interface CreateSessionOptions {
   model?: string
   llmConnection?: string
   systemPromptPreset?: 'default' | 'mini' | string
+  /**
+   * POO-196 R3 P12-5: the committed project's title (+ optional introduction)
+   * as authoritative context metadata. The server stores it ONLY when the
+   * session binds to an enterprise product space, and every spawn/resume of
+   * that session re-injects it into the model request context (as system
+   * context — never as a fabricated user message).
+   */
+  projectContext?: { name: string; purpose?: string }
   hidden?: boolean
   /**
    * Host experience that owns the session. Only the non-privileged values are

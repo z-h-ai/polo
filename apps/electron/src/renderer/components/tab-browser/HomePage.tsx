@@ -1,9 +1,10 @@
 import { Checkbox } from '@polo-ai/ui/ui/checkbox'
 import { WorkbenchSelect } from '@/components/ui/workbench-controls'
 import { clientWorkbenchFocusClassName, useClientWorkbenchStyle, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName, clientWorkbenchPrimaryClassName, clientWorkbenchButtonClassName, clientWorkbenchDestructiveClassName } from '@/components/ui/client-workbench'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
+import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
 import type { HomeAppUsageRecord } from '@/lib/home-app-usage'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -23,9 +24,17 @@ import { useOptionalMemberCircles } from '@/context/MemberCircleResourceContext'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import { useMemberAppActions } from '@/hooks/useMemberAppActions'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
+import { useProjectEntry } from '@/hooks/useProjectEntry'
 import { ProductSpaceSkillsDialog } from '@/components/product-space/ProductSpaceSkillsDialog'
 import { useTabShell } from '@/context/TabShellContext'
-import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
+import { useProductSpaceAppLaunchHandoff, useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import {
+  readProjectPurpose,
+  readProjectVisitOrder,
+  rememberProjectPurposes,
+  sortProjectDirectory,
+  type ProjectVisitRecord,
+} from '@/lib/project-directory'
 import { PinnedCanvasApps } from './PinnedCanvasApps'
 import { KNOWLEDGE_BASE_APP_DEFINITION, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
@@ -57,7 +66,13 @@ import { createHomeQuickAccessContextKey } from '@/lib/home-quick-access'
 export { formatBytes }
 
 /**
- * POO-70 H3 (P70-HOME-01/02/03) — the "我的应用" home page.
+ * POO-196 R3 / POO-70 H3 (P70-HOME-01/02/03) — the 首页 (Home) page.
+ *
+ * R3 (consensus P1) page order: hero → 「项目」区域 → fixed canvas →
+ * 「应用」分区标题 + search/source/sort toolbar + app grid. The page title
+ * key (`poo70.h3.home.title`) now reads 首页/Home; search, source and sort
+ * keep their APP-ONLY scope — the project section above carries its own
+ * name search and never participates in the app filters.
  *
  * Since this card the home IS the complete directory: the H1 projection
  * (`selectHomeAppDirectory`) supplies the FULL authorized directory of the
@@ -181,14 +196,69 @@ export function homeAppMatchesQuery(
   ].some(value => value?.toLocaleLowerCase().includes(normalizedQuery))
 }
 
+// ─── The home project directory (POO-196 R3, consensus P2/P3/P4) ────────────
+
+/**
+ * The card-minimum contract (P12): stable id, name, current account role and
+ * access state, with the optional purpose/member-count facts the D6 r3
+ * negotiation carries. Missing facts are OMITTED downstream (P4: 人数未知则
+ * 省略该行，never a fabricated 0).
+ */
+export type ProjectDirectoryEntry = {
+  id: string
+  name: string
+  purpose?: string
+  role: 'owner' | 'manager' | 'member'
+  accessMode: 'active' | 'read_only'
+  memberCount?: number
+}
+
+/**
+ * P4 state truthfulness: loading / failure / stale cache are distinct and
+ * must never render as the empty state — 「还没有项目」is reserved for a
+ * VERIFIED-empty ready collection, nothing else.
+ */
+export type ProjectDirectoryState =
+  | { status: 'loading' }
+  | { status: 'error'; reason?: 'generic' | 'version' }
+  | { status: 'ready'; stale?: boolean }
+
+/** Case-insensitive name search over the project directory (app-scoped
+ * search stays app-only; this one serves the expanded project list). */
+export function projectDirectoryMatchesQuery(
+  entry: ProjectDirectoryEntry,
+  normalizedQuery: string,
+): boolean {
+  if (!normalizedQuery) return true
+  return entry.name.toLocaleLowerCase().includes(normalizedQuery)
+}
+
 // ─── The page ────────────────────────────────────────────────────────────────
 
-export function HomePage() {
+export function HomePage({ onEnterProject: onEnterProjectProp }: {
+  /**
+   * R3 (D13): optional host-provided entry override (isolated test mounts).
+   * Production uses `useProjectEntry()` below — the two-phased switch
+   * transaction → committed scope → most-recent-session routing →
+   * recordProjectVisit, per the adjudication. While absent (tests), the card
+   * click is deliberately inert (a silent no-op, never a fake navigation).
+   */
+  onEnterProject?: (productSpaceId: string) => void
+}) {
   const [skillsOpen, setSkillsOpen] = useState(false)
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
   const { openApp } = useTabShell()
   const launchHandoff = useProductSpaceAppLaunchHandoff()
+  // R3 (D13): the real entry flow. The card click starts the switch
+  // transaction, refuses sends until committed, and lands on the project's
+  // most recent conversation (or the editable empty state).
+  const { enterProject } = useProjectEntry()
+  const onEnterProject = onEnterProjectProp ?? enterProject
+  // R3 (P11): the home project section reaches the EXISTING ProductSpace
+  // context instance (the same provider the launch handoff above reads) —
+  // never a second one. onOpenCreateProject is hosted by App.
+  const spaceContext = useOptionalProductSpaceContext()
   // H3 (card step 4): the catalog instance is owned by the App-level
   // MemberCatalogProvider — this page CONSUMES the shared surface instead of
   // creating its own useAppCatalog instance.
@@ -258,6 +328,100 @@ export function HomePage() {
     ],
   )
   const phase = directory.phase
+
+  // ── The project directory (R3 P2/P3/D6) ──────────────────────────────────
+  // The r3 negotiated list (pm:listProductSpacesR3) is the authoritative
+  // source: entries are the enterprise spaces whose summary kind is
+  // 'project' — the main organization aggregate is never listed. Loading,
+  // failure and the version-unsupported face are distinct states and NEVER
+  // render as 「还没有项目」 (P4).
+  const [projectsState, setProjectsState] = useState<ProjectDirectoryState>({ status: 'loading' })
+  const [projectEntries, setProjectEntries] = useState<ProjectDirectoryEntry[]>([])
+  const projectsAccountId = catalog.productSpace?.accountId ?? spaceContext?.accountId ?? null
+  const [projectsReloadTick, setProjectsReloadTick] = useState(0)
+  const reloadProjects = useCallback(() => setProjectsReloadTick(tick => tick + 1), [])
+  useEffect(() => {
+    if (!projectsAccountId) {
+      setProjectEntries([])
+      setProjectsState({ status: 'ready' })
+      return
+    }
+    let cancelled = false
+    setProjectsState({ status: 'loading' })
+    void (async () => {
+      try {
+        const response = await window.electronAPI.pmListProductSpacesR3({ accountId: projectsAccountId })
+        if (cancelled) return
+        const summariesById = new Map(response.enterpriseSummaries.map(summary => [summary.productSpaceId, summary]))
+        const entries = response.spaces.productSpaces.flatMap(space => {
+          if (space.kind !== 'enterprise') return []
+          const summary = summariesById.get(space.id)
+          if (!summary || summary.enterpriseKind !== 'project') return []
+          const entry: ProjectDirectoryEntry = {
+            id: space.id,
+            name: space.name,
+            role: space.role,
+            accessMode: space.accessMode,
+            purpose: summary.purpose,
+            memberCount: summary.activeMemberCount,
+          }
+          return [entry]
+        })
+        setProjectEntries(entries)
+        // P12-5: cache the fetched introductions so the session-creation path
+        // can attach the SAME authoritative purpose to new project sessions.
+        if (projectsAccountId) {
+          rememberProjectPurposes(projectsAccountId, entries)
+        }
+        setProjectsState({ status: 'ready' })
+      } catch (error) {
+        if (cancelled) return
+        setProjectsState({
+          status: 'error',
+          reason: readRpcErrorCode(error) === 'contract_version_unsupported' ? 'version' : 'generic',
+        })
+      }
+    })()
+    return () => { cancelled = true }
+  }, [projectsAccountId, projectsReloadTick])
+  // Device-local visit order (P3): most recent successful entry first. Read
+  // per mounted account; a successful entry writes through
+  // recordProjectVisit (B4b/project-entry), so the order refreshes on the
+  // next mount of the page.
+  const projectVisits = useMemo<ProjectVisitRecord[]>(
+    () => (projectsAccountId ? readProjectVisitOrder(projectsAccountId) : []),
+    [projectsAccountId],
+  )
+  const sortedProjects = useMemo(
+    () => sortProjectDirectory(projectEntries, projectVisits, i18n.language),
+    [i18n.language, projectEntries, projectVisits],
+  )
+  const [projectsExpanded, setProjectsExpanded] = useState(false)
+  const [projectQuery, setProjectQuery] = useState('')
+  const normalizedProjectQuery = projectQuery.trim().toLocaleLowerCase()
+  const filteredProjects = useMemo(
+    () => sortedProjects.filter(entry => projectDirectoryMatchesQuery(entry, normalizedProjectQuery)),
+    [normalizedProjectQuery, sortedProjects],
+  )
+  // Capacity (P3): two rows of cards at the frozen breakpoints — 2×(1|2|3)
+  // columns. Collapsed overflow hides via the SAME responsive classes the
+  // grid uses, so no JS breakpoint listener can drift from the layout.
+  const cardVisibilityClass = (index: number): string => {
+    if (projectsExpanded || index < 2) return ''
+    if (index < 4) return 'hidden min-[761px]:block'
+    return 'hidden min-[761px]:hidden min-[1081px]:block'
+  }
+  const projectsOverflow = sortedProjects.length > 2
+  const expandRowClass = sortedProjects.length > 6
+    ? ''
+    : sortedProjects.length > 4
+      ? 'min-[1081px]:hidden'
+      : 'min-[761px]:hidden'
+
+  const handleEnterProject = useCallback((productSpaceId: string) => {
+    onEnterProject?.(productSpaceId)
+  }, [onEnterProject])
+
 
   // Skill authorization, personal enablement and native preparation are
   // managed from the existing assistant card in the current ProductSpace.
@@ -421,7 +585,7 @@ export function HomePage() {
         className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
       data-testid="home-app-hub"
     >
-      {/* Prototype `.r14-home .home-hero`: 我的应用 title + space lead at
+      {/* Prototype `.r14-home .home-hero`: 首页 title + space lead at
       left, the personal circles context link bottom-aligned at desktop and
       stacked full-width under the text at ≤760px. Enterprise homes never mix
       in the circles entry (P70-HOME-02). The test id is the long-standing
@@ -489,11 +653,232 @@ export function HomePage() {
         />
       )}
 
+      {/* POO-196 R3 (P1/P2): the「项目」区域 — always present between the hero
+      and the fixed canvas, on personal, organization and project homes
+      alike. Header = title + one-line scope + the ONLY create entry (P11);
+      the app toolbar below is untouched (search/source/sort stay
+      app-scoped). */}
+      {spaceContext && (
+        <section data-testid="home-projects" className="mb-[36px]">
+          <div className="mb-[16px] flex flex-wrap items-end justify-between gap-[12px]">
+            <div className="min-w-0">
+              <h2 className="m-0 text-[20px] font-[720] tracking-[-0.03em]">
+                {t('home.projects.title')}
+              </h2>
+              <p className="m-0 mt-[6px] text-[13px] leading-[1.5] text-foreground-60">
+                {t('home.projects.description')}
+              </p>
+            </div>
+            {/* P11: the sole create entry in the whole client. Rendered only
+            while the hosted-dialog callback exists (an isolated mount without
+            it must not show a dead button). */}
+            {typeof spaceContext.onOpenCreateProject === 'function' && (
+              <button
+                type="button"
+                data-testid="home-project-create"
+                className="inline-flex min-h-[32px] shrink-0 items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
+                onClick={() => spaceContext.onOpenCreateProject?.()}
+              >
+                <Icons.Plus className="size-[14px]" aria-hidden="true" />
+                {t('home.projects.create')}
+              </button>
+            )}
+          </div>
+
+          {/* P4 state truthfulness: loading = skeletons, failure = an explicit
+          in-section reload surface, stale cache = a「可能不是最新」marker —
+          none of them ever render as「还没有项目」. */}
+          {projectsState.status === 'loading' ? (
+            <div
+              className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3"
+              data-testid="home-project-loading"
+            >
+              {[0, 1].map(index => (
+                <div
+                  key={index}
+                  aria-hidden="true"
+                  className="h-[96px] animate-pulse rounded-[20px] border border-foreground/10 bg-surface client-material-card motion-reduce:animate-none"
+                />
+              ))}
+            </div>
+          ) : projectsState.status === 'error' ? (
+            <div
+              className="grid justify-items-center gap-[8px] rounded-[20px] border border-dashed border-border px-[20px] py-[30px] text-center"
+              data-testid="home-project-error"
+            >
+              <Icons.CloudOff className="size-[20px] text-muted-foreground" aria-hidden="true" />
+              {/* P4: the version face is distinct — retrying the same wire
+              cannot fix an unsupported negotiation, so it gets copy instead
+              of a retry button. */}
+              <p className="m-0 text-[13px] font-medium">
+                {projectsState.reason === 'version'
+                  ? t('home.projects.versionUnsupported')
+                  : t('home.projects.loadFailed')}
+              </p>
+              {projectsState.reason !== 'version' && (
+                <button
+                  type="button"
+                  data-testid="home-project-error-retry"
+                  className="mt-[2px] inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                  onClick={reloadProjects}
+                >
+                  {t('homeApps.actions.tryAgain')}
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {projectsState.stale && (
+                <div
+                  className="mb-[12px] inline-flex items-center gap-[6px] rounded-full border border-info/20 bg-info/8 px-[10px] py-[4px] text-[11px] text-info-text"
+                  data-testid="home-project-stale"
+                >
+                  <Icons.AlertTriangle className="size-[12px]" aria-hidden="true" />
+                  <span>{t('home.projects.stale')}</span>
+                </div>
+              )}
+              {sortedProjects.length === 0 ? (
+                /* P4: the single verified-empty state — the header's create
+                button above is the ONE primary action; no second same-weight
+                button inside the dashed card. */
+                <div
+                  className="rounded-[20px] border border-dashed border-border px-[20px] py-[30px] text-center text-[13px] text-muted-foreground"
+                  data-testid="home-project-empty"
+                >
+                  {t('home.projects.empty')}
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
+                    {filteredProjects.map((entry, index) => {
+                      const isCurrent = spaceContext.activeProductSpaceId === entry.id
+                      return (
+                        <article
+                          key={entry.id}
+                          data-testid="home-project-card"
+                          data-product-space-id={entry.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={entry.name}
+                          onClick={() => handleEnterProject(entry.id)}
+                          onKeyDown={event => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              handleEnterProject(entry.id)
+                            }
+                          }}
+                          className={cardVisibilityClass(index) + ' flex cursor-pointer flex-col gap-[8px] rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs outline-none transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle focus-visible:border-accent'}
+                        >
+                          <div className="flex items-start justify-between gap-[8px]">
+                            <h3 className="m-0 line-clamp-2 text-[15px] font-bold leading-[1.35]">
+                              {entry.name}
+                            </h3>
+                            {isCurrent && (
+                              <span
+                                data-testid="home-project-current"
+                                className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-[var(--accent-soft)] px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-accent"
+                              >
+                                {t('home.projects.current')}
+                              </span>
+                            )}
+                          </div>
+                          {entry.purpose && (
+                            <p className="m-0 truncate text-[12px] leading-[1.5] text-muted-foreground">
+                              {entry.purpose}
+                            </p>
+                          )}
+                          <div className="mt-auto flex flex-wrap items-center gap-[6px] pt-[4px] text-[11px] text-muted-foreground">
+                            <span className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] leading-[1.6]">
+                              {t(`productSpace.role.${entry.role}`)}
+                            </span>
+                            {entry.accessMode === 'read_only' && (
+                              <span
+                                className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] leading-[1.6]"
+                                data-testid="home-project-readonly"
+                              >
+                                {t('home.projects.readOnly')}
+                              </span>
+                            )}
+                            {/* P4: member count shows only when the data
+                            source actually knows it. */}
+                            {typeof entry.memberCount === 'number' && (
+                              <span className="whitespace-nowrap">
+                                {t('home.projects.memberCount', { count: entry.memberCount })}
+                              </span>
+                            )}
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                  {projectsExpanded && filteredProjects.length === 0 && (
+                    <p className="m-0 mt-[12px] text-[13px] text-muted-foreground" data-testid="home-project-no-matches">
+                      {t('home.projects.noMatches')}
+                    </p>
+                  )}
+                  {projectsExpanded ? (
+                    <div className="mt-[12px] flex flex-wrap items-center gap-[10px]">
+                      <input
+                        type="search"
+                        value={projectQuery}
+                        onChange={event => setProjectQuery(event.target.value)}
+                        placeholder={t('home.projects.searchPlaceholder')}
+                        data-testid="home-project-search"
+                        className="min-h-[34px] w-full max-w-[280px] appearance-none rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[7px] text-[13px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
+                      />
+                      <button
+                        type="button"
+                        data-testid="home-project-collapse"
+                        className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                        onClick={() => {
+                          setProjectQuery('')
+                          setProjectsExpanded(false)
+                        }}
+                      >
+                        {t('home.projects.collapse')}
+                      </button>
+                    </div>
+                  ) : (
+                    projectsOverflow && (
+                      /* P3: expand in place — the button's own visibility
+                      tracks the current breakpoint (2×columns), so a wide
+                      window that already shows every card shows no control. */
+                      <div className={expandRowClass + ' mt-[12px]'}>
+                        <button
+                          type="button"
+                          data-testid="home-project-expand"
+                          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                          onClick={() => setProjectsExpanded(true)}
+                        >
+                          {t('home.projects.showAll', { count: sortedProjects.length })}
+                        </button>
+                      </div>
+                    )
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
       {/* POO-154: 本机固定的画布应用 — the always-available re-open entry for
       pinned canvas apps. Device-local truth, independent of the catalog
       phases below (a closed pinned tab must never orphan its app). Renders
       nothing while nothing is pinned. */}
       <PinnedCanvasApps />
+
+      {/* POO-196 R3 (P1): the「应用」分区标题 marks the app region so the
+      project section above and the app toolbar below have clearly scoped
+      labels — search/source/sort keep applying to Apps ONLY. */}
+      {catalog.productSpace && (
+        <h2
+          className="m-0 mb-[16px] text-[20px] font-[720] tracking-[-0.03em]"
+          data-testid="home-apps-title"
+        >
+          {t('home.apps.title')}
+        </h2>
+      )}
 
       {/* Prototype `.r14-toolbar`: search + source filter + sort. Hidden when
       the directory cannot be verified AND nothing cached is retained (a

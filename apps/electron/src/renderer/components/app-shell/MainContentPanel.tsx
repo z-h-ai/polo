@@ -46,6 +46,8 @@ import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import type { ExecutionEntry } from '../automations/types'
 import { automationsAtom } from '@/atoms/automations'
 import { SendResourceToWorkspaceDialog, type SendResourceType } from './SendResourceToWorkspaceDialog'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import { ProjectConversationEmptyState } from '@/components/project-context/ProjectConversationEmptyState'
 
 export interface MainContentPanelProps {
   /** Whether both sidebar and navigator are hidden (focus mode / CMD+.) */
@@ -94,6 +96,10 @@ export function MainContentPanel({
   const { clearMultiSelect } = useSessionSelection()
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const automations = useAtomValue(automationsAtom)
+  // POO-196 R3 (D14): the committed product-space scope drives the project
+  // conversation empty state below — hooks stay top-level (rules of hooks).
+  const productSpaceScope = useOptionalProductSpaceContext()
+  const activeProjectSpace = productSpaceScope?.activeProductSpace
 
   // Execution history for the selected automation
   const selectedAutomationId = isAutomationsNavigation(navState) ? navState.details?.automationId : undefined
@@ -411,6 +417,29 @@ export function MainContentPanel({
       return wrapWithStoplight(
         <Panel variant="grow" className={className} testId="main-content-panel">
           <ChatPage sessionId={navState.details.sessionId} />
+        </Panel>
+      )
+    }
+    // POO-196 R3 (D14): a committed enterprise PROJECT scope with no selected
+    // session shows the editable project conversation empty state (zero-write
+    // entry — the session is created only by the first explicit send), not
+    // the generic "no session selected" placeholder.
+    if (
+      productSpaceScope?.accountId
+      && activeWorkspaceId
+      && activeProjectSpace
+      && activeProjectSpace.kind === 'enterprise'
+    ) {
+      return wrapWithStoplight(
+        <Panel variant="grow" className={className} testId="main-content-panel">
+          <ProjectConversationEmptyState
+            accountId={productSpaceScope.accountId}
+            workspaceId={activeWorkspaceId}
+            productSpaceId={activeProjectSpace.id}
+            projectName={activeProjectSpace.name}
+            viewerRole={activeProjectSpace.role}
+            enterpriseId={activeProjectSpace.enterpriseId}
+          />
         </Panel>
       )
     }

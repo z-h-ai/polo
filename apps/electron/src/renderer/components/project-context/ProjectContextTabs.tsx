@@ -10,10 +10,10 @@ import { cn } from '@/lib/utils'
  * Tabs root used purely as the selector — the messages pane (ChatDisplay)
  * stays mounted underneath, so tab switches never unmount the conversation.
  *
- * POO-196 追加轮 D-D 2: a「成员」BUTTON rides the END of the strip row —
- * deliberately NOT a fourth tab, so the selector semantics and all three tab
- * positions stay unchanged. Both ChatPage branches open the same members
- * dialog through `onOpenMembers`.
+ * POO-196 R3 (adjudication D11): the members entry no longer rides this row
+ * — it moved to the PanelHeader actions (「成员 N」, testid pc-members-button
+ * retained), and the assertion is that the strip stays a pure three-tab
+ * selector with no members affordance in the tablist.
  */
 
 export type ProjectContextTab = 'messages' | 'files' | 'pins'
@@ -22,11 +22,9 @@ export interface ProjectContextTabsProps {
   value: ProjectContextTab
   onValueChange: (tab: ProjectContextTab) => void
   className?: string
-  /** POO-196 追加轮: opens the shared project-members dialog. */
-  onOpenMembers?: () => void
 }
 
-export function ProjectContextTabs({ value, onValueChange, className, onOpenMembers }: ProjectContextTabsProps) {
+export function ProjectContextTabs({ value, onValueChange, className }: ProjectContextTabsProps) {
   const { t } = useTranslation()
 
   return (
@@ -67,18 +65,6 @@ export function ProjectContextTabs({ value, onValueChange, className, onOpenMemb
           </TabsTrigger>
         </TabsList>
       </Tabs>
-      {onOpenMembers ? (
-        <button
-          type="button"
-          data-testid="pc-members-button"
-          aria-label={t('projectMembers.buttonAria')}
-          onClick={onOpenMembers}
-          className="ml-2 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] border border-transparent px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-foreground-5 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-        >
-          <Icons.Users className="h-3.5 w-3.5" aria-hidden="true" />
-          {t('projectMembers.buttonLabel')}
-        </button>
-      ) : null}
     </div>
   )
 }

@@ -86,18 +86,13 @@ export function ProductSpaceSwitcher() {
             </StyledDropdownMenuItem>
           )
         })}
-        {/* POO-196 追加轮 D-D 1: the create + refresh entries close the
-            account/space menu. Personal-only accounts reach create exactly
-            here — never behind the multi-space select screen — and refresh
-            is the visible re-read after accepting an invite elsewhere. */}
+        {/* POO-196 R3 P11: the「创建项目」entry was REMOVED from the space
+            menu — the home「项目」区域 is now the only create entry (its
+            create button + hosted dialog are reachable from every space's
+            home, so personal-only accounts no longer depend on this menu).
+            Refresh stays: it is the visible re-read after accepting an invite
+            elsewhere. */}
         <StyledDropdownMenuSeparator />
-        <StyledDropdownMenuItem
-          data-testid="product-space-create-project"
-          onClick={() => space.onOpenCreateProject?.()}
-        >
-          <Building2 className="size-3.5" />
-          {t('createProject.menuAction')}
-        </StyledDropdownMenuItem>
         <StyledDropdownMenuItem
           data-testid="product-space-refresh"
           onClick={() => { void refreshProductSpaces(() => space.onRefreshProductSpaces()) }}

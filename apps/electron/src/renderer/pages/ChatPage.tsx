@@ -36,7 +36,12 @@ import { ProjectContextTabs, type ProjectContextTab } from '@/components/project
 import { ProjectFileLibrary } from '@/components/project-context/ProjectFileLibrary'
 import { ProjectPinPane } from '@/components/project-context/ProjectPinPane'
 import { ShareToProjectDialog, type ShareToProjectTarget } from '@/components/project-context/ShareToProjectDialog'
-import { ProjectMembersDialog } from '@/components/project-context/ProjectMembersDialog'
+import { ProjectMembersEntryLabel, ProjectMembersPanel } from '@/components/project-context/ProjectMembersPanel'
+import { useProjectMembersPanelHost } from '@/components/project-context/useProjectMembersPanelHost'
+import { useCollaborationRoster } from '@/components/project-context/useCollaborationRoster'
+import { useRightPanePresentation } from '@/hooks/use-right-pane-presentation'
+import { canvasPaneAppAtomFamily, canvasPanePopoutAtomFamily } from '@/atoms/canvas-pane'
+import { useProjectEntryPending } from '@/hooks/useProjectEntry'
 import { createEnterpriseWorkflowUrl } from '@/lib/enterprise-workflow-url'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
@@ -103,6 +108,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     chatDisplayRef,
     onChatMatchInfoChange,
     isFocusedPanel,
+    filePreview,
+    filePreviewVisible,
   } = useAppShellContext()
 
   // Use the unified session options hook for clean access
@@ -335,18 +342,29 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // shared-layer work, and structural reads keep this page compiling (and
   // correct at runtime) either way.
   const [projectTab, setProjectTab] = React.useState<ProjectContextTab>('messages')
-  // POO-196 追加轮 D-D 2: the members dialog is project-level and shared by
-  // BOTH ChatPage branches (with-messages and skeleton) — never a fourth tab.
-  const [projectMembersOpen, setProjectMembersOpen] = React.useState(false)
-  const handleOpenProjectMembers = React.useCallback(() => setProjectMembersOpen(true), [])
-  const handleCloseProjectMembers = React.useCallback((open: boolean) => setProjectMembersOpen(open), [])
-  React.useEffect(() => {
-    // A session switch resets to 消息 (default tab — the current behavior) and
-    // closes the members panel with it (E2-4: the dialog instance survives the
-    // switch, so a stale `open` state would resurrect it on the way back).
-    setProjectTab('messages')
-    setProjectMembersOpen(false)
-  }, [sessionId])
+  // POO-196 R3 (P8/D8 degradation trigger ②): a browser/canvas/file-preview
+  // pane occupying the right column forces the DRAWER form. Read from the
+  // SAME atoms/hooks AppShell renders the pane from — these stay set while a
+  // drawer merely suspends the native views, so occupancy can never be
+  // misread as "the tool was closed" (D8).
+  const contextFilePreviewVisible = Boolean(filePreview && filePreviewVisible)
+  const chatCanvasApp = useAtomValue(canvasPaneAppAtomFamily(sessionId))
+  const chatCanvasPresentation = useAtomValue(canvasPanePopoutAtomFamily(sessionId))
+  const chatSidebarCanvas = chatCanvasApp && !chatCanvasPresentation?.poppedOut && chatCanvasPresentation?.isVisible !== false
+    ? chatCanvasApp
+    : null
+  const chatRemoteWorkspaceId = React.useMemo(
+    () => workspaces.find((w) => w.id === activeWorkspaceId)?.remoteServer?.remoteWorkspaceId ?? null,
+    [workspaces, activeWorkspaceId],
+  )
+  const { browserSlotOpen: chatBrowserSlotOpen } = useRightPanePresentation({
+    currentSessionId: sessionId,
+    activeWorkspaceId: activeWorkspaceId ?? null,
+    remoteWorkspaceId: chatRemoteWorkspaceId,
+    fileVisible: contextFilePreviewVisible,
+    canvasVisible: Boolean(chatSidebarCanvas),
+  })
+  const membersToolPaneOccupied = contextFilePreviewVisible || Boolean(chatSidebarCanvas) || chatBrowserSlotOpen
   const sessionProductSpaceId = (session as { productSpaceId?: string } | null)?.productSpaceId
     ?? (sessionMeta as { productSpaceId?: string } | null)?.productSpaceId
     ?? null
@@ -360,7 +378,38 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       : null
   ), [isProjectSession, activeWorkspaceId, sessionProductSpaceId])
   const showProjectTabs = isProjectSession && projectScope !== null
+  // POO-196 R3 (P8/D8): the members PANEL is project-level and shared by BOTH
+  // ChatPage branches (with-messages and skeleton). The host hook owns the
+  // open state, the push/drawer form factor (lane measurement + tool-pane
+  // occupancy) and the drawer's native-pane suspension.
+  const membersLaneRef = React.useRef<HTMLDivElement | null>(null)
+  const membersTriggerRef = React.useRef<HTMLButtonElement | null>(null)
+  const membersPanelHost = useProjectMembersPanelHost({
+    enabled: showProjectTabs,
+    laneRef: membersLaneRef,
+    toolPaneOccupied: membersToolPaneOccupied,
+    triggerRef: membersTriggerRef,
+  })
+  const handleOpenProjectMembers = membersPanelHost.openPanel
+  // POO-196 R3 D13.1: the entry-in-flight send gate (see the onSendMessage
+  // handler) — a ref so the composer callback sees the live value without
+  // being rebuilt on every atom tick.
+  const entryPending = useProjectEntryPending()
+  const entryPendingRef = React.useRef(entryPending)
+  entryPendingRef.current = entryPending
+  React.useEffect(() => {
+    // A session switch resets to 消息 (default tab — the current behavior) and
+    // closes the members panel with it (the panel instance survives the
+    // switch, so a stale `open` state would resurrect it on the way back).
+    setProjectTab('messages')
+    membersPanelHost.closePanel()
+  }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps -- closePanel identity is stable; the guard keeps the switch scoped to sessionId
   const projectPaneVisible = showProjectTabs && projectTab !== 'messages'
+  // P9 entry roster: the ALL-ROLES collaboration projection (never the
+  // management roster) feeds the header「成员 N」stack and the panel alike.
+  const membersRoster = useCollaborationRoster(showProjectTabs && productSpace && projectScope
+    ? { accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }
+    : null)
   // D-C: the controlled external「前往企业管理」handoff — the same fail-closed
   // click-time check TopBar performs, re-derived from the LIVE scope at click
   // time; the desktop Bearer never rides the URL.
@@ -382,20 +431,42 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       toast.error(t('topbar.account.enterpriseOpenFailed'))
     }
   }, [productSpace, t])
-  // One dialog element, rendered inside BOTH return branches so the skeleton
-  // (messages-still-loading) session offers the same members entry.
-  const projectMembersDialog = showProjectTabs && projectScope && productSpace && activeProductSpace?.kind === 'enterprise'
+  // One panel element, rendered inside BOTH return branches so the skeleton
+  // (messages-still-loading) session offers the same members entry. The push
+  // form sits INSIDE the lane row (a flex sibling); the drawer portals itself.
+  const projectMembersPanel = showProjectTabs && projectScope && productSpace && activeProductSpace?.kind === 'enterprise'
     ? (
-      <ProjectMembersDialog
-        open={projectMembersOpen}
-        onOpenChange={handleCloseProjectMembers}
+      <ProjectMembersPanel
+        open={membersPanelHost.open}
+        mode={membersPanelHost.mode}
         scope={{ accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }}
         projectName={activeProductSpace.name}
         viewerRole={activeProductSpace.role}
+        assertedEnterpriseId={activeProductSpace.enterpriseId}
+        roster={membersRoster}
+        onClose={membersPanelHost.closePanel}
         onOpenEnterpriseManagement={() => { void handleOpenEnterpriseManagement() }}
       />
     )
     : null
+  // P9 header entry: 「成员 N」 with up to three roster avatars, ahead of the
+  // share control. The roster-unknown fallback is the plain icon + label —
+  // never a fabricated count. D11 keeps the pc-members-button testid and the
+  // uniqueness: the tab strip no longer carries any members affordance.
+  const membersEntryButton = showProjectTabs ? (
+    <button
+      type="button"
+      ref={membersTriggerRef}
+      data-testid="pc-members-button"
+      aria-label={t('projectMembers.buttonAria')}
+      aria-haspopup="dialog"
+      aria-expanded={membersPanelHost.open}
+      onClick={handleOpenProjectMembers}
+      className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] border border-transparent px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-foreground-5 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+    >
+      <ProjectMembersEntryLabel roster={membersRoster} />
+    </button>
+  ) : null
   // X6: both project panes stay MOUNTED (hidden) across tab flips, so a
   // 消息 round-trip no longer discards scroll position, in-flight previews or
   // an open upload dialog. The key folds the workspace + product space in, so
@@ -820,7 +891,20 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     )
   }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta])
 
-  const headerActions = isCompactMode ? compactInfoButton : shareButton
+  // Members entry (project sessions only) rides BEFORE the share/info control
+  // in the header actions slot — desktop and compact alike (P9: the entry is
+  // the header's own; the drawer it opens stays reachable on narrow windows).
+  const headerActions = isCompactMode ? (
+    <div className="flex items-center">
+      {membersEntryButton}
+      {compactInfoButton}
+    </div>
+  ) : (
+    <div className="flex items-center">
+      {membersEntryButton}
+      {shareButton}
+    </div>
+  )
 
   // Build title menu content for chat sessions using shared SessionMenu.
   // Desktop uses Radix DropdownMenu via PanelHeader; compact mode uses a
@@ -916,78 +1000,85 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
       return (
         <>
-          <div className="h-full flex flex-col">
-            <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-            {showProjectTabs && (
-              <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} onOpenMembers={handleOpenProjectMembers} />
-            )}
-            <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
-              <ChatDisplay
-                ref={chatDisplayRef}
-                session={skeletonSession}
-                onSendMessage={() => {}}
-                onOpenFile={handleOpenFile}
-                onOpenUrl={handleOpenUrl}
-                currentModel={effectiveModel}
-                pendingPermission={undefined}
-                onRespondToPermission={onRespondToPermission}
-                pendingCredential={undefined}
-                onRespondToCredential={onRespondToCredential}
-                pendingQuestion={undefined}
-                onRespondToQuestion={onRespondToQuestion}
-                permissionMode={sessionOpts.permissionMode}
-                onPermissionModeChange={setPermissionMode}
-                enabledModes={enabledModes}
-                inputValue={inputValue}
-                onInputChange={handleInputChange}
-                attachmentsValue={attachmentsValue}
-                onAttachmentsChange={handleAttachmentsChange}
-                elementReferencesValue={elementRefsValue}
-                onElementReferencesChange={handleElementRefsChange}
-                sources={enabledSources}
-                skills={skills}
-                sessionStatuses={sessionStatuses}
-                onSessionStatusChange={handleSessionStatusChange}
-                workspaceId={activeWorkspaceId || undefined}
-                onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
-                workingDirectory={sessionMeta.workingDirectory}
-                onWorkingDirectoryChange={handleWorkingDirectoryChange}
-                messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-                messagesLoadError={messageLoadState.error}
-                messagesRetrying={messagesRetrying}
-                onRetryMessagesLoad={handleRetryMessagesLoad}
-                searchQuery={sessionListSearchQuery}
-                isSearchModeActive={isSearchModeActive}
-                onMatchInfoChange={onChatMatchInfoChange}
-                connectionUnavailable={connectionUnavailable}
-                disabled={isChatInputDisabled}
-                inputStatusBanner={inputStatusBanner}
-                compactMode={!!isCompactMode}
-                projectShareEnabled={showProjectTabs}
-                onShareToProject={handleShareToProject}
-              />
+          {/* The chat lane (D8 measurement node): its content-box width is
+              identical before and after the panel inserts itself, so one
+              ResizeObserver serves the pre-insert lane width in both host
+              forms. Push rides inside as a flex sibling; drawer portals out. */}
+          <div ref={membersLaneRef} className="h-full flex min-h-0 min-w-0">
+            <div className="h-full flex min-h-0 min-w-0 flex-1 flex-col">
+              <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+              {showProjectTabs && (
+                <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
+              )}
+              <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
+                <ChatDisplay
+                  ref={chatDisplayRef}
+                  session={skeletonSession}
+                  onSendMessage={() => {}}
+                  onOpenFile={handleOpenFile}
+                  onOpenUrl={handleOpenUrl}
+                  currentModel={effectiveModel}
+                  pendingPermission={undefined}
+                  onRespondToPermission={onRespondToPermission}
+                  pendingCredential={undefined}
+                  onRespondToCredential={onRespondToCredential}
+                  pendingQuestion={undefined}
+                  onRespondToQuestion={onRespondToQuestion}
+                  permissionMode={sessionOpts.permissionMode}
+                  onPermissionModeChange={setPermissionMode}
+                  enabledModes={enabledModes}
+                  inputValue={inputValue}
+                  onInputChange={handleInputChange}
+                  attachmentsValue={attachmentsValue}
+                  onAttachmentsChange={handleAttachmentsChange}
+                  elementReferencesValue={elementRefsValue}
+                  onElementReferencesChange={handleElementRefsChange}
+                  sources={enabledSources}
+                  skills={skills}
+                  sessionStatuses={sessionStatuses}
+                  onSessionStatusChange={handleSessionStatusChange}
+                  workspaceId={activeWorkspaceId || undefined}
+                  onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
+                  workingDirectory={sessionMeta.workingDirectory}
+                  onWorkingDirectoryChange={handleWorkingDirectoryChange}
+                  messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
+                  messagesLoadError={messageLoadState.error}
+                  messagesRetrying={messagesRetrying}
+                  onRetryMessagesLoad={handleRetryMessagesLoad}
+                  searchQuery={sessionListSearchQuery}
+                  isSearchModeActive={isSearchModeActive}
+                  onMatchInfoChange={onChatMatchInfoChange}
+                  connectionUnavailable={connectionUnavailable}
+                  disabled={isChatInputDisabled}
+                  inputStatusBanner={inputStatusBanner}
+                  compactMode={!!isCompactMode}
+                  projectShareEnabled={showProjectTabs}
+                  onShareToProject={handleShareToProject}
+                />
+              </div>
+              {showProjectTabs && projectScope && (
+                <>
+                  <div className={projectPaneVisible && projectTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                    <ProjectFileLibrary
+                      key={projectPaneKey}
+                      scope={projectScope}
+                      currentUserId={productSpace?.accountId ?? null}
+                      active={projectPaneVisible && projectTab === 'files'}
+                      pinMutations={pinsVersion}
+                    />
+                  </div>
+                  <div className={projectPaneVisible && projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                    <ProjectPinPane
+                      key={projectPaneKey}
+                      scope={projectScope}
+                      active={projectPaneVisible && projectTab !== 'files'}
+                      onChanged={handlePinsChanged}
+                    />
+                  </div>
+                </>
+              )}
             </div>
-            {showProjectTabs && projectScope && (
-              <>
-                <div className={projectPaneVisible && projectTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
-                  <ProjectFileLibrary
-                    key={projectPaneKey}
-                    scope={projectScope}
-                    currentUserId={productSpace?.accountId ?? null}
-                    active={projectPaneVisible && projectTab === 'files'}
-                    pinMutations={pinsVersion}
-                  />
-                </div>
-                <div className={projectPaneVisible && projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
-                  <ProjectPinPane
-                    key={projectPaneKey}
-                    scope={projectScope}
-                    active={projectPaneVisible && projectTab !== 'files'}
-                    onChanged={handlePinsChanged}
-                  />
-                </div>
-              </>
-            )}
+            {projectMembersPanel}
           </div>
           <RenameDialog
             open={renameDialogOpen}
@@ -998,7 +1089,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onSubmit={handleRenameSubmit}
             placeholder={t('chat.enterSessionName')}
           />
-          {projectMembersDialog}
         </>
       )
     }
@@ -1017,87 +1107,98 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   return (
     <>
-      <div className="h-full flex flex-col">
-        <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-        {showProjectTabs && (
-          <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} onOpenMembers={handleOpenProjectMembers} />
-        )}
-        <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
-          <ChatDisplay
-            ref={chatDisplayRef}
-            session={session}
-            onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences, projectAssetRefs) => {
-              if (session) {
-                onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences, projectAssetRefs)
-              }
-            }}
-            onOpenFile={handleOpenFile}
-            onOpenUrl={handleOpenUrl}
-            currentModel={effectiveModel}
-            pendingPermission={pendingPermission}
-            onRespondToPermission={onRespondToPermission}
-            pendingCredential={pendingCredential}
-            onRespondToCredential={onRespondToCredential}
-            pendingQuestion={pendingQuestion}
-            onRespondToQuestion={onRespondToQuestion}
-            permissionMode={sessionOpts.permissionMode}
-            onPermissionModeChange={setPermissionMode}
-            enabledModes={enabledModes}
-            inputValue={inputValue}
-            onInputChange={handleInputChange}
-            attachmentsValue={attachmentsValue}
-            onAttachmentsChange={handleAttachmentsChange}
-            elementReferencesValue={elementRefsValue}
-            onElementReferencesChange={handleElementRefsChange}
-            projectAssetRefsValue={projectAssetRefsValue}
-            onProjectAssetRefsChange={handleProjectAssetRefsChange}
-            sources={enabledSources}
-            skills={skills}
-            labels={labels}
-            onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
-            sessionStatuses={sessionStatuses}
-            onSessionStatusChange={handleSessionStatusChange}
-            workspaceId={activeWorkspaceId || undefined}
-            onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
-            workingDirectory={workingDirectory}
-            onWorkingDirectoryChange={handleWorkingDirectoryChange}
-            sessionFolderPath={session?.sessionFolderPath}
-            messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-            messagesLoadError={messageLoadState.error}
-            messagesRetrying={messagesRetrying}
-            onRetryMessagesLoad={handleRetryMessagesLoad}
-            searchQuery={sessionListSearchQuery}
-            isSearchModeActive={isSearchModeActive}
-            onMatchInfoChange={onChatMatchInfoChange}
-            connectionUnavailable={connectionUnavailable}
-            disabled={isChatInputDisabled}
-            inputStatusBanner={inputStatusBanner}
-            compactMode={!!isCompactMode}
-            projectShareEnabled={showProjectTabs}
-            onShareToProject={handleShareToProject}
-          />
+      {/* The chat lane (D8 measurement node) — see the skeleton branch. */}
+      <div ref={membersLaneRef} className="h-full flex min-h-0 min-w-0">
+        <div className="h-full flex min-h-0 min-w-0 flex-1 flex-col">
+          <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+          {showProjectTabs && (
+            <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
+          )}
+          <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
+            <ChatDisplay
+              ref={chatDisplayRef}
+              session={session}
+              onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences, projectAssetRefs) => {
+                // D13.1 entry fence: a send during an in-flight project entry
+                // would land in the PREVIOUS scope — refuse visibly and keep
+                // the composer draft exactly as typed.
+                if (entryPendingRef.current) {
+                  toast.error(t('project.entry.scopeChanged'))
+                  return
+                }
+                if (session) {
+                  onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences, projectAssetRefs)
+                }
+              }}
+              onOpenFile={handleOpenFile}
+              onOpenUrl={handleOpenUrl}
+              currentModel={effectiveModel}
+              pendingPermission={pendingPermission}
+              onRespondToPermission={onRespondToPermission}
+              pendingCredential={pendingCredential}
+              onRespondToCredential={onRespondToCredential}
+              pendingQuestion={pendingQuestion}
+              onRespondToQuestion={onRespondToQuestion}
+              permissionMode={sessionOpts.permissionMode}
+              onPermissionModeChange={setPermissionMode}
+              enabledModes={enabledModes}
+              inputValue={inputValue}
+              onInputChange={handleInputChange}
+              attachmentsValue={attachmentsValue}
+              onAttachmentsChange={handleAttachmentsChange}
+              elementReferencesValue={elementRefsValue}
+              onElementReferencesChange={handleElementRefsChange}
+              projectAssetRefsValue={projectAssetRefsValue}
+              onProjectAssetRefsChange={handleProjectAssetRefsChange}
+              sources={enabledSources}
+              skills={skills}
+              labels={labels}
+              onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
+              sessionStatuses={sessionStatuses}
+              onSessionStatusChange={handleSessionStatusChange}
+              workspaceId={activeWorkspaceId || undefined}
+              onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
+              workingDirectory={workingDirectory}
+              onWorkingDirectoryChange={handleWorkingDirectoryChange}
+              sessionFolderPath={session?.sessionFolderPath}
+              messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
+              messagesLoadError={messageLoadState.error}
+              messagesRetrying={messagesRetrying}
+              onRetryMessagesLoad={handleRetryMessagesLoad}
+              searchQuery={sessionListSearchQuery}
+              isSearchModeActive={isSearchModeActive}
+              onMatchInfoChange={onChatMatchInfoChange}
+              connectionUnavailable={connectionUnavailable}
+              disabled={isChatInputDisabled}
+              inputStatusBanner={inputStatusBanner}
+              compactMode={!!isCompactMode}
+              projectShareEnabled={showProjectTabs}
+              onShareToProject={handleShareToProject}
+            />
+          </div>
+          {showProjectTabs && projectScope && (
+            <>
+              <div className={projectPaneVisible && projectTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                <ProjectFileLibrary
+                  key={projectPaneKey}
+                  scope={projectScope}
+                  currentUserId={productSpace?.accountId ?? null}
+                  active={projectPaneVisible && projectTab === 'files'}
+                  pinMutations={pinsVersion}
+                />
+              </div>
+              <div className={projectPaneVisible && projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                <ProjectPinPane
+                  key={projectPaneKey}
+                  scope={projectScope}
+                  active={projectPaneVisible && projectTab !== 'files'}
+                  onChanged={handlePinsChanged}
+                />
+              </div>
+            </>
+          )}
         </div>
-        {showProjectTabs && projectScope && (
-          <>
-            <div className={projectPaneVisible && projectTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
-              <ProjectFileLibrary
-                key={projectPaneKey}
-                scope={projectScope}
-                currentUserId={productSpace?.accountId ?? null}
-                active={projectPaneVisible && projectTab === 'files'}
-                pinMutations={pinsVersion}
-              />
-            </div>
-            <div className={projectPaneVisible && projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
-              <ProjectPinPane
-                key={projectPaneKey}
-                scope={projectScope}
-                active={projectPaneVisible && projectTab !== 'files'}
-                onChanged={handlePinsChanged}
-              />
-            </div>
-          </>
-        )}
+        {projectMembersPanel}
       </div>
       <RenameDialog
         open={renameDialogOpen}
@@ -1118,7 +1219,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           onShared={handleSharedToProject}
         />
       )}
-      {projectMembersDialog}
     </>
   )
 })

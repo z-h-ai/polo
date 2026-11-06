@@ -38,8 +38,14 @@ import {
   type PcUploadGrantResponse,
 } from './project-context-contract.ts';
 import {
+  CLIENT_ENTERPRISE_CONTRACT_VERSION,
   CLIENT_ENTERPRISE_ERROR_CODES,
+  CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER,
   CLIENT_ENTERPRISE_PAGE_MAX_LIMIT,
+  clientColleagueInvitationReceiptSchema,
+  clientColleagueOptionsResponseSchema,
+  clientCollaborationRosterResponseSchema,
+  clientCreateColleagueInvitationCommandSchema,
   clientCreateEnterpriseCommandSchema,
   clientCreateEnterpriseResponseSchema,
   clientCreateInvitationCommandSchema,
@@ -47,6 +53,11 @@ import {
   clientCreateReceiptSchema,
   clientInvitationListResponseSchema,
   clientMemberRosterResponseSchema,
+  type ClientColleagueInvitationReceipt,
+  type ClientColleagueOptionsResponse,
+  type ClientCollaborationRosterResponse,
+  type ClientCreateColleagueInvitationCommand,
+  type ClientCreateColleagueInvitationResponse,
   type ClientCreateEnterpriseCommand,
   type ClientCreateEnterpriseResponse,
   type ClientCreateInvitationCommand,
@@ -55,6 +66,13 @@ import {
   type ClientInvitationListResponse,
   type ClientMemberRosterResponse,
 } from './client-enterprise-contract.ts';
+// The negotiated R3 list composition lives in the protocol layer (it joins
+// the generated envelope with the v1 ProductSpace list schema, both protocol
+// concerns) and is re-exported through @polo-ai/shared/protocol.
+import {
+  PmProductSpacesListR3ResponseSchema,
+  type PmProductSpacesListR3Response,
+} from '../protocol/project-members';
 import {
   AdminError,
   type AdminAuthConfig,
@@ -1770,7 +1788,11 @@ export class AdminClient {
 
   /** POST /api/client/enterprises — creates the enterprise aggregate under the
    * caller's idempotency key; `replayed` means the SAME key + payload already
-   * committed. */
+   * committed. The r3 negotiation header opts THIS client into the r3 contract
+   * (POO-196 D7): optional purpose (empty string allowed) and the r3
+   * fingerprint domain. Without the header the server validates the payload as
+   * legacy r2 — where an empty purpose is a 400 — so the header MUST ride the
+   * real transport call, never be reconstructed client-side. */
   async createEnterprise(
     accessToken: string,
     input: ClientCreateEnterpriseCommand & { idempotencyKey: string },
@@ -1779,7 +1801,10 @@ export class AdminClient {
     const response = await this.request<unknown>('/api/client/enterprises', {
       method: 'POST',
       accessToken,
-      headers: { 'Idempotency-Key': idempotencyKey },
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+        'X-Polo-Client-Enterprise-Contract': CLIENT_ENTERPRISE_CONTRACT_VERSION,
+      },
       body: clientCreateEnterpriseCommandSchema.parse(command),
     });
     return this.readSuccessResponse(response, clientCreateEnterpriseResponseSchema);
@@ -1854,6 +1879,120 @@ export class AdminClient {
       { method: 'POST', accessToken, body: clientCreateInvitationCommandSchema.parse(input) },
     );
     return this.readSuccessResponse(response, clientCreateInvitationResponseSchema);
+  }
+
+  // -----------------------------------------------------------------------
+  // POO-196 R3 client surface (D3–D6) — same narrow Bearer paths, same
+  // response-validation discipline as the block above. The directory and
+  // roster reads are page reads (server-side name search, bounded limit);
+  // the colleague invitation bridge is strictly ONE colleague per request —
+  // the desktop's multi-select fans out client-side, never as a batch body.
+  // -----------------------------------------------------------------------
+
+  /** GET /api/client/product-spaces/{id}/colleague-options?q&cursor&limit —
+   * the caller's own organization projected into the target project (D3).
+   * `none`/`ambiguous` source states are SUCCESS bodies, never errors. */
+  async listColleagueOptions(
+    accessToken: string,
+    productSpaceId: string,
+    query: { q?: string; limit?: number; cursor?: string },
+  ): Promise<ClientColleagueOptionsResponse> {
+    const boundedLimit = query.limit === undefined
+      ? undefined
+      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
+    const suffix = AdminClient.clientEnterpriseQuery({
+      q: query.q,
+      limit: boundedLimit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/colleague-options${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientColleagueOptionsResponseSchema);
+  }
+
+  /** GET /api/client/product-spaces/{id}/collaboration-roster?q&cursor&limit —
+   * the all-role minimal roster (D4); the total count is the server's. */
+  async listCollaborationRoster(
+    accessToken: string,
+    productSpaceId: string,
+    query: { q?: string; limit?: number; cursor?: string },
+  ): Promise<ClientCollaborationRosterResponse> {
+    const boundedLimit = query.limit === undefined
+      ? undefined
+      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
+    const suffix = AdminClient.clientEnterpriseQuery({
+      q: query.q,
+      limit: boundedLimit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/collaboration-roster${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientCollaborationRosterResponseSchema);
+  }
+
+  /** POST /api/client/product-spaces/{id}/colleague-invitations — the D5
+   * bridge: one selected colleague, resolved server-side onto the existing
+   * targeted invitation. The response union is the SAME targeted-invitation
+   * outcome contract. */
+  async createColleagueInvitation(
+    accessToken: string,
+    productSpaceId: string,
+    input: ClientCreateColleagueInvitationCommand,
+  ): Promise<ClientCreateColleagueInvitationResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, '/colleague-invitations'),
+      { method: 'POST', accessToken, body: clientCreateColleagueInvitationCommandSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, clientCreateInvitationResponseSchema);
+  }
+
+  /** GET /api/client/product-spaces/{id}/colleague-invitations?createRequestKey=…
+   * — the caller's OWN recovery query for one colleague invitation; `unknown`
+   * is a success state and must never re-create. */
+  async queryColleagueInvitation(
+    accessToken: string,
+    productSpaceId: string,
+    createRequestKey: string,
+  ): Promise<ClientColleagueInvitationReceipt> {
+    const suffix = AdminClient.clientEnterpriseQuery({ createRequestKey });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/colleague-invitations${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientColleagueInvitationReceiptSchema);
+  }
+
+  /** GET /api/me/product-spaces?clientEnterpriseContract=poo196-client-enterprise-r3
+   * — the D6 negotiated list read. The default v1 `listProductSpaces` above is
+   * untouched; THIS variant opts in with the contract query parameter and only
+   * accepts the composed v1+R3 envelope. An admin that ignored the parameter
+   * and answered plain v1 (or an envelope that fails the join) is surfaced as
+   * `contract_version_unsupported` so the renderer can show the update prompt
+   * instead of guessing project kinds. */
+  async listProductSpacesR3(accessToken: string): Promise<PmProductSpacesListR3Response> {
+    const suffix = AdminClient.clientEnterpriseQuery({
+      [CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER]: CLIENT_ENTERPRISE_CONTRACT_VERSION,
+    });
+    const response = await this.request<unknown>(`/api/me/product-spaces${suffix}`, {
+      method: 'GET',
+      accessToken,
+    });
+    const parsed = PmProductSpacesListR3ResponseSchema.safeParse(response);
+    if (parsed.success) return parsed.data;
+    // A body that still parses as the plain v1 list means the deployment did
+    // not understand the negotiation — a version problem, not corrupt data.
+    const answeredPlainV1 = ListProductSpacesResponseSchema.safeParse(response).success;
+    if (answeredPlainV1) {
+      throw new AdminError(
+        'Polo Admin does not support the negotiated client enterprise list contract',
+        'contract_version_unsupported',
+      );
+    }
+    throw new AdminError('Negotiated ProductSpace list response is invalid', 'SERVER_ERROR');
   }
 
   // -------------------------------------------------------------------------

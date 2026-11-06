@@ -466,6 +466,15 @@ export const RPC_CHANNELS = {
     LIST_MEMBERS: 'pm:listMembers',
     LIST_INVITATIONS: 'pm:listInvitations',
     CREATE_INVITATION: 'pm:createInvitation',
+    // POO-196 R3 (D3–D6): the restricted colleague directory, the all-role
+    // collaboration roster, the per-object colleague invitation bridge with
+    // its own recovery query, and the negotiated R3 product-space list read.
+    // All LOCAL_ONLY, same trust boundary as the pm block above.
+    LIST_COLLEAGUE_OPTIONS: 'pm:listColleagueOptions',
+    LIST_COLLABORATION_ROSTER: 'pm:listCollaborationRoster',
+    CREATE_COLLEAGUE_INVITATION: 'pm:createColleagueInvitation',
+    QUERY_COLLEAGUE_INVITATION: 'pm:queryColleagueInvitation',
+    LIST_PRODUCT_SPACES_R3: 'pm:listProductSpacesR3',
   },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',

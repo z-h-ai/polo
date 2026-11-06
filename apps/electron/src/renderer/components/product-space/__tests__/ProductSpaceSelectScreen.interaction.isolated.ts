@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import { createElement } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 
@@ -13,6 +13,7 @@ GlobalRegistrator.register()
 setupI18n()
 
 const { cleanup, fireEvent, render, screen } = await import('@testing-library/react')
+const { ProductSpaceProvider } = await import('@/context/ProductSpaceContext')
 const { ProductSpaceSelectScreen } = await import('../ProductSpaceSelectScreen')
 
 const personalId = 'space-personal'
@@ -236,5 +237,65 @@ describe('ProductSpaceSelectScreen · 键盘（listbox 语义）', () => {
     fireEvent.keyDown(listbox, { key: 'Enter' })
     expect(onConfirm).toHaveBeenCalledTimes(1)
     expect(onConfirm).toHaveBeenCalledWith('space-ent-2')
+  })
+})
+
+describe('ProductSpaceSelectScreen · 创建入口收敛（POO-196 R3 P11）', () => {
+  // P11: the gate keeps refresh only — the home「项目」区域 is the sole
+  // create entry, even when the hosted-dialog callback exists.
+  function renderWithContext(overrides: Record<string, unknown> = {}) {
+    const onConfirm = mock(() => {})
+    const onLogout = mock(() => {})
+    const onOpenCreateProject = mock(() => {})
+    const onRefreshProductSpaces = mock(() => {})
+    const Provider = ProductSpaceProvider as unknown as (props: Record<string, unknown>) => ReactElement
+    const utils = render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(
+        Provider,
+        {
+          value: {
+            accountId: 'account-a',
+            activeProductSpaceId: personalId,
+            activeProductSpace: personalSpace,
+            productSpaces: [personalSpace, enterpriseSpace],
+            allProductSpaces: [personalSpace, enterpriseSpace],
+            personalProductSpaceId: personalId,
+            productSpaceContextKey: JSON.stringify(['product-space', 1, 'account-a', personalId]),
+            contextVersion: 1,
+            pendingSwitch: null,
+            onSelectProductSpace: mock(() => {}),
+            onRefreshProductSpaces,
+            onOpenCreateProject,
+            onConfirmStopAndSwitch: mock(() => {}),
+            onRetryFailedStops: mock(() => {}),
+            onRetryTargetLoad: mock(() => {}),
+            onCancelSwitch: mock(() => {}),
+            onDismissTargetAccessLost: mock(() => {}),
+          },
+        },
+        createElement(ProductSpaceSelectScreen, {
+          spaces: [personalSpace, enterpriseSpace],
+          activeProductSpaceId: personalId,
+          selectionSource: 'fresh',
+          account: { displayName: '王晓蕴', username: 'wangxy' },
+          submitting: false,
+          onConfirm,
+          onLogout,
+          ...overrides,
+        }),
+      ),
+    ))
+    return { onConfirm, onLogout, onOpenCreateProject, onRefreshProductSpaces, ...utils }
+  }
+
+  it('选择屏无创建入口（product-space-select-create-project 不存在），刷新保留', () => {
+    const { onOpenCreateProject, onRefreshProductSpaces } = renderWithContext()
+    expect(screen.queryByTestId('product-space-select-create-project')).toBeNull()
+    const refresh = screen.getByTestId('product-space-select-refresh')
+    fireEvent.click(refresh)
+    expect(onOpenCreateProject).not.toHaveBeenCalled()
+    expect(onRefreshProductSpaces).toHaveBeenCalled()
   })
 })

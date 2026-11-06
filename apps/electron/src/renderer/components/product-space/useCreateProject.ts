@@ -8,20 +8,26 @@ import {
 import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
 
 /**
- * POO-196 追加轮 create-project state hook (adjudication D-B).
+ * POO-196 R3 create-project state hook (consensus P5, adjudication D7).
  *
- * The seven interaction contracts this hook owns:
- * - D-B 1/2: the confirmation checkbox defaults UNCHECKED and only an
- *   explicit submit mints consent; the echoed terms version is the contract
+ * The interaction contracts this hook owns:
+ * - D-B 1/2 (retained): the confirmation checkbox defaults UNCHECKED and only
+ *   an explicit submit mints consent; the echoed terms version is the contract
  *   literal, never a locally invented string.
- * - D-B 5: the Idempotency-Key is generated at explicit submit time and
- *   kept per account while the request is in flight or unresolved.
- * - D-B 6: a lost/unknown response NEVER mints a new key — the stored key
- *   feeds the「查询创建结果」recovery query, and only the user's explicit
- *   action retries. Editing the form abandons the stored key (a different
- *   payload under the same key would be a 409, not a retry).
- * - D-B 7: success separates「项目已创建」from「进入项目」— the controlled
- *   switch is the caller's job; a failed entry never re-creates.
+ * - D-B 5/6 (retained): the Idempotency-Key is generated at explicit submit
+ *   time and kept per account while the request is in flight or unresolved; a
+ *   lost/unknown response NEVER mints a new key — the stored key feeds the
+ *   「查询创建结果」recovery query, and only the user's explicit action
+ *   retries. Editing the form abandons the stored key.
+ * - D-B 7 (retained): success separates「项目已创建」from「进入项目」— a
+ *   failed entry never re-creates.
+ * - P5/D7 (R3): the purpose is OPTIONAL end to end (empty string is legal;
+ *   nothing is ever copied from the name or synthesised as a placeholder).
+ *   The owner name has NO standing input: the current account's effective
+ *   display name is used automatically; only a MISSING or over-limit display
+ *   name surfaces the in-form「你的姓名」completion field (whitespace counts
+ *   as missing, the 64-code-unit bound validates in place, and nothing is
+ *   ever silently truncated).
  */
 
 export type CreateProjectFormValues = {
@@ -41,7 +47,9 @@ export type CreateProjectFieldErrors = {
 /** One submitted request, retained per account until it resolves or the user
  * abandons it by editing the form. In-memory by design: no localStorage, no
  * telemetry, and a renderer reload loses only the ability to query, never
- * correctness (the server keeps the aggregate). */
+ * correctness (the server keeps the aggregate). Holds the EFFECTIVE values
+ * (account display name already resolved into ownerName) — the shape that
+ * produced the wire fingerprint. */
 type StoredRequest = {
   accountId: string
   idempotencyKey: string
@@ -77,7 +85,12 @@ export type CreateProjectPhase =
  * receipt query stays available. `legacy_projection_inconsistent` remains
  * definite deliberately: the projection repair path is a server-side fix for
  * an already-settled aggregate — the receipt query cannot change its outcome,
- * and keeping the form editable is the only exit that exists. */
+ * and keeping the form editable is the only exit that exists.
+ *
+ * `contract_version_unsupported` is definite too: an admin deployment that
+ * answers 409 never wrote anything, so the form stays editable with the
+ * update-prompt copy. (The generated contract's code list gains the literal
+ * additively; until then the pm layer surfaces it the same way.) */
 const DEFINITE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   ...([
     'unauthorized',
@@ -96,6 +109,7 @@ const DEFINITE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   'pm_scope_changed',
   'pm_unavailable_in_personal',
   'validation_error',
+  'contract_version_unsupported',
 ])
 
 function newIdempotencyKey(): string {
@@ -115,7 +129,31 @@ function areValuesEqual(a: CreateProjectFormValues, b: CreateProjectFormValues):
     && a.responsibilityConfirmed === b.responsibilityConfirmed
 }
 
-export function useCreateProject(accountId: string) {
+/**
+ * D7: the account display name (already trimmed by the caller's source) is
+ * the automatic owner name when it sits within the 1–64 UTF-16 code-unit
+ * bound; otherwise the form's own completion value stands in. This is the
+ * ONLY place the two sources merge, so the wire payload always mirrors what
+ * the fingerprint covers.
+ */
+function resolveEffectiveValues(
+  values: CreateProjectFormValues,
+  accountOwnerName: string,
+  ownerNameMax: number,
+): CreateProjectFormValues {
+  const resolved = accountOwnerName.trim()
+  const accountOwnerUsable = resolved.length >= 1 && resolved.length <= ownerNameMax
+  return accountOwnerUsable ? { ...values, ownerName: resolved } : values
+}
+
+/**
+ * @param accountId the creating account.
+ * @param accountOwnerName the current account's effective display name
+ *   (`displayName.trim()` from the signed-in admin user). May be null/empty
+ *   or over the bound — that is exactly the「你的姓名」completion case, the
+ *   caller does not pre-filter.
+ */
+export function useCreateProject(accountId: string, accountOwnerName?: string | null) {
   const [phase, setPhase] = useState<CreateProjectPhase>('form')
   const [values, setValues] = useState<CreateProjectFormValues>(() => ({
     name: '',
@@ -146,6 +184,16 @@ export function useCreateProject(accountId: string) {
 
   const presentation = clientEnterpriseCreatePresentation
 
+  /**
+   * P5: whether the「你的姓名」completion field must appear — i.e. the
+   * account display name is missing (blank counts as missing) or exceeds the
+   * 64-code-unit bound. When false, NO owner input renders at all.
+   */
+  const ownerNeedsInput = useMemo(() => {
+    const resolved = (accountOwnerName ?? '').trim()
+    return resolved.length < 1 || resolved.length > presentation.fieldLimits.ownerNameMax
+  }, [accountOwnerName, presentation.fieldLimits.ownerNameMax])
+
   const setField = useCallback(<K extends keyof CreateProjectFormValues>(key: K, value: CreateProjectFormValues[K]) => {
     setValues(previous => ({ ...previous, [key]: value }))
     setFieldErrors(previous => ({ ...previous, [key]: undefined }))
@@ -160,33 +208,41 @@ export function useCreateProject(accountId: string) {
     setField('responsibilityConfirmed', checked)
   }, [setField])
 
-  const validate = useCallback((): CreateProjectFieldErrors => {
+  const validate = useCallback((effective: CreateProjectFormValues): CreateProjectFieldErrors => {
     const errors: CreateProjectFieldErrors = {}
-    if (!values.name.trim()) errors.name = 'createProject.error.nameRequired'
-    else if (values.name.trim().length > presentation.fieldLimits.nameMax) errors.name = 'createProject.error.generic'
-    if (!values.ownerName.trim()) errors.ownerName = 'createProject.error.ownerNameRequired'
-    else if (values.ownerName.trim().length > presentation.fieldLimits.ownerNameMax) errors.ownerName = 'createProject.error.generic'
-    if (!values.purpose.trim()) errors.purpose = 'createProject.error.purposeRequired'
-    else if (values.purpose.trim().length > presentation.fieldLimits.purposeMax) errors.purpose = 'createProject.error.generic'
-    if (!values.responsibilityConfirmed) errors.responsibility = 'createProject.confirmRequired'
+    if (!effective.name.trim()) errors.name = 'createProject.error.nameRequired'
+    else if (effective.name.trim().length > presentation.fieldLimits.nameMax) errors.name = 'createProject.error.nameTooLong'
+    // The owner bound only applies when the completion field stands in for a
+    // missing/over-limit account display name; a usable display name can
+    // never violate it by construction (resolveEffectiveValues).
+    if (ownerNeedsInput) {
+      if (!effective.ownerName.trim()) errors.ownerName = 'createProject.error.ownerNameRequired'
+      else if (effective.ownerName.trim().length > presentation.fieldLimits.ownerNameMax) errors.ownerName = 'createProject.error.ownerNameTooLong'
+    }
+    // P5/D7: optional — empty or whitespace is legal, only the upper bound
+    // is enforced. No required error, no name-derived placeholder.
+    if (effective.purpose.trim().length > presentation.fieldLimits.purposeMax) errors.purpose = 'createProject.error.purposeTooLong'
+    if (!effective.responsibilityConfirmed) errors.responsibility = 'createProject.confirmRequired'
     return errors
-  }, [presentation.fieldLimits, values])
+  }, [ownerNeedsInput, presentation.fieldLimits])
 
   /** The command sent on submit. The literal terms version comes from the
-   * generated contract — the client cannot mint a future agreement. */
-  const buildCommand = useCallback(() => clientCreateEnterpriseCommandSchema.parse({
-    name: values.name.trim(),
-    ownerName: values.ownerName.trim(),
-    purpose: values.purpose.trim(),
+   * generated contract — the client cannot mint a future agreement. The
+   * purpose stays an honest empty string when the member wrote nothing. */
+  const buildCommand = useCallback((effective: CreateProjectFormValues) => clientCreateEnterpriseCommandSchema.parse({
+    name: effective.name.trim(),
+    ownerName: effective.ownerName.trim(),
+    purpose: effective.purpose.trim(),
     paymentResponsibilityAccepted: true as const,
     paymentResponsibilityTermsVersion: clientEnterprisePaymentResponsibilityTermsVersion,
-  }), [values])
+  }), [])
 
   const submit = useCallback(async (): Promise<CreateProjectOutcome | null> => {
-    const errors = validate()
+    const effective = resolveEffectiveValues(values, accountOwnerName ?? '', presentation.fieldLimits.ownerNameMax)
+    const errors = validate(effective)
     setFieldErrors(errors)
     if (Object.values(errors).some(Boolean)) return null
-    const command = buildCommand()
+    const command = buildCommand(effective)
     const generation = ++submitGenerationRef.current
     setPhase('submitting')
     setSubmitError(null)
@@ -196,11 +252,11 @@ export function useCreateProject(accountId: string) {
     // a second one. A changed payload (setField drops the stored request) or a
     // first submit mints the key here, at the only moment consent exists.
     const previousStored = storedRequests.get(accountId) ?? null
-    const samePayload = previousStored !== null && areValuesEqual(previousStored.values, values)
+    const samePayload = previousStored !== null && areValuesEqual(previousStored.values, effective)
     const idempotencyKey = samePayload && previousStored
       ? previousStored.idempotencyKey
       : newIdempotencyKey()
-    const stored: StoredRequest = { accountId, idempotencyKey, values }
+    const stored: StoredRequest = { accountId, idempotencyKey, values: effective }
     storedRequests.set(accountId, stored)
     setHasStoredRequest(true)
     try {
@@ -254,7 +310,7 @@ export function useCreateProject(accountId: string) {
       }
       return null
     }
-  }, [accountId, buildCommand, validate, values])
+  }, [accountOwnerName, accountId, buildCommand, presentation.fieldLimits.ownerNameMax, validate, values])
 
   /** D-B 6: query the ORIGINAL request's receipt with the stored key. */
   const queryReceipt = useCallback(async (): Promise<CreateProjectOutcome | null> => {
@@ -337,6 +393,7 @@ export function useCreateProject(accountId: string) {
     queryNotFound,
     hasStoredRequest: hasStoredRequest && storedForAccount !== null,
     versionMismatch,
+    ownerNeedsInput,
     setField,
     setResponsibilityConfirmed,
     submit,

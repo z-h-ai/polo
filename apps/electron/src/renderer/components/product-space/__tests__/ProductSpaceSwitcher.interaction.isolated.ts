@@ -146,6 +146,15 @@ describe('ProductSpaceSwitcher', () => {
     expect(items[0]!.getAttribute('disabled') !== null).toBe(true)
     expect(items[2]!.textContent).toContain('受限')
   })
+
+  it('POO-196 R3 P11: the create entry is GONE from the menu and refresh stays', () => {
+    const onOpenCreateProject = mock(() => {})
+    renderWithContext(makeContextValue({ onOpenCreateProject }))
+    // The home「项目」区域 is the only create entry (consensus P11) — the
+    // menu must not offer a second one, even when the callback exists.
+    expect(screen.queryByTestId('product-space-create-project')).toBeNull()
+    expect(screen.getByTestId('product-space-refresh')).toBeTruthy()
+  })
 })
 
 describe('ProductSpaceSwitchDialog', () => {

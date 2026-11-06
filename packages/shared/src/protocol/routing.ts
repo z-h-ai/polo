@@ -120,6 +120,16 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.projectMembers.LIST_MEMBERS,
   RPC_CHANNELS.projectMembers.LIST_INVITATIONS,
   RPC_CHANNELS.projectMembers.CREATE_INVITATION,
+  // POO-196 R3 (D3–D6): the colleague directory / collaboration roster reads
+  // re-prove the committed space fence; the colleague invitation write and
+  // its recovery query act through the device's trusted Admin session; the
+  // negotiated R3 list read is account-scoped on that same session. None of
+  // it is workspace-server routable.
+  RPC_CHANNELS.projectMembers.LIST_COLLEAGUE_OPTIONS,
+  RPC_CHANNELS.projectMembers.LIST_COLLABORATION_ROSTER,
+  RPC_CHANNELS.projectMembers.CREATE_COLLEAGUE_INVITATION,
+  RPC_CHANNELS.projectMembers.QUERY_COLLEAGUE_INVITATION,
+  RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3,
 
   // system — local OS info
   RPC_CHANNELS.system.VERSIONS,

@@ -49,6 +49,8 @@ export interface PendingAgentResume {
 export const SESSION_PERSISTENT_FIELDS = [
   // Identity
   'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd', 'productSpaceId', 'accountId',
+  // POO-196 R3 P12-5: project context metadata (title + optional purpose)
+  'projectContext',
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
@@ -147,6 +149,11 @@ export interface SessionConfig {
   /** Immutable trusted Admin account binding assigned at creation time (R32-2).
    *  Space-bound legacy records without it are quarantined (fail-closed). */
   accountId?: string;
+  /** POO-196 R3 P12-5: the project's authoritative context metadata (title +
+   *  optional introduction) captured at creation for space-bound sessions.
+   *  Persisted so EVERY spawn/resume of this session re-injects it into the
+   *  model request context — never by fabricating a user message. */
+  projectContext?: { name: string; purpose?: string };
   /** Optional user-defined name */
   name?: string;
   createdAt: number;

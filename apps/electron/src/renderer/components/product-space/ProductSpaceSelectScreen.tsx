@@ -246,19 +246,13 @@ export function ProductSpaceSelectScreen({
           </Button>
         </div>
 
-        {/* POO-196 追加轮 D-D 1: the SAME create/refresh actions as the
-            account/space menu, sharing the one hosted dialog. Rendered only
-            when the ProductSpace provider is mounted around the gate. */}
+        {/* POO-196 R3 P11: the「创建项目」button was REMOVED from this gate —
+            the home「项目」区域 is the only create entry (consensus P11), so
+            this screen keeps only refresh (the visible re-read, e.g. after an
+            invite was accepted elsewhere). Rendered only when the ProductSpace
+            provider is mounted around the gate. */}
         {spaceContext ? (
           <div className="mt-[12px] flex items-center justify-center gap-[8px]">
-            <Button
-              className={clientWorkbenchButtonClassName + ' shrink-0'}
-              data-testid="product-space-select-create-project"
-              disabled={submitting}
-              onClick={() => spaceContext.onOpenCreateProject?.()}
-            >
-              {t('createProject.menuAction')}
-            </Button>
             <Button
               className={clientWorkbenchButtonClassName + ' shrink-0'}
               data-testid="product-space-select-refresh"

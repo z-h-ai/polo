@@ -30,6 +30,12 @@ export interface ProductSpaceContextValue {
   contextVersion: number
   pendingSwitch: PendingSpaceSwitch | null
   onSelectProductSpace: (productSpaceId: string) => void
+  /** POO-196 R3 (D13): the awaitable switch primitive for the project
+   * entry flow. Resolves after the transaction committed OR right after
+   * parking on a user phase — completion is only ever read from
+   * `pendingSwitch === null` plus the committed target (the two-phased
+   * App pattern). */
+  onRequestSwitch: (productSpaceId: string) => Promise<void>
   /**
    * Fire-and-forget for existing consumers; awaitable for callers that need
    * the returned list (`null` means the refresh failed or was superseded —

@@ -6,12 +6,19 @@
  * multi-state (indexed/processing/failed/unsupported), confirmed/unconfirmed,
  * pinned, trashed, multi-version, several uploaders.
  */
-import type { Session } from '../../shared/types'
+import type { Message, Session } from '../../src/shared/types'
 import type {
   PcAssetDto,
   PcCapabilitiesResponse,
   PcSearchResponse,
 } from '@polo-ai/shared/protocol'
+
+/** Fixture sessions/messages carry runtime extras the production types omit
+ * (lastUsedAt ordering hints, per-message projectAssetRefs snapshot chips the
+ * ChatDisplay reads). The intersection keeps real-field checking while
+ * allowing the extras — the boundary the cast documents is deliberate. */
+type FixtureSession = Session & Record<string, unknown>
+type FixtureMessage = Message & Record<string, unknown>
 
 export const WORKSPACE_ID = 'ws-apollo'
 export const PRODUCT_SPACE_ID = 'ps-apollo'
@@ -498,7 +505,19 @@ export const initialPmRoster = () => ({
 })
 
 /** One pending invitation, matching the roster's enterprise. */
-export const initialPmInvitations = () => [
+/** Invitation entry shape: masked contacts are nullable (phone-only vs
+ * email-only targets), so consumers pushing synthesized rows stay assignable. */
+export interface FixtureInvitationEntry {
+  invitationId: string
+  status: string
+  maskedPhone: string | null
+  maskedEmail: string | null
+  expiresAt: string
+  createdAt: string
+  acceptedAt: string | null
+}
+
+export const initialPmInvitations = (): FixtureInvitationEntry[] => [
   {
     invitationId: 'inv-seed-1',
     status: 'active',
@@ -578,7 +597,7 @@ export function searchAssets(assets: PcAssetDto[], index: Map<string, string>, q
 }
 
 /** The project session: productSpaceId bound, transcript carries @ snapshots. */
-export const projectSession: Session = {
+const projectSessionFixture: FixtureSession & { messages: FixtureMessage[] } = {
   id: SESSION_PROJECT,
   workspaceId: WORKSPACE_ID,
   workspaceName: 'Apollo 项目空间',
@@ -632,7 +651,7 @@ export const projectSession: Session = {
 }
 
 /** The non-project session: no productSpaceId — the tab strip must stay off. */
-export const personalSession: Session = {
+const personalSessionFixture: FixtureSession = {
   id: SESSION_PERSONAL,
   workspaceId: WORKSPACE_ID,
   workspaceName: 'Apollo 项目空间',
@@ -664,7 +683,7 @@ export const personalSession: Session = {
 /** R2 扩展: the empty project session — same committed enterprise space, zero
  * transcript. ChatPage renders its second assembly (empty state) there; the
  * tab strip + members button must exist on BOTH branches. */
-export const projectEmptySession: Session = {
+export const projectEmptySession: FixtureSession = {
   id: SESSION_PROJECT_EMPTY,
   workspaceId: WORKSPACE_ID,
   workspaceName: 'Apollo 项目空间',
@@ -681,8 +700,202 @@ export const projectEmptySession: Session = {
   isFlagged: false,
 }
 
+export const projectSession = projectSessionFixture as unknown as Session
+
+export const personalSession = personalSessionFixture as unknown as Session
+
 export const sessionsById: Record<string, Session> = {
   [SESSION_PROJECT]: projectSession,
   [SESSION_PERSONAL]: personalSession,
-  [SESSION_PROJECT_EMPTY]: projectEmptySession,
+  [SESSION_PROJECT_EMPTY]: projectEmptySession as unknown as Session,
 }
+
+/* ── POO-196 R3 (adjudication D6/D12/D13): the negotiated project directory,
+ * the collaboration roster and the project-entry session seeds ──────────── */
+
+/** The negotiated R3 contract literal (client-enterprise-contract.ts). */
+export const R3_CONTRACT_VERSION = 'poo196-client-enterprise-r3'
+
+/** R3 directory ids. `ps-apollo` doubles as the organization home (its
+ * summary carries enterpriseKind 'organization' — it must NEVER render a
+ * home project card). */
+export const R3_PROJECT_ALPHA_ID = 'ps-r3-alpha'
+export const R3_PROJECT_BETA_ID = 'ps-r3-beta'
+/** The verified-empty project: entry must land on the zero-write empty state. */
+export const R3_PROJECT_EMPTY_ID = 'ps-r3-empty'
+export const R3_PROJECT_READONLY_ID = 'ps-r3-readonly'
+/** Same-name twins: disambiguation is by data-product-space-id, never name. */
+export const R3_TWIN_A_ID = 'ps-r3-twin-a'
+export const R3_TWIN_B_ID = 'ps-r3-twin-b'
+export const R3_TWIN_NAME = '交付资料库'
+/** A second account — the home visit ordering is per-account isolated. */
+export const R3_ACCOUNT_B_ID = 'acct-zhao-03'
+
+/** One v1 enterprise ProductSpace summary (strict v1 wire shape). */
+const enterpriseSpace = (id: string, enterpriseId: string, name: string, role: string, accessMode: string) => ({
+  id,
+  kind: 'enterprise',
+  enterpriseId,
+  name,
+  role,
+  accessMode,
+  payer: { kind: 'enterprise', enterpriseId },
+})
+
+/**
+ * The R3 negotiated directory (pm:listProductSpacesR3 response shape): the
+ * strict v1 list as `spaces` plus per-enterprise summaries. Summaries carry
+ * `enterpriseKind` + `purpose` and — per the R3 fixture contract — NO
+ * `activeMemberCount` (P4: an unknown count is omitted, never a fabricated 0;
+ * the panel count comes from the D4 roster). Every enterprise space is covered
+ * exactly once (schema superRefine); the organization aggregate is listed but
+ * `enterpriseKind:'organization'` keeps it out of the card collection.
+ */
+export function initialR3Directory() {
+  const productSpaces = [
+    enterpriseSpace(PRODUCT_SPACE_ID, 'ent-apollo-01', 'Apollo 项目空间', 'manager', 'active'),
+    {
+      id: PERSONAL_SPACE_ID,
+      kind: 'personal',
+      name: '我的空间',
+      accessMode: 'active',
+      payer: { kind: 'account' },
+    },
+    enterpriseSpace(R3_PROJECT_ALPHA_ID, 'ent-r3-alpha', '华东区销售资料库', 'owner', 'active'),
+    enterpriseSpace(R3_PROJECT_BETA_ID, 'ent-r3-beta', '北区交付资料库', 'manager', 'active'),
+    enterpriseSpace(R3_PROJECT_EMPTY_ID, 'ent-r3-empty', '新项目·尚无对话', 'owner', 'active'),
+    enterpriseSpace(R3_PROJECT_READONLY_ID, 'ent-r3-readonly', '只读归档区', 'member', 'read_only'),
+    enterpriseSpace(R3_TWIN_A_ID, 'ent-r3-twin-a', R3_TWIN_NAME, 'member', 'active'),
+    enterpriseSpace(R3_TWIN_B_ID, 'ent-r3-twin-b', R3_TWIN_NAME, 'member', 'active'),
+  ]
+  const summaryOf = (space: { id: string; enterpriseId: string }, enterpriseKind: 'organization' | 'project', purpose?: string) => ({
+    productSpaceId: space.id,
+    enterpriseId: space.enterpriseId,
+    enterpriseKind,
+    ...(purpose ? { purpose } : {}),
+  })
+  return {
+    contractVersion: R3_CONTRACT_VERSION,
+    spaces: {
+      contractVersion: 1,
+      personalProductSpaceId: PERSONAL_SPACE_ID,
+      productSpaces,
+    },
+    enterpriseSummaries: [
+      summaryOf(productSpaces[0] as { id: string; enterpriseId: string }, 'organization'),
+      summaryOf(productSpaces[2] as { id: string; enterpriseId: string }, 'project', '集中管理华东区客户与销售过程资料'),
+      summaryOf(productSpaces[3] as { id: string; enterpriseId: string }, 'project', '沉淀交付过程与验收记录'),
+      summaryOf(productSpaces[4] as { id: string; enterpriseId: string }, 'project'),
+      summaryOf(productSpaces[5] as { id: string; enterpriseId: string }, 'project', '历史归档（只读）'),
+      summaryOf(productSpaces[6] as { id: string; enterpriseId: string }, 'project', '同名 twin A'),
+      summaryOf(productSpaces[7] as { id: string; enterpriseId: string }, 'project', '同名 twin B'),
+    ],
+  }
+}
+
+/** Directory variants the scenarios reprogram: an EMPTY project collection
+ * (organization+personal only — 「还没有项目」 face) and a ONE-project
+ * capacity boundary face. */
+export function r3DirectoryVariant(variant: 'empty' | 'one') {
+  const full = initialR3Directory()
+  if (variant === 'empty') {
+    const kept = full.spaces.productSpaces.filter((space: { id: string; kind: string }) => space.kind === 'personal' || space.id === PRODUCT_SPACE_ID)
+    return {
+      ...full,
+      spaces: { ...full.spaces, productSpaces: kept },
+      enterpriseSummaries: full.enterpriseSummaries.filter((entry: { productSpaceId: string }) => entry.productSpaceId === PRODUCT_SPACE_ID),
+    }
+  }
+  const keptIds = new Set([PRODUCT_SPACE_ID, PERSONAL_SPACE_ID, R3_PROJECT_ALPHA_ID])
+  return {
+    ...full,
+    spaces: { ...full.spaces, productSpaces: full.spaces.productSpaces.filter((space: { id: string }) => keptIds.has(space.id)) },
+    enterpriseSummaries: full.enterpriseSummaries.filter((entry: { productSpaceId: string }) => keptIds.has(entry.productSpaceId) && entry.productSpaceId !== PERSONAL_SPACE_ID),
+  }
+}
+
+/* ── R3 project-entry session seeds (D13) ────────────────────────────────── */
+
+export const SESSION_R3_ALPHA_RECENT = 'sess-r3-alpha-recent'
+export const SESSION_R3_ALPHA_OLDER = 'sess-r3-alpha-older'
+export const SESSION_R3_BETA_RECENT = 'sess-r3-beta-recent'
+/** A decoy: NEWER than the alpha pair but bound to the apollo project space —
+ * the committed-scope filter must never pick it when entering alpha. */
+export const SESSION_R3_DECOY = 'sess-r3-decoy'
+
+const r3Session = (id: string, productSpaceId: string, name: string, lastMessageAt: number): FixtureSession => ({
+  id,
+  workspaceId: WORKSPACE_ID,
+  workspaceName: 'Apollo 项目空间',
+  productSpaceId,
+  accountId: ACCOUNT_ID,
+  name,
+  preview: `${name} 的第一条用户消息。`,
+  createdAt: lastMessageAt - 60_000,
+  lastMessageAt,
+  lastUsedAt: lastMessageAt,
+  isProcessing: false,
+  messages: [
+    {
+      id: `${id}-m1`,
+      role: 'user',
+      content: `${name} 的第一条用户消息。`,
+      timestamp: lastMessageAt - 60_000,
+    },
+    {
+      id: `${id}-m2`,
+      role: 'assistant',
+      content: `${name} 的回复要点已整理。`,
+      timestamp: lastMessageAt,
+    },
+  ],
+  messageCount: 2,
+  isFlagged: false,
+})
+
+/** The project sessions the fixture getSessions hands out (the full workspace
+ * list — selection scopes by productSpaceId, never by workspaceId alone). */
+export const r3Sessions: FixtureSession[] = [
+  r3Session(SESSION_R3_ALPHA_RECENT, R3_PROJECT_ALPHA_ID, '华东区资料库 · 最近会话', Date.parse('2026-11-03T18:00:00+08:00')),
+  r3Session(SESSION_R3_ALPHA_OLDER, R3_PROJECT_ALPHA_ID, '华东区资料库 · 早期会话', Date.parse('2026-11-01T10:00:00+08:00')),
+  r3Session(SESSION_R3_BETA_RECENT, R3_PROJECT_BETA_ID, '北区交付 · 最近会话', Date.parse('2026-11-02T15:00:00+08:00')),
+  r3Session(SESSION_R3_DECOY, PRODUCT_SPACE_ID, 'Apollo 组织空间 · 更新的会话', Date.parse('2026-11-03T20:00:00+08:00')),
+]
+
+export const r3SessionsById: Record<string, Session> = Object.fromEntries(r3Sessions.map(session => [session.id, session]))
+
+/** The session the EMPTY state's first trusted send creates — bound to the
+ * committed project scope so the D14 fence passes. */
+export function createdSessionFixture(productSpaceId: string, sessionId: string): Session {
+  return r3Session(sessionId, productSpaceId, '项目首个会话', Date.now()) as unknown as Session
+}
+
+/** The D4 collaboration roster (all-role minimal projection): no contact, no
+ * governance fields, server-owned `totalActiveMembers`. */
+export const initialCollaborationRoster = () => ({
+  productSpaceId: PRODUCT_SPACE_ID,
+  enterpriseName: 'Apollo 项目空间',
+  viewerRole: 'manager',
+  totalActiveMembers: 3,
+  members: [
+    { userId: CURRENT_USER_ID, displayName: '林奕', avatarUrl: null, role: 'manager', isSelf: true },
+    { userId: 'u-chen-02', displayName: '陈晓', avatarUrl: null, role: 'member', isSelf: false },
+    { userId: 'u-zhou-03', displayName: '周然', avatarUrl: null, role: 'member', isSelf: false },
+  ],
+  nextCursor: null,
+})
+
+/** The D3 restricted colleague directory of the caller's source organization,
+ * projected into the committed project: avatarUrl always null, server-derived
+ * projectState, no contact fields. */
+export const initialColleaguesDirectory = () => ({
+  sourceState: 'available',
+  source: { enterpriseId: 'ent-apollo-01', name: 'Apollo 项目空间' },
+  members: [
+    { userId: 'u-chen-02', displayName: '陈晓', avatarUrl: null, projectState: 'available' },
+    { userId: 'u-zhou-03', displayName: '周然', avatarUrl: null, projectState: 'pending' },
+    { userId: 'u-sun-04', displayName: '孙启', avatarUrl: null, projectState: 'joined' },
+    { userId: 'u-liu-05', displayName: '刘畅', avatarUrl: null, projectState: 'unavailable' },
+  ],
+  nextCursor: null as string | null,
+})

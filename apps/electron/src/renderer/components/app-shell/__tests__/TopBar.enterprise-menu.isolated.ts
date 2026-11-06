@@ -67,7 +67,7 @@ function tree(active: ProductSpaceSummary, productSpaces = [personal, member, ow
       accountId: 'account-a', membershipListVerified: true, activeProductSpaceId: active.id, activeProductSpace: active,
       personalProductSpaceId: personal.id, productSpaces, allProductSpaces: productSpaces,
       productSpaceContextKey: JSON.stringify(['product-space', 1, 'account-a', active.id]), contextVersion: 1,
-      pendingSwitch: null, onSelectProductSpace: () => {}, onRefreshProductSpaces: () => {},
+      pendingSwitch: null, onSelectProductSpace: () => {}, onRequestSwitch: async () => {}, onRefreshProductSpaces: () => {},
       onConfirmStopAndSwitch: () => {}, onRetryFailedStops: () => {}, onCancelSwitch: () => {},
       onStopSwitchExecution: () => {}, onRetryTargetLoad: () => {}, onDismissTargetAccessLost: () => {},
     },

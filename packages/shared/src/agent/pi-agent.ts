@@ -105,7 +105,7 @@ import { PiEventAdapter } from './backend/pi/event-adapter.ts';
 import { EventQueue } from './backend/event-queue.ts';
 
 // System prompt for Polo AI context
-import { getSystemPrompt } from '../prompts/system.ts';
+import { formatProjectContextSystemAppend, getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
 
 // Credential manager for token storage
@@ -2409,7 +2409,7 @@ export class PiAgent extends BaseAgent {
       }
 
       // Build system prompt
-      const systemPrompt = getSystemPrompt(
+      const baseSystemPrompt = getSystemPrompt(
         undefined, // pinnedPreferencesPrompt
         this.config.debugMode,
         this.config.workspace.rootPath,
@@ -2418,6 +2418,12 @@ export class PiAgent extends BaseAgent {
         'Polo AI Backend', // backendName
         getCoAuthorPreference() // respect user's includeCoAuthoredBy preference (#576)
       );
+      // POO-196 R3 P12-5: project context metadata rides EVERY turn of a
+      // project-bound session (first and resumed alike) — on the system side,
+      // never as a fabricated user message.
+      const systemPrompt = this.config.session?.projectContext
+        ? `${baseSystemPrompt}\n\n${formatProjectContextSystemAppend(this.config.session.projectContext)}`
+        : baseSystemPrompt;
 
       // Build context from sources
       const sourceContext = this.sourceManager.formatSourceState();

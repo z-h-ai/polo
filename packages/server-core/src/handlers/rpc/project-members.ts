@@ -1,30 +1,42 @@
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import {
+  PmCreateColleagueInvitationInputSchema,
   PmCreateEnterpriseInputSchema,
   PmCreateInvitationInputSchema,
+  PmListColleagueOptionsInputSchema,
+  PmListCollaborationRosterInputSchema,
   PmListInvitationsInputSchema,
   PmListMembersInputSchema,
+  PmListProductSpacesR3InputSchema,
+  PmQueryColleagueInvitationInputSchema,
   PmQueryCreateReceiptInputSchema,
 } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { RequestContext } from '@polo-ai/server-core/transport'
 import {
+  pmCreateColleagueInvitation,
   pmCreateEnterprise,
   pmCreateProjectInvitation,
   pmError,
+  pmListCollaborationRoster,
+  pmListColleagueOptions,
+  pmListProductSpacesR3,
   pmListProjectInvitations,
   pmListProjectMembers,
+  pmQueryColleagueInvitation,
   pmQueryCreateReceipt,
 } from '../../project-members/service'
 
 /**
- * POO-196 追加轮 project-members RPC handlers (adjudication D-A/D-B/D-C).
+ * POO-196 追加轮 project-members RPC handlers (adjudication D-A/D-B/D-C; R3
+ * per POO-196 redesign D3–D6).
  *
  * Every channel is LOCAL_ONLY and gated in the service layer — the handler
  * bodies are thin: parse the shared protocol schema, delegate. The account
  * commands are gated on the trusted Admin session WITHOUT an enterprise
- * fence; the roster/invitation commands re-prove the committed space fence on
- * EVERY entry. Nothing here is exposed as an agent tool.
+ * fence; the roster/invitation/directory commands re-prove the committed
+ * space fence on EVERY entry and let polo-admin decide the role authority.
+ * Nothing here is exposed as an agent tool.
  */
 
 /** Manifest of every channel this module registers (registration coverage
@@ -35,6 +47,11 @@ export const PROJECT_MEMBERS_HANDLED_CHANNELS = [
   RPC_CHANNELS.projectMembers.LIST_MEMBERS,
   RPC_CHANNELS.projectMembers.LIST_INVITATIONS,
   RPC_CHANNELS.projectMembers.CREATE_INVITATION,
+  RPC_CHANNELS.projectMembers.LIST_COLLEAGUE_OPTIONS,
+  RPC_CHANNELS.projectMembers.LIST_COLLABORATION_ROSTER,
+  RPC_CHANNELS.projectMembers.CREATE_COLLEAGUE_INVITATION,
+  RPC_CHANNELS.projectMembers.QUERY_COLLEAGUE_INVITATION,
+  RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3,
 ] as const
 
 function parseOrThrow<T>(schema: { safeParse(input: unknown): { success: boolean; data?: T } }, raw: unknown): T {
@@ -62,5 +79,25 @@ export function registerProjectMembersHandlers(server: RpcServer): void {
 
   server.handle(RPC_CHANNELS.projectMembers.CREATE_INVITATION, async (_ctx: RequestContext, rawInput: unknown) => {
     return pmCreateProjectInvitation(parseOrThrow(PmCreateInvitationInputSchema, rawInput))
+  })
+
+  server.handle(RPC_CHANNELS.projectMembers.LIST_COLLEAGUE_OPTIONS, async (_ctx: RequestContext, rawInput: unknown) => {
+    return pmListColleagueOptions(parseOrThrow(PmListColleagueOptionsInputSchema, rawInput))
+  })
+
+  server.handle(RPC_CHANNELS.projectMembers.LIST_COLLABORATION_ROSTER, async (_ctx: RequestContext, rawInput: unknown) => {
+    return pmListCollaborationRoster(parseOrThrow(PmListCollaborationRosterInputSchema, rawInput))
+  })
+
+  server.handle(RPC_CHANNELS.projectMembers.CREATE_COLLEAGUE_INVITATION, async (_ctx: RequestContext, rawInput: unknown) => {
+    return pmCreateColleagueInvitation(parseOrThrow(PmCreateColleagueInvitationInputSchema, rawInput))
+  })
+
+  server.handle(RPC_CHANNELS.projectMembers.QUERY_COLLEAGUE_INVITATION, async (_ctx: RequestContext, rawInput: unknown) => {
+    return pmQueryColleagueInvitation(parseOrThrow(PmQueryColleagueInvitationInputSchema, rawInput))
+  })
+
+  server.handle(RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3, async (_ctx: RequestContext, rawInput: unknown) => {
+    return pmListProductSpacesR3(parseOrThrow(PmListProductSpacesR3InputSchema, rawInput))
   })
 }

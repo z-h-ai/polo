@@ -1,10 +1,15 @@
 import { z } from 'zod'
 import {
+  CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER,
   CLIENT_ENTERPRISE_PAGE_MAX_LIMIT,
+  clientCreateColleagueInvitationCommandSchema,
   clientCreateEnterpriseCommandSchema,
   clientCreateInvitationCommandSchema,
   clientEnterpriseIdempotencyKeySchema,
+  clientEnterpriseListR3ResponseSchema,
+  clientPageCursorSchema,
 } from '../admin/client-enterprise-contract'
+import { ListProductSpacesResponseSchema } from '../product-spaces/schemas'
 
 /**
  * Enterprise project members (POO-196 追加轮, adjudication D-A/D-C) wire
@@ -115,3 +120,108 @@ export const PmCreateInvitationInputSchema = PmSpaceScopeSchema.extend({
   command: clientCreateInvitationCommandSchema,
 }).strict()
 export type PmCreateInvitationInput = z.output<typeof PmCreateInvitationInputSchema>
+
+/* ------------------------------------------------------------------ */
+/* R3 channels (POO-196 redesign, adjudication D3–D6)                  */
+/* ------------------------------------------------------------------ */
+
+/** D3: name search is resolved server-side over the FULL source directory
+ * before pagination, so `q` is only a bound-checked parameter here (the admin
+ * route trims and re-validates; a cross-query cursor is a server 400). */
+const PmR3QuerySchema = z.object({
+  q: z.string().max(128).optional(),
+  limit: z.number().int().min(1).max(CLIENT_ENTERPRISE_PAGE_MAX_LIMIT).optional(),
+  cursor: clientPageCursorSchema.optional(),
+}).strict()
+
+/** pm:listColleagueOptions — the restricted colleague directory of the
+ * caller's own source organization, projected into the committed project.
+ * The source enterprise is derived server-side and is NEVER a wire field. */
+export const PmListColleagueOptionsInputSchema = PmSpaceScopeSchema.extend(
+  PmR3QuerySchema.shape,
+).strict()
+export type PmListColleagueOptionsInput = z.output<typeof PmListColleagueOptionsInputSchema>
+
+/** pm:listCollaborationRoster — the all-role minimal roster of the committed
+ * space (D4); `q` filters the page server-side, the total count never does. */
+export const PmListCollaborationRosterInputSchema = PmSpaceScopeSchema.extend(
+  PmR3QuerySchema.shape,
+).strict()
+export type PmListCollaborationRosterInput = z.output<typeof PmListCollaborationRosterInputSchema>
+
+/** pm:createColleagueInvitation — D5 bridge: one selected colleague per call,
+ * resolved server-side onto the existing targeted invitation. The ids are
+ * resource references awaiting authorization, not caller identity. */
+export const PmCreateColleagueInvitationInputSchema = PmSpaceScopeSchema.extend({
+  command: clientCreateColleagueInvitationCommandSchema,
+}).strict()
+export type PmCreateColleagueInvitationInput = z.output<typeof PmCreateColleagueInvitationInputSchema>
+
+/** pm:queryColleagueInvitation — D5 recovery: the caller's own
+ * `createRequestKey`; `unknown` (202) is a success state, not a failure. */
+export const PmQueryColleagueInvitationInputSchema = PmSpaceScopeSchema.extend({
+  createRequestKey: clientEnterpriseIdempotencyKeySchema,
+}).strict()
+export type PmQueryColleagueInvitationInput = z.output<typeof PmQueryColleagueInvitationInputSchema>
+
+/** pm:listProductSpacesR3 — D6 negotiated list read (account-scoped: the
+ * collection covers the whole account, never just the committed space). The
+ * response composes the generated R3 envelope with the client's own strict v1
+ * `ListProductSpacesResponseSchema`, so no new schema is declared here. */
+export const PmListProductSpacesR3InputSchema = PmAccountScopeSchema.strict()
+export type PmListProductSpacesR3Input = z.output<typeof PmListProductSpacesR3InputSchema>
+
+/** The exact query parameter and version literal the negotiated list request
+ * carries; the AdminClient owns the composition (see listProductSpacesR3). */
+export const PM_LIST_CONTRACT_QUERY_PARAMETER = CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER
+
+/**
+ * pm:listProductSpacesR3 response (D6): the client-side composition of the
+ * generated R3 envelope with this client's OWN strict v1
+ * `ListProductSpacesResponse`. The generated envelope deliberately leaves
+ * `spaces` unknown (it is self-contained and cannot re-declare the published
+ * v1 schema), so the negotiated response is only trusted after BOTH halves
+ * parse and the metadata join is exact: one summary per enterprise space,
+ * ids matching one-to-one (productSpaceId AND enterpriseId), no duplicates,
+ * no metadata for personal or foreign spaces. A default v1 body (no R3
+ * envelope) fails THIS schema — that is the version-unsupported face, never a
+ * silently degraded success.
+ */
+export const PmProductSpacesListR3ResponseSchema =
+  clientEnterpriseListR3ResponseSchema.extend({
+    spaces: ListProductSpacesResponseSchema,
+  }).superRefine((value, ctx) => {
+    const enterpriseSpaces = new Map(
+      value.spaces.productSpaces
+        .filter(space => space.kind === 'enterprise')
+        .map(space => [space.id as string, space]),
+    );
+    const seen = new Set<string>();
+    for (const [index, summary] of value.enterpriseSummaries.entries()) {
+      if (seen.has(summary.productSpaceId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['enterpriseSummaries', index, 'productSpaceId'],
+          message: 'Enterprise summaries must be unique per ProductSpace',
+        });
+        continue;
+      }
+      seen.add(summary.productSpaceId);
+      const space = enterpriseSpaces.get(summary.productSpaceId);
+      if (!space || space.kind !== 'enterprise' || space.enterpriseId !== summary.enterpriseId) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['enterpriseSummaries', index, 'productSpaceId'],
+          message: 'Every enterprise summary must match exactly one enterprise ProductSpace in the list',
+        });
+      }
+    }
+    if (seen.size !== enterpriseSpaces.size) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['enterpriseSummaries'],
+        message: 'Enterprise summaries must cover every enterprise ProductSpace in the list',
+      });
+    }
+  })
+export type PmProductSpacesListR3Response = z.output<typeof PmProductSpacesListR3ResponseSchema>

@@ -415,6 +415,18 @@ export const CHANNEL_MAP = {
   pmListProjectInvitations: invokeCoded(RPC_CHANNELS.projectMembers.LIST_INVITATIONS),
   pmCreateProjectInvitation: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_INVITATION),
 
+  // POO-196 R3 (D3–D6). Same codedErrors discipline: the colleague/roster
+  // recovery copy branches on the stable contract codes
+  // (colleague_source_unavailable, colleague_target_unavailable,
+  // contract_version_unsupported, forbidden …) which the context bridge
+  // would otherwise erase. The colleague invitation stays strictly
+  // per-object on the wire — no batch channel exists.
+  pmListColleagueOptions: invokeCoded(RPC_CHANNELS.projectMembers.LIST_COLLEAGUE_OPTIONS),
+  pmListCollaborationRoster: invokeCoded(RPC_CHANNELS.projectMembers.LIST_COLLABORATION_ROSTER),
+  pmCreateColleagueInvitation: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_COLLEAGUE_INVITATION),
+  pmQueryColleagueInvitation: invokeCoded(RPC_CHANNELS.projectMembers.QUERY_COLLEAGUE_INVITATION),
+  pmListProductSpacesR3: invokeCoded(RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3),
+
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
   reorderStatuses: invoke(RPC_CHANNELS.statuses.REORDER),
