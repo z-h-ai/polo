@@ -90,7 +90,7 @@ function parsePopoutPayload(): PopoutPayload | null {
 function PopoutFallback({ messageKey }: { messageKey: string }) {
   const { t } = useTranslation()
   return (
-    <div className="h-full w-full flex items-center justify-center text-[13px] text-muted-foreground/70">
+    <div className="h-full w-full flex items-center justify-center text-[14px] text-muted-foreground/70">
       {t(messageKey)}
     </div>
   )

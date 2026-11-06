@@ -24,9 +24,14 @@ export interface ChatInputStatusBanner {
   /** POO-144: optional explicit action (e.g. retry sync) — user-triggered only */
   actionLabel?: string
   onAction?: () => void
-  /** U2: optional second, lower-emphasis action (e.g. "I've recharged — recheck"). */
+  /** U2: optional second, lower-emphasis action (e.g. "I've recharged — recheck").
+   * POO-177: this is now the manual billing refresh — while its read is in
+   * flight it renders disabled with aria-busy and the short checking label. */
   secondaryActionLabel?: string
   onSecondaryAction?: () => void
+  /** POO-177 QUOTA-02: the refresh read is in flight — disabled + aria-busy. */
+  secondaryActionDisabled?: boolean
+  secondaryActionBusy?: boolean
   /** Journey #8 (review F4): optional dismiss (e.g. discard preserved draft). */
   dismissLabel?: string
   onDismiss?: () => void
@@ -165,7 +170,7 @@ export function ChatInputZone({
       {statusBanner && (
         <div
           className={cn(
-            'mb-1.5 flex items-start gap-2 rounded-lg px-3 py-2 text-[13px] leading-5 animate-[chat-status-slide-up_250ms_ease-out]',
+            'mb-1.5 flex items-start gap-2 rounded-lg px-3 py-2 text-[14px] leading-5 animate-[chat-status-slide-up_250ms_ease-out]',
             statusBanner.variant === 'info'
               ? 'bg-info/10 text-info'
               : 'bg-destructive/10 text-destructive',
@@ -179,10 +184,10 @@ export function ChatInputZone({
             <span>{statusBanner.message}</span>
             {statusBanner.detail && (
               <details data-testid="chat-status-banner-detail" className="mt-1">
-                <summary className="cursor-pointer select-none text-[12px] opacity-70 transition-opacity hover:opacity-100">
+                <summary className="cursor-pointer select-none text-[14px] opacity-70 transition-opacity hover:opacity-100">
                   {t('chat.sendFailed.detailSummary')}
                 </summary>
-                <div className="mt-1 max-h-24 overflow-y-auto break-words font-mono text-[11px] leading-4 opacity-70">
+                <div className="mt-1 max-h-24 overflow-y-auto break-words font-mono text-[14px] leading-4 opacity-70">
                   {statusBanner.detail}
                 </div>
               </details>
@@ -192,7 +197,7 @@ export function ChatInputZone({
             <button
               type="button"
               data-testid="chat-status-banner-action"
-              className="ml-auto shrink-0 rounded-md text-[13px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80"
+              className="ml-auto shrink-0 rounded-md text-[14px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80"
               onClick={statusBanner.onAction}
             >
               {statusBanner.actionLabel}
@@ -203,12 +208,17 @@ export function ChatInputZone({
               type="button"
               data-testid="chat-status-banner-secondary-action"
               className={cn(
-                'shrink-0 rounded-md text-[13px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80',
+                'shrink-0 rounded-md text-[14px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80',
+                'disabled:cursor-default disabled:opacity-60 disabled:hover:opacity-60',
                 statusBanner.actionLabel && statusBanner.onAction ? '' : 'ml-auto',
               )}
               onClick={statusBanner.onSecondaryAction}
+              disabled={statusBanner.secondaryActionDisabled}
+              aria-busy={statusBanner.secondaryActionBusy || undefined}
             >
-              {statusBanner.secondaryActionLabel}
+              {/* POO-177 QUOTA-02: in flight, the action label collapses to
+                  the short checking copy — no second button, no explainer. */}
+              {statusBanner.secondaryActionBusy ? t('common.checking') : statusBanner.secondaryActionLabel}
             </button>
           )}
           {statusBanner.dismissLabel && statusBanner.onDismiss && (
@@ -216,7 +226,7 @@ export function ChatInputZone({
               type="button"
               data-testid="chat-status-banner-dismiss"
               className={cn(
-                'shrink-0 rounded-md text-[13px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80',
+                'shrink-0 rounded-md text-[14px] font-medium underline underline-offset-2 transition-opacity hover:opacity-80',
                 statusBanner.actionLabel && statusBanner.onAction ? '' : 'ml-auto',
               )}
               onClick={statusBanner.onDismiss}

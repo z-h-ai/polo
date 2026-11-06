@@ -230,7 +230,7 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
   return (
     <>
       {user && (
-        <div className="truncate px-2 py-1.5 text-[12px]">
+        <div className="truncate px-2 py-1.5 text-[14px]">
           <span className="font-medium text-foreground">{userLabel}</span>
           {user.displayName && user.username ? (
             <span className="text-muted-foreground"> · {user.username}</span>

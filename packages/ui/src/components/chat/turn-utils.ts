@@ -8,6 +8,7 @@
 import type { Message, StoredMessage, MessageRole } from '@polo-ai/core'
 import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { storedToMessage } from '@polo-ai/core'
+import i18n from 'i18next'
 
 export { storedToMessage }
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
@@ -703,17 +704,23 @@ export function getActivitySummary(turn: AssistantTurn): string {
   const running = turn.activities.filter(a => a.status === 'running').length
   const errors = turn.activities.filter(a => a.status === 'error').length
 
+  // POO-179: counts are display copy resolved at call time; the numbers themselves stay raw.
   const parts: string[] = []
-  if (running > 0) parts.push(`${running} running`)
-  if (completed > 0) parts.push(`${completed} completed`)
-  if (errors > 0) parts.push(`${errors} failed`)
+  if (running > 0) parts.push(i18n.t('turnDetails.summaryRunning', { count: running }))
+  if (completed > 0) parts.push(i18n.t('turnDetails.summaryCompleted', { count: completed }))
+  if (errors > 0) parts.push(i18n.t('turnDetails.summaryFailed', { count: errors }))
 
-  return parts.join(', ') || 'No activities'
+  return parts.join(', ') || i18n.t('turnDetails.noActivities')
 }
 
 /**
  * Format an AssistantTurn as markdown for detailed viewing in Monaco
- * Shows full tool inputs, results, and response
+ * Shows full tool inputs, results, and response.
+ *
+ * POO-179: this is a temporary display copy rendered in the turn-details
+ * overlay — nothing produced here is written back to messages or JSONL.
+ * Labels resolve at call time; tool names, inputs, results and response
+ * text stay verbatim.
  */
 export function formatTurnAsMarkdown(turn: AssistantTurn): string {
   const lines: string[] = []
@@ -722,26 +729,27 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
   if (turn.intent) {
     lines.push(`# ${turn.intent}`)
   } else {
-    lines.push('# Turn Details')
+    lines.push(`# ${i18n.t('chat.turnDetails')}`)
   }
   lines.push('')
 
   // Summary
   const summary = getActivitySummary(turn)
-  lines.push(`**Status:** ${turn.isComplete ? 'Complete' : 'In Progress'} · ${summary}`)
+  const statusLabel = turn.isComplete ? i18n.t('turnDetails.statusComplete') : i18n.t('turnDetails.statusInProgress')
+  lines.push(i18n.t('turnDetails.statusLine', { status: statusLabel, summary }))
   lines.push('')
 
   // Activities section
   if (turn.activities.length > 0) {
     lines.push('---')
     lines.push('')
-    lines.push('## Activities')
+    lines.push(i18n.t('turnDetails.activitiesSection'))
     lines.push('')
 
     for (const activity of turn.activities) {
       if (activity.type === 'intermediate') {
         // Intermediate text (thinking/commentary)
-        lines.push(`### 💭 Commentary`)
+        lines.push(i18n.t('turnDetails.commentarySection'))
         lines.push('')
         if (activity.content) {
           lines.push(activity.content)
@@ -764,7 +772,7 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
 
         // Input
         if (activity.toolInput && Object.keys(activity.toolInput).length > 0) {
-          lines.push('**Input:**')
+          lines.push(i18n.t('turnDetails.inputLabel'))
           lines.push('```json')
           lines.push(JSON.stringify(activity.toolInput, null, 2))
           lines.push('```')
@@ -773,7 +781,7 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
 
         // Result/Output
         if (activity.content) {
-          lines.push('**Result:**')
+          lines.push(i18n.t('turnDetails.resultLabel'))
           // Check if result looks like JSON
           const trimmed = activity.content.trim()
           if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -798,7 +806,7 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
 
         // Error if present
         if (activity.error) {
-          lines.push('**Error:**')
+          lines.push(i18n.t('turnDetails.errorLabel'))
           lines.push('```')
           lines.push(activity.error)
           lines.push('```')
@@ -812,7 +820,7 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
   if (turn.response?.text) {
     lines.push('---')
     lines.push('')
-    lines.push('## Response')
+    lines.push(i18n.t('turnDetails.responseSection'))
     lines.push('')
     lines.push(turn.response.text)
   }

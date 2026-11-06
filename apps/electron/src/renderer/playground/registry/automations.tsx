@@ -128,7 +128,7 @@ function AutomationAvatarGallery() {
           {(['xs', 'sm', 'md', 'lg'] as const).map(size => (
             <div key={size} className="flex flex-col items-center gap-1">
               <AutomationAvatar event="SchedulerTick" size={size} />
-              <span className="text-[10px] text-muted-foreground">{size}</span>
+              <span className="text-[14px] text-muted-foreground">{size}</span>
             </div>
           ))}
         </div>

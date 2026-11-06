@@ -507,6 +507,7 @@ function TelegramBindingsBody({
   onOpenSession,
   onUnbind,
 }: TelegramBindingsBodyProps) {
+  const { t } = useTranslation()
   const [workspaceOwners, setWorkspaceOwners] = React.useState<PlatformOwner[]>([])
 
   React.useEffect(() => {
@@ -534,10 +535,10 @@ function TelegramBindingsBody({
           ...(next.mode === 'allow-list' ? { allowedSenderIds: next.allowedSenderIds } : {}),
         })
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to update access')
+        toast.error(err instanceof Error ? err.message : t('settings.messaging.accessUpdateFailed'))
       }
     },
-    [],
+    [t],
   )
   // Telegram bindings split cleanly on `threadId`:
   //   - undefined: DM ("direct session") — at most one per workspace

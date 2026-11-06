@@ -57,3 +57,25 @@ export function resolveMarkdownLinkTarget(target: string): ResolvedMarkdownLinkT
 export function classifyMarkdownLinkTarget(target: string): 'file' | 'url' {
   return resolveMarkdownLinkTarget(target).kind
 }
+
+/** Schemes that must never stand in as an openable fallback link target. */
+const UNSAFE_FALLBACK_SCHEME = /^(?:javascript|data|vbscript|blob):/i
+
+/**
+ * Whether anchor text that has to stand in for a missing href is actually
+ * openable (POO-172/CITE-02). Plain-text citation references ("Source 1",
+ * "见来源 A") resolve to nothing openable and must render as non-interactive
+ * text instead of a misleading fake link — only a filesystem path or a URL
+ * with an explicit, non-dangerous scheme qualifies.
+ */
+export function isOpenableMarkdownLinkText(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  if (resolveMarkdownLinkTarget(trimmed).kind === 'file') return true
+  if (UNSAFE_FALLBACK_SCHEME.test(trimmed)) return false
+  try {
+    return new URL(trimmed).protocol !== ''
+  } catch {
+    return false
+  }
+}

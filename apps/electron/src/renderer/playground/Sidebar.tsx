@@ -67,7 +67,7 @@ export function Sidebar({ categories, selectedId, onSelect }: SidebarProps) {
                   )}
                 />
                 {category.name}
-                <span className="ml-auto text-[10px] font-normal opacity-60">
+                <span className="ml-auto text-[14px] font-normal opacity-60">
                   {category.components.length}
                 </span>
               </button>

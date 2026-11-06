@@ -106,17 +106,17 @@ export function MemberCircleRow({ model, onOpen, testId = 'circle-row' }: Member
         </div>
         {/* Review #6: readable 12px metadata — muted token (AA-compliant),
             not the decorative fg-50 mix. */}
-        <p className="m-0 mb-[10px] truncate text-[12px] text-muted-foreground" data-testid="circle-row-creator">
+        <p className="m-0 mb-[10px] truncate text-[14px] text-muted-foreground" data-testid="circle-row-creator">
           {creatorLine}
         </p>
         {model.summary !== null && (
-          <p className="m-0 mb-[12px] mt-[8px] text-[13px] leading-[1.6] text-foreground-70" data-testid="circle-row-summary">
+          <p className="m-0 mb-[12px] mt-[8px] text-[14px] leading-[1.6] text-foreground-70" data-testid="circle-row-summary">
             {model.summary}
           </p>
         )}
         {/* FIXED entitlement position: term first, counts beside it — identical
         slot for free / paid / restricted rows (P70-CIRCLE-LIST-01). */}
-        <div className="flex flex-wrap items-center gap-x-[16px] gap-y-[8px] text-[12px] leading-[1.6] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-[16px] gap-y-[8px] text-[14px] leading-[1.6] text-muted-foreground">
           <span className="text-foreground-70" data-testid="circle-row-term">{model.termText}</span>
           <span className="border-l border-border pl-[16px]" data-testid="circle-row-count">{countText}</span>
         </div>
@@ -124,7 +124,7 @@ export function MemberCircleRow({ model, onOpen, testId = 'circle-row' }: Member
       <button
         type="button"
         data-testid="circle-row-open"
-        className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap self-center rounded-[8px] border-0 bg-transparent px-[12px] text-[13px] font-medium text-accent hover:bg-[color-mix(in_srgb,var(--accent)_7%,transparent)]"
+        className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap self-center rounded-[8px] border-0 bg-transparent px-[12px] text-[14px] font-medium text-accent hover:bg-[color-mix(in_srgb,var(--accent)_7%,transparent)]"
         onClick={() => onOpen(model)}
       >
         {t('poo70.c3.row.open')}

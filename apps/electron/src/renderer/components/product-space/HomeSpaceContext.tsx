@@ -67,7 +67,7 @@ export function HomeSpaceContext({
               <h2 className="text-base font-semibold">
                 {t('homeSpace.context.myCircles')}
               </h2>
-              <p className="mt-[3px] text-[11px] text-muted-foreground">
+              <p className="mt-[3px] text-[14px] text-muted-foreground">
                 {t('homeSpace.context.circlesSubtitle', {
                   count: creatorCircles.length,
                 })}
@@ -76,7 +76,7 @@ export function HomeSpaceContext({
             <button
               type="button"
               data-testid="product-space-relation-my-circles-back"
-              className="rounded-lg px-[10px] py-[6px] text-[11px] text-muted-foreground hover:bg-foreground/4"
+              className="rounded-lg px-[10px] py-[6px] text-[14px] text-muted-foreground hover:bg-foreground/4"
               onClick={() => { setView('context') }}
             >
               {t('homeSpace.context.back')}
@@ -87,7 +87,7 @@ export function HomeSpaceContext({
               <li
                 key={circle.circleId}
                 data-testid="product-space-relation-my-circles-item"
-                className="flex items-center justify-between gap-[12px] rounded-lg border border-border/40 px-[12px] py-[8px] text-[13px]"
+                className="flex items-center justify-between gap-[12px] rounded-lg border border-border/40 px-[12px] py-[8px] text-[14px]"
               >
                 <span className="truncate font-medium">{circle.name}</span>
                 <span className="text-xs text-muted-foreground">
@@ -100,7 +100,7 @@ export function HomeSpaceContext({
       ) : (
         <div>
           <h2 className="text-base font-semibold">{spaceName}</h2>
-          <p className="mt-[3px] text-[11px] text-muted-foreground">
+          <p className="mt-[3px] text-[14px] text-muted-foreground">
             {spaceKind === 'enterprise'
               ? t('homeSpace.context.enterpriseDescription')
               : t('homeSpace.context.personalDescription')}
@@ -114,10 +114,10 @@ export function HomeSpaceContext({
             >
               <Icons.Circle className="size-[14px] shrink-0 text-accent" />
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="text-[13px] font-semibold">
+                <span className="text-[14px] font-semibold">
                   {t('homeSpace.context.myCircles')}
                 </span>
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-[14px] text-muted-foreground">
                   {t('homeSpace.context.circlesCount', {
                     count: creatorCircles.length,
                   })}

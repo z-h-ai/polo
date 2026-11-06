@@ -28,7 +28,7 @@ export function LoginTrustRow({
   const { t } = useTranslation()
 
   return (
-    <div className="mt-[18px] rounded-[9px] bg-foreground-3 px-[12px] py-[10px] text-[10px] leading-[1.5] text-foreground-50">
+    <div className="mt-[18px] rounded-[9px] bg-foreground-3 px-[12px] py-[10px] text-[14px] leading-[1.5] text-foreground-50">
       <label className="flex cursor-pointer items-center gap-[6px]">
         <Checkbox
           data-testid="login-trust-consent"

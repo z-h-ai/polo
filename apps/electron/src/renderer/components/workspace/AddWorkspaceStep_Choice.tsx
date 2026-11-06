@@ -41,7 +41,7 @@ function ChoiceCard({ icon, title, description, onClick, variant = 'secondary' }
       </div>
       <div className="min-w-0">
         <div className="font-medium text-[15px] text-foreground">{title}</div>
-        <div className="text-[12px] text-muted-foreground -mt-[1px]">{description}</div>
+        <div className="text-[14px] text-muted-foreground -mt-[1px]">{description}</div>
       </div>
     </button>
   )

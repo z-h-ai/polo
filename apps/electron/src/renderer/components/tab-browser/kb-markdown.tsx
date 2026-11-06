@@ -100,7 +100,7 @@ export function renderKbMarkdown(source: string): ReactNode {
       const closing = line.match(FENCE_PATTERN)
       if (closing) {
         out.push(
-          <pre key={`b${key++}`} className="my-[0.6em] overflow-auto rounded-[8px] bg-surface-strong px-[13px] py-[11px] font-mono text-[12px] leading-[1.6] text-foreground-80">
+          <pre key={`b${key++}`} className="my-[0.6em] overflow-auto rounded-[8px] bg-surface-strong px-[13px] py-[11px] font-mono text-[14px] leading-[1.6] text-foreground-80">
             <code>{fence.body.join('\n')}</code>
           </pre>,
         )
@@ -176,11 +176,11 @@ export function renderKbMarkdown(source: string): ReactNode {
   if (fence !== null) {
     // An unclosed fence still renders its body — content beats formatting.
     out.push(
-      <pre key={`b${key++}`} className="my-[0.6em] overflow-auto rounded-[8px] bg-surface-strong px-[13px] py-[11px] font-mono text-[12px] leading-[1.6] text-foreground-80">
+      <pre key={`b${key++}`} className="my-[0.6em] overflow-auto rounded-[8px] bg-surface-strong px-[13px] py-[11px] font-mono text-[14px] leading-[1.6] text-foreground-80">
         <code>{fence.body.join('\n')}</code>
       </pre>,
     )
   }
   flushAll()
-  return <div className="text-[13px] leading-[1.7] text-foreground-80">{out}</div>
+  return <div className="text-[14px] leading-[1.7] text-foreground-80">{out}</div>
 }

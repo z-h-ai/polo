@@ -213,7 +213,7 @@ export function CompactWorkspaceSwitcher({
               src={selectedWorkspace ? workspaceIconMap.get(selectedWorkspace.id) : undefined}
               alt={selectedWorkspace?.name}
               className="h-5 w-5 mr-1.5 rounded-full ring-1 ring-border/50"
-              fallbackClassName="bg-muted text-[11px] rounded-full"
+              fallbackClassName="bg-muted text-[14px] rounded-full"
               fallback={selectedWorkspace?.name?.charAt(0) || 'W'}
             />
             <span className="truncate min-w-0 flex-1 text-left">{selectedWorkspace?.name || 'Workspace'}</span>

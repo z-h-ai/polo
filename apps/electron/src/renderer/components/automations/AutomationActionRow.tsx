@@ -75,7 +75,7 @@ function PromptActionBadges({ action, t }: { action: PromptAction; t: (key: stri
       {llmConnection && (
         <Badge
           variant="secondary"
-          className="font-mono text-[10px] px-1.5 py-0 font-normal"
+          className="font-mono text-[14px] px-1.5 py-0 font-normal"
           title={`${t('automations.labelConnection')}: ${llmConnection}`}
         >
           {llmConnection}
@@ -84,7 +84,7 @@ function PromptActionBadges({ action, t }: { action: PromptAction; t: (key: stri
       {model && (
         <Badge
           variant="secondary"
-          className="font-mono text-[10px] px-1.5 py-0 font-normal max-w-[14rem] truncate"
+          className="font-mono text-[14px] px-1.5 py-0 font-normal max-w-[14rem] truncate"
           title={`${t('automations.labelModel')}: ${model}`}
         >
           {model}
@@ -93,7 +93,7 @@ function PromptActionBadges({ action, t }: { action: PromptAction; t: (key: stri
       {thinkingLevel && (
         <Badge
           variant="secondary"
-          className="text-[10px] px-1.5 py-0 font-normal"
+          className="text-[14px] px-1.5 py-0 font-normal"
           title={`${t('automations.labelThinking')}: ${thinkingLabel}`}
         >
           {thinkingLabel}

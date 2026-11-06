@@ -42,7 +42,7 @@ function isEditRequestBadge(badge: ContentBadge): boolean {
 function EditRequestBadge({ badge }: { badge: ContentBadge }) {
   const displayLabel = badge.collapsedLabel || badge.label
   return (
-    <span className="inline-flex items-center h-[28px] px-2.5 rounded-[8px] bg-background shadow-minimal text-[13px] text-muted-foreground">
+    <span className="inline-flex items-center h-[28px] px-2.5 rounded-[8px] bg-background shadow-minimal text-[14px] text-muted-foreground">
       {displayLabel}
     </span>
   )
@@ -55,7 +55,7 @@ function EditRequestBadge({ badge }: { badge: ContentBadge }) {
 function InlineBadge({ badge }: { badge: ContentBadge }) {
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle"
+      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[14px] align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
     >
       {badge.iconDataUrl ? (
@@ -65,7 +65,7 @@ function InlineBadge({ badge }: { badge: ContentBadge }) {
           className="h-[12px] w-[12px] rounded-[2px] shrink-0"
         />
       ) : (
-        <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[8px]">
+        <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[14px]">
           {badge.type === 'skill' ? SKILL_ICON_TEXT : badge.type === 'context' ? CONTEXT_ICON_TEXT : SOURCE_ICON_TEXT}
         </span>
       )}
@@ -79,15 +79,21 @@ function InlineBadge({ badge }: { badge: ContentBadge }) {
  * Styled similarly to InlineBadge but indicates a SDK command (e.g., /compact)
  */
 function CommandBadge({ badge }: { badge: ContentBadge }) {
+  const { t } = useTranslation()
+  // POO-179: only the display label of a *known* command localizes; the raw
+  // text (/compact and any unknown command) is persisted message content and
+  // stays verbatim, as does any label we cannot positively identify.
+  const isKnownCompact = /^\/compact\b/i.test(badge.rawText)
+  const displayLabel = isKnownCompact ? t('commands.compactBadge') : badge.label
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle"
+      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[14px] align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
     >
-      <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[10px] font-medium">
+      <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[14px] font-medium">
         {COMMAND_ICON_TEXT}
       </span>
-      <span className="truncate max-w-[200px]">{badge.label}</span>
+      <span className="truncate max-w-[200px]">{displayLabel}</span>
     </span>
   )
 }
@@ -103,11 +109,11 @@ function ContextBadge({ badge }: { badge: ContentBadge }) {
 
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mr-1 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle"
+      className="inline-flex items-center gap-1 h-[22px] px-1.5 mr-1 rounded-[5px] bg-background shadow-minimal text-[14px] align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
       title={t('chat.contextBadge')}
     >
-      <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[8px]">
+      <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[14px]">
         {CONTEXT_ICON_TEXT}
       </span>
       <span className="truncate max-w-[200px] text-muted-foreground">{displayLabel}</span>
@@ -181,7 +187,7 @@ function InlineFileBadge({
       role={isClickable ? 'button' : undefined}
       onClick={() => isClickable && onFileClick!(badge.filePath!)}
       className={cn(
-        "inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle",
+        "inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[14px] align-middle",
         isClickable && "hover:bg-foreground/5 transition-colors cursor-pointer"
       )}
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
@@ -458,7 +464,7 @@ export function UserMessageBubble({
                       <span className="text-xs font-medium line-clamp-2 break-all" title={att.name}>
                         {att.name}
                       </span>
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-[14px] text-muted-foreground">
                         {getFileTypeLabel(att.type, att.mimeType, att.name)}
                       </span>
                     </div>
@@ -497,7 +503,7 @@ export function UserMessageBubble({
             aria-live="polite"
           >
             <Clock className="h-3 w-3 animate-pulse" aria-hidden="true" />
-            <span className="text-[11px] italic">{t('chat.queuedBadge')}</span>
+            <span className="text-[14px] italic">{t('chat.queuedBadge')}</span>
           </div>
         )}
         {hasInlineBadges

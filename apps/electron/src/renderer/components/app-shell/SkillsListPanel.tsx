@@ -132,18 +132,18 @@ export function SkillsListPanel({
           badges: (
             <span className="flex items-center gap-1.5 min-w-0">
               {skill.source === 'project' && (
-                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
+                <span className="shrink-0 text-[14px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
                   {t('skillsList.projectBadge')}
                 </span>
               )}
               {skill.source === 'bundled' && (
-                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
+                <span className="shrink-0 text-[14px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
                   {t('skillsList.bundledBadge')}
                 </span>
               )}
               {status?.shadowedBuiltin && (
                 <span
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5 text-[14px] text-muted-foreground"
                   title={skill.source === 'global'
                     ? t('skillsList.shadowedBuiltinGlobalHint')
                     : t('skillsList.shadowedBuiltinHint')}
@@ -153,19 +153,19 @@ export function SkillsListPanel({
                 </span>
               )}
               {skill.creatorInstallation?.lastKnownStatus === 'revoked' ? (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 text-[14px] text-destructive">
                   <ShieldAlert className="size-3" />
                   {t('creatorSkills.safety.revoked')}
                 </span>
               ) : null}
               {creatorSkillHasStaleSafetyStatus(skill) ? (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[14px] text-amber-700">
                   <ShieldQuestion className="size-3" />
                   {t('creatorSkills.safety.stale')}
                 </span>
               ) : null}
               {availableCreatorSkillVersions[skill.slug] ? (
-                <span className="inline-flex shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
+                <span className="inline-flex shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[14px] text-accent">
                   {t('creatorSkills.update.available', {
                     version: availableCreatorSkillVersions[skill.slug],
                   })}

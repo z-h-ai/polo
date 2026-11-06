@@ -53,7 +53,7 @@ export function KbReferenceChips({ references, workspaceId }: {
   return (
     <>
       <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5" data-testid="kb-reference-chips">
-        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1 text-[14px] text-muted-foreground">
           <Icons.Library className="h-3 w-3" aria-hidden="true" />
           {t('chat.knowledgeBase.referenceTitle')}
         </span>
@@ -64,11 +64,11 @@ export function KbReferenceChips({ references, workspaceId }: {
             disabled={loading || !workspaceId}
             title={`${reference.collectionName} · ${reference.title}\n${reference.snippet}`}
             onClick={() => void openReference(reference)}
-            className="inline-flex max-w-[260px] items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-foreground-70 shadow-minimal transition-colors hover:border-foreground/20 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex max-w-[260px] items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[14px] text-foreground-70 shadow-minimal transition-colors hover:border-foreground/20 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Icons.FileText className="h-3 w-3 shrink-0 text-accent" aria-hidden="true" />
             <span className="truncate">{reference.title}</span>
-            <span className="shrink-0 text-[10px] text-muted-foreground">{reference.collectionName}</span>
+            <span className="shrink-0 text-[14px] text-muted-foreground">{reference.collectionName}</span>
           </button>
         ))}
       </div>
@@ -85,7 +85,7 @@ export function KbReferenceChips({ references, workspaceId }: {
             <DialogDescription>{t('knowledgeBase.previewLabel')}</DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto px-[20px] pb-[18px]">
-            <pre className="m-0 whitespace-pre-wrap break-words font-sans text-[13px] leading-[1.7] text-foreground-80">
+            <pre className="m-0 whitespace-pre-wrap break-words font-sans text-[14px] leading-[1.7] text-foreground-80">
               {preview?.content}
             </pre>
           </div>

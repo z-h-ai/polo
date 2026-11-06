@@ -9,6 +9,7 @@ import {
   getStateIcon,
   getStateColor,
   getStatusIconStyle,
+  getStatusLabel,
 } from '@/config/session-status-config'
 
 // Re-export types for backwards compatibility
@@ -20,17 +21,15 @@ export { type SessionStatusId, type SessionStatus, getStateIcon, getStateColor }
 
 const MENU_CONTAINER_STYLE = 'min-w-[180px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small'
 const MENU_LIST_STYLE = 'max-h-[240px] overflow-y-auto p-1 [&_[cmdk-list-sizer]]:space-y-px'
-const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-3 rounded-[6px] px-3 py-1.5 text-[13px]'
+const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-3 rounded-[6px] px-3 py-1.5 text-[14px]'
 
 // ============================================================================
 // StateItemContent - Shared item rendering
 // ============================================================================
 
-const DEFAULT_STATUS_IDS = new Set(['backlog', 'todo', 'needs-review', 'done', 'cancelled'])
-
 function StateItemContent({ state }: { state: SessionStatus }) {
   const { t } = useTranslation()
-  const label = DEFAULT_STATUS_IDS.has(state.id) ? t(`status.${state.id}`, state.label) : state.label
+  const label = getStatusLabel(state, t)
   return (
     <>
       <span className="shrink-0 flex items-center" style={getStatusIconStyle(state)}>
@@ -86,6 +85,7 @@ export function SessionStatusMenu({
     <CommandPrimitive
       className={cn(MENU_CONTAINER_STYLE, className)}
       defaultValue={defaultValue}
+      label={t("sessionMenu.status")}
     >
       <div className="border-b border-border/50 px-3 py-2">
         <CommandPrimitive.Input
@@ -96,16 +96,19 @@ export function SessionStatusMenu({
           className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
         />
       </div>
-      <CommandPrimitive.List className={MENU_LIST_STYLE}>
+      <CommandPrimitive.List className={MENU_LIST_STYLE} label={t("sessionMenu.status")}>
         <CommandPrimitive.Empty className="py-3 text-center text-sm text-muted-foreground">
-          No status found
+          {t("status.noStatusFound")}
         </CommandPrimitive.Empty>
         {states.map((state) => {
           const isActive = activeState === state.id
           return (
             <CommandPrimitive.Item
-              key={state.id}
-              value={state.label}
+              // cmdk caches keywords by value. Re-register when the display name
+              // changes so a live language switch also refreshes the active search.
+              key={`${state.id}:${getStatusLabel(state, t)}`}
+              value={state.id}
+              keywords={[getStatusLabel(state, t), state.label]}
               onSelect={() => onSelect(state.id)}
               className={cn(
                 MENU_ITEM_STYLE,
@@ -122,7 +125,7 @@ export function SessionStatusMenu({
           <>
             <div className="border-t border-border/50 mx-2 my-1" />
             <CommandPrimitive.Item
-              value={isArchived ? "unarchive" : "archive"}
+              value={isArchived ? "action:unarchive" : "action:archive"}
               onSelect={() => isArchived ? onUnarchive?.() : onArchive?.()}
               className={cn(
                 MENU_ITEM_STYLE,
@@ -133,7 +136,7 @@ export function SessionStatusMenu({
               <span className="shrink-0 flex items-center opacity-60">
                 {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
               </span>
-              <div className="flex-1 min-w-0">{isArchived ? 'Unarchive' : 'Archive'}</div>
+              <div className="flex-1 min-w-0">{isArchived ? t("sessionMenu.unarchive") : t("sessionMenu.archive")}</div>
             </CommandPrimitive.Item>
           </>
         )}

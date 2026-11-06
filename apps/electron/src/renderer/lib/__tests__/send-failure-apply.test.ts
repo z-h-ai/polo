@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { createStore } from 'jotai'
 import { setupI18n } from '@polo-ai/shared/i18n'
 import { sendFailureAtomFamily } from '@/atoms/sessions'
-import { applySendBlockedByLatch, applySendFailure } from '../send-failure-apply'
+import { applyEventBillingBlock, applySendBlockedByLatch, applySendFailure } from '../send-failure-apply'
+import type { BillingLatchSourceLease } from '../billing-refresh'
 
 // U4 (product-closure 2026-10-27) — every send entry point funnels into the
 // SAME failure pipeline. These tests pin the three classification entries
@@ -105,5 +106,70 @@ describe('applySendBlockedByLatch (U4 pre-send stop)', () => {
     // Overwriting a prior prompt replaces it — the freshest blocked draft wins.
     applySendBlockedByLatch('s6', 'newer text', { store })
     expect(store.get(sendFailureAtomFamily('s6'))?.draft).toBe('newer text')
+  })
+})
+
+// POO-177 QUOTA-01 — a turn the SERVER terminated (post-persist admission
+// rejection / provider 402) must write the SAME latch a rejected send does,
+// bound to the lease the caller resolves at failure time. It deliberately
+// writes NO draft prompt: the blocked text is already a persisted message.
+describe('applyEventBillingBlock (POO-177 事件流计费阻断)', () => {
+  function makeEventDeps(lease: BillingLatchSourceLease) {
+    const store = createStore()
+    const latch: Array<{ issue: string; quotaResetAt?: number }> = []
+    const bound: BillingLatchSourceLease[] = []
+    return {
+      store,
+      latch,
+      bound,
+      deps: {
+        setBillingLatch: (issue: 'insufficient-credit' | 'quota-exhausted', quotaResetAt?: number) => {
+          latch.push({ issue, quotaResetAt })
+        },
+        onBindBillingLease: (resolved: BillingLatchSourceLease) => { bound.push(resolved) },
+        resolveLease: () => lease,
+      },
+    }
+  }
+
+  test('post-persist admission 拒绝事件 → latch 写入 + admin-managed lease 绑定,无 draft prompt', () => {
+    const lease: BillingLatchSourceLease = {
+      source: 'admin-managed', sessionId: 'ev1',
+      connectionSlug: 'polo-space-31030000-0000-4000-8000-0000000000f1',
+      productSpaceId: '31030000-0000-4000-8000-0000000000f1', accountId: 'user-1',
+    }
+    const { store, latch, bound, deps } = makeEventDeps(lease)
+    applyEventBillingBlock('ev1', { errorCode: 'budget_exhausted', status: 409 }, deps)
+    expect(latch).toEqual([{ issue: 'insufficient-credit', quotaResetAt: undefined }])
+    expect(bound).toEqual([lease])
+    expect(store.get(sendFailureAtomFamily('ev1'))).toBeNull()
+  })
+
+  test('provider 402 typed_error 事件 → 同一 latch 写入', () => {
+    const { latch, bound, deps } = makeEventDeps({
+      source: 'admin-managed', sessionId: 'ev2', connectionSlug: 'polo-space-x',
+      productSpaceId: 'space-x', accountId: 'user-1',
+    })
+    applyEventBillingBlock('ev2', { status: 402 }, deps)
+    expect(latch).toEqual([{ issue: 'insufficient-credit', quotaResetAt: undefined }])
+    expect(bound).toHaveLength(1)
+    expect(bound[0]?.source).toBe('admin-managed')
+  })
+
+  test('BYOK 402 由调用方 lease 决定刷新不可达:lease 原样透传,不二次加工', () => {
+    const lease: BillingLatchSourceLease = { source: 'unknown', sessionId: 'ev3' }
+    const { latch, bound, deps } = makeEventDeps(lease)
+    applyEventBillingBlock('ev3', { status: 402 }, deps)
+    expect(latch).toEqual([{ issue: 'insufficient-credit', quotaResetAt: undefined }])
+    expect(bound).toEqual([lease])
+  })
+
+  test('非计费事件(无分类字段)→ 完全 no-op', () => {
+    const { store, latch, bound, deps } = makeEventDeps({ source: 'unknown' })
+    applyEventBillingBlock('ev4', undefined, deps)
+    applyEventBillingBlock('ev4', { errorCode: 'HANDLER_ERROR' }, deps)
+    expect(latch).toEqual([])
+    expect(bound).toEqual([])
+    expect(store.get(sendFailureAtomFamily('ev4'))).toBeNull()
   })
 })

@@ -39,7 +39,7 @@ function MockAvatar({ icon: Icon, color, label }: { icon: React.ComponentType<{ 
 
 function TypeBadge({ label, colorClass }: { label: string; colorClass: string }) {
   return (
-    <span className={cn("shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded", colorClass)}>
+    <span className={cn("shrink-0 px-1.5 py-0.5 text-[14px] font-medium rounded", colorClass)}>
       {label}
     </span>
   )
@@ -47,7 +47,7 @@ function TypeBadge({ label, colorClass }: { label: string; colorClass: string })
 
 function StatusBadge({ label, colorClass }: { label: string; colorClass: string }) {
   return (
-    <span className={cn("shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded cursor-default", colorClass)}>
+    <span className={cn("shrink-0 px-1.5 py-0.5 text-[14px] font-medium rounded cursor-default", colorClass)}>
       {label}
     </span>
   )
@@ -234,7 +234,7 @@ function EntityRowPreview({
             <span className="truncate">{subtitle}</span>
           </>
         ) : subtitle ? <span className="truncate text-xs text-foreground/70">{subtitle}</span> : undefined}
-        trailing={showTrailing ? <span className="text-[11px] text-foreground/40">3m</span> : undefined}
+        trailing={showTrailing ? <span className="text-[14px] text-foreground/40">3m</span> : undefined}
         isSelected={isSelected}
         isInMultiSelect={isInMultiSelect}
         showSeparator={showSeparator}
@@ -278,10 +278,10 @@ function SessionEntityListPreview({
               badges={
                 <>
                   {session.isProcessing && (
-                    <Spinner className="text-[8px] text-foreground shrink-0" />
+                    <Spinner className="text-[14px] text-foreground shrink-0" />
                   )}
                   {!session.isProcessing && session.hasUnread && (
-                    <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-accent text-white">
+                    <span className="shrink-0 px-1.5 py-0.5 text-[14px] font-medium rounded bg-accent text-white">
                       New
                     </span>
                   )}
@@ -297,7 +297,7 @@ function SessionEntityListPreview({
                     {session.labels?.map((label, i) => (
                       <span
                         key={i}
-                        className="shrink-0 h-[18px] max-w-[120px] px-1.5 text-[10px] font-medium rounded flex items-center whitespace-nowrap"
+                        className="shrink-0 h-[18px] max-w-[120px] px-1.5 text-[14px] font-medium rounded flex items-center whitespace-nowrap"
                         style={{
                           backgroundColor: 'rgba(var(--foreground-rgb), 0.05)',
                           color: 'rgba(var(--foreground-rgb), 0.8)',
@@ -311,7 +311,7 @@ function SessionEntityListPreview({
               }
               trailing={
                 session.lastMessageAt ? (
-                  <span className="shrink-0 text-[11px] text-foreground/40 whitespace-nowrap">
+                  <span className="shrink-0 text-[14px] text-foreground/40 whitespace-nowrap">
                     {formatRelativeTime(session.lastMessageAt)}
                   </span>
                 ) : undefined
@@ -500,7 +500,7 @@ function MixedEntityListPreview({
             title={session.name || 'Untitled'}
             badges={
               <>
-                {session.hasUnread && <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-accent text-white">New</span>}
+                {session.hasUnread && <span className="shrink-0 px-1.5 py-0.5 text-[14px] font-medium rounded bg-accent text-white">New</span>}
                 {session.isFlagged && (
                   <span className="shrink-0 h-[18px] w-[18px] flex items-center justify-center rounded bg-foreground/5">
                     <Flag className="h-[10px] w-[10px] text-info fill-info" />
@@ -508,7 +508,7 @@ function MixedEntityListPreview({
                 )}
               </>
             }
-            trailing={session.lastMessageAt ? <span className="text-[11px] text-foreground/40">{formatRelativeTime(session.lastMessageAt)}</span> : undefined}
+            trailing={session.lastMessageAt ? <span className="text-[14px] text-foreground/40">{formatRelativeTime(session.lastMessageAt)}</span> : undefined}
             isSelected={currentFlatIndex === selectedIndex}
             showSeparator={!isFirst}
             menuContent={<MockMenuItems />}
@@ -680,7 +680,7 @@ function InteractiveEntityListPreview({
             title={item.name}
             badges={
               <>
-                {item.hasUnread && <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-accent text-white">New</span>}
+                {item.hasUnread && <span className="shrink-0 px-1.5 py-0.5 text-[14px] font-medium rounded bg-accent text-white">New</span>}
                 {item.isFlagged && (
                   <span className="shrink-0 h-[18px] w-[18px] flex items-center justify-center rounded bg-foreground/5">
                     <Flag className="h-[10px] w-[10px] text-info fill-info" />
@@ -688,7 +688,7 @@ function InteractiveEntityListPreview({
                 )}
               </>
             }
-            trailing={item.lastMessageAt ? <span className="text-[11px] text-foreground/40">{formatRelativeTime(item.lastMessageAt)}</span> : undefined}
+            trailing={item.lastMessageAt ? <span className="text-[14px] text-foreground/40">{formatRelativeTime(item.lastMessageAt)}</span> : undefined}
             showSeparator={!isFirst}
             menuContent={<MockMenuItems />}
           />
@@ -796,7 +796,7 @@ function InteractiveEntityListPreview({
       </div>
 
       {/* Instructions */}
-      <div className="text-[11px] text-foreground/40 space-y-0.5 px-1">
+      <div className="text-[14px] text-foreground/40 space-y-0.5 px-1">
         {enableKeyboard && <div>Arrow keys to navigate, Enter to activate</div>}
         {enableMultiSelect && <div>Cmd+Click to toggle, Shift+Click to range select</div>}
         {enableSearch && <div>Type in the search box to filter</div>}

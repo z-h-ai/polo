@@ -98,7 +98,7 @@ export function TerminalOutput({
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2 text-xs" style={{ color: mutedColor }}>
             <Terminal className="w-3 h-3" />
-            <span>Command</span>
+            <span>{t('overlay.command')}</span>
           </div>
           <button
             onClick={() => copyToClipboard(command, 'command')}
@@ -128,7 +128,7 @@ export function TerminalOutput({
             <span>{t('terminal.output')}</span>
             {exitCode !== undefined && (
               <span
-                className="px-1.5 py-0.5 rounded text-[10px]"
+                className="px-1.5 py-0.5 rounded text-[14px]"
                 style={{
                   backgroundColor: exitCode === 0 ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
                   color: exitCode === 0 ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)',
@@ -213,7 +213,7 @@ export function TerminalOutput({
               ))}
             </div>
           ) : (
-            <span style={{ color: mutedColor }}>(no output)</span>
+            <span style={{ color: mutedColor }}>{t('overlay.noOutputCaptured')}</span>
           )}
         </pre>
       </div>

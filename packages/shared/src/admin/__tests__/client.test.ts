@@ -1768,4 +1768,139 @@ describe('App billing deployed acknowledgements', () => {
     mockJsonFetch({run:{runId,status:'failed'},idempotent:true});
     await expect(new AdminClient('https://admin.example.com').finishAppRun('token',runId,{status:'completed'})).rejects.toMatchObject({errorCode:'SERVER_ERROR'});
   });
+
+  // POO-177 (POL-288 consumer): the manual billing refresh reads the caller's
+  // own availability for exactly one requested space, keeps amounts and
+  // owner-only projections out, and never downgrades an unreadable DTO.
+  describe('getSelfBillingAvailability', () => {
+    const SPACE_ID = '11111111-2222-3333-4444-555555555555';
+    const PATH = `/api/product-spaces/${SPACE_ID}/billing/self-availability`;
+
+    function availabilityBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+      return {
+        productSpaceId: SPACE_ID,
+        computedAt: '2026-10-29T08:00:00.000Z',
+        billingMode: 'provider_metered',
+        preflightOnly: true,
+        availability: { state: 'available', reason: null },
+        quota: null,
+        ...overrides,
+      };
+    }
+
+    it('issues one bearer GET without query or body for the requested space', async () => {
+      mockJsonFetch(availabilityBody());
+      const client = new AdminClient('https://admin.example.com');
+      const result = await client.getSelfBillingAvailability('controlled-token', SPACE_ID);
+      expect(result.availability).toEqual({ state: 'available', reason: null });
+      expect(result.productSpaceId).toBe(SPACE_ID);
+      expect(result.quota).toBeNull();
+      expect(fetchCalls).toHaveLength(1);
+      expect(fetchCalls[0]!.url).toBe(`https://admin.example.com${PATH}`);
+      expect(fetchCalls[0]!.init.method).toBe('GET');
+      expect(fetchCalls[0]!.init.body).toBeUndefined();
+      expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization).toBe('Bearer controlled-token');
+    });
+
+    it('passes blocked and unknown outcomes through verbatim', async () => {
+      const client = new AdminClient('https://admin.example.com');
+      mockJsonFetch(availabilityBody({ availability: { state: 'blocked', reason: 'budget_exhausted' } }));
+      expect(await client.getSelfBillingAvailability('token', SPACE_ID))
+        .toMatchObject({ availability: { state: 'blocked', reason: 'budget_exhausted' } });
+      mockJsonFetch(availabilityBody({ availability: { state: 'unknown', reason: 'billing_migration_in_progress' } }));
+      expect(await client.getSelfBillingAvailability('token', SPACE_ID))
+        .toMatchObject({ availability: { state: 'unknown', reason: 'billing_migration_in_progress' } });
+    });
+
+    it('keeps legacy token quota as strings without rounding through Number', async () => {
+      mockJsonFetch(availabilityBody({
+        quota: {
+          unit: 'tokens', period: '2026-10', enforcement: 'not_applied_to_provider_metered',
+          configuredLimitTokens: '900719925474099300000', override: null,
+          usedTokens: '12345678901234', reservedTokens: '0',
+        },
+      }));
+      const client = new AdminClient('https://admin.example.com');
+      const result = await client.getSelfBillingAvailability('token', SPACE_ID);
+      expect(result.quota).toMatchObject({ configuredLimitTokens: '900719925474099300000' });
+    });
+
+    it('fails closed with billing_contract_unsupported on HTML, unknown reasons, and finance fields', async () => {
+      const client = new AdminClient('https://admin.example.com');
+      globalThis.fetch = (async () => new Response('<html>not json</html>', {
+        status: 200, headers: { 'Content-Type': 'text/html' },
+      })) as unknown as typeof globalThis.fetch;
+      await expect(client.getSelfBillingAvailability('token', SPACE_ID))
+        .rejects.toMatchObject({ errorCode: 'billing_contract_unsupported' });
+      mockJsonFetch(availabilityBody({ availability: { state: 'blocked', reason: 'brand_new_reason' } }));
+      await expect(client.getSelfBillingAvailability('token', SPACE_ID))
+        .rejects.toMatchObject({ errorCode: 'billing_contract_unsupported' });
+      mockJsonFetch(availabilityBody({ remainingTokens: '42' }));
+      await expect(client.getSelfBillingAvailability('token', SPACE_ID))
+        .rejects.toMatchObject({ errorCode: 'billing_contract_unsupported' });
+      mockJsonFetch(availabilityBody({ payerId: 'payer-1' }));
+      await expect(client.getSelfBillingAvailability('token', SPACE_ID))
+        .rejects.toMatchObject({ errorCode: 'billing_contract_unsupported' });
+    });
+
+    it('rejects a valid DTO answered for a different space instead of hydrating it', async () => {
+      mockJsonFetch(availabilityBody({ productSpaceId: '99999999-8888-7777-6666-555555555555' }));
+      const client = new AdminClient('https://admin.example.com');
+      await expect(client.getSelfBillingAvailability('token', SPACE_ID))
+        .rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+    });
+
+    it('maps a missing route (404) to NOT_FOUND instead of a billing verdict', async () => {
+      mockJsonFetch({ errorCode: 'NOT_FOUND', message: 'no such route' }, 404);
+      const client = new AdminClient('https://admin.example.com');
+      await expect(client.getSelfBillingAvailability('token', SPACE_ID))
+        .rejects.toMatchObject({ errorCode: 'NOT_FOUND', status: 404 });
+    });
+
+    it('retries the read once after a controlled 401 refresh, keeping auth and business calls apart', async () => {
+      fetchCalls = [];
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        fetchCalls.push({ url, init: init ?? {} });
+        if (url.endsWith('/api/auth/refresh')) {
+          return new Response(JSON.stringify({
+            accessToken: 'fresh-access-token', refreshToken: 'fresh-refresh-token', expiresIn: 3600,
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (fetchCalls.length === 1) {
+          return new Response(JSON.stringify({ errorCode: 'TOKEN_EXPIRED', message: 'expired' }), {
+            status: 401, headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify(availabilityBody()), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+      const client = new AdminClient('https://admin.example.com', {
+        tokenStore: { getRefreshToken: () => 'old-refresh-token' },
+      });
+      const result = await client.getSelfBillingAvailability('stale-token', SPACE_ID);
+      expect(result.availability).toEqual({ state: 'available', reason: null });
+      expect(fetchCalls.map(call => call.url)).toEqual([
+        `https://admin.example.com${PATH}`,
+        'https://admin.example.com/api/auth/refresh',
+        `https://admin.example.com${PATH}`,
+      ]);
+      expect((fetchCalls[2]!.init.headers as Record<string, string>).Authorization).toBe('Bearer fresh-access-token');
+    });
+
+    it('honors an aborted caller signal instead of settling a stale read', async () => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => (
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })
+      )) as typeof globalThis.fetch;
+      const controller = new AbortController();
+      const client = new AdminClient('https://admin.example.com');
+      const pending = client.getSelfBillingAvailability('token', SPACE_ID, { signal: controller.signal });
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ errorCode: 'NETWORK_ERROR' });
+    });
+  });
 });

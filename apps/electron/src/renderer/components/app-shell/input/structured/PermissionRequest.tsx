@@ -27,6 +27,12 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
   const { t } = useTranslation()
   if (request.type === 'browser_action') return <BrowserActionPermissionRequest request={request} onResponse={onResponse} unstyled={unstyled}/>
 
+  // POO-179: read-only presentation metadata from the request origin. Only a
+  // strict `true` may show the session-remember action — missing, unknown or
+  // false origins (Pi, legacy servers, dangerous/no-domain commands,
+  // mismatched legacy targets) hide it without any placeholder or extra copy.
+  const canRememberForSession = request.canRememberForSession === true
+
   const handleAllow = () => {
     onResponse({ type: 'permission', allowed: true, alwaysAllow: false })
   }
@@ -57,7 +63,7 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
             <span>{t('chat.permissionRequired')}</span>
           </div>
           <div className="text-xs leading-[18px] text-muted-foreground">
-            <span className="font-medium text-foreground">Tool:</span> {request.toolName}
+            <span className="font-medium text-foreground">{t('table.tool')}:</span> {request.toolName}
             <br />
             {request.description}
           </div>
@@ -81,17 +87,19 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
           data-tutorial="permission-allow-button"
         >
           <Check className="h-3.5 w-3.5" />
-          Allow
+          {t('chat.permission.allow')}
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 gap-1.5 border border-foreground/10 hover:bg-foreground/5 active:bg-foreground/10"
-          onClick={handleAlwaysAllow}
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Always Allow
-        </Button>
+        {canRememberForSession && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1.5 border border-foreground/10 hover:bg-foreground/5 active:bg-foreground/10"
+            onClick={handleAlwaysAllow}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            {t('chat.permission.alwaysAllow')}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -99,13 +107,15 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
           onClick={handleDeny}
         >
           <X className="h-3.5 w-3.5" />
-          Deny
+          {t('chat.permission.deny')}
         </Button>
 
         {/* Tip text */}
-        <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
-          "Always Allow" remembers this command for the session
-        </span>
+        {canRememberForSession && (
+          <span className="min-w-0 flex-1 basis-full text-[14px] text-muted-foreground sm:basis-auto sm:text-right">
+            {t('chat.permission.rememberForSession', { action: t('chat.permission.alwaysAllow') })}
+          </span>
+        )}
       </div>
     </div>
   )

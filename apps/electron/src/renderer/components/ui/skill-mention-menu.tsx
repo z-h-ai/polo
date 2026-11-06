@@ -31,7 +31,7 @@ export interface InlineSkillMentionProps {
 
 const MENU_CONTAINER_STYLE = 'min-w-[240px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small'
 const MENU_LIST_STYLE = 'max-h-[240px] overflow-y-auto p-1'
-const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-3 rounded-[6px] px-3 py-2 text-[13px]'
+const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-3 rounded-[6px] px-3 py-2 text-[14px]'
 const MENU_ITEM_SELECTED = 'bg-foreground/5'
 
 // ============================================================================
@@ -156,17 +156,17 @@ export function InlineSkillMention({
                 <div className="flex items-center gap-1.5 font-medium">
                   <span className="truncate">{skill.metadata.name}</span>
                   {skill.creatorInstallation?.lastKnownStatus === 'revoked' ? (
-                    <span className="shrink-0 rounded bg-destructive/10 px-1 py-0.5 text-[9px] text-destructive">
+                    <span className="shrink-0 rounded bg-destructive/10 px-1 py-0.5 text-[14px] text-destructive">
                       {t('creatorSkills.safety.revoked')}
                     </span>
                   ) : creatorSkillHasStaleSafetyStatus(skill) ? (
-                    <span className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[9px] text-amber-700">
+                    <span className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[14px] text-amber-700">
                       {t('creatorSkills.safety.stale')}
                     </span>
                   ) : null}
                 </div>
                 {skill.metadata.description && (
-                  <div className="text-[11px] text-foreground/50 truncate">
+                  <div className="text-[14px] text-foreground/50 truncate">
                     {skill.metadata.description}
                   </div>
                 )}

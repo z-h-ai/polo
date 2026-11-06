@@ -71,7 +71,7 @@ export function AcceptPlanDropdown({
       <StyledDropdownMenuContent align="end" minWidth="min-w-64" sideOffset={6}>
         <StyledDropdownMenuItem onSelect={() => onAccept()} className="items-start py-2">
           <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] leading-tight">{effectiveAcceptOptionLabel}</span>
+            <span className="text-[14px] leading-tight">{effectiveAcceptOptionLabel}</span>
             <span className="max-w-[220px] whitespace-normal text-xs leading-tight text-muted-foreground">
               {t('plan.executeImmediately')}
             </span>
@@ -80,7 +80,7 @@ export function AcceptPlanDropdown({
 
         <StyledDropdownMenuItem onSelect={() => onAcceptWithCompact()} className="items-start py-2">
           <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] leading-tight">{t('plan.acceptAndCompact')}</span>
+            <span className="text-[14px] leading-tight">{t('plan.acceptAndCompact')}</span>
             <span className="max-w-[220px] whitespace-normal text-xs leading-tight text-muted-foreground">
               {t('plan.worksForComplex')}
             </span>

@@ -174,7 +174,7 @@ const itemVariants: Variants = {
  * sidebar keyboard navigation. This component just renders the items.
  *
  * Styling matches agent items in the sidebar for consistency:
- * - py-[7px] px-2 text-[13px] rounded-md
+ * - py-[7px] px-2 text-[14px] rounded-md
  * - Icon: h-3.5 w-3.5
  *
  * Link variants:
@@ -339,7 +339,7 @@ function SidebarUserMenu({ config }: { config: SidebarUserMenuConfig }) {
               {initials}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium text-foreground">
+              <span className="block truncate text-[14px] font-medium text-foreground">
                 {displayName}
               </span>
             </span>
@@ -353,21 +353,21 @@ function SidebarUserMenu({ config }: { config: SidebarUserMenuConfig }) {
           className="w-[204px] p-0 overflow-hidden"
         >
           <div className="border-b border-border px-3.5 py-2.5">
-            <div className="truncate text-[13px] font-medium text-foreground">{displayName}</div>
-            <div className="truncate text-[11px] text-muted-foreground">@{config.user.username}</div>
+            <div className="truncate text-[14px] font-medium text-foreground">{displayName}</div>
+            <div className="truncate text-[14px] text-muted-foreground">@{config.user.username}</div>
           </div>
 
           {config.quota && <SidebarQuotaSection quota={config.quota} />}
 
           <div className="p-1">
-            <StyledDropdownMenuItem onSelect={config.onProfile} className="gap-2 px-2 py-1.5 text-[13px]">
+            <StyledDropdownMenuItem onSelect={config.onProfile} className="gap-2 px-2 py-1.5 text-[14px]">
               <User className="h-3.5 w-3.5" />
               <span>{t('sidebar.userMenu.profile')}</span>
             </StyledDropdownMenuItem>
             <StyledDropdownMenuItem
               data-testid="sidebar-user-menu-settings"
               onSelect={config.onSettings}
-              className="gap-2 px-2 py-1.5 text-[13px]"
+              className="gap-2 px-2 py-1.5 text-[14px]"
             >
               <Settings2 className="h-3.5 w-3.5" />
               <span>{t('sidebar.settings')}</span>
@@ -379,7 +379,7 @@ function SidebarUserMenu({ config }: { config: SidebarUserMenuConfig }) {
                 void config.onLogout()
               }}
               variant="destructive"
-              className="gap-2 px-2 py-1.5 text-[13px]"
+              className="gap-2 px-2 py-1.5 text-[14px]"
             >
               <LogOut className="h-3.5 w-3.5" />
               <span>{t('sidebar.userMenu.logout')}</span>
@@ -410,11 +410,11 @@ function SidebarQuotaSection({ quota }: { quota: SidebarUserQuota }) {
   return (
     <div className="border-b border-border px-3.5 py-2.5">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1 text-[14px] text-muted-foreground">
           <BarChart3 className="h-3 w-3" />
           {t('sidebar.userMenu.monthlyUsage')}
         </span>
-        <span className={cn('text-[11px] font-medium', statusClassName)}>
+        <span className={cn('text-[14px] font-medium', statusClassName)}>
           {formatQuotaNumber(quota.used)} / {formatQuotaNumber(quota.total)}
         </span>
       </div>
@@ -425,19 +425,19 @@ function SidebarQuotaSection({ quota }: { quota: SidebarUserQuota }) {
         />
       </div>
       {isWarning && (
-        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-info">
+        <div className="mt-1.5 flex items-center gap-1 text-[14px] text-info">
           <AlertTriangle className="h-2.5 w-2.5" />
           {t('sidebar.userMenu.quotaWarning', { percent: usagePct })}
         </div>
       )}
       {isExhausted && (
-        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-destructive">
+        <div className="mt-1.5 flex items-center gap-1 text-[14px] text-destructive">
           <AlertTriangle className="h-2.5 w-2.5" />
           {t('sidebar.userMenu.quotaExhausted', { resetDate: quota.resetDate })}
         </div>
       )}
       {!isExhausted && (
-        <div className="mt-1.5 text-[10px] text-muted-foreground">
+        <div className="mt-1.5 text-[14px] text-muted-foreground">
           {t('sidebar.userMenu.resetDate', { resetDate: quota.resetDate })}
         </div>
       )}
@@ -646,7 +646,7 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
         onClick={isOverlay ? undefined : link.onClick}
         data-tutorial={link.dataTutorial}
         className={cn(
-          "group flex w-full items-center gap-2 rounded-[6px] text-[13px] select-none outline-none",
+          "group flex w-full items-center gap-2 rounded-[6px] text-[14px] select-none outline-none",
           "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
           // Compact mode: 4px less total height (py-[3px] vs py-[5px])
           link.compact ? "py-[3px]" : "py-[5px]",

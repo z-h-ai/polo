@@ -12,6 +12,7 @@
  */
 
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChevronRight } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -81,7 +82,7 @@ export interface EntityListProps<T> {
 function SectionHeader({ label }: { label: string }) {
   return (
     <div className="px-4 py-2">
-      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+      <span className="text-[14px] font-medium text-muted-foreground uppercase tracking-wider">
         {label}
       </span>
     </div>
@@ -104,6 +105,7 @@ function CollapsibleGroupHeader({
   onCollapseAll?: () => void
   onExpandAll?: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <ContextMenu modal>
       <ContextMenuTrigger asChild>
@@ -118,21 +120,21 @@ function CollapsibleGroupHeader({
               !isCollapsed && "rotate-90"
             )}
           />
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground relative">
+          <span className="text-[14px] font-medium uppercase tracking-wider text-muted-foreground relative">
             {label}{isCollapsed && <> · <span className="text-muted-foreground/50 client-material-fg-muted">{itemCount}</span></>}
           </span>
         </button>
       </ContextMenuTrigger>
       <StyledContextMenuContent>
         <StyledContextMenuItem onClick={onToggle}>
-          {isCollapsed ? 'Expand' : 'Collapse'}
+          {isCollapsed ? t('common.expand') : t('common.collapse')}
         </StyledContextMenuItem>
         <StyledContextMenuSeparator />
         <StyledContextMenuItem onClick={onCollapseAll}>
-          Collapse All
+          {t('common.collapseAll')}
         </StyledContextMenuItem>
         <StyledContextMenuItem onClick={onExpandAll}>
-          Expand All
+          {t('common.expandAll')}
         </StyledContextMenuItem>
       </StyledContextMenuContent>
     </ContextMenu>

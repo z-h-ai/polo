@@ -25,6 +25,8 @@ import { Button } from '@/components/ui/button'
 import { CrossfadeAvatar } from '@/components/ui/avatar'
 import { useWorkspaceIcons } from '@/hooks/useWorkspaceIcon'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
+import i18n from 'i18next'
 import type { Workspace, ExportResourcesOptions, ResourceImportMode } from '../../../shared/types'
 
 export type SendResourceType = 'source' | 'skill' | 'automation'
@@ -46,10 +48,12 @@ export interface SendResourceToWorkspaceDialogProps {
   onTransferComplete?: () => void
 }
 
-const RESOURCE_TYPE_LABELS: Record<SendResourceType, { singular: string; plural: string }> = {
-  source: { singular: 'source', plural: 'sources' },
-  skill: { singular: 'skill', plural: 'skills' },
-  automation: { singular: 'automation', plural: 'automations' },
+// POO-179: type labels are i18n keys resolved at call time; the raw type value
+// in export/import payloads is never rewritten.
+const RESOURCE_TYPE_LABELS: Record<SendResourceType, { singularKey: string; pluralKey: string }> = {
+  source: { singularKey: 'sendToWorkspace.type.source', pluralKey: 'sendToWorkspace.type.sources' },
+  skill: { singularKey: 'sendToWorkspace.type.skill', pluralKey: 'sendToWorkspace.type.skills' },
+  automation: { singularKey: 'sendToWorkspace.type.automation', pluralKey: 'sendToWorkspace.type.automations' },
 }
 
 export function SendResourceToWorkspaceDialog({
@@ -62,6 +66,7 @@ export function SendResourceToWorkspaceDialog({
   activeWorkspaceId,
   onTransferComplete,
 }: SendResourceToWorkspaceDialogProps) {
+  const { t } = useTranslation()
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
   const workspaceIconMap = useWorkspaceIcons(workspaces)
@@ -118,12 +123,12 @@ export function SendResourceToWorkspaceDialog({
 
     setIsSending(true)
     const targetName = targetWorkspace.name
-    const { singular, plural } = RESOURCE_TYPE_LABELS[resourceType]
+    const { singularKey, pluralKey } = RESOURCE_TYPE_LABELS[resourceType]
     const count = resourceIds.length
-    const label = count === 1 ? singular : plural
+    const label = i18n.t(count === 1 ? singularKey : pluralKey)
     const mode: ResourceImportMode = 'skip'
 
-    const toastId = toast.loading(`Sending ${resourceLabel} to ${targetName}...`)
+    const toastId = toast.loading(t('sendToWorkspace.sendingResource', { resource: resourceLabel, target: targetName }))
 
     try {
       // 1. Export the selected resource(s) from current workspace
@@ -162,13 +167,13 @@ export function SendResourceToWorkspaceDialog({
       const skipped = bucket?.skipped?.length ?? 0
 
       if (imported > 0 && skipped === 0) {
-        toast.success(`Sent ${resourceLabel} to ${targetName}`, { id: toastId })
+        toast.success(t('sendToWorkspace.sentResource', { resource: resourceLabel, target: targetName }), { id: toastId })
       } else if (imported > 0 && skipped > 0) {
-        toast.success(`Sent ${imported} ${label}, ${skipped} already existed`, { id: toastId })
+        toast.success(t('sendToWorkspace.sentPartial', { imported, type: label, skipped }), { id: toastId })
       } else if (skipped > 0) {
-        toast.info(`${resourceLabel} already exists in ${targetName}`, { id: toastId })
+        toast.info(t('sendToWorkspace.alreadyExists', { resource: resourceLabel, target: targetName }), { id: toastId })
       } else {
-        toast.warning(`Nothing was sent to ${targetName}`, { id: toastId })
+        toast.warning(t('sendToWorkspace.nothingSent', { target: targetName }), { id: toastId })
       }
 
       if (exportWarnings.length > 0) {
@@ -182,15 +187,13 @@ export function SendResourceToWorkspaceDialog({
       const isUnsupported = error?.code === 'CHANNEL_NOT_FOUND' ||
         (error?.message ?? '').includes('No handler for')
       const message = isUnsupported
-        ? `${targetName} is running an older version that doesn't support resource import. Update the remote server and try again.`
-        : error instanceof Error ? error.message : 'Unknown error'
-      toast.error(`Failed to send ${label}`, { id: toastId, description: message })
+        ? t('sendToWorkspace.unsupportedRemote', { target: targetName })
+        : error instanceof Error ? error.message : t('chat.unknownError')
+      toast.error(t('sendToWorkspace.failedToSendType', { type: label }), { id: toastId, description: message })
     } finally {
       setIsSending(false)
     }
-  }, [selectedWorkspaceId, activeWorkspaceId, resourceIds, resourceType, resourceLabel, workspaces, onOpenChange, onTransferComplete])
-
-  const { singular, plural } = RESOURCE_TYPE_LABELS[resourceType]
+  }, [t, selectedWorkspaceId, activeWorkspaceId, resourceIds, resourceType, resourceLabel, workspaces, onOpenChange, onTransferComplete])
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
@@ -203,10 +206,10 @@ export function SendResourceToWorkspaceDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-4 w-4" />
-            Send to Workspace
+            {t('sendToWorkspace.title')}
           </DialogTitle>
           <DialogDescription>
-            Send {resourceLabel} to another workspace.
+            {t('sendToWorkspace.resourceDescription', { resource: resourceLabel })}
           </DialogDescription>
         </DialogHeader>
 
@@ -214,7 +217,7 @@ export function SendResourceToWorkspaceDialog({
         <div className="flex flex-col gap-1 max-h-64 overflow-y-auto py-1">
           {targetWorkspaces.length === 0 ? (
             <p className="text-sm text-muted-foreground px-2 py-4 text-center">
-              No other workspaces available.
+              {t('sendToWorkspace.noOtherWorkspaces')}
             </p>
           ) : (
             targetWorkspaces.map(workspace => {
@@ -241,7 +244,7 @@ export function SendResourceToWorkspaceDialog({
                     src={workspaceIconMap.get(workspace.id)}
                     alt={workspace.name}
                     className="h-5 w-5 rounded-full ring-1 ring-border/50 shrink-0"
-                    fallbackClassName="bg-muted text-[10px] rounded-full"
+                    fallbackClassName="bg-muted text-[14px] rounded-full"
                     fallback={workspace.name?.charAt(0) || 'W'}
                   />
                   <span className="flex-1 truncate">{workspace.name}</span>

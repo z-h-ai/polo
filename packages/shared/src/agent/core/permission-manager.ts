@@ -47,6 +47,18 @@ const DANGEROUS_COMMANDS = new Set([
 ]);
 
 /**
+ * POO-179: the legacy "Always Allow" whitelist write target, resolved from the
+ * original `(baseCommand, command)` pair of a pending permission. `kind`
+ * distinguishes the domain write (curl/wget) from the command write so the
+ * legacy respond side effect and the read-only presentation eligible check
+ * share one resolution source.
+ */
+export interface LegacyAlwaysAllowTarget {
+  kind: 'domain' | 'command';
+  key: string;
+}
+
+/**
  * PermissionManager provides centralized permission checking for agent backends.
  *
  * Usage:
@@ -296,6 +308,83 @@ export class PermissionManager {
     }
 
     return null;
+  }
+
+  /**
+   * Single source of the legacy "Always Allow" whitelist write target.
+   *
+   * Mirrors the historical ClaudeAgent.respondToPermission branch exactly:
+   * curl/wget whitelist the extracted domain (nothing when no domain is
+   * extractable), any other non-dangerous base command whitelists itself, and
+   * dangerous base commands write nothing. Callers pass the ORIGINAL
+   * `(baseCommand, command)` pair captured on the pending permission — the
+   * getBaseCommand parsing itself is NOT redone here.
+   *
+   * Used by both the legacy respond side effect and the read-only presentation
+   * eligible check so the two can never drift.
+   *
+   * @param baseCommand - Base command captured on the pending permission
+   * @param command - Full command captured on the pending permission
+   * @returns The target the legacy respond would write, or null when it writes nothing
+   */
+  resolveLegacyAlwaysAllowTarget(baseCommand: string, command: string): LegacyAlwaysAllowTarget | null {
+    if (baseCommand === 'curl' || baseCommand === 'wget') {
+      // For curl/wget, whitelist the domain instead of the command
+      const domain = this.extractDomainFromNetworkCommand(command);
+      return domain ? { kind: 'domain', key: domain } : null;
+    }
+    if (!this.isDangerousCommand(baseCommand)) {
+      return { kind: 'command', key: baseCommand };
+    }
+    return null;
+  }
+
+  /**
+   * Read-only presentation metadata for permission prompts: whether clicking
+   * "Always Allow" on this request would remember it for this session.
+   *
+   * POO-179: this only decides whether the UI may show the existing Always
+   * Allow action. It is NOT an authorization credential, never enters
+   * PermissionResponseOptions, and never changes grant rules or the legacy
+   * respond side effects.
+   *
+   * Eligible is deliberately decoupled from the legacy write target: the
+   * legacy respond keeps writing its historical (sometimes mismatched) target,
+   * while eligible is true only when that target is also the key the canonical
+   * lookup consults for the same request — i.e. a second identical request
+   * would really be auto-allowed.
+   *
+   * @param input - promptType plus the original (toolName, command, baseCommand) of THIS request
+   * @returns true only when the legacy target matches the canonical lookup key
+   */
+  canRememberForSession(input: {
+    promptType: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval' | 'browser_action' | string;
+    toolName: string;
+    command: string;
+    baseCommand: string;
+  }): boolean {
+    // Admin approval has its own session+commandHash remember window and the
+    // browser_action branch has none; the normal card must not promise either.
+    if (input.promptType !== 'bash' && input.promptType !== 'file_write' && input.promptType !== 'mcp_mutation' && input.promptType !== 'api_mutation') {
+      return false;
+    }
+    const target = this.resolveLegacyAlwaysAllowTarget(input.baseCommand, input.command);
+    if (!target || !target.key) return false;
+    if (target.kind === 'domain') {
+      // The domain whitelist is only consulted by the canonical curl/wget
+      // branch, which extracts the domain from the same command.
+      return input.baseCommand === 'curl' || input.baseCommand === 'wget';
+    }
+    // Command target: the canonical lookup must consult the SAME key.
+    const canonicalLookupKey =
+      input.promptType === 'bash'
+        ? input.baseCommand
+        : input.promptType === 'mcp_mutation'
+          ? input.toolName
+          : input.promptType === 'file_write'
+            ? input.toolName
+            : input.command; // api_mutation: full "METHOD path" key
+    return canonicalLookupKey === target.key;
   }
 
   // ============================================================

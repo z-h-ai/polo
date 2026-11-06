@@ -78,8 +78,8 @@ const kindBadgeClass: Record<ShadowKind, string> = {
 function ValueBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase tracking-wide text-foreground/50">{label}</div>
-      <div className="rounded-[8px] bg-foreground/3 p-2 text-[11px] text-foreground/70 font-mono leading-snug break-words">
+      <div className="text-[14px] uppercase tracking-wide text-foreground/50">{label}</div>
+      <div className="rounded-[8px] bg-foreground/3 p-2 text-[14px] text-foreground/70 font-mono leading-snug break-words">
         {value}
       </div>
     </div>
@@ -90,7 +90,7 @@ function BorderBadge({ hasExplicitBorder }: { hasExplicitBorder: boolean }) {
   return (
     <span
       className={cn(
-        'shrink-0 rounded-[6px] px-1.5 py-0.5 text-[10px] font-medium',
+        'shrink-0 rounded-[6px] px-1.5 py-0.5 text-[14px] font-medium',
         hasExplicitBorder ? 'bg-success/10 text-success' : 'bg-foreground/10 text-foreground/70'
       )}
     >
@@ -105,11 +105,11 @@ function ShadowSpecCard({ spec }: { spec: ShadowSpec }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-medium truncate">{spec.component}</div>
-          <div className="text-[11px] text-foreground/50 truncate">{spec.file}</div>
+          <div className="text-[14px] text-foreground/50 truncate">{spec.file}</div>
         </div>
         <div className="flex items-center gap-1.5">
           <BorderBadge hasExplicitBorder={spec.hasExplicitBorder} />
-          <span className={cn('shrink-0 rounded-[6px] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide', kindBadgeClass[spec.kind])}>
+          <span className={cn('shrink-0 rounded-[6px] px-1.5 py-0.5 text-[14px] font-medium uppercase tracking-wide', kindBadgeClass[spec.kind])}>
             {spec.kind}
           </span>
         </div>
@@ -124,7 +124,7 @@ function ShadowSpecCard({ spec }: { spec: ShadowSpec }) {
         </div>
       </div>
 
-      {spec.note && <div className="text-[11px] text-foreground/60">{spec.note}</div>}
+      {spec.note && <div className="text-[14px] text-foreground/60">{spec.note}</div>}
     </div>
   )
 }
@@ -264,7 +264,7 @@ function ShadowShowcase() {
           <div key={variant.className} className="rounded-[10px] border border-border bg-background p-3 space-y-2">
             <div className="space-y-1">
               <div className="text-sm font-medium">{variant.className}</div>
-              <div className="text-[11px] text-foreground/60">{variant.note}</div>
+              <div className="text-[14px] text-foreground/60">{variant.note}</div>
             </div>
             <VariantPreview variant={variant} />
           </div>

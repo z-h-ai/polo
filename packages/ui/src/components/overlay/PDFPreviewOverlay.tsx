@@ -63,7 +63,9 @@ export function PDFPreviewOverlay({
   const [activeIdx, setActiveIdx] = useState(initialIndex)
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null)
   const [numPages, setNumPages] = useState<number>(0)
-  const [error, setError] = useState<string | null>(null)
+  // POO-179: keep the raw diagnostic (if any) in state; the self-produced
+  // fallback copy resolves at render time so a language switch re-translates.
+  const [error, setError] = useState<{ raw: string | null } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
   const activeItem = resolvedItems[activeIdx]
@@ -94,7 +96,7 @@ export function PDFPreviewOverlay({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load PDF')
+          setError({ raw: err instanceof Error ? err.message : null })
           setIsLoading(false)
         }
       })
@@ -107,7 +109,7 @@ export function PDFPreviewOverlay({
   }, [])
 
   const onDocumentLoadError = useCallback((error: Error) => {
-    setError(`Failed to load PDF: ${error.message}`)
+    setError({ raw: error.message })
   }, [])
 
   // Memoize file object to prevent unnecessary re-renders (react-pdf uses === equality)
@@ -136,7 +138,7 @@ export function PDFPreviewOverlay({
         variant: 'orange',
       }}
       filePath={activeItem?.src || filePath}
-      error={error ? { label: 'Load Failed', message: error } : undefined}
+      error={error ? { label: t('overlay.loadFailed'), message: error.raw !== null ? t('overlay.loadPdfFailedDetail', { message: error.raw }) : t('overlay.loadPdfFailed') } : undefined}
       headerActions={headerActions}
     >
       <div className="h-full flex flex-col items-center overflow-auto">

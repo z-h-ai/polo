@@ -238,8 +238,8 @@ function GenUiErrorPlaceholder({ componentId }: { componentId: string }) {
     <div className="rounded-[8px] border border-destructive/20 bg-destructive/[0.04] px-3 py-2.5 flex items-start gap-2">
       <AlertTriangle className="w-3.5 h-3.5 text-destructive/70 shrink-0 mt-0.5" />
       <div className="min-w-0">
-        <div className="text-[12px] font-medium text-destructive/80">{t('genui.componentError')}</div>
-        <div className="text-[11px] text-muted-foreground/70 truncate">{componentId}</div>
+        <div className="text-[14px] font-medium text-destructive/80">{t('genui.componentError')}</div>
+        <div className="text-[14px] text-muted-foreground/70 truncate">{componentId}</div>
       </div>
     </div>
   )
@@ -252,11 +252,11 @@ function GenUiUnknownFallback({ component }: { component: Record<string, unknown
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
       <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-1.5">
         <AlertTriangle className="w-3 h-3 text-muted-foreground/60" />
-        <span className="text-[12px] text-muted-foreground font-medium">
+        <span className="text-[14px] text-muted-foreground font-medium">
           {t('genui.unknownType', { type: String(component.type ?? '') })}
         </span>
       </div>
-      <pre className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground overflow-x-auto select-text max-h-[240px]">
+      <pre className="px-3 py-2 text-[14px] leading-relaxed text-muted-foreground overflow-x-auto select-text max-h-[240px]">
         {JSON.stringify(component, null, 2)}
       </pre>
     </div>
@@ -510,20 +510,20 @@ function StatCardView({ component }: { component: GenUiStatCard }) {
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
       {component.title && (
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{component.title}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{component.title}</span>
         </div>
       )}
       <div className="px-3 py-2.5 flex items-baseline justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[12px] text-muted-foreground truncate">{component.label}</div>
+          <div className="text-[14px] text-muted-foreground truncate">{component.label}</div>
           <div className="text-[20px] font-semibold tabular-nums leading-tight truncate">
             {formatStatValue(component.value, component.format, component.currency)}
-            {component.unit && <span className="text-[13px] font-normal text-muted-foreground ml-1">{component.unit}</span>}
+            {component.unit && <span className="text-[14px] font-normal text-muted-foreground ml-1">{component.unit}</span>}
           </div>
         </div>
         {component.delta !== undefined && (
           <span className={cn(
-            'shrink-0 inline-flex items-center gap-1 text-[12px] font-medium tabular-nums',
+            'shrink-0 inline-flex items-center gap-1 text-[14px] font-medium tabular-nums',
             deltaTone === 'success' && 'text-success',
             deltaTone === 'destructive' && 'text-destructive',
             deltaTone === 'muted' && 'text-muted-foreground',
@@ -563,7 +563,7 @@ const GENUI_ROW_LINK_STYLES = cn(
 )
 
 const GENUI_ROW_ACTION_STYLES = cn(
-  'h-[22px] px-2 text-[11px] font-medium rounded-[5px] transition-all',
+  'h-[22px] px-2 text-[14px] font-medium rounded-[5px] transition-all',
   'bg-accent/5 text-accent hover:bg-accent/10 shadow-tinted',
   'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
   'disabled:opacity-50 disabled:cursor-not-allowed',
@@ -688,8 +688,8 @@ function AlertView({ component }: { component: GenUiAlert }) {
     <div className={cn('rounded-[8px] border px-3 py-2.5 flex items-start gap-2', ALERT_SEVERITY_STYLES[component.severity])}>
       <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 opacity-70" />
       <div className="min-w-0">
-        {component.title && <div className="text-[12px] font-medium">{component.title}</div>}
-        <div className="text-[13px] leading-snug select-text text-foreground/80">
+        {component.title && <div className="text-[14px] font-medium">{component.title}</div>}
+        <div className="text-[14px] leading-snug select-text text-foreground/80">
           {component.message}
         </div>
       </div>
@@ -712,14 +712,14 @@ function ProgressView({ component }: { component: GenUiProgress }) {
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
       {component.title && (
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{component.title}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{component.title}</span>
         </div>
       )}
       <div className="px-3 py-2.5 space-y-1.5">
         <div className="flex items-baseline justify-between gap-3">
-          <span className={cn('text-[13px] truncate', styles.text)}>{component.label}</span>
+          <span className={cn('text-[14px] truncate', styles.text)}>{component.label}</span>
           {percent !== undefined && (
-            <span className="shrink-0 text-[12px] text-muted-foreground tabular-nums">{Math.round(percent)}%</span>
+            <span className="shrink-0 text-[14px] text-muted-foreground tabular-nums">{Math.round(percent)}%</span>
           )}
         </div>
         <div className="h-1 rounded-full bg-muted overflow-hidden">
@@ -816,7 +816,7 @@ function ActionButtonsView({ component, sessionId }: { component: GenUiActionBut
     <div className="rounded-[8px] overflow-hidden border bg-muted/10">
       {component.title && (
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{component.title}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{component.title}</span>
         </div>
       )}
       <div className="px-3 py-2.5 flex flex-wrap gap-2">
@@ -853,7 +853,7 @@ function ActionButtonsView({ component, sessionId }: { component: GenUiActionBut
             'px-3 py-2.5 border-t flex flex-wrap items-center gap-2',
             GENUI_ACTION_BAR_STYLES[openPanelButton.style === 'danger' ? 'destructive' : 'accent'],
           )}>
-            <span className="text-[12px] leading-snug text-foreground/80 min-w-0 flex-1 select-text">
+            <span className="text-[14px] leading-snug text-foreground/80 min-w-0 flex-1 select-text">
               {openPanelButton.confirm?.message}
             </span>
             <button
@@ -890,7 +890,7 @@ function ActionButtonsView({ component, sessionId }: { component: GenUiActionBut
           >
             {(openPanelButton.params ?? []).map(param => (
               <label key={param.key} className="block space-y-1">
-                <span className="flex items-baseline gap-1 text-[11px] text-muted-foreground">
+                <span className="flex items-baseline gap-1 text-[14px] text-muted-foreground">
                   {param.label}
                   {param.required && <span className="text-destructive/80">*</span>}
                 </span>
@@ -911,7 +911,7 @@ function ActionButtonsView({ component, sessionId }: { component: GenUiActionBut
                   />
                 )}
                 {missingParams.has(param.key) && (
-                  <span className="block text-[10px] text-destructive/80">{t('genui.form.requiredMissing')}</span>
+                  <span className="block text-[14px] text-destructive/80">{t('genui.form.requiredMissing')}</span>
                 )}
               </label>
             ))}
@@ -1002,13 +1002,13 @@ function FormView({ component, sessionId }: { component: GenUiForm; sessionId?: 
     >
       {component.title && (
         <div className="px-3 py-2 bg-muted/50 border-b">
-          <span className="text-[12px] text-muted-foreground font-medium">{component.title}</span>
+          <span className="text-[14px] text-muted-foreground font-medium">{component.title}</span>
         </div>
       )}
       <div className="px-3 py-2.5 space-y-2">
         {component.fields.map(field => (
           <label key={field.key} className="block space-y-1">
-            <span className="flex items-baseline gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-baseline gap-1 text-[14px] text-muted-foreground">
               {field.label}
               {field.required && <span className="text-destructive/80">*</span>}
             </span>
@@ -1031,7 +1031,7 @@ function FormView({ component, sessionId }: { component: GenUiForm; sessionId?: 
               />
             )}
             {missingKeys.has(field.key) && (
-              <span className="block text-[10px] text-destructive/80">{t('genui.form.requiredMissing')}</span>
+              <span className="block text-[14px] text-destructive/80">{t('genui.form.requiredMissing')}</span>
             )}
           </label>
         ))}

@@ -307,14 +307,36 @@ export type QuestionResolutionResult =
 // Session events (main → renderer)
 // ---------------------------------------------------------------------------
 
+/**
+ * POO-177: the structured billing classification a turn-terminating
+ * error/typed_error event may carry. Optional and purely additive — a
+ * producer that cannot classify the failure simply omits the field, and no
+ * existing field changes meaning. Only trusted structured facts ride here
+ * (the server-side admission code / HTTP status); message text is never
+ * reinterpreted into a billing class by either side. The renderer classifies
+ * this object through the SAME recognition table as a synchronously
+ * rejected send, so a blocked admission (post-persist event stream) and a
+ * provider 402 (in-stream typed_error) drive the same chat-access latch a
+ * pre-persist rejection already does.
+ */
+export interface SessionBillingErrorClassification {
+  /** Server-classified billing error code (Admin runtime dialect, e.g.
+   * `insufficient_credit` / `budget_exhausted` — the shared
+   * INSUFFICIENT_CREDIT_ERROR_CODES table). */
+  errorCode?: string
+  /** Server-classified admission HTTP status (`402` payer lacks allowance,
+   * `429` period quota exhausted). */
+  status?: number
+}
+
 // turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
 export type SessionEvent =
   | { type: 'text_delta'; sessionId: string; delta: string; turnId?: string }
   | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
   | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
   | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
-  | { type: 'error'; sessionId: string; error: string; timestamp?: number }
-  | { type: 'typed_error'; sessionId: string; error: TypedError; timestamp?: number }
+  | { type: 'error'; sessionId: string; error: string; timestamp?: number; billingClassification?: SessionBillingErrorClassification }
+  | { type: 'typed_error'; sessionId: string; error: TypedError; timestamp?: number; billingClassification?: SessionBillingErrorClassification }
   | { type: 'complete'; sessionId: string; tokenUsage?: Session['tokenUsage']; hasUnread?: boolean }
   | { type: 'interrupted'; sessionId: string; message?: Message; queuedMessages?: string[] }
   | { type: 'status'; sessionId: string; message: string; statusType?: 'compacting' }

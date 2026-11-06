@@ -19,6 +19,12 @@ export type SlashItemType = 'command' | 'folder'
 export interface SlashCommand {
   id: SlashCommandId
   label: string
+  /**
+   * POO-179: i18n key resolved at render time. `label` stays the English
+   * literal so filtering keeps matching it; only the displayed copy is
+   * localized.
+   */
+  labelKey?: string
   description: string
   icon: React.ReactNode
   shortcut?: string
@@ -41,6 +47,8 @@ export interface SlashFolderItem {
 export interface SlashSection {
   id: string
   label: string
+  /** POO-179: i18n key resolved at render time (see SlashCommand.labelKey). */
+  labelKey?: string
   items: (SlashCommand | SlashFolderItem)[]
 }
 
@@ -96,6 +104,9 @@ const permissionModeCommands: SlashCommand[] = PERMISSION_MODE_ORDER.map(mode =>
 const compactCommand: SlashCommand = {
   id: 'compact',
   label: 'Compact Context',
+  // POO-179: `label` doubles as the search alias; the displayed copy resolves
+  // through the key. The description is not rendered by CommandItemContent.
+  labelKey: 'commands.compactContext',
   description: 'Summarize conversation context to free up token budget',
   icon: <Minimize2 className={MENU_ICON_SIZE} />,
 }
@@ -115,9 +126,9 @@ export const DEFAULT_SLASH_COMMAND_GROUPS: CommandGroup[] = [
 
 const MENU_CONTAINER_STYLE = 'min-w-[200px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small'
 const MENU_LIST_STYLE = 'max-h-[260px] overflow-y-auto py-1'
-const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-2 rounded-[6px] mx-1 px-2 py-1.5 text-[13px]'
+const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-2 rounded-[6px] mx-1 px-2 py-1.5 text-[14px]'
 const MENU_ITEM_SELECTED = 'bg-foreground/5'
-const MENU_SECTION_HEADER = 'px-3 py-1.5 mb-0.5 text-[12px] font-medium text-muted-foreground border-b border-foreground/5'
+const MENU_SECTION_HEADER = 'px-3 py-1.5 mb-0.5 text-[14px] font-medium text-muted-foreground border-b border-foreground/5'
 
 // ============================================================================
 // Shared: Filter utilities
@@ -169,7 +180,13 @@ const MODE_COMMAND_IDS = new Set<string>(['safe', 'ask', 'allow-all'])
 
 function CommandItemContent({ command, isActive }: { command: SlashCommand; isActive: boolean }) {
   const { t } = useTranslation()
-  const label = MODE_COMMAND_IDS.has(command.id) ? t(`mode.${command.id}`, command.label) : command.label
+  // POO-179: explicit key first, then the existing mode-command mapping; the
+  // English literal remains the fallback so search values are untouched.
+  const label = command.labelKey
+    ? t(command.labelKey, command.label)
+    : MODE_COMMAND_IDS.has(command.id)
+      ? t(`mode.${command.id}`, command.label)
+      : command.label
   return (
     <>
       <div className="shrink-0 text-muted-foreground">{command.icon}</div>
@@ -295,7 +312,7 @@ export function SlashCommandMenu({
       <CommandPrimitive.List className={MENU_LIST_STYLE}>
         {allFilteredCommands.length === 0 ? (
           <CommandPrimitive.Empty className="py-4 text-center text-sm text-muted-foreground">
-            No commands found
+            {t('commands.noCommandsFound')}
           </CommandPrimitive.Empty>
         ) : filteredGroups ? (
           // Group-based rendering with smart separators
@@ -346,6 +363,7 @@ export function InlineSlashCommand({
 }: InlineSlashCommandProps) {
   const menuRef = React.useRef<HTMLDivElement>(null)
   const listRef = React.useRef<HTMLDivElement>(null)
+  const { t } = useTranslation()
   const [selectedIndex, setSelectedIndex] = React.useState(0)
   const filteredSections = filterSections(sections, filter)
   const flatItems = flattenSections(filteredSections)
@@ -444,7 +462,7 @@ export function InlineSlashCommand({
           <React.Fragment key={section.id}>
             {/* Section header */}
             <div className={MENU_SECTION_HEADER}>
-              {section.label}
+              {section.labelKey ? t(section.labelKey, section.label) : section.label}
             </div>
 
             {/* Section items */}
@@ -500,7 +518,7 @@ export function InlineSlashCommand({
       {/* Always-visible footer hint for @ mentions */}
       <div className="h-px bg-border/50 mx-2" />
       <div className="px-3 py-2.5 select-none text-xs text-muted-foreground">
-        Use @ for skills and files
+        {t('commands.useAtMentionHint')}
       </div>
     </div>
   )
@@ -580,6 +598,7 @@ export function useInlineSlashCommand({
     result.push({
       id: 'modes',
       label: 'Modes',
+      labelKey: 'commands.sectionModes',
       items: permissionModeCommands,
     })
 
@@ -587,6 +606,7 @@ export function useInlineSlashCommand({
     result.push({
       id: 'commands',
       label: 'Commands',
+      labelKey: 'commands.sectionCommands',
       items: [compactCommand],
     })
 
@@ -602,6 +622,7 @@ export function useInlineSlashCommand({
       result.push({
         id: 'folders',
         label: 'Recent Working Directories',
+        labelKey: 'commands.recentWorkingDirectories',
         items: sortedFolders.map(path => ({
           id: path,
           type: 'folder' as const,

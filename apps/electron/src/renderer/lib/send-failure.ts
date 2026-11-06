@@ -14,6 +14,7 @@
  *   in the prompt instead of a fake bubble.
  */
 import { isInsufficientCreditError, isPeriodQuotaError, readQuotaResetAt } from './quota-error'
+import type { SessionBillingErrorClassification } from '@polo-ai/shared/protocol'
 
 export type SendFailureOutcome =
   | {
@@ -45,6 +46,25 @@ export function classifySendFailure(
     kind: 'send-failed',
     detail: error instanceof Error ? error.message : String(error),
   }
+}
+
+/**
+ * POO-177 QUOTA-01 — the event-stream twin of the send-rejection classes. A
+ * turn the SERVER terminated never reaches a renderer catch block: a blocked
+ * admission arrives as a post-persist error event and a provider 402 as an
+ * in-stream typed_error. Both may carry the server's structured billing
+ * classification (`billingClassification`), which holds exactly the trusted
+ * fields the recognition table above reads (errorCode / status) — so it is
+ * classified by feeding classifySendFailure ITSELF. One billing vocabulary,
+ * no message-text guessing; an event without the field, or one whose class
+ * is not a billing block, stays null.
+ */
+export function classifyEventBillingBlock(
+  classification: SessionBillingErrorClassification | undefined,
+): Extract<SendFailureOutcome, { kind: 'billing-block' }> | null {
+  if (!classification) return null
+  const outcome = classifySendFailure(classification, { hadGoalStartIntent: false })
+  return outcome.kind === 'billing-block' ? outcome : null
 }
 
 /**

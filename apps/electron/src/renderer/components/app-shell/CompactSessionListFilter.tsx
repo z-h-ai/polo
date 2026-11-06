@@ -52,7 +52,7 @@ import {
 } from '@/components/ui/label-menu-utils'
 import { findLabelById } from '@polo-ai/shared/labels'
 import type { LabelConfig } from '@polo-ai/shared/labels'
-import { type SessionStatus, type SessionStatusId } from '@/config/session-status-config'
+import { getStatusLabel, type SessionStatus, type SessionStatusId } from '@/config/session-status-config'
 import type { ChatGroupingMode } from './SessionList'
 
 type FilterMode = 'include' | 'exclude'
@@ -119,13 +119,13 @@ export function CompactSessionListFilter({
   const results = React.useMemo(() => {
     return {
       states: isSearching
-        ? filterSessionStatuses(effectiveSessionStatuses, trimmedQuery)
+        ? filterSessionStatuses(effectiveSessionStatuses, trimmedQuery, t)
         : effectiveSessionStatuses,
       labels: isSearching
         ? filterLabelMenuItems(flatLabelItems, trimmedQuery)
         : flatLabelItems,
     }
-  }, [isSearching, trimmedQuery, effectiveSessionStatuses, flatLabelItems])
+  }, [isSearching, trimmedQuery, effectiveSessionStatuses, flatLabelItems, t])
 
   const hasUserFilter = listFilter.size > 0 || labelFilter.size > 0
   const hasAnyFilter =
@@ -255,7 +255,7 @@ export function CompactSessionListFilter({
                     icon={state.icon}
                     iconColor={colorize ? state.resolvedColor : undefined}
                     bareIcon
-                    label={state.label}
+                    label={getStatusLabel(state, t)}
                     mode={mode}
                     pinned={isPinned}
                     onTap={() => toggleStatus(state.id)}
@@ -297,7 +297,7 @@ export function CompactSessionListFilter({
 
           {isSearching && results.states.length === 0 && results.labels.length === 0 && (
             <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-              No matches
+              {t('chat.noResults')}
             </div>
           )}
 
@@ -355,7 +355,7 @@ function Section({
 }) {
   return (
     <div className="pt-3">
-      <div className="px-3 pb-1 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider">
+      <div className="px-3 pb-1 flex items-center gap-1.5 text-[14px] font-medium text-muted-foreground/70 uppercase tracking-wider">
         {icon}
         <span>{title}</span>
       </div>
@@ -386,6 +386,7 @@ function FilterRow({
   onTap?: () => void
   onModeTap?: () => void
 }) {
+  const { t } = useTranslation()
   const renderedIcon = bareIcon
     ? (
       <span className="shrink-0 h-5 w-5 flex items-center justify-center" style={iconColor ? { color: iconColor } : undefined}>
@@ -431,7 +432,7 @@ function FilterRow({
               ? ({ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties)
               : undefined
           }
-          aria-label={mode === 'include' ? 'Switch to exclude' : 'Switch to include'}
+          aria-label={mode === 'include' ? t('filter.exclude') : t('filter.include')}
         >
           {mode === 'include' ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
         </button>

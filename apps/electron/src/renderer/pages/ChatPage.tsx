@@ -26,6 +26,7 @@ import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
 import { decideChatAccessBanner } from '@/lib/chat-access-banner'
+import { createCitationSourceOpener, type CitationSourceScope } from '@/lib/open-citation-source'
 import { formatQuotaResetTime } from '@/lib/quota-reset-time'
 import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
@@ -39,6 +40,14 @@ import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '
 export interface ChatPageProps {
   sessionId: string
 }
+
+/**
+ * POO-179: the self-produced "no messages" failure is stored verbatim in
+ * state and only resolved to display copy at render time, so an error visible
+ * across a language switch re-renders in the active language. Raw server
+ * error strings (formatSessionLoadFailure) pass through untouched.
+ */
+const MESSAGES_UNAVAILABLE_SENTINEL = 'Session messages are not available'
 
 const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const { t } = useTranslation()
@@ -60,6 +69,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     chatAccessStatus,
     onRetryAiConfigSync,
     onRecheckBilling,
+    billingRecheckPending,
     onSendMessage,
     onOpenFile,
     onOpenUrl,
@@ -135,7 +145,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setMessagesRetrying(false)
 
     if (shouldForceInitialMessagesReload && autoForcedReloadSessionRef.current === sessionId) {
-      setMessagesLoadError('Session messages are not available')
+      setMessagesLoadError(MESSAGES_UNAVAILABLE_SENTINEL)
       return () => {
         cancelled = true
       }
@@ -153,7 +163,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     loadPromise
       .then((loadedSession) => {
         if (!cancelled && !loadedSession) {
-          setMessagesLoadError('Session messages are not available')
+          setMessagesLoadError(MESSAGES_UNAVAILABLE_SENTINEL)
         }
       })
       .catch((error: unknown) => {
@@ -174,7 +184,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     try {
       const loadedSession = await forceMessagesReload(sessionId)
       if (!loadedSession) {
-        setMessagesLoadError('Session messages are not available')
+        setMessagesLoadError(MESSAGES_UNAVAILABLE_SENTINEL)
       }
     } catch (error) {
       setMessagesLoadError(formatSessionLoadFailure(error))
@@ -374,11 +384,17 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         ...(bannerDecision.action === 'retry-ai-config-sync'
           ? { actionLabel: t('chat.statusBanner.retrySync'), onAction: onRetryAiConfigSync }
           : {}),
-        // U2: the "I've recharged — recheck" second action. It only clears
-        // the client latch; the NEXT explicit send re-adjudicates (never an
-        // automatic resend).
+        // U2, superseded by POO-177: this second action IS the manual billing
+        // refresh — one real Admin read per click. While the read is in
+        // flight it renders disabled + aria-busy with the short checking
+        // copy (QUOTA-02); it still never auto-sends.
         ...(bannerDecision.secondaryAction === 'recheck-billing' && onRecheckBilling
-          ? { secondaryActionLabel: t('billingRecheck.action'), onSecondaryAction: onRecheckBilling }
+          ? {
+              secondaryActionLabel: t('billingRecheck.action'),
+              onSecondaryAction: onRecheckBilling,
+              secondaryActionDisabled: billingRecheckPending,
+              secondaryActionBusy: billingRecheckPending,
+            }
           : {}),
       }
     }
@@ -398,7 +414,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       }
     }
     return null
-  }, [bannerDecision, onRetryAiConfigSync, onRecheckBilling, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
+  }, [bannerDecision, onRetryAiConfigSync, onRecheckBilling, billingRecheckPending, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
 
   // Only the hard billing block disables the composer (review F4); the
   // failed-send prompt is advisory.
@@ -483,6 +499,34 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       onOpenUrl(url)
     },
     [onOpenUrl]
+  )
+
+  // POO-172: assistant-markdown citation sources get a dedicated channel —
+  // parsable http/https opens in the built-in browserPane (scoped to THIS
+  // session/workspace), file paths keep the file preview, dangerous schemes
+  // are rejected without any external fallback. Business URLs (error-card
+  // open_url, user messages, settings handoffs) keep using handleOpenUrl.
+  // The scope is read live so a click that races a session switch never
+  // steals another session's browser pane. `remoteWorkspaceId` is the same
+  // authoritative alias the browser tab strip filters by — a remote agent's
+  // instance carries the mirror id, not the local one.
+  const citationScopeRef = React.useRef<CitationSourceScope>({ sessionId: null, workspaceId: null, remoteWorkspaceId: null })
+  citationScopeRef.current = {
+    sessionId: session?.id ?? null,
+    workspaceId: session?.workspaceId ?? activeWorkspaceId ?? null,
+    remoteWorkspaceId: activeWorkspace?.remoteServer?.remoteWorkspaceId ?? null,
+  }
+  const openSourceUrl = React.useMemo(
+    () =>
+      createCitationSourceOpener({
+        getSessionScope: () => citationScopeRef.current,
+        onOpenFile: handleOpenFile,
+        onExternalUrl: onOpenUrl,
+        onBlocked: (reason) => {
+          toast.error(t('toast.citationSourceBlocked'), { description: reason })
+        },
+      }),
+    [handleOpenFile, onOpenUrl, t]
   )
 
   // Perf: Mark when data is ready
@@ -628,7 +672,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <PanelHeaderCenterButton
-          aria-label={sharedUrl ? 'Shared session options' : 'Share session'}
+          aria-label={sharedUrl ? t('chat.sharedSessionOptions') : t('chat.shareSession')}
           icon={sharedUrl
             ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M11.2383 10.2871C11.6481 10.0391 12.1486 10.0082 12.5811 10.1943L12.7617 10.2871L13.0088 10.4414C14.2231 11.227 15.1393 12.2124 15.8701 13.502C16.1424 13.9824 15.9736 14.5929 15.4932 14.8652C15.0127 15.1375 14.4022 14.9688 14.1299 14.4883C13.8006 13.9073 13.4303 13.417 13 12.9883V21C13 21.5523 12.5523 22 12 22C11.4477 22 11 21.5523 11 21V12.9883C10.5697 13.417 10.1994 13.9073 9.87012 14.4883C9.59781 14.9688 8.98732 15.1375 8.50684 14.8652C8.02643 14.5929 7.8576 13.9824 8.12988 13.502C8.90947 12.1264 9.90002 11.0972 11.2383 10.2871ZM11.5 3C14.2848 3 16.6594 4.75164 17.585 7.21289C20.1294 7.90815 22 10.235 22 13C22 16.3137 19.3137 19 16 19H15V16.9961C15.5021 16.9966 16.0115 16.8707 16.4795 16.6055C17.9209 15.7885 18.4272 13.9571 17.6104 12.5156C16.6661 10.8495 15.4355 9.56805 13.7969 8.57617C12.692 7.90745 11.308 7.90743 10.2031 8.57617C8.56453 9.56806 7.3339 10.8495 6.38965 12.5156C5.57277 13.957 6.07915 15.7885 7.52051 16.6055C7.98851 16.8707 8.49794 16.9966 9 16.9961V19H7C4.23858 19 2 16.7614 2 14C2 11.9489 3.23498 10.1861 5.00195 9.41504C5.04745 5.86435 7.93852 3 11.5 3Z" />
@@ -701,7 +745,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         )}
       />
     )
-  }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta])
+  }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta, t])
 
   const headerActions = isCompactMode ? compactInfoButton : shareButton
 
@@ -808,6 +852,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onSendMessage={() => {}}
                 onOpenFile={handleOpenFile}
                 onOpenUrl={handleOpenUrl}
+                onOpenSourceUrl={openSourceUrl}
                 currentModel={effectiveModel}
                 pendingPermission={undefined}
                 onRespondToPermission={onRespondToPermission}
@@ -833,7 +878,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 workingDirectory={sessionMeta.workingDirectory}
                 onWorkingDirectoryChange={handleWorkingDirectoryChange}
                 messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-                messagesLoadError={messageLoadState.error}
+                messagesLoadError={messageLoadState.error === MESSAGES_UNAVAILABLE_SENTINEL ? t('chat.messagesUnavailable') : messageLoadState.error}
                 messagesRetrying={messagesRetrying}
                 onRetryMessagesLoad={handleRetryMessagesLoad}
                 searchQuery={sessionListSearchQuery}
@@ -886,6 +931,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             }}
             onOpenFile={handleOpenFile}
             onOpenUrl={handleOpenUrl}
+            onOpenSourceUrl={openSourceUrl}
             currentModel={effectiveModel}
             pendingPermission={pendingPermission}
             onRespondToPermission={onRespondToPermission}
@@ -914,7 +960,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onWorkingDirectoryChange={handleWorkingDirectoryChange}
             sessionFolderPath={session?.sessionFolderPath}
             messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-            messagesLoadError={messageLoadState.error}
+            messagesLoadError={messageLoadState.error === MESSAGES_UNAVAILABLE_SENTINEL ? t('chat.messagesUnavailable') : messageLoadState.error}
             messagesRetrying={messagesRetrying}
             onRetryMessagesLoad={handleRetryMessagesLoad}
             searchQuery={sessionListSearchQuery}
