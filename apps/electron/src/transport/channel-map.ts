@@ -383,6 +383,51 @@ export const CHANNEL_MAP = {
   kbSetSessionCollections: invokeCoded(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS),
   kbGetSessionCollections: invokeCoded(RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS),
 
+  // Enterprise Project Context (POO-196). codedErrors for the same reason as
+  // the kb block: the renderer's error mapping branches on the stable pc_*
+  // codes, which the context bridge would otherwise erase. The upload is a
+  // single RPC (pc:uploadFile) — the renderer hands over a local file path
+  // and never sees a transfer URL.
+  pcListCapabilities: invokeCoded(RPC_CHANNELS.projectContext.LIST_CAPABILITIES),
+  pcGetSummary: invokeCoded(RPC_CHANNELS.projectContext.GET_SUMMARY),
+  pcListAssets: invokeCoded(RPC_CHANNELS.projectContext.LIST_ASSETS),
+  pcGetAsset: invokeCoded(RPC_CHANNELS.projectContext.GET_ASSET),
+  pcUploadFile: invokeCoded(RPC_CHANNELS.projectContext.UPLOAD_FILE),
+  pcUpdateAsset: invokeCoded(RPC_CHANNELS.projectContext.UPDATE_ASSET),
+  pcSetConfirmed: invokeCoded(RPC_CHANNELS.projectContext.SET_CONFIRMED),
+  pcSetPinned: invokeCoded(RPC_CHANNELS.projectContext.SET_PINNED),
+  pcTrashAsset: invokeCoded(RPC_CHANNELS.projectContext.TRASH_ASSET),
+  pcRestoreAsset: invokeCoded(RPC_CHANNELS.projectContext.RESTORE_ASSET),
+  pcDownloadAsset: invokeCoded(RPC_CHANNELS.projectContext.DOWNLOAD_ASSET),
+  pcReadAsset: invokeCoded(RPC_CHANNELS.projectContext.READ_ASSET),
+  pcGetPreviewUrl: invokeCoded(RPC_CHANNELS.projectContext.GET_PREVIEW_URL),
+  pcSearchAssets: invokeCoded(RPC_CHANNELS.projectContext.SEARCH_ASSETS),
+  pcRebuild: invokeCoded(RPC_CHANNELS.projectContext.REBUILD),
+
+  // Enterprise project members (POO-196 追加轮). codedErrors for the same
+  // reason as the pc block: the renderer's recovery copy branches on the
+  // stable contract codes (phone_verification_required,
+  // account_enterprise_exists, forbidden …) which the context bridge would
+  // otherwise erase. No transfer URL and no invitation link ever rides the
+  // channel map — links live in the renderer's dialog state only.
+  pmCreateEnterprise: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_ENTERPRISE),
+  pmQueryCreateReceipt: invokeCoded(RPC_CHANNELS.projectMembers.QUERY_CREATE_RECEIPT),
+  pmListProjectMembers: invokeCoded(RPC_CHANNELS.projectMembers.LIST_MEMBERS),
+  pmListProjectInvitations: invokeCoded(RPC_CHANNELS.projectMembers.LIST_INVITATIONS),
+  pmCreateProjectInvitation: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_INVITATION),
+
+  // POO-196 R3 (D3–D6). Same codedErrors discipline: the colleague/roster
+  // recovery copy branches on the stable contract codes
+  // (colleague_source_unavailable, colleague_target_unavailable,
+  // contract_version_unsupported, forbidden …) which the context bridge
+  // would otherwise erase. The colleague invitation stays strictly
+  // per-object on the wire — no batch channel exists.
+  pmListColleagueOptions: invokeCoded(RPC_CHANNELS.projectMembers.LIST_COLLEAGUE_OPTIONS),
+  pmListCollaborationRoster: invokeCoded(RPC_CHANNELS.projectMembers.LIST_COLLABORATION_ROSTER),
+  pmCreateColleagueInvitation: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_COLLEAGUE_INVITATION),
+  pmQueryColleagueInvitation: invokeCoded(RPC_CHANNELS.projectMembers.QUERY_COLLEAGUE_INVITATION),
+  pmListProductSpacesR3: invokeCoded(RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3),
+
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
   reorderStatuses: invoke(RPC_CHANNELS.statuses.REORDER),

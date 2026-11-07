@@ -21,6 +21,10 @@ mock.module('@/components/ui/styled-dropdown', () => ({
   DropdownMenuSub: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   StyledDropdownMenuSubTrigger: ({ children, ...props }: { children?: ReactNode }) => createElement('div', props, children),
   DropdownMenuContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  // workbench-controls 静态命名导入这两个（WorkbenchMenuContent/SubContent
+  // 的基元），mock 工厂必须提供完整的命名绑定，否则模块图加载即抛
+  // SyntaxError（bun 对静态 import 做导出名校验）。
+  StyledDropdownMenuContent: ({ children, ...props }: { children?: ReactNode }) => createElement('div', props, children),
   StyledDropdownMenuSubContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   StyledDropdownMenuItem: ({ children, ...props }: { children?: ReactNode }) =>
     createElement('button', { type: 'button', ...props }, children),
@@ -141,6 +145,15 @@ describe('ProductSpaceSwitcher', () => {
     const items = screen.getAllByTestId('product-space-item')
     expect(items[0]!.getAttribute('disabled') !== null).toBe(true)
     expect(items[2]!.textContent).toContain('受限')
+  })
+
+  it('POO-196 R3 P11: the create entry is GONE from the menu and refresh stays', () => {
+    const onOpenCreateProject = mock(() => {})
+    renderWithContext(makeContextValue({ onOpenCreateProject }))
+    // The home「项目」区域 is the only create entry (consensus P11) — the
+    // menu must not offer a second one, even when the callback exists.
+    expect(screen.queryByTestId('product-space-create-project')).toBeNull()
+    expect(screen.getByTestId('product-space-refresh')).toBeTruthy()
   })
 })
 

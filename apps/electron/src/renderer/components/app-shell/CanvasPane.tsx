@@ -51,6 +51,7 @@ import {
   canvasPaneWidthAtomFamily,
   type CanvasPaneApp,
 } from '@/atoms/canvas-pane'
+import { rightPaneNativeSuspendAtom } from '@/atoms/right-pane-suspension'
 
 /** One focus-flash highlight, long enough to be caught by an aiming eye. */
 const FOCUS_FLASH_MS = 900
@@ -93,19 +94,26 @@ function NativeCanvasSurface({ sessionId, app }: { sessionId: string; app: Canva
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const presentation = useAtomValue(canvasPanePopoutAtomFamily(sessionId))
+  // POO-196 R3 (D8): a members drawer temporarily hides the native view via
+  // the existing canvasPane.hide IPC — the instance (and its URL/state) stays
+  // alive in Main and the SAME embed is re-issued (no reload) on resume.
+  const suspended = useAtomValue(rightPaneNativeSuspendAtom)
+  const syncRef = useRef<(() => void) | null>(null)
+  const lastBoundsRef = useRef('')
+  const wasSuspendedRef = useRef<boolean | null>(null)
   useEffect(() => {
     const node = ref.current
     if (!node) return
     let disposed = false, pending = false, blocked = false
-    let lastBounds = ''
     const sync = () => {
       if (disposed || pending || blocked) return
+      if (wasSuspendedRef.current === true) return
       const rect = node.getBoundingClientRect()
       if (!rect.width || !rect.height) return
       const bounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
       const key = JSON.stringify(bounds)
-      if (key === lastBounds) return
-      lastBounds = key
+      if (key === lastBoundsRef.current) return
+      lastBoundsRef.current = key
       pending = true
       void window.electronAPI.canvasPane.embed(sessionId, app, bounds).then(() => {
         pending = false
@@ -116,17 +124,34 @@ function NativeCanvasSurface({ sessionId, app }: { sessionId: string; app: Canva
         if (!disposed) setFailed(true)
       })
     }
+    syncRef.current = sync
     const observer = new ResizeObserver(sync)
     observer.observe(node)
     window.addEventListener('resize', sync)
     sync()
     return () => {
       disposed = true
+      syncRef.current = null
       observer.disconnect()
       window.removeEventListener('resize', sync)
       void window.electronAPI.canvasPane.unembed(sessionId).catch(() => {})
     }
   }, [sessionId, app.appId, app.indexPath, attempt])
+  useEffect(() => {
+    const was = wasSuspendedRef.current
+    wasSuspendedRef.current = suspended
+    if (was === null) return // mount: the embed effect above just synced
+    if (suspended) {
+      // Hide WITHOUT destroying: instanceId, URL and canvas state survive in
+      // Main; load count never increases.
+      void window.electronAPI?.canvasPane?.hide(sessionId).catch(() => {})
+    } else {
+      // Resume: clear the bounds memo so the SAME embed is re-issued even
+      // though the rect is unchanged.
+      lastBoundsRef.current = ''
+      syncRef.current?.()
+    }
+  }, [sessionId, suspended])
   return <div ref={ref} data-testid="native-canvas-surface" data-native-surface="true" className="h-full w-full min-h-0">{(failed || presentation?.loadFailed) && <div role="alert" className="p-4 text-xs text-muted-foreground"><p>{t('genui.app.loadError')}</p><button type="button" onClick={() => { setFailed(false); setAttempt(n => n + 1) }} className="mt-2 rounded border px-2 py-1">{t('common.retry')}</button></div>}</div>
 }
 

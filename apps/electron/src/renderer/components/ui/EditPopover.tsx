@@ -15,6 +15,7 @@ import { GripHorizontal } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react' // motion used for backdrop only
 import { Popover, PopoverTrigger, PopoverContent } from './popover'
 import { Button } from './button'
+import { ViewportPortal } from './viewport-portal'
 import { cn } from '@/lib/utils'
 import { usePlatform } from '@polo-ai/ui'
 import { toast } from 'sonner'
@@ -1041,18 +1042,25 @@ export function EditPopover({
 
   return (
     <>
-      {/* Full-screen backdrop - rendered BEHIND the popover during processing */}
-      <AnimatePresence>
-        {open && isProcessing && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, ease: 'easeInOut' }}
-            className="fixed inset-0 bg-black/5 z-40"
-          />
-        )}
-      </AnimatePresence>
+      {/* Full-screen backdrop - rendered BEHIND the popover during processing.
+          R-AT: `fixed inset-0` coordinates must mount on body — panel ancestors
+          (backdrop-filter/container-type) would otherwise make the PANEL the
+          containing block and shrink the backdrop to that panel. The z tier
+          sits between panel (50) and the popover content (dropdown 100) so the
+          backdrop blocks the app but never the popover itself nor real modals. */}
+      <ViewportPortal>
+        <AnimatePresence>
+          {open && isProcessing && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.5, ease: 'easeInOut' }}
+              className="fixed inset-0 bg-black/5 z-[calc(var(--z-dropdown)-1)]"
+            />
+          )}
+        </AnimatePresence>
+      </ViewportPortal>
 
       <Popover open={open} onOpenChange={setOpen} modal={modal}>
         <PopoverTrigger asChild className={triggerClassName}>

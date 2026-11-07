@@ -89,6 +89,48 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS,
   RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS,
 
+  // pc — Enterprise Project Context (POO-196). Like the KB, this is a device
+  // local service domain: asset bytes stream between the local filesystem and
+  // object storage over short-lived admin-granted URLs, credentials ride the
+  // device's trusted Admin session, and no transfer URL ever crosses the RPC
+  // boundary — so every pc channel stays local.
+  RPC_CHANNELS.projectContext.LIST_CAPABILITIES,
+  RPC_CHANNELS.projectContext.GET_SUMMARY,
+  RPC_CHANNELS.projectContext.LIST_ASSETS,
+  RPC_CHANNELS.projectContext.GET_ASSET,
+  RPC_CHANNELS.projectContext.UPLOAD_FILE,
+  RPC_CHANNELS.projectContext.UPDATE_ASSET,
+  RPC_CHANNELS.projectContext.SET_CONFIRMED,
+  RPC_CHANNELS.projectContext.SET_PINNED,
+  RPC_CHANNELS.projectContext.TRASH_ASSET,
+  RPC_CHANNELS.projectContext.RESTORE_ASSET,
+  RPC_CHANNELS.projectContext.DOWNLOAD_ASSET,
+  RPC_CHANNELS.projectContext.READ_ASSET,
+  RPC_CHANNELS.projectContext.GET_PREVIEW_URL,
+  RPC_CHANNELS.projectContext.SEARCH_ASSETS,
+  RPC_CHANNELS.projectContext.REBUILD,
+
+  // pm — Enterprise project members (POO-196 追加轮). Creation and targeted
+  // invitations act through the device's trusted Admin session only; the
+  // roster/invitation reads are re-proved against the committed space fence on
+  // every call. There is no remote consumer for an account-scoped membership
+  // command, so every pm channel stays local.
+  RPC_CHANNELS.projectMembers.CREATE_ENTERPRISE,
+  RPC_CHANNELS.projectMembers.QUERY_CREATE_RECEIPT,
+  RPC_CHANNELS.projectMembers.LIST_MEMBERS,
+  RPC_CHANNELS.projectMembers.LIST_INVITATIONS,
+  RPC_CHANNELS.projectMembers.CREATE_INVITATION,
+  // POO-196 R3 (D3–D6): the colleague directory / collaboration roster reads
+  // re-prove the committed space fence; the colleague invitation write and
+  // its recovery query act through the device's trusted Admin session; the
+  // negotiated R3 list read is account-scoped on that same session. None of
+  // it is workspace-server routable.
+  RPC_CHANNELS.projectMembers.LIST_COLLEAGUE_OPTIONS,
+  RPC_CHANNELS.projectMembers.LIST_COLLABORATION_ROSTER,
+  RPC_CHANNELS.projectMembers.CREATE_COLLEAGUE_INVITATION,
+  RPC_CHANNELS.projectMembers.QUERY_COLLEAGUE_INVITATION,
+  RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3,
+
   // system — local OS info
   RPC_CHANNELS.system.VERSIONS,
   RPC_CHANNELS.system.HOME_DIR,
@@ -264,6 +306,12 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.browserPane.SET_EMBED_OCCLUSION,
   RPC_CHANNELS.browserPane.SET_ELEMENT_PICKING,
   RPC_CHANNELS.browserPane.ELEMENT_PICKER_EVENT,
+  // product-closure U12/U11 additions that predate this table's coverage of
+  // them: logout/teardown destroys every local instance and partition data,
+  // and the terminal download outcome is a Main→renderer toast push — both
+  // are local window/view operations like the rest of browserPane.
+  RPC_CHANNELS.browserPane.DESTROY_ALL,
+  RPC_CHANNELS.browserPane.DOWNLOAD_EVENT,
 
   // canvasPane — POO-135 验收修复 (SB-CANVAS-OUT): the canvas popup BrowserWindow
   // is local to this desktop; nothing here is workspace-server routable

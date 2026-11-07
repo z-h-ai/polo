@@ -253,6 +253,13 @@ export interface SessionScopedToolsOptions {
    * share a toolset.
    */
   allowGoalUpdate?: boolean;
+  /**
+   * POO-196: register project_context_search / project_context_read. Only
+   * turns whose session is bound to the CURRENTLY committed enterprise
+   * project set this; every other turn fails closed. Participates in the
+   * cache key so a project turn and a non-project turn never share a toolset.
+   */
+  allowProjectContext?: boolean;
 }
 
 /**
@@ -277,11 +284,12 @@ export function getSessionScopedTools(
   const allowRenderUi = options?.allowRenderUi ?? false;
   const allowGenerateApp = options?.allowGenerateApp ?? false;
   const allowGoalUpdate = options?.allowGoalUpdate ?? false;
+  const allowProjectContext = options?.allowProjectContext ?? false;
   const renderUiCatalog = options?.renderUiCatalog ?? getGenUiComponentCatalog().descriptors();
   // Catalog signature in the cache key: a catalog change (third-party install)
   // must rebuild the toolset so render_ui's description reflects it.
   const renderUiCatalogKey = renderUiCatalog.map(d => d.type).join(',');
-  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}::gap-${allowGenerateApp ? '1' : '0'}::goal-${allowGoalUpdate ? '1' : '0'}::cat-${renderUiCatalogKey}`;
+  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}::gui-${allowRenderUi ? '1' : '0'}::gap-${allowGenerateApp ? '1' : '0'}::goal-${allowGoalUpdate ? '1' : '0'}::pctx-${allowProjectContext ? '1' : '0'}::cat-${renderUiCatalogKey}`;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -298,6 +306,10 @@ export function getSessionScopedTools(
       // the handler invokes this SYNCHRONOUSLY at initiation and binds the
       // returned value immutably into the callback chain.
       getTurnGeneration: () => getSessionScopedToolCallbacks(sessionId)?.getTurnGeneration?.() ?? 0,
+      // POO-196: facade read happens AT TOOL-CALL TIME (never cached here) —
+      // the callback registry entry the backend registered/merged carries the
+      // host-injected factory.
+      getProjectContext: () => getSessionScopedToolCallbacks(sessionId)?.getProjectContext?.() ?? null,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         const callbacks = getSessionScopedToolCallbacks(sessionId);
@@ -356,6 +368,7 @@ export function getSessionScopedTools(
       allowRenderUi,
       allowGenerateApp,
       allowGoalUpdate,
+      allowProjectContext,
     })
       .filter(def => def.handler !== null) // Skip backend-specific tools (call_llm)
       .map(def => registryTool(def.name, def.inputSchema.shape));

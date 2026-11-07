@@ -9,6 +9,7 @@ import {
   ChevronUp,
   CircleAlert,
   ExternalLink,
+  FolderUp,
   Info,
   X,
 } from "lucide-react"
@@ -67,6 +68,9 @@ import {
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { KbReferenceChips } from "@/components/chat/KbReferenceChips"
 import { ElementReferenceChips } from "@/components/chat/ElementReferenceChips"
+import { ProjectAssetChip } from "@/components/project-context/ProjectAssetChip"
+import type { ProjectAssetMentionDraft } from "@/atoms/project-context"
+import type { ProjectAssetReference } from "@polo-ai/shared/protocol"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { ChatInputZone, type ChatInputStatusBanner, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
@@ -135,6 +139,16 @@ function isStackedActivityTool(activity: ActivityItem): boolean {
   return toolName === 'bash' || toolName.startsWith('mcp__') || toolName.startsWith('browser_')
 }
 
+/**
+ * POO-196: the persisted @ project-asset snapshot on a user message. Read
+ * structurally for the same reason as the session's productSpaceId: the
+ * Message contract field is landing with the shared-layer work, and this read
+ * is correct at runtime either way.
+ */
+function readMessageProjectAssetRefs(message: Message): ProjectAssetReference[] {
+  return (message as { projectAssetRefs?: ProjectAssetReference[] }).projectAssetRefs ?? []
+}
+
 function getTurnKey(turn: Turn): string {
   if (turn.type === 'user') return `user-${turn.message.id}`
   if (turn.type === 'system') return `system-${turn.message.id}`
@@ -144,7 +158,7 @@ function getTurnKey(turn: Turn): string {
 
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   /** POO-172: dedicated channel for assistant-markdown citation sources
@@ -205,6 +219,10 @@ interface ChatDisplayProps {
   elementReferencesValue?: WebElementReference[]
   /** Callback when a draft reference is removed (send clears the rest) */
   onElementReferencesChange?: (references: WebElementReference[]) => void
+  /** POO-196: picked project-asset mentions queued for this session's composer */
+  projectAssetRefsValue?: ProjectAssetMentionDraft[]
+  /** Callback when a draft project-asset reference is removed (send clears the rest) */
+  onProjectAssetRefsChange?: (references: ProjectAssetMentionDraft[]) => void
   // Source selection
   /** Available sources (enabled only) */
   sources?: LoadedSource[]
@@ -264,6 +282,26 @@ interface ChatDisplayProps {
   connectionUnavailable?: boolean
   /** Blocking account/config/quota state shown above the input */
   inputStatusBanner?: ChatInputStatusBanner | null
+  // POO-196 UB2 (U11): the project entry send gate + notice, forwarded into
+  // the composer's submit path (the gate runs inside FreeFormInput BEFORE
+  // any draft clear / annotation sent-marker / KB commit) and rendered as
+  // the persistent notice above the input. Undefined = the composer behaves
+  // exactly as before (non-project consumers keep the original behavior).
+  submitGate?: () => boolean
+  gateNotice?: string | null
+  // POO-196 S-01: present only in an enterprise project session — it turns on
+  // the hover "share to project" action on user messages.
+  projectShareEnabled?: boolean
+  /** Called with the user message the user wants to land in the project library. */
+  onShareToProject?: (message: Message) => void
+  /**
+   * POO-196 UB4 (U13): the project-composer presentation (stable placeholder
+   * following the real sendMessageKey preference + the「输入帮助」toolbar
+   * affordance). ChatPage passes its committed-scope authority; when absent
+   * the structural isProjectSession read below decides — non-project sessions
+   * keep the current presentation untouched.
+   */
+  projectComposer?: boolean
 }
 
 import {
@@ -487,6 +525,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onAttachmentsChange,
   elementReferencesValue,
   onElementReferencesChange,
+  projectAssetRefsValue,
+  onProjectAssetRefsChange,
   // Sources
   sources,
   onSourcesChange,
@@ -521,6 +561,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Connection unavailable
   connectionUnavailable = false,
   inputStatusBanner,
+  submitGate,
+  gateNotice,
+  projectShareEnabled = false,
+  onShareToProject,
+  projectComposer,
 }, ref) {
   const { t, i18n: i18nInstance } = useTranslation()
 
@@ -545,6 +590,34 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       collectionIds,
     }).then(() => undefined)
   }, [isEnterpriseSpace, session])
+
+  // POO-196: the project-context surface (tab strip data + @ mention) exists
+  // only for a session bound to the COMMITTED enterprise space. The session's
+  // productSpaceId is read structurally: the field is being added to the
+  // shared Session contract, and the structural read keeps this file compiling
+  // (and correct at runtime) whether or not the type declaration has landed.
+  const sessionProductSpaceId = (session as { productSpaceId?: string } | null)?.productSpaceId
+    ?? null
+  const isProjectSession = !!sessionProductSpaceId
+    && isEnterpriseSpace
+    && productSpace?.activeProductSpaceId === sessionProductSpaceId
+  // U13: project sessions (and the project empty state, which passes its own
+  // flag) get the stable project composer presentation; the ChatPage prop
+  // (its committed-scope authority) wins when provided, the structural read
+  // backfills for direct mounts.
+  const projectComposerMode = projectComposer ?? isProjectSession
+  const projectAssetMention = React.useMemo(() => (
+    isProjectSession && session && workspaceId
+      ? {
+        search: (q: string) => window.electronAPI.pcSearchAssets({
+          workspaceId,
+          productSpaceId: sessionProductSpaceId!,
+          q,
+          limit: 20,
+        }),
+      }
+      : undefined
+  ), [isProjectSession, session, workspaceId, sessionProductSpaceId])
 
   // Input is only disabled when explicitly disabled (e.g., agent needs activation)
   // User can type during streaming - submitting will stop the stream and send
@@ -1342,7 +1415,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
   // kbOptions mirrors the FreeFormInput onSubmit 4th parameter shape (POO-108)
-  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }, elementReferences?: WebElementReference[]) => {
+  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }, elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => {
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
       includeTopSeparator: hasBaseMessage,
@@ -1354,7 +1427,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
-    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds, elementReferences)
+    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds, elementReferences, projectAssetRefs)
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
     // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
@@ -1876,6 +1949,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             sessionId={session?.id}
                             workspaceId={session?.workspaceId}
                             compactMode={compactMode}
+                            canShareToProject={projectShareEnabled}
+                            onShareToProject={onShareToProject}
                           />
                         </div>
                       )
@@ -1902,15 +1977,27 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             onOpenUrl={onOpenUrl}
                             onOpenSourceUrl={onOpenSourceUrl}
                             sessionId={session?.id}
-                            onRetry={turn.message.role === 'error' ? () => {
-                              const msgs = session?.messages
-                              if (!msgs) return
-                              const errorIdx = msgs.findIndex(m => m.id === turn.message.id)
-                              const lastUserMsg = msgs.slice(0, errorIdx).findLast(m => m.role === 'user')
-                              if (lastUserMsg) {
-                                onSendMessage(lastUserMsg.content)
+                            onRetry={(() => {
+                              // R-AT: error bubbles keep their existing retry;
+                              // the interrupted marker gains a resend affordance
+                              // that is interactive ONLY at the transcript tail —
+                              // a stale marker mid-history must never resend
+                              // ancient context.
+                              const isError = turn.message.role === 'error'
+                              const isInterrupted = turn.message.role === 'info'
+                                && turn.message.statusType === 'response_interrupted'
+                              if (!isError && !isInterrupted) return undefined
+                              if (isInterrupted && turns.slice(index + 1).some(t => t.type === 'user')) return undefined
+                              return () => {
+                                const msgs = session?.messages
+                                if (!msgs) return
+                                const markerIdx = msgs.findIndex(m => m.id === turn.message.id)
+                                const lastUserMsg = msgs.slice(0, markerIdx).findLast(m => m.role === 'user')
+                                if (lastUserMsg) {
+                                  onSendMessage(lastUserMsg.content)
+                                }
                               }
-                            } : undefined}
+                            })()}
                           />
                         </div>
                       )
@@ -2192,10 +2279,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             statusBanner={inputStatusBanner}
             inputProps={{
               placeholder,
+              projectComposer: projectComposerMode,
               disabled: isInputDisabled,
               isProcessing: session.isProcessing,
               onAnimatedHeightChange: handleAnimatedHeightChange,
               onSubmit: handleSubmit,
+              submitGate,
+              gateNotice,
               onStop: handleStop,
               textareaRef,
               currentModel,
@@ -2208,6 +2298,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onAttachmentsChange,
               elementReferencesValue,
               onElementReferencesChange,
+              projectAssetRefsValue: isProjectSession ? projectAssetRefsValue : undefined,
+              onProjectAssetRefsChange: isProjectSession ? onProjectAssetRefsChange : undefined,
+              projectAssetMention,
               sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
               onSourcesChange,
@@ -2407,6 +2500,10 @@ interface MessageBubbleProps {
   compactMode?: boolean
   /** Callback to resend the user message that preceded an error */
   onRetry?: () => void
+  /** S-01: whether this session can share into the project library at all. */
+  canShareToProject?: boolean
+  /** S-01: opens the share dialog for this message. */
+  onShareToProject?: (message: Message) => void
 }
 
 /**
@@ -2497,13 +2594,30 @@ function MessageBubble({
   onPopOut,
   compactMode,
   onRetry,
+  canShareToProject = false,
+  onShareToProject,
 }: MessageBubbleProps) {
   const { t } = useTranslation()
 
   // === USER MESSAGE: Right-aligned bubble with attachments above ===
   if (message.role === 'user') {
     return (
-      <div>
+      <div className="group/msg relative">
+        {/* S-01: the share entry sits on the free left side of the right-aligned
+            bubble and appears on hover, mirroring the assistant pop-out. */}
+        {canShareToProject && onShareToProject && (
+          <button
+            type="button"
+            onClick={() => onShareToProject(message)}
+            data-touch-reveal="true"
+            className="absolute left-0 top-1 rounded-[8px] p-1.5 opacity-0 transition-opacity hover:bg-foreground/5 group-hover/msg:opacity-100"
+            title={t('projectContext.share.entryTitle')}
+            aria-label={t('projectContext.share.entryTitle')}
+            data-testid={`pc-share-message-${message.id}`}
+          >
+            <FolderUp className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+          </button>
+        )}
         <UserMessageBubble
           content={message.content}
           attachments={message.attachments}
@@ -2516,6 +2630,13 @@ function MessageBubble({
         />
         {message.kbReferences && message.kbReferences.length > 0 && (
           <KbReferenceChips references={message.kbReferences} workspaceId={workspaceId} />
+        )}
+        {/* POO-196: the persisted @ project-asset snapshot with its per-reference
+            outcome; references that did not resolve say so instead of vanishing. */}
+        {readMessageProjectAssetRefs(message).length > 0 && (
+          <div className="flex justify-end">
+            <ProjectAssetChip references={readMessageProjectAssetRefs(message)} mode="message" />
+          </div>
         )}
         {/* POO-135: point-in-time web element snapshots attached at send time. */}
         {message.elementReferences && message.elementReferences.length > 0 && (
@@ -2614,6 +2735,30 @@ function MessageBubble({
     }[level]
     const Icon = config.icon
 
+    // R-AT (体验闭环 F5): the interrupted marker carries a resend affordance —
+    // the interrupted request text is one click away instead of requiring the
+    // user to scroll up, copy and re-type (零基础恢复路径). The button renders
+    // only when the host wired onRetry AND no user message follows the marker
+    // (stale markers mid-history stay inert).
+    if (message.statusType === 'response_interrupted' && onRetry) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 text-[13px] select-none text-muted-foreground">
+          <div className="w-3 h-3 flex items-center justify-center shrink-0">
+            <Icon className="w-3 h-3" />
+          </div>
+          <span>{message.content}</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            data-testid="chat-interrupted-resend"
+            className="ml-1 rounded-[6px] border border-border px-2 py-0.5 text-[12px] text-foreground transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t('chat.resendLastMessage')}
+          </button>
+        </div>
+      )
+    }
+
     return (
       <div className={cn('flex items-center gap-2 px-3 py-1 text-[14px] select-none', config.className)}>
         <div className="w-3 h-3 flex items-center justify-center shrink-0">
@@ -2662,7 +2807,10 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.workspaceId === next.workspaceId &&
     prev.message.kbReferences === next.message.kbReferences &&
     prev.message.elementReferences === next.message.elementReferences &&
+    readMessageProjectAssetRefs(prev.message) === readMessageProjectAssetRefs(next.message) &&
     prev.compactMode === next.compactMode &&
-    prev.onOpenSourceUrl === next.onOpenSourceUrl
+    prev.onOpenSourceUrl === next.onOpenSourceUrl &&
+    prev.canShareToProject === next.canShareToProject &&
+    prev.onShareToProject === next.onShareToProject
   )
 })

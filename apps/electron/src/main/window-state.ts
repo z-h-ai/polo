@@ -1,8 +1,8 @@
 import { writeFileSync, existsSync, mkdirSync } from 'fs'
 import { readJsonFileSync } from '@polo-ai/shared/utils/files'
+import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 import { mainLog } from './logger'
 import { join } from 'path'
-import { homedir } from 'os'
 
 export interface WindowBounds {
   x: number
@@ -29,7 +29,9 @@ export interface WindowState {
   lastFocusedWorkspaceId?: string
 }
 
-const CONFIG_DIR = join(homedir(), '.polo-ai')
+// R-AT: resolve via the shared multi-instance-aware CONFIG_DIR (honors
+// POLO_AI_CONFIG_DIR) — the previous hardcoded ~/.polo-ai made isolated
+// instances share (and clobber) one window-state file.
 const WINDOW_STATE_FILE = join(CONFIG_DIR, 'window-state.json')
 
 /**

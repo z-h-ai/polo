@@ -1,5 +1,15 @@
 import type { z } from 'zod';
 import type { AppRuntimeStartInput, BillingRuntimeUsageInput, BillingRuntimeFinishInput, BillingRuntimeAdmissionInput, billingRuntimeAdmissionResponseSchema, billingRuntimeRequestResponseSchema } from './billing-runtime-contract';
+// POO-196: the project-context surface puts stable `pc_*` codes on the wire.
+// They join the AdminErrorCode union by type so AdminError can carry them
+// verbatim — the generated contract (project-context-contract.ts) stays the
+// single source of truth for the code list.
+import type { PcErrorCode } from './project-context-contract.ts';
+// POO-196 追加轮: the client-enterprise surface puts its own stable codes on
+// the wire (unprefixed, owned by the generated contract). Same registration
+// pattern as `pc_*` — they join the AdminErrorCode union by type so AdminError
+// can carry them; the ADMIN_ERROR_CODES passthrough set spreads the same list.
+import type { ClientEnterpriseErrorCode } from './client-enterprise-contract.ts';
 import type { LlmConnection } from '../config/llm-connections.ts';
 export type {
   CreatorArtifact,
@@ -514,7 +524,16 @@ export type AdminErrorCode =
   | 'budget_exhausted'
   | 'run_finalized'
   | 'account_transition_pending'
-  | PhoneAuthErrorCode;
+  | PhoneAuthErrorCode
+  // POO-196 project-context wire codes (`pc_*`), owned by the generated
+  // contract; SAFE_ADMIN_ERROR_MESSAGES carries no entries for these — the
+  // generic 'Admin request failed' fallback is intentional and callers
+  // (server-core) branch on the code itself.
+  | PcErrorCode
+  // POO-196 追加轮 client-enterprise wire codes, owned by the generated
+  // contract; SAFE_ADMIN_ERROR_MESSAGES carries no entries for these — the
+  // generic fallback is intentional and server-core branches on the code.
+  | ClientEnterpriseErrorCode;
 
 export interface AdminErrorDetails {
   retryAfter?: number;

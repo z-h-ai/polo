@@ -1,14 +1,16 @@
 import { WorkbenchMenuSubContent } from '@/components/ui/workbench-controls'
-import { Check, Building2 } from 'lucide-react'
+import { Check, Building2, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   DropdownMenuSub,
   StyledDropdownMenuSubTrigger,
   StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
 } from '@/components/ui/styled-dropdown'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { cn } from '@/lib/utils'
 import { productSpaceAvatarGlyph } from '@/lib/space-initial'
+import { useProductSpacesRefresh } from './useProductSpacesRefresh'
 
 function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
   return kind === 'personal'
@@ -19,6 +21,8 @@ function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
 export function ProductSpaceSwitcher() {
   const { t } = useTranslation()
   const space = useOptionalProductSpaceContext()
+  // X2-11: called before the early returns — hooks never sit behind them.
+  const { refreshProductSpaces } = useProductSpacesRefresh()
   if (!space) return null
 
   const active = space.activeProductSpace
@@ -82,6 +86,20 @@ export function ProductSpaceSwitcher() {
             </StyledDropdownMenuItem>
           )
         })}
+        {/* POO-196 R3 P11: the「创建项目」entry was REMOVED from the space
+            menu — the home「项目」区域 is now the only create entry (its
+            create button + hosted dialog are reachable from every space's
+            home, so personal-only accounts no longer depend on this menu).
+            Refresh stays: it is the visible re-read after accepting an invite
+            elsewhere. */}
+        <StyledDropdownMenuSeparator />
+        <StyledDropdownMenuItem
+          data-testid="product-space-refresh"
+          onClick={() => { void refreshProductSpaces(() => space.onRefreshProductSpaces()) }}
+        >
+          <RefreshCw className="size-3.5" />
+          {t('createProject.refreshAction')}
+        </StyledDropdownMenuItem>
       </WorkbenchMenuSubContent>
     </DropdownMenuSub>
   )

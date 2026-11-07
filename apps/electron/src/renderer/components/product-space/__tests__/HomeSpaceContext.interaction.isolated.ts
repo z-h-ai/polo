@@ -18,6 +18,7 @@ const circles = [
 function withProvider(props: {
   spaceName: string
   spaceKind: 'personal' | 'enterprise' | null
+  spaceCategory?: 'organization' | 'project' | 'personal' | 'unknown'
   creatorCircles: Array<{ circleId: string; name: string }>
   spaceKey?: string
 }) {
@@ -31,6 +32,7 @@ function withProvider(props: {
 function renderWithContext(props: {
   spaceName: string
   spaceKind: 'personal' | 'enterprise' | null
+  spaceCategory?: 'organization' | 'project' | 'personal' | 'unknown'
   creatorCircles: Array<{ circleId: string; name: string }>
 }) {
   return render(
@@ -178,5 +180,72 @@ describe('HomeSpaceContext — 我的圈子 relation entry (REQ-022)', () => {
 
     expect(screen.queryByTestId('product-space-relation-my-circles')).toBeNull()
     expect(screen.queryByTestId('product-space-relation-my-circles-view')).toBeNull()
+  })
+})
+
+describe('HomeSpaceContext — UB5 (U14) 空间身份层级', () => {
+  it('classifies the title from the authoritative spaceCategory — organization / project / personal / unknown — with the real name verbatim', () => {
+    // The committed name deliberately contains「项目空间」: the category
+    // prefix never strips or rewrites the user-chosen name.
+    const cases = [
+      { spaceCategory: 'organization', expected: '当前单位：Apollo 项目空间' },
+      { spaceCategory: 'project', expected: '当前项目：Apollo 项目空间' },
+      { spaceCategory: 'personal', expected: '个人空间：Apollo 项目空间' },
+      { spaceCategory: 'unknown', expected: '当前空间：Apollo 项目空间' },
+    ] as const
+    for (const item of cases) {
+      const view = renderWithContext({
+        spaceName: 'Apollo 项目空间',
+        spaceKind: item.spaceCategory === 'personal' ? 'personal' : 'enterprise',
+        spaceCategory: item.spaceCategory,
+        creatorCircles: [],
+      })
+      expect(screen.getByTestId('home-space-context-title').textContent).toBe(item.expected)
+      // The name is never rendered raw — the category template wraps it.
+      expect(screen.queryByText('Apollo 项目空间')).toBeNull()
+      view.unmount()
+    }
+  })
+
+  it('defaults to the neutral 当前空间 face when no category is provided (fail-closed, never a wrong commitment)', () => {
+    renderWithContext({
+      spaceName: '未分类空间',
+      spaceKind: 'enterprise',
+      creatorCircles: [],
+    })
+    expect(screen.getByTestId('home-space-context-title').textContent).toBe('当前空间：未分类空间')
+  })
+
+  it('renders the compact default state — 8px vertical padding, 13px semibold name, 12px secondary description on one wrapping row', () => {
+    renderWithContext({
+      spaceName: '很长很长的空间名称很长很长的空间名称很长很长的空间名称很长很长的空间名称',
+      spaceKind: 'enterprise',
+      spaceCategory: 'organization',
+      creatorCircles: [],
+    })
+    const section = screen.getByTestId('home-space-context')
+    expect(section.className).toContain('py-[8px]')
+    const title = screen.getByTestId('home-space-context-title')
+    expect(title.className).toContain('text-[13px]')
+    expect(title.className).toContain('font-semibold')
+    expect(title.className).toContain('min-w-0')
+    const description = screen.getByText('发布到当前空间的应用。')
+    expect(description.className).toContain('text-[12px]')
+    expect(description.className).toContain('text-muted-foreground')
+  })
+
+  it('keeps the circles entry personal-only beside the compact identity row and the relation view intact', () => {
+    const view = renderWithContext({
+      spaceName: '我的空间',
+      spaceKind: 'personal',
+      spaceCategory: 'personal',
+      creatorCircles: circles,
+    })
+    expect(screen.getByTestId('home-space-context-title').textContent).toBe('个人空间：我的空间')
+    fireEvent.click(screen.getByTestId('product-space-relation-my-circles'))
+    expect(screen.getByTestId('product-space-relation-my-circles-view')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('product-space-relation-my-circles-back'))
+    expect(screen.getByTestId('home-space-context-title').textContent).toBe('个人空间：我的空间')
+    view.unmount()
   })
 })

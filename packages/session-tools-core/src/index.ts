@@ -124,7 +124,6 @@ export {
   validateRequestUserInputArgs,
   parseRequestUserInputArgs,
 } from './question-types.ts';
-
 export type {
   RequestUserInputOptionArgs,
   RequestUserInputQuestionArgs,
@@ -158,6 +157,17 @@ export type {
   GoalUpdateCandidate,
   GoalUpdateReport,
 } from './goal-types.ts';
+
+// Project context protocol (project_context_search/read) — POO-196
+export {
+  ProjectContextSearchArgsSchema,
+  ProjectContextReadArgsSchema,
+} from './project-context-types.ts';
+
+export type {
+  ProjectContextSearchHit,
+  ProjectContextFacade,
+} from './project-context-types.ts';
 
 // Session MCP server spawn spec (dependency-free leaf — see spawn-spec.ts)
 export { buildSessionMcpServerArgs } from './spawn-spec.ts';
@@ -222,6 +232,9 @@ export {
   handleRequestUserInput,
   // Goal Update (POO-134 structured goal reporting)
   handleGoalUpdate,
+  // Project Context (POO-196 shared project file area)
+  handleProjectContextSearch,
+  handleProjectContextRead,
   // Update Preferences
   handleUpdatePreferences,
   // Transform Data

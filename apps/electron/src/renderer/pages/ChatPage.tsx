@@ -32,6 +32,19 @@ import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sendFailureAtomFamily, sessionMetaMapAtom } from '@/atoms/sessions'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
+import { projectAssetDraftRefsAtomFamily, type ProjectAssetMentionDraft } from '@/atoms/project-context'
+import { ProjectContextTabs, type ProjectContextTab } from '@/components/project-context/ProjectContextTabs'
+import { ProjectFileLibrary } from '@/components/project-context/ProjectFileLibrary'
+import { ProjectPinPane } from '@/components/project-context/ProjectPinPane'
+import { ShareToProjectDialog, type ShareToProjectTarget } from '@/components/project-context/ShareToProjectDialog'
+import { ProjectMembersEntryLabel, ProjectMembersPanel } from '@/components/project-context/ProjectMembersPanel'
+import { useProjectMembersPanelHost } from '@/components/project-context/useProjectMembersPanelHost'
+import { useCollaborationRoster } from '@/components/project-context/useCollaborationRoster'
+import { useRightPanePresentation } from '@/hooks/use-right-pane-presentation'
+import { canvasPaneAppAtomFamily, canvasPanePopoutAtomFamily } from '@/atoms/canvas-pane'
+import { useProjectEntryPending } from '@/hooks/useProjectEntry'
+import { projectEntryAtom, projectEntrySendNoticesAtom, isEntryPendingState } from '@/atoms/project-entry'
+import { createEnterpriseWorkflowUrl } from '@/lib/enterprise-workflow-url'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
@@ -106,6 +119,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     chatDisplayRef,
     onChatMatchInfoChange,
     isFocusedPanel,
+    filePreview,
+    filePreviewVisible,
   } = useAppShellContext()
 
   // Use the unified session options hook for clean access
@@ -321,6 +336,247 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const handleElementRefsChange = React.useCallback((refs: import('@polo-ai/core/types').WebElementReference[]) => {
     store.set(elementDraftRefsAtomFamily(sessionId), refs)
   }, [sessionId, store])
+
+  // POO-196: the per-session draft of @ project-asset mentions (same shape
+  // and lifecycle as the element references above — a jotai draft that dies
+  // with the session unless it rides a send).
+  const projectAssetRefsValue = useAtomValue(
+    React.useMemo(() => projectAssetDraftRefsAtomFamily(sessionId), [sessionId]),
+  )
+  const handleProjectAssetRefsChange = React.useCallback((refs: ProjectAssetMentionDraft[]) => {
+    store.set(projectAssetDraftRefsAtomFamily(sessionId), refs)
+  }, [sessionId, store])
+
+  // POO-196: the business tab strip (消息 / 文件 / Pin) exists only for a
+  // session bound to the COMMITTED enterprise product space. Both ids are
+  // read structurally: the productSpaceId fields are landing with the
+  // shared-layer work, and structural reads keep this page compiling (and
+  // correct at runtime) either way.
+  const [projectTab, setProjectTab] = React.useState<ProjectContextTab>('messages')
+  // POO-196 R3 (P8/D8 degradation trigger ②): a browser/canvas/file-preview
+  // pane occupying the right column forces the DRAWER form. Read from the
+  // SAME atoms/hooks AppShell renders the pane from — these stay set while a
+  // drawer merely suspends the native views, so occupancy can never be
+  // misread as "the tool was closed" (D8).
+  const contextFilePreviewVisible = Boolean(filePreview && filePreviewVisible)
+  const chatCanvasApp = useAtomValue(canvasPaneAppAtomFamily(sessionId))
+  const chatCanvasPresentation = useAtomValue(canvasPanePopoutAtomFamily(sessionId))
+  const chatSidebarCanvas = chatCanvasApp && !chatCanvasPresentation?.poppedOut && chatCanvasPresentation?.isVisible !== false
+    ? chatCanvasApp
+    : null
+  const chatRemoteWorkspaceId = React.useMemo(
+    () => workspaces.find((w) => w.id === activeWorkspaceId)?.remoteServer?.remoteWorkspaceId ?? null,
+    [workspaces, activeWorkspaceId],
+  )
+  const { browserSlotOpen: chatBrowserSlotOpen } = useRightPanePresentation({
+    currentSessionId: sessionId,
+    activeWorkspaceId: activeWorkspaceId ?? null,
+    remoteWorkspaceId: chatRemoteWorkspaceId,
+    fileVisible: contextFilePreviewVisible,
+    canvasVisible: Boolean(chatSidebarCanvas),
+  })
+  const membersToolPaneOccupied = contextFilePreviewVisible || Boolean(chatSidebarCanvas) || chatBrowserSlotOpen
+  const sessionProductSpaceId = (session as { productSpaceId?: string } | null)?.productSpaceId
+    ?? (sessionMeta as { productSpaceId?: string } | null)?.productSpaceId
+    ?? null
+  const activeProductSpace = productSpace?.activeProductSpace
+  const isProjectSession = !!sessionProductSpaceId
+    && activeProductSpace?.kind === 'enterprise'
+    && activeProductSpace.id === sessionProductSpaceId
+  const projectScope = React.useMemo(() => (
+    isProjectSession && activeWorkspaceId && sessionProductSpaceId
+      ? { workspaceId: activeWorkspaceId, productSpaceId: sessionProductSpaceId }
+      : null
+  ), [isProjectSession, activeWorkspaceId, sessionProductSpaceId])
+  const showProjectTabs = isProjectSession && projectScope !== null
+  // POO-196 R3 (P8/D8): the members PANEL is project-level and shared by BOTH
+  // ChatPage branches (with-messages and skeleton). The host hook owns the
+  // open state, the push/drawer form factor (lane measurement + tool-pane
+  // occupancy) and the drawer's native-pane suspension.
+  const membersLaneRef = React.useRef<HTMLDivElement | null>(null)
+  const membersTriggerRef = React.useRef<HTMLButtonElement | null>(null)
+  // P9 entry roster: the ALL-ROLES collaboration projection (never the
+  // management roster) feeds the header「成员 N」stack and the panel alike.
+  const membersRoster = useCollaborationRoster(showProjectTabs && productSpace && projectScope
+    ? { accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }
+    : null)
+  // U7 entry authority + UB4 (U5) invite capability: the roster viewerRole is
+  // the live authority; a roster 403 (real lost access) removes the glyph and
+  // the onboarding auto-open whatever the space summary said.
+  const membersEntryLostAccess = membersRoster.errorKey === 'projectMembers.error.forbidden'
+  const membersEntryRole = membersEntryLostAccess
+    ? null
+    : (membersRoster.viewerRole ?? (activeProductSpace?.kind === 'enterprise' ? activeProductSpace.role : null))
+  const membersCanInvite = membersEntryRole === 'owner' || membersEntryRole === 'manager'
+  const membersPanelHost = useProjectMembersPanelHost({
+    enabled: showProjectTabs,
+    laneRef: membersLaneRef,
+    toolPaneOccupied: membersToolPaneOccupied,
+    triggerRef: membersTriggerRef,
+    // UB4 (U5): this ChatPage IS the conversation host for a recovered
+    // create whose landing has history (「已有历史的恢复落点也由 ChatPage
+    // 接住」) — the one-time intent is consumed HERE when the entry is ready
+    // on the committed target and this viewer may invite; the panel opens
+    // straight on the 添加成员 selection page.
+    onboardingScope: showProjectTabs && projectScope && productSpace
+      ? { accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }
+      : null,
+    canInvite: membersCanInvite,
+    // 「关闭后聚焦输入框」— the composer is this page's input.
+    onOnboardingClosed: () => dispatchFocusInputEvent({ sessionId }),
+  })
+  const handleOpenProjectMembers = membersPanelHost.openPanel
+  // POO-196 R3 D13.1 + UB2 U11: the entry-in-flight fence. The PRIMARY gate
+  // is the composer's synchronous admission callback (submitGate below — it
+  // refuses INSIDE FreeFormInput before the draft clears/annotation markers),
+  // while THIS deep pending check in the send handler stays as the backstop
+  // for any path that might bypass the composer gate. A ref keeps the
+  // callbacks reading the live value without being rebuilt on every atom tick.
+  const entryState = useAtomValue(projectEntryAtom)
+  const entryPending = useProjectEntryPending()
+  const entryPendingRef = React.useRef(entryPending)
+  entryPendingRef.current = entryPending
+  // U11 notice markers: a USER-triggered blocked send records ONE contentless
+  // marker (account/project/draft-key/generation) that drives the
+  // post-landing「请点击发送」/「返回原对话」guidance. Consumed by actually
+  // sending the draft; purged wholesale when the account changes (in the
+  // shared entry owner).
+  const setSendNotices = useSetAtom(projectEntrySendNoticesAtom)
+  const sendNotices = useAtomValue(projectEntrySendNoticesAtom)
+  const recordBlockedSendNotice = React.useCallback((draftKey: string, draftProject: string | null) => {
+    const entry = entryState
+    const account = productSpace?.accountId ?? null
+    if (!account) return
+    setSendNotices(notices => [
+      ...notices.filter(notice => !(notice.accountId === account && notice.draftKey === draftKey)),
+      {
+        accountId: account,
+        productSpaceId: draftProject ?? entry.productSpaceId ?? '',
+        draftKey,
+        generation: entry.generation,
+      },
+    ])
+  }, [entryState, productSpace?.accountId, setSendNotices])
+  const clearSendNotice = React.useCallback((draftKey: string) => {
+    const account = productSpace?.accountId
+    if (!account) return
+    setSendNotices(notices => notices.filter(notice => !(notice.accountId === account && notice.draftKey === draftKey)))
+  }, [productSpace?.accountId, setSendNotices])
+  // The composer's admission gate: refuses ONLY while an entry is in flight —
+  // the draft belongs to ITS conversation and a failure/scope-mismatch is the
+  // deep check's business, not the gate's.
+  const submitGate = React.useCallback(() => {
+    if (!entryPendingRef.current) return true
+    recordBlockedSendNotice(sessionId, sessionProductSpaceId)
+    toast.error(t('project.entry.sendBlocked'))
+    return false
+  }, [recordBlockedSendNotice, sessionProductSpaceId, sessionId, t])
+  // U11 persistent notice above the input: the waiting-time prompt while an
+  // entry is in flight, then the landing guidance for a recorded blocked
+  // draft —「请点击发送」in the original conversation,「返回原对话」elsewhere.
+  const gateNotice = React.useMemo(() => {
+    if (isEntryPendingState(entryState)) return t('project.entry.sendBlocked')
+    const account = productSpace?.accountId ?? null
+    if (!account) return null
+    // The marker for THIS conversation wins (sendReady); any other retained
+    // draft of the same account shows the「返回原对话」guidance.
+    const mine = sendNotices.find(notice => notice.accountId === account && notice.draftKey === sessionId)
+      ?? sendNotices.find(notice => notice.accountId === account)
+    if (!mine) return null
+    if (mine.draftKey === sessionId) {
+      const retainedDraft = (inputValueRef.current.trim().length > 0)
+        || attachmentsValue.length > 0
+        || elementRefsValue.length > 0
+        || projectAssetRefsValue.length > 0
+      return retainedDraft ? t('project.entry.sendReady') : null
+    }
+    return t('project.entry.sendRetainedElsewhere')
+    // F1 (glm review): depend on the draft VALUE (not the ref identity) so the
+    // notice recomputes — and a cleared original draft consumes its marker.
+    }, [attachmentsValue, elementRefsValue, entryState, inputValue, productSpace?.accountId, projectAssetRefsValue, sendNotices, sessionId, t])
+  React.useEffect(() => {
+    // A session switch resets to 消息 (default tab — the current behavior) and
+    // closes the members panel with it (the panel instance survives the
+    // switch, so a stale `open` state would resurrect it on the way back).
+    setProjectTab('messages')
+    membersPanelHost.closePanel()
+  }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps -- closePanel identity is stable; the guard keeps the switch scoped to sessionId
+  const projectPaneVisible = showProjectTabs && projectTab !== 'messages'
+  // (The P9 entry roster feeds the host hook above — declared there once.)
+  // D-C: the controlled external「前往企业管理」handoff — the same fail-closed
+  // click-time check TopBar performs, re-derived from the LIVE scope at click
+  // time; the desktop Bearer never rides the URL.
+  const handleOpenEnterpriseManagement = React.useCallback(async () => {
+    const scope = productSpace
+    const space = scope?.activeProductSpace
+    if (!scope || scope.pendingSwitch || !space || space.kind !== 'enterprise') return
+    if (space.role !== 'owner' && space.role !== 'manager') return
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      if (!status.loggedIn || !status.adminUrl || status.userId !== scope.accountId) {
+        toast.error(t('topbar.account.enterpriseOpenFailed'), { description: t('homeApps.errors.staleContext') })
+        return
+      }
+      await window.electronAPI.openUrl(
+        createEnterpriseWorkflowUrl(status.adminUrl, space.enterpriseId, 'members'),
+      )
+    } catch {
+      toast.error(t('topbar.account.enterpriseOpenFailed'))
+    }
+  }, [productSpace, t])
+  // One panel element, rendered inside BOTH return branches so the skeleton
+  // (messages-still-loading) session offers the same members entry. The push
+  // form sits INSIDE the lane row (a flex sibling); the drawer portals itself.
+  const projectMembersPanel = showProjectTabs && projectScope && productSpace && activeProductSpace?.kind === 'enterprise'
+    ? (
+      <ProjectMembersPanel
+        open={membersPanelHost.open}
+        mode={membersPanelHost.mode}
+        scope={{ accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }}
+        projectName={activeProductSpace.name}
+        viewerRole={activeProductSpace.role}
+        assertedEnterpriseId={activeProductSpace.enterpriseId}
+        roster={membersRoster}
+        onClose={membersPanelHost.closePanel}
+        onOpenEnterpriseManagement={() => { void handleOpenEnterpriseManagement() }}
+        initialDirectory={membersPanelHost.directoryLanding}
+        onboardingOpen={membersPanelHost.onboardingAutoOpen}
+      />
+    )
+    : null
+  // P9 header entry (U7 button): 「成员 N」 with up to three roster avatars,
+  // a trailing add-member glyph for owner/manager, ≥32px tall with a border
+  // + light fill. The roster-unknown fallback is the plain icon + label —
+  // never a fabricated count. D11 keeps the pc-members-button testid and the
+  // uniqueness: the tab strip no longer carries any members affordance.
+  // (The roster/role computation lives with the host hook above.)
+  const membersEntryButton = showProjectTabs ? (
+    <button
+      type="button"
+      ref={membersTriggerRef}
+      data-testid="pc-members-button"
+      aria-label={t(membersCanInvite ? 'projectMembers.openMembersAndInvite' : 'projectMembers.buttonAria')}
+      aria-haspopup="dialog"
+      aria-expanded={membersPanelHost.open}
+      onClick={handleOpenProjectMembers}
+      className="inline-flex h-8 min-h-[32px] shrink-0 items-center gap-1.5 rounded-[6px] border border-border bg-foreground-5 px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+    >
+      <ProjectMembersEntryLabel roster={membersRoster} showInviteAffordance={membersCanInvite} />
+    </button>
+  ) : null
+  // X6: both project panes stay MOUNTED (hidden) across tab flips, so a
+  // 消息 round-trip no longer discards scroll position, in-flight previews or
+  // an open upload dialog. The key folds the workspace + product space in, so
+  // an account or space switch remounts them and their state can never leak
+  // across scopes. Pin mutations tick a counter the files tab watches to
+  // re-sync its pinned rows (the dead `onChanged` contract, now wired).
+  const [pinsVersion, setPinsVersion] = React.useState(0)
+  const handlePinsChanged = React.useCallback(() => setPinsVersion((version) => version + 1), [])
+  const projectPaneKey = `${activeWorkspaceId ?? ''}::${sessionProductSpaceId ?? ''}`
+
+  // S-01: the message staged for "share to project". Non-null opens the
+  // dialog; a successful share lands the files and flips to the Files tab.
+  const [shareTarget, setShareTarget] = React.useState<ShareToProjectTarget | null>(null)
 
   // Journey #8: a failed local send leaves a session-scoped prompt (not a
   // message). The explicit action restores the preserved draft into the
@@ -579,6 +835,25 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setRenameDialogOpen(false)
   }, [sessionId, renameName, displayTitle, onRenameSession])
 
+  // S-01: staging a share snapshots {text, attachments, sessionTitle} at
+  // share-click time instead of keeping the live message. ChatPage re-renders
+  // on session streaming and metadata updates; a target rebuilt per render
+  // would hand the dialog a fresh reference, re-run its init effect, and
+  // silently wipe whatever the user had already typed there (name, tags,
+  // source note). The stable snapshot keeps the dialog's edits intact.
+  const handleShareToProject = React.useCallback((message: import('../../shared/types').Message) => {
+    setShareTarget({
+      text: message.content,
+      attachments: message.attachments ?? [],
+      sessionTitle: displayTitle,
+    })
+  }, [displayTitle])
+  const handleSharedToProject = React.useCallback((shared: import('@polo-ai/shared/protocol').PcAssetDto[]) => {
+    setShareTarget(null)
+    setProjectTab('files')
+    toast.success(t('projectContext.toast.shared', { count: shared.length }))
+  }, [t])
+
   const handleFlag = React.useCallback(() => {
     onFlagSession(sessionId)
   }, [sessionId, onFlagSession])
@@ -747,7 +1022,20 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     )
   }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta, t])
 
-  const headerActions = isCompactMode ? compactInfoButton : shareButton
+  // Members entry (project sessions only) rides BEFORE the share/info control
+  // in the header actions slot — desktop and compact alike (P9: the entry is
+  // the header's own; the drawer it opens stays reachable on narrow windows).
+  const headerActions = isCompactMode ? (
+    <div className="flex items-center">
+      {membersEntryButton}
+      {compactInfoButton}
+    </div>
+  ) : (
+    <div className="flex items-center">
+      {membersEntryButton}
+      {shareButton}
+    </div>
+  )
 
   // Build title menu content for chat sessions using shared SessionMenu.
   // Desktop uses Radix DropdownMenu via PanelHeader; compact mode uses a
@@ -843,53 +1131,89 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
       return (
         <>
-          <div className="h-full flex flex-col">
-            <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-            <div className="flex-1 flex flex-col min-h-0">
-              <ChatDisplay
-                ref={chatDisplayRef}
-                session={skeletonSession}
-                onSendMessage={() => {}}
-                onOpenFile={handleOpenFile}
-                onOpenUrl={handleOpenUrl}
-                onOpenSourceUrl={openSourceUrl}
-                currentModel={effectiveModel}
-                pendingPermission={undefined}
-                onRespondToPermission={onRespondToPermission}
-                pendingCredential={undefined}
-                onRespondToCredential={onRespondToCredential}
-                pendingQuestion={undefined}
-                onRespondToQuestion={onRespondToQuestion}
-                permissionMode={sessionOpts.permissionMode}
-                onPermissionModeChange={setPermissionMode}
-                enabledModes={enabledModes}
-                inputValue={inputValue}
-                onInputChange={handleInputChange}
-                attachmentsValue={attachmentsValue}
-                onAttachmentsChange={handleAttachmentsChange}
-                elementReferencesValue={elementRefsValue}
-                onElementReferencesChange={handleElementRefsChange}
-                sources={enabledSources}
-                skills={skills}
-                sessionStatuses={sessionStatuses}
-                onSessionStatusChange={handleSessionStatusChange}
-                workspaceId={activeWorkspaceId || undefined}
-                onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
-                workingDirectory={sessionMeta.workingDirectory}
-                onWorkingDirectoryChange={handleWorkingDirectoryChange}
-                messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-                messagesLoadError={messageLoadState.error === MESSAGES_UNAVAILABLE_SENTINEL ? t('chat.messagesUnavailable') : messageLoadState.error}
-                messagesRetrying={messagesRetrying}
-                onRetryMessagesLoad={handleRetryMessagesLoad}
-                searchQuery={sessionListSearchQuery}
-                isSearchModeActive={isSearchModeActive}
-                onMatchInfoChange={onChatMatchInfoChange}
-                connectionUnavailable={connectionUnavailable}
-                disabled={isChatInputDisabled}
-                inputStatusBanner={inputStatusBanner}
-                compactMode={!!isCompactMode}
-              />
+          {/* The chat lane (D8 measurement node): its content-box width is
+              identical before and after the panel inserts itself, so one
+              ResizeObserver serves the pre-insert lane width in both host
+              forms. Push rides inside as a flex sibling; drawer portals out. */}
+          <div ref={membersLaneRef} className="h-full flex min-h-0 min-w-0">
+            <div className="h-full flex min-h-0 min-w-0 flex-1 flex-col">
+              <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+              {showProjectTabs && (
+                <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
+              )}
+              <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
+                <ChatDisplay
+                  ref={chatDisplayRef}
+                  session={skeletonSession}
+                  onSendMessage={() => {}}
+                  submitGate={submitGate}
+                  gateNotice={gateNotice}
+                  onOpenFile={handleOpenFile}
+                  onOpenUrl={handleOpenUrl}
+                  onOpenSourceUrl={openSourceUrl}
+                  currentModel={effectiveModel}
+                  pendingPermission={undefined}
+                  onRespondToPermission={onRespondToPermission}
+                  pendingCredential={undefined}
+                  onRespondToCredential={onRespondToCredential}
+                  pendingQuestion={undefined}
+                  onRespondToQuestion={onRespondToQuestion}
+                  permissionMode={sessionOpts.permissionMode}
+                  onPermissionModeChange={setPermissionMode}
+                  enabledModes={enabledModes}
+                  inputValue={inputValue}
+                  onInputChange={handleInputChange}
+                  attachmentsValue={attachmentsValue}
+                  onAttachmentsChange={handleAttachmentsChange}
+                  elementReferencesValue={elementRefsValue}
+                  onElementReferencesChange={handleElementRefsChange}
+                  sources={enabledSources}
+                  skills={skills}
+                  sessionStatuses={sessionStatuses}
+                  onSessionStatusChange={handleSessionStatusChange}
+                  workspaceId={activeWorkspaceId || undefined}
+                  onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
+                  workingDirectory={sessionMeta.workingDirectory}
+                  onWorkingDirectoryChange={handleWorkingDirectoryChange}
+                  messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
+                  messagesLoadError={messageLoadState.error === MESSAGES_UNAVAILABLE_SENTINEL ? t('chat.messagesUnavailable') : messageLoadState.error}
+                  messagesRetrying={messagesRetrying}
+                  onRetryMessagesLoad={handleRetryMessagesLoad}
+                  searchQuery={sessionListSearchQuery}
+                  isSearchModeActive={isSearchModeActive}
+                  onMatchInfoChange={onChatMatchInfoChange}
+                  connectionUnavailable={connectionUnavailable}
+                  disabled={isChatInputDisabled}
+                  inputStatusBanner={inputStatusBanner}
+                  compactMode={!!isCompactMode}
+                  projectComposer={showProjectTabs}
+                  projectShareEnabled={showProjectTabs}
+                  onShareToProject={handleShareToProject}
+                />
+              </div>
+              {showProjectTabs && projectScope && (
+                <>
+                  <div className={projectPaneVisible && projectTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                    <ProjectFileLibrary
+                      key={projectPaneKey}
+                      scope={projectScope}
+                      currentUserId={productSpace?.accountId ?? null}
+                      active={projectPaneVisible && projectTab === 'files'}
+                      pinMutations={pinsVersion}
+                    />
+                  </div>
+                  <div className={projectPaneVisible && projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                    <ProjectPinPane
+                      key={projectPaneKey}
+                      scope={projectScope}
+                      active={projectPaneVisible && projectTab !== 'files'}
+                      onChanged={handlePinsChanged}
+                    />
+                  </div>
+                </>
+              )}
             </div>
+            {projectMembersPanel}
           </div>
           <RenameDialog
             open={renameDialogOpen}
@@ -918,60 +1242,107 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   return (
     <>
-      <div className="h-full flex flex-col">
-        <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-        <div className="flex-1 flex flex-col min-h-0">
-          <ChatDisplay
-            ref={chatDisplayRef}
-            session={session}
-            onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences) => {
-              if (session) {
-                onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences)
-              }
-            }}
-            onOpenFile={handleOpenFile}
-            onOpenUrl={handleOpenUrl}
-            onOpenSourceUrl={openSourceUrl}
-            currentModel={effectiveModel}
-            pendingPermission={pendingPermission}
-            onRespondToPermission={onRespondToPermission}
-            pendingCredential={pendingCredential}
-            onRespondToCredential={onRespondToCredential}
-            pendingQuestion={pendingQuestion}
-            onRespondToQuestion={onRespondToQuestion}
-            permissionMode={sessionOpts.permissionMode}
-            onPermissionModeChange={setPermissionMode}
-            enabledModes={enabledModes}
-            inputValue={inputValue}
-            onInputChange={handleInputChange}
-            attachmentsValue={attachmentsValue}
-            onAttachmentsChange={handleAttachmentsChange}
-            elementReferencesValue={elementRefsValue}
-            onElementReferencesChange={handleElementRefsChange}
-            sources={enabledSources}
-            skills={skills}
-            labels={labels}
-            onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
-            sessionStatuses={sessionStatuses}
-            onSessionStatusChange={handleSessionStatusChange}
-            workspaceId={activeWorkspaceId || undefined}
-            onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
-            workingDirectory={workingDirectory}
-            onWorkingDirectoryChange={handleWorkingDirectoryChange}
-            sessionFolderPath={session?.sessionFolderPath}
-            messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-            messagesLoadError={messageLoadState.error === MESSAGES_UNAVAILABLE_SENTINEL ? t('chat.messagesUnavailable') : messageLoadState.error}
-            messagesRetrying={messagesRetrying}
-            onRetryMessagesLoad={handleRetryMessagesLoad}
-            searchQuery={sessionListSearchQuery}
-            isSearchModeActive={isSearchModeActive}
-            onMatchInfoChange={onChatMatchInfoChange}
-            connectionUnavailable={connectionUnavailable}
-            disabled={isChatInputDisabled}
-            inputStatusBanner={inputStatusBanner}
-            compactMode={!!isCompactMode}
-          />
+      {/* The chat lane (D8 measurement node) — see the skeleton branch. */}
+      <div ref={membersLaneRef} className="h-full flex min-h-0 min-w-0">
+        <div className="h-full flex min-h-0 min-w-0 flex-1 flex-col">
+          <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+          {showProjectTabs && (
+            <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
+          )}
+          <div className={projectPaneVisible ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
+            <ChatDisplay
+              ref={chatDisplayRef}
+              session={session}
+              onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences, projectAssetRefs) => {
+                // D13.1 entry fence (BACKSTOP): the composer's submitGate is
+                // the primary U11 gate and already refused before the draft
+                // cleared; this deep pending check keeps any path that might
+                // bypass the composer from delivering a send into the
+                // PREVIOUS scope. A refused send here keeps the draft.
+                if (entryPendingRef.current) {
+                  toast.error(t('project.entry.scopeChanged'))
+                  return
+                }
+                if (session) {
+                  // U11: an ACCEPTED send consumes this conversation's
+                  // blocked-send notice marker — the guidance did its job.
+                  clearSendNotice(session.id)
+                  onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences, projectAssetRefs)
+                }
+              }}
+              submitGate={submitGate}
+              gateNotice={gateNotice}
+              onOpenFile={handleOpenFile}
+              onOpenUrl={handleOpenUrl}
+              onOpenSourceUrl={openSourceUrl}
+              currentModel={effectiveModel}
+              pendingPermission={pendingPermission}
+              onRespondToPermission={onRespondToPermission}
+              pendingCredential={pendingCredential}
+              onRespondToCredential={onRespondToCredential}
+              pendingQuestion={pendingQuestion}
+              onRespondToQuestion={onRespondToQuestion}
+              permissionMode={sessionOpts.permissionMode}
+              onPermissionModeChange={setPermissionMode}
+              enabledModes={enabledModes}
+              inputValue={inputValue}
+              onInputChange={handleInputChange}
+              attachmentsValue={attachmentsValue}
+              onAttachmentsChange={handleAttachmentsChange}
+              elementReferencesValue={elementRefsValue}
+              onElementReferencesChange={handleElementRefsChange}
+              projectAssetRefsValue={projectAssetRefsValue}
+              onProjectAssetRefsChange={handleProjectAssetRefsChange}
+              sources={enabledSources}
+              skills={skills}
+              labels={labels}
+              onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
+              sessionStatuses={sessionStatuses}
+              onSessionStatusChange={handleSessionStatusChange}
+              workspaceId={activeWorkspaceId || undefined}
+              onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
+              workingDirectory={workingDirectory}
+              onWorkingDirectoryChange={handleWorkingDirectoryChange}
+              sessionFolderPath={session?.sessionFolderPath}
+              messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
+              messagesLoadError={messageLoadState.error === MESSAGES_UNAVAILABLE_SENTINEL ? t('chat.messagesUnavailable') : messageLoadState.error}
+              messagesRetrying={messagesRetrying}
+              onRetryMessagesLoad={handleRetryMessagesLoad}
+              searchQuery={sessionListSearchQuery}
+              isSearchModeActive={isSearchModeActive}
+              onMatchInfoChange={onChatMatchInfoChange}
+              connectionUnavailable={connectionUnavailable}
+              disabled={isChatInputDisabled}
+              inputStatusBanner={inputStatusBanner}
+              compactMode={!!isCompactMode}
+              projectComposer={showProjectTabs}
+              projectShareEnabled={showProjectTabs}
+              onShareToProject={handleShareToProject}
+            />
+          </div>
+          {showProjectTabs && projectScope && (
+            <>
+              <div className={projectPaneVisible && projectTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                <ProjectFileLibrary
+                  key={projectPaneKey}
+                  scope={projectScope}
+                  currentUserId={productSpace?.accountId ?? null}
+                  active={projectPaneVisible && projectTab === 'files'}
+                  pinMutations={pinsVersion}
+                />
+              </div>
+              <div className={projectPaneVisible && projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                <ProjectPinPane
+                  key={projectPaneKey}
+                  scope={projectScope}
+                  active={projectPaneVisible && projectTab !== 'files'}
+                  onChanged={handlePinsChanged}
+                />
+              </div>
+            </>
+          )}
         </div>
+        {projectMembersPanel}
       </div>
       <RenameDialog
         open={renameDialogOpen}
@@ -982,6 +1353,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {projectScope && (
+        <ShareToProjectDialog
+          open={shareTarget !== null}
+          scope={projectScope}
+          sessionId={sessionId}
+          target={shareTarget}
+          onClose={() => setShareTarget(null)}
+          onShared={handleSharedToProject}
+        />
+      )}
     </>
   )
 })

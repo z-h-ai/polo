@@ -1189,7 +1189,10 @@ export function useProductSpaceContextState() {
     )
   }, [abandonSwitchIfStale, commitPreparedSwitch, enterContractBlocked, isCurrentAccountScope, isCurrentSwitchOperation, publishCommittedSelection, verifyTargetStillAccessible])
 
-  const requestSwitch = useCallback(async (targetId: string): Promise<void> => {
+  const requestSwitch = useCallback(async (
+    targetId: string,
+    options?: { knownSpaces?: ReadonlyArray<{ id: string }> },
+  ): Promise<void> => {
     const accountId = accountIdRef.current
     const activeId = activeProductSpaceIdRef.current
     if (!accountId || !activeId) {
@@ -1197,7 +1200,14 @@ export function useProductSpaceContextState() {
     }
     if (targetId === activeId) return
     if (pendingTargetRef.current) return
-    if (!productSpacesRef.current.some(space => space.id === targetId)) return
+    // R-AT: a caller may hold a FRESHER authoritative list than this context
+    // (create-success auto-enter: the refreshed catalog reaches the caller
+    // one React commit before the context state does). Prefer it when
+    // provided — it comes from the same authoritative fetch this context
+    // publishes, so the guard still refuses spaces outside the evaluated
+    // membership list.
+    const knownSpaces = options?.knownSpaces ?? productSpacesRef.current
+    if (!knownSpaces.some(space => space.id === targetId)) return
 
     const scope = { accountId, generation: accountScopeGenerationRef.current }
     // Reading executions does not yet own a switch. Capture, but do not
@@ -1208,7 +1218,12 @@ export function useProductSpaceContextState() {
       && activeProductSpaceIdRef.current === activeId
       && switchGenerationRef.current === switchGeneration
       && pendingTargetRef.current === null
-      && productSpacesRef.current.some(space => space.id === targetId)
+      // R-AT: accept EITHER list knowing the target — the caller's fresh
+      // list or this context's (possibly just-committed) state. Requiring
+      // only the context ref here re-introduced the create-auto-enter hang
+      // whenever the commit landed after this re-check.
+      && (knownSpaces.some(space => space.id === targetId)
+        || productSpacesRef.current.some(space => space.id === targetId))
     )
 
     setError(null)

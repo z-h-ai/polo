@@ -5,8 +5,10 @@ import { Button } from '@/components/ui/button'
 import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchButtonClassName, clientWorkbenchPrimaryClassName } from '@/components/ui/client-workbench'
 import { cn } from '@/lib/utils'
 import { productSpaceAvatarGlyph } from '@/lib/space-initial'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import type { ProductSpaceSelectionSource } from '@/hooks/useProductSpaceContext'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
+import { useProductSpacesRefresh } from './useProductSpacesRefresh'
 
 export type ProductSpaceSelectAccount = {
   displayName: string
@@ -55,6 +57,9 @@ export function ProductSpaceSelectScreen({
 }) {
   const { t } = useTranslation()
   const style = useClientWorkbenchStyle()
+  const spaceContext = useOptionalProductSpaceContext()
+  // X2-11: the same progress/failure wrapper the account menu refresh uses.
+  const { refreshProductSpaces } = useProductSpacesRefresh()
 
   // M3 default selection: stored active → first-login recommended active
   // enterprise → bootstrap-committed active as the fallback. 'stored' means
@@ -240,6 +245,24 @@ export function ProductSpaceSelectScreen({
             {t('topbar.account.logout')}
           </Button>
         </div>
+
+        {/* POO-196 R3 P11: the「创建项目」button was REMOVED from this gate —
+            the home「项目」区域 is the only create entry (consensus P11), so
+            this screen keeps only refresh (the visible re-read, e.g. after an
+            invite was accepted elsewhere). Rendered only when the ProductSpace
+            provider is mounted around the gate. */}
+        {spaceContext ? (
+          <div className="mt-[12px] flex items-center justify-center gap-[8px]">
+            <Button
+              className={clientWorkbenchButtonClassName + ' shrink-0'}
+              data-testid="product-space-select-refresh"
+              disabled={submitting}
+              onClick={() => { void refreshProductSpaces(() => spaceContext.onRefreshProductSpaces()) }}
+            >
+              {t('createProject.refreshAction')}
+            </Button>
+          </div>
+        ) : null}
       </section>
     </div>
   )

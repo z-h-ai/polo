@@ -105,7 +105,7 @@ import { PiEventAdapter } from './backend/pi/event-adapter.ts';
 import { EventQueue } from './backend/event-queue.ts';
 
 // System prompt for Polo AI context
-import { getSystemPrompt } from '../prompts/system.ts';
+import { formatProjectContextSystemAppend, getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
 
 // Credential manager for token storage
@@ -373,6 +373,11 @@ export class PiAgent extends BaseAgent {
   // Last allowGoalUpdate value sent to the subprocess — same drift detection
   // for the goal_update tool (POO-134 goal turns only).
   private _lastRegisteredAllowGoalUpdate: boolean = false;
+
+  // Last allowProjectContext value sent to the subprocess — same drift
+  // detection for the project_context_* tools (POO-196 committed-project
+  // turns only).
+  private _lastRegisteredAllowProjectContext: boolean = false;
 
   // RPC request counter for unique IDs
   private rpcIdCounter: number = 0;
@@ -684,6 +689,7 @@ export class PiAgent extends BaseAgent {
       allowRenderUi: this.allowRenderUi,
       allowGenerateApp: this.allowGenerateApp,
       allowGoalUpdate: this.allowGoalUpdate,
+      allowProjectContext: this.allowProjectContext,
     });
 
     // Mirror Claude's gate: hide `browser_tool` when the user has disabled
@@ -724,7 +730,8 @@ export class PiAgent extends BaseAgent {
     this._lastRegisteredAllowRenderUi = this.allowRenderUi;
     this._lastRegisteredAllowGenerateApp = this.allowGenerateApp;
     this._lastRegisteredAllowGoalUpdate = this.allowGoalUpdate;
-    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}, allowGoalUpdate=${this.allowGoalUpdate})`);
+    this._lastRegisteredAllowProjectContext = this.allowProjectContext;
+    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}, allowGoalUpdate=${this.allowGoalUpdate}, allowProjectContext=${this.allowProjectContext})`);
   }
 
   /**
@@ -737,10 +744,11 @@ export class PiAgent extends BaseAgent {
     const guiDrifted = this._lastRegisteredAllowRenderUi !== this.allowRenderUi;
     const gapDrifted = this._lastRegisteredAllowGenerateApp !== this.allowGenerateApp;
     const goalDrifted = this._lastRegisteredAllowGoalUpdate !== this.allowGoalUpdate;
-    if (!ruiDrifted && !guiDrifted && !gapDrifted && !goalDrifted) {
+    const pctxDrifted = this._lastRegisteredAllowProjectContext !== this.allowProjectContext;
+    if (!ruiDrifted && !guiDrifted && !gapDrifted && !goalDrifted && !pctxDrifted) {
       return;
     }
-    this.debug(`session tool visibility changed (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}, allowGoalUpdate=${this.allowGoalUpdate}) — re-registering session tools`);
+    this.debug(`session tool visibility changed (allowRequestUserInput=${this.allowRequestUserInput}, allowRenderUi=${this.allowRenderUi}, allowGenerateApp=${this.allowGenerateApp}, allowGoalUpdate=${this.allowGoalUpdate}, allowProjectContext=${this.allowProjectContext}) — re-registering session tools`);
     this.sendSessionToolRegistration();
   }
 
@@ -1783,6 +1791,11 @@ export class PiAgent extends BaseAgent {
       // which is correct because the read happens at initiation of THAT
       // turn's tool call.
       getTurnGeneration: () => this.sessionTurnGeneration,
+      // POO-196: the facade is resolved AT TOOL-CALL TIME from the
+      // host-injected factory (BaseAgent.getProjectContext) — never cached on
+      // the ctx, so a session that leaves the project fence stops resolving
+      // immediately. Null factory = the handlers fail closed.
+      getProjectContext: () => this.getProjectContext?.() ?? null,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         this.onPlanSubmitted?.(planPath);
@@ -1852,6 +1865,15 @@ export class PiAgent extends BaseAgent {
       if (toolName === GOAL_UPDATE_TOOL_NAME && !this.allowGoalUpdate) {
         return {
           content: 'goal_update is not available in this session: there is no active goal on this turn. Summarize progress in plain text instead.',
+          isError: true,
+        };
+      }
+      // POO-196: project context tools only exist on turns whose session is
+      // bound to the currently committed enterprise project — a stale
+      // registration must never expose project files outside the fence.
+      if ((toolName === 'project_context_search' || toolName === 'project_context_read') && !this.allowProjectContext) {
+        return {
+          content: '当前会话不在项目共享范围内',
           isError: true,
         };
       }
@@ -2331,6 +2353,9 @@ export class PiAgent extends BaseAgent {
           onAuthRequest: (request) => this.onAuthRequest?.(request),
           onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, generationAtRegistration),
           getTurnGeneration: () => this.sessionTurnGeneration,
+          // POO-196: same live factory forward the Claude registration uses —
+          // the facade resolves at tool-call time, never cached in the record.
+          getProjectContext: () => this.getProjectContext?.() ?? null,
           queryFn: (request) => this.queryLlm(request),
         },
         ownerToken,
@@ -2388,7 +2413,7 @@ export class PiAgent extends BaseAgent {
       }
 
       // Build system prompt
-      const systemPrompt = getSystemPrompt(
+      const baseSystemPrompt = getSystemPrompt(
         undefined, // pinnedPreferencesPrompt
         this.config.debugMode,
         this.config.workspace.rootPath,
@@ -2397,6 +2422,12 @@ export class PiAgent extends BaseAgent {
         'Polo AI Backend', // backendName
         getCoAuthorPreference() // respect user's includeCoAuthoredBy preference (#576)
       );
+      // POO-196 R3 P12-5: project context metadata rides EVERY turn of a
+      // project-bound session (first and resumed alike) — on the system side,
+      // never as a fabricated user message.
+      const systemPrompt = this.config.session?.projectContext
+        ? `${baseSystemPrompt}\n\n${formatProjectContextSystemAppend(this.config.session.projectContext)}`
+        : baseSystemPrompt;
 
       // Build context from sources
       const sourceContext = this.sourceManager.formatSourceState();

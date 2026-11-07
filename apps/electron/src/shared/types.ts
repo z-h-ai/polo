@@ -1480,6 +1480,45 @@ export interface ElectronAPI {
   kbSetSessionCollections(input: import('@polo-ai/shared/protocol').KbSessionCollectionsInput): Promise<{ ok: true; collectionIds: string[] }>
   kbGetSessionCollections(input: import('@polo-ai/shared/protocol').KbGetSessionCollectionsInput): Promise<{ collectionIds: string[] }>
 
+  // Enterprise Project Context (POO-196). pc:uploadFile is the single upload
+  // RPC (renderer passes a local file path, never a transfer URL);
+  // pc:downloadAsset streams to targetPath and answers with the saved path.
+  pcListCapabilities(input: import('@polo-ai/shared/protocol').PcListCapabilitiesInput): Promise<import('@polo-ai/shared/protocol').PcCapabilitiesResponse>
+  pcGetSummary(input: import('@polo-ai/shared/protocol').PcGetSummaryInput): Promise<import('@polo-ai/shared/protocol').PcSummaryResponse>
+  pcListAssets(input: import('@polo-ai/shared/protocol').PcListAssetsInput): Promise<import('@polo-ai/shared/protocol').PcAssetListResponse>
+  pcGetAsset(input: import('@polo-ai/shared/protocol').PcGetAssetInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcUploadFile(input: import('@polo-ai/shared/protocol').PcUploadFileInput): Promise<import('@polo-ai/shared/protocol').PcCompleteUploadResponse>
+  pcUpdateAsset(input: import('@polo-ai/shared/protocol').PcUpdateAssetIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcSetConfirmed(input: import('@polo-ai/shared/protocol').PcSetConfirmedIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcSetPinned(input: import('@polo-ai/shared/protocol').PcSetPinnedIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcTrashAsset(input: import('@polo-ai/shared/protocol').PcTrashAssetIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcRestoreAsset(input: import('@polo-ai/shared/protocol').PcRestoreIpcInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
+  pcDownloadAsset(input: import('@polo-ai/shared/protocol').PcDownloadAssetInput): Promise<import('@polo-ai/shared/protocol').PcDownloadFileOutput>
+  pcReadAsset(input: import('@polo-ai/shared/protocol').PcReadAssetIpcInput): Promise<import('@polo-ai/shared/protocol').PcReadResponse>
+  pcGetPreviewUrl(input: import('@polo-ai/shared/protocol').PcGetPreviewUrlIpcInput): Promise<import('@polo-ai/shared/protocol').PcPreviewResponse>
+  pcSearchAssets(input: import('@polo-ai/shared/protocol').PcSearchAssetsInput): Promise<import('@polo-ai/shared/protocol').PcSearchResponse>
+  pcRebuild(input: import('@polo-ai/shared/protocol').PcRebuildInput): Promise<import('@polo-ai/shared/protocol').PcRebuildResponse>
+
+  // Enterprise project members (POO-196 追加轮). The create commands are
+  // account-scoped (reachable from the personal space); the roster and
+  // invitation commands are committed-space scoped and polo-admin decides
+  // owner/manager authority.
+  pmCreateEnterprise(input: import('@polo-ai/shared/protocol').PmCreateEnterpriseInput): Promise<import('@polo-ai/shared/protocol').ClientCreateEnterpriseResponse>
+  pmQueryCreateReceipt(input: import('@polo-ai/shared/protocol').PmQueryCreateReceiptInput): Promise<import('@polo-ai/shared/protocol').ClientCreateReceipt>
+  pmListProjectMembers(input: import('@polo-ai/shared/protocol').PmListMembersInput): Promise<import('@polo-ai/shared/protocol').ClientMemberRosterResponse>
+  pmListProjectInvitations(input: import('@polo-ai/shared/protocol').PmListInvitationsInput): Promise<import('@polo-ai/shared/protocol').ClientInvitationListResponse>
+  pmCreateProjectInvitation(input: import('@polo-ai/shared/protocol').PmCreateInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientCreateInvitationResponse>
+
+  // Enterprise project members R3 (POO-196 D3–D6). The colleague directory
+  // and collaboration roster are committed-space scoped reads; the colleague
+  // invitation bridge is one object per call with its own recovery query; the
+  // negotiated R3 list read is account-scoped.
+  pmListColleagueOptions(input: import('@polo-ai/shared/protocol').PmListColleagueOptionsInput): Promise<import('@polo-ai/shared/protocol').ClientColleagueOptionsResponse>
+  pmListCollaborationRoster(input: import('@polo-ai/shared/protocol').PmListCollaborationRosterInput): Promise<import('@polo-ai/shared/protocol').ClientCollaborationRosterResponse>
+  pmCreateColleagueInvitation(input: import('@polo-ai/shared/protocol').PmCreateColleagueInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientCreateColleagueInvitationResponse>
+  pmQueryColleagueInvitation(input: import('@polo-ai/shared/protocol').PmQueryColleagueInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientColleagueInvitationReceipt>
+  pmListProductSpacesR3(input: import('@polo-ai/shared/protocol').PmListProductSpacesR3Input): Promise<import('@polo-ai/shared/protocol').PmProductSpacesListR3Response>
+
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@polo-ai/shared/statuses').StatusConfig[]>
   reorderStatuses(workspaceId: string, orderedIds: string[]): Promise<void>

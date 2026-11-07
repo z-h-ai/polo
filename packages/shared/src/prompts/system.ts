@@ -344,6 +344,26 @@ Use config_validate to verify changes match the expected schema.
  * @param preset - System prompt preset ('default' | 'mini' | custom string)
  * @param backendName - Backend name for "powered by X" text (default: 'Claude Code')
  */
+/**
+ * POO-196 R3 P12-5 — the project's authoritative context metadata (title +
+ * optional introduction) as a system-prompt block. Appended by the agent
+ * backends on EVERY turn of a project-bound session (first and resumed
+ * alike); never sent as a fabricated user message. Deterministic output so
+ * acceptance evidence can grep the real model request for the name.
+ */
+export function formatProjectContextSystemAppend(projectContext: { name: string; purpose?: string }): string {
+  const purposeLine = projectContext.purpose?.trim()
+    ? `\nProject introduction: ${projectContext.purpose.trim()}`
+    : '';
+  return [
+    '<project_context>',
+    'The session belongs to the following project. Treat the project name and introduction as authoritative project context metadata.',
+    `Project name: ${projectContext.name}`,
+    purposeLine,
+    '</project_context>',
+  ].filter(Boolean).join('\n');
+}
+
 export function getSystemPrompt(
   pinnedPreferencesPrompt?: string,
   debugMode?: DebugModeConfig,

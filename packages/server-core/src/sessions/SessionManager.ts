@@ -11,6 +11,8 @@ import { createAssistantBillingHooks } from '../runtime/assistant-billing'
 import { resolveProductSpaceConnection } from '../handlers/rpc/admin'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
+import type { HandlerDeps } from '../handlers/handler-deps'
+import { createProjectContextToolFacade } from '../project-context/tool-facade'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@polo-ai/server-core/runtime'
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
@@ -897,6 +899,10 @@ interface ManagedSession {
   /** Immutable trusted Admin account bound at creation (R32-2). Space-bound
    *  legacy records without it are quarantined (fail-closed). */
   accountId?: string
+  /** POO-196 R3 P12-5: the project's title (+ optional introduction) captured
+   *  at creation for space-bound sessions; re-sent on EVERY agent spawn so the
+   *  model request context carries it for first and restored sessions alike. */
+  projectContext?: { name: string; purpose?: string }
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
@@ -1182,6 +1188,9 @@ interface ManagedSession {
    * simply injects nothing.
    */
   pendingKbModelContext?: { block: string; docs: number; bytes: number }
+  /** POO-196: staged project-context block (header + @ references), same
+   * one-shot runtime-only discipline as `pendingKbModelContext`. */
+  pendingProjectModelContext?: { block: string; docs: number; bytes: number }
   /**
    * Runtime-only: Pi SDK message id → Polo AI assistant message id.
    * Populated when a `text_complete` arrives carrying `sdkMessageId`, and read
@@ -1377,6 +1386,33 @@ export function computeGoalUpdateEligibility(isGoalTurn: boolean): boolean {
 }
 
 /**
+ * POO-196: per-turn eligibility for the project_context_search/read tools.
+ * Two fail-closed conditions AND-ed together:
+ *
+ * - the same desktop/hidden/mini matrix as request_user_input — the tools
+ *   browse the project's shared files on the interactive desktop surface;
+ *   messaging, automation, headless/CLI and internal turns fail closed;
+ * - the session must be bound to the CURRENTLY committed enterprise Product
+ *   Space (the runtime fence's active space) — a personal-space session, an
+ *   unbound session, or one bound to a space the fence no longer commits all
+ *   fail closed.
+ *
+ * This flag is VISIBILITY only: every tool call still re-runs the full
+ * trusted-scope gate inside the facade (per-call re-authorization).
+ */
+export function computeProjectContextEligibility(
+  invocationSource: InvocationSource | undefined,
+  hidden: boolean | undefined,
+  isMini: boolean | undefined,
+  origin: import('@polo-ai/shared/protocol').SessionOrigin | undefined,
+  sessionProductSpaceId: string | null | undefined,
+  activeProductSpaceId: string | null | undefined,
+): boolean {
+  if (!sessionProductSpaceId || sessionProductSpaceId !== activeProductSpaceId) return false
+  return computeRequestUserInputEligibility(invocationSource, hidden, isMini, origin)
+}
+
+/**
  * Card-supplied context must never break out of — or forge structure inside —
  * the reminder frame: tag delimiters are stripped and line breaks collapsed,
  * so each entry stays one line that cannot close the block early. The length
@@ -1420,6 +1456,16 @@ function sanitizeKbModelContextBlock(block: string): string {
  */
 export function buildKbModelContextReminder(block: string): string {
   return `<system-reminder>以下是本会话所勾选企业知识库的参考文档内容（检索于发送时）。回答时请依据这些内容，引用出处标题。\n\n${sanitizeKbModelContextBlock(block)}\n</system-reminder>`
+}
+
+/**
+ * POO-196: the one-shot system-reminder block for the staged project context
+ * (bounded project header + the resolved @ references). Same runtime-only
+ * discipline as the KB reminder; `sanitizeKbModelContextBlock` is a generic
+ * fence over reminder-tag injection, so the project block rides it too.
+ */
+export function buildProjectModelContextReminder(block: string): string {
+  return `<system-reminder>以下是本项目共享文件区的内容摘录与 @ 引用的文件正文（检索于发送时）。回答时请依据这些内容；@ 引用的文件若标注未成功读取，请如实说明而不是假设其内容。\n\n${sanitizeKbModelContextBlock(block)}\n</system-reminder>`
 }
 
 /**
@@ -2697,9 +2743,27 @@ export class SessionManager implements ISessionManager {
   /** Pinned desktop client per session for `client:browser:invoke` routing. */
   private browserHostByCanvas = new Map<string, string>()
   private eventSink: EventSink | null = null
+  /**
+   * POO-196: the HandlerDeps the host captured here at bootstrap so per-agent
+   * project-context tool facades can be built (`createProjectContextToolFacade`
+   * needs the deps' sessionManager + platform logger). Absent = no host ever
+   * wired project context — every agent's facade factory stays null and the
+   * tools fail closed everywhere.
+   */
+  private projectContextFacadeDeps: HandlerDeps<ISessionManager> | null = null
 
   setEventSink(sink: EventSink): void {
     this.eventSink = sink
+  }
+
+  /**
+   * POO-196: bootstrap wiring — the host (bootstrapServer) hands the handler
+   * deps to the SessionManager once, right after `createHandlerDeps`. The
+   * facade itself is built per agent construction and re-authorizes on every
+   * tool call, so nothing cached here decides authorization.
+   */
+  setProjectContextFacadeDeps(deps: HandlerDeps<ISessionManager>): void {
+    this.projectContextFacadeDeps = deps
   }
 
   setBrowserPaneManager(bpm: IBrowserPaneManager): void {
@@ -4474,6 +4538,10 @@ export class SessionManager implements ISessionManager {
       isFlagged: options?.isFlagged,
       productSpaceId: trustedScope?.productSpaceId,
       accountId: trustedScope?.accountId,
+      // P12-5: capture the project's context metadata only for a session the
+      // server itself binds to an enterprise space — the renderer-supplied
+      // values are a projection of THAT space, never a client-asserted scope.
+      projectContext: trustedScope?.productSpaceId ? options?.projectContext : undefined,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -5923,6 +5991,9 @@ export class SessionManager implements ISessionManager {
         lastUsedAt: managed.lastMessageAt,
         workingDirectory: managed.workingDirectory,
         sdkCwd: managed.sdkCwd,
+        // P12-5: re-sent on every spawn (create, auth-retry, restart/resume)
+        // so the model request context always carries the project metadata.
+        projectContext: managed.projectContext,
         model: managed.model,
         llmConnection: managed.llmConnection,
         permissionMode: managed.permissionMode,
@@ -6130,6 +6201,20 @@ export class SessionManager implements ISessionManager {
         // register/merge calls carry it; a mismatch with the live lease's
         // owner rejects the merge outright.
         sessionCallbackOwnerToken: managed.runtimeOwnerToken,
+        // POO-196: per-call re-authorized facade factory — built here where
+        // the HandlerDeps live; the shared backends only see the factory (the
+        // dependency direction stays server-core → shared). Absent deps = no
+        // factory = the tools fail closed.
+        ...(this.projectContextFacadeDeps
+          ? {
+            getProjectContext: (): import('@polo-ai/session-tools-core').ProjectContextFacade | null =>
+              createProjectContextToolFacade({
+                deps: this.projectContextFacadeDeps!,
+                sessionId: managed.id,
+                workspaceId: managed.workspace.id,
+              }),
+          }
+          : {}),
         getRecoveryMessages,
         getBranchFallbackMessages,
         getBranchSeedMessages,
@@ -9114,6 +9199,11 @@ export class SessionManager implements ISessionManager {
           if (options?.kbModelContext) {
             managed.pendingKbModelContext = options.kbModelContext
           }
+          // POO-196: stage the project-context block the same way (runtime-
+          // only, one-shot, queue replays inject nothing).
+          if (options?.projectModelContext) {
+            managed.pendingProjectModelContext = options.projectModelContext
+          }
 
           // Update lastMessageRole for badge display
           managed.lastMessageRole = 'user'
@@ -9476,6 +9566,20 @@ export class SessionManager implements ISessionManager {
       if (agent.allowGoalUpdate !== allowGoalUpdateNow) {
         agent.allowGoalUpdate = allowGoalUpdateNow
       }
+      // POO-196: project context tools exist ONLY on a desktop turn whose
+      // session is bound to the currently committed enterprise project — the
+      // per-call facade re-authorization behind them is the second gate.
+      const allowProjectContextNow = computeProjectContextEligibility(
+        invocationSource,
+        managed.hidden,
+        managed.systemPromptPreset === 'mini',
+        managed.origin,
+        managed.productSpaceId,
+        getRuntimeActiveProductSpace(),
+      )
+      if (agent.allowProjectContext !== allowProjectContextNow) {
+        agent.allowProjectContext = allowProjectContextNow
+      }
 
       // Always set all sources for context (even if none are enabled), including built-ins
       const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
@@ -9599,6 +9703,16 @@ export class SessionManager implements ISessionManager {
         managed.pendingKbModelContext = undefined
         effectiveMessage = `${effectiveMessage}\n\n${buildKbModelContextReminder(pendingKb.block)}`
         sessionLog.info(`KB_INJECT_MODEL_CONTEXT docs=${pendingKb.docs} bytes=${pendingKb.bytes}`)
+      }
+
+      // POO-196: one-shot project-context injection (bounded header + the
+      // resolved @ references), staged by the same send-time resolution that
+      // persisted the per-reference outcome chips.
+      const pendingProject = managed.pendingProjectModelContext
+      if (pendingProject) {
+        managed.pendingProjectModelContext = undefined
+        effectiveMessage = `${effectiveMessage}\n\n${buildProjectModelContextReminder(pendingProject.block)}`
+        sessionLog.info(`PC_INJECT_MODEL_CONTEXT docs=${pendingProject.docs} bytes=${pendingProject.bytes}`)
       }
 
       const messageBackendContext = resolveBackendContext({
@@ -10014,8 +10128,12 @@ export class SessionManager implements ISessionManager {
       const interruptedMessage: Message = {
         id: generateMessageId(),
         role: 'info',
-        content: 'Response interrupted',
+        // R-AT: localized — this content renders verbatim in the chat transcript
+        content: i18n.t('chat.responseInterrupted'),
         timestamp: this.monotonic(),
+        // R-AT: typed marker — the transcript renders a「重新发送」 affordance
+        // on this marker (ChatDisplay info branch), never on plain info rows.
+        statusType: 'response_interrupted',
       }
       managed.messages.push(interruptedMessage)
       this.sendEvent({
@@ -10270,10 +10388,13 @@ export class SessionManager implements ISessionManager {
         managed.authRetryInProgress = false
         sessionLog.error(`[auth-retry] Failed to retry after auth refresh for session ${sessionId}:`, retryError)
         sessionRuntimeHooks.captureException(retryError, { errorSource: 'auth-retry', sessionId })
+        // R-AT: localized — the content string renders verbatim in the chat
+        // transcript; the protocol error stays a stable identifier.
+        const authFailedText = i18n.t('chat.sessionAuthFailed')
         const failedMessage: Message = {
           id: generateMessageId(),
           role: 'error',
-          content: 'Authentication failed. Please check your credentials.',
+          content: authFailedText,
           timestamp: this.monotonic(),
           errorCode: failureErrorCode,
         }
@@ -10281,7 +10402,7 @@ export class SessionManager implements ISessionManager {
         this.sendEvent({
           type: 'error',
           sessionId,
-          error: 'Authentication failed. Please check your credentials.',
+          error: authFailedText,
           timestamp: failedMessage.timestamp,
         }, workspaceId)
         this.onProcessingStopped(sessionId, 'error')

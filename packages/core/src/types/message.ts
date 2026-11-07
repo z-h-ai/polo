@@ -336,7 +336,7 @@ export interface Message {
   // Turn ID: Correlation ID from the API's message.id, groups all messages in an assistant turn
   turnId?: string;
   // Status type for special status messages (e.g., compacting)
-  statusType?: 'compacting' | 'compaction_complete';
+  statusType?: 'compacting' | 'compaction_complete' | 'response_interrupted';
   // Info level for info messages (determines icon/color)
   infoLevel?: 'info' | 'warning' | 'error' | 'success';
   // Error-specific fields (for typed errors with diagnostics)

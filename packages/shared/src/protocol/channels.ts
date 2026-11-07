@@ -438,6 +438,47 @@ export const RPC_CHANNELS = {
     SET_SESSION_COLLECTIONS: 'kb:setSessionCollections',
     GET_SESSION_COLLECTIONS: 'kb:getSessionCollections',
   },
+  // Enterprise Project Context (POO-196): admin-owned enterprise project
+  // assets consumed through the device's trusted Admin session; every channel
+  // is LOCAL_ONLY (see routing.ts) and carries pc_* coded errors.
+  projectContext: {
+    LIST_CAPABILITIES: 'pc:listCapabilities',
+    GET_SUMMARY: 'pc:getSummary',
+    LIST_ASSETS: 'pc:listAssets',
+    GET_ASSET: 'pc:getAsset',
+    UPLOAD_FILE: 'pc:uploadFile',
+    UPDATE_ASSET: 'pc:updateAsset',
+    SET_CONFIRMED: 'pc:setConfirmed',
+    SET_PINNED: 'pc:setPinned',
+    TRASH_ASSET: 'pc:trashAsset',
+    RESTORE_ASSET: 'pc:restoreAsset',
+    DOWNLOAD_ASSET: 'pc:downloadAsset',
+    READ_ASSET: 'pc:readAsset',
+    GET_PREVIEW_URL: 'pc:getPreviewUrl',
+    SEARCH_ASSETS: 'pc:searchAssets',
+    REBUILD: 'pc:rebuild',
+  },
+  // Enterprise project members (POO-196 追加轮): the account-scoped create and
+  // create-receipt commands plus the committed-space roster/invitation reads.
+  // Every channel is LOCAL_ONLY (see routing.ts) and carries coded errors;
+  // none of them is exposed as an agent tool — membership stays an admin
+  // authority (adjudication D-A/D-C).
+  projectMembers: {
+    CREATE_ENTERPRISE: 'pm:createEnterprise',
+    QUERY_CREATE_RECEIPT: 'pm:queryCreateReceipt',
+    LIST_MEMBERS: 'pm:listMembers',
+    LIST_INVITATIONS: 'pm:listInvitations',
+    CREATE_INVITATION: 'pm:createInvitation',
+    // POO-196 R3 (D3–D6): the restricted colleague directory, the all-role
+    // collaboration roster, the per-object colleague invitation bridge with
+    // its own recovery query, and the negotiated R3 product-space list read.
+    // All LOCAL_ONLY, same trust boundary as the pm block above.
+    LIST_COLLEAGUE_OPTIONS: 'pm:listColleagueOptions',
+    LIST_COLLABORATION_ROSTER: 'pm:listCollaborationRoster',
+    CREATE_COLLEAGUE_INVITATION: 'pm:createColleagueInvitation',
+    QUERY_COLLEAGUE_INVITATION: 'pm:queryColleagueInvitation',
+    LIST_PRODUCT_SPACES_R3: 'pm:listProductSpacesR3',
+  },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',
     INSTALL: 'creatorSkills:install',

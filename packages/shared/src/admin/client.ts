@@ -1,6 +1,79 @@
 import {browserPolicyResponseSchema,type BrowserPolicyResponse} from "./browser-policy-contract";
 import { SkillTurnBeginSchema, SkillTurnOperationSchema, SkillTurnReceiptSchema, type SkillTurnBegin, type SkillTurnReceipt } from './skill-turn-contract.ts';
 import {
+  PC_ERROR_CODES,
+  PcCapabilitiesResponseSchema,
+  PcAssetListResponseSchema,
+  PcCompleteUploadResponseSchema,
+  PcCreateAssetInputSchema,
+  PcCreateUploadInputSchema,
+  PcDownloadResponseSchema,
+  PcMutationResponseSchema,
+  PcPreviewResponseSchema,
+  PcReadResponseSchema,
+  PcRebuildResponseSchema,
+  PcRestoreInputSchema,
+  PcSearchResponseSchema,
+  PcSetConfirmedInputSchema,
+  PcSetPinnedInputSchema,
+  PcSummaryResponseSchema,
+  PcUpdateAssetInputSchema,
+  PcUploadGrantResponseSchema,
+  type PcAssetListResponse,
+  type PcCapabilitiesResponse,
+  type PcCompleteUploadResponse,
+  type PcCreateAssetInput,
+  type PcCreateUploadInput,
+  type PcDownloadResponse,
+  type PcMutationResponse,
+  type PcPreviewResponse,
+  type PcReadResponse,
+  type PcRebuildResponse,
+  type PcRestoreInput,
+  type PcSearchResponse,
+  type PcSetConfirmedInput,
+  type PcSetPinnedInput,
+  type PcSummaryResponse,
+  type PcUpdateAssetInput,
+  type PcUploadGrantResponse,
+} from './project-context-contract.ts';
+import {
+  CLIENT_ENTERPRISE_CONTRACT_VERSION,
+  CLIENT_ENTERPRISE_ERROR_CODES,
+  CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER,
+  CLIENT_ENTERPRISE_PAGE_MAX_LIMIT,
+  clientColleagueInvitationReceiptSchema,
+  clientColleagueOptionsResponseSchema,
+  clientCollaborationRosterResponseSchema,
+  clientCreateColleagueInvitationCommandSchema,
+  clientCreateEnterpriseCommandSchema,
+  clientCreateEnterpriseResponseSchema,
+  clientCreateInvitationCommandSchema,
+  clientCreateInvitationResponseSchema,
+  clientCreateReceiptSchema,
+  clientInvitationListResponseSchema,
+  clientMemberRosterResponseSchema,
+  type ClientColleagueInvitationReceipt,
+  type ClientColleagueOptionsResponse,
+  type ClientCollaborationRosterResponse,
+  type ClientCreateColleagueInvitationCommand,
+  type ClientCreateColleagueInvitationResponse,
+  type ClientCreateEnterpriseCommand,
+  type ClientCreateEnterpriseResponse,
+  type ClientCreateInvitationCommand,
+  type ClientCreateInvitationResponse,
+  type ClientCreateReceipt,
+  type ClientInvitationListResponse,
+  type ClientMemberRosterResponse,
+} from './client-enterprise-contract.ts';
+// The negotiated R3 list composition lives in the protocol layer (it joins
+// the generated envelope with the v1 ProductSpace list schema, both protocol
+// concerns) and is re-exported through @polo-ai/shared/protocol.
+import {
+  PmProductSpacesListR3ResponseSchema,
+  type PmProductSpacesListR3Response,
+} from '../protocol/project-members';
+import {
   AdminError,
   type AdminAuthConfig,
   type AdminErrorCode,
@@ -221,6 +294,20 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'quota_exhausted',
   'budget_exhausted',
   'run_finalized',
+  // POO-196: the generated project-context contract owns this list; the
+  // spread keeps the passthrough set from drifting from it. readAdminErrorCode
+  // only returns codes present here, so without it every pc_* failure would
+  // degrade to a generic status-derived code.
+  ...PC_ERROR_CODES,
+  // POO-196 追加轮: the generated client-enterprise contract owns this list.
+  // Note the ordering discipline — ADMIN_ERROR_CODE_ALIASES still wins for the
+  // seven codes it already normalizes (unauthorized/forbidden/not_found/
+  // validation_error/token_revoked/account_disabled/…), so those arrive on
+  // AdminError as the legacy uppercase spelling; server-core's project-members
+  // service maps them back onto the contract spelling. The remaining pm codes
+  // (phone_verification_required, account_enterprise_exists, …) pass through
+  // verbatim only because they are registered here.
+  ...CLIENT_ENTERPRISE_ERROR_CODES,
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -237,7 +324,10 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
   validation_error: 'VALIDATION_ERROR',
 };
 
-const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
+// Partial by design: domain unions that join AdminErrorCode (e.g. the
+// POO-196 pc_* codes) intentionally have no entry here — getSafeAdminErrorMessage
+// falls back to 'Admin request failed' and callers branch on the code itself.
+const SAFE_ADMIN_ERROR_MESSAGES: Partial<Record<AdminErrorCode, string>> = {
   product_space_contract_unsupported: 'ProductSpace contract is not supported by this client',
   billing_contract_unsupported: 'Billing contract is not supported by this client',
   INVALID_CREDENTIALS: 'Invalid username or password',
@@ -1450,6 +1540,512 @@ export class AdminClient {
   }
 
   // -------------------------------------------------------------------------
+  // Project context (POO-196) — the enterprise project-asset control plane on
+  // Polo Admin. Metadata and grants ride the admin Bearer; bytes go directly
+  // between the local device and object storage through the short-lived URLs
+  // these responses carry. Every response is validated against the generated
+  // contract schema — an off-contract body fails closed. Paths all hang off
+  // /api/project-context/{productSpaceId}; pc_* error codes survive into
+  // AdminError.errorCode via the ADMIN_ERROR_CODES registration above.
+  // -------------------------------------------------------------------------
+
+  private projectContextPath(productSpaceId: string, suffix: string): string {
+    return `/api/project-context/${encodeURIComponent(productSpaceId)}${suffix}`;
+  }
+
+  private static projectContextQuery(
+    params: Record<string, string | number | undefined>,
+  ): string {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) search.set(key, String(value));
+    }
+    const encoded = search.toString();
+    return encoded ? `?${encoded}` : '';
+  }
+
+  /** GET /api/project-context/{id}/capabilities — feature gate, role and limits. */
+  async getProjectContextCapabilities(accessToken: string, productSpaceId: string): Promise<PcCapabilitiesResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, '/capabilities'),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcCapabilitiesResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/summary — bounded project overview. */
+  async getProjectContextSummary(accessToken: string, productSpaceId: string): Promise<PcSummaryResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, '/summary'),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcSummaryResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets — paged list; undefined query values are not encoded. */
+  async listProjectContextAssets(
+    accessToken: string,
+    productSpaceId: string,
+    query: {
+      view?: string;
+      tag?: string;
+      pinned?: string;
+      /** Current-version processing state filter, applied before pagination. */
+      processing?: string;
+      q?: string;
+      limit?: number;
+      cursor?: string;
+    },
+  ): Promise<PcAssetListResponse> {
+    const suffix = AdminClient.projectContextQuery({
+      view: query.view,
+      tag: query.tag,
+      pinned: query.pinned,
+      processing: query.processing,
+      q: query.q,
+      limit: query.limit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcAssetListResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets — declares the asset, returns the first upload grant. */
+  async createProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    input: PcCreateAssetInput,
+  ): Promise<PcUploadGrantResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, '/assets'),
+      { method: 'POST', accessToken, body: PcCreateAssetInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcUploadGrantResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/uploads — grants one replacement version upload. */
+  async createProjectContextUpload(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcCreateUploadInput,
+  ): Promise<PcUploadGrantResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/uploads`),
+      { method: 'POST', accessToken, body: PcCreateUploadInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcUploadGrantResponseSchema);
+  }
+
+  /** POST .../uploads/{uploadId}/complete — hands the finished PUT to admin for verification/publish. */
+  async completeProjectContextUpload(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    uploadId: string,
+  ): Promise<PcCompleteUploadResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/uploads/${encodeURIComponent(uploadId)}/complete`),
+      { method: 'POST', accessToken, body: {} },
+    );
+    return this.readSuccessResponse(response, PcCompleteUploadResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets/{assetId} — authoritative asset detail. */
+  async getProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** PATCH /api/project-context/{id}/assets/{assetId} — revision-guarded metadata mutation. */
+  async updateProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcUpdateAssetInput,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      { method: 'PATCH', accessToken, body: PcUpdateAssetInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/confirmed — version-bound confirmation write. */
+  async setProjectContextConfirmed(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcSetConfirmedInput,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/confirmed`),
+      { method: 'POST', accessToken, body: PcSetConfirmedInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/pinned — pin toggle. */
+  async setProjectContextPinned(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcSetPinnedInput,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/pinned`),
+      { method: 'POST', accessToken, body: PcSetPinnedInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** DELETE /api/project-context/{id}/assets/{assetId} — revision-guarded trash write. */
+  async trashProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    expectedRevision: number,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      { method: 'DELETE', accessToken, body: { expectedRevision } },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/restore — revision-guarded untrash. */
+  async restoreProjectContextAsset(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    input: PcRestoreInput,
+  ): Promise<PcMutationResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/restore`),
+      { method: 'POST', accessToken, body: PcRestoreInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, PcMutationResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets/{assetId}/download?version= — short-lived attachment grant. */
+  async getProjectContextDownload(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    version?: number,
+  ): Promise<PcDownloadResponse> {
+    const suffix = AdminClient.projectContextQuery({ version });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/download${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcDownloadResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets/{assetId}/read?version= — bounded text body. */
+  async getProjectContextRead(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    version?: number,
+  ): Promise<PcReadResponse> {
+    const suffix = AdminClient.projectContextQuery({ version });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/read${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcReadResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/assets/{assetId}/preview?version= — short-lived HTML preview grant. */
+  async getProjectContextPreview(
+    accessToken: string,
+    productSpaceId: string,
+    assetId: string,
+    version?: number,
+  ): Promise<PcPreviewResponse> {
+    const suffix = AdminClient.projectContextQuery({ version });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/preview${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcPreviewResponseSchema);
+  }
+
+  /** GET /api/project-context/{id}/search — semantic hits; `degraded` must reach the renderer verbatim. */
+  async searchProjectContextAssets(
+    accessToken: string,
+    productSpaceId: string,
+    query: { q: string; tag?: string; limit?: number },
+  ): Promise<PcSearchResponse> {
+    const suffix = AdminClient.projectContextQuery({
+      q: query.q,
+      tag: query.tag,
+      limit: query.limit,
+    });
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/search${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, PcSearchResponseSchema);
+  }
+
+  /** POST /api/project-context/{id}/rebuild — schedules the index rebuild job. */
+  async rebuildProjectContext(accessToken: string, productSpaceId: string): Promise<PcRebuildResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, '/rebuild'),
+      { method: 'POST', accessToken, body: {} },
+    );
+    return this.readSuccessResponse(response, PcRebuildResponseSchema);
+  }
+
+  // -------------------------------------------------------------------------
+  // Client enterprise surface (POO-196 追加轮, adjudication D-A/D-B/D-C) — the
+  // narrow Bearer paths that let the desktop create a project (enterprise
+  // space) and manage targeted invitations. The idempotency key rides the
+  // REQUIRED `Idempotency-Key` header for create (never the body — the
+  // contract command schema is strict), and inside the command for
+  // invitations, exactly as the generated contract declares. Every response
+  // is validated against the generated contract schema; the stable error
+  // codes survive into AdminError.errorCode via the ADMIN_ERROR_CODES
+  // registration above.
+  // -------------------------------------------------------------------------
+
+  private static clientEnterpriseQuery(
+    params: Record<string, string | number | undefined>,
+  ): string {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) search.set(key, String(value));
+    }
+    const encoded = search.toString();
+    return encoded ? `?${encoded}` : '';
+  }
+
+  private clientEnterpriseSpacePath(productSpaceId: string, suffix: string): string {
+    return `/api/client/product-spaces/${encodeURIComponent(productSpaceId)}${suffix}`;
+  }
+
+  /** POST /api/client/enterprises — creates the enterprise aggregate under the
+   * caller's idempotency key; `replayed` means the SAME key + payload already
+   * committed. The r3 negotiation header opts THIS client into the r3 contract
+   * (POO-196 D7): optional purpose (empty string allowed) and the r3
+   * fingerprint domain. Without the header the server validates the payload as
+   * legacy r2 — where an empty purpose is a 400 — so the header MUST ride the
+   * real transport call, never be reconstructed client-side. */
+  async createEnterprise(
+    accessToken: string,
+    input: ClientCreateEnterpriseCommand & { idempotencyKey: string },
+  ): Promise<ClientCreateEnterpriseResponse> {
+    const { idempotencyKey, ...command } = input;
+    const response = await this.request<unknown>('/api/client/enterprises', {
+      method: 'POST',
+      accessToken,
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+        'X-Polo-Client-Enterprise-Contract': CLIENT_ENTERPRISE_CONTRACT_VERSION,
+      },
+      body: clientCreateEnterpriseCommandSchema.parse(command),
+    });
+    return this.readSuccessResponse(response, clientCreateEnterpriseResponseSchema);
+  }
+
+  /** GET /api/client/enterprises?createRequestKey=… — the caller's OWN original
+   * request lookup. `unknown` is not a failure and must never re-create. */
+  async queryMyCreateReceipt(
+    accessToken: string,
+    createRequestKey: string,
+  ): Promise<ClientCreateReceipt> {
+    const suffix = AdminClient.clientEnterpriseQuery({ createRequestKey });
+    const response = await this.request<unknown>(`/api/client/enterprises${suffix}`, {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, clientCreateReceiptSchema);
+  }
+
+  /** GET /api/client/product-spaces/{id}/members — owner/manager bounded
+   * roster read; a plain member is rejected before any roster data is read. */
+  async listProjectMembers(
+    accessToken: string,
+    productSpaceId: string,
+    query: { limit?: number; cursor?: string },
+  ): Promise<ClientMemberRosterResponse> {
+    const boundedLimit = query.limit === undefined
+      ? undefined
+      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
+    const suffix = AdminClient.clientEnterpriseQuery({
+      limit: boundedLimit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/members${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientMemberRosterResponseSchema);
+  }
+
+  /** GET /api/client/product-spaces/{id}/invitations — owner/manager targeted
+   * invitation projection (never a token or a link). */
+  async listProjectInvitations(
+    accessToken: string,
+    productSpaceId: string,
+    query: { limit?: number; cursor?: string },
+  ): Promise<ClientInvitationListResponse> {
+    const boundedLimit = query.limit === undefined
+      ? undefined
+      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
+    const suffix = AdminClient.clientEnterpriseQuery({
+      limit: boundedLimit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/invitations${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientInvitationListResponseSchema);
+  }
+
+  /** POST /api/client/product-spaces/{id}/invitations — one targeted invite
+   * under the command's `createRequestKey`; `replayed` returns the caller's
+   * own still-valid link for that same key. */
+  async createProjectInvitation(
+    accessToken: string,
+    productSpaceId: string,
+    input: ClientCreateInvitationCommand,
+  ): Promise<ClientCreateInvitationResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, '/invitations'),
+      { method: 'POST', accessToken, body: clientCreateInvitationCommandSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, clientCreateInvitationResponseSchema);
+  }
+
+  // -----------------------------------------------------------------------
+  // POO-196 R3 client surface (D3–D6) — same narrow Bearer paths, same
+  // response-validation discipline as the block above. The directory and
+  // roster reads are page reads (server-side name search, bounded limit);
+  // the colleague invitation bridge is strictly ONE colleague per request —
+  // the desktop's multi-select fans out client-side, never as a batch body.
+  // -----------------------------------------------------------------------
+
+  /** GET /api/client/product-spaces/{id}/colleague-options?q&cursor&limit —
+   * the caller's own organization projected into the target project (D3).
+   * `none`/`ambiguous` source states are SUCCESS bodies, never errors. */
+  async listColleagueOptions(
+    accessToken: string,
+    productSpaceId: string,
+    query: { q?: string; limit?: number; cursor?: string },
+  ): Promise<ClientColleagueOptionsResponse> {
+    const boundedLimit = query.limit === undefined
+      ? undefined
+      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
+    const suffix = AdminClient.clientEnterpriseQuery({
+      q: query.q,
+      limit: boundedLimit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/colleague-options${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientColleagueOptionsResponseSchema);
+  }
+
+  /** GET /api/client/product-spaces/{id}/collaboration-roster?q&cursor&limit —
+   * the all-role minimal roster (D4); the total count is the server's. */
+  async listCollaborationRoster(
+    accessToken: string,
+    productSpaceId: string,
+    query: { q?: string; limit?: number; cursor?: string },
+  ): Promise<ClientCollaborationRosterResponse> {
+    const boundedLimit = query.limit === undefined
+      ? undefined
+      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
+    const suffix = AdminClient.clientEnterpriseQuery({
+      q: query.q,
+      limit: boundedLimit,
+      cursor: query.cursor,
+    });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/collaboration-roster${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientCollaborationRosterResponseSchema);
+  }
+
+  /** POST /api/client/product-spaces/{id}/colleague-invitations — the D5
+   * bridge: one selected colleague, resolved server-side onto the existing
+   * targeted invitation. The response union is the SAME targeted-invitation
+   * outcome contract. */
+  async createColleagueInvitation(
+    accessToken: string,
+    productSpaceId: string,
+    input: ClientCreateColleagueInvitationCommand,
+  ): Promise<ClientCreateColleagueInvitationResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, '/colleague-invitations'),
+      { method: 'POST', accessToken, body: clientCreateColleagueInvitationCommandSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, clientCreateInvitationResponseSchema);
+  }
+
+  /** GET /api/client/product-spaces/{id}/colleague-invitations?createRequestKey=…
+   * — the caller's OWN recovery query for one colleague invitation; `unknown`
+   * is a success state and must never re-create. */
+  async queryColleagueInvitation(
+    accessToken: string,
+    productSpaceId: string,
+    createRequestKey: string,
+  ): Promise<ClientColleagueInvitationReceipt> {
+    const suffix = AdminClient.clientEnterpriseQuery({ createRequestKey });
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/colleague-invitations${suffix}`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, clientColleagueInvitationReceiptSchema);
+  }
+
+  /** GET /api/me/product-spaces?clientEnterpriseContract=poo196-client-enterprise-r3
+   * — the D6 negotiated list read. The default v1 `listProductSpaces` above is
+   * untouched; THIS variant opts in with the contract query parameter and only
+   * accepts the composed v1+R3 envelope. An admin that ignored the parameter
+   * and answered plain v1 (or an envelope that fails the join) is surfaced as
+   * `contract_version_unsupported` so the renderer can show the update prompt
+   * instead of guessing project kinds. */
+  async listProductSpacesR3(accessToken: string): Promise<PmProductSpacesListR3Response> {
+    const suffix = AdminClient.clientEnterpriseQuery({
+      [CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER]: CLIENT_ENTERPRISE_CONTRACT_VERSION,
+    });
+    const response = await this.request<unknown>(`/api/me/product-spaces${suffix}`, {
+      method: 'GET',
+      accessToken,
+    });
+    const parsed = PmProductSpacesListR3ResponseSchema.safeParse(response);
+    if (parsed.success) return parsed.data;
+    // A body that still parses as the plain v1 list means the deployment did
+    // not understand the negotiation — a version problem, not corrupt data.
+    const answeredPlainV1 = ListProductSpacesResponseSchema.safeParse(response).success;
+    if (answeredPlainV1) {
+      throw new AdminError(
+        'Polo Admin does not support the negotiated client enterprise list contract',
+        'contract_version_unsupported',
+      );
+    }
+    throw new AdminError('Negotiated ProductSpace list response is invalid', 'SERVER_ERROR');
+  }
+
+  // -------------------------------------------------------------------------
   // Member circle reads (POO-70 C1) — F1-verified member-side endpoints only.
   // There is deliberately NO purchase/create-order/grant method here: the
   // client never creates circle payment orders (contract
@@ -1809,7 +2405,8 @@ export class AdminClient {
     const value =
       this.readString(data, 'errorCode') ??
       this.readString(data, 'code') ??
-      this.readString(data, 'error');
+      this.readString(data, 'error') ??
+      this.readNestedErrorCode(data);
     if (value && ADMIN_ERROR_CODE_ALIASES[value]) {
       return ADMIN_ERROR_CODE_ALIASES[value];
     }
@@ -1817,6 +2414,20 @@ export class AdminClient {
       return value as AdminErrorCode;
     }
     return null;
+  }
+
+  /**
+   * POO-196: the project-context envelope nests the wire code at
+   * `error.code` (`{ error: { code, message } }` — PcErrorEnvelopeSchema).
+   * Without this read every pc_* failure would degrade to the generic
+   * status-derived code and erase the distinction callers branch on.
+   */
+  private readNestedErrorCode(data: unknown): string | null {
+    if (!data || typeof data !== 'object') return null;
+    const nested = (data as Record<string, unknown>).error;
+    if (!nested || typeof nested !== 'object') return null;
+    const value = (nested as Record<string, unknown>).code;
+    return typeof value === 'string' && value.length > 0 ? value : null;
   }
 
   private readSuccessResponse<T>(data: unknown, schema: ZodType<T>): T {

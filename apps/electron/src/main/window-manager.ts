@@ -415,6 +415,30 @@ export class WindowManager {
       this.openExternalFromRenderer(url, 'will-navigate', window)
     })
 
+    // POO-196 review R-4: SUB-frame navigation never fires `will-navigate`, so
+    // a sandboxed iframe — the project HTML preview renders untrusted shared
+    // files in one — could navigate ITSELF (`<meta http-equiv="refresh">` or
+    // `location.href=`, no script needed for the former) out to a remote page.
+    // The landing document would drop the injected CSP, sit inside the app
+    // renderer and render arbitrary remote content (in-app phishing surface).
+    // Nothing in this app legitimately navigates a sub-frame across origins,
+    // so non-app sub-frame navigation is blocked outright (main-frame attempts
+    // stay with `will-navigate` above, which routes them to the user's
+    // browser). Chosen over a preview-only webContents/webRequest allowlist:
+    // one global sub-frame guard is a smaller surface than per-preview wiring
+    // and covers every future embedded-frame consumer.
+    //
+    // `about:` stays open: a srcdoc preview's own document commits as
+    // `about:srcdoc`, and the event fires for that initial load too. Blocking
+    // it would blank every preview; a meta-refresh escape always lands on an
+    // http(s) URL, so the allow-list gap cannot carry the R-4 vector.
+    window.webContents.on('will-frame-navigate', (details) => {
+      if (details.isMainFrame) return
+      if (this.isRendererAppUrl(details.url)) return
+      if (details.url.startsWith('about:')) return
+      details.preventDefault()
+    })
+
     // Enable right-click context menu in development
     if (!app.isPackaged) {
       window.webContents.on('context-menu', (_event, params) => {

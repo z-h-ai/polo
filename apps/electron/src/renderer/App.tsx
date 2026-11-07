@@ -10,6 +10,7 @@ import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult, GoalProjection } from '../shared/types'
 import type { WebElementReference } from '@polo-ai/core/types'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
+import { projectAssetDraftRefsAtomFamily, type ProjectAssetMentionDraft } from '@/atoms/project-context'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -37,6 +38,7 @@ import { useNotifications } from '@/hooks/useNotifications'
 import { useSession } from '@/hooks/useSession'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
+import { readProjectPurpose } from '@/lib/project-directory'
 import { navigate, openGlobalSettings, routes } from './lib/navigate'
 import { DEFAULT_SETTINGS_SUBPAGE } from '../shared/settings-registry'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
@@ -105,6 +107,7 @@ import {
 import { useProductSpaceContextState } from '@/hooks/useProductSpaceContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { ProductSpaceSwitchDialog } from '@/components/product-space/ProductSpaceSwitchDialog'
+import { CreateProjectDialog } from '@/components/product-space/CreateProjectDialog'
 import { ProductSpaceContractGate } from '@/components/product-space/ProductSpaceContractGate'
 import {
   emitAdminAuthFailure,
@@ -642,6 +645,11 @@ export default function App() {
   const [appTheme, setAppTheme] = useState<ThemeOverrides | null>(null)
   // Reset confirmation dialog
   const [showResetDialog, setShowResetDialog] = useState(false)
+  // POO-196 追加轮 D-D 1: the create-project dialog is hosted ONCE here so
+  // both entries (account/space menu + select screen) open the same instance
+  // and its submit/recovery state outlives menu close.
+  const [createProjectOpen, setCreateProjectOpen] = useState(false)
+  const handleOpenCreateProject = useCallback(() => setCreateProjectOpen(true), [])
 
   // Auto-update state
   const updateChecker = useUpdateChecker()
@@ -2249,13 +2257,25 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createSession(workspaceId, options)
+    // POO-196 R3 P12-5: carry the committed project's authoritative context
+    // metadata (title + cached introduction) on creation. The server stores it
+    // ONLY under its own trustedScope space binding, and every spawn/resume of
+    // the session re-injects it into the model request context.
+    const activeSpace = productSpace.activeProductSpace
+    const projectContext = activeSpace?.kind === 'enterprise' && currentAdminUser?.userId
+      ? {
+        name: activeSpace.name,
+        purpose: readProjectPurpose(currentAdminUser.userId, activeSpace.id),
+      }
+      : undefined
+    const attachedOptions = { ...options, ...(projectContext ? { projectContext } : {}) }
+    const session = await window.electronAPI.createSession(workspaceId, attachedOptions)
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
 
     return session
-  }, [addSession, syncSessionOptionsFromSession])
+  }, [addSession, currentAdminUser?.userId, productSpace.activeProductSpace, syncSessionOptionsFromSession])
 
   // Dedicated, trusted creation path for the Edit Popover session: the server
   // stamps the 'edit-popover' origin + owner identity. The generic
@@ -2451,7 +2471,7 @@ export default function App() {
     return lease
   }, [])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => {
     // Journey #8: the optimistic bubble's id, hoisted so the catch block can
     // strip exactly that bubble (the send's server receipt is unknown — the
     // failed attempt must not linger as a half-confirmed message).
@@ -2636,6 +2656,21 @@ export default function App() {
         // POO-135: picked web element references ride the same chain and are
         // persisted on the stored user message.
         elementReferences,
+        // POO-196: the composer's @ project-asset mentions ride the same
+        // chain. What is sent are MENTION REQUESTS (assetId/version/name);
+        // the server resolves each one against the admin read path and stamps
+        // the authoritative snapshot (per-reference ok/missing/stale/failed)
+        // on the persisted user message — client-supplied values for the
+        // snapshot fields are always dropped server-side.
+        projectAssetRefs: projectAssetRefs && projectAssetRefs.length > 0
+          ? projectAssetRefs.map((draft) => ({
+            assetId: draft.assetId,
+            version: draft.version,
+            name: draft.name,
+            status: 'ok' as const,
+            snippet: null,
+          }))
+          : undefined,
         optimisticMessageId: userMessage.id,
         invocationSource: 'desktop',
         // POO-134: an armed 目标模式 send declares the Goal start intent. The
@@ -2650,6 +2685,9 @@ export default function App() {
       // session (FreeFormInput already cleared its copy).
       if (elementReferences && elementReferences.length > 0) {
         store.set(elementDraftRefsAtomFamily(sessionId), [])
+      }
+      if (projectAssetRefs && projectAssetRefs.length > 0) {
+        store.set(projectAssetDraftRefsAtomFamily(sessionId), [])
       }
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -3586,7 +3624,9 @@ export default function App() {
       contextVersion: productSpace.contextVersion,
       pendingSwitch: productSpace.pendingSwitch,
       onSelectProductSpace: handleSelectProductSpace,
+      onRequestSwitch: requestSwitch,
       onRefreshProductSpaces: handleRefreshProductSpaces,
+      onOpenCreateProject: handleOpenCreateProject,
       onRecoverActiveProductSpace: productSpace.recoverActiveProductSpace,
       onConfirmStopAndSwitch: () => {
         void confirmStopAndSwitch()
@@ -3609,8 +3649,10 @@ export default function App() {
     confirmStopAndSwitch,
     currentAdminUser?.userId,
     dismissTargetAccessLost,
+    handleOpenCreateProject,
     handleRefreshProductSpaces,
     handleSelectProductSpace,
+    requestSwitch,
     productSpace.activeProductSpace,
     productSpace.activeProductSpaceId,
     productSpace.allProductSpaces,
@@ -3780,6 +3822,17 @@ export default function App() {
               }}
             />
             <ProductSpaceSwitchDialog />
+            <CreateProjectDialog
+              open={createProjectOpen}
+              onOpenChange={setCreateProjectOpen}
+              onVerifyPhone={() => {
+                // D-B 3: the existing sign-in challenge owns phone
+                // verification — hand off and let the user come back to
+                // re-read their identity and re-submit.
+                setCreateProjectOpen(false)
+                handleAdminRelogin()
+              }}
+            />
           </MaybeProductSpaceProvider>
         </ModalProvider>
       </DismissibleLayerProvider>
@@ -4116,6 +4169,14 @@ export default function App() {
             </ClientPageProvider>
             </MemberCatalogProvider>
             <ProductSpaceSwitchDialog />
+            <CreateProjectDialog
+              open={createProjectOpen}
+              onOpenChange={setCreateProjectOpen}
+              onVerifyPhone={() => {
+                setCreateProjectOpen(false)
+                handleAdminRelogin()
+              }}
+            />
           </MaybeProductSpaceProvider>
           </AppShellProvider>
         </TooltipProvider>

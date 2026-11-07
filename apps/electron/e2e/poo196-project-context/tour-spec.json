@@ -1,0 +1,76 @@
+{
+  "comment": "POO-196 批2 A 档证据采集巡游的状态清单。与 main.ts 的 evidenceTour() 状态一一对应：驱动侧在每个状态做 identity/state 检查并出带凭据截图；before 树没有的面（available 过滤 chip、能力通知、标签被拒 inline、丢弃确认、回收站加载更多）由驱动判 absent；preview-overlay 两侧都有（before 为未隔离的旧浮层，after 为 sandbox=allow-scripts + 注入 CSP 的隔离覆盖层）。",
+  "viewport": [1440, 900],
+  "states": [
+    {
+      "name": "files-library",
+      "object": "项目知识库·文件库", "state": "列表态", "role": "member", "data": "POO-196 fixture 资产池（resetAssets 后 12 项）",
+      "identity": { "surface": "消息", "dataset": "设计稿-首页" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "dataset": "[data-testid=\"pc-asset-row-as-design-home\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-library\"]", "text": "上传" }]
+    },
+    {
+      "name": "files-available-filter",
+      "object": "项目知识库·文件库", "state": "状态过滤=可用", "role": "member", "data": "POO-196 fixture 资产池（resetAssets 后 12 项）",
+      "identity": { "surface": "消息", "filter": "可用" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "filter": "[data-testid=\"pc-status-filter-available\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-status-filter-available\"]", "text": "可用" }]
+    },
+    {
+      "name": "capability-storage-disabled",
+      "object": "项目知识库·文件库", "state": "存储不可用中性通知", "role": "member", "data": "capabilities.featureEnabled=false + disabledReason=storage_unavailable",
+      "identity": { "surface": "消息", "notice": "文件存储暂不可用" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "notice": "[data-testid=\"pc-capability-title\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-capability-notice\"]", "text": "文件存储暂不可用" }]
+    },
+    {
+      "name": "upload-dialog",
+      "object": "项目知识库·上传弹层", "state": "已选文件待提交", "role": "member", "data": "fixture 文件 __size2048_迭代纪要-1106.md（2048B，摘要区呈现 2 KB）",
+      "identity": { "surface": "消息", "picked": "2 KB" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "picked": "[data-testid=\"pc-upload-file-summary\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-upload-dialog\"]", "text": "上传" }]
+    },
+    {
+      "name": "upload-tag-reserved",
+      "object": "项目知识库·上传弹层", "state": "自定义标签保留字被拒", "role": "member", "data": "输入 confirmed 触发保留字校验",
+      "identity": { "surface": "消息", "reason": "该名称为保留字" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "reason": "[data-testid=\"pc-upload-tag-error\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-upload-tag-error\"]", "text": "该名称为保留字" }]
+    },
+    {
+      "name": "upload-discard-guard",
+      "object": "项目知识库·上传弹层", "state": "Esc 触发丢弃确认层", "role": "member", "data": "已选 迭代纪要-1106.md 未提交时按 Esc",
+      "identity": { "surface": "消息", "confirm": "放弃本次上传？" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "confirm": "[data-testid=\"pc-upload-discard-confirm\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-upload-discard-confirm\"]", "text": "放弃本次上传" }]
+    },
+    {
+      "name": "mention-popover",
+      "object": "composer @ 引用浮层", "state": "查询「会」结果分组", "role": "member", "data": "查询词=会（项目文件/技能/来源统一分组）",
+      "identity": { "surface": "消息", "popover": "会议纪要-1030" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "popover": "[data-testid=\"pc-mention-popover\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-mention-popover\"]", "text": "会议纪要-1030" }]
+    },
+    {
+      "name": "pin-pane",
+      "object": "项目知识库·Pin 面板", "state": "pinned active 投影", "role": "member", "data": "fixture 钉选集（需求文档 v2.3.docx 等）",
+      "identity": { "surface": "Pin", "pinned": "需求文档 v2.3" },
+      "selectors": { "surface": "[data-testid=\"pc-tab-pins\"]", "pinned": "[data-testid=\"pc-pin-pane\"] [data-testid=\"pc-asset-row-as-req-doc\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-pin-pane\"]", "text": "需求文档 v2.3" }]
+    },
+    {
+      "name": "trash-load-more",
+      "object": "项目知识库·回收站", "state": "超一页出现加载更多", "role": "member", "data": "stageTrashLoadMore 压入 60 行回收站（超过默认页大小 50）",
+      "identity": { "surface": "消息", "trash": "回收站中的文件" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "trash": "[data-testid=\"pc-trash-view\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-trash-load-more\"]", "text": "加载更多" }]
+    },
+    {
+      "name": "preview-overlay",
+      "object": "项目文件 HTML 预览覆盖层", "state": "覆盖层呈现", "role": "member", "data": "原型演示-首页.html（after 为 srcdoc + sandbox=allow-scripts + 注入 CSP；before 为未隔离旧浮层）",
+      "identity": { "surface": "消息", "preview": "原型演示-首页" },
+      "selectors": { "surface": "[data-testid=\"pc-tabs\"]", "preview": "[data-testid=\"pc-preview-overlay\"]" },
+      "state_checks": [{ "selector": "[data-testid=\"pc-preview-overlay\"]", "text": "原型演示-首页" }]
+    }
+  ]
+}

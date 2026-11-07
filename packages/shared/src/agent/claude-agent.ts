@@ -783,6 +783,9 @@ export class ClaudeAgent extends BaseAgent {
         return this.onGoalUpdateReport?.(report, generationAtRequest);
       },
       getTurnGeneration: () => this.sessionTurnGeneration,
+      // POO-196: forward the host-injected factory — the facade is resolved
+      // at tool-call time by the handler, never cached at registration.
+      getProjectContext: () => this.getProjectContext?.() ?? null,
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
     }, ownerToken);
@@ -1342,7 +1345,7 @@ export class ClaudeAgent extends BaseAgent {
           undefined,
           this.sessionStorage,
           this.workingDirectory,
-          { allowRequestUserInput: this.allowRequestUserInput, allowRenderUi: this.allowRenderUi, allowGenerateApp: this.allowGenerateApp, allowGoalUpdate: this.allowGoalUpdate },
+          { allowRequestUserInput: this.allowRequestUserInput, allowRenderUi: this.allowRenderUi, allowGenerateApp: this.allowGenerateApp, allowGoalUpdate: this.allowGoalUpdate, allowProjectContext: this.allowProjectContext },
         ),
         // Polo AI documentation - always available for searching setup guides
         // This is a public Mintlify MCP server, no auth needed

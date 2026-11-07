@@ -73,6 +73,15 @@ export interface SessionScopedToolCallbacks {
   getTurnGeneration?: () => number;
 
   /**
+   * POO-196: per-call re-authorized project context facade, registered by the
+   * agent backend from its host-injected factory. Read by the
+   * project_context_* handlers AT TOOL-CALL TIME (not cached at registration)
+   * so a session that leaves the project fence mid-turn stops resolving
+   * immediately. Absent/null = the handlers fail closed.
+   */
+  getProjectContext?: () => import('@polo-ai/session-tools-core').ProjectContextFacade | null;
+
+  /**
    * Agent-native LLM query callback for call_llm tool (OAuth path).
    * Each agent backend sets this to its own queryLlm implementation.
    */

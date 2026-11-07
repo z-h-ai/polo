@@ -20,11 +20,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { AlertCircle, CloudOff } from 'lucide-react'
 import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { useManagedSkills } from '@/hooks/useManagedSkills'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
+import { projectEntryAtom } from '@/atoms/project-entry'
+import { useProjectEntry } from '@/hooks/useProjectEntry'
 import { StoplightProvider } from '@/context/StoplightContext'
 import {
   useNavigationState,
@@ -46,6 +49,8 @@ import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import type { ExecutionEntry } from '../automations/types'
 import { automationsAtom } from '@/atoms/automations'
 import { SendResourceToWorkspaceDialog, type SendResourceType } from './SendResourceToWorkspaceDialog'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import { ProjectConversationEmptyState } from '@/components/project-context/ProjectConversationEmptyState'
 
 export interface MainContentPanelProps {
   /** Whether both sidebar and navigator are hidden (focus mode / CMD+.) */
@@ -58,6 +63,57 @@ export interface MainContentPanelProps {
    * Used by PanelSlot to render panels in the panel stack.
    */
   navStateOverride?: import('../../../shared/types').NavigationState | null
+}
+
+/**
+ * POO-196 R3 UB2 (adjudication U10) — the PERSISTENT landing face for a
+ * committed entry whose fresh history read (getSessions) failed. It keeps the
+ * project title, renders「无法读取项目对话，请重新加载」+「重新加载」, and NEVER
+ * falls back to a sendable empty state or an old project's messages — the
+ * unknown history must not be mistaken for an empty project (that would
+ * invite a duplicate conversation). It shows ONLY while the failed target is
+ * still this account's valid committed scope (the shared entry state clears
+ * itself when the scope moves), and create-origin entries additionally carry
+ *「项目已创建，暂时无法进入」— retry re-enters, it never re-creates.
+ * Exported so the harness host can mirror the exact production surface rule.
+ */
+export function ProjectEntryHistoryErrorFace({ projectName, createOrigin, onRetry }: {
+  projectName: string
+  createOrigin: boolean
+  onRetry: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div
+      data-testid="project-entry-history-error"
+      className="flex flex-1 flex-col items-center justify-center gap-[10px] px-[24px] py-[30px] text-center"
+    >
+      <CloudOff className="size-[20px] text-muted-foreground" aria-hidden="true" />
+      {/* U10: the face keeps the project title so the user knows WHICH
+      conversation surface failed to load. */}
+      <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">{projectName}</h2>
+      <p className="m-0 max-w-[460px] text-[13px] leading-[1.6] text-muted-foreground">
+        {t('project.entry.historyFailed')}
+      </p>
+      {createOrigin && (
+        <p
+          data-testid="project-entry-history-error-created"
+          className="m-0 flex items-center gap-[6px] text-[12px] leading-[1.5] text-foreground"
+        >
+          <AlertCircle className="size-[13px] shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span>{t('createProject.created.enterFailed')}</span>
+        </p>
+      )}
+      <button
+        type="button"
+        data-testid="project-entry-retry"
+        className="mt-[4px] inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+        onClick={onRetry}
+      >
+        {t('project.entry.reloadHistory')}
+      </button>
+    </div>
+  )
 }
 
 export function MainContentPanel({
@@ -94,6 +150,21 @@ export function MainContentPanel({
   const { clearMultiSelect } = useSessionSelection()
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const automations = useAtomValue(automationsAtom)
+  // POO-196 R3 (D14): the committed product-space scope drives the project
+  // conversation empty state below — hooks stay top-level (rules of hooks).
+  const productSpaceScope = useOptionalProductSpaceContext()
+  const activeProjectSpace = productSpaceScope?.activeProductSpace
+  // UB2 (U3/U10): the shared entry transaction state. A committed entry whose
+  // fresh history read failed pins the persistent history-error face over
+  // this scope's conversation area (no sendable empty state, no old project's
+  // messages) until「重新加载」re-reads and re-routes.
+  const entryState = useAtomValue(projectEntryAtom)
+  const { retryEntry } = useProjectEntry()
+  const historyErrorActive = entryState.phase === 'history-failed'
+    && entryState.accountId !== null
+    && entryState.accountId === productSpaceScope?.accountId
+    && activeProjectSpace?.kind === 'enterprise'
+    && activeProjectSpace.id === entryState.productSpaceId
 
   // Execution history for the selected automation
   const selectedAutomationId = isAutomationsNavigation(navState) ? navState.details?.automationId : undefined
@@ -407,10 +478,50 @@ export function MainContentPanel({
       )
     }
 
+    // UB2 (U10): the history-error face wins over BOTH the stale session view
+    // and the empty state — a committed scope whose fresh history read failed
+    // must not display the previous project's messages and must never render
+    // as a sendable「暂无对话」. It stays until「重新加载」re-reads and
+    // re-routes, and only while the failed target is still this account's
+    // valid committed scope (the shared entry state clears on scope change).
+    if (historyErrorActive && activeProjectSpace) {
+      return wrapWithStoplight(
+        <Panel variant="grow" className={className} testId="main-content-panel">
+          <ProjectEntryHistoryErrorFace
+            projectName={activeProjectSpace.name}
+            createOrigin={entryState.origin === 'create'}
+            onRetry={() => retryEntry(entryState.productSpaceId)}
+          />
+        </Panel>
+      )
+    }
     if (navState.details) {
       return wrapWithStoplight(
         <Panel variant="grow" className={className} testId="main-content-panel">
           <ChatPage sessionId={navState.details.sessionId} />
+        </Panel>
+      )
+    }
+    // POO-196 R3 (D14): a committed enterprise PROJECT scope with no selected
+    // session shows the editable project conversation empty state (zero-write
+    // entry — the session is created only by the first explicit send), not
+    // the generic "no session selected" placeholder.
+    if (
+      productSpaceScope?.accountId
+      && activeWorkspaceId
+      && activeProjectSpace
+      && activeProjectSpace.kind === 'enterprise'
+    ) {
+      return wrapWithStoplight(
+        <Panel variant="grow" className={className} testId="main-content-panel">
+          <ProjectConversationEmptyState
+            accountId={productSpaceScope.accountId}
+            workspaceId={activeWorkspaceId}
+            productSpaceId={activeProjectSpace.id}
+            projectName={activeProjectSpace.name}
+            viewerRole={activeProjectSpace.role}
+            enterpriseId={activeProjectSpace.enterpriseId}
+          />
         </Panel>
       )
     }

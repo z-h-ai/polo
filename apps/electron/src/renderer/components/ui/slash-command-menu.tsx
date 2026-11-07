@@ -4,6 +4,12 @@ import { Command as CommandPrimitive } from 'cmdk'
 import { Check, Minimize2 } from 'lucide-react'
 import { Icon_Folder } from '@polo-ai/ui'
 import { cn } from '@/lib/utils'
+import {
+  ViewportPortal,
+  useCloseOnViewportResize,
+  clampFloatLeft,
+  clampFloatBottom,
+} from '@/components/ui/viewport-portal'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@polo-ai/shared/agent/modes'
 
 // ============================================================================
@@ -398,6 +404,8 @@ export function InlineSlashCommand({
     if (!open || flatItems.length === 0) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // R-AT: IME composition keys belong to the input method (see mention-menu).
+      if (e.isComposing) return
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
@@ -439,24 +447,29 @@ export function InlineSlashCommand({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open, onOpenChange])
 
+  // R-AT: viewport clamps + body portal — the panel's backdrop-filter makes
+  // the panel a fixed containing block, so viewport coordinates require the
+  // float to live outside the panel subtree. The resize guard must register
+  // unconditionally (rules of hooks); it self-gates on `open`.
+  useCloseOnViewportResize(open, () => onOpenChange(false))
+
   // Hide if no results or not open
   if (!open || flatItems.length === 0) return null
 
-  // Calculate bottom position from window height (menu appears above cursor)
-  const bottomPosition = typeof window !== 'undefined'
-    ? window.innerHeight - Math.round(position.y) + 8
-    : 0
+  const bottomPosition = clampFloatBottom(position.y, 260)
+  const leftPosition = clampFloatLeft(position.x, 260)
 
   // Track current item index across all sections
   let currentItemIndex = 0
 
   return (
-    <div
-      ref={menuRef}
-      data-inline-menu
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
-      style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 220, maxWidth: 260 }}
-    >
+    <ViewportPortal>
+      <div
+        ref={menuRef}
+        data-inline-menu
+        className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+        style={{ left: leftPosition, bottom: bottomPosition, minWidth: 220, maxWidth: 260 }}
+      >
       <div ref={listRef} className={MENU_LIST_STYLE}>
         {filteredSections.map((section, sectionIndex) => (
           <React.Fragment key={section.id}>
@@ -520,7 +533,8 @@ export function InlineSlashCommand({
       <div className="px-3 py-2.5 select-none text-xs text-muted-foreground">
         {t('commands.useAtMentionHint')}
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   )
 }
 

@@ -3,11 +3,27 @@ import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import type { CreatorCircleRelation } from '@/hooks/useAppCatalog'
 
+/**
+ * POO-196 R3 UB5 (U14): the display category of the committed space, carried
+ * VERBATIM from the verified R3 summary type (`enterpriseKind`) by the
+ * consumer — never guessed from the name. The committed ProductSpace may
+ * itself be a project, so the identity bar must not misname a project as the
+ * organization (or silently strip “项目空间” out of a user-chosen name).
+ * A summary the client cannot classify renders the neutral「当前空间」face.
+ */
+export type HomeSpaceCategory = 'organization' | 'project' | 'personal' | 'unknown'
+
 interface HomeSpaceContextProps {
   /** Currently committed ProductSpace name (context title). */
   spaceName: string
   /** personal spaces carry the CreatorCircle relation entry; enterprise never. */
   spaceKind: 'personal' | 'enterprise' | null
+  /**
+   * U14: the authoritative display category of `spaceName` (from the R3
+   * negotiated summary; personal spaces derive from the space kind itself).
+   * Absent → the neutral「当前空间」title — never a wrong commitment.
+   */
+  spaceCategory?: HomeSpaceCategory
   /** CreatorCircle relations visible in the active space's Catalog (REQ-022). */
   creatorCircles: CreatorCircleRelation[]
   /**
@@ -30,12 +46,23 @@ interface HomeSpaceContextProps {
 export function HomeSpaceContext({
   spaceName,
   spaceKind,
+  spaceCategory = 'unknown',
   creatorCircles,
   spaceKey,
 }: HomeSpaceContextProps) {
   const { t } = useTranslation()
   const [view, setView] = useState<'context' | 'circles'>('context')
   const showCirclesEntry = spaceKind === 'personal' && creatorCircles.length > 0
+  // U14: the title row names the space ACCORDING TO ITS AUTHORITATIVE TYPE —
+  // organization / project / personal / (unknown → neutral). The real
+  // committed name rides {{name}} untouched.
+  const categoryTitleKey = spaceCategory === 'organization'
+    ? 'homeSpace.context.currentOrganization'
+    : spaceCategory === 'project'
+      ? 'homeSpace.context.currentProject'
+      : spaceCategory === 'personal'
+        ? 'homeSpace.context.currentPersonal'
+        : 'homeSpace.context.currentSpace'
 
   // Fail-closed transitions: a ProductSpace identity change or a lost guard
   // (non-personal / relations emptied) always collapses back to the context
@@ -53,7 +80,7 @@ export function HomeSpaceContext({
     <section
       aria-label={t('homeSpace.context.ariaLabel')}
       data-testid="home-space-context"
-      className="mb-[16px] rounded-[17px] border border-foreground/10 px-[16px] py-[12px]"
+      className="mb-[16px] rounded-[17px] border border-foreground/10 px-[16px] py-[8px]"
     >
       {/* Fail-closed render predicate: the circles branch requires BOTH the
           persisted view state AND the live guard (personal + non-empty
@@ -99,12 +126,23 @@ export function HomeSpaceContext({
         </div>
       ) : (
         <div>
-          <h2 className="text-base font-semibold">{spaceName}</h2>
-          <p className="mt-[3px] text-[14px] text-muted-foreground">
-            {spaceKind === 'enterprise'
-              ? t('homeSpace.context.enterpriseDescription')
-              : t('homeSpace.context.personalDescription')}
-          </p>
+          {/* U14 compact default state: name (13px semibold) and description
+              (12px secondary) share ONE horizontal baseline row; a long name
+              wraps (min-w-0 + flex-wrap) and never clips or covers the
+              circles entry below. */}
+          <div className="flex flex-wrap items-baseline gap-x-[10px] gap-y-[2px]">
+            <h2
+              data-testid="home-space-context-title"
+              className="m-0 min-w-0 text-[13px] font-semibold leading-[1.5]"
+            >
+              {t(categoryTitleKey, { name: spaceName })}
+            </h2>
+            <p className="m-0 min-w-0 text-[12px] leading-[1.5] text-muted-foreground">
+              {spaceKind === 'enterprise'
+                ? t('homeSpace.context.enterpriseDescription')
+                : t('homeSpace.context.personalDescription')}
+            </p>
+          </div>
           {showCirclesEntry && (
             <button
               type="button"

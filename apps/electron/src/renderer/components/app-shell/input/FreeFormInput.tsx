@@ -12,6 +12,7 @@ import {
   ChevronUp,
   X,
   Library,
+  HelpCircle,
 } from 'lucide-react'
 import { Icon_Home, Icon_Folder } from '@polo-ai/ui'
 
@@ -26,6 +27,7 @@ import {
 import {
   InlineMentionMenu,
   useInlineMention,
+  filterSections,
   type MentionItem,
   type MentionItemType,
 } from '@/components/ui/mention-menu'
@@ -62,9 +64,17 @@ import { KnowledgeBaseSelectorPopover } from './KnowledgeBaseSelectorPopover'
 import { useKbSelectionSave } from './use-kb-selection-save'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { WebElementReference } from '@polo-ai/core/types'
-import type { KbCollection } from '@polo-ai/shared/protocol'
+import type { KbCollection, PcSearchResponse } from '@polo-ai/shared/protocol'
 import type { PermissionMode } from '@polo-ai/shared/agent/modes'
 import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
+import {
+  AssetMentionPopover,
+  useAssetMention,
+  type AssetMentionExtraSection,
+  type AssetMentionHit,
+} from '@/components/project-context/AssetMentionPopover'
+import { ProjectAssetDraftChips } from '@/components/project-context/ProjectAssetChip'
+import type { ProjectAssetMentionDraft } from '@/atoms/project-context'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
@@ -120,6 +130,15 @@ export interface FollowUpInputItem {
 export interface FreeFormInputProps {
   /** Placeholder text(s) for the textarea - can be array for rotation */
   placeholder?: string | string[]
+  /**
+   * POO-196 UB4 (U13): the project-composer presentation — a STABLE
+   * placeholder (no shortcut/# rotation; the send key follows the user's
+   * REAL sendMessageKey preference) plus the always-present 「输入帮助」
+   * affordance in the composer toolbar. Project sessions AND the project
+   * empty state turn this on; non-project consumers keep the current
+   * presentation untouched.
+   */
+  projectComposer?: boolean
   /** Whether input is disabled */
   disabled?: boolean
   /** Whether the session is currently processing */
@@ -133,7 +152,25 @@ export interface FreeFormInputProps {
     kbOptions?: { kbCollectionIds?: string[] },
     /** POO-135: picked web element references attached to this send. */
     elementReferences?: WebElementReference[],
+  /** POO-196: picked project-asset mentions attached to this send. */
+  projectAssetRefs?: ProjectAssetMentionDraft[],
   ) => void
+  /**
+   * POO-196 UB2 (U11): the synchronous send-admission gate. Called FIRST in
+   * submitMessage — before the mention/source side effects, the KB scope
+   * commit, the draft/attachment/reference clears, the follow-up sent
+   * markers and the onSubmit hand-off. Returning false refuses the submit
+   * and leaves every draft field exactly as typed. ALL submit paths (Send
+   * click, Enter/⌘Enter, programmatic craft:submit-input) pass through this
+   * one gate; consumers that never pass the prop keep the original behavior.
+   */
+  submitGate?: () => boolean
+  /**
+   * POO-196 UB2 (U11): persistent notice rendered ABOVE the input (e.g.
+   * 「正在打开项目…」while an entry is in flight, or the post-landing「请点击
+   * 发送」guidance). Content-owned by the caller; render-only here.
+   */
+  gateNotice?: string | null
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
   onStop?: (silent?: boolean) => void
   /** External ref for the input */
@@ -164,6 +201,18 @@ export interface FreeFormInputProps {
   elementReferencesValue?: WebElementReference[]
   /** Callback when a draft reference is removed by the user (send clears the rest). */
   onElementReferencesChange?: (references: WebElementReference[]) => void
+  /**
+   * POO-196: @ project-asset mention surface — wired ONLY in project sessions
+   * (enterprise space + session bound to the committed space). Absent = the
+   * whole surface stays off and the generic mention keeps the `@` key.
+   */
+  projectAssetMention?: {
+    search: (q: string) => Promise<PcSearchResponse>
+  }
+  /** POO-196: picked project-asset references queued for this session's composer. */
+  projectAssetRefsValue?: ProjectAssetMentionDraft[]
+  /** Callback when a draft project-asset reference is removed (send clears the rest). */
+  onProjectAssetRefsChange?: (references: ProjectAssetMentionDraft[]) => void
   /** When true, removes container styling (shadow, bg, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
   /** Callback when component height changes (for external animation sync) */
@@ -268,9 +317,12 @@ export interface FreeFormInputProps {
  */
 export function FreeFormInput({
   placeholder,
+  projectComposer = false,
   disabled = false,
   isProcessing = false,
   onSubmit,
+  submitGate,
+  gateNotice,
   onStop,
   inputRef: externalInputRef,
   currentModel,
@@ -283,6 +335,9 @@ export function FreeFormInput({
   onAttachmentsChange,
   elementReferencesValue,
   onElementReferencesChange,
+  projectAssetMention,
+  projectAssetRefsValue,
+  onProjectAssetRefsChange,
   unstyled = false,
   onHeightChange,
   onFocusChange,
@@ -326,7 +381,66 @@ export function FreeFormInput({
     t("chatInput.placeholder.focusMode", { key: cmdKey }),
   ], [t])
 
-  const effectivePlaceholderProp = placeholder ?? defaultPlaceholders
+  // Input settings (loaded from config). `sendMessageKey` is declared early:
+  // it is the AUTHORITATIVE preference the project composer's stable
+  // placeholder (U13) mirrors — never a second copy of the setting.
+  const [autoCapitalisation, setAutoCapitalisation] = React.useState(true)
+  const [sendMessageKey, setSendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
+  const [spellCheck, setSpellCheck] = React.useState(false)
+  // U13: the project composer's「输入帮助」face. Open state only — the rows
+  // below are derived from the REAL platform/preference capabilities each
+  // render, never stored.
+  const [projectInputHelpOpen, setProjectInputHelpOpen] = React.useState(false)
+
+  // U13: Esc closes the help and returns focus to the composer. The capture
+  // listener runs before the chat's double-Esc interrupt and before any
+  // overlay detection, so closing the help never leaks into the input's own
+  // Esc semantics.
+  React.useEffect(() => {
+    if (!projectInputHelpOpen) return
+    const handleHelpEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setProjectInputHelpOpen(false)
+      richInputRef.current?.focus()
+    }
+    document.addEventListener('keydown', handleHelpEscape, true)
+    return () => document.removeEventListener('keydown', handleHelpEscape, true)
+  }, [projectInputHelpOpen])
+
+  // U13 help rows — only what THIS user's platform/preferences truly support:
+  // the send line follows sendMessageKey; Shift+Tab only with ≥2 modes
+  // enabled; the desktop-only sidebar/focus/newline hints drop in compact
+  // mode (same honesty rule as the compact placeholder filtering). @ and #
+  // reuse the existing menu keys unchanged.
+  const projectHelpRows = React.useMemo(() => {
+    const rows: string[] = [
+      sendMessageKey === 'cmd-enter'
+        ? t('project.entry.inputPlaceholderClick')
+        : t('project.entry.inputPlaceholder'),
+    ]
+    if (!compactMode) rows.push(t('chatInput.placeholder.newLine'))
+    rows.push(t('chatInput.placeholder.mention'))
+    rows.push(t('chatInput.placeholder.labels'))
+    if (!compactMode && enabledModes.length >= 2) rows.push(t('chatInput.placeholder.shiftTab'))
+    if (!compactMode) {
+      rows.push(t('chatInput.placeholder.sidebar', { key: cmdKey }))
+      rows.push(t('chatInput.placeholder.focusMode', { key: cmdKey }))
+    }
+    return rows
+  }, [compactMode, enabledModes.length, sendMessageKey, t])
+
+  const effectivePlaceholderProp = projectComposer
+    // U13: the project composer never rotates the shortcut/# hints. The
+    // single stable line follows the REAL sendMessageKey preference: Enter
+    // senders see「输入问题，按回车发送」， ⌘/Ctrl+Enter senders see
+    // 「输入问题，点击发送」— the actual newline key is never described as
+    // the send key.
+    ? (sendMessageKey === 'cmd-enter'
+      ? t('project.entry.inputPlaceholderClick')
+      : t('project.entry.inputPlaceholder'))
+    : (placeholder ?? defaultPlaceholders)
 
   // Read connection default model, connections, and workspace info from context.
   // Uses optional variant so playground (no provider) doesn't crash.
@@ -430,10 +544,16 @@ export function FreeFormInput({
     })
   }, [placeholder, compactMode])
 
-  // Hide placeholder entirely when panel is unfocused in multi-panel layout
+  // Hide placeholder entirely when panel is unfocused in multi-panel layout.
+  // The rotation order shuffles once per DEFAULT-array identity (stable
+  // useMemo — session switches keep the same shuffle, the original
+  // behavior); a single-string placeholder (the U13 project line and any
+  // custom context) is deliberately NOT frozen: the sendMessageKey
+  // preference may load after mount and a session switch must swap the
+  // presentation immediately.
   const shuffledPlaceholder = React.useMemo(
     () => Array.isArray(effectivePlaceholderProp) ? shuffleArray(effectivePlaceholderProp) : effectivePlaceholderProp,
-    [] // eslint-disable-line react-hooks/exhaustive-deps -- intentionally shuffle only on mount
+    [effectivePlaceholderProp],
   )
   const effectivePlaceholder = isFocusedPanel ? shuffledPlaceholder : ''
 
@@ -639,12 +759,9 @@ export function FreeFormInput({
     })
   }, [persistKbSelection])
 
-  // Input settings (loaded from config)
-  const [autoCapitalisation, setAutoCapitalisation] = React.useState(true)
-  const [sendMessageKey, setSendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
-  const [spellCheck, setSpellCheck] = React.useState(false)
-
-  // Load input settings on mount
+  // Input settings state lives with the composer's top-level declarations
+  // above (sendMessageKey feeds the U13 project placeholder); this effect
+  // loads the persisted values into it.
   React.useEffect(() => {
     const loadInputSettings = async () => {
       if (!window.electronAPI) return
@@ -1067,6 +1184,94 @@ export function FreeFormInput({
     workspaceId: workspaceSlug,
   })
 
+  // POO-196: latest project-asset reference callback (no stale closure; the
+  // draft itself is read through the prop in submitMessage).
+  const onProjectAssetRefsChangeRef = React.useRef(onProjectAssetRefsChange)
+  onProjectAssetRefsChangeRef.current = onProjectAssetRefsChange
+
+  // Queue a picked @ project asset as a draft chip (deduped per asset+version).
+  const handleProjectAssetPick = React.useCallback((hit: AssetMentionHit) => {
+    onProjectAssetRefsChangeRef.current?.((projectAssetRefsValue ?? []).some((draft) =>
+      draft.assetId === hit.assetId && draft.version === hit.version,
+    )
+      ? (projectAssetRefsValue ?? [])
+      : [...(projectAssetRefsValue ?? []), { assetId: hit.assetId, version: hit.version, name: hit.name }])
+  }, [projectAssetRefsValue])
+
+  // Apply the post-pick text (the @query token stripped) back into the composer.
+  const handleProjectAssetPickApply = React.useCallback((value: string, cursorPosition: number) => {
+    setInput(value)
+    syncToParent(value)
+    setTimeout(() => {
+      richInputRef.current?.focus()
+      richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
+    }, 0)
+  }, [syncToParent])
+
+  // POO-196 consensus S-11: the skill/source groups ride INSIDE the project
+  // asset popover as extra sections, so the single-token skill/source mention
+  // that predates POO-196 stays reachable from the same `@` surface. The file
+  // section is excluded — project sessions already have the asset group — and
+  // filtered rows keep the generic menu's ranking so both surfaces agree.
+  const assetMentionCloseRef = React.useRef<() => void>(() => {})
+  // The generic select handler is declared further down (it needs the whole
+  // inlineMention hook); the extra rows call it through this holder.
+  const inlineMentionSelectRef = React.useRef<(item: MentionItem) => void>(() => {})
+  // POO-196 review R-1: the extra rows are picked while the asset trigger owns
+  // the `@`, so they go through the LIVE-value select (handleSelectAt) instead
+  // of the stale-snapshot path — declared further down, held here.
+  const inlineMentionSelectAtRef = React.useRef<(item: MentionItem) => void>(() => {})
+  const assetMentionExtraSections = React.useMemo<AssetMentionExtraSection[]>(() => {
+    const assetSections = filterSections(
+      inlineMention.sections.filter((section) => section.id !== 'files'),
+      inlineMention.filter,
+    )
+    const byType = new Map<MentionItemType, MentionItem[]>()
+    for (const section of assetSections) {
+      for (const item of section.items) {
+        if (item.type !== 'skill' && item.type !== 'source') continue
+        const bucket = byType.get(item.type)
+        if (bucket) bucket.push(item)
+        else byType.set(item.type, [item])
+      }
+    }
+    return (['skill', 'source'] as const)
+      .filter((type) => (byType.get(type)?.length ?? 0) > 0)
+      .map((type) => ({
+        id: type === 'skill' ? 'skills' : 'sources',
+        label: t(type === 'skill' ? 'projectContext.mention.groupSkills' : 'projectContext.mention.groupSources'),
+        items: (byType.get(type) ?? []).map((item) => ({
+          id: `${type}:${item.id}`,
+          label: item.label,
+          description: item.description ?? null,
+          pick: () => {
+            // Close the asset popover first: the mention insertion replaces the
+            // `@query` token, which no longer matches the asset trigger, but the
+            // popover state is only told about changes through its own handler.
+            // R-1: the insertion itself goes through the LIVE-value select — the
+            // generic path trusts this hook's committed trigger snapshot, which
+            // is stale while the asset popover owns the `@` and used to reset
+            // the whole composer text.
+            assetMentionCloseRef.current()
+            inlineMentionSelectAtRef.current(item)
+          },
+        })),
+      }))
+  }, [inlineMention.sections, inlineMention.filter, t])
+
+  // POO-196: the @ project-asset mention owns the plain `@` trigger in project
+  // sessions. The hook stays mounted everywhere but inert (enabled=false)
+  // unless the parent wired projectAssetMention.
+  const assetMention = useAssetMention({
+    enabled: !!projectAssetMention,
+    inputRef: richInputRef,
+    search: projectAssetMention?.search ?? (async () => ({ degraded: false, hits: [] })),
+    onPick: handleProjectAssetPick,
+    applyInputValue: handleProjectAssetPickApply,
+    extraSections: assetMentionExtraSections,
+  })
+  assetMentionCloseRef.current = assetMention.close
+
   // Inline label menu hook (for #labels)
   const handleLabelSelect = React.useCallback((labelId: string) => {
     onLabelAdd?.(labelId)
@@ -1334,6 +1539,16 @@ export function FreeFormInput({
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
 
+    // POO-196 UB2 (U11): the synchronous send-admission gate — the FIRST
+    // thing a submit does after the content checks. It runs BEFORE the
+    // mention/source side effects below, the KB scope commit, the draft
+    // clears, and before ChatDisplay's onSubmit marks the follow-up
+    // annotations as sent, so a refused send (project entry mid-flight)
+    // leaves text, attachments, references, KB selection and annotation
+    // markers untouched. Click, Enter/⌘Enter and programmatic
+    // craft:submit-input all pass through this single gate.
+    if (submitGate && !submitGate()) return false
+
     // Parse all @mentions (skills, sources, folders)
     const skillSlugs = skills.map(s => s.slug)
     const sourceSlugs = sources.map(s => s.config.slug)
@@ -1362,12 +1577,18 @@ export function FreeFormInput({
       : undefined
 
     const elementSnapshot = elementReferencesValue
+
+    // POO-196: picked project-asset mentions ride with THIS send; an empty
+    // queue sends nothing (the send chain accepts an omission — unlike the KB
+    // scope there is no stored server-side session state to commit).
+    const projectAssetSnapshot = projectAssetRefsValue
     onSubmit(
       input.trim(),
       attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
       mentions.skills.length > 0 ? mentions.skills : undefined,
       kbDraft,
-      elementSnapshot && elementSnapshot.length > 0 ? elementSnapshot : undefined
+      elementSnapshot && elementSnapshot.length > 0 ? elementSnapshot : undefined,
+      projectAssetSnapshot && projectAssetSnapshot.length > 0 ? projectAssetSnapshot : undefined
     )
     setInput('')
     setAttachments([])
@@ -1375,6 +1596,7 @@ export function FreeFormInput({
     // never touched by removals, and the queue clears only after the
     // submission has been handed off (App clears its mirror on failure paths).
     onElementReferencesChangeRef.current?.([])
+    onProjectAssetRefsChangeRef.current?.([])
     // Clear draft immediately (cancel any pending debounced sync)
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
     onInputChange?.('')
@@ -1387,7 +1609,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir, elementReferencesValue])
+  }, [input, attachments, followUpItems, disabled, disableSend, submitGate, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir, elementReferencesValue, projectAssetRefsValue])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1411,8 +1633,20 @@ export function FreeFormInput({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // During IME composition, ESC should cancel composition, not trigger app/menu ESC behavior.
-    if (e.key === 'Escape' && e.nativeEvent.isComposing) {
+    // IME composition keys belong to the input method FIRST: Enter confirms
+    // the candidate, Esc cancels the composition, arrows walk the candidate
+    // window. R-AT 真机实测：组合期间事件仍会以 isComposing:true 到达本处理器
+    // （keyCode 13/27），而下面 @ 弹层/斜杠/# 菜单的路由不看 isComposing ——
+    // 输入法确认键会被当成菜单选中。组合期间一概不做应用级按键路由
+    // （发送逻辑另有 isComposing 守卫，行为不变）。
+    if (e.nativeEvent.isComposing) {
+      return
+    }
+
+    // POO-196: the @ project-asset popover owns navigation/selection keys
+    // while it floats — route keydowns there FIRST.
+    if (assetMention.handleKeyDown(e)) {
+      e.preventDefault()
       return
     }
 
@@ -1524,8 +1758,17 @@ export function FreeFormInput({
     // Update inline slash command state
     inlineSlash.handleInputChange(nextValue, cursorPosition)
 
-    // Update inline mention state (for @mentions - skills, sources, folders)
-    inlineMention.handleInputChange(nextValue, cursorPosition)
+    // POO-196 consensus S-11: the project-asset mention and the generic
+    // skill/source mention now share ONE surface, so BOTH hooks track every
+    // input change. While the asset trigger is active the generic menu is
+    // suppressed at render time (below) instead of being force-closed here —
+    // force-closing threw away its live sections and made the single-token
+    // skill/source mention unreachable.
+    const assetMentionActive = assetMention.handleInputChanged(nextValue, cursorPosition)
+    if (!assetMentionActive) {
+      // Update inline mention state (for @mentions - skills, sources, folders)
+      inlineMention.handleInputChange(nextValue, cursorPosition)
+    }
 
     // Update inline label state (for #labels)
     inlineLabel.handleInputChange(nextValue, cursorPosition)
@@ -1554,7 +1797,7 @@ export function FreeFormInput({
       setInput(newValue)
       syncToParent(newValue)
     }
-  }, [inlineSlash, inlineMention, inlineLabel, syncToParent, autoCapitalisation])
+  }, [inlineSlash, inlineMention, inlineLabel, assetMention, syncToParent, autoCapitalisation])
 
   // Handle inline slash command selection (removes the /command text)
   const handleInlineSlashCommandSelect = React.useCallback((commandId: SlashCommandId) => {
@@ -1583,6 +1826,27 @@ export function FreeFormInput({
       richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
     }, 0)
   }, [inlineMention, syncToParent])
+  inlineMentionSelectRef.current = handleInlineMentionSelect
+
+  // POO-196 review R-1: the asset popover's skill/source rows insert with the
+  // LIVE composer value + caret (read off the element, not this hook's stale
+  // snapshot), so the mention replaces the `@query` token in place and the rest
+  // of the draft survives. Keyboard (Enter/Tab) and pointer picks share this
+  // closure through the extra rows' pick().
+  const handleInlineMentionSelectAt = React.useCallback((item: MentionItem) => {
+    const element = richInputRef.current
+    const liveValue = element?.value ?? input
+    const liveCursor = element ? element.selectionStart : liveValue.length
+    const { value: newValue, cursorPosition } = inlineMention.handleSelectAt(liveValue, liveCursor, item)
+    setInput(newValue)
+    syncToParent(newValue)
+    // Focus input and restore cursor position after badge renders
+    setTimeout(() => {
+      richInputRef.current?.focus()
+      richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
+    }, 0)
+  }, [inlineMention, syncToParent, input])
+  inlineMentionSelectAtRef.current = handleInlineMentionSelectAt
 
   // Handle inline label selection (removes the #label text from input)
   const handleInlineLabelSelect = React.useCallback((labelId: string) => {
@@ -1659,6 +1923,23 @@ export function FreeFormInput({
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
+        {/* POO-196 UB2 (U11): the persistent entry notice rides ABOVE the
+        input — the waiting-time「正在打开项目…」prompt or the post-landing
+        guidance. Render-only: the caller owns the content and clears it. */}
+        {gateNotice && (
+          <div
+            role="status"
+            data-testid="project-entry-send-notice"
+            className="flex items-start gap-2 rounded-lg bg-info/10 px-3 py-2 text-[13px] leading-5 text-info"
+          >
+            <svg viewBox="0 0 24 24" className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4M12 8h.01" />
+            </svg>
+            <span className="min-w-0 flex-1">{gateNotice}</span>
+          </div>
+        )}
+
         {/* Inline Slash Command Autocomplete */}
         <InlineSlashCommand
           open={inlineSlash.isOpen}
@@ -1671,9 +1952,11 @@ export function FreeFormInput({
           position={inlineSlash.position}
         />
 
-        {/* Inline Mention Autocomplete (skills, sources, files) */}
+        {/* Inline Mention Autocomplete (skills, sources, files) — suppressed
+            while the POO-196 asset popover owns the same `@` caret: the two
+            never float at once (consensus S-11). */}
         <InlineMentionMenu
-          open={inlineMention.isOpen}
+          open={inlineMention.isOpen && !assetMention.isOpen}
           onOpenChange={(open) => !open && inlineMention.close()}
           sections={inlineMention.sections}
           onSelect={handleInlineMentionSelect}
@@ -1682,6 +1965,13 @@ export function FreeFormInput({
           workspaceId={workspaceId}
           maxWidth={280}
           isSearching={inlineMention.isSearching}
+        />
+
+        {/* POO-196: @ project-asset mention popover (project sessions only) */}
+        <AssetMentionPopover
+          state={assetMention}
+          onChoose={(hit) => assetMention.choose(hit)}
+          onChooseExtra={(item) => item.pick()}
         />
 
         {/* Inline Label & State Autocomplete (#labels / #states) */}
@@ -1750,6 +2040,20 @@ export function FreeFormInput({
               onRemove={(id) => {
                 onElementReferencesChangeRef.current?.(
                   (elementReferencesValue ?? []).filter((r) => r.id !== id),
+                )
+              }}
+            />
+          </div>
+        )}
+
+        {/* POO-196: picked project-asset references queued for the next send. */}
+        {projectAssetRefsValue && projectAssetRefsValue.length > 0 && (
+          <div className="px-3 pt-2.5">
+            <ProjectAssetDraftChips
+              drafts={projectAssetRefsValue}
+              onRemove={(assetId) => {
+                onProjectAssetRefsChangeRef.current?.(
+                  (projectAssetRefsValue ?? []).filter((r) => r.assetId !== assetId),
                 )
               }}
             />
@@ -1878,6 +2182,25 @@ export function FreeFormInput({
             showEscapeOverlay={isProcessing && showEscapeOverlay}
             sessionId={sessionId}
           />
+
+          {/* U13: the small help content — every row is a REAL capability of
+              this user's platform/preferences (see projectHelpRows); Esc
+              closes and refocuses the composer (capture listener above). */}
+          {projectComposer && projectInputHelpOpen && (
+            <div
+              data-testid="project-composer-help-content"
+              role="dialog"
+              aria-label={t('project.entry.inputHelp')}
+              className="absolute bottom-full right-2 z-20 mb-2 w-[320px] rounded-[10px] border border-border bg-background p-[12px] shadow-middle"
+            >
+              <p className="m-0 mb-[6px] text-[12px] font-semibold text-foreground">{t('project.entry.inputHelp')}</p>
+              <ul className="m-0 flex list-none flex-col gap-[4px] p-0">
+                {projectHelpRows.map(row => (
+                  <li key={row} className="text-[12px] leading-[1.5] text-muted-foreground">{row}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className={cn("flex items-center gap-1 px-2 py-2", !compactMode && "border-t border-border/50")}>
           {/* Hidden file input for attach button (shared by compact and desktop) */}
@@ -2193,6 +2516,28 @@ export function FreeFormInput({
 
           {/* Right side: context usage + send - never shrink so they're always visible */}
           <div className="flex items-center shrink-0">
+
+          {/* U13: the project composer's always-present 「输入帮助」 icon —
+              hover/focus tooltip, click/keyboard opens the small help panel
+              (real send/newline/Shift+Tab/@/#/sidebar/focus rows only). */}
+          {projectComposer && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="project-composer-help"
+                  aria-label={t('project.entry.inputHelp')}
+                  aria-expanded={projectInputHelpOpen}
+                  disabled={disabled}
+                  onClick={() => setProjectInputHelpOpen(open => !open)}
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent mr-1"
+                >
+                  <HelpCircle className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('project.entry.inputHelp')}</TooltipContent>
+            </Tooltip>
+          )}
 
           {/* 5.5 Context Usage Warning Badge - shows when approaching auto-compaction threshold */}
           {(() => {
