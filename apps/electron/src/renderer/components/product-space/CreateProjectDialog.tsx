@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, Info, Loader2 } from 'lucide-react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -489,17 +489,9 @@ export function CreateProjectDialog({
               </label>
             </div>
 
-            {/* U1 (G1): the fact line above the consent explains the REAL
-            scope — no prepayment required, budget off by default (owner can
-            enable), no tool import or member invites at creation. 13px
-            foreground with an info icon, so it reads as information, not
-            fine print. It makes NO promise about future pricing, billing
-            entities or automatic authorizations. */}
-            <p className="mt-[14px] mb-0 flex items-start gap-[8px] text-[13px] leading-[1.55] text-foreground" data-testid="create-project-budget-fact">
-              <Info className="mt-[2px] size-[14px] shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span>{t('createProject.budgetFact')}</span>
-            </p>
-
+            {/* 产品裁决（用户 2026-11-06）：预算/预充值说明行移除——不同意
+            任何「不收费/默认关闭」类承诺文案。POL-79 的显式勾选保留（勾选
+            本体是命令事实，不可静默代为同意），标签按用户意见最短化。 */}
             <div className="mt-[10px]">
               {/* U1: the FULL original responsibility sentence stays intact
               (never split up, never replaced by a soothing paraphrase) and the
