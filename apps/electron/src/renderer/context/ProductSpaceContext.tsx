@@ -34,8 +34,19 @@ export interface ProductSpaceContextValue {
    * entry flow. Resolves after the transaction committed OR right after
    * parking on a user phase — completion is only ever read from
    * `pendingSwitch === null` plus the committed target (the two-phased
-   * App pattern). */
-  onRequestSwitch: (productSpaceId: string) => Promise<void>
+   * App pattern).
+   *
+   * R-AT: `knownSpaces` lets a caller hand over a FRESHER authoritative list
+   * than the context state — the create-success auto-enter refreshes the
+   * catalog and immediately switches to the new project, while the context's
+   * own list still lags one React commit behind. Without it the stale-list
+   * guard silently swallowed the switch and the entry hung with zero
+   * feedback. The list is the same authoritative fetch the context itself
+   * publishes, so the permission-safety purpose of the guard is unchanged. */
+  onRequestSwitch: (
+    productSpaceId: string,
+    options?: { knownSpaces?: ReadonlyArray<{ id: string }> },
+  ) => Promise<void>
   /**
    * Fire-and-forget for existing consumers; awaitable for callers that need
    * the returned list (`null` means the refresh failed or was superseded —

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import type { PcSearchResponse } from '@polo-ai/shared/protocol'
 import type { MentionInputElement } from '@/components/ui/mention-menu'
+import { ViewportPortal, useCloseOnViewportResize } from '@/components/ui/viewport-portal'
 import { cn } from '@/lib/utils'
 
 /**
@@ -389,6 +390,10 @@ export function AssetMentionPopover({ state, onChoose, onChooseExtra, onClose }:
     selectedEl?.scrollIntoView({ block: 'nearest' })
   }, [isOpen, state.selectedIndex, state.options.length, state.extraGroups])
 
+  // R-AT: viewport/layout changes invalidate the stored caret anchor — close
+  // instead of drifting (registered unconditionally; self-gates on isOpen).
+  useCloseOnViewportResize(isOpen, () => state.close())
+
   if (!isOpen) return null
 
   // Above the caret, viewport-clamped (consensus X1) — the same placement the
@@ -416,16 +421,17 @@ export function AssetMentionPopover({ state, onChoose, onChooseExtra, onClose }:
   const face = state.face
 
   return (
-    <div
-      ref={containerRef}
-      role="listbox"
-      aria-label={t('projectContext.mention.listAria')}
-      className="fixed z-dropdown max-h-[280px] w-[320px] overflow-y-auto rounded-[12px] border border-border bg-surface p-1 shadow-modal-small"
-      style={{ left: leftPosition, bottom: bottomPosition, maxHeight: PC_MENTION_POPOVER_MAX_HEIGHT }}
-      data-testid="pc-mention-popover"
-      data-open="true"
-      data-face={face}
-    >
+    <ViewportPortal>
+      <div
+        ref={containerRef}
+        role="listbox"
+        aria-label={t('projectContext.mention.listAria')}
+        className="fixed z-dropdown max-h-[280px] w-[320px] overflow-y-auto rounded-[12px] border border-border bg-surface p-1 shadow-modal-small"
+        style={{ left: leftPosition, bottom: bottomPosition, maxHeight: PC_MENTION_POPOVER_MAX_HEIGHT }}
+        data-testid="pc-mention-popover"
+        data-open="true"
+        data-face={face}
+      >
       <div ref={listRef}>
         {face === 'guide' && (
           <p className="px-3 py-2 text-[12px] text-muted-foreground" role="status" data-testid="pc-mention-guide">
@@ -527,6 +533,7 @@ export function AssetMentionPopover({ state, onChoose, onChooseExtra, onClose }:
       <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground">
         {t('projectContext.mention.hint')}
       </p>
-    </div>
+      </div>
+    </ViewportPortal>
   )
 }

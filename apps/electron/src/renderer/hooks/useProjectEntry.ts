@@ -61,7 +61,10 @@ interface SpaceSnapshot {
   activeProductSpaceId: string | null
   pendingSwitchId: string | null
   productSpaces: ReadonlyArray<{ id: string }>
-  onRequestSwitch: (productSpaceId: string) => Promise<unknown>
+  onRequestSwitch: (
+    productSpaceId: string,
+    options?: { knownSpaces?: ReadonlyArray<{ id: string }> },
+  ) => Promise<unknown>
 }
 
 /* ── The module-level transaction owner (single renderer lifecycle) ──────── */
@@ -70,6 +73,10 @@ let activeTarget: ActiveTarget | null = null
 let publishedState: ProjectEntryState = PROJECT_ENTRY_IDLE
 let generationSeq = 0
 let spaceSnapshot: SpaceSnapshot | null = null
+/** R-AT: the ready-landing generation whose assistant-tab activation has
+ * already been replayed into the (post-remount) shell — see the self-heal
+ * effect in useProjectEntry. */
+let readyTabReplayGeneration: number | null = null
 
 /** Publication channel + live capabilities, captured from whichever instance
  * is mounted (the create dialog hosts one permanently at App level). */
@@ -330,7 +337,12 @@ function enterProjectImpl(
     void resumeIntoScope(target)
     return
   }
-  void live.onRequestSwitch(productSpaceId).then(() => {
+  // R-AT: forward the caller's fresh knownSpaces into requestSwitch — the
+  // create-success auto-enter calls this one React commit BEFORE the context
+  // publishes the refreshed catalog, and the context's own stale-list guard
+  // used to silently swallow the switch (entry parked in 'switching' with
+  // zero feedback while the project existed server-side).
+  void live.onRequestSwitch(productSpaceId, { knownSpaces }).then(() => {
     if (activeTarget?.generation !== generation) return
     activeTarget = { ...target, requestSettled: true }
     // The committed-scope sync settles on completion; the promise may also
@@ -373,6 +385,24 @@ export function useProjectEntry() {
     setOnboardingIntent(previous => update(previous))
   }
   channel.readOnboardingIntent = () => getOnboardingIntent
+
+  // R-AT: a committed space switch (the create-success auto-enter) changes
+  // `productSpaceContextKey`, which REMOUNTS TabShellProvider; its hydrate()
+  // resets the visible tab to Home AFTER the landing's activateTab, so the
+  // user is left on Home although the entry landed (route + scope + intent
+  // all committed). A freshly mounted instance self-heals: if the shared
+  // entry state is a ready landing for THIS committed scope and this
+  // generation's tab replay has not been handed to the new tree yet, re
+  // activate the assistant tab exactly once. The module-level guard keeps
+  // later remounts from yanking the user back after they moved on.
+  useEffect(() => {
+    const state = entryState
+    if (state.phase !== 'ready' || !state.accountId || !state.productSpaceId) return
+    if (readyTabReplayGeneration === state.generation) return
+    if (state.accountId !== space.accountId || state.productSpaceId !== space.activeProductSpaceId) return
+    readyTabReplayGeneration = state.generation
+    activateAssistantTab(POLO_APP_DEFINITION)
+  }, [entryState, space.accountId, space.activeProductSpaceId, activateAssistantTab])
 
   const snapshot = useMemo<SpaceSnapshot>(() => ({
     accountId: space.accountId,

@@ -4,6 +4,12 @@ import { cn } from '@/lib/utils'
 import { FadingText } from '@/components/ui/fading-text'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { SourceAvatar } from '@/components/ui/source-avatar'
+import {
+  ViewportPortal,
+  useCloseOnViewportResize,
+  clampFloatLeft,
+  clampFloatBottom,
+} from '@/components/ui/viewport-portal'
 import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import type { LoadedSkill, LoadedSource, FileSearchResult } from '../../../shared/types'
 import { AGENTS_PLUGIN_NAME } from '@polo-ai/shared/skills/types'
@@ -51,6 +57,9 @@ export interface InlineMentionMenuProps {
 
 const MENU_CONTAINER_STYLE = 'overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small'
 const MENU_LIST_STYLE = 'max-h-[240px] overflow-y-auto py-1'
+/** Outer height budget of the scroll list — the vertical clamp needs the
+ *  number as a constant, not only inside the Tailwind class. */
+const MENTION_MENU_MAX_HEIGHT = 240
 const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-3 rounded-[6px] mx-1 px-2 py-1.5 text-[13px]'
 const MENU_ITEM_SELECTED = 'bg-foreground/5'
 // Type badge shown to the right of each item label (e.g. "Skill", "Source")
@@ -283,6 +292,9 @@ export function InlineMentionMenu({
     if (!open || flatItems.length === 0) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // R-AT: IME composition keys belong to the input method — Enter/arrows
+      // confirm/walk candidates and must never select a menu row.
+      if (e.isComposing) return
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
@@ -334,25 +346,31 @@ export function InlineMentionMenu({
     }
   }, [selectedIndex])
 
+  // R-AT: the float anchors to viewport coordinates, so a viewport/layout
+  // change invalidates the stored caret anchor — close rather than linger.
+  useCloseOnViewportResize(open && flatItems.length > 0, () => onOpenChange(false))
+
   if (!open) return null
 
-  // Calculate bottom position from window height (menu appears above cursor)
-  const bottomPosition = typeof window !== 'undefined'
-    ? window.innerHeight - Math.round(position.y) + 8
-    : 0
+  // R-AT: clamp to the viewport. The panel ancestor (client-material-reading
+  // backdrop-filter) is a fixed containing block, so this component must be
+  // portaled to body for these viewport coordinates to mean the viewport.
+  const bottomPosition = clampFloatBottom(position.y, MENTION_MENU_MAX_HEIGHT)
+  const leftPosition = clampFloatLeft(position.x, maxWidth)
 
   return (
-    <div
-      ref={menuRef}
-      data-inline-menu
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
-      style={{
-        left: Math.round(position.x) - 10,
-        bottom: bottomPosition,
-        width: maxWidth,
-        maxWidth,
-      }}
-    >
+    <ViewportPortal>
+      <div
+        ref={menuRef}
+        data-inline-menu
+        className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+        style={{
+          left: leftPosition,
+          bottom: bottomPosition,
+          width: maxWidth,
+          maxWidth,
+        }}
+      >
       {/* Menu header — sticky above scroll area */}
       <div className="px-3 py-1.5 text-[12px] font-medium text-muted-foreground border-b border-foreground/5">
         {t('chat.mentionFilesSkillsSources')}
@@ -435,7 +453,8 @@ export function InlineMentionMenu({
         })}
 
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   )
 }
 

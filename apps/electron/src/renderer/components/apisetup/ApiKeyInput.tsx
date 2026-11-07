@@ -22,6 +22,7 @@ import {
   StyledDropdownMenuItem,
 } from "@/components/ui/styled-dropdown"
 import { cn } from "@/lib/utils"
+import { ViewportPortal } from "@/components/ui/viewport-portal"
 import { Check, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react"
 import { pickTierDefaults, resolveTierModels, type PiModelInfo } from "./tier-models"
 import {
@@ -718,19 +719,25 @@ export function ApiKeyInput({
                 </div>
               ))}
               {activeTierConfig && tierDropdownPosition && (
-                <>
-                  <div
-                    className="fixed inset-0 z-floating-backdrop"
-                    onClick={() => { setOpenTier(null); setTierFilter('') }}
-                  />
-                  <div
-                    className="fixed z-floating-menu min-w-[200px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small"
-                    style={{
-                      top: tierDropdownPosition.top,
-                      left: tierDropdownPosition.left,
-                      width: tierDropdownPosition.width,
-                    }}
-                  >
+                // R-AT: backdrop + dropdown are viewport-anchored (`fixed` +
+                // button-rect coordinates); settings surfaces render inside
+                // panel ancestors whose backdrop-filter/container-type makes
+                // them the fixed containing block. Portal the PAIR together to
+                // body so the coordinates mean the viewport again.
+                <ViewportPortal>
+                  <>
+                    <div
+                      className="fixed inset-0 z-floating-backdrop"
+                      onClick={() => { setOpenTier(null); setTierFilter('') }}
+                    />
+                    <div
+                      className="fixed z-floating-menu min-w-[200px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small"
+                      style={{
+                        top: tierDropdownPosition.top,
+                        left: tierDropdownPosition.left,
+                        width: tierDropdownPosition.width,
+                      }}
+                    >
                     <CommandPrimitive
                       className="min-w-[200px]"
                       shouldFilter={false}
@@ -774,7 +781,8 @@ export function ApiKeyInput({
                       </CommandPrimitive.List>
                     </CommandPrimitive>
                   </div>
-                </>
+                  </>
+                </ViewportPortal>
               )}
               {modelError && (
                 <p className="text-xs text-destructive">{modelError}</p>

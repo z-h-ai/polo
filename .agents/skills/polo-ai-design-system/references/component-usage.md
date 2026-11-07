@@ -96,3 +96,10 @@ Settings 分类注册（`registry/settings.tsx`，与本文联动校验；id 集
 - 助手表单、浏览器实例选择、日期年月下拉复用 renderer 主题，不向助手或第三方 App 全局注入工作台配色。日期控件的 hidden select 只保留 DayPicker change-event 契约，不展示原生弹出菜单；开发 playground 参数编辑器的原生 select 不属于客户端产品面。
 - 普通下拉动作菜单与右键菜单保留各自 Radix 语义，统一间距、悬停、子菜单间隔和可滚动高度。命令搜索、提及、模型搜索保留适用的搜索/树形交互；OS 菜单、文件选择和第三方应用内部不替换。
 - 展示：`settings-unified-controls` 注册卡（启用/禁用）及 `workspace-home` 的账号多级菜单。验证应打开各级 portal，检查同主题字体/行高/颜色、键盘选择/取消、长标签与 800×600 边界；截图不等于真实空间切换或支付验收。
+
+## 视口浮层锚定防呆规范（POO-196 体验闭环，2026-11-06）
+
+- 背景：聚焦面板带 `client-material-reading` 材质（`backdrop-filter: blur(24px)`），面板/壳层还普遍挂 container-type（`@container/panel`、`@container/shell`）。这两类祖先都会成为 `position: fixed` 后代的包含块（前者按 Filter Effects 规范，后者按引擎实现），fixed 浮层一旦渲染在其子树内，left/bottom 视口坐标就被改挂到面板盒子——POO-196 验收中 @ 候选/斜杠/# 标签菜单整体飘到输入框右侧即此成因（真机归因：仅关 backdrop-filter 即恢复）。
+- 规则：新增或调整视口定位（fixed + 视口坐标）浮层时，默认经 `renderer/components/ui/viewport-portal.tsx` 的 `ViewportPortal` 挂到 body；`useCloseOnViewportResize` 负责视口/布局变化时关闭旧锚，`clampFloatLeft`/`clampFloatBottom` 是统一的视口夹紧（浮层不得溢出视口，光标右侧时取右缘夹紧值）。新建/调整任何祖先的 container-type、contain、transform、filter、backdrop-filter 时，必须检查其子树内 fixed 浮层的实际包含块与锚定，并在真实 Electron 布局（非 jsdom）做几何回归：正常锚点 `abs(menu.left - caret.x) ≤ 40px` 且 `menu.bottom ≈ caret.y - 8`；边缘用夹紧期望值 ±2px；遮罩类浮层需验证覆盖全窗且实际命中层级正确。例外（需要面板局部定位的浮层）必须写明坐标契约并留同等回归。
+- 层级：body 直挂浮层沿用语义 z token（panel 50 / dropdown 100 / tooltip 150 / modal 200 / overlay 300），处理遮罩类取 `calc(var(--z-dropdown)-1)` 夹在被挡面与浮层之间，不任意抬 z-index。
+- 截图检查清单在常规项外必查：锚点是否在触发处、浮层四边是否可见（未溢出未截断）、遮罩覆盖范围、真实命中（点击落点）层级。

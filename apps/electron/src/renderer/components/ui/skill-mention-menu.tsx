@@ -7,6 +7,12 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
+import {
+  ViewportPortal,
+  useCloseOnViewportResize,
+  clampFloatLeft,
+  clampFloatBottom,
+} from '@/components/ui/viewport-portal'
 import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import type { LoadedSkill } from '../../../shared/types'
 
@@ -77,6 +83,8 @@ export function InlineSkillMention({
     if (!open) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // R-AT: IME composition keys belong to the input method (see mention-menu).
+      if (e.isComposing) return
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
@@ -119,20 +127,23 @@ export function InlineSkillMention({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open, onOpenChange])
 
+  // R-AT: registered unconditionally (rules of hooks); self-gates on `open`.
+  useCloseOnViewportResize(open, () => onOpenChange(false))
+
   // Hide if no results or not open
   if (!open || filteredSkills.length === 0) return null
 
-  // Calculate bottom position from window height (menu appears above cursor)
-  const bottomPosition = typeof window !== 'undefined'
-    ? window.innerHeight - Math.round(position.y) + 8
-    : 0
+  // R-AT: viewport clamps + body portal (see viewport-portal.tsx)
+  const bottomPosition = clampFloatBottom(position.y, 240)
+  const leftPosition = clampFloatLeft(position.x, 260)
 
   return (
-    <div
-      ref={menuRef}
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
-      style={{ left: Math.round(position.x) - 10, bottom: bottomPosition }}
-    >
+    <ViewportPortal>
+      <div
+        ref={menuRef}
+        className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+        style={{ left: leftPosition, bottom: bottomPosition }}
+      >
       <div className={MENU_LIST_STYLE}>
         {filteredSkills.map((skill, index) => {
           const isSelected = index === selectedIndex
@@ -175,7 +186,8 @@ export function InlineSkillMention({
           )
         })}
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   )
 }
 

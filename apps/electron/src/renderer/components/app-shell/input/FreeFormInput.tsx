@@ -1633,8 +1633,13 @@ export function FreeFormInput({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // During IME composition, ESC should cancel composition, not trigger app/menu ESC behavior.
-    if (e.key === 'Escape' && e.nativeEvent.isComposing) {
+    // IME composition keys belong to the input method FIRST: Enter confirms
+    // the candidate, Esc cancels the composition, arrows walk the candidate
+    // window. R-AT 真机实测：组合期间事件仍会以 isComposing:true 到达本处理器
+    // （keyCode 13/27），而下面 @ 弹层/斜杠/# 菜单的路由不看 isComposing ——
+    // 输入法确认键会被当成菜单选中。组合期间一概不做应用级按键路由
+    // （发送逻辑另有 isComposing 守卫，行为不变）。
+    if (e.nativeEvent.isComposing) {
       return
     }
 

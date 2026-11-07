@@ -2,6 +2,12 @@ import * as React from 'react'
 import { Check, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LabelIcon } from './label-icon'
+import {
+  ViewportPortal,
+  useCloseOnViewportResize,
+  clampFloatLeft,
+  clampFloatBottom,
+} from '@/components/ui/viewport-portal'
 import type { LabelConfig } from '@polo-ai/shared/labels'
 import { createLabelMenuItems, filterItems, segmentScore, type LabelMenuItem } from './label-menu-utils'
 import { getStatusIconStyle, type SessionStatus } from '@/config/session-status-config'
@@ -124,6 +130,8 @@ export function InlineLabelMenu({
     if (totalItemCount === 0 && !showAddLabel) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // R-AT: IME composition keys belong to the input method (see mention-menu).
+      if (e.isComposing) return
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
@@ -181,24 +189,27 @@ export function InlineLabelMenu({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open, onOpenChange])
 
+  // R-AT: registered unconditionally (rules of hooks); self-gates on `open`.
+  useCloseOnViewportResize(open, () => onOpenChange(false))
+
   // Hide if not open, or if no items and no "Add New Label" fallback
   if (!open || (totalItemCount === 0 && !showAddLabel)) return null
 
-  // Position menu above cursor
-  const bottomPosition = typeof window !== 'undefined'
-    ? window.innerHeight - Math.round(position.y) + 8
-    : 0
+  // R-AT: viewport clamps + body portal (see viewport-portal.tsx)
+  const bottomPosition = clampFloatBottom(position.y, 240)
+  const leftPosition = clampFloatLeft(position.x, 260)
 
   // Whether to show section headers (only when both states and labels are present)
   const showSectionHeaders = filteredStates_.length > 0 && filteredItems.length > 0
 
   return (
-    <div
-      ref={menuRef}
-      data-inline-menu
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
-      style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 200, maxWidth: 260 }}
-    >
+    <ViewportPortal>
+      <div
+        ref={menuRef}
+        data-inline-menu
+        className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+        style={{ left: leftPosition, bottom: bottomPosition, minWidth: 200, maxWidth: 260 }}
+      >
       <div ref={listRef} className={MENU_LIST_STYLE}>
         {showAddLabel ? (
           /* "Add New Label" fallback row when nothing matches the filter */
@@ -309,7 +320,8 @@ export function InlineLabelMenu({
           </>
         )}
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   )
 }
 

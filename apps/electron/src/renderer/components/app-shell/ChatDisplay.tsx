@@ -1871,15 +1871,27 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
                             sessionId={session?.id}
-                            onRetry={turn.message.role === 'error' ? () => {
-                              const msgs = session?.messages
-                              if (!msgs) return
-                              const errorIdx = msgs.findIndex(m => m.id === turn.message.id)
-                              const lastUserMsg = msgs.slice(0, errorIdx).findLast(m => m.role === 'user')
-                              if (lastUserMsg) {
-                                onSendMessage(lastUserMsg.content)
+                            onRetry={(() => {
+                              // R-AT: error bubbles keep their existing retry;
+                              // the interrupted marker gains a resend affordance
+                              // that is interactive ONLY at the transcript tail —
+                              // a stale marker mid-history must never resend
+                              // ancient context.
+                              const isError = turn.message.role === 'error'
+                              const isInterrupted = turn.message.role === 'info'
+                                && turn.message.statusType === 'response_interrupted'
+                              if (!isError && !isInterrupted) return undefined
+                              if (isInterrupted && turns.slice(index + 1).some(t => t.type === 'user')) return undefined
+                              return () => {
+                                const msgs = session?.messages
+                                if (!msgs) return
+                                const markerIdx = msgs.findIndex(m => m.id === turn.message.id)
+                                const lastUserMsg = msgs.slice(0, markerIdx).findLast(m => m.role === 'user')
+                                if (lastUserMsg) {
+                                  onSendMessage(lastUserMsg.content)
+                                }
                               }
-                            } : undefined}
+                            })()}
                           />
                         </div>
                       )
@@ -2600,6 +2612,30 @@ function MessageBubble({
       success: { icon: CheckCircle2, className: 'text-success' },
     }[level]
     const Icon = config.icon
+
+    // R-AT (体验闭环 F5): the interrupted marker carries a resend affordance —
+    // the interrupted request text is one click away instead of requiring the
+    // user to scroll up, copy and re-type (零基础恢复路径). The button renders
+    // only when the host wired onRetry AND no user message follows the marker
+    // (stale markers mid-history stay inert).
+    if (message.statusType === 'response_interrupted' && onRetry) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 text-[13px] select-none text-muted-foreground">
+          <div className="w-3 h-3 flex items-center justify-center shrink-0">
+            <Icon className="w-3 h-3" />
+          </div>
+          <span>{message.content}</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            data-testid="chat-interrupted-resend"
+            className="ml-1 rounded-[6px] border border-border px-2 py-0.5 text-[12px] text-foreground transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t('chat.resendLastMessage')}
+          </button>
+        </div>
+      )
+    }
 
     return (
       <div className={cn('flex items-center gap-2 px-3 py-1 text-[13px] select-none', config.className)}>

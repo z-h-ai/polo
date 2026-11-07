@@ -10098,8 +10098,12 @@ export class SessionManager implements ISessionManager {
       const interruptedMessage: Message = {
         id: generateMessageId(),
         role: 'info',
-        content: 'Response interrupted',
+        // R-AT: localized — this content renders verbatim in the chat transcript
+        content: i18n.t('chat.responseInterrupted'),
         timestamp: this.monotonic(),
+        // R-AT: typed marker — the transcript renders a「重新发送」 affordance
+        // on this marker (ChatDisplay info branch), never on plain info rows.
+        statusType: 'response_interrupted',
       }
       managed.messages.push(interruptedMessage)
       this.sendEvent({
@@ -10354,10 +10358,13 @@ export class SessionManager implements ISessionManager {
         managed.authRetryInProgress = false
         sessionLog.error(`[auth-retry] Failed to retry after auth refresh for session ${sessionId}:`, retryError)
         sessionRuntimeHooks.captureException(retryError, { errorSource: 'auth-retry', sessionId })
+        // R-AT: localized — the content string renders verbatim in the chat
+        // transcript; the protocol error stays a stable identifier.
+        const authFailedText = i18n.t('chat.sessionAuthFailed')
         const failedMessage: Message = {
           id: generateMessageId(),
           role: 'error',
-          content: 'Authentication failed. Please check your credentials.',
+          content: authFailedText,
           timestamp: this.monotonic(),
           errorCode: failureErrorCode,
         }
@@ -10365,7 +10372,7 @@ export class SessionManager implements ISessionManager {
         this.sendEvent({
           type: 'error',
           sessionId,
-          error: 'Authentication failed. Please check your credentials.',
+          error: authFailedText,
           timestamp: failedMessage.timestamp,
         }, workspaceId)
         this.onProcessingStopped(sessionId, 'error')
