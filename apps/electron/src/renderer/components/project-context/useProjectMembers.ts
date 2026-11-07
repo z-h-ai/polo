@@ -206,6 +206,10 @@ export function useProjectMembers(scope: {
   /** X2-4: a response from an abandoned compose (cancelled, reopened or a
    * scope switch) must never steer the visible step. */
   const composeGenerationRef = useRef(0)
+  /** UB3 (U2): a clipboard write that resolves AFTER an account/project
+   * switch or a live authority loss must never publish「已复制」into the NEW
+   * scope — copyLink re-checks this generation before every setState. */
+  const copyGenerationRef = useRef(0)
 
   const canManage = viewerRole === 'owner' || viewerRole === 'manager'
   // Per-list generations: the two first-screen loads run CONCURRENTLY, so a
@@ -220,6 +224,7 @@ export function useProjectMembers(scope: {
     rosterGenerationRef.current += 1
     invitationsGenerationRef.current += 1
     composeGenerationRef.current += 1
+    copyGenerationRef.current += 1
     setStep('overview')
     setRoster(emptyList())
     setInvitations(emptyList())
@@ -243,6 +248,7 @@ export function useProjectMembers(scope: {
     // it must not re-raise the viewer role after the 403 landed.
     rosterGenerationRef.current += 1
     invitationsGenerationRef.current += 1
+    copyGenerationRef.current += 1
     setRoster(emptyList())
     setInvitations(emptyList())
     setViewerRole('member')
@@ -483,23 +489,28 @@ export function useProjectMembers(scope: {
   }, [composeRequest, composeSubmitting, composeTarget, emailDeliveryAvailable, loadInvitations, scope])
 
 const copyLink = useCallback(async (): Promise<boolean> => {
-  if (!outcome?.invitationUrl) return false
+  if (!outcome?.invitationUrl || !scope) return false
+  const generation = copyGenerationRef.current
   setCopied(false)
   setCopyFailed(false)
   const resolved = await resolveInvitationUrlValue(outcome.invitationUrl)
+  if (generation !== copyGenerationRef.current) return false
   if (!resolved) {
     setCopyFailed(true)
     return false
   }
   try {
     await navigator.clipboard.writeText(resolved)
+    // UB3 (U2): 失权/换 scope 的迟到复制不发布 — 复核账号/项目后丢弃。
+    if (generation !== copyGenerationRef.current) return false
     setCopied(true)
     return true
   } catch {
+    if (generation !== copyGenerationRef.current) return false
     setCopyFailed(true)
     return false
   }
-}, [outcome])
+}, [outcome, scope])
 
   const statusKeyOf = useCallback((status: ClientInvitationEntry['status']): string => {
     return `projectMembers.invitations.status.${status}`

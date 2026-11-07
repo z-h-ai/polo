@@ -25,14 +25,18 @@ mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined
 
 // P5/D7 owner-name source: the App shell admin user. The holder lets each
 // case pick the display name the shell would surface (null = shell without a
-// usable display name — the「你的姓名」completion case).
-const shellState: { displayName: string | null } = { displayName: null }
+// usable display name — the「你的姓名」completion case). `present: false`
+// simulates a host WITHOUT the AppShell owner (U4: no settings navigation →
+// the version guide degrades to the local explanation only).
+const shellState: { displayName: string | null; present: boolean } = { displayName: null, present: true }
 mock.module('@/context/AppShellContext', () => ({
-  useOptionalAppShellContext: () => ({
-    currentAdminUser: shellState.displayName === null
-      ? null
-      : { userId: 'user-1', username: 'wangxy', displayName: shellState.displayName },
-  }),
+  useOptionalAppShellContext: () => shellState.present
+    ? {
+        currentAdminUser: shellState.displayName === null
+          ? null
+          : { userId: 'user-1', username: 'wangxy', displayName: shellState.displayName },
+      }
+    : null,
 }))
 
 mock.module('@/components/ui/client-workbench', () => ({
@@ -206,8 +210,19 @@ function renderCreate(options: Parameters<typeof makeHarness>[0] & {
 
 const checkbox = () => screen.getByTestId('create-project-responsibility').querySelector('input') as HTMLInputElement
 
+/** The sentence span inside the consent label (U1: a single click target
+ * together with the 24px box). The Checkbox's own wrapper is also a direct
+ * span child, so pick the direct-child span that carries the sentence. */
+const consentSentence = () => {
+  const label = screen.getByTestId('create-project-responsibility')
+  const span = Array.from(label.querySelectorAll(':scope > span')).find(el => el.textContent?.includes('我确认'))
+  if (!span) throw new Error('consent sentence span missing')
+  return span as HTMLElement
+}
+
 beforeEach(async () => {
   shellState.displayName = null
+  shellState.present = true
   await i18n.changeLanguage('zh-Hans')
 })
 
@@ -378,14 +393,22 @@ describe('CreateProjectDialog (POO-196 追加轮 D-B)', () => {
     expect(harness.createCalls).toHaveLength(1)
   })
 
-  it('renders the zh-Hans strings VERBATIM from the generated contract presentation', () => {
+  it('renders the zh-Hans strings under the U1 presentation ruling: the POL-79 literals stay bound to the generated contract, the解释性 copy is deliberately overridden', () => {
+    // POL-79 governance surface — still VERBATIM from the contract.
     expect(i18n.t('createProject.field.nameLabel')).toBe(clientEnterpriseCreatePresentation.fields.projectName.label)
-    expect(i18n.t('createProject.field.nameHint')).toBe(clientEnterpriseCreatePresentation.fields.projectName.hint)
-    expect(i18n.t('createProject.description')).toBe(clientEnterpriseCreatePresentation.responsibility.scopeStatement)
     expect(i18n.t('createProject.responsibilityConfirm')).toBe(clientEnterpriseCreatePresentation.responsibility.confirmStatement)
     expect(i18n.t('createProject.responsibilityMismatch')).toBe(clientEnterpriseCreatePresentation.responsibility.versionMismatchHint)
-    expect(i18n.t('createProject.budgetFact')).toBe(clientEnterpriseCreatePresentation.budgetFact)
     expect(clientEnterpriseCreatePresentation.responsibility.confirmDefaultChecked).toBe(false)
+    // U1 (adjudication-usability G1): the explanatory copy is a deliberate
+    // product override of the generated presentation — honest facts about
+    // prepayment/budget scope and a plain invitation line, with no ownership
+    // or member-authorization promises. The nameHint key carries the synced
+    // introduction value (the form itself no longer renders it).
+    expect(i18n.t('createProject.budgetFact')).toBe('创建项目不要求预充值。预算默认关闭，可由负责人开启；创建时无需导入工具或邀请成员。')
+    expect(i18n.t('createProject.description')).toBe('建好项目后，可以邀请同事加入，一起看资料、聊工作。')
+    expect(i18n.t('createProject.field.nameHint')).toBe('建好项目后，可以邀请同事加入，一起看资料、聊工作。')
+    expect(i18n.t('createProject.description')).not.toBe(clientEnterpriseCreatePresentation.responsibility.scopeStatement)
+    expect(i18n.t('createProject.budgetFact')).not.toBe(clientEnterpriseCreatePresentation.budgetFact)
   })
 })
 
@@ -451,7 +474,7 @@ describe('CreateProjectDialog (POO-196 R3 minimal form, P5/D7)', () => {
     expect(harness.createCalls).toHaveLength(0)
   })
 
-  it('D7: contract_version_unsupported is a definite failure with the update-prompt copy — the form stays editable', async () => {
+  it('D7: contract_version_unsupported is a definite failure with the service-guide copy — the form stays editable', async () => {
     renderCreate({ createScript: [{ code: 'contract_version_unsupported' }] })
     await screen.findByTestId('create-project-dialog')
     fillAndConfirm()
@@ -459,8 +482,138 @@ describe('CreateProjectDialog (POO-196 R3 minimal form, P5/D7)', () => {
 
     expect(await screen.findByTestId('create-project-submit-error')).toBeTruthy()
     expect(screen.getByTestId('create-project-submit-error').textContent)
-      .toBe('当前服务尚不支持此创建方式，请更新后重试')
+      .toContain('当前连接的服务暂不支持此功能，需要管理员检查服务版本。')
     expect(screen.getByTestId('create-project-dialog').getAttribute('data-phase')).toBe('form')
     expect(screen.getByTestId('create-project-name-input')).toBeTruthy()
+  })
+
+  it('U4: the version-unsupported face expands/collapses the local guide in place and offers the settings navigation shortcut for a hosted shell', async () => {
+    const { harness } = renderCreate({
+      // Both submits reject the same way — the guide is a pure presentation
+      // surface on top of a repeated definite failure (never a re-send fix).
+      createScript: [{ code: 'contract_version_unsupported' }, { code: 'contract_version_unsupported' }],
+    })
+    await screen.findByTestId('create-project-dialog')
+    fillAndConfirm()
+    submitForm()
+
+    const guide = await screen.findByTestId('create-project-update-guide')
+    expect(guide.getAttribute('aria-expanded')).toBe('false')
+    expect(guide.textContent).toBe('查看更新指引')
+    expect(screen.queryByTestId('create-project-update-guide-body')).toBeNull()
+
+    // Expand in place: the admin escalation guide + the client-update
+    // shortcut with its honesty note (the shell provides settings nav here).
+    fireEvent.click(guide)
+    const body = screen.getByTestId('create-project-update-guide-body')
+    expect(body.textContent).toContain('请联系单位的 Polo 管理员，告知当前无法使用项目功能，请其检查服务与客户端版本是否兼容。')
+    expect(screen.getByTestId('create-project-client-update').textContent).toBe('检查客户端更新')
+    expect(body.textContent).toContain('客户端更新不等于服务已更新')
+    expect(guide.getAttribute('aria-expanded')).toBe('true')
+    expect(guide.textContent).toBe('收起')
+    // A re-trigger of the SAME error never re-sends; the guide toggle writes
+    // nothing to the wire.
+    const callsAfterError = harness.createCalls.length
+
+    // Keyboard operable: a REAL button (focusable, Enter/Space activatable in
+    // any browser) with the aria-expanded state contract.
+    expect(guide.tagName).toBe('BUTTON')
+    expect(guide.getAttribute('type')).toBe('button')
+    fireEvent.click(guide)
+    expect(screen.queryByTestId('create-project-update-guide-body')).toBeNull()
+    expect(guide.getAttribute('aria-expanded')).toBe('false')
+
+    // Re-expanding after a fresh submit starts collapsed again. The definite
+    // failure keeps the form editable (consent included — the terms-mismatch
+    // uncheck is D-B 2's rule for `validation_error`, not this code).
+    submitForm()
+    await waitFor(() => expect(harness.createCalls.length).toBe(callsAfterError + 1))
+    expect(screen.getByTestId('create-project-update-guide').getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByTestId('create-project-update-guide-body')).toBeNull()
+  })
+
+  it('U4: without a hosting shell the version guide keeps ONLY the local explanation — no settings shortcut, no dead button', async () => {
+    shellState.present = false
+    renderCreate({ createScript: [{ code: 'contract_version_unsupported' }] })
+    await screen.findByTestId('create-project-dialog')
+    // The degraded shell also means no usable display name → the owner
+    // completion field exists again; fill it so the submit passes locally.
+    fillAndConfirm()
+    submitForm()
+
+    await screen.findByTestId('create-project-submit-error')
+    fireEvent.click(screen.getByTestId('create-project-update-guide'))
+    expect(screen.getByTestId('create-project-update-guide-body').textContent)
+      .toContain('请联系单位的 Polo 管理员，告知当前无法使用项目功能，请其检查服务与客户端版本是否兼容。')
+    expect(screen.queryByTestId('create-project-client-update')).toBeNull()
+  })
+})
+
+describe('CreateProjectDialog (POO-196 R3 usability U1 responsibility presentation)', () => {
+  it('U1: the fact line sits ABOVE the consent with the honest budget copy; the full responsibility sentence stays one intact label', async () => {
+    shellState.displayName = '李明'
+    const { harness } = renderCreate()
+    await screen.findByTestId('create-project-dialog')
+
+    const fact = screen.getByTestId('create-project-budget-fact')
+    expect(fact.textContent).toBe('创建项目不要求预充值。预算默认关闭，可由负责人开启；创建时无需导入工具或邀请成员。')
+    const consent = screen.getByTestId('create-project-responsibility')
+    expect(consent.textContent).toBe('我确认成为唯一负责人并承担企业付款责任')
+    // DOM order: the fact line precedes the consent label.
+    expect(fact.compareDocumentPosition(consent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    // The name field no longer renders the standing hint (the introduction
+    // carries it), and no stray scopeStatement copy survives anywhere.
+    expect(document.getElementById('create-project-name-hint')?.textContent).toBe('')
+    expect(screen.getByTestId('create-project-dialog').textContent).toContain('建好项目后，可以邀请同事加入，一起看资料、聊工作。')
+    expect(screen.getByTestId('create-project-dialog').textContent).not.toContain('唯一负责人；该企业的成员都可访问')
+    expect(harness.createCalls).toHaveLength(0)
+  })
+
+  it('U1: the 24px box keeps the whole label as one hit target — clicking the sentence toggles exactly once', async () => {
+    shellState.displayName = '李明'
+    renderCreate()
+    await screen.findByTestId('create-project-dialog')
+
+    const input = checkbox()
+    // The Checkbox renders the input inside a sizing wrapper; the 24px box is
+    // the wrapper's size utility (the input fills it). Geometry itself is
+    // pinned in the real-browser harness (happy-dom has no layout).
+    const boxWrapper = input.parentElement as HTMLElement
+    expect(boxWrapper.className).toContain('size-[24px]')
+    expect(boxWrapper.className).not.toContain('size-4')
+    expect(input.className).toContain('size-full')
+
+    // Clicking the SENTENCE (not the box) toggles the native input once.
+    const sentence = consentSentence()
+    fireEvent.click(sentence)
+    expect(input.checked).toBe(true)
+    fireEvent.click(sentence)
+    expect(input.checked).toBe(false)
+    // And the label element itself drives the same single toggle.
+    fireEvent.click(screen.getByTestId('create-project-responsibility'))
+    expect(input.checked).toBe(true)
+  })
+
+  it('U1: the unchecked-submit error carries a ≥12px icon and is wired to the checkbox via aria-describedby', async () => {
+    renderCreate()
+    await screen.findByTestId('create-project-dialog')
+    fireEvent.change(screen.getByTestId('create-project-name-input'), { target: { value: '责任呈现项目' } })
+    submitForm()
+
+    const error = await screen.findByTestId('create-project-responsibility-error')
+    expect(error.textContent).toContain('需要先勾选确认')
+    const icon = error.querySelector('svg')
+    expect(icon).toBeTruthy()
+    // ≥12px error icon (class-pinned here; real geometry pinned in the e2e
+    // harness where layout exists).
+    expect(icon!.getAttribute('class')).toContain('size-[12px]')
+    // The checkbox announces the error as its own description.
+    expect(checkbox().getAttribute('aria-describedby')).toBe('create-project-responsibility-error')
+    expect(checkbox().getAttribute('aria-invalid')).toBe('true')
+    // Re-checking clears the error and the description wiring.
+    fireEvent.click(checkbox())
+    expect(screen.queryByTestId('create-project-responsibility-error')).toBeNull()
+    expect(checkbox().getAttribute('aria-describedby')).toBeNull()
   })
 })

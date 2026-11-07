@@ -74,6 +74,20 @@ export interface ProjectFileLibraryProps {
    * there is re-synced here without a manual refresh.
    */
   pinMutations?: number
+  /**
+   * UB4 (U5): one-shot open request for the EXISTING upload dialog — the
+   * project empty-state「上传」action card switches to this tab and raises
+   * the signal; the dialog opens through the same `setUploadOpen` the
+   * toolbar button uses (no rewritten upload flow). Opening is still gated
+   * by the real `canShare` capability: a read_only member gets the honest
+   * library face, never a fabricated upload.
+   */
+  uploadSignal?: number
+  /**
+   * UB4 (U5): acknowledge a consumed upload signal (the dialog actually
+   * opened) so a later pane remount never re-opens it.
+   */
+  onUploadSignalConsumed?: () => void
 }
 
 interface PreviewState {
@@ -81,7 +95,7 @@ interface PreviewState {
   state: FilePreviewState
 }
 
-export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMutations = 0 }: ProjectFileLibraryProps) {
+export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMutations = 0, uploadSignal = 0, onUploadSignalConsumed }: ProjectFileLibraryProps) {
   const { t } = useTranslation()
   const { isDark } = useTheme()
   const { requestConfirm, confirmElement } = useConfirmDialog()
@@ -164,6 +178,25 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
   React.useEffect(() => {
     if (pinMutations > 0) void refresh()
   }, [pinMutations, refresh])
+
+  // UB4 (U5): consume the empty-state upload card's one-shot request — the
+  // dialog opens only through the existing `setUploadOpen` once the REAL
+  // capability has spoken (`canShare`); the signal is acknowledged exactly
+  // when the dialog opened, so a pane remount never re-opens it, and a
+  // read_only member simply never sees it (the library face stays honest).
+  const onUploadSignalConsumedRef = React.useRef(onUploadSignalConsumed)
+  onUploadSignalConsumedRef.current = onUploadSignalConsumed
+  React.useEffect(() => {
+    if (!uploadSignal || uploadSignal <= 0) return
+    // glm F3 review note: the !canShare hang here is deliberate — capabilities
+    // may still be loading at mount; consuming the signal on !canShare would
+    // break the async-capability race (verified: discard breaks the common
+    // path). A late capability gain opening the dialog without a fresh click
+    // is accepted (read_only never gains capability mid-mount in practice).
+    if (!canShare) return
+    setUploadOpen(true)
+    onUploadSignalConsumedRef.current?.()
+  }, [uploadSignal, canShare])
 
   const withBusy = async (assetId: string, write: () => Promise<PcAssetDto | null>): Promise<boolean> => {
     setBusyAssetId(assetId)

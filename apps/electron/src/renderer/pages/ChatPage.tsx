@@ -42,6 +42,7 @@ import { useCollaborationRoster } from '@/components/project-context/useCollabor
 import { useRightPanePresentation } from '@/hooks/use-right-pane-presentation'
 import { canvasPaneAppAtomFamily, canvasPanePopoutAtomFamily } from '@/atoms/canvas-pane'
 import { useProjectEntryPending } from '@/hooks/useProjectEntry'
+import { projectEntryAtom, projectEntrySendNoticesAtom, isEntryPendingState } from '@/atoms/project-entry'
 import { createEnterpriseWorkflowUrl } from '@/lib/enterprise-workflow-url'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
@@ -384,19 +385,105 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // occupancy) and the drawer's native-pane suspension.
   const membersLaneRef = React.useRef<HTMLDivElement | null>(null)
   const membersTriggerRef = React.useRef<HTMLButtonElement | null>(null)
+  // P9 entry roster: the ALL-ROLES collaboration projection (never the
+  // management roster) feeds the header「成员 N」stack and the panel alike.
+  const membersRoster = useCollaborationRoster(showProjectTabs && productSpace && projectScope
+    ? { accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }
+    : null)
+  // U7 entry authority + UB4 (U5) invite capability: the roster viewerRole is
+  // the live authority; a roster 403 (real lost access) removes the glyph and
+  // the onboarding auto-open whatever the space summary said.
+  const membersEntryLostAccess = membersRoster.errorKey === 'projectMembers.error.forbidden'
+  const membersEntryRole = membersEntryLostAccess
+    ? null
+    : (membersRoster.viewerRole ?? (activeProductSpace?.kind === 'enterprise' ? activeProductSpace.role : null))
+  const membersCanInvite = membersEntryRole === 'owner' || membersEntryRole === 'manager'
   const membersPanelHost = useProjectMembersPanelHost({
     enabled: showProjectTabs,
     laneRef: membersLaneRef,
     toolPaneOccupied: membersToolPaneOccupied,
     triggerRef: membersTriggerRef,
+    // UB4 (U5): this ChatPage IS the conversation host for a recovered
+    // create whose landing has history (「已有历史的恢复落点也由 ChatPage
+    // 接住」) — the one-time intent is consumed HERE when the entry is ready
+    // on the committed target and this viewer may invite; the panel opens
+    // straight on the 添加成员 selection page.
+    onboardingScope: showProjectTabs && projectScope && productSpace
+      ? { accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }
+      : null,
+    canInvite: membersCanInvite,
+    // 「关闭后聚焦输入框」— the composer is this page's input.
+    onOnboardingClosed: () => dispatchFocusInputEvent({ sessionId }),
   })
   const handleOpenProjectMembers = membersPanelHost.openPanel
-  // POO-196 R3 D13.1: the entry-in-flight send gate (see the onSendMessage
-  // handler) — a ref so the composer callback sees the live value without
-  // being rebuilt on every atom tick.
+  // POO-196 R3 D13.1 + UB2 U11: the entry-in-flight fence. The PRIMARY gate
+  // is the composer's synchronous admission callback (submitGate below — it
+  // refuses INSIDE FreeFormInput before the draft clears/annotation markers),
+  // while THIS deep pending check in the send handler stays as the backstop
+  // for any path that might bypass the composer gate. A ref keeps the
+  // callbacks reading the live value without being rebuilt on every atom tick.
+  const entryState = useAtomValue(projectEntryAtom)
   const entryPending = useProjectEntryPending()
   const entryPendingRef = React.useRef(entryPending)
   entryPendingRef.current = entryPending
+  // U11 notice markers: a USER-triggered blocked send records ONE contentless
+  // marker (account/project/draft-key/generation) that drives the
+  // post-landing「请点击发送」/「返回原对话」guidance. Consumed by actually
+  // sending the draft; purged wholesale when the account changes (in the
+  // shared entry owner).
+  const setSendNotices = useSetAtom(projectEntrySendNoticesAtom)
+  const sendNotices = useAtomValue(projectEntrySendNoticesAtom)
+  const recordBlockedSendNotice = React.useCallback((draftKey: string, draftProject: string | null) => {
+    const entry = entryState
+    const account = productSpace?.accountId ?? null
+    if (!account) return
+    setSendNotices(notices => [
+      ...notices.filter(notice => !(notice.accountId === account && notice.draftKey === draftKey)),
+      {
+        accountId: account,
+        productSpaceId: draftProject ?? entry.productSpaceId ?? '',
+        draftKey,
+        generation: entry.generation,
+      },
+    ])
+  }, [entryState, productSpace?.accountId, setSendNotices])
+  const clearSendNotice = React.useCallback((draftKey: string) => {
+    const account = productSpace?.accountId
+    if (!account) return
+    setSendNotices(notices => notices.filter(notice => !(notice.accountId === account && notice.draftKey === draftKey)))
+  }, [productSpace?.accountId, setSendNotices])
+  // The composer's admission gate: refuses ONLY while an entry is in flight —
+  // the draft belongs to ITS conversation and a failure/scope-mismatch is the
+  // deep check's business, not the gate's.
+  const submitGate = React.useCallback(() => {
+    if (!entryPendingRef.current) return true
+    recordBlockedSendNotice(sessionId, sessionProductSpaceId)
+    toast.error(t('project.entry.sendBlocked'))
+    return false
+  }, [recordBlockedSendNotice, sessionProductSpaceId, sessionId, t])
+  // U11 persistent notice above the input: the waiting-time prompt while an
+  // entry is in flight, then the landing guidance for a recorded blocked
+  // draft —「请点击发送」in the original conversation,「返回原对话」elsewhere.
+  const gateNotice = React.useMemo(() => {
+    if (isEntryPendingState(entryState)) return t('project.entry.sendBlocked')
+    const account = productSpace?.accountId ?? null
+    if (!account) return null
+    // The marker for THIS conversation wins (sendReady); any other retained
+    // draft of the same account shows the「返回原对话」guidance.
+    const mine = sendNotices.find(notice => notice.accountId === account && notice.draftKey === sessionId)
+      ?? sendNotices.find(notice => notice.accountId === account)
+    if (!mine) return null
+    if (mine.draftKey === sessionId) {
+      const retainedDraft = (inputValueRef.current.trim().length > 0)
+        || attachmentsValue.length > 0
+        || elementRefsValue.length > 0
+        || projectAssetRefsValue.length > 0
+      return retainedDraft ? t('project.entry.sendReady') : null
+    }
+    return t('project.entry.sendRetainedElsewhere')
+    // F1 (glm review): depend on the draft VALUE (not the ref identity) so the
+    // notice recomputes — and a cleared original draft consumes its marker.
+    }, [attachmentsValue, elementRefsValue, entryState, inputValue, productSpace?.accountId, projectAssetRefsValue, sendNotices, sessionId, t])
   React.useEffect(() => {
     // A session switch resets to 消息 (default tab — the current behavior) and
     // closes the members panel with it (the panel instance survives the
@@ -405,11 +492,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     membersPanelHost.closePanel()
   }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps -- closePanel identity is stable; the guard keeps the switch scoped to sessionId
   const projectPaneVisible = showProjectTabs && projectTab !== 'messages'
-  // P9 entry roster: the ALL-ROLES collaboration projection (never the
-  // management roster) feeds the header「成员 N」stack and the panel alike.
-  const membersRoster = useCollaborationRoster(showProjectTabs && productSpace && projectScope
-    ? { accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }
-    : null)
+  // (The P9 entry roster feeds the host hook above — declared there once.)
   // D-C: the controlled external「前往企业管理」handoff — the same fail-closed
   // click-time check TopBar performs, re-derived from the LIVE scope at click
   // time; the desktop Bearer never rides the URL.
@@ -446,25 +529,29 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         roster={membersRoster}
         onClose={membersPanelHost.closePanel}
         onOpenEnterpriseManagement={() => { void handleOpenEnterpriseManagement() }}
+        initialDirectory={membersPanelHost.directoryLanding}
+        onboardingOpen={membersPanelHost.onboardingAutoOpen}
       />
     )
     : null
-  // P9 header entry: 「成员 N」 with up to three roster avatars, ahead of the
-  // share control. The roster-unknown fallback is the plain icon + label —
+  // P9 header entry (U7 button): 「成员 N」 with up to three roster avatars,
+  // a trailing add-member glyph for owner/manager, ≥32px tall with a border
+  // + light fill. The roster-unknown fallback is the plain icon + label —
   // never a fabricated count. D11 keeps the pc-members-button testid and the
   // uniqueness: the tab strip no longer carries any members affordance.
+  // (The roster/role computation lives with the host hook above.)
   const membersEntryButton = showProjectTabs ? (
     <button
       type="button"
       ref={membersTriggerRef}
       data-testid="pc-members-button"
-      aria-label={t('projectMembers.buttonAria')}
+      aria-label={t(membersCanInvite ? 'projectMembers.openMembersAndInvite' : 'projectMembers.buttonAria')}
       aria-haspopup="dialog"
       aria-expanded={membersPanelHost.open}
       onClick={handleOpenProjectMembers}
-      className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] border border-transparent px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-foreground-5 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+      className="inline-flex h-8 min-h-[32px] shrink-0 items-center gap-1.5 rounded-[6px] border border-border bg-foreground-5 px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
     >
-      <ProjectMembersEntryLabel roster={membersRoster} />
+      <ProjectMembersEntryLabel roster={membersRoster} showInviteAffordance={membersCanInvite} />
     </button>
   ) : null
   // X6: both project panes stay MOUNTED (hidden) across tab flips, so a
@@ -1015,6 +1102,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   ref={chatDisplayRef}
                   session={skeletonSession}
                   onSendMessage={() => {}}
+                  submitGate={submitGate}
+                  gateNotice={gateNotice}
                   onOpenFile={handleOpenFile}
                   onOpenUrl={handleOpenUrl}
                   currentModel={effectiveModel}
@@ -1052,6 +1141,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   disabled={isChatInputDisabled}
                   inputStatusBanner={inputStatusBanner}
                   compactMode={!!isCompactMode}
+                  projectComposer={showProjectTabs}
                   projectShareEnabled={showProjectTabs}
                   onShareToProject={handleShareToProject}
                 />
@@ -1119,17 +1209,24 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               ref={chatDisplayRef}
               session={session}
               onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences, projectAssetRefs) => {
-                // D13.1 entry fence: a send during an in-flight project entry
-                // would land in the PREVIOUS scope — refuse visibly and keep
-                // the composer draft exactly as typed.
+                // D13.1 entry fence (BACKSTOP): the composer's submitGate is
+                // the primary U11 gate and already refused before the draft
+                // cleared; this deep pending check keeps any path that might
+                // bypass the composer from delivering a send into the
+                // PREVIOUS scope. A refused send here keeps the draft.
                 if (entryPendingRef.current) {
                   toast.error(t('project.entry.scopeChanged'))
                   return
                 }
                 if (session) {
+                  // U11: an ACCEPTED send consumes this conversation's
+                  // blocked-send notice marker — the guidance did its job.
+                  clearSendNotice(session.id)
                   onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences, projectAssetRefs)
                 }
               }}
+              submitGate={submitGate}
+              gateNotice={gateNotice}
               onOpenFile={handleOpenFile}
               onOpenUrl={handleOpenUrl}
               currentModel={effectiveModel}
@@ -1172,6 +1269,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               disabled={isChatInputDisabled}
               inputStatusBanner={inputStatusBanner}
               compactMode={!!isCompactMode}
+              projectComposer={showProjectTabs}
               projectShareEnabled={showProjectTabs}
               onShareToProject={handleShareToProject}
             />

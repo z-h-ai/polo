@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -77,6 +77,13 @@ export interface ProjectMembersPanelProps {
   roster: ReturnType<typeof useCollaborationRoster>
   onClose: () => void
   onOpenEnterpriseManagement: () => void
+  /** UB4 (U5): this open should land directly on the 添加成员 selection page
+   * (the one-time onboarding auto-open or the empty-state「邀请同事」card) —
+   * never through the overview. Manager-only; the open-edge effect guards. */
+  initialDirectory?: boolean
+  /** UB4 (U5): the one-time onboarding face is active — the panel bottom
+   * carries 「先不拉人，直接开始」; closing it consumes the offer (host). */
+  onboardingOpen?: boolean
 }
 
 type PanelPage = 'overview' | 'directory' | 'direct' | 'result' | 'invitations'
@@ -85,6 +92,44 @@ type DirectoryView = 'select' | 'colleague-result'
 /** True copy state, one colleague at a time (mirrors the single-outcome face
  * of the targeted compose): the last user whose link was copied/failed. */
 type ColleagueCopyState = { userId: string; failed: boolean } | null
+
+/** UB3 (U2): the aggregate「复制全部邀请链接」face —「已复制」only ever renders
+ * after the clipboard write resolved; a resolution/clipboard failure shows the
+ * original copy-failed note instead of any success claim. */
+type ColleagueCopyAllState = 'idle' | 'copied' | 'failed'
+
+/** UB3 (U6): the pending-summary face of the overview. A paged snapshot that
+ * still has pages ahead can only ever say「至少 N」; an unknown/erroring or
+ * not-yet-loaded list degrades to the plain「查看待接受邀请」entry — never a
+ * fabricated 0. */
+type PendingSummaryState = {
+  face: 'count' | 'at-least' | 'view-only'
+  count: number
+}
+
+/** UB3 (U6): the usable pending face of one invitation — `active` and not
+ * expired, deduplicated by invitationId. Expired/cancelled/accepted entries
+ * never count. */
+function isPendingInvitation(invitation: { invitationId: string; status: string; expiresAt: string }): boolean {
+  if (invitation.status !== 'active') return false
+  const expiresAt = new Date(invitation.expiresAt).getTime()
+  return Number.isFinite(expiresAt) && expiresAt > Date.now()
+}
+
+/** UB3 (U6): count DISTINCT pending invitations in a snapshot (duplicates a
+ * repeatable pagination page may produce count once). Module-level so the
+ * isolated tests can pin the dedup/expiry discipline directly. */
+export function countPendingInvitations(items: ReadonlyArray<{ invitationId: string; status: string; expiresAt: string }>): number {
+  const seen = new Set<string>()
+  let count = 0
+  for (const invitation of items) {
+    if (!isPendingInvitation(invitation)) continue
+    if (seen.has(invitation.invitationId)) continue
+    seen.add(invitation.invitationId)
+    count += 1
+  }
+  return count
+}
 
 const LOST_ACCESS_KEY = 'projectMembers.error.lostAccess'
 
@@ -117,6 +162,8 @@ export function ProjectMembersPanel({
   roster,
   onClose,
   onOpenEnterpriseManagement,
+  initialDirectory = false,
+  onboardingOpen = false,
 }: ProjectMembersPanelProps) {
   const { t } = useTranslation()
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -126,6 +173,25 @@ export function ProjectMembersPanel({
   const [directoryView, setDirectoryView] = useState<DirectoryView>('select')
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
   const [colleagueCopy, setColleagueCopy] = useState<ColleagueCopyState>(null)
+  const [colleagueCopyAll, setColleagueCopyAll] = useState<ColleagueCopyAllState>('idle')
+  /** UB3 (U6): in-memory (accountId,productSpaceId,invitationId)→displayName
+   * associations built ONLY from this session's own compose outcomes (the
+   * client-chosen target, never a server name receipt). Scope-keyed; a scope
+   * switch clears it wholesale and nothing is persisted. */
+  const [localInviteNames, setLocalInviteNames] = useState<ReadonlyMap<string, string>>(new Map())
+  const scopeKey = scope ? `${scope.accountId}:${scope.productSpaceId}` : null
+
+  // UB3 (U2): a copy resolution/write that settles after an account/project
+  // switch must never publish into the NEW scope — the callback re-checks
+  // this generation before any setState. (A live authority loss bumps it
+  // again, right after `lostAccess` is derived below.)
+  const copyGenerationRef = useRef(0)
+  useEffect(() => {
+    copyGenerationRef.current += 1
+    setColleagueCopyAll('idle')
+    setColleagueCopy(null)
+    setLocalInviteNames(new Map())
+  }, [scopeKey])
 
   // A roster 403 is a live authority loss (P10): the viewer role goes unknown
   // and every management affordance disappears, whatever the summary said.
@@ -134,6 +200,9 @@ export function ProjectMembersPanel({
     ? null
     : (roster.viewerRole ?? spaceViewerRole)
   const canManage = effectiveRole === 'owner' || effectiveRole === 'manager'
+  useEffect(() => {
+    if (lostAccess) copyGenerationRef.current += 1
+  }, [lostAccess])
 
   const members = useProjectMembers(scope
     ? { accountId: scope.accountId, productSpaceId: scope.productSpaceId, projectName, viewerRole: effectiveRole ?? 'member' }
@@ -150,17 +219,27 @@ export function ProjectMembersPanel({
   // Managers re-read the invitation records (and this deployment's email
   // capability, which rides the pm roster response and shapes the secondary
   // compose's placeholder). A plain member reads NOTHING here (P10).
+  // UB4 (U5): an `initialDirectory` open lands straight on the 添加成员
+  // selection page instead — the one-time onboarding auto-open and the
+  // empty-state invite card share this landing (manager-guarded: a member
+  // host can never request it, and the overview stays the honest fallback).
   const wasOpenRef = useRef(false)
   useEffect(() => {
     if (open && !wasOpenRef.current) {
-      setPage('overview')
-      setDirectoryView('select')
-      setSelectedIds(new Set())
-      setColleagueCopy(null)
-      if (canManage) members.openOverview()
+      if (canManage && initialDirectory) {
+        setSelectedIds(new Set())
+        setDirectoryView('select')
+        setPage('directory')
+      } else {
+        setPage('overview')
+        setDirectoryView('select')
+        setSelectedIds(new Set())
+        setColleagueCopy(null)
+        if (canManage) members.openOverview()
+      }
     }
     wasOpenRef.current = open
-  }) // eslint-disable-line react-hooks/exhaustive-deps -- reads the LATEST canManage/members on the open edge, like the old dialog's openOverview effect
+  }) // eslint-disable-line react-hooks/exhaustive-deps -- reads the LATEST canManage/members/initialDirectory on the open edge, like the old dialog's openOverview effect
 
   // Focus into the panel when it opens; when it closes, the HOST returns
   // focus to the members entry.
@@ -206,6 +285,9 @@ export function ProjectMembersPanel({
       members.closeResult()
       setPage('overview')
     } else if (page === 'invitations') {
+      // UB3 (U6): returning to the overview refreshes the records ONCE so the
+      // pending summary re-reads a fresh snapshot (a snapshot, not a stream).
+      members.refreshInvitations()
       setPage('overview')
     } else if (page === 'directory') {
       if (directoryView === 'colleague-result') {
@@ -273,6 +355,14 @@ export function ProjectMembersPanel({
     })
   }, [])
 
+  /** UB3 (U8): the cap forbids ADDING a 51st target, never CANCELLING an
+  * already-selected row — the old `!selectionAtCap` condition also disabled
+  * deselection at 50 and locked the selection shut. */
+  const rowSelectable = (member: (typeof colleagues.members)[number], selected: boolean): boolean => {
+    if (member.projectState !== 'available') return false
+    return !selectionAtCap || selected
+  }
+
   const selectedTargets = colleagues.members
     .filter(member => selectedIds.has(member.userId))
     .map(member => ({ userId: member.userId, displayName: member.displayName }))
@@ -293,6 +383,42 @@ export function ProjectMembersPanel({
     setPage('invitations')
   }, [members])
 
+  // UB3 (U6): associate THIS session's own settled compose outcomes with the
+  // display name the manager picked in the directory. Only a result that
+  // carries BOTH an invitationId and a client-chosen displayName enters the
+  // map — a masked targeted compose contributes nothing (no guessed identity).
+  // Purely in-memory, scope-keyed; the scope effect above clears it.
+  useEffect(() => {
+    if (!scope) return
+    setLocalInviteNames(previous => {
+      let next: Map<string, string> | null = null
+      for (const result of invites.results) {
+        const invitationId = result.invitation?.invitationId
+        if (!invitationId || !result.displayName) continue
+        const key = `${scope.accountId}:${scope.productSpaceId}:${invitationId}`
+        if (previous.get(key) === result.displayName) continue
+        if (!next) next = new Map(previous)
+        next.set(key, result.displayName)
+      }
+      return next ?? previous
+    })
+  }, [invites.results, scope])
+
+  // UB3 (U6): the overview pending summary — a snapshot over the manager's
+  // already-loaded invitation records (no polling, no extra page walks). The
+  // pagination bounds: pages still ahead + N>0 →「至少 N」; fully loaded →
+  // exact N; not loaded / errored / pages ahead with N=0 → the plain entry,
+  // never a fabricated 0.
+  const pendingSummary: PendingSummaryState = (() => {
+    const firstLoadInFlight = members.invitations.loading && members.invitations.items.length === 0
+    if (members.invitations.errorKey || firstLoadInFlight) return { face: 'view-only', count: 0 }
+    const count = countPendingInvitations(members.invitations.items)
+    if (members.invitations.nextCursor) {
+      return count > 0 ? { face: 'at-least', count } : { face: 'view-only', count: 0 }
+    }
+    return { face: 'count', count }
+  })()
+
   const submitDirectInvite = useCallback(async () => {
     const ok = await members.submitInvitation()
     if (ok) setPage('result')
@@ -310,19 +436,72 @@ export function ProjectMembersPanel({
 
   const copyColleagueLink = useCallback(async (result: ColleagueInvitationTargetResult) => {
     if (!result.invitationUrl) return
+    const generation = copyGenerationRef.current
     setColleagueCopy({ userId: result.userId, failed: false })
     const resolved = await resolveInvitationUrlValue(result.invitationUrl)
+    // UB3 (U2): 失权/换 scope 的迟到回调整体丢弃 — 不发布到新 scope。
+    if (generation !== copyGenerationRef.current) return
     if (!resolved) {
       setColleagueCopy({ userId: result.userId, failed: true })
       return
     }
     try {
       await navigator.clipboard.writeText(resolved)
+      if (generation !== copyGenerationRef.current) return
       setColleagueCopy({ userId: result.userId, failed: false })
     } catch {
+      if (generation !== copyGenerationRef.current) return
       setColleagueCopy({ userId: result.userId, failed: true })
     }
   }, [])
+
+  // UB3 (U2): the aggregate「复制全部邀请链接」candidates — ONLY already-held
+  // link-bearing results of an active, unexpired invitation, deduplicated by
+  // invitationId in row order. No create/recovery write ever fills a gap; a
+  // partial set copies the usable ones and keeps every per-row error visible.
+  const copyAllCandidates = useMemo(() => {
+    const seen = new Set<string>()
+    const usable: ColleagueInvitationTargetResult[] = []
+    for (const result of invites.results) {
+      if (!result.invitation || !result.invitationUrl) continue
+      if (!isPendingInvitation(result.invitation)) continue
+      if (seen.has(result.invitation.invitationId)) continue
+      seen.add(result.invitation.invitationId)
+      usable.push(result)
+    }
+    return usable
+  }, [invites.results])
+  const copyAllVisible = copyAllCandidates.length >= 2
+  const copyAllPartial = copyAllCandidates.length > 0
+    && invites.results.some(result => !result.invitation || !result.invitationUrl
+      || !isPendingInvitation(result.invitation))
+
+  /** 「姓名（无姓名则已有脱敏标识）\n专属 URL」，组间空行；绝不拼接明文联系方式。 */
+  const copyAllColleagueLinks = useCallback(async () => {
+    if (copyAllCandidates.length < 2) return
+    const generation = copyGenerationRef.current
+    const groups: string[] = []
+    for (const result of copyAllCandidates) {
+      const resolved = await resolveInvitationUrlValue(result.invitationUrl!)
+      if (generation !== copyGenerationRef.current) return
+      if (!resolved) {
+        setColleagueCopyAll('failed')
+        return
+      }
+      const masked = result.invitation?.maskedPhone ?? result.invitation?.maskedEmail ?? null
+      const label = result.displayName ?? masked ?? t('projectMembers.roster.unnamed')
+      groups.push(`${label}\n${resolved}`)
+    }
+    try {
+      await navigator.clipboard.writeText(groups.join('\n\n'))
+      // 复制完成、发布前复核 scope/generation：失权或换 scope 丢弃回调。
+      if (generation !== copyGenerationRef.current) return
+      setColleagueCopyAll('copied')
+    } catch {
+      if (generation !== copyGenerationRef.current) return
+      setColleagueCopyAll('failed')
+    }
+  }, [copyAllCandidates, t])
 
   if (!open) return null
 
@@ -408,6 +587,22 @@ export function ProjectMembersPanel({
               >
                 {t('projectMembers.roster.count', { count: roster.totalActiveMembers })}
               </span>
+            ) : null}
+            {canManage ? (
+              <button
+                type="button"
+                data-testid="project-members-pending-summary"
+                data-state={pendingSummary.face}
+                data-focus-key="pending-summary"
+                onClick={openInvitations}
+                className="inline-flex h-6 min-w-0 max-w-[52%] shrink-0 items-center gap-1 truncate rounded-[6px] px-[6px] text-[11px] font-medium text-accent transition-colors hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+              >
+                {pendingSummary.face === 'count'
+                  ? t('projectMembers.invitations.pendingCount', { count: pendingSummary.count })
+                  : pendingSummary.face === 'at-least'
+                    ? t('projectMembers.invitations.pendingAtLeast', { count: pendingSummary.count })
+                    : t('projectMembers.invitations.viewPending')}
+              </button>
             ) : null}
           </div>
 
@@ -596,39 +791,62 @@ export function ProjectMembersPanel({
                 <ul className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[10px] border border-border">
                   {colleagues.members.map(member => {
                     const stateKey = colleagueProjectStateKeyOf(member)
-                    const selectable = member.projectState === 'available' && !selectionAtCap
                     const selected = selectedIds.has(member.userId)
+                    const selectable = rowSelectable(member, selected)
                     const name = member.displayName ?? t('projectMembers.roster.unnamed')
-                    return (
+                    // UB3 (U8): ONE row-wide native button owns the whole
+                    // selectable row (avatar/name/checkbox are ITS content —
+                    // never nested interactive elements); a non-available
+                    // state stays a plain read-only row with no toggle.
+                    return stateKey ? (
                       <li
                         key={member.userId}
                         data-testid="project-colleagues-row"
                         data-user-id={member.userId}
                         data-project-state={member.projectState}
-                        className="flex items-center gap-[10px] border-b border-border px-[11px] py-[8px] last:border-b-0"
+                        className="border-b border-border last:border-b-0"
                       >
-                        <AvatarGlyph name={member.displayName} />
-                        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{name}</span>
-                        {stateKey ? (
+                        <div className="flex items-center gap-[10px] px-[11px] py-[8px]">
+                          <AvatarGlyph name={member.displayName} />
+                          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{name}</span>
                           <span className="shrink-0 rounded-full bg-foreground-5 px-[7px] py-[1px] text-[11px] leading-[1.6] text-foreground-60">
                             {t(stateKey)}
                           </span>
-                        ) : (
-                          <button
-                            type="button"
-                            aria-pressed={selected}
-                            aria-label={t('projectMembers.directory.toggleSelection', { name })}
-                            disabled={!selectable}
-                            onClick={() => toggleSelection(member.userId, member.displayName)}
+                        </div>
+                      </li>
+                    ) : (
+                      <li
+                        key={member.userId}
+                        data-testid="project-colleagues-row"
+                        data-user-id={member.userId}
+                        data-project-state={member.projectState}
+                        className="border-b border-border last:border-b-0"
+                      >
+                        <button
+                          type="button"
+                          data-testid="project-colleagues-row-toggle"
+                          aria-pressed={selected}
+                          aria-label={t('projectMembers.directory.toggleSelection', { name })}
+                          disabled={!selectable}
+                          onClick={() => toggleSelection(member.userId, member.displayName)}
+                          className={cn(
+                            'flex w-full items-center gap-[10px] rounded-none px-[11px] py-[8px] text-left transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent',
+                            selected ? 'bg-[var(--accent-soft)]' : 'hover:bg-foreground-5',
+                            !selectable && 'cursor-not-allowed opacity-40',
+                          )}
+                        >
+                          <AvatarGlyph name={member.displayName} />
+                          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{name}</span>
+                          <span
+                            aria-hidden="true"
                             className={cn(
-                              'inline-flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent',
-                              selected ? 'border-accent bg-accent text-[var(--on-accent,#fff)]' : 'border-border bg-transparent hover:border-foreground/30',
-                              !selectable && 'cursor-not-allowed opacity-40',
+                              'inline-flex size-[24px] shrink-0 items-center justify-center rounded-[6px] border transition-colors',
+                              selected ? 'border-accent bg-accent text-[var(--on-accent,#fff)]' : 'border-border bg-transparent',
                             )}
                           >
-                            {selected ? <Check className="size-3" aria-hidden="true" /> : null}
-                          </button>
-                        )}
+                            {selected ? <Check className="size-3.5" /> : null}
+                          </span>
+                        </button>
                       </li>
                     )
                   })}
@@ -712,13 +930,44 @@ export function ProjectMembersPanel({
               {invites.results.length === 0
                 ? t(invites.composeErrorKey ?? 'projectMembers.directory.sourceUnavailable')
                 : hasCreated
-                  ? t('projectMembers.directory.createdPending')
+                  ? t('projectMembers.invite.successTitle')
                   : t('projectMembers.directory.partialFailure')}
             </p>
+            {hasCreated ? (
+              <p role="status" className="text-[11px] leading-[1.45] text-foreground-60">
+                {t('projectMembers.invite.successNote')}
+              </p>
+            ) : null}
             {hasCreated && invites.failedCount > 0 ? (
               <p role="status" className="text-[11px] leading-[1.45] text-foreground-60">
                 {t('projectMembers.directory.partialFailure')}
               </p>
+            ) : null}
+
+            {copyAllVisible ? (
+              <div className="flex shrink-0 flex-col gap-[4px]">
+                <Button
+                  type="button"
+                  className={clientWorkbenchPrimaryClassName}
+                  data-testid="project-members-copy-all"
+                  onClick={() => { void copyAllColleagueLinks() }}
+                >
+                  {colleagueCopyAll === 'copied' ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
+                  {colleagueCopyAll === 'copied'
+                    ? t('projectMembers.invite.copied')
+                    : t('projectMembers.invite.copyAll')}
+                </Button>
+                {colleagueCopyAll === 'failed' ? (
+                  <p className="text-[11px] leading-[1.45] text-destructive" role="alert" data-testid="project-members-copy-all-failed">
+                    {t('projectMembers.invite.copyFailed')}
+                  </p>
+                ) : null}
+                {copyAllPartial ? (
+                  <p role="status" className="text-[11px] leading-[1.45] text-foreground-60" data-testid="project-members-copy-all-note">
+                    {t('projectMembers.invite.copyAllNote')}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
 
             <ul className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[10px] border border-border">
@@ -931,6 +1180,17 @@ export function ProjectMembersPanel({
             </div>
           ) : members.outcome.invitationUrl ? (
             <>
+              {/* UB3 (U2):「已复制」only AFTER the clipboard write resolved —
+                  until then the button keeps the send-it-yourself call. */}
+              {members.copied ? (
+                <p
+                  role="status"
+                  data-testid="project-members-copy-next-step"
+                  className="rounded-[10px] bg-foreground-5 px-[12px] py-[10px] text-[12px] leading-[1.55] text-foreground-60"
+                >
+                  {t('projectMembers.invite.copyNextStep')}
+                </p>
+              ) : null}
               <Button
                 type="button"
                 className={clientWorkbenchPrimaryClassName}
@@ -1009,24 +1269,43 @@ export function ProjectMembersPanel({
             >
               {members.invitations.items.map(invitation => {
                 const target = invitation.maskedPhone ?? invitation.maskedEmail ?? ''
+                // UB3 (U6): a name ONLY from this session's own compose
+                // outcomes, matched by invitationId in THIS scope. No mapping
+                // keeps the original masked-identifier face — never a guessed
+                // identity, nothing persisted.
+                const localName = scope
+                  ? localInviteNames.get(`${scope.accountId}:${scope.productSpaceId}:${invitation.invitationId}`) ?? null
+                  : null
                 return (
                   <li
                     key={invitation.invitationId}
                     data-testid="project-members-invitation-row"
                     data-invitation-status={invitation.status}
+                    {...(localName ? { 'data-local-target': localName } : {})}
                     className="flex flex-col gap-[2px] border-b border-border px-[11px] py-[8px] last:border-b-0"
                   >
                     <span className="flex items-center gap-[8px]">
-                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{target}</span>
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+                        {localName
+                          ? t('projectMembers.invitations.localTarget', { name: localName })
+                          : target}
+                      </span>
                       <span className="shrink-0 rounded-full bg-foreground-5 px-[7px] py-[1px] text-[11px] leading-[1.6] text-foreground-60">
                         {t(members.statusKeyOf(invitation.status))}
                       </span>
                     </span>
-                    <span className="text-[11px] leading-[1.45] text-foreground-50">
-                      {invitation.acceptedAt
-                        ? t('projectMembers.invitations.acceptedAt', { date: new Date(invitation.acceptedAt).toLocaleString() })
-                        : t('projectMembers.invitations.expiresAt', { date: new Date(invitation.expiresAt).toLocaleString() })}
-                    </span>
+                    {localName ? (
+                      <span className="text-[11px] leading-[1.45] text-foreground-50">
+                        {target ? <span>{target} · </span> : null}
+                        {t('projectMembers.invitations.createdAt', { date: new Date(invitation.createdAt).toLocaleString() })}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] leading-[1.45] text-foreground-50">
+                        {invitation.acceptedAt
+                          ? t('projectMembers.invitations.acceptedAt', { date: new Date(invitation.acceptedAt).toLocaleString() })
+                          : t('projectMembers.invitations.expiresAt', { date: new Date(invitation.expiresAt).toLocaleString() })}
+                      </span>
+                    )}
                   </li>
                 )
               })}
@@ -1047,6 +1326,27 @@ export function ProjectMembersPanel({
           <p className="mt-auto text-[11px] leading-[1.45] text-foreground-50" data-testid="project-members-manage-note">
             {t('projectMembers.manage.note')}
           </p>
+        </div>
+      ) : null}
+
+      {/* UB4 (U5): the one-time onboarding face — 「先不拉人，直接开始」 at the
+          panel bottom. Closing via this button (like X/backdrop/Esc) lands in
+          the host's closePanel, which consumes the offer and refocuses the
+          composer; nothing invites, creates a session or sends anything. */}
+      {onboardingOpen && canManage ? (
+        <div
+          className="flex shrink-0 items-center justify-center border-t border-border px-[14px] py-[10px]"
+          data-testid="project-onboarding-skip-bar"
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            className={clientWorkbenchButtonClassName}
+            data-testid="project-onboarding-skip"
+            onClick={onClose}
+          >
+            {t('project.entry.skipInvite')}
+          </Button>
         </div>
       ) : null}
     </>
@@ -1104,10 +1404,16 @@ export function ProjectMembersPanel({
   )
 }
 
-/** The header entry「成员 N」(P9): up to three roster avatars ahead of the
- * count; a roster that has not spoken yet degrades to the plain icon + label
- * — never a fabricated 0. Lives in ChatPage/EmptyState header actions. */
-export function ProjectMembersEntryLabel({ roster }: { roster: ReturnType<typeof useCollaborationRoster> }) {
+/** The header entry「成员 N」(P9, U7 button): up to three roster avatars ahead
+ * of the count, a trailing add-member glyph for owner/manager (aria-hidden —
+ * the WHOLE button is the one target and its accessible name carries the
+ * invite capability, never the glyph alone); a roster that has not spoken yet
+ * degrades to the plain icon + label — never a fabricated 0. Lives in
+ * ChatPage/EmptyState header actions. */
+export function ProjectMembersEntryLabel({ roster, showInviteAffordance = false }: {
+  roster: ReturnType<typeof useCollaborationRoster>
+  showInviteAffordance?: boolean
+}) {
   const { t } = useTranslation()
   const members = roster.members.slice(0, 3)
   return (
@@ -1136,6 +1442,9 @@ export function ProjectMembersEntryLabel({ roster }: { roster: ReturnType<typeof
           ? t('projectMembers.entryCount', { count: roster.totalActiveMembers })
           : t('projectMembers.buttonLabel')}
       </span>
+      {showInviteAffordance ? (
+        <UserPlus className="size-3.5 shrink-0" aria-hidden="true" data-testid="pc-members-entry-plus" />
+      ) : null}
     </>
   )
 }

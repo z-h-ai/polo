@@ -794,9 +794,11 @@ export function initialR3Directory() {
 }
 
 /** Directory variants the scenarios reprogram: an EMPTY project collection
- * (organization+personal only — 「还没有项目」 face) and a ONE-project
- * capacity boundary face. */
-export function r3DirectoryVariant(variant: 'empty' | 'one') {
+ * (organization+personal only — 「还没有项目」 face), a ONE-project capacity
+ * boundary face, and a SEVEN-project face for the UB5 (U9) resident-search
+ * capacity matrix (7 > 6 keeps the expand control alive at EVERY breakpoint).
+ * Data-only: same negotiated wire shape, no product logic. */
+export function r3DirectoryVariant(variant: 'empty' | 'one' | 'seven') {
   const full = initialR3Directory()
   if (variant === 'empty') {
     const kept = full.spaces.productSpaces.filter((space: { id: string; kind: string }) => space.kind === 'personal' || space.id === PRODUCT_SPACE_ID)
@@ -804,6 +806,19 @@ export function r3DirectoryVariant(variant: 'empty' | 'one') {
       ...full,
       spaces: { ...full.spaces, productSpaces: kept },
       enterpriseSummaries: full.enterpriseSummaries.filter((entry: { productSpaceId: string }) => entry.productSpaceId === PRODUCT_SPACE_ID),
+    }
+  }
+  if (variant === 'seven') {
+    const extra = enterpriseSpace('ps-r3-extra', 'ent-r3-extra', '海外交付资料库', 'manager', 'active')
+    return {
+      ...full,
+      spaces: { ...full.spaces, productSpaces: [...full.spaces.productSpaces, extra] },
+      enterpriseSummaries: [...full.enterpriseSummaries, {
+        productSpaceId: 'ps-r3-extra',
+        enterpriseId: 'ent-r3-extra',
+        enterpriseKind: 'project',
+        purpose: '第七个容量边界项目',
+      }],
     }
   }
   const keptIds = new Set([PRODUCT_SPACE_ID, PERSONAL_SPACE_ID, R3_PROJECT_ALPHA_ID])
@@ -853,12 +868,29 @@ const r3Session = (id: string, productSpaceId: string, name: string, lastMessage
   isFlagged: false,
 })
 
+/** The beta recent session carries the UB2 composer-draft seeds (data
+ * injection only, no product logic): a KB scope so the composer commits a
+ * real selection with a send, and ONE pending follow-up annotation so the
+ *「批注未标已发送」pin has a real subject (no `meta.followUp.lastSentAt` =
+ * still pending). R3-05's full-draft pin enters the ALREADY-committed beta
+ * (same-conversation landing), so the seeds ride this session. */
+const betaRecentSession = r3Session(SESSION_R3_BETA_RECENT, R3_PROJECT_BETA_ID, '北区交付 · 最近会话', Date.parse('2026-11-02T15:00:00+08:00'))
+betaRecentSession.kbCollectionIds = ['kb-col-weekly']
+;(betaRecentSession.messages[1] as Record<string, unknown>).annotations = [{
+  id: 'ann-r3-beta-followup',
+  schemaVersion: 1,
+  createdAt: Date.parse('2026-11-02T15:05:00+08:00'),
+  body: [{ type: 'note', text: '把这份要点同步给华东区' }],
+  target: { source: { sessionId: SESSION_R3_BETA_RECENT, messageId: `${SESSION_R3_BETA_RECENT}-m2` }, selectors: [] },
+  meta: {},
+}]
+
 /** The project sessions the fixture getSessions hands out (the full workspace
  * list — selection scopes by productSpaceId, never by workspaceId alone). */
 export const r3Sessions: FixtureSession[] = [
   r3Session(SESSION_R3_ALPHA_RECENT, R3_PROJECT_ALPHA_ID, '华东区资料库 · 最近会话', Date.parse('2026-11-03T18:00:00+08:00')),
   r3Session(SESSION_R3_ALPHA_OLDER, R3_PROJECT_ALPHA_ID, '华东区资料库 · 早期会话', Date.parse('2026-11-01T10:00:00+08:00')),
-  r3Session(SESSION_R3_BETA_RECENT, R3_PROJECT_BETA_ID, '北区交付 · 最近会话', Date.parse('2026-11-02T15:00:00+08:00')),
+  betaRecentSession,
   r3Session(SESSION_R3_DECOY, PRODUCT_SPACE_ID, 'Apollo 组织空间 · 更新的会话', Date.parse('2026-11-03T20:00:00+08:00')),
 ]
 

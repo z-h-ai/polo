@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
+import { MessageSquareText, Upload, UserPlus } from 'lucide-react'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ProjectContextTabs, type ProjectContextTab } from '@/components/project-context/ProjectContextTabs'
 import { ProjectFileLibrary } from '@/components/project-context/ProjectFileLibrary'
@@ -12,10 +14,12 @@ import {
 import { useProjectMembersPanelHost } from '@/components/project-context/useProjectMembersPanelHost'
 import { useCollaborationRoster } from '@/components/project-context/useCollaborationRoster'
 import { FreeFormInput } from '@/components/app-shell/input/FreeFormInput'
+import type { RichTextInputHandle } from '@/components/ui/rich-text-input'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { navigate, routes } from '@/lib/navigate'
 import { readProjectPurpose } from '@/lib/project-directory'
 import { createEnterpriseWorkflowUrl } from '@/lib/enterprise-workflow-url'
+import { projectEntryAtom, projectEntrySendNoticesAtom, emptyDraftKey, isEntryPendingState } from '@/atoms/project-entry'
 import type { ClientMemberRole } from '@polo-ai/shared/admin/client-enterprise-contract'
 import type { FileAttachment } from '../../../shared/types'
 import type { WebElementReference } from '@polo-ai/core/types'
@@ -83,13 +87,46 @@ export function ProjectConversationEmptyState({
   // empty state has no session, so no tool pane can occupy the right column.
   const laneRef = useRef<HTMLDivElement | null>(null)
   const membersTriggerRef = useRef<HTMLButtonElement | null>(null)
+  // UB4 (U5): the composer ref — closing the one-time onboarding panel hands
+  // focus back to the input (「关闭后聚焦输入框」), never a dead surface.
+  const composerRef = useRef<RichTextInputHandle | null>(null)
+  // UB4 (U5): the「上传」action card's one-shot request into the files tab's
+  // EXISTING upload dialog (explicit trigger wiring only — no new flow).
+  const [uploadSignal, setUploadSignal] = useState(0)
+  const membersRoster = useCollaborationRoster({ accountId, productSpaceId })
+  // U7: the members entry is a real ≥32px bordered button in BOTH hosts. The
+  // roster viewerRole is the live invite-affordance authority (the prop role
+  // only fills in until the roster speaks; a roster 403 removes the glyph).
+  const membersEntryLostAccess = membersRoster.errorKey === 'projectMembers.error.forbidden'
+  const membersEntryRole = membersEntryLostAccess
+    ? null
+    : (membersRoster.viewerRole ?? viewerRole)
+  const membersCanInvite = membersEntryRole === 'owner' || membersEntryRole === 'manager'
   const membersPanelHost = useProjectMembersPanelHost({
     enabled: true,
     laneRef,
     toolPaneOccupied: Boolean(filePreview && filePreviewVisible),
     triggerRef: membersTriggerRef,
+    // UB4 (U5): this empty state IS the conversation host for the scope —
+    // the recorded one-time intent is consumed HERE when the entry is ready,
+    // the project is committed and this viewer may invite; the panel opens
+    // straight on the 添加成员 selection page and closing it refocuses the
+    // composer below.
+    onboardingScope: { accountId, productSpaceId },
+    canInvite: membersCanInvite,
+    onOnboardingClosed: () => { composerRef.current?.focus() },
   })
-  const membersRoster = useCollaborationRoster({ accountId, productSpaceId })
+
+  // UB2 (U11): the SHARED entry transaction state — the composer gate reads
+  // the same owner the HomePage cards and the history-error face consume, so
+  // a blocked first send can never create a session into a scope that is
+  // still switching, and the draft stays exactly as typed.
+  const entryState = useAtomValue(projectEntryAtom)
+  const entryStateRef = useRef(entryState)
+  entryStateRef.current = entryState
+  const setSendNotices = useSetAtom(projectEntrySendNoticesAtom)
+  const sendNotices = useAtomValue(projectEntrySendNoticesAtom)
+  const composerDraftKey = emptyDraftKey(accountId, productSpaceId)
 
   const handleInputChange = useCallback((value: string) => {
     draft.input = value
@@ -106,6 +143,40 @@ export function ProjectConversationEmptyState({
   const handleProjectAssetRefsChange = useCallback((references: ProjectAssetMentionDraft[]) => {
     draft.projectAssetRefs = references
   }, [draft])
+
+  // U11: the synchronous admission gate — a send while the entry is in
+  // flight records ONE contentless notice marker and refuses INSIDE the
+  // composer, before any session creation or draft clear.
+  const submitGate = useCallback(() => {
+    if (!isEntryPendingState(entryStateRef.current)) return true
+    setSendNotices(notices => [
+      ...notices.filter(notice => !(notice.accountId === accountId && notice.draftKey === composerDraftKey)),
+      {
+        accountId,
+        productSpaceId,
+        draftKey: composerDraftKey,
+        generation: entryStateRef.current.generation,
+      },
+    ])
+    toast.error(t('project.entry.sendBlocked'))
+    return false
+  }, [accountId, composerDraftKey, productSpaceId, setSendNotices, t])
+
+  // U11 persistent notice above the composer: the waiting-time prompt while
+  // an entry is in flight, then「项目已打开，刚才的内容还在，请点击发送。」
+  // once THIS scope landed and the retained draft still exists. (The
+  // empty-state composer IS its own draft scope —「返回原对话」cannot happen
+  // here; leaving the surface unmounts this composer entirely.)
+  const gateNotice = useMemo(() => {
+    if (isEntryPendingState(entryState)) return t('project.entry.sendBlocked')
+    const mine = sendNotices.find(notice => notice.accountId === accountId && notice.draftKey === composerDraftKey)
+    if (!mine) return null
+    const retainedDraft = draft.input.trim().length > 0
+      || draft.attachments.length > 0
+      || draft.elementReferences.length > 0
+      || draft.projectAssetRefs.length > 0
+    return retainedDraft ? t('project.entry.sendReady') : null
+  }, [accountId, composerDraftKey, draft, entryState, sendNotices, t])
 
   const handleFirstSend = useCallback((
     message: string,
@@ -152,6 +223,10 @@ export function ProjectConversationEmptyState({
             projectAssetRefs,
           )
         }, 100)
+        // U11: the accepted first send consumes this scope's blocked-send
+        // notice marker (the guidance did its job) along with the served
+        // draft — the project conversation starts clean.
+        setSendNotices(notices => notices.filter(notice => !(notice.accountId === accountId && notice.draftKey === composerDraftKey)))
         // The draft's purpose is served; start the project conversation clean.
         scopeDrafts.delete(draftKey)
       } catch {
@@ -162,7 +237,7 @@ export function ProjectConversationEmptyState({
         submittingRef.current = false
       }
     })()
-  }, [accountId, draftKey, onCreateSession, onSendMessage, productSpaceId, t, workspaceId])
+  }, [accountId, composerDraftKey, draftKey, onCreateSession, onSendMessage, productSpaceId, setSendNotices, t, workspaceId])
 
   // D-C handoff semantics (same fail-closed click-time checks ChatPage uses):
   // the desktop Bearer never rides the URL and a stale admin session fails
@@ -195,6 +270,27 @@ export function ProjectConversationEmptyState({
   const projectPaneVisible = projectTab !== 'messages'
   const projectPaneKey = `${accountId}:${productSpaceId}`
 
+  // UB4 (U5) three action cards:
+  // - 「邀请同事」(primary, invite-capable viewers only) → the members panel's
+  //   existing 添加成员 selection page through the host's open channel —
+  //   nothing invites until the in-panel confirm (0 invite here);
+  // - 「上传」→ switches to the files tab AND raises the one-shot signal into
+  //   the EXISTING AssetUploadDialog (capability-gated inside the library);
+  // - 「直接开始聊」→ focuses the composer ONLY.
+  // All three are pure presentation actions: 0 createSession / 0 send / 0
+  // invitation write before AND after the click.
+  const handleUploadAction = useCallback(() => {
+    setProjectTab('files')
+    setUploadSignal(signal => signal + 1)
+  }, [])
+  const handleInviteAction = useCallback(() => {
+    if (!membersCanInvite) return
+    membersPanelHost.openInvitePanel()
+  }, [membersCanInvite, membersPanelHost])
+  const handleStartChatAction = useCallback(() => {
+    composerRef.current?.focus()
+  }, [])
+
   return (
     // The chat lane (D8 measurement node) — same contract as ChatPage.
     <div ref={laneRef} className="h-full flex min-h-0 min-w-0">
@@ -206,13 +302,13 @@ export function ProjectConversationEmptyState({
               type="button"
               ref={membersTriggerRef}
               data-testid="pc-members-button"
-              aria-label={t('projectMembers.buttonAria')}
+              aria-label={t(membersCanInvite ? 'projectMembers.openMembersAndInvite' : 'projectMembers.buttonAria')}
               aria-haspopup="dialog"
               aria-expanded={membersPanelHost.open}
               onClick={membersPanelHost.openPanel}
-              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] border border-transparent px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-foreground-5 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+              className="inline-flex h-8 min-h-[32px] shrink-0 items-center gap-1.5 rounded-[6px] border border-border bg-foreground-5 px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
             >
-              <ProjectMembersEntryLabel roster={membersRoster} />
+              <ProjectMembersEntryLabel roster={membersRoster} showInviteAffordance={membersCanInvite} />
             </button>
           )}
         />
@@ -222,13 +318,54 @@ export function ProjectConversationEmptyState({
         />
         <div className={projectPaneVisible ? 'hidden' : 'flex flex-1 flex-col items-center justify-center gap-2 px-6'}>
           <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">{t('project.entry.emptyTitle')}</h2>
-          <p className="m-0 max-w-[460px] text-center text-[13px] leading-[1.6] text-muted-foreground">
+          {/* U5: honest capability copy — the assistant's real scope first;
+              the invite sentence ONLY for viewers who can actually invite
+              (a member/read_only host never sees the second sentence nor the
+              invite card — no misleading affordance). */}
+          <p className="m-0 max-w-[460px] text-center text-[13px] leading-[1.6] text-muted-foreground" data-testid="project-entry-empty-hint">
             {t('project.entry.emptyHint')}
+            {membersCanInvite ? <span>{t('project.entry.inviteHint')}</span> : null}
           </p>
+          {/* U5 three action cards: desktop side-by-side, narrow wraps. */}
+          <div className="mt-4 flex w-full max-w-[520px] flex-wrap items-stretch justify-center gap-[10px]" data-testid="project-entry-actions">
+            {membersCanInvite ? (
+              <button
+                type="button"
+                data-testid="project-entry-action-invite"
+                onClick={handleInviteAction}
+                className="inline-flex min-h-[44px] min-w-[140px] flex-1 items-center justify-center gap-[8px] rounded-[10px] border border-accent bg-[var(--accent-soft)] px-[14px] text-[13px] font-semibold text-accent transition-colors hover:bg-accent hover:text-[var(--on-accent,#fff)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+              >
+                <UserPlus className="size-[15px] shrink-0" aria-hidden="true" />
+                {t('project.entry.inviteColleagues')}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              data-testid="project-entry-action-upload"
+              onClick={handleUploadAction}
+              className="inline-flex min-h-[44px] min-w-[120px] flex-1 items-center justify-center gap-[8px] rounded-[10px] border border-border bg-foreground-5 px-[14px] text-[13px] font-medium text-foreground transition-colors hover:bg-foreground-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+            >
+              <Upload className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />
+              {t('projectContext.library.upload')}
+            </button>
+            <button
+              type="button"
+              data-testid="project-entry-action-start"
+              onClick={handleStartChatAction}
+              className="inline-flex min-h-[44px] min-w-[120px] flex-1 items-center justify-center gap-[8px] rounded-[10px] border border-border bg-foreground-5 px-[14px] text-[13px] font-medium text-foreground transition-colors hover:bg-foreground-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+            >
+              <MessageSquareText className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />
+              {t('project.entry.startChatting')}
+            </button>
+          </div>
           <div className="mt-4 w-full max-w-[720px]">
             <FreeFormInput
+              inputRef={composerRef}
+              projectComposer
               placeholder={t('project.entry.emptyHint')}
               onSubmit={handleFirstSend}
+              submitGate={submitGate}
+              gateNotice={gateNotice}
               currentModel=""
               inputValue={draft.input}
               onInputChange={handleInputChange}
@@ -252,6 +389,8 @@ export function ProjectConversationEmptyState({
                 currentUserId={accountId}
                 active={projectTab === 'files'}
                 pinMutations={0}
+                uploadSignal={uploadSignal}
+                onUploadSignalConsumed={() => setUploadSignal(0)}
               />
             </div>
             <div className={projectTab !== 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
@@ -275,6 +414,8 @@ export function ProjectConversationEmptyState({
         roster={membersRoster}
         onClose={membersPanelHost.closePanel}
         onOpenEnterpriseManagement={() => { void handleOpenEnterpriseManagement() }}
+        initialDirectory={membersPanelHost.directoryLanding}
+        onboardingOpen={membersPanelHost.onboardingAutoOpen}
       />
     </div>
   )

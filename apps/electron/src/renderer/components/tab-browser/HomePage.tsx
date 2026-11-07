@@ -22,8 +22,10 @@ import {
 import { useMemberCatalog } from '@/context/MemberCatalogContext'
 import { useOptionalMemberCircles } from '@/context/MemberCircleResourceContext'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import { navigate, routes } from '@/lib/navigate'
 import { useMemberAppActions } from '@/hooks/useMemberAppActions'
-import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
+import { HomeSpaceContext, type HomeSpaceCategory } from '@/components/product-space/HomeSpaceContext'
 import { useProjectEntry } from '@/hooks/useProjectEntry'
 import { ProductSpaceSkillsDialog } from '@/components/product-space/ProductSpaceSkillsDialog'
 import { useTabShell } from '@/context/TabShellContext'
@@ -250,10 +252,12 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
   const workbenchStyle = useClientWorkbenchStyle()
   const { openApp } = useTabShell()
   const launchHandoff = useProductSpaceAppLaunchHandoff()
-  // R3 (D13): the real entry flow. The card click starts the switch
-  // transaction, refuses sends until committed, and lands on the project's
-  // most recent conversation (or the editable empty state).
-  const { enterProject } = useProjectEntry()
+  // R3 (D13) + UB2 (U3): the real entry flow, sharing the ONE module-level
+  // transaction state. The clicked card shows the spinner/「正在进入项目…」face
+  // while its generation is in flight, a failed card keeps a persistent
+  // error +「重新进入」face, and duplicate activations never re-enter (the
+  // shared owner refuses while a transaction is mid-flight).
+  const { enterProject, retryEntry, entryState } = useProjectEntry()
   const onEnterProject = onEnterProjectProp ?? enterProject
   // R3 (P11): the home project section reaches the EXISTING ProductSpace
   // context instance (the same provider the launch handoff above reads) —
@@ -273,6 +277,15 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
   // client-page route stack. Optional: surfaces mounted without the App's
   // provider tree (isolated tests) fall back to the local circles card.
   const clientPage = useOptionalClientPage()
+  // U4: the version-unsupported error face offers a「检查客户端更新」shortcut
+  // through the App shell's existing settings navigation ONLY when the host
+  // provides it (the AppShell context owner). Without it the face keeps just
+  // the expandable local guide — never a dead navigation button.
+  const settingsNavigationAvailable = useOptionalAppShellContext() !== null
+  // U4: expand/collapse state of the in-place version guide (「查看更新指引」
+  // → service/admin explanation + optional client-update shortcut). Local and
+  // transient: a fresh error face starts collapsed.
+  const [versionGuideOpen, setVersionGuideOpen] = useState(false)
   const [showCirclesCard, setShowCirclesCard] = useState(false)
   const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
   const [preserveData, setPreserveData] = useState(true)
@@ -337,12 +350,17 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
   // render as 「还没有项目」 (P4).
   const [projectsState, setProjectsState] = useState<ProjectDirectoryState>({ status: 'loading' })
   const [projectEntries, setProjectEntries] = useState<ProjectDirectoryEntry[]>([])
+  // U14: the negotiated summary's display kind PER SPACE (`enterpriseKind`),
+  // verbatim from the R3 wire type — the identity bar classifies the CURRENT
+  // committed space from this map and NEVER from the name.
+  const [spaceKindsById, setSpaceKindsById] = useState<Record<string, 'organization' | 'project'>>({})
   const projectsAccountId = catalog.productSpace?.accountId ?? spaceContext?.accountId ?? null
   const [projectsReloadTick, setProjectsReloadTick] = useState(0)
   const reloadProjects = useCallback(() => setProjectsReloadTick(tick => tick + 1), [])
   useEffect(() => {
     if (!projectsAccountId) {
       setProjectEntries([])
+      setSpaceKindsById({})
       setProjectsState({ status: 'ready' })
       return
     }
@@ -353,6 +371,11 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
         const response = await window.electronAPI.pmListProductSpacesR3({ accountId: projectsAccountId })
         if (cancelled) return
         const summariesById = new Map(response.enterpriseSummaries.map(summary => [summary.productSpaceId, summary]))
+        const kinds: Record<string, 'organization' | 'project'> = {}
+        for (const summary of response.enterpriseSummaries) {
+          kinds[summary.productSpaceId] = summary.enterpriseKind
+        }
+        setSpaceKindsById(kinds)
         const entries = response.spaces.productSpaces.flatMap(space => {
           if (space.kind !== 'enterprise') return []
           const summary = summariesById.get(space.id)
@@ -376,6 +399,10 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
         setProjectsState({ status: 'ready' })
       } catch (error) {
         if (cancelled) return
+        // Fail closed on the identity classification too: a failed read
+        // leaves the committed space UNCLASSIFIED (neutral face), never a
+        // stale guess.
+        setSpaceKindsById({})
         setProjectsState({
           status: 'error',
           reason: readRpcErrorCode(error) === 'contract_version_unsupported' ? 'version' : 'generic',
@@ -384,6 +411,19 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
     })()
     return () => { cancelled = true }
   }, [projectsAccountId, projectsReloadTick])
+  // U14: the identity-bar category of the CURRENT committed space. Personal
+  // spaces classify from the space kind itself; enterprise spaces classify
+  // strictly from the negotiated summary (organization aggregate vs project)
+  // — anything the summary does not verify stays the neutral「当前空间」face.
+  const spaceCategory: HomeSpaceCategory = spaceKind === 'personal'
+    ? 'personal'
+    : (() => {
+        const activeSpaceId = spaceContext?.activeProductSpaceId
+          ?? catalog.productSpace?.activeProductSpaceId
+          ?? null
+        const verifiedKind = activeSpaceId === null ? undefined : spaceKindsById[activeSpaceId]
+        return verifiedKind === 'organization' || verifiedKind === 'project' ? verifiedKind : 'unknown'
+      })()
   // Device-local visit order (P3): most recent successful entry first. Read
   // per mounted account; a successful entry writes through
   // recordProjectVisit (B4b/project-entry), so the order refreshes on the
@@ -399,15 +439,31 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
   const [projectsExpanded, setProjectsExpanded] = useState(false)
   const [projectQuery, setProjectQuery] = useState('')
   const normalizedProjectQuery = projectQuery.trim().toLocaleLowerCase()
+  // U9: an active (non-blank) query shows EVERY match over the full
+  // authorized set — the two-row capacity truncation and the expand/collapse
+  // controls are suspended for the duration (and nothing may implicitly
+  // erase the query; only clearing it does).
+  const projectQueryActive = normalizedProjectQuery.length > 0
+  // U9: the project query belongs to ONE account's directory — an account
+  // change clears it. The expand/collapse preference is a device display
+  // preference and is deliberately NOT touched here.
+  const previousProjectsAccountIdRef = useRef(projectsAccountId)
+  useEffect(() => {
+    if (previousProjectsAccountIdRef.current !== projectsAccountId) {
+      previousProjectsAccountIdRef.current = projectsAccountId
+      setProjectQuery('')
+    }
+  }, [projectsAccountId])
   const filteredProjects = useMemo(
     () => sortedProjects.filter(entry => projectDirectoryMatchesQuery(entry, normalizedProjectQuery)),
     [normalizedProjectQuery, sortedProjects],
   )
   // Capacity (P3): two rows of cards at the frozen breakpoints — 2×(1|2|3)
   // columns. Collapsed overflow hides via the SAME responsive classes the
-  // grid uses, so no JS breakpoint listener can drift from the layout.
+  // grid uses, so no JS breakpoint listener can drift from the layout. U9:
+  // an active query suspends the truncation — every match renders.
   const cardVisibilityClass = (index: number): string => {
-    if (projectsExpanded || index < 2) return ''
+    if (projectQueryActive || projectsExpanded || index < 2) return ''
     if (index < 4) return 'hidden min-[761px]:block'
     return 'hidden min-[761px]:hidden min-[1081px]:block'
   }
@@ -648,6 +704,7 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
           spaceName={activeProductSpace?.name
             || t('homeApps.organization.current')}
           spaceKind="enterprise"
+          spaceCategory={spaceCategory}
           creatorCircles={catalog.creatorCircles}
           spaceKey={catalog.productSpace.productSpaceContextKey}
         />
@@ -655,9 +712,11 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
 
       {/* POO-196 R3 (P1/P2): the「项目」区域 — always present between the hero
       and the fixed canvas, on personal, organization and project homes
-      alike. Header = title + one-line scope + the ONLY create entry (P11);
-      the app toolbar below is untouched (search/source/sort stay
-      app-scoped). */}
+      alike. Header = title left + the U9 RESIDENT name search middle + the
+      ONLY create entry right (P11); the app toolbar below is untouched
+      (search/source/sort stay app-scoped). When the container cannot fit all
+      three, the search wraps onto its own full-width row — it never degrades
+      into an unlabeled icon. */}
       {spaceContext && (
         <section data-testid="home-projects" className="mb-[36px]">
           <div className="mb-[16px] flex flex-wrap items-end justify-between gap-[12px]">
@@ -668,6 +727,31 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
               <p className="m-0 mt-[6px] text-[13px] leading-[1.5] text-foreground-60">
                 {t('home.projects.description')}
               </p>
+            </div>
+            {/* U9: the project name search is RESIDENT — every loaded
+            directory (including the verified-empty one) offers it, fully
+            decoupled from the expand/collapse preference. The no-match hint
+            sits DIRECTLY below the input (never above it, never in the app
+            region) and only ever speaks for a VERIFIED-ready directory —
+            loading/failure keep their own faces. */}
+            <div className="min-w-[220px] flex-1">
+              <input
+                type="search"
+                value={projectQuery}
+                onChange={event => setProjectQuery(event.target.value)}
+                placeholder={t('home.projects.searchPlaceholder')}
+                aria-label={t('home.projects.searchPlaceholder')}
+                data-testid="home-project-search"
+                className="min-h-[34px] w-full appearance-none rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[7px] text-[13px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
+              />
+              {projectsState.status === 'ready' && sortedProjects.length > 0 && projectQueryActive && filteredProjects.length === 0 && (
+                <p
+                  className="m-0 mt-[6px] text-[12px] leading-[1.5] text-muted-foreground"
+                  data-testid="home-project-no-matches"
+                >
+                  {t('home.projects.noMatches')}
+                </p>
+              )}
             </div>
             {/* P11: the sole create entry in the whole client. Rendered only
             while the hosted-dialog callback exists (an isolated mount without
@@ -708,13 +792,50 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
             >
               <Icons.CloudOff className="size-[20px] text-muted-foreground" aria-hidden="true" />
               {/* P4: the version face is distinct — retrying the same wire
-              cannot fix an unsupported negotiation, so it gets copy instead
-              of a retry button. */}
+              cannot fix an unsupported negotiation, so it gets copy plus an
+              expandable service guide (U4) instead of a retry button. The
+              guide never claims a retry/refresh could fix it and never
+              reports an update as done (客户端更新不等于服务已更新). */}
               <p className="m-0 text-[13px] font-medium">
                 {projectsState.reason === 'version'
                   ? t('home.projects.versionUnsupported')
                   : t('home.projects.loadFailed')}
               </p>
+              {projectsState.reason === 'version' && (
+                <>
+                  <button
+                    type="button"
+                    data-testid="home-project-update-guide"
+                    aria-expanded={versionGuideOpen}
+                    className="mt-[2px] inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
+                    onClick={() => setVersionGuideOpen(open => !open)}
+                  >
+                    {versionGuideOpen ? t('home.projects.collapse') : t('home.projects.updateGuideAction')}
+                  </button>
+                  {versionGuideOpen && (
+                    <div data-testid="home-project-update-guide-body" className="flex flex-col items-center gap-[8px] text-[12px] leading-[1.55]">
+                      <p className="m-0 max-w-[420px] text-muted-foreground">
+                        {t('home.projects.updateGuideBody')}
+                      </p>
+                      {settingsNavigationAvailable && (
+                        <>
+                          <button
+                            type="button"
+                            data-testid="home-project-client-update"
+                            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                            onClick={() => navigate(routes.view.settings('app'))}
+                          >
+                            {t('home.projects.clientUpdateAction')}
+                          </button>
+                          <p className="m-0 text-[11px] leading-[1.45] text-muted-foreground">
+                            {t('home.projects.clientUpdateNote')}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
               {projectsState.reason !== 'version' && (
                 <button
                   type="button"
@@ -752,6 +873,13 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
                   <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
                     {filteredProjects.map((entry, index) => {
                       const isCurrent = spaceContext.activeProductSpaceId === entry.id
+                      // U3: the SHARED entry state — only the TARGET card is
+                      // busy (spinner + aria-busy), and only the failed
+                      // target keeps the persistent error face with retry.
+                      const cardEntering = entryState.productSpaceId === entry.id
+                        && (entryState.phase === 'switching' || entryState.phase === 'resuming')
+                      const cardEnterFailed = entryState.productSpaceId === entry.id
+                        && (entryState.phase === 'enter-failed' || entryState.phase === 'history-failed')
                       return (
                         <article
                           key={entry.id}
@@ -760,6 +888,7 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
                           role="button"
                           tabIndex={0}
                           aria-label={entry.name}
+                          aria-busy={cardEntering || undefined}
                           onClick={() => handleEnterProject(entry.id)}
                           onKeyDown={event => {
                             if (event.key === 'Enter' || event.key === ' ') {
@@ -770,8 +899,15 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
                           className={cardVisibilityClass(index) + ' flex cursor-pointer flex-col gap-[8px] rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs outline-none transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle focus-visible:border-accent'}
                         >
                           <div className="flex items-start justify-between gap-[8px]">
-                            <h3 className="m-0 line-clamp-2 text-[15px] font-bold leading-[1.35]">
-                              {entry.name}
+                            {/* U14 card hierarchy: the conversation bubble
+                            marks the card as a CHAT project at the name level
+                            only — the frozen card chrome (radius / material /
+                            hover lift / grid) is untouched. The icon is
+                            decorative; the card's aria-label stays the pure
+                            project name. */}
+                            <h3 className="m-0 flex min-w-0 items-start gap-[6px] text-[15px] font-bold leading-[1.35]">
+                              <Icons.MessageSquare className="mt-[2px] size-[15px] shrink-0 text-accent" aria-hidden="true" />
+                              <span className="line-clamp-2 min-w-0">{entry.name}</span>
                             </h3>
                             {isCurrent && (
                               <span
@@ -786,6 +922,44 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
                             <p className="m-0 truncate text-[12px] leading-[1.5] text-muted-foreground">
                               {entry.purpose}
                             </p>
+                          )}
+                          {cardEntering && (
+                            <div
+                              data-testid="home-project-entering"
+                              className="flex items-center gap-[6px] text-[12px] font-medium text-accent"
+                            >
+                              <Icons.LoaderCircle className="size-[13px] shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                              <span>{t('home.projects.entering')}</span>
+                            </div>
+                          )}
+                          {cardEnterFailed && (
+                            <div
+                              data-testid="home-project-enter-error"
+                              className="flex flex-col gap-[8px] rounded-[12px] bg-[var(--destructive-soft)] px-[12px] py-[10px] text-[12px] leading-[1.5] text-destructive"
+                            >
+                              <span className="flex items-start gap-[6px]">
+                                <Icons.CircleAlert className="mt-[1px] size-[13px] shrink-0" aria-hidden="true" />
+                                <span>{t('home.projects.enterFailed')}</span>
+                              </span>
+                              {entryState.origin === 'create' && (
+                                <span data-testid="home-project-enter-error-created">{t('createProject.created.enterFailed')}</span>
+                              )}
+                              <button
+                                type="button"
+                                data-testid="home-project-enter-retry"
+                                className="inline-flex min-h-[28px] w-fit items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[10px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                                // The retry is its own action INSIDE the card
+                                // activation target: stop the event so the
+                                // card's click/Enter does not double-fire.
+                                onClick={event => {
+                                  event.stopPropagation()
+                                  retryEntry(entry.id)
+                                }}
+                                onKeyDown={event => event.stopPropagation()}
+                              >
+                                {t('home.projects.retryEnter')}
+                              </button>
+                            </div>
                           )}
                           <div className="mt-auto flex flex-wrap items-center gap-[6px] pt-[4px] text-[11px] text-muted-foreground">
                             <span className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] leading-[1.6]">
@@ -806,53 +980,57 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
                                 {t('home.projects.memberCount', { count: entry.memberCount })}
                               </span>
                             )}
+                            {/* U3: the visible「进入项目」label rides bottom-
+                            right. It is a NON-nested marker (the card itself
+                            stays the single activation target — Enter/Space
+                            activate it), shared verbatim by the U14 identity
+                            work; never a second interactive element. */}
+                            <span
+                              data-testid="home-project-enter-label"
+                              className="ml-auto inline-flex shrink-0 items-center gap-[2px] whitespace-nowrap text-[12px] font-semibold leading-[1.6] text-accent"
+                            >
+                              {t('home.projects.enter')}
+                              <Icons.ChevronRight className="size-[12px]" aria-hidden="true" />
+                            </span>
                           </div>
                         </article>
                       )
                     })}
                   </div>
-                  {projectsExpanded && filteredProjects.length === 0 && (
-                    <p className="m-0 mt-[12px] text-[13px] text-muted-foreground" data-testid="home-project-no-matches">
-                      {t('home.projects.noMatches')}
-                    </p>
-                  )}
-                  {projectsExpanded ? (
-                    <div className="mt-[12px] flex flex-wrap items-center gap-[10px]">
-                      <input
-                        type="search"
-                        value={projectQuery}
-                        onChange={event => setProjectQuery(event.target.value)}
-                        placeholder={t('home.projects.searchPlaceholder')}
-                        data-testid="home-project-search"
-                        className="min-h-[34px] w-full max-w-[280px] appearance-none rounded-[8px] border border-border bg-surface client-material-card px-[12px] py-[7px] text-[13px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
-                      />
-                      <button
-                        type="button"
-                        data-testid="home-project-collapse"
-                        className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
-                        onClick={() => {
-                          setProjectQuery('')
-                          setProjectsExpanded(false)
-                        }}
-                      >
-                        {t('home.projects.collapse')}
-                      </button>
-                    </div>
-                  ) : (
-                    projectsOverflow && (
-                      /* P3: expand in place — the button's own visibility
-                      tracks the current breakpoint (2×columns), so a wide
-                      window that already shows every card shows no control. */
-                      <div className={expandRowClass + ' mt-[12px]'}>
+                  {/* U9: the expand/collapse row exists ONLY while the query
+                  is empty — with an active query every match already shows,
+                  so both controls would be meaningless. Neither control ever
+                  touches the query (implicit erasure is impossible: the
+                  collapse path flips the preference and nothing else; the
+                  clearing gesture belongs to the input alone). */}
+                  {sortedProjects.length > 0 && !projectQueryActive && (
+                    projectsExpanded ? (
+                      <div className="mt-[12px] flex flex-wrap items-center gap-[10px]">
                         <button
                           type="button"
-                          data-testid="home-project-expand"
+                          data-testid="home-project-collapse"
                           className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
-                          onClick={() => setProjectsExpanded(true)}
+                          onClick={() => setProjectsExpanded(false)}
                         >
-                          {t('home.projects.showAll', { count: sortedProjects.length })}
+                          {t('home.projects.collapse')}
                         </button>
                       </div>
+                    ) : (
+                      projectsOverflow && (
+                        /* P3: expand in place — the button's own visibility
+                        tracks the current breakpoint (2×columns), so a wide
+                        window that already shows every card shows no control. */
+                        <div className={expandRowClass + ' mt-[12px]'}>
+                          <button
+                            type="button"
+                            data-testid="home-project-expand"
+                            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                            onClick={() => setProjectsExpanded(true)}
+                          >
+                            {t('home.projects.showAll', { count: sortedProjects.length })}
+                          </button>
+                        </div>
+                      )
                     )
                   )}
                 </>
@@ -1280,6 +1458,7 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
           spaceName={activeProductSpace?.name
             || t('homeApps.organization.current')}
           spaceKind="personal"
+          spaceCategory={spaceCategory}
           creatorCircles={catalog.creatorCircles}
           spaceKey={catalog.productSpace.productSpaceContextKey}
         />

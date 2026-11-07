@@ -12,6 +12,7 @@ import {
   ChevronUp,
   X,
   Library,
+  HelpCircle,
 } from 'lucide-react'
 import { Icon_Home, Icon_Folder } from '@polo-ai/ui'
 
@@ -129,6 +130,15 @@ export interface FollowUpInputItem {
 export interface FreeFormInputProps {
   /** Placeholder text(s) for the textarea - can be array for rotation */
   placeholder?: string | string[]
+  /**
+   * POO-196 UB4 (U13): the project-composer presentation — a STABLE
+   * placeholder (no shortcut/# rotation; the send key follows the user's
+   * REAL sendMessageKey preference) plus the always-present 「输入帮助」
+   * affordance in the composer toolbar. Project sessions AND the project
+   * empty state turn this on; non-project consumers keep the current
+   * presentation untouched.
+   */
+  projectComposer?: boolean
   /** Whether input is disabled */
   disabled?: boolean
   /** Whether the session is currently processing */
@@ -142,9 +152,25 @@ export interface FreeFormInputProps {
     kbOptions?: { kbCollectionIds?: string[] },
     /** POO-135: picked web element references attached to this send. */
     elementReferences?: WebElementReference[],
-    /** POO-196: picked project-asset mentions attached to this send. */
-    projectAssetRefs?: ProjectAssetMentionDraft[],
+  /** POO-196: picked project-asset mentions attached to this send. */
+  projectAssetRefs?: ProjectAssetMentionDraft[],
   ) => void
+  /**
+   * POO-196 UB2 (U11): the synchronous send-admission gate. Called FIRST in
+   * submitMessage — before the mention/source side effects, the KB scope
+   * commit, the draft/attachment/reference clears, the follow-up sent
+   * markers and the onSubmit hand-off. Returning false refuses the submit
+   * and leaves every draft field exactly as typed. ALL submit paths (Send
+   * click, Enter/⌘Enter, programmatic craft:submit-input) pass through this
+   * one gate; consumers that never pass the prop keep the original behavior.
+   */
+  submitGate?: () => boolean
+  /**
+   * POO-196 UB2 (U11): persistent notice rendered ABOVE the input (e.g.
+   * 「正在打开项目…」while an entry is in flight, or the post-landing「请点击
+   * 发送」guidance). Content-owned by the caller; render-only here.
+   */
+  gateNotice?: string | null
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
   onStop?: (silent?: boolean) => void
   /** External ref for the input */
@@ -291,9 +317,12 @@ export interface FreeFormInputProps {
  */
 export function FreeFormInput({
   placeholder,
+  projectComposer = false,
   disabled = false,
   isProcessing = false,
   onSubmit,
+  submitGate,
+  gateNotice,
   onStop,
   inputRef: externalInputRef,
   currentModel,
@@ -352,7 +381,66 @@ export function FreeFormInput({
     t("chatInput.placeholder.focusMode", { key: cmdKey }),
   ], [t])
 
-  const effectivePlaceholderProp = placeholder ?? defaultPlaceholders
+  // Input settings (loaded from config). `sendMessageKey` is declared early:
+  // it is the AUTHORITATIVE preference the project composer's stable
+  // placeholder (U13) mirrors — never a second copy of the setting.
+  const [autoCapitalisation, setAutoCapitalisation] = React.useState(true)
+  const [sendMessageKey, setSendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
+  const [spellCheck, setSpellCheck] = React.useState(false)
+  // U13: the project composer's「输入帮助」face. Open state only — the rows
+  // below are derived from the REAL platform/preference capabilities each
+  // render, never stored.
+  const [projectInputHelpOpen, setProjectInputHelpOpen] = React.useState(false)
+
+  // U13: Esc closes the help and returns focus to the composer. The capture
+  // listener runs before the chat's double-Esc interrupt and before any
+  // overlay detection, so closing the help never leaks into the input's own
+  // Esc semantics.
+  React.useEffect(() => {
+    if (!projectInputHelpOpen) return
+    const handleHelpEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setProjectInputHelpOpen(false)
+      richInputRef.current?.focus()
+    }
+    document.addEventListener('keydown', handleHelpEscape, true)
+    return () => document.removeEventListener('keydown', handleHelpEscape, true)
+  }, [projectInputHelpOpen])
+
+  // U13 help rows — only what THIS user's platform/preferences truly support:
+  // the send line follows sendMessageKey; Shift+Tab only with ≥2 modes
+  // enabled; the desktop-only sidebar/focus/newline hints drop in compact
+  // mode (same honesty rule as the compact placeholder filtering). @ and #
+  // reuse the existing menu keys unchanged.
+  const projectHelpRows = React.useMemo(() => {
+    const rows: string[] = [
+      sendMessageKey === 'cmd-enter'
+        ? t('project.entry.inputPlaceholderClick')
+        : t('project.entry.inputPlaceholder'),
+    ]
+    if (!compactMode) rows.push(t('chatInput.placeholder.newLine'))
+    rows.push(t('chatInput.placeholder.mention'))
+    rows.push(t('chatInput.placeholder.labels'))
+    if (!compactMode && enabledModes.length >= 2) rows.push(t('chatInput.placeholder.shiftTab'))
+    if (!compactMode) {
+      rows.push(t('chatInput.placeholder.sidebar', { key: cmdKey }))
+      rows.push(t('chatInput.placeholder.focusMode', { key: cmdKey }))
+    }
+    return rows
+  }, [compactMode, enabledModes.length, sendMessageKey, t])
+
+  const effectivePlaceholderProp = projectComposer
+    // U13: the project composer never rotates the shortcut/# hints. The
+    // single stable line follows the REAL sendMessageKey preference: Enter
+    // senders see「输入问题，按回车发送」， ⌘/Ctrl+Enter senders see
+    // 「输入问题，点击发送」— the actual newline key is never described as
+    // the send key.
+    ? (sendMessageKey === 'cmd-enter'
+      ? t('project.entry.inputPlaceholderClick')
+      : t('project.entry.inputPlaceholder'))
+    : (placeholder ?? defaultPlaceholders)
 
   // Read connection default model, connections, and workspace info from context.
   // Uses optional variant so playground (no provider) doesn't crash.
@@ -456,10 +544,16 @@ export function FreeFormInput({
     })
   }, [placeholder, compactMode])
 
-  // Hide placeholder entirely when panel is unfocused in multi-panel layout
+  // Hide placeholder entirely when panel is unfocused in multi-panel layout.
+  // The rotation order shuffles once per DEFAULT-array identity (stable
+  // useMemo — session switches keep the same shuffle, the original
+  // behavior); a single-string placeholder (the U13 project line and any
+  // custom context) is deliberately NOT frozen: the sendMessageKey
+  // preference may load after mount and a session switch must swap the
+  // presentation immediately.
   const shuffledPlaceholder = React.useMemo(
     () => Array.isArray(effectivePlaceholderProp) ? shuffleArray(effectivePlaceholderProp) : effectivePlaceholderProp,
-    [] // eslint-disable-line react-hooks/exhaustive-deps -- intentionally shuffle only on mount
+    [effectivePlaceholderProp],
   )
   const effectivePlaceholder = isFocusedPanel ? shuffledPlaceholder : ''
 
@@ -665,12 +759,9 @@ export function FreeFormInput({
     })
   }, [persistKbSelection])
 
-  // Input settings (loaded from config)
-  const [autoCapitalisation, setAutoCapitalisation] = React.useState(true)
-  const [sendMessageKey, setSendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
-  const [spellCheck, setSpellCheck] = React.useState(false)
-
-  // Load input settings on mount
+  // Input settings state lives with the composer's top-level declarations
+  // above (sendMessageKey feeds the U13 project placeholder); this effect
+  // loads the persisted values into it.
   React.useEffect(() => {
     const loadInputSettings = async () => {
       if (!window.electronAPI) return
@@ -1448,6 +1539,16 @@ export function FreeFormInput({
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
 
+    // POO-196 UB2 (U11): the synchronous send-admission gate — the FIRST
+    // thing a submit does after the content checks. It runs BEFORE the
+    // mention/source side effects below, the KB scope commit, the draft
+    // clears, and before ChatDisplay's onSubmit marks the follow-up
+    // annotations as sent, so a refused send (project entry mid-flight)
+    // leaves text, attachments, references, KB selection and annotation
+    // markers untouched. Click, Enter/⌘Enter and programmatic
+    // craft:submit-input all pass through this single gate.
+    if (submitGate && !submitGate()) return false
+
     // Parse all @mentions (skills, sources, folders)
     const skillSlugs = skills.map(s => s.slug)
     const sourceSlugs = sources.map(s => s.config.slug)
@@ -1508,7 +1609,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir, elementReferencesValue, projectAssetRefsValue])
+  }, [input, attachments, followUpItems, disabled, disableSend, submitGate, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, kbSelection, onKbCollectionsChange, onWorkingDirectoryChange, homeDir, elementReferencesValue, projectAssetRefsValue])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1817,6 +1918,23 @@ export function FreeFormInput({
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
+        {/* POO-196 UB2 (U11): the persistent entry notice rides ABOVE the
+        input — the waiting-time「正在打开项目…」prompt or the post-landing
+        guidance. Render-only: the caller owns the content and clears it. */}
+        {gateNotice && (
+          <div
+            role="status"
+            data-testid="project-entry-send-notice"
+            className="flex items-start gap-2 rounded-lg bg-info/10 px-3 py-2 text-[13px] leading-5 text-info"
+          >
+            <svg viewBox="0 0 24 24" className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4M12 8h.01" />
+            </svg>
+            <span className="min-w-0 flex-1">{gateNotice}</span>
+          </div>
+        )}
+
         {/* Inline Slash Command Autocomplete */}
         <InlineSlashCommand
           open={inlineSlash.isOpen}
@@ -2059,6 +2177,25 @@ export function FreeFormInput({
             showEscapeOverlay={isProcessing && showEscapeOverlay}
             sessionId={sessionId}
           />
+
+          {/* U13: the small help content — every row is a REAL capability of
+              this user's platform/preferences (see projectHelpRows); Esc
+              closes and refocuses the composer (capture listener above). */}
+          {projectComposer && projectInputHelpOpen && (
+            <div
+              data-testid="project-composer-help-content"
+              role="dialog"
+              aria-label={t('project.entry.inputHelp')}
+              className="absolute bottom-full right-2 z-20 mb-2 w-[320px] rounded-[10px] border border-border bg-background p-[12px] shadow-middle"
+            >
+              <p className="m-0 mb-[6px] text-[12px] font-semibold text-foreground">{t('project.entry.inputHelp')}</p>
+              <ul className="m-0 flex list-none flex-col gap-[4px] p-0">
+                {projectHelpRows.map(row => (
+                  <li key={row} className="text-[12px] leading-[1.5] text-muted-foreground">{row}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className={cn("flex items-center gap-1 px-2 py-2", !compactMode && "border-t border-border/50")}>
           {/* Hidden file input for attach button (shared by compact and desktop) */}
@@ -2374,6 +2511,28 @@ export function FreeFormInput({
 
           {/* Right side: context usage + send - never shrink so they're always visible */}
           <div className="flex items-center shrink-0">
+
+          {/* U13: the project composer's always-present 「输入帮助」 icon —
+              hover/focus tooltip, click/keyboard opens the small help panel
+              (real send/newline/Shift+Tab/@/#/sidebar/focus rows only). */}
+          {projectComposer && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="project-composer-help"
+                  aria-label={t('project.entry.inputHelp')}
+                  aria-expanded={projectInputHelpOpen}
+                  disabled={disabled}
+                  onClick={() => setProjectInputHelpOpen(open => !open)}
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent mr-1"
+                >
+                  <HelpCircle className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('project.entry.inputHelp')}</TooltipContent>
+            </Tooltip>
+          )}
 
           {/* 5.5 Context Usage Warning Badge - shows when approaching auto-compaction threshold */}
           {(() => {

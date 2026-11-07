@@ -45,7 +45,9 @@ import ChatPage from '@/pages/ChatPage'
 import { HomePage } from '@/components/tab-browser/HomePage'
 import { ProjectConversationEmptyState } from '@/components/project-context/ProjectConversationEmptyState'
 import { CreateProjectDialog } from '@/components/product-space/CreateProjectDialog'
-import { projectEntryPendingAtom } from '@/hooks/useProjectEntry'
+import { ProjectEntryHistoryErrorFace } from '@/components/app-shell/MainContentPanel'
+import { useProjectEntry } from '@/hooks/useProjectEntry'
+import { projectEntryAtom, projectEntryPendingAtom, projectEntrySendNoticesAtom, projectOnboardingIntentAtom } from '@/atoms/project-entry'
 import { NAVIGATE_EVENT } from '@/lib/navigate'
 import { __resetProjectVisitsForTests } from '@/lib/project-directory'
 import {
@@ -77,9 +79,28 @@ const sendMessageLog: Array<{
   sessionId: string
   message: string
   projectAssetRefs: Array<{ assetId: string; version: number; name: string }>
+  attachments: Array<{ name?: string }>
+  kbCollectionIds: string[]
+  elementReferences: Array<{ id?: string }>
 }> = []
 
 const openUrlLog: string[] = []
+
+/** UB1 (U12) evidence channel: every navigator.clipboard.writeText call with
+ * its payload length. The Markdown pop-out pin asserts the「Markdown」entry
+ * still OPENS THE PREVIEW (no clipboard write), while the Copy button keeps
+ * writing — the spy wraps, never replaces, the real clipboard. */
+const clipboardLog: string[] = []
+if (typeof navigator !== 'undefined' && navigator.clipboard) {
+  const originalWriteText = navigator.clipboard.writeText.bind(navigator.clipboard)
+  Object.defineProperty(navigator.clipboard, 'writeText', {
+    configurable: true,
+    value: async (text: string) => {
+      clipboardLog.push(String(text ?? ''))
+      return originalWriteText(text)
+    },
+  })
+}
 
 /** POO-196 追加轮: the controlled space switches the create dialog hands to
  * the host (D-B 7) — the orchestrator reads this instead of spying on atoms.
@@ -112,6 +133,10 @@ let createSessionScript: 'ok' | 'wrongScope' = 'ok'
  * deliberately OMITS that space, so the auto-enter finds no target and the
  * dialog must KEEP the「项目已创建」page (retry only — never a re-create). */
 let refreshMissingId: string | null = null
+
+/** UB2 (U3): the next onRequestSwitch rejects once — the production cancel /
+ * failure face (explicit cancel along the original transaction reason). */
+let switchRejectOnce = false
 
 /** R2 扩展: viewer-role / space-list overrides for the members two-state and
  * the space-menu reachability surfaces. Mutated ONLY through the
@@ -264,6 +289,8 @@ function SpaceContextHost({ children, onOpenCreateProject }: { children: React.R
     },
     // R3 (D13.1): park/unpark in-flight switch transactions.
     setHoldSwitch: (next: boolean) => { spaceOverride.holdSwitch = next; return true },
+    // UB2 (U3): script the next switch to REJECT once (cancel/failure face).
+    setSwitchRejectOnce: (next: boolean) => { switchRejectOnce = next; return true },
     // R3 (P3): swap the signed-in account (visit-order isolation probe).
     setAccountId: (accountId: string) => { spaceOverride.accountId = accountId; bumpOverride(); return true },
     // R3: re-run the home directory read (production refetches through a
@@ -278,11 +305,20 @@ function SpaceContextHost({ children, onOpenCreateProject }: { children: React.R
     // R3 (D13): the project-entry transaction hand. The fixture COMMITS the
     // switch (active space + contextVersion bump + override tick) after an
     // optional orchestrator-controlled hold, so useProjectEntry's committed-
-    // scope effect observes a real completion signal.
+    // scope effect observes a real completion signal. UB2: a scripted ONE-SHOT
+    // rejection mirrors the production cancel/failure face — the transaction
+    // promise rejects AFTER the request was recorded, so enter-failed keeps
+    // the target for「重新进入」(explicit cancel along the ORIGINAL reason,
+    // never disguised as a network fault).
     onRequestSwitch: async (productSpaceId: string) => {
       spaceSwitchLog.push(`request:${productSpaceId}`)
       if (!spaceRecordOf(productSpaceId)) {
         throw new Error(`fixture: unknown space ${productSpaceId}`)
+      }
+      if (switchRejectOnce) {
+        switchRejectOnce = false
+        await new Promise(resolve => setTimeout(resolve, 30))
+        throw new Error('fixture: switch rejected (orchestrator-scripted cancel)')
       }
       const deadline = Date.now() + 30_000
       while (spaceOverride.holdSwitch && Date.now() < deadline) {
@@ -386,14 +422,25 @@ function AppShellHost({ children, createProjectOpen, onSetCreateProjectOpen }: {
       onSendMessage: (
         sessionId: string,
         message: string,
-        _attachments?: unknown[],
+        attachments?: unknown[],
         _skillSlugs?: string[],
         _badges?: unknown[],
-        _kbCollectionIds?: string[],
-        _elementReferences?: unknown[],
+        kbCollectionIds?: string[],
+        elementReferences?: unknown[],
         projectAssetRefs?: Array<{ assetId: string; version: number; name: string }>,
       ) => {
-        sendMessageLog.push({ sessionId, message, projectAssetRefs: projectAssetRefs ?? [] })
+        // UB2 (U11): the send log carries the FULL draft the send committed —
+        // text, attachments, KB scope, element references and project-asset
+        // mentions — so the retained-draft pins can assert one send carries
+        // everything that was typed before the blocked attempt.
+        sendMessageLog.push({
+          sessionId,
+          message,
+          projectAssetRefs: projectAssetRefs ?? [],
+          attachments: (attachments ?? []).map((a) => ({ name: (a as { name?: string })?.name })),
+          kbCollectionIds: [...(kbCollectionIds ?? [])],
+          elementReferences: (elementReferences ?? []).map((r) => ({ id: (r as { id?: string })?.id })),
+        })
       },
       onGetEditPopoverPendingQuestion: async () => null,
       onRenameSession: noop,
@@ -533,6 +580,18 @@ function HarnessBridge() {
   const activeSpace = spaceContext.activeProductSpace
   const committedEnterpriseProject = spaceContext.pendingSwitch === null
     && activeSpace !== null && activeSpace.kind === 'enterprise'
+  // UB2 (U3/U10): the host mirrors the production MainContentPanel surface
+  // rule — a committed entry whose fresh history read failed pins the
+  // history-error face over the conversation area (no stale session view, no
+  // sendable empty state) until「重新加载」re-reads. The retry re-enters
+  // through the SAME shared entry owner.
+  const { retryEntry } = useProjectEntry()
+  const entryState = store.get(projectEntryAtom)
+  const historyErrorActive = entryState.phase === 'history-failed'
+    && entryState.accountId !== null
+    && entryState.accountId === spaceContext.accountId
+    && activeSpace !== null && activeSpace.kind === 'enterprise'
+    && activeSpace.id === entryState.productSpaceId
 
   useEffect(() => {
     setSessionRef.current = (id: string) => setActiveSession(id)
@@ -584,6 +643,27 @@ function HarnessBridge() {
       navRouteLog: () => routeLog.slice(),
       chatSession: () => (mode === 'chat' ? activeSession : navSessionId),
       entryPending: () => store.get(projectEntryPendingAtom),
+      /** UB2 (U3/U10/U11): the FULL shared entry state + the U11 notice
+       * markers — the orchestrator pins phases (switching/resuming/failed),
+       * target retention and the blocked-send marker lifecycle on these. */
+      entryState: () => store.get(projectEntryAtom),
+      sendNotices: () => store.get(projectEntrySendNoticesAtom),
+      /** UB4 (U5): the one-time post-create invite intent + a fixture-state
+       * injection setter (the same class as setEntryState) so the member/
+       * 切型 nails can arm a pending intent without mounting the home flow. */
+      onboardingIntent: () => store.get(projectOnboardingIntentAtom),
+      setOnboardingIntent: (state: unknown) => { store.set(projectOnboardingIntentAtom, state as never); return true },
+      /** UB2 (U11/S18): drive the shared entry atom directly (fixture state
+       * injection — the same class as setDraftRefs) so the chat-mode surface
+       * can arm a pending entry for the blocked-send/account-cleanup pins
+       * without mounting the home flow. */
+      setEntryState: (state: unknown) => { store.set(projectEntryAtom, state as never); return true },
+      /** UB2 (U11): seed the per-session @ project-asset mention draft the
+       * same way a user pick would (the production atom write path). */
+      setDraftRefs: (sessionId: string, refs: Array<{ assetId: string; version: number; name: string }>) => {
+        store.set(projectAssetDraftRefsAtomFamily(sessionId), refs)
+        return true
+      },
       navigateLog: () => navigateLog.slice(),
       createSessionLog: () => createSessionLog.slice(),
       visitOrder: (accountId: string) => {
@@ -602,11 +682,33 @@ function HarnessBridge() {
         __resetProjectVisitsForTests()
         return true
       },
-      /** R3: reset the entry/switch observation logs (per-scenario isolation). */
+      /** R3: reset the entry/switch observation logs (per-scenario isolation).
+       * UB4: the one-time onboarding intent clears too — a stale create
+       * intent from an earlier scenario must never pop into a later one. */
       clearLogs: () => {
         navigateLog.length = 0
         spaceSwitchLog.length = 0
+        clipboardLog.length = 0
+        store.set(projectOnboardingIntentAtom, null)
         return true
+      },
+      /** UB1 (U12): clipboard write evidence (payload strings, in order). */
+      clipboardLog: () => clipboardLog.slice(),
+      /** UB1 (U12 Markdown pin): the TurnCard footer「Markdown」entry is the
+       * hardcoded pop-out preview trigger (G12 explicitly keeps it — the
+       * button executes onPopOut, it is NOT a copy). This probe clicks that
+       * production button so the orchestrator can assert the preview opens
+       * with zero clipboard writes. */
+      clickMarkdownPopOut: () => {
+        const button = Array.from(document.querySelectorAll('button'))
+          .find(el => (el.textContent ?? '').trim() === 'Markdown')
+        if (!button) return false
+        ;(button as HTMLElement).click()
+        return true
+      },
+      markdownPopOutPresent: () => {
+        return Array.from(document.querySelectorAll('button'))
+          .some(el => (el.textContent ?? '').trim() === 'Markdown')
       },
       activeSpaceId: () => spaceContext.activeProductSpaceId,
       /** D-D 1: the create entry lives in the home「项目」区域 (the context
@@ -737,7 +839,13 @@ function HarnessBridge() {
   // orchestrator's showChats(), or the committed-scope effect dies mid-entry
   // and the send gate would leak pending forever. The home page stays mounted
   // (hidden) while the assistant surface is visible, exactly like a tab.
-  const chatsSurface = navSessionId
+  const chatsSurface = historyErrorActive && activeSpace ? (
+    <ProjectEntryHistoryErrorFace
+      projectName={activeSpace.name}
+      createOrigin={entryState.origin === 'create'}
+      onRetry={() => retryEntry(entryState.productSpaceId)}
+    />
+  ) : navSessionId
     ? <ChatPage sessionId={navSessionId} />
     : committedEnterpriseProject && activeSpace.kind === 'enterprise'
       ? (

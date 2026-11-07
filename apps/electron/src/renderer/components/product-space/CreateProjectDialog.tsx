@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, Info, Loader2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import {
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { useProductSpaceContext } from '@/context/ProductSpaceContext'
 import { useProjectEntry } from '@/hooks/useProjectEntry'
+import { navigate, routes } from '@/lib/navigate'
 import { useCreateProject } from './useCreateProject'
 
 /**
@@ -41,7 +42,9 @@ import { useCreateProject } from './useCreateProject'
  * the 64-code-unit bound, with the "syncs to the account display name"
  * disclosure (admin create-service writes ownerName into user.displayName —
  * the member must know). The payment responsibility consent is a single
- * checkbox plus one small fact line hugging the submit area.
+ * checkbox: a 13px fact line with an info icon sits ABOVE the consent (U1 —
+ * no-prepayment / budget-off-by-default facts, no promises beyond C1), and
+ * the full responsibility sentence stays intact below it.
  *
  * HIG (retained): single primary action; Enter submits only when the form
  * validates AND the responsibility checkbox is explicitly checked; an IME
@@ -117,6 +120,15 @@ export function CreateProjectDialog({
 
   const [enterFailed, setEnterFailed] = useState(false)
   const [entering, setEntering] = useState(false)
+  // U4: the version-unsupported error face carries an expandable local guide
+  // (「查看更新指引」→ explanation block, collapsible, keyboard operable). It
+  // starts collapsed on every fresh submit and never mutates the form state.
+  const [versionGuideOpen, setVersionGuideOpen] = useState(false)
+  // U4: the「检查客户端更新」shortcut opens the App shell's existing settings
+  // app page. It renders ONLY when the hosting shell provides settings
+  // navigation (the AppShell context owner); a host without it keeps just the
+  // expandable local guide — never a dead button.
+  const settingsNavigationAvailable = useOptionalAppShellContext() !== null
   // One automatic enter attempt per created outcome (D-B 7: refresh → find →
   // controlled switch; failure shows「项目已创建」+ recovery, no re-create).
   const attemptedOutcomeRef = useRef<string | null>(null)
@@ -144,8 +156,10 @@ export function CreateProjectDialog({
       // record. The refreshed list is passed explicitly: the context value
       // may still hold the pre-refresh spaces when this continuation runs.
       // A failed entry shows「项目已创建，暂时无法进入」and the retry NEVER
-      // re-creates (the outcome stays queryable server-side).
-      enterProject(productSpaceId, { knownSpaces: list ?? undefined })
+      // re-creates (the outcome stays queryable server-side). U3/U10: the
+      // create ORIGIN rides the shared entry state so failure faces can add
+      // the「项目已创建，暂时无法进入」line.
+      enterProject(productSpaceId, { knownSpaces: list ?? undefined, origin: 'create' })
     } catch {
       setEnterFailed(true)
     } finally {
@@ -166,6 +180,8 @@ export function CreateProjectDialog({
 
   const runSubmit = useCallback(() => {
     if (phase !== 'form' || entering) return
+    // U4: a fresh submit starts with the version guide collapsed again.
+    setVersionGuideOpen(false)
     void creator.submit().then(result => {
       if (result) setEnterFailed(false)
     })
@@ -176,6 +192,7 @@ export function CreateProjectDialog({
       // Escape / close always closes an uncommitted step. An in-flight submit
       // keeps its stored key: reopening offers「查询创建结果」(D-B 6) — the
       // view closing never implies the server write was cancelled.
+      setVersionGuideOpen(false)
       creator.reset()
     }
     onOpenChange(next)
@@ -306,6 +323,47 @@ export function CreateProjectDialog({
                 className="mb-[12px] rounded-[10px] bg-[var(--destructive-soft)] px-[12px] py-[10px] text-[12px] leading-[1.55] text-destructive"
               >
                 {submitMessageKey ? t(submitMessageKey) : t('createProject.error.generic')}
+                {/* U4: `contract_version_unsupported` is a service-contract
+                negotiation failure — retrying the same wire cannot fix it, so
+                the face offers an expandable local guide instead of a retry.
+                The explanation stays inside THIS error block; the「检查客户端
+               更新」shortcut only renders when the hosting shell provides the
+                existing settings navigation, and it never claims an update
+                happened (客户端更新不等于服务已更新). */}
+                {submitError.code === 'contract_version_unsupported' && (
+                  <div className="mt-[8px]">
+                    <button
+                      type="button"
+                      data-testid="create-project-update-guide"
+                      aria-expanded={versionGuideOpen}
+                      className="inline-flex min-h-[28px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                      onClick={() => setVersionGuideOpen(open => !open)}
+                    >
+                      {versionGuideOpen ? t('home.projects.collapse') : t('home.projects.updateGuideAction')}
+                    </button>
+                    {versionGuideOpen && (
+                      <div data-testid="create-project-update-guide-body" className="mt-[8px] text-[12px] leading-[1.55]">
+                        <p className="m-0 text-destructive">{t('home.projects.updateGuideBody')}</p>
+                        {settingsNavigationAvailable && (
+                          <div className="mt-[8px]">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className={clientWorkbenchButtonClassName}
+                              data-testid="create-project-client-update"
+                              onClick={() => navigate(routes.view.settings('app'))}
+                            >
+                              {t('home.projects.clientUpdateAction')}
+                            </Button>
+                            <p className="m-0 mt-[4px] text-[11px] leading-[1.45] text-muted-foreground">
+                              {t('home.projects.clientUpdateNote')}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : null}
             {showEnterpriseExists ? (
@@ -372,8 +430,12 @@ export function CreateProjectDialog({
                   aria-invalid={Boolean(fieldErrors.name)}
                   aria-describedby="create-project-name-hint"
                 />
+                {/* U1: the standing hint under the name field is retired —
+                the dialog introduction carries the honest invitation copy and
+                the hint key keeps its synced value without re-rendering it
+                here. Field errors still appear in place. */}
                 <span id="create-project-name-hint" className="mt-[4px] block text-[11px] leading-[1.45] text-foreground-50">
-                  {fieldErrors.name ? t(fieldErrors.name, { max: presentation.fieldLimits.nameMax }) : t('createProject.field.nameHint')}
+                  {fieldErrors.name ? t(fieldErrors.name, { max: presentation.fieldLimits.nameMax }) : ''}
                 </span>
               </label>
               {ownerNeedsInput ? (
@@ -427,27 +489,43 @@ export function CreateProjectDialog({
               </label>
             </div>
 
-            {/* P5: the responsibility consent hugs the submit area — one
-            small fact line and the checkbox, no boxed billing display. */}
-            <p className="mt-[14px] mb-0 text-[11px] leading-[1.5] text-muted-foreground" data-testid="create-project-budget-fact">
-              {t('createProject.budgetFact')}
+            {/* U1 (G1): the fact line above the consent explains the REAL
+            scope — no prepayment required, budget off by default (owner can
+            enable), no tool import or member invites at creation. 13px
+            foreground with an info icon, so it reads as information, not
+            fine print. It makes NO promise about future pricing, billing
+            entities or automatic authorizations. */}
+            <p className="mt-[14px] mb-0 flex items-start gap-[8px] text-[13px] leading-[1.55] text-foreground" data-testid="create-project-budget-fact">
+              <Info className="mt-[2px] size-[14px] shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span>{t('createProject.budgetFact')}</span>
             </p>
 
             <div className="mt-[10px]">
+              {/* U1: the FULL original responsibility sentence stays intact
+              (never split up, never replaced by a soothing paraphrase) and the
+              whole label is the click target — the native label wraps the
+              24px box, so clicking any part toggles the consent exactly once. */}
               <label className="flex cursor-pointer items-start gap-[9px]" data-testid="create-project-responsibility">
                 <Checkbox
                   checked={values.responsibilityConfirmed}
                   disabled={phase === 'submitting'}
                   onChange={event => creator.setResponsibilityConfirmed(event.target.checked)}
-                  className="mt-[2px]"
+                  aria-invalid={Boolean(fieldErrors.responsibility)}
+                  aria-describedby={fieldErrors.responsibility ? 'create-project-responsibility-error' : undefined}
+                  className="mt-[1px] size-[24px]"
                 />
                 <span className="text-[12px] leading-[1.55] text-foreground">
                   {t('createProject.responsibilityConfirm')}
                 </span>
               </label>
-              <span className="mt-[4px] block text-[11px] leading-[1.45] text-destructive">
-                {fieldErrors.responsibility ? t(fieldErrors.responsibility) : ''}
-              </span>
+              {fieldErrors.responsibility ? (
+                // U1: the unchecked-submit error carries its own icon (≥12px)
+                // and is wired to the checkbox via aria-describedby.
+                <span id="create-project-responsibility-error" data-testid="create-project-responsibility-error" className="mt-[6px] flex items-start gap-[6px] text-[12px] leading-[1.45] text-destructive">
+                  <AlertCircle className="mt-[1px] size-[12px] shrink-0" aria-hidden="true" />
+                  <span>{t(fieldErrors.responsibility)}</span>
+                </span>
+              ) : null}
               {versionMismatch ? (
                 <p className="mt-[2px] text-[11px] leading-[1.45] text-destructive" data-testid="create-project-version-mismatch" role="alert">
                   {t('createProject.responsibilityMismatch')}

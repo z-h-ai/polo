@@ -23,6 +23,7 @@ import {
   CREATED_ENTERPRISE_SPACE_ID,
   CURRENT_USER_ID,
   LONG_NAME_ASSET_ID,
+  PRODUCT_SPACE_ID,
   R3_ACCOUNT_B_ID,
   R3_PROJECT_ALPHA_ID,
   R3_PROJECT_BETA_ID,
@@ -127,6 +128,10 @@ const fixture = {
   nextAssetId: 100,
   downloadDir: join(BUILD, 'fixture-downloads'),
   previewContent: new Map<string, string>(),
+  /** UB4 (U13): the composer send-key preference the fixture answers with —
+   * the REAL settings storage is outside the harness boundary, so the same
+   * preference flip is a fixture control (setSendMessageKey op). */
+  sendMessageKey: 'Enter' as 'Enter' | 'cmd-enter',
   /** POO-196 追加轮: programmable project-members store (D-B/D-C). */
   pm: {
     roster: initialPmRoster(),
@@ -166,6 +171,13 @@ const fixture = {
     colleagueKeys: new Map<string, { key: string; invitationId: string; token: string }>(),
     colleagueCalls: [] as Array<Record<string, unknown>>,
     colleagueQueryCalls: [] as Array<Record<string, unknown>>,
+    /** UB3 (U6): pagination for the invitation records (0 = off). Staged via
+     * setPmInvitationPages so the pending-summary page-bound nails run against
+     * a REAL two-page walk (cursor semantics, not a faked count). */
+    invitationPageSize: 0,
+    /** UB3 (U8): extra AVAILABLE colleague rows appended to the directory —
+     * the cap/multi-select nails need more selectable rows than the base four. */
+    colleagueExtraAvailable: 0,
   },
   /** POO-196 R3 (D6/D12/D13): the negotiated home project directory, the
    * project-entry session read mode, and the R3 call observability. */
@@ -175,12 +187,21 @@ const fixture = {
      * boundary; 'version' → contract_version_unsupported 409 (the P4 version
      * face); 'fault' → pm_service_unavailable (the generic error face);
      * 'revoked' → the alpha project dropped from the list (撤权). */
-    directoryScript: 'ok' as 'ok' | 'empty' | 'one' | 'version' | 'fault' | 'revoked',
+    directoryScript: 'ok' as 'ok' | 'empty' | 'one' | 'seven' | 'legacy' | 'version' | 'fault' | 'revoked',
     /** project-entry session reads: 'recent' → the seeded workspace list;
      * 'empty' → the alpha/beta sessions removed (无历史 entry); 'fault' → the
      * read fails (historyFailed, D13.3 — never a silent "no history"). */
     sessionsMode: 'recent' as 'recent' | 'empty' | 'fault',
+    /** UB2 (U3/U11): extra latency for the getSessions read so the
+     * 'resuming' window (post-commit history read) is orchestrator-
+     * observable — the same injection class as the latency knob (时延注入,
+     * no product logic in the fixture). */
+    sessionsDelayMs: 0,
     getSessionsCalls: [] as Array<{ at: string }>,
+    /** UB2 (U11): ChatDisplay's follow-up sent-marker writes
+     * (sessionCommand updateAnnotation) — the blocked-send pin asserts this
+     * stays EMPTY while a send is refused. */
+    annotationCommands: [] as Array<{ at: string; messageId?: string; annotationId?: string }>,
     /** The D4 roster's viewerRole — the LIVE authority the panel trusts
      * (roster.viewerRole ?? space summary), so the member face requires the
      * fixture roster to answer as a member. */
@@ -329,13 +350,29 @@ function computePm(
     case 'pmListProjectMembers':
       // X2-9: the capability bit rides the roster, like the real read model.
       return clone({ ...pm.roster, emailDeliveryAvailable: pm.emailDeliveryAvailable })
-    case 'pmListProjectInvitations':
+    case 'pmListProjectInvitations': {
+      // UB3 (U6): when pagination is staged (setPmInvitationPages) the list
+      // walks by REAL numeric cursors — the pending-summary page-bound nails
+      // exercise the client against true page semantics, not a faked count.
+      const pageSize = fixture.pm.invitationPageSize
+      if (!pageSize || pageSize <= 0) {
+        return clone({
+          productSpaceId: pm.roster.productSpaceId,
+          viewerRole: pm.roster.viewerRole,
+          invitations: pm.invitations,
+          nextCursor: null,
+        })
+      }
+      const cursorNum = Number(input.cursor ?? 0)
+      const start = Number.isFinite(cursorNum) && cursorNum > 0 ? cursorNum : 0
+      const end = start + pageSize
       return clone({
         productSpaceId: pm.roster.productSpaceId,
         viewerRole: pm.roster.viewerRole,
-        invitations: pm.invitations,
-        nextCursor: null,
+        invitations: pm.invitations.slice(start, end),
+        nextCursor: end < pm.invitations.length ? String(end) : null,
       })
+    }
     case 'pmCreateEnterprise': {
       pm.createCalls.push(clone(input))
       if (pm.createScript === 'lost') {
@@ -480,9 +517,21 @@ function computePm(
           nextCursor: null,
         }
       }
+      // UB3 (U8): staged extra AVAILABLE rows (cap/multi-select nails).
+      const base = directory.members.filter(member => !q || (member.displayName ?? '').toLowerCase().includes(q))
+      const extra = fixture.pm.colleagueExtraAvailable
+      if (!(extra > 0) || q) {
+        return { ...directory, members: base, nextCursor: null }
+      }
+      const generated = Array.from({ length: extra }, (_, index) => ({
+        userId: `u-cap-${String(index + 1).padStart(2, '0')}`,
+        displayName: `容量同事${index + 1}`,
+        avatarUrl: null,
+        projectState: 'available',
+      }))
       return {
         ...directory,
-        members: directory.members.filter(member => !q || (member.displayName ?? '').toLowerCase().includes(q)),
+        members: [...base, ...generated],
         nextCursor: null,
       }
     }
@@ -514,6 +563,9 @@ function computePm(
       const held = fixture.pm.colleagueKeys.get(target)
       if (fixture.pm.colleagueInviteScript === 'lost') {
         fixture.pm.colleagueKeys.set(target, { key, invitationId: baseInvitation.invitationId, token })
+        // UB3 (U6): the aggregate committed server-side — the invitation is
+        // listed in the records exactly like the targeted path's loss arm.
+        fixture.pm.invitations.unshift(baseInvitation)
         throw new Error('fixture transport dropped before the colleague invitation response arrived')
       }
       if (held && held.key === key) {
@@ -527,6 +579,10 @@ function computePm(
         return { result: 'existing', invitation: { ...baseInvitation, invitationId: held.invitationId, status: 'active' } }
       }
       fixture.pm.colleagueKeys.set(target, { key, invitationId: baseInvitation.invitationId, token })
+      // UB3 (U6): colleague invitations appear in the records list (the real
+      // read model lists every project invitation regardless of path), so the
+      // local-name mapping nail has a row to land on.
+      fixture.pm.invitations.unshift(baseInvitation)
       return {
         result: 'created',
         invitation: baseInvitation,
@@ -573,6 +629,18 @@ function computePm(
       }
       if (fixture.r3.directoryScript === 'empty') return clone(r3DirectoryVariant('empty'))
       if (fixture.r3.directoryScript === 'one') return clone(r3DirectoryVariant('one'))
+      // UB5 (U9): the seven-project capacity face — data-only variant so the
+      // resident-search matrix can cross the >6 boundary (expand control).
+      if (fixture.r3.directoryScript === 'seven') return clone(r3DirectoryVariant('seven'))
+      // UB5 (U14): the UNCLASSIFIED identity face — the active space's
+      // summary row is missing from an otherwise healthy negotiation, so the
+      // client must render the neutral 「当前空间」 face instead of guessing
+      // organization/project from the name. Fixture DATA only.
+      if (fixture.r3.directoryScript === 'legacy') {
+        const legacy = initialR3Directory() as { spaces: { productSpaces: Array<{ id: string }> }; enterpriseSummaries: Array<{ productSpaceId: string }> }
+        legacy.enterpriseSummaries = legacy.enterpriseSummaries.filter(summary => summary.productSpaceId !== PRODUCT_SPACE_ID)
+        return clone(legacy)
+      }
       const directory = initialR3Directory() as { spaces: { productSpaces: Array<{ id: string }> }; enterpriseSummaries: Array<{ productSpaceId: string }> }
       if (fixture.r3.directoryScript === 'revoked') {
         // 撤权 face: the alpha project drops out of BOTH halves (a failed
@@ -580,6 +648,28 @@ function computePm(
         // summary disappear together on the next read.
         directory.spaces.productSpaces = directory.spaces.productSpaces.filter(space => space.id !== 'ps-r3-alpha')
         directory.enterpriseSummaries = directory.enterpriseSummaries.filter(summary => summary.productSpaceId !== 'ps-r3-alpha')
+      }
+      // UB4 (U5): a space the fixture's pm create already minted joins the
+      // negotiated directory on the NEXT read — production reality (the list
+      // is server-authoritative; a created project shows up as a card), and
+      // the 关闭再进/取消重试 nails need the created card to exist. Fixture
+      // DATA only — the join mirrors the server, it fabricates nothing.
+      const created = fixture.pm.createdSpace
+      if (created && !directory.spaces.productSpaces.some(space => space.id === created.productSpaceId)) {
+        directory.spaces.productSpaces = [...directory.spaces.productSpaces, {
+          id: created.productSpaceId,
+          kind: 'enterprise',
+          enterpriseId: `ent-of-${created.productSpaceId}`,
+          name: created.enterpriseName,
+          role: 'owner',
+          accessMode: 'active',
+          payer: { kind: 'enterprise', enterpriseId: `ent-of-${created.productSpaceId}` },
+        }]
+        directory.enterpriseSummaries = [...directory.enterpriseSummaries, {
+          productSpaceId: created.productSpaceId,
+          enterpriseId: `ent-of-${created.productSpaceId}`,
+          enterpriseKind: 'project',
+        }]
       }
       return clone(directory)
     }
@@ -840,7 +930,7 @@ function startPreviewServer(): Promise<void> {
 function registerFixtureIpc() {
   ipcMain.handle('fixture-pc', (_e, method: string, input: Record<string, unknown>) => handlePc(method, input ?? {}))
   ipcMain.handle('fixture-pm', (_e, method: string, input: Record<string, unknown>) => handlePm(method, input ?? {}))
-  ipcMain.handle('fixture-stub', (_e, name: string, args: unknown[]) => {
+  ipcMain.handle('fixture-stub', async (_e, name: string, args: unknown[]) => {
     switch (name) {
       case 'getSessionMessages': {
         // Unknown sessions (e.g. the first-send session created in the empty
@@ -859,7 +949,7 @@ function registerFixtureIpc() {
       case 'getSpellCheck':
         return false
       case 'getSendMessageKey':
-        return 'Enter'
+        return fixture.sendMessageKey
       case 'getPendingPlanExecution':
         return null
       case 'getHomeDir':
@@ -881,8 +971,21 @@ function registerFixtureIpc() {
       case 'setAutoCapitalisation':
       case 'setSpellCheck':
       case 'setSendMessageKey':
-      case 'sessionCommand':
+      case 'sessionCommand': {
+        // UB2 (U11): ChatDisplay marks follow-up annotations as sent through
+        // THIS command after an accepted send — the blocked-send pin reads
+        // the log to prove a refused submit never marked anything.
+        // sessionCommand(sessionId, command) — the command rides args[1].
+        const command = (args?.[1] ?? {}) as { type?: string; messageId?: string; annotationId?: string }
+        if (command?.type === 'updateAnnotation') {
+          fixture.r3.annotationCommands.push({
+            at: nowIso(),
+            messageId: command.messageId,
+            annotationId: command.annotationId,
+          })
+        }
         return { success: true }
+      }
       case 'kbListCollections':
         return []
       case 'adminPaymentHandoff':
@@ -948,6 +1051,11 @@ function registerFixtureIpc() {
         // scope's fresh session list through this IPC. The fixture hands out
         // the full workspace list (selection scopes by productSpaceId on the
         // real Session rows) or the scripted faces.
+        if (fixture.r3.sessionsDelayMs > 0) {
+          // UB2 (U3/U11): scripted read latency keeps the 'resuming' window
+          // observable — injection only, the same class as setLatency.
+          await delay(fixture.r3.sessionsDelayMs)
+        }
         fixture.r3.getSessionsCalls.push({ at: nowIso() })
         if (fixture.r3.sessionsMode === 'fault') {
           throw new Error('fixture: session history read failed')
@@ -1096,6 +1204,9 @@ async function runProgram(program: { op: string; args?: Record<string, unknown> 
       fixture.pm.colleagueKeys.clear()
       fixture.pm.colleagueCalls = []
       fixture.pm.colleagueQueryCalls = []
+      // UB3 (U6/U8): staged pagination and extra directory rows reset too.
+      fixture.pm.invitationPageSize = 0
+      fixture.pm.colleagueExtraAvailable = 0
       fixture.r3.rosterRole = 'manager'
       return true
     case 'pmCallStats': {
@@ -1117,17 +1228,62 @@ async function runProgram(program: { op: string; args?: Record<string, unknown> 
     case 'setR3RosterRole':
       fixture.r3.rosterRole = String(args.role) as typeof fixture.r3.rosterRole
       return true
+    case 'setR3SessionsDelay':
+      fixture.r3.sessionsDelayMs = Number(args.ms ?? 0)
+      return true
+    // UB4 (U13): flip the composer send-key preference the fixture answers
+    // with (the REAL settings live outside this harness's boundary).
+    case 'setSendMessageKey':
+      fixture.sendMessageKey = args.value === 'cmd-enter' ? 'cmd-enter' : 'Enter'
+      return true
     case 'setColleagueScript':
       fixture.pm.colleagueScript = String(args.script) as typeof fixture.pm.colleagueScript
       return true
     case 'setColleagueInviteScript':
       fixture.pm.colleagueInviteScript = String(args.script) as typeof fixture.pm.colleagueInviteScript
       return true
+    // UB3 (U6): stage a REAL two-page invitation walk — two active (page 1),
+    // one active-but-EXPIRED (page 1, never counted), then a repeatable
+    // duplicate of an active id, one more active and one accepted (page 2).
+    // First page pending = 2 (「至少 2」), full walk pending = 3 (exact).
+    case 'setPmInvitationPages': {
+      const future = '2026-12-20T00:00:00+08:00'
+      const expired = '2026-01-10T00:00:00+08:00'
+      const entry = (invitationId: string, maskedPhone: string, overrides: Partial<Record<string, unknown>> = {}) => ({
+        invitationId,
+        status: 'active',
+        maskedPhone,
+        maskedEmail: null,
+        expiresAt: future,
+        createdAt: '2026-11-01T09:00:00+08:00',
+        acceptedAt: null,
+        ...overrides,
+      })
+      fixture.pm.invitations = [
+        entry('inv-pg-1', '138****0001'),
+        entry('inv-pg-2', '138****0002'),
+        entry('inv-pg-3', '138****0003', { expiresAt: expired }),
+        entry('inv-pg-2', '138****0002'), // repeatable-page duplicate
+        entry('inv-pg-4', '138****0004'),
+        entry('inv-pg-5', '138****0005', { status: 'accepted', acceptedAt: '2026-11-03T10:00:00+08:00' }),
+      ]
+      // pageSize 0 turns the staged pagination OFF again (reset semantics).
+      fixture.pm.invitationPageSize = Math.max(0, Number(args.pageSize ?? 0))
+      return true
+    }
+    // UB3 (U8): extend the directory with N extra AVAILABLE colleagues.
+    case 'stageColleagueDirectory': {
+      fixture.pm.colleagueScript = 'available'
+      fixture.pm.colleagueExtraAvailable = Math.max(0, Number(args.available ?? 0))
+      return true
+    }
     case 'resetR3':
       fixture.r3.directoryScript = 'ok'
       fixture.r3.sessionsMode = 'recent'
+      fixture.r3.sessionsDelayMs = 0
       fixture.r3.rosterRole = 'manager'
       fixture.r3.getSessionsCalls = []
+      fixture.r3.annotationCommands = []
       fixture.pm.colleagueScript = 'available'
       fixture.pm.colleagueInviteScript = 'ok'
       fixture.pm.colleagueKeys.clear()
@@ -1139,6 +1295,8 @@ async function runProgram(program: { op: string; args?: Record<string, unknown> 
         getSessionsCalls: clone(fixture.r3.getSessionsCalls),
         directoryScript: fixture.r3.directoryScript,
         sessionsMode: fixture.r3.sessionsMode,
+        sessionsDelayMs: fixture.r3.sessionsDelayMs,
+        annotationCommands: clone(fixture.r3.annotationCommands),
       }
     case 'stageTrashLoadMore': {
       // X25 采集布景：把 25 个活跃资产压入回收站，使回收站列表超过默认页大小，
@@ -1314,6 +1472,8 @@ async function until(probe: () => Promise<unknown> | unknown, ms = 15000, step =
       const navRoute = (window.__poo196 && window.__poo196.navRoute) ? String(window.__poo196.navRoute()) : '?'
       const routeHist = (window.__poo196 && window.__poo196.navRouteLog) ? JSON.stringify(window.__poo196.navRouteLog().slice(-5)) : '[]'
       const creates = (window.__poo196 && window.__poo196.createSessionLog) ? window.__poo196.createSessionLog().length : -1
+      const oi = (window.__poo196 && window.__poo196.onboardingIntent) ? JSON.stringify(window.__poo196.onboardingIntent()) : '?'
+      const ep = (window.__poo196 && window.__poo196.entryState) ? JSON.stringify(window.__poo196.entryState()) : '?'
       const shellInfo = (() => {
         const shell = document.querySelector('[data-testid="poo196-shell"]')
         const el = shell ? (shell.querySelector('[data-testid="project-entry-empty"]') ? 'empty-state' : (shell.querySelector('[data-testid="pc-tabs"]') ? 'chatpage-tabs' : 'other')) : 'no-shell'
@@ -1330,7 +1490,7 @@ async function until(probe: () => Promise<unknown> | unknown, ms = 15000, step =
       const trashVis = trashEl ? getComputedStyle(trashEl).display : 'none'
       const mainEl = document.querySelector('[data-testid="pc-library"]')
       const mainVis = mainEl ? getComputedStyle(mainEl).display : 'none'
-      return \`pm=\${pmInfo} create=\${cdInfo} overlays=\${overlays} trashVis=\${trashVis} mainVis=\${mainVis} tab=\${tab} libRoot=\${libRootName} notice=\${notice} pinPane=\${pinPane} rows=\${rows} popover=\${popoverInfo} \${dialog} err=\${err} input=\${JSON.stringify(input)} toast=\${JSON.stringify(toast)} toolbar=[\${toolbar}] r3=\${r3surface}/pend=\${r3pending}/switch=\${r3switch}/nav=\${r3nav}/route=\${navRoute}/rh=\${routeHist}/shell=\${shellInfo} renderLog=\${renderLog}\`
+      return \`pm=\${pmInfo} create=\${cdInfo} overlays=\${overlays} trashVis=\${trashVis} mainVis=\${mainVis} tab=\${tab} libRoot=\${libRootName} notice=\${notice} pinPane=\${pinPane} rows=\${rows} popover=\${popoverInfo} \${dialog} err=\${err} input=\${JSON.stringify(input)} toast=\${JSON.stringify(toast)} toolbar=[\${toolbar}] r3=\${r3surface}/pend=\${r3pending}/switch=\${r3switch}/nav=\${r3nav}/route=\${navRoute}/rh=\${routeHist}/shell=\${shellInfo}/oi=\${oi}/ep=\${ep} renderLog=\${renderLog}\`
     })()`)
   } catch (e) {
     forensic = `forensic failed: ${String(e).slice(0, 80)}`
@@ -1426,6 +1586,7 @@ const T = {
   membersInvitations: '[data-testid="project-members-invitations"]',
   membersInvitationRow: '[data-testid="project-members-invitation-row"]',
   membersInvitationsEntry: '[data-testid="project-members-invitations-entry"]',
+  membersInvitationsMore: '[data-testid="project-members-invitations-more"]',
   membersInviteAction: '[data-testid="project-members-invite-action"]',
   membersCompose: '[data-testid="project-members-compose"]',
   membersInviteTarget: '[data-testid="project-members-invite-target"]',
@@ -1477,6 +1638,16 @@ const T = {
   membersInviteUnrecoverable: '[data-testid="project-members-invite-unrecoverable"]',
   membersInviteStateChanged: '[data-testid="project-members-invite-state-changed"]',
   membersInviteExisting: '[data-testid="project-members-invite-existing"]',
+  // UB3 (U2/U6/U7/U8): manual-delivery copy faces, the pending summary with
+  // its pagination bounds, the entry button's add-member glyph and the
+  // colleague row's single row-wide toggle.
+  membersCopyAll: '[data-testid="project-members-copy-all"]',
+  membersCopyAllFailed: '[data-testid="project-members-copy-all-failed"]',
+  membersCopyAllNote: '[data-testid="project-members-copy-all-note"]',
+  membersCopyNextStep: '[data-testid="project-members-copy-next-step"]',
+  membersPendingSummary: '[data-testid="project-members-pending-summary"]',
+  membersEntryPlus: '[data-testid="pc-members-entry-plus"]',
+  colleaguesRowToggle: '[data-testid="project-colleagues-row-toggle"]',
   membersInviteInvalid: '[data-testid="project-members-invite-target"]',
   createEnterFailed: '[data-testid="create-project-enter-failed"]',
   createEnterExisting: '[data-testid="create-project-enter-existing"]',
@@ -1486,6 +1657,14 @@ const T = {
   createVersionMismatch: '[data-testid="create-project-version-mismatch"]',
   createSubmitError: '[data-testid="create-project-submit-error"]',
   createNameHint: '[id="create-project-name-hint"]',
+  // UB1 (U1/U4): responsibility error face + both version-guide hosts.
+  createResponsibilityError: '[data-testid="create-project-responsibility-error"]',
+  createUpdateGuide: '[data-testid="create-project-update-guide"]',
+  createUpdateGuideBody: '[data-testid="create-project-update-guide-body"]',
+  createClientUpdate: '[data-testid="create-project-client-update"]',
+  homeProjectUpdateGuide: '[data-testid="home-project-update-guide"]',
+  homeProjectUpdateGuideBody: '[data-testid="home-project-update-guide-body"]',
+  homeProjectClientUpdate: '[data-testid="home-project-client-update"]',
   spaceMenuTrigger: '[data-testid="poo196-space-menu-trigger"]',
   spaceMenuContent: '[data-testid="poo196-space-menu-content"]',
   spaceMenuItem: '[data-testid="product-space-item"]',
@@ -1509,9 +1688,32 @@ const T = {
   homeProjectStale: '[data-testid="home-project-stale"]',
   homeProjectEmpty: '[data-testid="home-project-empty"]',
   homeProjectReadonly: '[data-testid="home-project-readonly"]',
+  // POO-196 R3 UB2 (U3/U10/U11): entry feedback, history-error face, retry
+  // and the composer send-notice pins.
+  homeProjectEntering: '[data-testid="home-project-entering"]',
+  homeProjectEnterError: '[data-testid="home-project-enter-error"]',
+  homeProjectEnterRetry: '[data-testid="home-project-enter-retry"]',
+  homeProjectEnterLabel: '[data-testid="home-project-enter-label"]',
+  projectEntryHistoryError: '[data-testid="project-entry-history-error"]',
+  projectEntryRetry: '[data-testid="project-entry-retry"]',
+  projectEntrySendNotice: '[data-testid="project-entry-send-notice"]',
+  // POO-196 R3 UB4 (U5/U13): the empty-state three action cards, the honest
+  // capability copy, the one-time onboarding skip face and the composer help.
+  projectEntryEmptyHint: '[data-testid="project-entry-empty-hint"]',
+  projectEntryActions: '[data-testid="project-entry-actions"]',
+  projectEntryActionInvite: '[data-testid="project-entry-action-invite"]',
+  projectEntryActionUpload: '[data-testid="project-entry-action-upload"]',
+  projectEntryActionStart: '[data-testid="project-entry-action-start"]',
+  projectOnboardingSkip: '[data-testid="project-onboarding-skip"]',
+  projectOnboardingSkipBar: '[data-testid="project-onboarding-skip-bar"]',
+  composerHelp: '[data-testid="project-composer-help"]',
+  composerHelpContent: '[data-testid="project-composer-help-content"]',
   homeAppsTitle: '[data-testid="home-apps-title"]',
   homeDirectorySearch: '[data-testid="home-directory-search"]',
   projectEntryEmpty: '[data-testid="project-entry-empty"]',
+  // UB5 (U14): the space identity bar + its classified title row.
+  homeSpaceContext: '[data-testid="home-space-context"]',
+  homeSpaceContextTitle: '[data-testid="home-space-context-title"]',
 }
 
 const clickTab = async (testId: string) => {
@@ -1590,6 +1792,19 @@ const pressEscape = async () => {
   await delay(350)
 }
 
+/** UB1 (U4): a TRUSTED Enter on the focused element (the real keyboard path a
+ * plain <button> needs — synthetic KeyboardEvents do not trigger activation).
+ * Electron's sendInputEvent spells the key 'Return' (accelerator spelling). */
+const pressEnterTrusted = async () => {
+  // A real Enter keystroke = keyDown(VK_RETURN) + char('\r') + keyUp. The
+  // char leg is what makes Blink run the button's Enter-activation default
+  // action (the keyDown name alone does not).
+  host.webContents.sendInputEvent({ type: 'keyDown', keyCode: '\r' } as unknown as Electron.KeyboardInputEvent)
+  host.webContents.sendInputEvent({ type: 'char', keyCode: '\r' } as unknown as Electron.KeyboardInputEvent)
+  host.webContents.sendInputEvent({ type: 'keyUp', keyCode: '\r' } as unknown as Electron.KeyboardInputEvent)
+  await delay(250)
+}
+
 const toastText = () => js<string>('window.__poo196.toastText()')
 // The key rides JSON.stringify, not a quoted literal: the i18n coverage lint
 // treats quoted call shapes as static keys, and this stays genuinely dynamic.
@@ -1662,7 +1877,9 @@ async function scenarioSessionSwitch() {
   await until(() => js<boolean>(`window.__poo196.q('${T.tabs}')`), 8000)
   check('[S1] 项目会话出现三 tab strip', true)
   const tabsText = await js<string>(`Array.from(document.querySelectorAll('${T.tabs} [role="tab"]')).map(el => el.textContent.trim()).join('|')`)
-  check('[S1] 三 tab 文案齐全(消息/文件/Pin)', tabsText.includes('消息') && tabsText.includes('文件') && tabsText.includes('Pin'), tabsText)
+  // U12 旧→新映射：Pin tab 文案「Pin」→「置顶」（键值断言，术语统一钉）。
+  const tabsPinsCopyS1 = (await i18nText('projectContext.tabs.pins')).trim()
+  check('[S1] 三 tab 文案齐全(消息/文件/置顶)', tabsText.includes('消息') && tabsText.includes('文件') && tabsText.includes(tabsPinsCopyS1), { tabsText, tabsPinsCopyS1 })
   await capture('s1-project-session-tabs')
 }
 
@@ -1739,16 +1956,20 @@ async function scenarioUploadJourney() {
   const toast = await toastText()
   check('[S3] 上传处理中 toast 出现', toast.includes('正在处理'), { toast: toast.slice(0, 120) })
   const newRow = await until(async () => js<string | null>(`(Array.from(document.querySelectorAll('[data-testid^="pc-asset-row-"]')).find(el => el.textContent.includes('会议纪要-1106.md'))?.getAttribute('data-testid') ?? null)`), 8000) as string
+  // U12 (G12) 旧→新映射：状态术语统一「处理中」→「正在准备」（键值改，检查
+  // 语义不变——徽标必须是处理中态的真实文案）。
+  const processingCopy = (await i18nText('projectContext.status.processing')).trim()
   const processingBadge = await js<string>(`document.querySelector('[data-testid="${newRow}"] [data-testid^="pc-asset-status-"]')?.textContent ?? ''`)
-  check('[S3] 新行状态徽标为处理中', processingBadge.includes('处理中'), { processingBadge })
+  check('[S3] 新行状态徽标为处理中(正在准备)', processingBadge.includes(processingCopy), { processingBadge, processingCopy })
 
-  // fixture: 索引完成 → 用户切 tab 触发 refetch → 可用
+  // fixture: 索引完成 → 用户切 tab 触发 refetch → 可用（U12: 「可用」→「已就绪」）
   await runProgramDirect({ op: 'indexAsset', args: { assetId: newRow.replace('pc-asset-row-', '') } })
   await clickTab(T.tabPins)
   await clickTab(T.tabFiles)
   await delay(600)
+  const readyCopy = (await i18nText('projectContext.status.ready')).trim()
   const readyBadge = await js<string>(`document.querySelector('[data-testid="${newRow}"] [data-testid^="pc-asset-status-"]')?.textContent ?? ''`)
-  check('[S3] 处理完成后(经列表刷新)徽标为可用', readyBadge === '可用', { readyBadge })
+  check('[S3] 处理完成后(经列表刷新)徽标为可用(已就绪)', readyBadge === readyCopy, { readyBadge, readyCopy })
   await capture('s3-uploaded-indexed')
 
   // ── 上传失败 → 重试（once fault）
@@ -1955,16 +2176,29 @@ async function scenarioRowActionsAndPins() {
   await capture('s5-row-menu-open')
   await pressEscape()
 
-  // Pin → toast → 行状态翻转 → Pin 面板（as-meeting-1030 起始未 Pin，动作将其翻转为已 Pin）
+  // Pin → toast → 行状态翻转 → Pin 面板（as-meeting-1030 起始未 Pin，动作将其翻转为已置顶）
   mark('S5:row-menu-captured')
-  await clickMenuAction('as-meeting-1030', 'pin')
+  // U12 (G12) 消费者钉：行菜单动作文案=键值「置顶」（旧「Pin」→新「置顶」，
+  // 断言语义不变：pin 动作入口在且标注为新术语）。
+  const pinActionCopy = (await i18nText('projectContext.actions.pin')).trim()
+  const rowMenuOpen = await openRowMenu('as-meeting-1030', 'pin')
+  check('[S5][U12] 行菜单 Pin 动作呈现「置顶」术语', rowMenuOpen
+    && (await js<string>(`document.querySelector('${rowAction('as-meeting-1030', 'pin')}')?.textContent ?? ''`)).trim() === pinActionCopy, { pinActionCopy })
+  await js<boolean>(`window.__poo196.pressEnterOn('${rowAction('as-meeting-1030', 'pin')}')`)
+  await delay(250)
   mark('S5:pin-clicked')
-  // 行状态翻转为 gate；toast 单独记录（toast 渲染本身由 S3/S6 证明）
+  // 行状态翻转为 gate；toast 单独记录（toast 渲染本身由 S3/S6 证明）。
+  // U12 旧→新映射：「已 Pin」→「已置顶」（键值断言，防术语回退）。
   await until(async () => (await js<string>(`document.querySelector('[data-testid="pc-asset-row-as-meeting-1030"]')?.getAttribute('data-pinned')`)) === 'true', 8000)
-  const pinToastSeen = (await toastText()).includes('已 Pin')
-  check('[S5] Pin 操作 toast 反馈', pinToastSeen, { pinToastSeen })
+  const pinnedToastCopy = (await i18nText('projectContext.toast.pinned')).trim()
+  const pinToastSeen = (await toastText()).includes(pinnedToastCopy)
+  check('[S5] Pin 操作 toast 反馈（已置顶）', pinToastSeen, { pinToastSeen, pinnedToastCopy })
   const pinnedAttr = await js<string>(`document.querySelector('[data-testid="pc-asset-row-as-meeting-1030"]')?.getAttribute('data-pinned')`)
   check('[S5] 行 data-pinned 翻转', pinnedAttr === 'true', { pinnedAttr })
+  // U12 消费钉：行上已置顶图标的 aria-label=「已置顶」（pinnedAria 键值）。
+  const pinnedAriaCopyS5 = (await i18nText('projectContext.pin.pinnedAria')).trim()
+  const rowAriaLabelsS5 = await js<string[]>(`Array.from(document.querySelectorAll('[data-testid="pc-asset-row-as-meeting-1030"] svg[aria-label]')).map(el => el.getAttribute('aria-label'))`)
+  check('[S5][U12] 已置顶图标 aria=「已置顶」', rowAriaLabelsS5.includes(pinnedAriaCopyS5), { rowAriaLabelsS5, pinnedAriaCopyS5 })
 
   mark('S5:pinned-attr-ok')
   await clickTab(T.tabPins)
@@ -1987,10 +2221,72 @@ async function scenarioRowActionsAndPins() {
     await delay(150)
   }
   const unpinLabel = (await js<string>(`document.querySelector('${rowAction('as-meeting-1030', 'pin')}').textContent`)).trim()
-  check('[S5] Pin 面板内菜单呈现「取消 Pin」', unpinLabel.includes('取消'), { unpinLabel })
+  // U12 旧→新映射：「取消 Pin」→「取消置顶」（含「取消」的旧断言保留，另钉
+  // 逐字术语断言防回退）。
+  const unpinActionCopy = (await i18nText('projectContext.actions.unpin')).trim()
+  check('[S5] Pin 面板内菜单呈现「取消置顶」', unpinLabel.includes('取消') && unpinLabel === unpinActionCopy, { unpinLabel, unpinActionCopy })
   await js<boolean>(`window.__poo196.pressEnterOn('${rowAction('as-meeting-1030', 'pin')}')`)
   await delay(600)
   check('[S5] Unpin 后从 Pin 面板消失', await js<boolean>(`!window.__poo196.q('${T.pinPane} [data-testid="pc-asset-row-as-meeting-1030"]')`))
+
+  // U12（G12）空态/状态钉：清空其余置顶（as-req-doc / as-design-home）到达
+  // 真实空态——「还没有置顶文件」+ hint；unpin toast=「已取消置顶」。
+  // 注意：Pin 面板行菜单走 pane 专属 handleUnpin（无 toast）；取消置顶 toast
+  // 的消费者在文件库行菜单（下方 files-tab 回路验证）。面板内以状态翻转为准。
+  for (const assetId of ['as-req-doc', 'as-design-home']) {
+    const menuSel = `${T.pinPane} ${rowMenu(assetId)}`
+    let opened = false
+    for (const mode of ['key', 'pointer']) {
+      if (mode === 'key') await js<boolean>(`window.__poo196.pressEnterOn('${menuSel}')`)
+      else await js<boolean>(`window.__poo196.click('${menuSel}')`)
+      opened = await until(() => js<boolean>(`window.__poo196.q('${rowAction(assetId, 'pin')}')`), 3000)
+      if (opened) break
+      await pressEscape()
+      await delay(150)
+    }
+    if (!opened) throw new Error(`pin pane menu never opened for ${assetId}`)
+    await js<boolean>(`window.__poo196.pressEnterOn('${rowAction(assetId, 'pin')}')`)
+    await until(async () => (await js<number>(`window.__poo196.count('${T.pinPane} [data-testid="pc-asset-row-${assetId}"]')`)) === 0, 8000)
+    check(`[S5][U12] ${assetId} 取消置顶后离开 Pin 面板（状态翻转）`, true)
+  }
+  await until(async () => (await js<boolean>(`window.__poo196.q('${T.pinPane}')`))
+    && (await js<number>(`window.__poo196.count('${T.pinPane} [data-testid^="pc-asset-row-"]')`)) === 0, 8000)
+  const emptyTitleCopyS5 = (await i18nText('projectContext.pin.emptyTitle')).trim()
+  const emptyHintCopyS5 = (await i18nText('projectContext.pin.emptyHint')).trim()
+  const pinEmptyText = await js<string>(`document.querySelector('${T.pinPane}')?.textContent ?? ''`)
+  check('[S5][U12] Pin 面板空态=「还没有置顶文件」+ 裁决 hint', pinEmptyText.includes(emptyTitleCopyS5) && pinEmptyText.includes(emptyHintCopyS5), { seen: pinEmptyText.slice(0, 80) })
+  await capture('s5-u12-pin-pane-empty')
+
+  // U12 toast 消费钉（文件库行菜单路径 = 带 toast 的 handleSetPinned）：
+  // 置顶 toast=「已置顶」、取消置顶 toast=「已取消置顶」。回路用 as-design-home
+  // （S7 的 Pin 面板冲突探针依赖 as-req-doc 在面板内——它在下方恢复）。
+  // 行菜单标签跟随 data-pinned 渲染，先等列表 refetch 收敛再驱动，避免陈旧
+  // 菜单标签把「置顶」点成「取消置顶」。
+  const rowPinnedS5 = (assetId: string) => js<string>(`document.querySelector('[data-testid="pc-asset-row-${assetId}"]')?.getAttribute('data-pinned')`)
+  await clickTab(T.tabFiles)
+  await until(() => js<boolean>(`window.__poo196.q('${T.library}')`), 8000)
+  await until(async () => (await rowPinnedS5('as-design-home')) === 'false' && (await rowPinnedS5('as-req-doc')) === 'false', 8000)
+  const pinnedToastCopyS5b = (await i18nText('projectContext.toast.pinned')).trim()
+  const unpinnedToastCopyS5b = (await i18nText('projectContext.toast.unpinned')).trim()
+  await clickMenuAction('as-design-home', 'pin')
+  let pinToastS5b = ''
+  await until(async () => { pinToastS5b = await toastText(); return pinToastS5b.includes(pinnedToastCopyS5b) }, 8000)
+  check('[S5][U12] 文件库置顶 toast=「已置顶」', pinToastS5b.includes(pinnedToastCopyS5b), { toastNow: pinToastS5b.slice(0, 120) })
+  await until(async () => (await rowPinnedS5('as-design-home')) === 'true', 8000)
+  await clickMenuAction('as-design-home', 'pin')
+  let unpinToastS5b = ''
+  await until(async () => { unpinToastS5b = await toastText(); return unpinToastS5b.includes(unpinnedToastCopyS5b) }, 8000)
+  check('[S5][U12] 文件库取消置顶 toast=「已取消置顶」', unpinToastS5b.includes(unpinnedToastCopyS5b), { toastNow: unpinToastS5b.slice(0, 120) })
+  // 恢复夹具基线 Pin 态（as-req-doc 必须回到 Pin 面板：S7 依赖；design-home 一并恢复）。
+  // 以 data-pinned 真值驱动重试：一次菜单标签竞态不致把恢复点成反向。
+  for (const assetId of ['as-req-doc', 'as-design-home']) {
+    for (let attempt = 0; attempt < 4 && (await rowPinnedS5(assetId)) !== 'true'; attempt++) {
+      await clickMenuAction(assetId, 'pin')
+      await probeUntil(async () => (await rowPinnedS5(assetId)) === 'true', 4000)
+    }
+    await until(async () => (await rowPinnedS5(assetId)) === 'true', 8000)
+  }
+  check('[S5][U12] 基线 Pin 态恢复（as-req-doc/as-design-home 已置顶）', (await rowPinnedS5('as-req-doc')) === 'true' && (await rowPinnedS5('as-design-home')) === 'true')
 
   // 已确认回路（manager 能力位）
   await clickTab(T.tabFiles)
@@ -2020,6 +2316,31 @@ async function scenarioRowActionsAndPins() {
   await js<boolean>(`window.__poo196.click('[data-testid="pc-status-filter-all"]')`)
   await delay(400)
   check('[S5] 回到全部过滤', (await js<number>(`window.__poo196.count('${T.list} [data-testid^="pc-asset-row-"]')`)) >= 7)
+
+  // U12 (G12) 消费者钉：19 键改值后所有可达消费者显示新术语（testid/结构不
+  // 变，仅逐字文案断言；Pin/unpin 回路与过滤结果在上方保持原语义）。
+  mark('S5:u12-terminology')
+  const tabsPinsCopy = (await i18nText('projectContext.tabs.pins')).trim()
+  const pinsTabLabel = (await js<string>(`document.querySelector('${T.tabPins}')?.textContent ?? ''`)).trim()
+  check('[S5][U12] Pin tab 标签呈现「置顶」', pinsTabLabel === tabsPinsCopy, { pinsTabLabel, tabsPinsCopy })
+  const readyCopyS5 = (await i18nText('projectContext.status.ready')).trim()
+  const processingCopyS5 = (await i18nText('projectContext.status.processing')).trim()
+  const failedRetryableCopyS5 = (await i18nText('projectContext.status.failedRetryable')).trim()
+  const statusBadgeOf = (id: string) => js<string>(`document.querySelector('[data-testid="pc-asset-row-${id}"] [data-testid^="pc-asset-status-"]')?.textContent ?? ''`)
+  check('[S5][U12] 状态徽标「已就绪」', (await statusBadgeOf('as-req-doc')).trim() === readyCopyS5, { badge: await statusBadgeOf('as-req-doc'), readyCopyS5 })
+  check('[S5][U12] 状态徽标「正在准备」', (await statusBadgeOf('as-api-doc')).trim() === processingCopyS5, { badge: await statusBadgeOf('as-api-doc'), processingCopyS5 })
+  check('[S5][U12] 状态徽标「处理失败，可重试」', (await statusBadgeOf('as-test-plan')).trim() === failedRetryableCopyS5, { badge: await statusBadgeOf('as-test-plan'), failedRetryableCopyS5 })
+  const filterCopy = {
+    available: (await i18nText('projectContext.statusFilter.available')).trim(),
+    processing: (await i18nText('projectContext.statusFilter.processing')).trim(),
+    failed: (await i18nText('projectContext.statusFilter.failed')).trim(),
+  }
+  const filterChipText = (state: string) => js<string>(`document.querySelector('[data-testid="pc-status-filter-${state}"]')?.textContent ?? ''`)
+  check('[S5][U12] 状态筛选 chips 呈现「已就绪/正在准备/处理失败」',
+    (await filterChipText('available')).trim() === filterCopy.available
+    && (await filterChipText('processing')).trim() === filterCopy.processing
+    && (await filterChipText('failed')).trim() === filterCopy.failed,
+    { filterCopy, chips: [await filterChipText('available'), await filterChipText('processing'), await filterChipText('failed')] })
 
   // 行菜单: 撤销已确认
   await clickMenuAction('as-meeting-1030', 'confirm')
@@ -2718,6 +3039,22 @@ async function scenarioMembersAndCreate() {
   await until(() => js<boolean>(`window.__poo196.q('${T.membersRoster}')`), 8000)
   check('[S13] 记录子页返回后名册仍在（面板不关）', await js<boolean>(`window.__poo196.q('${T.membersPanel}')`))
   check('[S13] 前往企业管理入口存在（不驱跳转）', await js<boolean>(`window.__poo196.q('${T.membersOpenManagement}')`))
+
+  // UB3 (U6): 名册计数旁的待接受摘要——首屏已加载且无后页 → 精确「待接受 1 人」
+  // （seed 一条 active 未过期）；点击进邀请记录、返回仍回名册。member 无此入口
+  // 由 S14 钉死。
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersPendingSummary}')`), 8000)
+  const pendingReady13 = await probeUntil(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'count', 8000)
+  const pendingState13 = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()
+  const pendingText13 = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
+  const pendingCount13 = (await js<string>("String(window.__poo196.t('projectMembers.invitations.pendingCount', { count: 1 }))")).trim()
+  check('[S13][U6] 待接受摘要为精确计数（全加载，非假 0/至少）', pendingReady13 && pendingState13 === 'count' && pendingText13.includes(pendingCount13), { pendingState13, pendingText13, pendingCount13 })
+  await js<boolean>(`window.__poo196.click('${T.membersPendingSummary}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersInvitations}')`), 8000)
+  check('[S13][U6] 摘要点击进入邀请记录子页', true)
+  await js<boolean>(`window.__poo196.click('${T.membersComposeBack}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersRoster}')`), 8000)
+  check('[S13][U6] 记录返回后名册仍在（摘要子页回路闭合）', await js<boolean>(`window.__poo196.q('${T.membersPanel}')`))
   await capture('s13-members-manager-overview')
 
   // 邀请步骤在面板内（不叠弹层）：目录页 → 无源空态的定向邀请次级路径。
@@ -2735,6 +3072,14 @@ async function scenarioMembersAndCreate() {
   check('[S13] 结果页为 created', (await js<string>(`document.querySelector('${T.membersResult}')?.getAttribute('data-result')`)) === 'created')
   const statsAfterInvite = await runProgramDirect<{ inviteCalls: Array<{ command: { createRequestKey: string } }> }>({ op: 'pmCallStats' })
   check('[S13] 邀请请求携带 pm-invite key', /^pm-invite-/.test(statsAfterInvite.inviteCalls[0]?.command?.createRequestKey ?? ''), { command: statsAfterInvite.inviteCalls[0]?.command })
+  // UB3 (U2): 复制 Promise 成功前——无「已复制」、无下一步指引、无聚合按钮
+  // （单人结果不满两条可用链接）。
+  const copyLabelBefore = (await js<string>(`document.querySelector('${T.membersCopyLink}')?.textContent ?? ''`)).trim()
+  const copyLinkLabel = (await i18nText('projectMembers.invite.copyLink')).trim()
+  check('[S13][U2] 复制前按钮为「复制链接，去发给对方」且无已复制宣称',
+    copyLabelBefore.includes(copyLinkLabel)
+    && !(await js<boolean>(`window.__poo196.q('${T.membersCopyNextStep}')`))
+    && !(await js<boolean>(`window.__poo196.q('${T.membersCopyAll}')`)), { copyLabelBefore, copyLinkLabel })
   await js<boolean>(`window.__poo196.click('${T.membersCopyLink}')`)
   await until(async () => (await js<number>('window.__clipboardLog.length')) > 0, 8000)
   const copiedLink = await js<string>('window.__clipboardLog[0]')
@@ -2743,6 +3088,23 @@ async function scenarioMembersAndCreate() {
   const expectedToken = Buffer.from(`invite:${statsAfterInvite.inviteCalls[0].command.createRequestKey}`).toString('base64url')
   check('[S13] 复制的链接与 fixture invitationUrl 一致',
     copiedLink === `https://fixture-admin.polo.invalid/invite/${expectedToken}`, { copiedLink })
+  // UB3 (U2): 复制成功后——role=status 指引正文出现（手动投递语义），按钮
+  // 保留可再复制；再次点击只再写剪贴板，零额外邀请写。
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersCopyNextStep}')`), 8000)
+  const nextStepRole = (await js<string>(`document.querySelector('${T.membersCopyNextStep}')?.getAttribute('role') ?? 'none'`)).trim()
+  const nextStepText = (await js<string>(`document.querySelector('${T.membersCopyNextStep}')?.textContent ?? ''`)).trim()
+  const nextStepCopy = (await i18nText('projectMembers.invite.copyNextStep')).trim()
+  const copiedLabel13 = (await i18nText('projectMembers.invite.copied')).trim()
+  const copyBtnText13 = (await js<string>(`document.querySelector('${T.membersCopyLink}')?.textContent ?? ''`)).trim()
+  check('[S13][U2] 复制成功后 role=status 指引与可再复制按钮出现',
+    nextStepRole === 'status' && nextStepText.includes(nextStepCopy.slice(0, 12)) && copyBtnText13.includes(copiedLabel13.slice(0, 3)),
+    { nextStepRole, nextStepText: nextStepText.slice(0, 40), copyBtnText13 })
+  await js<boolean>(`window.__poo196.click('${T.membersCopyLink}')`)
+  await until(async () => (await js<number>('window.__clipboardLog.length')) > 1, 8000)
+  const inviteCallsAfterCopies = await runProgramDirect<{ inviteCalls: unknown[] }>({ op: 'pmCallStats' })
+  check('[S13][U2] 重复复制仅写剪贴板（零额外邀请写，单人无聚合按钮）',
+    inviteCallsAfterCopies.inviteCalls.length === 1
+    && !(await js<boolean>(`window.__poo196.q('${T.membersCopyAll}')`)), { copies: inviteCallsAfterCopies.inviteCalls.length })
   await capture('s13-invite-created-copy')
 
   // Esc 只关未提交的步骤/结果页，不关面板（HIG 单一任务步骤）。push 面板
@@ -3156,6 +3518,14 @@ async function scenarioMembersTwoState() {
   check('[S14] member 名册计数为服务端人数', memberCount.includes('3'), { memberCount })
   check('[S14] member 无「添加成员」主动作', !(await js<boolean>(`window.__poo196.q('${T.membersInviteAction}')`)))
   check('[S14] member 无邀请记录与管理入口', !(await js<boolean>(`window.__poo196.q('${T.membersInvitationsEntry}')`)) && !(await js<boolean>(`window.__poo196.q('${T.membersOpenManagement}')`)))
+  // UB3 (U6): member 无待接受摘要（无邀请读、无入口）。
+  check('[S14][U6] member 无待接受摘要入口', !(await js<boolean>(`window.__poo196.q('${T.membersPendingSummary}')`)))
+  // UB3 (U7): member 入口按钮同样可发现但无加号，accessible name 用现有成员名。
+  const memberEntryAria = (await js<string>(`document.querySelector('${T.membersButton}')?.getAttribute('aria-label') ?? ''`)).trim()
+  const memberAriaLabel = (await i18nText('projectMembers.buttonAria')).trim()
+  check('[S14][U7] member 入口无加号且 accessible name 为成员名',
+    !(await js<boolean>(`window.__poo196.q('${T.membersEntryPlus}')`)) && memberEntryAria === memberAriaLabel,
+    { memberEntryAria, memberAriaLabel })
   // D11: 旧 member 降级面（your-role/contact-owner）已撤除——不再以提示替代名册。
   check('[S14] 旧降级面（your-role/contact-owner）零残留',
     (await js<number>(`window.__poo196.count('[data-testid="project-members-your-role"]')`)) === 0
@@ -3178,6 +3548,20 @@ async function scenarioMembersTwoState() {
   await openMembersPanel()
   await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
   check('[S14] 管理形态名册加载成功（失权前）', (await js<number>(`window.__poo196.count('${T.membersRosterRow}')`)) === 3)
+  // UB3 (U7): manager 入口 ≥32px、边框浅底、末尾加号 aria-hidden、accessible
+  // name 用「查看成员或邀请同事」（点任意部位仍开同一总览——键盘钉在 R3-06）。
+  const entryMetrics = await js<{ height: number; borderTop: string; background: string }>(`(() => {
+    const el = document.querySelector('${T.membersButton}')
+    const r = el.getBoundingClientRect()
+    const s = getComputedStyle(el)
+    return { height: r.height, borderTop: s.borderTopStyle, background: s.backgroundColor }
+  })()`)
+  const managerEntryAria = (await js<string>(`document.querySelector('${T.membersButton}')?.getAttribute('aria-label') ?? ''`)).trim()
+  const openInviteName = (await i18nText('projectMembers.openMembersAndInvite')).trim()
+  const plusHidden = (await js<string>(`document.querySelector('${T.membersEntryPlus}')?.getAttribute('aria-hidden') ?? 'missing'`)).trim()
+  check('[S14][U7] manager 入口 ≥32px 且有边框与浅底', entryMetrics.height >= 32 && entryMetrics.borderTop !== 'none' && entryMetrics.background !== 'rgba(0, 0, 0, 0)', { entryMetrics })
+  check('[S14][U7] manager 入口末尾加号存在且 aria-hidden', plusHidden === 'true', { plusHidden })
+  check('[S14][U7] manager 入口 accessible name 为邀请权名称', managerEntryAria === openInviteName, { managerEntryAria, openInviteName })
   mark('S14:manager-close-attempt')
   await closeMembersPanel()
   mark('S14:manager-closed')
@@ -3199,6 +3583,12 @@ async function scenarioMembersTwoState() {
   check('[S14] 403 呈现失权文案（lostAccess，非 generic）',
     rosterErrorText.includes(lostAccessCopy.slice(0, 10)), { rosterErrorText: rosterErrorText.slice(0, 60) })
   check('[S14] 失权后管理动作一并消失', !(await js<boolean>(`window.__poo196.q('${T.membersInviteAction}')`)))
+  // UB3 (U6): 失权即清——待接受摘要与邀请记录入口一并消失（不残留旧计数）。
+  check('[S14][U6] 失权后待接受摘要消失', !(await js<boolean>(`window.__poo196.q('${T.membersPendingSummary}')`)))
+  // UB3 (U7): 失权入口回退成员名，绝不显示 fabricated 计数或加号。
+  const lostEntryText = ((await js<string>(`document.querySelector('${T.membersButton}')?.textContent ?? 'missing'`)).trim())
+  check('[S14][U7] 失权入口无计数无加号（回退成员名）', lostEntryText !== 'missing'
+    && !/\d/.test(lostEntryText) && !(await js<boolean>(`window.__poo196.q('${T.membersEntryPlus}')`)), { lostEntryText })
   check('[S14] 失权错误面带行内重试入口', await js<boolean>(`window.__poo196.q('${T.membersRosterRetry}')`))
   await capture('s14-members-403-face')
   await closeMembersPanel()
@@ -3490,7 +3880,171 @@ async function scenarioInviteLoops() {
   check('[S15][X2-7] 行内重试恢复名册（无行刷新不静默）', await js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`))
   await capture('s15-roster-retry')
   await closeMembersPanel()
+
+  // ── UB3（U2/U6/U8）：同事目录多选——聚合复制 / 整行选择 / cap 可取消 / 本地姓名 ──
+  mark('S15:ub3-colleague-aggregate')
+  await runProgramDirect({ op: 'resetPm' })
+  // 基础目录 1 人可选（陈晓）+ 注入 2 名可选同事 → 3 条可用链接；随后局部
+  // 失败臂需要第 4 条。先做全成功回路（2 人聚合），再做部分失败回路。
+  await runProgramDirect({ op: 'stageColleagueDirectory', args: { available: 1 } })
+  await js<boolean>('window.__poo196Space.setRole("manager")')
+  await openMembersPanel()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
+  await js<boolean>(`window.__poo196.click('${T.membersInviteAction}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.colleaguesPage}')`), 8000)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.colleaguesRowToggle}')`)) >= 2, 8000)
+
+  // (1) U8 整行可点：joined/pending/unavailable 行没有切换按钮；点「姓名」
+  // 文本（button 内部内容）只切一次；键盘 Enter（trusted）也只切一次；选择
+  // 全程零邀请写。
+  check('[S15][U8] 非可选行零按钮', (await js<number>(`window.__poo196.count('[data-testid="project-colleagues-row"][data-project-state="joined"] button')`)) === 0
+    && (await js<number>(`window.__poo196.count('[data-testid="project-colleagues-row"][data-project-state="pending"] button')`)) === 0
+    && (await js<number>(`window.__poo196.count('[data-testid="project-colleagues-row"][data-project-state="unavailable"] button')`)) === 0)
+  await js<boolean>(`window.__poo196.click('${T.colleaguesRow}[data-user-id="u-chen-02"] button > span.flex-1')`)
+  await delay(150)
+  const chenPressed = (await js<string>(`document.querySelector('${T.colleaguesRow}[data-user-id="u-chen-02"] button')?.getAttribute('aria-pressed') ?? 'missing'`)).trim()
+  const selectedAfterName = (await js<string>(`document.querySelector('${T.colleaguesSelected}')?.textContent ?? ''`)).trim()
+  check('[S15][U8] 点姓名整行切换一次（aria-pressed 同步）', chenPressed === 'true' && selectedAfterName.includes('1'), { chenPressed, selectedAfterName })
+  // 头像区域（aria-hidden span）同属该按钮：再切一次（取消）。
+  await js<boolean>(`window.__poo196.click('${T.colleaguesRow}[data-user-id="u-chen-02"] button > span[aria-hidden="true"]')`)
+  await delay(150)
+  const chenDeselected = (await js<string>(`document.querySelector('${T.colleaguesRow}[data-user-id="u-chen-02"] button')?.getAttribute('aria-pressed') ?? 'missing'`)).trim()
+  check('[S15][U8] 点头像区域再切换一次（无冒泡双切）', chenDeselected === 'false'
+    && ((await js<string>(`document.querySelector('${T.colleaguesSelected}')?.textContent ?? ''`)).trim()).includes('0'), { chenDeselected })
+  // 键盘：trusted Enter 激活行按钮（真实默认激活路径）。
+  await js<boolean>(`(() => { const el = document.querySelector('${T.colleaguesRow}[data-user-id="u-chen-02"] button'); el.focus(); return document.activeElement === el })()`)
+  await pressEnterTrusted()
+  await delay(150)
+  const chenKeyboard = (await js<string>(`document.querySelector('${T.colleaguesRow}[data-user-id="u-chen-02"] button')?.getAttribute('aria-pressed') ?? 'missing'`)).trim()
+  check('[S15][U8] 键盘 Enter 激活整行（一次切换）', chenKeyboard === 'true', { chenKeyboard })
+  check('[S15][U8] 选择不产生邀请写', pmCallCount('pmCreateColleagueInvitation') === 0)
+
+  // (2) U2 聚合复制：选 2 人 → confirm → 结果页出现「复制全部邀请链接」→
+  // 内容 = 「姓名\nURL」组、空行分隔、行序保持；逐人按钮仍在；复制只写剪贴板。
+  await js<boolean>(`window.__poo196.click('${T.colleaguesRow}[data-user-id="u-cap-01"] button')`)
+  await delay(120)
+  await js<boolean>(`window.__poo196.click('${T.colleaguesConfirm}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersResult}')`), 10000)
+  await until(async () => pmCallCount('pmCreateColleagueInvitation') >= 2, 8000)
+  await js<boolean>(`(() => {
+    window.__clipboardLog = []
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text) => { window.__clipboardLog.push(text); return true } },
+    })
+    return true
+  })()`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersCopyAll}')`), 8000)
+  const copyAllLabelBefore = (await js<string>(`document.querySelector('${T.membersCopyAll}')?.textContent ?? ''`)).trim()
+  check('[S15][U2] 两条可用链接出现聚合复制按钮（复制前无已复制）',
+    copyAllLabelBefore.includes(((await i18nText('projectMembers.invite.copyAll'))).trim().slice(0, 4))
+    && (await js<number>('window.__clipboardLog.length')) === 0, { copyAllLabelBefore })
+  const copyAllCallsBefore = pmCallCount('pmCreateColleagueInvitation')
+  await js<boolean>(`window.__poo196.click('${T.membersCopyAll}')`)
+  await until(async () => (await js<number>('window.__clipboardLog.length')) > 0, 8000)
+  const aggregate = await js<string>('window.__clipboardLog[0] ?? ""')
+  const aggregateGroups = aggregate.split('\n\n')
+  const resultRows15 = await js<string[]>(`Array.from(document.querySelectorAll('${T.membersResult} [data-user-id]')).map(row => row.getAttribute('data-user-id'))`)
+  check('[S15][U2] 聚合内容为「姓名\\nURL」组、空行分隔、与结果行序一致', aggregateGroups.length === 2
+    && aggregateGroups[0]!.startsWith('陈晓\nhttps://fixture-admin.polo.invalid/invite/')
+    && aggregateGroups[1]!.startsWith('容量同事1\nhttps://fixture-admin.polo.invalid/invite/')
+    && !aggregate.includes('138'), { groups: aggregateGroups.map(g => g.slice(0, 30)), resultRows15 })
+  check('[S15][U2] 聚合复制零额外邀请写且逐人按钮保留',
+    pmCallCount('pmCreateColleagueInvitation') === copyAllCallsBefore
+    && (await js<number>(`window.__poo196.count('${T.membersCopyLink}')`)) === 2, { calls: pmCallCount('pmCreateColleagueInvitation') })
+  await capture('s15-colleagues-aggregate-copy')
+  await closeMembersPanel()
+
+  // (3) U6 本地姓名：本次目录选择的结果落到邀请记录——按 invitationId 关联
+  // 「本次邀请：陈晓」+ 脱敏标识/创建时间；无映射行保持脱敏标识。
+  await openMembersPanel()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersPendingSummary}')`), 8000)
+  await js<boolean>(`window.__poo196.click('${T.membersPendingSummary}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersInvitations}')`), 8000)
+  const localRow15 = await js<string>(`(() => {
+    const row = document.querySelector('[data-local-target="陈晓"]')
+    return row ? row.textContent : ''
+  })()`)
+  const localTarget15 = (await i18nText('projectMembers.invitations.localTarget')).replace('{{name}}', '').trim()
+  const createdAt15 = (await i18nText('projectMembers.invitations.createdAt')).replace('{{date}}', '').trim()
+  check('[S15][U6] 记录行以本地映射命名并保留创建时间',
+    localRow15.includes(localTarget15.replace(/[：:]\s*$/, '')) && localRow15.includes(createdAt15.slice(0, 3)),
+    { localRow15: localRow15.slice(0, 60), localTarget15, createdAt15 })
+  await closeMembersPanel()
+
+  // (4) U2 部分失败 + U8 cap：第 2 轮注入 4 名可选同事（共 5 可选），首写
+  // definite 失败（target_already_member）→ 4 条可用 + 1 失败 → 聚合按钮 +
+  // 「仅复制可用链接」提示；复制只落可用组；失败行错误保留。cap 臂另开目录。
+  mark('S15:ub3-partial-and-cap')
+  await runProgramDirect({ op: 'resetPm' })
+  await runProgramDirect({ op: 'stageColleagueDirectory', args: { available: 4 } })
+  await openMembersPanel()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
+  await js<boolean>(`window.__poo196.click('${T.membersInviteAction}')`)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.colleaguesRowToggle}')`)) >= 5, 8000)
+  // 全选 5 行中的 4 行（陈晓 + 容量1-3）：点击直至已选 4。
+  for (const userId of ['u-chen-02', 'u-cap-01', 'u-cap-02', 'u-cap-03']) {
+    await js<boolean>(`window.__poo196.click('${T.colleaguesRow}[data-user-id="${userId}"] button')`)
+    await delay(80)
+  }
+  await runProgramDirect({ op: 'setPmFault', args: { method: 'pmCreateColleagueInvitation', fault: { code: 'target_already_member', once: true } } })
+  await js<boolean>(`window.__poo196.click('${T.colleaguesConfirm}')`)
+  await until(async () => pmCallCount('pmCreateColleagueInvitation') >= 4, 10000)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersResult}')`), 10000)
+  await js<boolean>(`(() => {
+    window.__clipboardLog = []
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text) => { window.__clipboardLog.push(text); return true } },
+    })
+    return true
+  })()`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersCopyAll}')`), 8000)
+  const noteShown = await probeUntil(() => js<boolean>(`window.__poo196.q('${T.membersCopyAllNote}')`), 6000)
+  const noteText = (await js<string>(`document.querySelector('${T.membersCopyAllNote}')?.textContent ?? ''`)).trim()
+  const copyAllNoteCopy = (await i18nText('projectMembers.invite.copyAllNote')).trim()
+  check('[S15][U2] 部分失败保留逐行错误并呈现聚合提示（仅复制可用链接）',
+    noteShown && noteText.includes(copyAllNoteCopy.slice(0, 6))
+    && ((await js<string>(`document.querySelector('${T.membersResult}')?.textContent ?? ''`)).trim()).includes(((await i18nText('projectMembers.invite.alreadyMember'))).trim().slice(0, 6)),
+    { noteShown, noteText: noteText.slice(0, 40) })
+  await js<boolean>(`window.__poo196.click('${T.membersCopyAll}')`)
+  await until(async () => (await js<number>('window.__clipboardLog.length')) > 0, 8000)
+  const partialAggregate = await js<string>('window.__clipboardLog[0] ?? ""')
+  const partialGroups = partialAggregate.split('\n\n')
+  check('[S15][U2] 部分失败时只复制可用链接（3 组，失败者不入聚合）', partialGroups.length === 3
+    && !partialAggregate.includes('陈晓'), { groups: partialGroups.map(g => g.split('\n')[0]) })
+  await closeMembersPanel()
+
+  // (5) U8 cap 取消：注入 51 名可选同事（共 52 可选）→ 选满 50 → 未选行禁用
+  // 而已选行仍可取消（修正 `!selectionAtCap` 连已选都禁的条件）。
+  mark('S15:ub3-cap-cancel')
+  await runProgramDirect({ op: 'resetPm' })
+  await runProgramDirect({ op: 'stageColleagueDirectory', args: { available: 51 } })
+  await openMembersPanel()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
+  await js<boolean>(`window.__poo196.click('${T.membersInviteAction}')`)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.colleaguesRowToggle}')`)) >= 52, 10000)
+  const allToggles = `Array.from(document.querySelectorAll('${T.colleaguesRow}[data-project-state="available"] button'))`
+  await js<boolean>(`(${allToggles}).forEach(b => b.click()); true`)
+  await until(async () => ((await js<string>(`document.querySelector('${T.colleaguesSelected}')?.textContent ?? ''`)).trim()).includes('50'), 10000)
+  const capStates = await js<{ selectedDisabled: boolean; unselectedDisabled: boolean; selectedPressed: string }>(`(() => {
+    const toggles = ${allToggles}
+    const first = toggles[0]
+    const last = toggles[toggles.length - 1]
+    return { selectedDisabled: first.disabled, unselectedDisabled: last.disabled, selectedPressed: first.getAttribute('aria-pressed') }
+  })()`)
+  check('[S15][U8] 50 人上限：已选行仍可操作、未选行禁用', capStates.selectedPressed === 'true'
+    && capStates.selectedDisabled === false && capStates.unselectedDisabled === true, { capStates })
+  // 已选行取消成功（腾出名额后原禁用行恢复可选）。
+  await js<boolean>(`(${allToggles})[0].click(); true`)
+  await until(async () => ((await js<string>(`document.querySelector('${T.colleaguesSelected}')?.textContent ?? ''`)).trim()).includes('49'), 8000)
+  const lastAfterCancel = (await js<boolean>(`(${allToggles})[${allToggles}.length - 1].disabled`))
+  check('[S15][U8] 取消已选行后名额腾出（第 51 行恢复可选）', lastAfterCancel === false, { lastAfterCancel })
+  await closeMembersPanel()
+  await runProgramDirect({ op: 'resetPm' })
   await runProgramDirect({ op: 'setColleagueScript', args: { script: 'available' } })
+  await js<boolean>('window.__poo196Space.setRole("manager")')
+  await delay(200)
 }
 
 /** S16: 创建对话框回路扩展——焦点、空表单校验、勾选往返、提交门槛、
@@ -3506,6 +4060,21 @@ async function scenarioCreateLoops() {
   await clearInput()
   await delay(200)
 
+  // U12（G12）不实施子项钉：「Markdown」入口保留为硬编码预览触发器（点它
+  // 打开 onPopOut 预览，不写剪贴板——复制语义只在 Copy 钮上）。
+  mark('S16:markdown-preview-not-copy')
+  const markdownPresent = await probeUntil(() => js<boolean>('window.__poo196.markdownPopOutPresent()'), 8000)
+  check('[S16][U12] Markdown 入口保留（未伪装中文化）', markdownPresent)
+  if (markdownPresent) {
+    const clipboardBefore = (await js<string[]>('window.__poo196.clipboardLog()')).length
+    await js<boolean>('window.__poo196.clickMarkdownPopOut()')
+    const previewOpened = await probeUntil(async () => (await js<string>('document.body.innerText')).includes('response.md'), 8000)
+    const clipboardAfter = (await js<string[]>('window.__poo196.clipboardLog()')).length
+    check('[S16][U12] Markdown 点击仍是预览（response.md 覆盖层）且零剪贴板写入', previewOpened && clipboardAfter === clipboardBefore, { previewOpened, clipboardBefore, clipboardAfter })
+    await pressEscape()
+    await delay(200)
+  }
+
   await openCreateDialog()
   // E2-3：当前实现关闭后保留表单值（S13 残留会流入本场景），先清空字段
   // 再做空表单断言。R3（D7）下负责人补全框仅在显示名缺失/超限时存在——
@@ -3514,6 +4083,41 @@ async function scenarioCreateLoops() {
   await clearAndType(T.createName, '')
   const focusOnName = await js<boolean>(`document.activeElement === document.querySelector('${T.createName}')`)
   check('[S16] 打开对话框焦点落在名称输入（键盘轴）', focusOnName)
+
+  // U1（G1）呈现钉：介绍句=裁决文案；名称下的常驻 hint 撤下（无字段错误时
+  // hint span 为空）；13px 信息正文在责任勾选上方；24px 方框+整 label 热区。
+  const budgetFactCopy = (await i18nText('createProject.budgetFact')).trim()
+  const descriptionCopy = (await i18nText('createProject.description')).trim()
+  const u1Faces = await js<{ fact: string; factBefore: boolean; boxW: number; boxH: number; hint: string; desc: string }>(`(() => {
+    const fact = document.querySelector('${T.createBudgetFact}')
+    const consent = document.querySelector('${T.createResponsibility}')
+    const input = consent?.querySelector('input')
+    const box = input ? input.getBoundingClientRect() : null
+    return {
+      fact: fact?.textContent ?? '',
+      factBefore: Boolean(fact && consent && fact.compareDocumentPosition(consent) & Node.DOCUMENT_POSITION_FOLLOWING),
+      boxW: box ? Math.round(box.width) : 0,
+      boxH: box ? Math.round(box.height) : 0,
+      hint: document.getElementById('create-project-name-hint')?.textContent ?? 'missing',
+      desc: document.querySelector('${T.createDialog}')?.textContent ?? '',
+    }
+  })()`)
+  check('[S16][U1] 预算事实=裁决文案且在勾选上方（13px 信息正文）', u1Faces.fact === budgetFactCopy && u1Faces.factBefore, { fact: u1Faces.fact, factBefore: u1Faces.factBefore })
+  check('[S16][U1] 责任方框 24px（整 label 热区几何）', u1Faces.boxW === 24 && u1Faces.boxH === 24, { boxW: u1Faces.boxW, boxH: u1Faces.boxH })
+  check('[S16][U1] 名称下常驻 hint 撤下、介绍句在弹窗', u1Faces.hint === '' && u1Faces.desc.includes(descriptionCopy), { hint: u1Faces.hint })
+  // 热区钉：点句子（非方框）只切一次勾选——native label 语义，双切会回到原态。
+  const labelToggle = await js<boolean>(`(() => {
+    const label = document.querySelector('${T.createResponsibility}')
+    const input = label?.querySelector('input')
+    const sentence = Array.from(label?.querySelectorAll(':scope > span') ?? []).find(el => el.textContent.includes('我确认'))
+    if (!input || !sentence) return false
+    sentence.click()
+    const afterFirst = input.checked
+    sentence.click()
+    return afterFirst === true && input.checked === false
+  })()`)
+  check('[S16][U1] 点责任句只切一次勾选（热区=整 label）', labelToggle)
+  await capture('s16-u1-responsibility-presentation')
 
   // 空表单提交：字段级错误 + 零请求
   mark('S16:empty-submit')
@@ -3525,6 +4129,21 @@ async function scenarioCreateLoops() {
   const emptyText = await js<string>('window.__poo196.text()')
   check('[S16] 空表单提交呈现字段级错误（名称/责任）', emptyText.includes(nameRequired) && emptyText.includes(confirmRequired))
   check('[S16] 空表单提交零创建请求', pmCallCount('pmCreateEnterprise') - createMark0 === 0)
+  // U1 钉：未勾选错误自带 ≥12px 图标，且经 aria-describedby 关联到勾选框。
+  const errorFaceU1 = await js<{ iconMin: number; describedBy: string; invalid: string }>(`(() => {
+    const error = document.querySelector('${T.createResponsibilityError}')
+    const icon = error?.querySelector('svg')
+    const iconBox = icon ? icon.getBoundingClientRect() : null
+    const input = document.querySelector('${T.createResponsibility} input')
+    return {
+      iconMin: iconBox ? Math.min(Math.round(iconBox.width), Math.round(iconBox.height)) : 0,
+      describedBy: input?.getAttribute('aria-describedby') ?? '',
+      invalid: input?.getAttribute('aria-invalid') ?? '',
+    }
+  })()`)
+  check('[S16][U1] 未勾选错误带 ≥12px 图标并 aria 关联勾选框', errorFaceU1.iconMin >= 12
+    && errorFaceU1.describedBy.includes('create-project-responsibility-error')
+    && errorFaceU1.invalid === 'true', errorFaceU1)
   await capture('s16-create-field-errors')
 
   // 勾选往返 + 提交门槛：勾→取消→表单提交被责任校验拦截
@@ -3666,6 +4285,102 @@ async function scenarioCreateLoops() {
   await resetCreateDialogState()
   await runProgramDirect({ op: 'setPmCreateScript', args: { script: 'ok' } })
   await delay(200)
+
+  // U4（G4）创建宿主钉：contract_version_unsupported → 服务指引面（正文 +
+  // 可展开「查看更新指引」说明块 + 设置导航快捷入口 + 无重试零重发）。
+  mark('S16:version-unsupported-guide')
+  await runProgramDirect({ op: 'setPmCreateScript', args: { script: 'code:contract_version_unsupported' } })
+  await openCreateDialog()
+  await fillCreateForm('版本指引项目')
+  // pmCallCount 会把一次 faulted 调用记两条（fault+error），零重发断言按
+  // outcome 去重计数（error 条目是同一请求的桥接镜像，不是第二次请求）。
+  const pmCreateAttempts = () => result.pcCalls.filter(call => call.method === 'pmCreateEnterprise' && call.outcome !== 'error').length
+  const createMarkU4 = pmCreateAttempts()
+  await js<boolean>(`window.__poo196.click('${T.createSubmit}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.createSubmitError}')`), 8000)
+  const versionBodyCopyU4 = (await i18nText('createProject.error.versionUnsupported')).trim()
+  const guideActionCopyU4 = (await i18nText('home.projects.updateGuideAction')).trim()
+  const collapsedU4 = await js<{ body: string; expanded: string; label: string; editable: boolean }>(`(() => {
+    const guide = document.querySelector('${T.createUpdateGuide}')
+    const name = document.querySelector('${T.createName}')
+    return {
+      body: document.querySelector('${T.createSubmitError}')?.textContent ?? '',
+      expanded: guide?.getAttribute('aria-expanded') ?? 'missing',
+      label: guide?.textContent ?? '',
+      editable: Boolean(name) && !name.disabled,
+    }
+  })()`)
+  check('[S16][U4] 版本不支持正文=服务指引文案（表单仍可编辑）', collapsedU4.body.includes(versionBodyCopyU4) && collapsedU4.editable, collapsedU4)
+  check('[S16][U4] 「查看更新指引」按钮初始收起', collapsedU4.expanded === 'false' && collapsedU4.label === guideActionCopyU4, collapsedU4)
+  // 展开：说明块就地出现 + 客户端更新入口（宿主具备设置导航）+ 诚实注记。
+  await js<boolean>(`window.__poo196.click('${T.createUpdateGuide}')`)
+  const guideBodyCopyU4 = (await i18nText('home.projects.updateGuideBody')).trim()
+  const clientUpdateCopyU4 = (await i18nText('home.projects.clientUpdateAction')).trim()
+  const clientUpdateNoteU4 = (await i18nText('home.projects.clientUpdateNote')).trim()
+  const expandedU4 = await js<{ guide: string; body: string; shortcut: boolean; note: string }>(`(() => {
+    const guide = document.querySelector('${T.createUpdateGuide}')
+    return {
+      guide: guide?.textContent ?? '',
+      body: document.querySelector('${T.createUpdateGuideBody}')?.textContent ?? '',
+      shortcut: Boolean(document.querySelector('${T.createClientUpdate}')),
+      note: document.querySelector('${T.createSubmitError}')?.textContent ?? '',
+    }
+  })()`)
+  check('[S16][U4] 展开说明块=管理员升级指引', expandedU4.body.includes(guideBodyCopyU4), { body: expandedU4.body.slice(0, 80) })
+  check('[S16][U4] 客户端更新入口+「客户端更新不等于服务已更新」注记', expandedU4.shortcut
+    && (await js<string>(`document.querySelector('${T.createClientUpdate}')?.textContent ?? ''`)).trim() === clientUpdateCopyU4
+    && expandedU4.note.includes(clientUpdateNoteU4), expandedU4)
+  await capture('s16-u4-version-guide-expanded')
+  // 键盘可操作：焦点在收起钮上按真实 Enter → 收起。
+  await js<boolean>(`document.querySelector('${T.createUpdateGuide}').focus()`)
+  await pressEnterTrusted()
+  await until(() => js<boolean>(`!window.__poo196.q('${T.createUpdateGuideBody}')`), 6000)
+  check('[S16][U4] 真实 Enter 收起说明块（键盘可操作）', !(await js<boolean>(`window.__poo196.q('${T.createUpdateGuideBody}')`)))
+  // 全程零重发：指引交互不产生任何创建请求；无「重试」入口。
+  check('[S16][U4] 指引交互零重发（无重试语义入口）', pmCreateAttempts() - createMarkU4 === 1, { creates: pmCreateAttempts() - createMarkU4 })
+  // 设置导航快捷入口真实到 app 设置页（生产 NAVIGATE_EVENT → settings/app）。
+  await js<boolean>(`window.__poo196.click('${T.createUpdateGuide}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.createClientUpdate}')`), 6000)
+  await js<boolean>(`window.__poo196.click('${T.createClientUpdate}')`)
+  const navToSettings = await probeUntil(async () => (await js<Array<{ route: string }>>('window.__poo196.navigateLog()')).some(entry => entry.route === 'settings/app'), 6000)
+  check('[S16][U4] 检查客户端更新真实导航到 app 设置页', navToSettings && (await js<string>('window.__poo196.navRoute()')) === 'settings/app', { navToSettings, navRoute: await js<string>('window.__poo196.navRoute()') })
+  // 回到会话路由基线，避免导航状态漂移进后续场景。
+  await js<boolean>(`window.dispatchEvent(new CustomEvent('polo-ai-navigate', { detail: { route: 'allSessions' } })); true`)
+  await delay(300)
+  await closeCreateDialog()
+  await resetCreateDialogState()
+  await runProgramDirect({ op: 'setPmCreateScript', args: { script: 'ok' } })
+  await delay(200)
+
+  // U12（G12）键值钉：19 键 zh-Hans 逐字值（消费者 DOM 文案在 S5/R3-03 钉）。
+  mark('S16:u12-key-values')
+  const u12Expected: Record<string, string> = {
+    'projectContext.tabs.pins': '置顶',
+    'projectContext.actions.pin': '置顶',
+    'projectContext.actions.unpin': '取消置顶',
+    'projectContext.pin.emptyTitle': '还没有置顶文件',
+    'projectContext.pin.emptyHint': '在文件页置顶文件后，会集中显示在这里，方便快速取用。',
+    'projectContext.pin.loading': '正在加载置顶文件…',
+    'projectContext.pin.pinnedAria': '已置顶',
+    'projectContext.toast.pinned': '已置顶',
+    'projectContext.toast.unpinned': '已取消置顶',
+    'projectContext.status.ready': '已就绪',
+    'projectContext.status.processing': '正在准备',
+    'projectContext.status.failedRetryable': '处理失败，可重试',
+    'projectContext.statusFilter.available': '已就绪',
+    'projectContext.statusFilter.processing': '正在准备',
+    'projectContext.statusFilter.failed': '处理失败',
+    'projectContext.share.sourceNote': '来自对话：{{title}}',
+    'project.entry.historyFailed': '无法读取项目对话，请重新加载',
+    'homeSpace.context.enterpriseDescription': '发布到当前空间的应用。',
+    'homeSpace.context.personalDescription': '你的个人空间与圈子应用。',
+  }
+  const u12Actual = await js<Record<string, string>>(`(() => {
+    const keys = ${JSON.stringify(Object.keys(u12Expected))}
+    return Object.fromEntries(keys.map(key => [key, String(window.__poo196.t(key))]))
+  })()`)
+  const u12Drift = Object.entries(u12Expected).filter(([key, value]) => u12Actual[key] !== value)
+  check('[S16][U12] 19 键 zh-Hans 逐字值（术语统一落位）', u12Drift.length === 0, { drift: u12Drift.map(([key]) => key), actual: u12Drift.map(([key]) => [key, u12Actual[key]]) })
 }
 
 /** S17: 空间菜单入口（生产 ProductSpaceSwitcher）——R3 (D11) 唯一入口收敛：
@@ -3715,6 +4430,11 @@ async function scenarioSpaceMenuEntry() {
  * 不残留。 */
 async function scenarioBranchesAndLifecycle() {
   await runProgramDirect({ op: 'resetPm' })
+  // UB3 (U6): stage a REAL two-page invitation walk BEFORE the panel opens —
+  // first page = 2 active + 1 active-but-expired (never counted), second page
+  // = a repeatable duplicate + 1 active + 1 accepted. 首页 pending=2 →「至少」；
+  // 全加载 pending=3 → 精确。
+  await runProgramDirect({ op: 'setPmInvitationPages', args: { pageSize: 3 } })
   await js<boolean>('window.__poo196Space.setRole("manager")')
   await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.projectEmpty)`)
   await until(() => js<boolean>(`window.__poo196.q('${T.tabs}')`), 10000)
@@ -3724,6 +4444,57 @@ async function scenarioBranchesAndLifecycle() {
   await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
   check('[S18] 第二分支成员面板打开管理形态（push + 管理动作在）', (await js<string>(`document.querySelector('${T.membersPanel}')?.getAttribute('data-mode')`)) === 'push'
     && await js<boolean>(`window.__poo196.q('${T.membersInviteAction}')`))
+
+  // UB3 (U6)：分页未知数——首页快照有后页 →「待接受至少 2 人」（过期不计、
+  // 重复 id 不计）；摘要点击进记录；加载更多补全快照；返回总览刷新一次后
+  // 重算为精确「待接受 3 人」。
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersPendingSummary}')`), 8000)
+  const s18PendingReady = await probeUntil(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'at-least', 8000)
+  const s18PendingState = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()
+  const s18PendingText = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
+  const s18AtLeast2 = (await js<string>("String(window.__poo196.t('projectMembers.invitations.pendingAtLeast', { count: 2 }))")).trim()
+  check('[S18][U6] 首页快照有后页 →「待接受至少 2 人」（过期不计）',
+    s18PendingReady && s18PendingState === 'at-least' && s18PendingText.includes(s18AtLeast2.slice(0, 6)) && !s18PendingText.includes('4'), { s18PendingState, s18PendingText })
+  await capture('s18-pending-at-least')
+  await js<boolean>(`window.__poo196.click('${T.membersPendingSummary}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersInvitations}')`), 8000)
+  check('[S18][U6] 摘要点击进入分页记录列表', (await js<number>(`window.__poo196.count('${T.membersInvitationRow}')`)) === 3)
+  await js<boolean>(`window.__poo196.click('${T.membersInvitationsMore}')`)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.membersInvitationRow}')`)) === 6, 8000)
+  check('[S18][U6] 加载更多后快照补全（6 行 = 5 条 staged + 1 重复 id）', true)
+  await focusMembersPanel()
+  await pressEscape()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersRoster}')`), 8000)
+  // 返回总览时刷新一次（快照语义）——刷新后仍从第一页读起，分页未结束
+  // 继续「至少」，绝不把第一页当全量。
+  await until(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'at-least', 8000)
+  const s18AgainText = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
+  check('[S18][U6] 返回总览刷新一次后仍「至少 2」（不把第一页当全量）', s18AgainText.includes(s18AtLeast2.slice(0, 6)), { s18AgainText })
+  // 全加载面：关闭重开（openOverview 重读邀请记录），分页关闭后一次读全
+  // → 精确「待接受 3 人」（重复 id 只算一次、过期不计）。
+  await closeMembersPanel()
+  await runProgramDirect({ op: 'setPmInvitationPages', args: { pageSize: 0 } })
+  await openMembersPanel()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
+  await until(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'count', 8000)
+  const s18Exact = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
+  const s18Exact3 = (await js<string>("String(window.__poo196.t('projectMembers.invitations.pendingCount', { count: 3 }))")).trim()
+  check('[S18][U6] 全加载后重算为精确「待接受 3 人」（重复 id 只算一次）', s18Exact.includes(s18Exact3.slice(0, 5)), { s18Exact })
+  // 错误面：邀请记录加载失败 → 仅「查看待接受邀请」，不报假 0。
+  await runProgramDirect({ op: 'setPmFault', args: { method: 'pmListProjectInvitations', fault: { code: 'pm_service_unavailable', once: true } } })
+  await closeMembersPanel()
+  await openMembersPanel()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
+  const s18ErrorState = await probeUntil(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'view-only', 8000)
+  const s18ErrorText = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
+  const s18ViewPending = (await i18nText('projectMembers.invitations.viewPending')).trim()
+  check('[S18][U6] 记录加载失败 → 仅入口不报假数', s18ErrorState && s18ErrorText.includes(s18ViewPending.slice(0, 4)) && !s18ErrorText.includes('0'), { s18ErrorText })
+  await closeMembersPanel()
+  await runProgramDirect({ op: 'setPmFault', args: { method: 'pmListProjectInvitations' } })
+  await runProgramDirect({ op: 'setPmInvitationPages', args: { pageSize: 0 } })
+  await js<boolean>('window.__poo196Space.setRole("manager")')
+  await delay(200)
+
   await capture('s18-empty-session-members')
 
   // 切会话清理：面板打开时切走 → 面板消失且非项目会话零入口
@@ -3766,6 +4537,63 @@ async function scenarioBranchesAndLifecycle() {
   check('[S18][E2-3] 关闭重开责任勾选回到默认（同意不继承）', !respResidue, { respResidue })
   check('[S18][E2-3] 关闭重开保留文字草稿（共识最小：只清同意，不清文字）', nameResidue === '生命周期残留探针', { nameResidue })
   await closeCreateDialog()
+
+  // UB2 (U11/U3)：换账号清理——被拦截草稿的提示标记与共享进入状态在账号
+  // 变化时整体清除（上个账号的草稿 scope 不泄露）。标记由真实拦截产生：
+  // 注入 pending 进入状态 → 当前项目会话 composer 触发发送 → 同步拒绝。
+  await js<boolean>('window.__poo196.setSession(window.__poo196.sessions.project)')
+  await until(() => js<boolean>(`window.__poo196.q('${T.input}')`), 8000)
+  await js<boolean>(`window.__poo196.setEntryState({ accountId: '${ACCOUNT_ID}', productSpaceId: '${PRODUCT_SPACE_ID}', generation: 42, phase: 'switching', origin: 'home' })`)
+  await delay(200)
+  const s18SendMark = (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length
+  await typeInto(T.input, '换账号前被拦截的草稿')
+  await js<boolean>('window.__poo196.send()')
+  await delay(500)
+  check('[S18][U11] pending 注入下发送被拒且标记入账（零送达）',
+    (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length === s18SendMark
+    && ((await js<string>('window.__poo196.inputValue()')) ?? '').includes('换账号前被拦截的草稿')
+    && (await js<Array<{ draftKey: string; accountId: string }>>('window.__poo196.sendNotices()')).some(notice => notice.draftKey === SESSION_PROJECT && notice.accountId === ACCOUNT_ID), { notices: await js<Array<unknown>>('window.__poo196.sendNotices()') })
+  await js<boolean>(`window.__poo196Space.setAccountId('acct-zhao-03')`)
+  await until(async () => (await js<Array<unknown>>('window.__poo196.sendNotices()')).length === 0, 8000)
+  check('[S18][U11] 换账号清理提示标记（不泄露上个账号草稿 scope）',
+    (await js<Array<unknown>>('window.__poo196.sendNotices()')).length === 0
+    && ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'idle'))
+  await js<boolean>(`window.__poo196Space.setAccountId('${ACCOUNT_ID}')`)
+  await js<boolean>(`window.__poo196.setEntryState({ accountId: null, productSpaceId: null, generation: 0, phase: 'idle', origin: null })`)
+  await delay(300)
+
+  // ── UB4 (U13)：项目会话 composer 稳定提示 + 帮助；非项目保持当前呈现 ────
+  // 有历史的会话宿主与空态同一呈现（ChatPage→ChatDisplay→FreeFormInput）：
+  // 占位符稳定不轮播（超过旧轮播间隔仍为 Enter 偏好句），帮助可发现、Esc
+  // 关闭回焦；切到非项目会话恢复轮播默认且无帮助按钮。
+  await runProgramDirect({ op: 'setSendMessageKey', args: { value: 'enter' } })
+  await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.project)`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.input}')`), 8000)
+  const s18Placeholder = () => js<string>(`document.querySelector('${T.input}')?.getAttribute('aria-placeholder') ?? 'missing'`)
+  await until(async () => ((await s18Placeholder()) === (await i18nText('project.entry.inputPlaceholder')).trim()), 8000)
+  await delay(5300)
+  check('[S18][U13] 项目会话占位符稳定（等待超过旧轮播间隔仍为 Enter 偏好句）',
+    (await s18Placeholder()) === (await i18nText('project.entry.inputPlaceholder')).trim())
+  await js<boolean>(`window.__poo196.click('${T.composerHelp}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.composerHelpContent}')`), 8000)
+  check('[S18][U13] 会话 composer 输入帮助可打开（真实快捷键行）',
+    ((await js<string>(`document.querySelector('${T.composerHelpContent}')?.textContent ?? ''`)).includes((await i18nText('chatInput.placeholder.shiftTab')).trim().slice(0, 4))))
+  await js<boolean>('window.__poo196.focusInput()')
+  await pressEscape()
+  await until(async () => !(await js<boolean>(`window.__poo196.q('${T.composerHelpContent}')`)), 8000)
+  check('[S18][U13] Esc 关闭帮助并回焦输入框',
+    ((await js<string>(`document.activeElement?.getAttribute('data-tutorial') ?? 'missing'`)).trim()) === 'chat-input')
+  // 非项目会话：保持当前呈现（轮播默认占位符、无帮助按钮）。
+  await runProgramDirect({ op: 'setSendMessageKey', args: { value: 'enter' } })
+  await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.personal)`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.input}')`), 8000)
+  await delay(400)
+  check('[S18][U13] 非项目会话保持轮播默认（无帮助按钮、占位符非项目稳定句）',
+    !(await js<boolean>(`window.__poo196.q('${T.composerHelp}')`))
+    && (await s18Placeholder()) !== (await i18nText('project.entry.inputPlaceholder')).trim()
+    && (await s18Placeholder()) !== (await i18nText('project.entry.inputPlaceholderClick')).trim())
+  await capture('s18-composer-presentation')
+  await runProgramDirect({ op: 'setSendMessageKey', args: { value: 'enter' } })
 
   await js<boolean>(`window.__poo196.setSession(window.__poo196.sessions.project)`)
   await until(() => js<boolean>(`window.__poo196.q('${T.tabs}')`), 8000)
@@ -4020,6 +4848,13 @@ const leaveHomeMode = async () => {
  * DOM row count alone is not the rendered count. */
 const visibleCardCount = () => js<number>(`Array.from(document.querySelectorAll('${T.homeProjectCard}')).filter(el => el.getClientRects().length > 0).length`)
 
+/** UB5 (U9): the resident project search — visible (not display:none) input. */
+const projectSearchVisible = () => js<boolean>(`(() => { const el = document.querySelector('${T.homeProjectSearch}'); return Boolean(el) && el.getClientRects().length > 0 })()`)
+
+/** UB5 (U9): clear the resident project search the way a user's clear gesture
+ * does (select-all + replace with empty through the real input path). */
+const clearProjectSearchInput = () => js<boolean>(`(() => { const el = document.querySelector('${T.homeProjectSearch}'); el.focus(); document.execCommand('selectAll'); document.execCommand('insertText', false, ''); return true })()`)
+
 const cardIdsInDomOrder = () => js<string[]>(`Array.from(document.querySelectorAll('${T.homeProjectCard}')).map(el => el.getAttribute('data-product-space-id') ?? '')`)
 
 /** D12 R3-01: personal/organization/project 首页目录——三首页都渲染「项目」
@@ -4066,6 +4901,12 @@ async function scenarioR3HomeProjectDirectory() {
   const currentIds = await js<string[]>(`Array.from(document.querySelectorAll('${T.homeProjectCard} [data-testid="home-project-current"]')).map(el => el.closest('[data-testid="home-project-card"]')?.getAttribute('data-product-space-id') ?? '')`)
   check('[R3-01] 「当前」徽标唯一且落在当前空间卡', (await js<number>(`window.__poo196.count('${T.homeProjectCurrent}')`)) === 1
     && currentIds.length === 1 && currentIds[0] === R3_PROJECT_ALPHA_ID, { currentIds })
+  // UB5 (U14): committed PROJECT → 「当前项目：{{name}}」— the classification
+  // comes from the negotiated summary type; the committed name rides {{name}}
+  // verbatim (a project is never announced as the organization).
+  const projectIdentityExpected = await js<string>(`window.__poo196.t('homeSpace.context.currentProject', { name: '华东区销售资料库' })`)
+  const projectIdentityShown = await js<string>(`document.querySelector('${T.homeSpaceContextTitle}')?.textContent ?? ''`)
+  check('[R3-01][U14] 当前项目身份条=「当前项目：华东区销售资料库」（真实名称不改）', projectIdentityShown === projectIdentityExpected, { projectIdentityShown, projectIdentityExpected })
   await js<boolean>('window.__poo196Space.setActiveSpace("ps-apollo")')
   await delay(200)
 
@@ -4090,6 +4931,68 @@ async function scenarioR3HomeProjectDirectory() {
   check('[R3-01] 点击同名 twin 进入的是 ID 命中的那张（twinB）',
     (await js<string[]>('window.__poo196.spaceSwitchLog()')).some(entry => entry === `committed:${R3_TWIN_B_ID}`)
       && !(await js<string[]>('window.__poo196.spaceSwitchLog()')).some(entry => entry === `request:${R3_TWIN_A_ID}`))
+
+  // ── UB5 (U9/U14): 常驻搜索、空间身份层级与 frozen 卡片样式 ───────────────
+  // twin 提交后宿主按生产规则把表面切到了会话侧——showHome() 重新挂载首页
+  // （等价再次打开首页 tab，目录新读），再回到 organization scope 跑钉子。
+  await js<boolean>('window.__poo196.showHome()')
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 6, 12000)
+  await js<boolean>('window.__poo196Space.setActiveSpace("ps-apollo")')
+  await delay(400)
+
+  // U14: organization home → 「当前单位：{{name}}」（分类来自协商 summary
+  // 类型；已提交名称逐字进入 {{name}}，不从名字猜、不剥「项目空间」）。
+  const orgIdentityExpected = await js<string>(`window.__poo196.t('homeSpace.context.currentOrganization', { name: 'Apollo 项目空间' })`)
+  const orgIdentityShown = await js<string>(`document.querySelector('${T.homeSpaceContextTitle}')?.textContent ?? ''`)
+  check('[R3-01][U14] organization 身份条=「当前单位：Apollo 项目空间」（真实名称不改）', orgIdentityShown === orgIdentityExpected, { orgIdentityShown, orgIdentityExpected })
+  // U14: the compact identity row — 8px vertical padding + 13px semibold
+  // name + 12px secondary description.
+  check('[R3-01][U14] 身份条紧凑（py-8px、名称 13px semibold、说明 12px 次级）',
+    await js<boolean>(`(() => {
+      const section = document.querySelector('${T.homeSpaceContext}')
+      const title = document.querySelector('${T.homeSpaceContextTitle}')
+      return Boolean(section && title)
+        && section.className.includes('py-[8px]')
+        && title.className.includes('text-[13px]')
+        && title.className.includes('font-semibold')
+    })()`))
+
+  // U14: 项目区标题/说明换新键（旧→新映射：项目 → 我们的项目）。
+  const projectsTitleCopy = (await i18nText('home.projects.title')).trim()
+  const projectsDescCopy = (await i18nText('home.projects.description')).trim()
+  const projectsSectionText = await js<string>(`document.querySelector('${T.homeProjects}')?.textContent ?? ''`)
+  check('[R3-01][U14] 项目区标题=「我们的项目」+ 新说明', projectsSectionText.includes(projectsTitleCopy) && projectsSectionText.includes(projectsDescCopy),
+    { projectsTitleCopy, projectsDescCopy })
+
+  // U14: 卡片层级——每张卡名称前对话气泡 + 右下共用 U3「进入项目」标签。
+  const bubbleCount = await js<number>(`Array.from(document.querySelectorAll('${T.homeProjectCard} h3 svg')).length`)
+  const enterLabelCount = await js<number>(`window.__poo196.count('${T.homeProjectEnterLabel}')`)
+  check('[R3-01][U14] 六张卡都带对话气泡图标+「进入项目」标签', bubbleCount === 6 && enterLabelCount === 6, { bubbleCount, enterLabelCount })
+  // U14: frozen POO-41 卡片语言保持——圆角/材质/hover 抬升/grid 断点逐字未动。
+  check('[R3-01][U14] frozen 卡片样式保持（rounded-20/材质/hover/grid 断点）',
+    await js<boolean>(`(() => {
+      const card = document.querySelector('${T.homeProjectCard}')
+      const grid = card?.parentElement
+      const cls = card?.className ?? ''
+      const gridCls = grid?.className ?? ''
+      return cls.includes('rounded-[20px]') && cls.includes('client-material-card')
+        && cls.includes('hover:-translate-y-[1px]') && cls.includes('hover:shadow-middle')
+        && gridCls.includes('grid-cols-1') && gridCls.includes('min-[761px]:grid-cols-2')
+        && gridCls.includes('min-[1081px]:grid-cols-3')
+    })()`))
+
+  // U9: 常驻搜索——未展开（1440 宽）即可发现；查询只过滤项目区，应用工具栏
+  // 搜索词与结果不受影响。
+  check('[R3-01][U9] 项目搜索常驻可发现（1440 宽）',
+    await js<boolean>(`(() => { const el = document.querySelector('${T.homeProjectSearch}'); return Boolean(el) && el.getClientRects().length > 0 })()`))
+  await typeInto(T.homeProjectSearch, R3_TWIN_NAME)
+  await delay(400)
+  check('[R3-01][U9] 项目查询只过滤项目区（beta+双 twin 命中 3 卡），应用工具栏不受影响',
+    (await visibleCardCount()) === 3
+    && (await js<string>(`document.querySelector('${T.homeDirectorySearch}')?.value ?? ''`)) === '')
+  await capture('r3-01-u9-u14-resident-search-identity')
+  await js<boolean>(`(() => { const el = document.querySelector('${T.homeProjectSearch}'); el.focus(); document.execCommand('selectAll'); document.execCommand('insertText', false, ''); return true })()`)
+  await delay(300)
   await capture('r3-01-directory')
   await leaveHomeMode()
 }
@@ -4109,6 +5012,9 @@ async function scenarioR3ProjectCapacityAndOrdering() {
   await until(() => js<boolean>(`window.__poo196.q('${T.homeProjectEmpty}')`), 12000)
   check('[R3-02] 0 项目 →「还没有项目」空态且零卡片', (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 0)
   check('[R3-02] 空目录仍保留唯一创建入口', (await js<number>(`window.__poo196.count('${T.homeProjectCreate}')`)) === 1)
+  // UB5 (U9): 0 项目（已加载零集合）搜索仍常驻；空态/无匹配不互串。
+  check('[R3-02][U9] 0 项目搜索仍常驻可发现', await projectSearchVisible()
+    && !(await js<boolean>(`window.__poo196.q('${T.homeProjectNoMatches}')`)))
   await capture('r3-02-empty-directory')
 
   // 1 边界：单卡、无展开控件。
@@ -4116,8 +5022,9 @@ async function scenarioR3ProjectCapacityAndOrdering() {
   await remountHome()
   await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 1, 12000)
   check('[R3-02] 1 项目 → 单卡且无「查看全部」', !(await js<boolean>(`window.__poo196.q('${T.homeProjectExpand}')`)))
+  check('[R3-02][U9] 1 项目搜索常驻可发现', await projectSearchVisible())
 
-  // 超两行 + 展开搜索收起回路（900px 视口=两列断点带）。
+  // 超两行 + UB5 (U9) 常驻搜索矩阵（900px 视口=两列断点带）。
   await runProgramDirect({ op: 'setR3DirectoryScript', args: { script: 'ok' } })
   await remountHome()
   await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 6, 12000)
@@ -4125,21 +5032,68 @@ async function scenarioR3ProjectCapacityAndOrdering() {
   await delay(400)
   check('[R3-02] 超两行收起态只渲染两行（4 卡可见）', (await visibleCardCount()) === 4)
   check('[R3-02] 收起态出现「查看全部」', await js<boolean>(`window.__poo196.q('${T.homeProjectExpand}')`))
+  // U9 旧→新映射：搜索原先「展开后才出现」，现为常驻——收起态即可发现。
+  check('[R3-02][U9] 收起态搜索常驻可发现（900px 窄屏）', await projectSearchVisible())
+  // U9: 查询命中折叠区项目（只读卡排序在第 6 位、收起态 900px 下隐藏）→
+  // 全部命中绕过两行截断；展开/收起控件同时隐藏（不存在隐式擦掉查询的路径）。
+  await typeInto(T.homeProjectSearch, '只读')
+  await delay(400)
+  check('[R3-02][U9] 查询命中折叠区项目：全部命中（1 卡），无展开/收起控件', (await visibleCardCount()) === 1
+    && !(await js<boolean>(`window.__poo196.q('${T.homeProjectExpand}')`))
+    && !(await js<boolean>(`window.__poo196.q('${T.homeProjectCollapse}')`)))
+  await capture('r3-02-u9-collapsed-area-hit')
+  // U9: 清空查询 → 恢复原展开偏好（仍收起两行）+「查看全部」回来。
+  await clearProjectSearchInput()
+  await delay(400)
+  check('[R3-02][U9] 清空查询恢复收起两行+「查看全部」', (await visibleCardCount()) === 4
+    && await js<boolean>(`window.__poo196.q('${T.homeProjectExpand}')`)
+    && !(await js<boolean>(`window.__poo196.q('${T.homeProjectNoMatches}')`)))
   await js<boolean>(`window.__poo196.click('${T.homeProjectExpand}')`)
-  await until(() => js<boolean>(`window.__poo196.q('${T.homeProjectSearch}')`), 8000)
+  await until(() => js<boolean>(`window.__poo196.q('${T.homeProjectCollapse}')`), 8000)
   check('[R3-02] 展开后全部可见并出现项目搜索+收起', (await visibleCardCount()) === 6
+    && await js<boolean>(`window.__poo196.q('${T.homeProjectSearch}')`)
     && await js<boolean>(`window.__poo196.q('${T.homeProjectCollapse}')`))
   await typeInto(T.homeProjectSearch, '不存在的项目zzz')
   await delay(400)
   check('[R3-02] 项目搜索无匹配 →「没有匹配的项目」', await js<boolean>(`window.__poo196.q('${T.homeProjectNoMatches}')`)
     && (await visibleCardCount()) === 0)
+  check('[R3-02][U9] 查询非空时无展开/收起控件', !(await js<boolean>(`window.__poo196.q('${T.homeProjectExpand}')`))
+    && !(await js<boolean>(`window.__poo196.q('${T.homeProjectCollapse}')`)))
+  // U9: 无匹配提示紧接输入框下方（同容器、紧随其后）——不在输入框上方，
+  // 也不落进应用区。
+  check('[R3-02][U9] 无匹配提示紧接输入框下方', await js<boolean>(`(() => {
+    const input = document.querySelector('${T.homeProjectSearch}')
+    const hint = document.querySelector('${T.homeProjectNoMatches}')
+    return Boolean(input && hint)
+      && Boolean(input.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING)
+      && input.parentElement === hint.parentElement
+  })()`))
   await capture('r3-02-expanded-search')
+  // U9 旧→新映射：旧检查「收起=清空搜索」按裁决改为「展开/收起与查询独立
+  // 存储——清空才恢复原展开偏好」。查询非空时本无收起钮，直接清空。
+  await clearProjectSearchInput()
+  await delay(400)
+  check('[R3-02][U9] 清空查询恢复展开偏好（6 卡全显+收起钮）', (await visibleCardCount()) === 6
+    && await js<boolean>(`window.__poo196.q('${T.homeProjectCollapse}')`)
+    && !(await js<boolean>(`window.__poo196.q('${T.homeProjectNoMatches}')`)))
   await js<boolean>(`window.__poo196.click('${T.homeProjectCollapse}')`)
   await until(() => js<boolean>(`window.__poo196.q('${T.homeProjectExpand}')`), 8000)
-  check('[R3-02] 收起回到两行且清空搜索', (await visibleCardCount()) === 4
+  check('[R3-02] 收起回到两行', (await visibleCardCount()) === 4
     && !(await js<boolean>(`window.__poo196.q('${T.homeProjectNoMatches}')`)))
+
+  // UB5 (U9): 7 项目容量边界——搜索仍常驻，展开控件在任何断点都保留。
+  await runProgramDirect({ op: 'setR3DirectoryScript', args: { script: 'seven' } })
+  await remountHome()
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 7, 12000)
+  const expandTextSeven = await js<string>(`document.querySelector('${T.homeProjectExpand}')?.textContent ?? ''`)
+  check('[R3-02][U9] 7 项目搜索常驻且「查看全部（7）」', await projectSearchVisible() && expandTextSeven.includes('（7）'), { expandTextSeven })
   host.setSize(1440, 900)
   await delay(350)
+  check('[R3-02][U9] 宽屏（1440）搜索仍常驻可发现', await projectSearchVisible())
+  // 还原 6 项目目录，供后续 visit/账号隔离钉使用。
+  await runProgramDirect({ op: 'setR3DirectoryScript', args: { script: 'ok' } })
+  await remountHome()
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 6, 12000)
 
   // 成功进入才写 visit：进入前的记录为空，事务落地后才有 alpha 记录。
   const visitsBefore = await js<Record<string, number>>(`window.__poo196.visitOrder('${ACCOUNT_ID}')`)
@@ -4156,7 +5110,17 @@ async function scenarioR3ProjectCapacityAndOrdering() {
   check('[R3-02] visit 记录把 alpha 排到首位', (await cardIdsInDomOrder())[0] === R3_PROJECT_ALPHA_ID, { ids: await cardIdsInDomOrder() })
 
   // 账号切换隔离：账号 B 的 visit 集合为空（排序回退名称序），A 的记录不动。
+  // UB5 (U9): 项目查询不跨账号——切账号先清空查询（展开偏好是设备级，不动）。
+  await typeInto(T.homeProjectSearch, '华东区')
+  await delay(400)
+  check('[R3-02][U9] 项目查询过滤生效（仅华东区命中 1 卡）', (await visibleCardCount()) === 1)
   await js<boolean>(`window.__poo196Space.setAccountId('${R3_ACCOUNT_B_ID}')`)
+  await until(async () => (await js<string>(`document.querySelector('${T.homeProjectSearch}')?.value ?? 'pending'`)) === '', 8000)
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 6, 12000)
+  // 1440 宽（本段视口）收起容量=2×3：查询清空后 6 卡应全部恢复可见。
+  check('[R3-02][U9] 切账号清空项目查询且全部卡片恢复（1440 宽 6 卡全显）',
+    (await js<string>(`document.querySelector('${T.homeProjectSearch}')?.value ?? ''`)) === ''
+    && (await visibleCardCount()) === 6)
   await delay(400)
   const orderForB = await cardIdsInDomOrder()
   check('[R3-02] 账号 B 看不到 A 的 visit 排序（回退名称序）', orderForB[0] !== R3_PROJECT_ALPHA_ID, { orderForB })
@@ -4175,6 +5139,9 @@ async function scenarioR3LoadingAndRevocation() {
   await enterHomeMode()
   const skeletonSeen = await probeUntil(() => js<boolean>(`window.__poo196.q('${T.homeProjectLoading}')`), 6000)
   check('[R3-03] 首读慢响应呈现骨架（非空白非空态）', skeletonSeen)
+  // UB5 (U9): 加载态绝不被搜索的空结果替代（无「没有匹配的项目」/「还没有项目」）。
+  check('[R3-03][U9] 加载态不渲染无匹配/空态', !(await js<boolean>(`window.__poo196.q('${T.homeProjectNoMatches}')`))
+    && !(await js<boolean>(`window.__poo196.q('${T.homeProjectEmpty}')`)))
   await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 15000)
   await runProgramDirect({ op: 'setLatency', args: { ms: 40 } })
 
@@ -4187,6 +5154,9 @@ async function scenarioR3LoadingAndRevocation() {
   check('[R3-03] 首读失败呈现 error face（映射文案、非空态）', errorShown.includes(errorCopy.slice(0, 4))
     && !(await js<boolean>(`window.__poo196.q('${T.homeProjectEmpty}')`)), { errorShown: errorShown.slice(0, 60) })
   check('[R3-03] generic 失败带显式重试入口', await js<boolean>(`window.__poo196.q('${T.homeProjectErrorRetry}')`))
+  // UB5 (U9): 失败态同样不被搜索空结果替代（搜索常驻但不产出假结果面）。
+  check('[R3-03][U9] 失败态不渲染无匹配/空态', !(await js<boolean>(`window.__poo196.q('${T.homeProjectNoMatches}')`))
+    && !(await js<boolean>(`window.__poo196.q('${T.homeProjectEmpty}')`)))
   await capture('r3-03-error-face')
 
   // 重试恢复：清障后点重试 → 目录回来。
@@ -4205,6 +5175,47 @@ async function scenarioR3LoadingAndRevocation() {
   check('[R3-03] 版本不支持无重试按钮', !(await js<boolean>(`window.__poo196.q('${T.homeProjectErrorRetry}')`)))
   check('[R3-03] 版本不支持仍不渲染空态/卡片', !(await js<boolean>(`window.__poo196.q('${T.homeProjectEmpty}')`))
     && (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 0)
+
+  // U4（G4）首页宿主钉：可展开指引 + 设置导航（导航可用时）+ 键盘收起。
+  // 旧→新映射：正文从「请更新服务后重试」改为服务/管理员指引（U4 修改裁决）。
+  const guideActionCopyR3 = (await i18nText('home.projects.updateGuideAction')).trim()
+  const collapsedR3 = await js<{ expanded: string; label: string }>(`(() => {
+    const guide = document.querySelector('${T.homeProjectUpdateGuide}')
+    return { expanded: guide?.getAttribute('aria-expanded') ?? 'missing', label: guide?.textContent ?? '' }
+  })()`)
+  check('[R3-03][U4] 「查看更新指引」主按钮在且初始收起', collapsedR3.expanded === 'false' && collapsedR3.label === guideActionCopyR3, collapsedR3)
+  await js<boolean>(`window.__poo196.click('${T.homeProjectUpdateGuide}')`)
+  const guideBodyCopyR3 = (await i18nText('home.projects.updateGuideBody')).trim()
+  const clientUpdateCopyR3 = (await i18nText('home.projects.clientUpdateAction')).trim()
+  const clientUpdateNoteR3 = (await i18nText('home.projects.clientUpdateNote')).trim()
+  const expandedR3 = await js<{ body: string; shortcut: boolean; note: string }>(`(() => {
+    return {
+      body: document.querySelector('${T.homeProjectUpdateGuideBody}')?.textContent ?? '',
+      shortcut: Boolean(document.querySelector('${T.homeProjectClientUpdate}')),
+      note: document.querySelector('${T.homeProjectError}')?.textContent ?? '',
+    }
+  })()`)
+  check('[R3-03][U4] 展开说明块=联系 Polo 管理员指引', expandedR3.body.includes(guideBodyCopyR3), { body: expandedR3.body.slice(0, 80) })
+  check('[R3-03][U4] 检查客户端更新入口+「客户端更新不等于服务已更新」注记', expandedR3.shortcut
+    && (await js<string>(`document.querySelector('${T.homeProjectClientUpdate}')?.textContent ?? ''`)).trim() === clientUpdateCopyR3
+    && expandedR3.note.includes(clientUpdateNoteR3), expandedR3)
+  await capture('r3-03-u4-version-guide-expanded')
+  // 键盘收起：焦点在收起钮 + 真实 Enter。
+  await js<boolean>(`document.querySelector('${T.homeProjectUpdateGuide}').focus()`)
+  await pressEnterTrusted()
+  await until(() => js<boolean>(`!window.__poo196.q('${T.homeProjectUpdateGuideBody}')`), 6000)
+  check('[R3-03][U4] 真实 Enter 收起说明块（键盘可操作）', !(await js<boolean>(`window.__poo196.q('${T.homeProjectUpdateGuideBody}')`)))
+  // 重新展开后设置导航真实到 app 设置页（宿主具备设置导航 → 快捷入口存在）。
+  await js<boolean>(`window.__poo196.click('${T.homeProjectUpdateGuide}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.homeProjectClientUpdate}')`), 6000)
+  await js<boolean>(`window.__poo196.click('${T.homeProjectClientUpdate}')`)
+  const navToSettingsR3 = await probeUntil(async () => (await js<Array<{ route: string }>>('window.__poo196.navigateLog()')).some(entry => entry.route === 'settings/app'), 6000)
+  check('[R3-03][U4] 检查客户端更新真实导航到 app 设置页', navToSettingsR3 && (await js<string>('window.__poo196.navRoute()')) === 'settings/app', { navToSettingsR3, navRoute: await js<string>('window.__poo196.navRoute()') })
+  // 回到会话路由基线 + 回首页（导航事件把宿主表面切走了，与真实 tab 行为一致）。
+  await js<boolean>(`window.dispatchEvent(new CustomEvent('polo-ai-navigate', { detail: { route: 'allSessions' } })); true`)
+  await delay(200)
+  await remountHome()
+  await until(() => js<boolean>(`window.__poo196.q('${T.homeProjectError}')`), 12000)
   await capture('r3-03-version-unsupported')
   await runProgramDirect({ op: 'setR3DirectoryScript', args: { script: 'ok' } })
 
@@ -4213,6 +5224,95 @@ async function scenarioR3LoadingAndRevocation() {
   await remountHome()
   await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 12000)
   check('[R3-03] ready 态无 stale 标记（假态钉）', (await js<number>(`window.__poo196.count('${T.homeProjectStale}')`)) === 0)
+
+  // U12（G12）消费钉：HomeSpaceContext 空间说明改值——企业态呈现「发布到
+  // 当前空间的应用。」（不再绑定该企业空间措辞，键名/结构不变）。
+  const enterpriseDescCopy = (await i18nText('homeSpace.context.enterpriseDescription')).trim()
+  check('[R3-03][U12] 空间说明=「发布到当前空间的应用。」', (await js<string>('document.body.innerText')).includes(enterpriseDescCopy), { enterpriseDescCopy })
+
+  // ── UB5 (U14): 类型未知 →「当前空间：{{name}}」。协商 summary 缺失当前
+  // 空间的分类行时，身份条必须给中性面——不从名字猜组织/项目，真实名称
+  // 逐字保留。数据注入（legacy）仅摘除 ps-apollo 的 summary 行。
+  await runProgramDirect({ op: 'setR3DirectoryScript', args: { script: 'legacy' } })
+  await remountHome()
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) === 6, 12000)
+  const unknownIdentityExpected = await js<string>(`window.__poo196.t('homeSpace.context.currentSpace', { name: 'Apollo 项目空间' })`)
+  const unknownIdentityShown = await js<string>(`document.querySelector('${T.homeSpaceContextTitle}')?.textContent ?? ''`)
+  check('[R3-03][U14] summary 缺失 →「当前空间：Apollo 项目空间」（不猜组织/项目）', unknownIdentityShown === unknownIdentityExpected, { unknownIdentityShown, unknownIdentityExpected })
+  await capture('r3-03-u14-unclassified-identity')
+  await runProgramDirect({ op: 'setR3DirectoryScript', args: { script: 'ok' } })
+
+  // ── UB2 (U10): committed 进入后 getSessions 拒绝 → 持久错误面（历史未知
+  // ≠ 空项目，绝不渲染可发送空态或旧项目消息）；「重新加载」重读重进；
+  // scope 离开目标后旧错误不得复活。
+  await runProgramDirect({ op: 'resetR3' })
+  await runProgramDirect({ op: 'setR3SessionsMode', args: { mode: 'fault' } })
+  await js<boolean>('window.__poo196.showHome()')
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 12000)
+  const createsBeforeHistoryFault = (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length
+  const getSessionsBeforeFault = (await runProgramDirect<{ getSessionsCalls: unknown[] }>({ op: 'r3Stats' })).getSessionsCalls.length
+  await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_ALPHA_ID}"]')`)
+  await until(async () => ((await js<{ phase: string; productSpaceId: string | null; origin: string | null }>('window.__poo196.entryState()')).phase === 'history-failed'), 12000)
+  const failedStateR3 = await js<{ productSpaceId: string | null; origin: string | null }>('window.__poo196.entryState()')
+  check('[R3-03][U10] committed 后读历史失败 → history-failed 且保留目标',
+    failedStateR3.productSpaceId === R3_PROJECT_ALPHA_ID && failedStateR3.origin === 'home', { failedStateR3 })
+  const historyFailedCopy = (await i18nText('project.entry.historyFailed')).trim()
+  await js<boolean>('window.__poo196.showChats()')
+  await until(() => js<boolean>(`window.__poo196.q('${T.projectEntryHistoryError}')`), 8000)
+  const historyErrorText = await js<string>(`document.querySelector('${T.projectEntryHistoryError}')?.textContent ?? ''`)
+  check('[R3-03][U10] 持久错误面保留项目标题+错误文案+「重新加载」',
+    historyErrorText.includes('华东区销售资料库')
+    && historyErrorText.includes(historyFailedCopy.slice(0, 6))
+    && await js<boolean>(`window.__poo196.q('${T.projectEntryRetry}')`))
+  // 「不显示旧项目消息」的落地面断言：face 分支覆盖一切路由（包括前序场景
+  // 留下的会话路由）——对话面（pc-tabs 的 ChatPage/EmptyState）不在 DOM，
+  // face 单独在场。
+  check('[R3-03][U10] 不落成可发送空态/不显示旧会话（face 覆盖路由，无对话面）',
+    !(await js<boolean>(`window.__poo196.q('${T.projectEntryEmpty}')`))
+    && !(await js<boolean>(`window.__poo196.q('[data-testid="pc-tabs"]')`))
+    && await js<boolean>(`window.__poo196.q('${T.projectEntryHistoryError}')`)
+    && (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === createsBeforeHistoryFault, {
+      emptyState: await js<boolean>(`window.__poo196.q('${T.projectEntryEmpty}')`),
+      chatTabs: await js<boolean>(`window.__poo196.q('[data-testid="pc-tabs"]')`),
+      face: await js<boolean>(`window.__poo196.q('${T.projectEntryHistoryError}')`),
+      navRoute: await js<string>('window.__poo196.navRoute()'),
+      creates: (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length,
+      createsBefore: createsBeforeHistoryFault,
+      entry: await js<unknown>('window.__poo196.entryState()'),
+    })
+  check('[R3-03][U10] 失败前确实发起了新鲜历史读（getSessions）',
+    (await runProgramDirect<{ getSessionsCalls: unknown[] }>({ op: 'r3Stats' })).getSessionsCalls.length > getSessionsBeforeFault)
+  await capture('r3-03-history-error-face')
+  // history-failed 重试：重读目标历史，再按原选择规则进入。
+  await runProgramDirect({ op: 'setR3SessionsMode', args: { mode: 'recent' } })
+  await js<boolean>(`window.__poo196.click('${T.projectEntryRetry}')`)
+  await until(async () => (await js<string>('window.__poo196.chatSession()')) === SESSION_R3_ALPHA_RECENT, 12000)
+  check('[R3-03][U10] 「重新加载」重读历史并落地最近会话（错误面收口）',
+    (await js<string>('window.__poo196.chatSession()')) === SESSION_R3_ALPHA_RECENT
+    && ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'ready')
+    && !(await js<boolean>(`window.__poo196.q('${T.projectEntryHistoryError}')`)))
+  await capture('r3-03-history-error-recovered')
+
+  // 撤权/换 scope 后不恢复旧错误：beta 失败保留 → scope 离开（回 apollo）→
+  // 状态被清；再切回 beta（历史可读）旧错误也不复活。
+  await runProgramDirect({ op: 'setR3SessionsMode', args: { mode: 'fault' } })
+  await js<boolean>('window.__poo196.showHome()')
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 12000)
+  await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_BETA_ID}"]')`)
+  await until(async () => ((await js<{ phase: string; productSpaceId: string | null }>('window.__poo196.entryState()')).phase === 'history-failed'
+    && (await js<{ productSpaceId: string | null }>('window.__poo196.entryState()')).productSpaceId === R3_PROJECT_BETA_ID), 12000)
+  await js<boolean>('window.__poo196Space.setActiveSpace("ps-apollo")')
+  await until(async () => ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'idle'), 8000)
+  await runProgramDirect({ op: 'setR3SessionsMode', args: { mode: 'recent' } })
+  await js<boolean>(`window.__poo196Space.setActiveSpace("${R3_PROJECT_BETA_ID}")`)
+  await delay(600)
+  await js<boolean>('window.__poo196.showChats()')
+  await delay(400)
+  check('[R3-03][U10] 撤权/换 scope 后旧错误不复活（状态清空、错误面消失）',
+    ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'idle')
+    && !(await js<boolean>(`window.__poo196.q('${T.projectEntryHistoryError}')`)))
+  await js<boolean>('window.__poo196Space.setActiveSpace("ps-apollo")')
+  await delay(300)
 
   // 撤权：alpha 从目录消失（spaces 与 summaries 同步收窄），重挂后无卡。
   await runProgramDirect({ op: 'setR3DirectoryScript', args: { script: 'revoked' } })
@@ -4251,6 +5351,23 @@ async function scenarioR3MinimalCreateAndIdentity() {
   check('[R3-04] 可用显示名无负责人补全框/同步提示', !(await js<boolean>(`window.__poo196.q('${T.createOwner}')`))
     && !(await js<boolean>(`window.__poo196.q('${T.createOwnerSyncHint}')`)))
 
+  // U1（G1）钉：预算事实=裁决文案且在勾选上方；介绍句=裁决文案；名称下
+  // 常驻 hint 撤下（testid 保留：create-project-budget-fact/responsibility/submit）。
+  const budgetFactCopyR34 = (await i18nText('createProject.budgetFact')).trim()
+  const descriptionCopyR34 = (await i18nText('createProject.description')).trim()
+  const u1FacesR34 = await js<{ fact: string; factBefore: boolean; hint: string; desc: string }>(`(() => {
+    const fact = document.querySelector('${T.createBudgetFact}')
+    const consent = document.querySelector('${T.createResponsibility}')
+    return {
+      fact: fact?.textContent ?? '',
+      factBefore: Boolean(fact && consent && fact.compareDocumentPosition(consent) & Node.DOCUMENT_POSITION_FOLLOWING),
+      hint: document.getElementById('create-project-name-hint')?.textContent ?? 'missing',
+      desc: document.querySelector('${T.createDialog}')?.textContent ?? '',
+    }
+  })()`)
+  check('[R3-04][U1] 预算事实=裁决文案（勾选上方、13px 信息正文）', u1FacesR34.fact === budgetFactCopyR34 && u1FacesR34.factBefore, { fact: u1FacesR34.fact, factBefore: u1FacesR34.factBefore })
+  check('[R3-04][U1] 介绍句=裁决文案且名称 hint 撤下', u1FacesR34.desc.includes(descriptionCopyR34) && u1FacesR34.hint === '', { hint: u1FacesR34.hint })
+
   // 责任勾选门：名称就绪但未勾选 → 提交被拦 + 零创建请求。
   const createMark0 = pmCallCount('pmCreateEnterprise')
   await clearAndType(T.createName, '身份补全测试项目')
@@ -4269,6 +5386,9 @@ async function scenarioR3MinimalCreateAndIdentity() {
   // 空介绍穿透真实命令：勾选后提交，command.purpose 为合法空串。
   await clearAndType(T.createName, '空介绍穿透项目')
   await clearAndType(T.createPurpose, '')
+  // UB2 (U10/U3): 在提交前布好 getSessions 故障——创建本身不读会话历史，
+  // 但创建成功后的自动进入要读；故障让「创建成功→进入失败」确定性可达。
+  await runProgramDirect({ op: 'setR3SessionsMode', args: { mode: 'fault' } })
   await js<boolean>(`window.__poo196.click('${T.createResponsibility}')`)
   // 提交通道与生产一致：表单 submit 事件 = 浏览器 Enter 提交驱动的同一
   // onSubmit（D7：Enter 与鼠标同一门）。合成 pointer 在 Radix 面上的不稳定
@@ -4320,8 +5440,105 @@ async function scenarioR3MinimalCreateAndIdentity() {
       && !(await js<string[]>('window.__poo196.spaceSwitchLog()')).some(entry => entry.startsWith('select:')))
   await until(() => createDialogClosed(), 8000)
   check('[R3-04] 进入动作关闭对话框', true)
+  // UB2 (U10/U3)：创建来源进入读历史失败 → 持久错误面（创建来源额外行），
+  // 重试只重进、不再 create。注意 scope 仍在 created 项目上（尚未切走）。
+  const createsR34 = (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length
+  await until(async () => {
+    const entry = await js<{ phase: string; productSpaceId: string | null; origin: string | null }>('window.__poo196.entryState()')
+    return entry.phase === 'history-failed' && entry.productSpaceId === createdIdR34 && entry.origin === 'create'
+  }, 12000)
+  check('[R3-04][U10] 创建来源失败保留目标且 origin=create',
+    ((await js<{ productSpaceId: string | null }>('window.__poo196.entryState()')).productSpaceId) === createdIdR34)
+  await js<boolean>('window.__poo196.showChats()')
+  await until(() => js<boolean>(`window.__poo196.q('${T.projectEntryHistoryError}')`), 8000)
+  const createdFaceText = await js<string>(`document.querySelector('${T.projectEntryHistoryError}')?.textContent ?? ''`)
+  check('[R3-04][U10] 创建来源错误面带「项目已创建，暂时无法进入」+「重新加载」',
+    createdFaceText.includes((await i18nText('createProject.created.enterFailed')).trim().slice(0, 5))
+    && createdFaceText.includes((await i18nText('project.entry.historyFailed')).trim().slice(0, 6))
+    && Boolean(createdFaceText.match('空介绍穿透项目'))
+    && await js<boolean>(`window.__poo196.q('${T.projectEntryRetry}')`))
+  check('[R3-04][U10] 失败面零会话创建、创建请求不增（只重试进入）',
+    (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === createsR34)
+  await capture('r3-04-create-enter-failed-face')
+  await runProgramDirect({ op: 'setR3SessionsMode', args: { mode: 'recent' } })
+  await js<boolean>(`window.__poo196.click('${T.projectEntryRetry}')`)
+  await until(async () => ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'ready'), 12000)
+  check('[R3-04][U10] 重试只重进不再 create（created 项目无历史 → 空态落地）',
+    (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === createsR34
+    && await js<boolean>(`window.__poo196.q('${T.projectEntryEmpty}')`)
+    && !(await js<boolean>(`window.__poo196.q('${T.projectEntryHistoryError}')`)))
+  await capture('r3-04-create-enter-recovered')
   await capture('r3-04-create-entered')
+
+  // ── UB4 (U5) 一次性拉人引导：创建成功→恢复落地只弹一次 ─────────────────
+  // 恢复落点（创建来源 history-failed → 重新加载落地）由实际对话宿主接住：
+  // intent 恰在此消费，面板直落「添加成员」选择页（不是总览），底部有
+  // 「先不拉人，直接开始」；整条路径 0 invite / 0 createSession / 0 send。
+  const ub4InviteMark = pmCallCount('pmCreateColleagueInvitation') + pmCallCount('pmCreateProjectInvitation')
+  const ub4SendMark = (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length
+  const ub4CreateMark = (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersPanel}')`), 12000)
+  check('[R3-04][U5] 恢复落地只弹一次：面板自动打开且直落「添加成员」选择页',
+    (await js<string>(`document.querySelector('${T.membersPanel}')?.getAttribute('data-mode') ?? 'closed'`)) === 'push'
+    && await js<boolean>(`window.__poo196.q('${T.colleaguesPage}')`)
+    && !(await js<boolean>(`window.__poo196.q('${T.membersRoster}')`)))
+  check('[R3-04][U5] 自动打开面板底部有「先不拉人，直接开始」',
+    ((await js<string>(`document.querySelector('${T.projectOnboardingSkip}')?.textContent ?? ''`)).trim()).includes((await i18nText('project.entry.skipInvite')).trim().slice(0, 4)))
+  check('[R3-04][U5] 打开即消费 intent（一次性，不因后续重渲染/返回重弹）',
+    (await js<unknown>('window.__poo196.onboardingIntent()')) === null)
+  check('[R3-04][U5] 自动打开零写入（0 invite / 0 createSession / 0 send）',
+    pmCallCount('pmCreateColleagueInvitation') + pmCallCount('pmCreateProjectInvitation') === ub4InviteMark
+    && (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length === ub4SendMark
+    && (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === ub4CreateMark)
+  await capture('r3-04-onboarding-auto-open')
+  // 跳过：关闭面板并把焦点交回输入框。
+  await js<boolean>(`window.__poo196.click('${T.projectOnboardingSkip}')`)
+  await until(async () => !(await js<boolean>(`window.__poo196.q('${T.membersPanel}')`)), 8000)
+  check('[R3-04][U5] 跳过关闭面板且聚焦输入框',
+    ((await js<string>(`document.activeElement?.getAttribute('data-tutorial') ?? 'missing'`)).trim()) === 'chat-input')
+  // 关闭再进（普通卡片重进同项目）：intent 已消费 → 不再弹。
+  await js<boolean>('window.__poo196.showHome()')
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 12000)
+  await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${createdIdR34}"]')`)
+  await until(async () => ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'ready'), 12000)
+  await until(() => js<boolean>(`window.__poo196.q('${T.projectEntryEmpty}')`), 12000)
+  check('[R3-04][U5] 关闭再进不再弹（面板 absent、空态正常）',
+    !(await js<boolean>(`window.__poo196.q('${T.membersPanel}')`))
+    && (await js<unknown>('window.__poo196.onboardingIntent()')) === null)
+  await capture('r3-04-onboarding-skipped-reenter')
+
+  // 取消/进入失败销毁 intent：第二次创建的进入 request 被拒（生产取消语义
+  // 沿原事务原因）→ enter-failed → intent 销毁；「重新进入」落地不再弹。
+  await js<boolean>('window.__poo196Space.setSwitchRejectOnce(true)')
+  await js<boolean>('window.__poo196.openCreateProject()')
+  await until(() => js<boolean>(`window.__poo196.q('#create-project-form')`), 8000)
+  await clearAndType(T.createName, '取消销毁意图项目')
+  await js<boolean>(`window.__poo196.click('${T.createResponsibility}')`)
+  await js<boolean>(`(() => { const f = document.querySelector('#create-project-form'); if (!f) return false; f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); return true })()`)
+  await until(async () => pmCallCount('pmCreateEnterprise') > 0, 8000)
+  await until(async () => ((await js<{ phase: string; productSpaceId: string | null }>('window.__poo196.entryState()')).phase === 'enter-failed'), 12000)
+  const cancelledId = (await runProgramDirect<{ createdSpace: { productSpaceId: string } | null }>({ op: 'pmCallStats' })).createdSpace?.productSpaceId ?? ''
+  check('[R3-04][U5] 进入失败（取消）销毁 intent 且保留可重试目标',
+    (await js<unknown>('window.__poo196.onboardingIntent()')) === null
+    && ((await js<{ productSpaceId: string | null }>('window.__poo196.entryState()')).productSpaceId) === cancelledId
+    && cancelledId !== createdIdR34)
+  // 「重新进入」只重新进入（不重复 create）且落地不再弹拉人面板。生产语境：
+  // 上下文刷新后才感知新项目——fixture 用 reloadProjects（同一类上下文重建）
+  // 让失败卡的「重新进入」可达。
+  await js<boolean>('window.__poo196.showHome()')
+  await js<boolean>('window.__poo196Space.reloadProjects()')
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectEnterRetry}')`)) === 1, 12000)
+  const createsBeforeRetry = (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length
+  await js<boolean>(`window.__poo196.click('${T.homeProjectEnterRetry}')`)
+  await until(async () => ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'ready'), 12000)
+  await until(() => js<boolean>(`window.__poo196.q('${T.projectEntryEmpty}')`), 12000)
+  check('[R3-04][U5] 取消后重进落地不再弹（面板 absent、零 create、intent 仍空）',
+    !(await js<boolean>(`window.__poo196.q('${T.membersPanel}')`))
+    && (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === createsBeforeRetry
+    && (await js<unknown>('window.__poo196.onboardingIntent()')) === null)
+  await capture('r3-04-onboarding-cancel-destroyed')
   await js<boolean>('window.__poo196Space.setActiveSpace("ps-apollo")')
+  await runProgramDirect({ op: 'resetR3' })
 
   // 显示名缺失 → 「你的姓名」补全框 + 同步提示出现；65 字超限同样出现。
   await js<boolean>('window.__poo196Space.setAdminName("")')
@@ -4399,32 +5616,268 @@ async function scenarioR3DirectEntryAndRecentSession() {
   check('[R3-05] 进入零写入（createSession 调用数=0）', (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === createsBeforeEmpty)
   await capture('r3-05-empty-entry-landing')
 
-  // 发送门：hold 住切换事务 → pending 期间 ChatPage 发送被拒（toast
-  // project.entry.scopeChanged），放行后事务继续落地。
+  // ── UB4 (U5/U13)：空态三动作卡 + 项目 composer 稳定提示与帮助 ──────────
+  // 三张卡都是纯呈现动作：点击前后 create/invite/send 计数不变；「邀请同事」
+  // 走现有选择页、「上传」切文件 tab 并真实打开既有 AssetUploadDialog、
+  // 「直接开始聊」仅聚焦 composer。U13：占位符不再轮播快捷键/#，Enter 偏好
+  // 稳定显示「输入问题，按回车发送」；帮助可发现、Esc 关闭回焦；cmd-enter
+  // 偏好换「输入问题，点击发送」。
+  await runProgramDirect({ op: 'setSendMessageKey', args: { value: 'enter' } })
+  const ub4InviteMark05 = pmCallCount('pmCreateColleagueInvitation') + pmCallCount('pmCreateProjectInvitation')
+  const ub4SendMark05 = (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length
+  const ub4CreateMark05 = (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length
+  const ub4PlaceholderOf = () => js<string>(`document.querySelector('${T.input}')?.getAttribute('aria-placeholder') ?? 'missing'`)
+  check('[R3-05][U5] 空态三动作卡在（邀请同事/上传/直接开始聊）',
+    (await js<number>(`window.__poo196.count('${T.projectEntryActionInvite}')`)) === 1
+    && (await js<number>(`window.__poo196.count('${T.projectEntryActionUpload}')`)) === 1
+    && (await js<number>(`window.__poo196.count('${T.projectEntryActionStart}')`)) === 1)
+  check('[R3-05][U5] 副文案=助手说明+邀请后句（有邀请权）；占位符不再复用副文案',
+    ((await js<string>(`document.querySelector('${T.projectEntryEmptyHint}')?.textContent ?? ''`)).includes((await i18nText('project.entry.inviteHint')).trim().slice(0, 4)))
+    && ((await ub4PlaceholderOf()).includes((await i18nText('project.entry.inputPlaceholder')).trim().slice(0, 4))))
+  // U13：等待超过旧轮播间隔（5000ms），占位符仍稳定为 Enter 偏好那一句。
+  await delay(5300)
+  const ub4PlaceholderAfterRotationWindow = await ub4PlaceholderOf()
+  check('[R3-05][U13] 等待超过旧轮播间隔仍为稳定占位符（Enter 偏好）',
+    ub4PlaceholderAfterRotationWindow === (await i18nText('project.entry.inputPlaceholder')).trim(),
+    { placeholder: ub4PlaceholderAfterRotationWindow })
+  // U13 帮助：常驻图标 → 小帮助内容（真实发送/换行/Shift+Tab/@/#/侧栏行）
+  // → Esc 关闭并回焦输入框。
+  await js<boolean>(`window.__poo196.click('${T.composerHelp}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.composerHelpContent}')`), 8000)
+  const ub4HelpRows = (await js<string>(`document.querySelector('${T.composerHelpContent}')?.textContent ?? ''`))
+  check('[R3-05][U13] 输入帮助内容列出真实发送/换行/快捷键行',
+    ub4HelpRows.includes((await i18nText('project.entry.inputPlaceholder')).trim().slice(0, 4))
+    && ub4HelpRows.includes((await i18nText('chatInput.placeholder.newLine')).trim().slice(0, 4))
+    && ub4HelpRows.includes((await i18nText('chatInput.placeholder.shiftTab')).trim().slice(0, 4))
+    && ub4HelpRows.includes((await i18nText('chatInput.placeholder.mention')).trim().slice(0, 3))
+    && ub4HelpRows.includes((await i18nText('chatInput.placeholder.labels')).trim().slice(0, 3)))
+  await js<boolean>('window.__poo196.focusInput()')
+  await pressEscape()
+  await until(async () => !(await js<boolean>(`window.__poo196.q('${T.composerHelpContent}')`)), 8000)
+  check('[R3-05][U13] Esc 关闭帮助并回焦输入框',
+    !(await js<boolean>(`window.__poo196.q('${T.composerHelpContent}')`))
+    && ((await js<string>(`document.activeElement?.getAttribute('data-tutorial') ?? 'missing'`)).trim()) === 'chat-input')
+  await capture('r3-05-composer-help')
+  // 「邀请同事」卡 → 现有「添加成员」选择页；全程零写入。
+  await js<boolean>(`window.__poo196.click('${T.projectEntryActionInvite}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.colleaguesPage}')`), 8000)
+  check('[R3-05][U5] 「邀请同事」卡直落选择页且零写入（0 invite / 0 createSession / 0 send）',
+    await js<boolean>(`window.__poo196.q('${T.colleaguesPage}')`)
+    && pmCallCount('pmCreateColleagueInvitation') + pmCallCount('pmCreateProjectInvitation') === ub4InviteMark05
+    && (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length === ub4SendMark05
+    && (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === ub4CreateMark05)
+  await capture('r3-05-action-invite')
+  await js<boolean>(`window.__poo196.click('${T.membersClose}')`)
+  await until(async () => !(await js<boolean>(`window.__poo196.q('${T.colleaguesPage}')`)), 8000)
+  // 「上传」卡 → 切文件 tab + 真实打开既有 AssetUploadDialog（能力服从原库）。
+  await js<boolean>(`window.__poo196.click('${T.projectEntryActionUpload}')`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.uploadDialog}')`), 12000)
+  const ub4ActionsVisible = () => js<boolean>(`(() => { const el = document.querySelector('${T.projectEntryActions}'); return Boolean(el && el.getClientRects().length > 0) })()`)
+  check('[R3-05][U5] 「上传」卡切文件 tab 且打开真实上传对话框（零写入）',
+    await js<boolean>(`window.__poo196.q('${T.library}')`)
+    && await js<boolean>(`window.__poo196.q('${T.uploadDialog}')`)
+    && !(await ub4ActionsVisible())
+    && pmCallCount('pmCreateColleagueInvitation') + pmCallCount('pmCreateProjectInvitation') === ub4InviteMark05
+    && (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === ub4CreateMark05)
+  await capture('r3-05-action-upload-real-dialog')
+  await pressEscape()
+  await until(async () => !(await js<boolean>(`window.__poo196.q('${T.uploadDialog}')`)), 8000)
+  // 「直接开始聊」卡 → 仅聚焦 composer（回到消息 tab 后点击）。
+  await clickTab(T.tabMessages)
+  await until(async () => (await ub4ActionsVisible()) === true, 8000)
+  await js<boolean>(`window.__poo196.click('${T.projectEntryActionStart}')`)
+  check('[R3-05][U5] 「直接开始聊」仅聚焦 composer（零写入）',
+    ((await js<string>(`document.activeElement?.getAttribute('data-tutorial') ?? 'missing'`)).trim()) === 'chat-input'
+    && (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length === ub4SendMark05
+    && (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === ub4CreateMark05)
+  // U13 cmd-enter 偏好：重进换新 composer 实例 → 稳定行换成「点击发送」。
+  await runProgramDirect({ op: 'setSendMessageKey', args: { value: 'cmd-enter' } })
+  await js<boolean>('window.__poo196.showHome()')
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 12000)
+  await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_EMPTY_ID}"]')`)
+  await until(async () => (await js<boolean>(`window.__poo196.q('${T.projectEntryEmpty}')`)), 12000)
+  await until(async () => ((await ub4PlaceholderOf()) === (await i18nText('project.entry.inputPlaceholderClick')).trim()), 12000)
+  check('[R3-05][U13] cmd-enter 偏好 → 「输入问题，点击发送」（换行键不说成发送键）',
+    (await ub4PlaceholderOf()) === (await i18nText('project.entry.inputPlaceholderClick')).trim())
+  await runProgramDirect({ op: 'setSendMessageKey', args: { value: 'enter' } })
+  await capture('r3-05-action-cards')
+
+  // ── UB2 (U3/U10/U11): 进入反馈、发送准入、草稿完整保留、落地引导 ────────
+  // 旧→新映射：pending 期间的 toast 断言从 project.entry.scopeChanged 改为
+  // U11 持久提示键 project.entry.sendBlocked（scopeChanged 保留给深层 scope
+  // 不符兜底，ChatPage 深层检查沿用）；原「零送达」与「放行后落地」检查语义
+  // 原样保留，其余为新增钉子。
   await js<boolean>('window.__poo196Space.setActiveSpace("ps-apollo")')
   await js<boolean>('window.__poo196.showHome()')
   await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 12000)
+  const enterLabelCopy = (await i18nText('home.projects.enter')).trim()
+  check('[R3-05][U3] 每张卡右下可见「进入项目」标签（非嵌套，卡片仍是唯一激活目标）',
+    (await js<number>(`window.__poo196.count('${T.homeProjectEnterLabel}')`)) === 6
+    && ((await js<string>(`document.querySelector('${T.homeProjectEnterLabel}')?.textContent ?? ''`)).includes(enterLabelCopy.slice(0, 2))))
+
   await js<boolean>('window.__poo196Space.setHoldSwitch(true)')
   await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_BETA_ID}"]')`)
   await until(async () => (await js<boolean>('window.__poo196.entryPending()')) === true, 8000)
   check('[R3-05] hold 住切换：entry pending 且未 committed',
     (await js<string[]>('window.__poo196.spaceSwitchLog()')).some(entry => entry === `request:${R3_PROJECT_BETA_ID}`)
       && !(await js<string[]>('window.__poo196.spaceSwitchLog()')).some(entry => entry === `committed:${R3_PROJECT_BETA_ID}`))
+  // U3 卡片反馈：仅目标卡 spinner+「正在进入项目…」+aria-busy；重复鼠标/键盘
+  // 激活不重入（request 恰一次）。
+  const enteringCopy = (await i18nText('home.projects.entering')).trim()
+  await delay(120)
+  check('[R3-05][U3] 仅目标卡呈现进入反馈（spinner+文案+aria-busy）',
+    (await js<number>(`window.__poo196.count('${T.homeProjectEntering}')`)) === 1
+    && (await js<string>(`document.querySelector('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_BETA_ID}"]')?.getAttribute('aria-busy') ?? ''`)) === 'true'
+    && ((await js<string>(`document.querySelector('${T.homeProjectEntering}')?.textContent ?? ''`)).includes(enteringCopy.slice(0, 4))))
+  await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_BETA_ID}"]')`)
+  await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_BETA_ID}"]')`)
+  await js<boolean>(`window.__poo196.pressEnterOn('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_BETA_ID}"]')`)
+  check('[R3-05][U3] 重复鼠标/键盘激活不重入（beta request 恰一次）',
+    (await js<string[]>('window.__poo196.spaceSwitchLog()')).filter(entry => entry === `request:${R3_PROJECT_BETA_ID}`).length === 1)
+
+  // U11 发送准入：等待期在对话面（apollo 空态 composer）触发发送 → 同步拒绝、
+  // 零送达、草稿原样保留、无内容提示标记入账。
   await js<boolean>('window.__poo196.showChats()')
   await until(() => js<boolean>(`window.__poo196.q('${T.input}')`), 8000)
   const sendMark = (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length
+  const createsMark = (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length
   await typeInto(T.input, '切换期间试图发送')
   await js<boolean>('window.__poo196.send()')
   await delay(600)
-  const scopeChangedCopy = (await i18nText('project.entry.scopeChanged')).trim()
-  check('[R3-05] pending 期间发送被拒（toast scopeChanged + 零送达）',
+  const sendBlockedCopy = (await i18nText('project.entry.sendBlocked')).trim()
+  check('[R3-05][U11] pending 期间发送被拒（sendBlocked toast，零送达）',
     (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length === sendMark
-      && (await js<string>('window.__poo196.toastText()')).includes(scopeChangedCopy.slice(0, 6)), { toast: (await js<string>('window.__poo196.toastText()')).slice(0, 60) })
+      && (await js<string>('window.__poo196.toastText()')).includes(sendBlockedCopy.slice(0, 6)), { toast: (await js<string>('window.__poo196.toastText()')).slice(0, 60) })
+  check('[R3-05][U11] 等待期持久提示在输入框上方（project-entry-send-notice）',
+    await js<boolean>(`window.__poo196.q('${T.projectEntrySendNotice}')`)
+      && ((await js<string>(`document.querySelector('${T.projectEntrySendNotice}')?.textContent ?? ''`)).includes(sendBlockedCopy.slice(0, 6))))
+  check('[R3-05][U11] 被拦截的草稿仍在输入框（未清空）',
+    ((await js<string>('window.__poo196.inputValue()')) ?? '').includes('切换期间试图发送'))
+  const blockedNotice = await js<Array<{ accountId: string; productSpaceId: string; draftKey: string; generation: number }>>('window.__poo196.sendNotices()')
+  check('[R3-05][U11] 拦截记录一个无内容提示标记（account/project/draftKey/generation）',
+    blockedNotice.length === 1
+    && blockedNotice[0]!.draftKey.startsWith('empty:')
+    && blockedNotice[0]!.productSpaceId === 'ps-apollo'
+    && typeof blockedNotice[0]!.generation === 'number', { marker: blockedNotice[0] })
+  check('[R3-05][U11] 拦截零会话创建（0 createSession）',
+    (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === createsMark)
   await capture('r3-05-send-gate')
   await js<boolean>('window.__poo196Space.setHoldSwitch(false)')
   await until(async () => (await js<string[]>('window.__poo196.spaceSwitchLog()')).some(entry => entry === `committed:${R3_PROJECT_BETA_ID}`), 12000)
   await until(async () => (await js<string>('window.__poo196.chatSession()')) === SESSION_R3_BETA_RECENT, 12000)
   check('[R3-05] 放行后事务落地（beta 最近会话）', (await js<string>('window.__poo196.chatSession()')) === SESSION_R3_BETA_RECENT)
+  // U11 落地引导（跨对话）：拦截发生在 apollo 空态草稿，落地在 beta 会话 →
+  // 「项目已打开。刚才的内容保留在原对话，请返回原对话发送。」
+  const retainedCopy = (await i18nText('project.entry.sendRetainedElsewhere')).trim()
+  await until(() => js<boolean>(`window.__poo196.q('${T.projectEntrySendNotice}')`), 8000)
+  check('[R3-05][U11] 落地在另一对话 →「保留在原对话」引导',
+    ((await js<string>(`document.querySelector('${T.projectEntrySendNotice}')?.textContent ?? ''`)).includes(retainedCopy.slice(0, 6))))
+
+  // ── U11 同对话落地 + 完整草稿保留：进入已 committed 的 beta（fast-path
+  // resume），用 getSessions 时延拉长 resuming 窗口；在 beta 会话输入文字+
+  // 真实附件+项目引用（KB/批注由会话种子提供）→ 点发送 / 真实 Enter /
+  // craft:submit-input 三门同拒 → 0 send、0 createSession、批注未标已发送、
+  // 草稿逐项保留；落地同一会话 →「请点击发送」→ 用户一次发送恰一次请求，
+  // 载荷携带全部草稿字段。
+  await runProgramDirect({ op: 'setR3SessionsDelay', args: { ms: 6000 } })
+  await js<boolean>('window.__poo196.showHome()')
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 12000)
+  await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_BETA_ID}"]')`)
+  await until(async () => ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'resuming'), 8000)
+  check('[R3-05][U3] getSessions 时延窗口内 phase=resuming（共享状态可观测）', true)
+  await js<boolean>('window.__poo196.showChats()')
+  await until(() => js<boolean>(`window.__poo196.q('${T.input}')`), 8000)
+  const statsBeforeFull = await runProgramDirect<{ annotationCommands: unknown[] }>({ op: 'r3Stats' })
+  const sendMarkFull = (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length
+  const createsMarkFull = (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length
+  const betaDraftRefs = [{ assetId: 'as-draft-pin', version: 2, name: '拦截引用.md' }]
+  await js<boolean>(`window.__poo196.setDraftRefs('${SESSION_R3_BETA_RECENT}', ${JSON.stringify(betaDraftRefs)})`)
+  await typeInto(T.input, '落地前的完整草稿')
+  // 真实附件：clipboardData.files 粘贴路径（生产 readFileAsAttachment）。
+  await js<boolean>(`(() => {
+    const file = new File(['UB2 拦截钉子附件正文'], 'blocked-draft.txt', { type: 'text/plain' })
+    const dt = new DataTransfer()
+    dt.items.add(file)
+    const el = document.querySelector('${T.input}')
+    if (!el) return false
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    return true
+  })()`)
+  await until(async () => ((await js<string>('document.body.innerText')).includes('blocked-draft.txt')), 8000)
+  check('[R3-05][U11] 完整草稿就位（文字+附件+引用+KB+待发批注）',
+    ((await js<string>('window.__poo196.inputValue()')) ?? '').includes('落地前的完整草稿')
+    && ((await js<string>('document.body.innerText')).includes('把这份要点同步给华东区'))
+    && (await js<Array<unknown>>(`window.__poo196.count('[data-testid="project-asset-draft-chips"]')`)) >= 1)
+  // 三门同拒：点发送（craft:submit-input）、真实 Enter、再点一次。
+  await js<boolean>('window.__poo196.send()')
+  await delay(400)
+  await js<boolean>('window.__poo196.focusInput()')
+  await pressEnterTrusted()
+  await delay(400)
+  await js<boolean>('window.__poo196.send()')
+  await delay(600)
+  check('[R3-05][U11] 等待期三门发送全被拒（0 send / 0 createSession / 批注未标已发送）',
+    (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length === sendMarkFull
+    && (await js<Array<unknown>>('window.__poo196.createSessionLog()')).length === createsMarkFull
+    && (await runProgramDirect<{ annotationCommands: unknown[] }>({ op: 'r3Stats' })).annotationCommands.length === statsBeforeFull.annotationCommands.length)
+  check('[R3-05][U11] 拦截后草稿逐项保留（文字/附件/引用/KB/批注）',
+    ((await js<string>('window.__poo196.inputValue()')) ?? '').includes('落地前的完整草稿')
+    && ((await js<string>('document.body.innerText')).includes('blocked-draft.txt'))
+    && JSON.stringify(await js<Array<unknown>>(`window.__poo196.draftRefs('${SESSION_R3_BETA_RECENT}')`)) === JSON.stringify(betaDraftRefs)
+    && ((await js<string>('document.body.innerText')).includes('把这份要点同步给华东区')))
+  const blockedMarkerFull = await js<Array<{ draftKey: string; generation: number }>>('window.__poo196.sendNotices()')
+  check('[R3-05][U11] 会话草稿拦截标记入账（draftKey=会话 id）',
+    blockedMarkerFull.some(notice => notice.draftKey === SESSION_R3_BETA_RECENT))
+  await capture('r3-05-full-draft-blocked')
+  await until(async () => ((await js<{ phase: string }>('window.__poo196.entryState()')).phase === 'ready'), 12000)
+  await until(async () => (await js<string>('window.__poo196.chatSession()')) === SESSION_R3_BETA_RECENT, 12000)
+  const sendReadyCopy = (await i18nText('project.entry.sendReady')).trim()
+  check('[R3-05][U11] 同对话落地 →「项目已打开，请点击发送」引导',
+    ((await js<string>(`document.querySelector('${T.projectEntrySendNotice}')?.textContent ?? ''`)).includes(sendReadyCopy.slice(0, 5))))
+  // 用户一次发送 = 一次请求，载荷携带全部草稿字段（文字/附件/引用/KB），
+  // 批注此刻才标记已发送（恰好一条 updateAnnotation）。
+  await js<boolean>('window.__poo196.send()')
+  await until(async () => (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length === sendMarkFull + 1, 12000)
+  const acceptedSend = (await js<Array<{ sessionId: string; message: string; attachments: Array<{ name?: string }>; kbCollectionIds: string[]; projectAssetRefs: unknown[] }>>('window.__poo196.sendMessageLog'))[sendMarkFull]!
+  check('[R3-05][U11] 一次发送恰一次请求且载荷完整（文字/附件/引用/KB）',
+    acceptedSend.sessionId === SESSION_R3_BETA_RECENT
+    // ChatDisplay appends the follow-up annotation section after the typed
+    // text — the draft text leads the payload verbatim.
+    && acceptedSend.message.startsWith('落地前的完整草稿')
+    && acceptedSend.attachments.length === 1 && acceptedSend.attachments[0]!.name === 'blocked-draft.txt'
+    && JSON.stringify(acceptedSend.kbCollectionIds) === JSON.stringify(['kb-col-weekly'])
+    && JSON.stringify(acceptedSend.projectAssetRefs) === JSON.stringify(betaDraftRefs), { acceptedSend })
+  const statsAfterFull = await runProgramDirect<{ annotationCommands: Array<{ annotationId?: string }> }>({ op: 'r3Stats' })
+  check('[R3-05][U11] 已发送才标记批注（恰好一条 updateAnnotation）',
+    statsAfterFull.annotationCommands.length === statsBeforeFull.annotationCommands.length + 1
+    && statsAfterFull.annotationCommands.some(command => command.annotationId === 'ann-r3-beta-followup'))
+  check('[R3-05][U11] 发送消费本对话提示标记（guidance 收口）',
+    !(await js<Array<{ draftKey: string }>>('window.__poo196.sendNotices()')).some(notice => notice.draftKey === SESSION_R3_BETA_RECENT))
+  await runProgramDirect({ op: 'setR3SessionsDelay', args: { ms: 0 } })
+
+  // U3 显式取消/失败：request 拒绝（生产取消确认语义）→ enter-failed 保留
+  // 目标 → 失败卡常驻错误 +「重新进入」→ 重试只重新进入并落地。
+  await js<boolean>('window.__poo196Space.setActiveSpace("ps-apollo")')
+  await js<boolean>('window.__poo196.showHome()')
+  await until(async () => (await js<number>(`window.__poo196.count('${T.homeProjectCard}')`)) > 0, 12000)
+  await js<boolean>('window.__poo196Space.setSwitchRejectOnce(true)')
+  await js<boolean>(`window.__poo196.click('[data-testid="home-project-card"][data-product-space-id="${R3_PROJECT_ALPHA_ID}"]')`)
+  await until(async () => ((await js<{ phase: string; productSpaceId: string | null }>('window.__poo196.entryState()')).phase === 'enter-failed'), 8000)
+  check('[R3-05][U3] 显式取消沿原事务原因 → enter-failed 且保留目标',
+    ((await js<{ productSpaceId: string | null }>('window.__poo196.entryState()')).productSpaceId) === R3_PROJECT_ALPHA_ID)
+  const enterFailedCopy = (await i18nText('home.projects.enterFailed')).trim()
+  check('[R3-05][U3] 失败卡常驻错误 +「重新进入」（home-project-enter-error/retry）',
+    (await js<number>(`window.__poo196.count('${T.homeProjectEnterError}')`)) === 1
+    && await js<boolean>(`window.__poo196.q('${T.homeProjectEnterRetry}')`)
+    && ((await js<string>(`document.querySelector('${T.homeProjectEnterError}')?.textContent ?? ''`)).includes(enterFailedCopy.slice(0, 4))))
+  await capture('r3-05-enter-failed-card')
+  await js<boolean>(`window.__poo196.click('${T.homeProjectEnterRetry}')`)
+  await until(async () => (await js<string[]>('window.__poo196.spaceSwitchLog()')).some(entry => entry === `committed:${R3_PROJECT_ALPHA_ID}`), 12000)
+  await until(async () => (await js<string>('window.__poo196.chatSession()')) === SESSION_R3_ALPHA_RECENT, 12000)
+  check('[R3-05][U3] 「重新进入」重发受控事务并落地（alpha 最近会话）',
+    (await js<string>('window.__poo196.chatSession()')) === SESSION_R3_ALPHA_RECENT)
+  const visitsAfterRetry = await js<Record<string, number>>(`window.__poo196.visitOrder('${ACCOUNT_ID}')`)
+  check('[R3-05][U3] 成功才写最近访问（重试落地后）', Boolean(visitsAfterRetry[R3_PROJECT_ALPHA_ID]))
   await leaveHomeMode()
 }
 
@@ -4510,7 +5963,8 @@ async function scenarioR3MemberPanelResponsive() {
   await delay(300)
 
   // push 形态（D8 默认推挤）：非模态、无遮罩、无 dialog 语义。
-  await js<boolean>(`window.__poo196.click('${T.membersButton}')`)
+  // UB3 (U7)：首开走「入口按钮内部头像」——名字/头像/加号均打开同一总览。
+  await js<boolean>(`window.__poo196.click('${T.membersButton} span[aria-hidden="true"]')`)
   await until(() => js<boolean>(`window.__poo196.q('${T.membersPanel}')`), 8000)
   check('[R3-06] 宽窗口面板为 push 形态', (await js<string>(`document.querySelector('${T.membersPanel}')?.getAttribute('data-mode')`)) === 'push')
   check('[R3-06] push 非模态（无 role=dialog、无遮罩）', (await js<string>(`document.querySelector('${T.membersPanel}')?.getAttribute('role') ?? 'none'`)) === 'none'
@@ -4524,6 +5978,22 @@ async function scenarioR3MemberPanelResponsive() {
   check('[R3-06] 计数呈现服务端 totalActiveMembers', rosterCount.includes('3'), { rosterCount })
   const entryLabel = (await js<string>(`document.querySelector('${T.membersButton}')?.textContent ?? ''`)).trim()
   check('[R3-06] 入口按钮呈现「成员 N」', entryLabel.includes('成员') && entryLabel.includes('3'), { entryLabel })
+
+  // UB3 (U7)：成员入口按钮化——≥32px 高、边框+浅底、manager 末尾加号
+  // （aria-hidden），accessible name 用邀请权名称；未知人数不显示 0。
+  const entryMetrics06 = await js<{ height: number; borderTop: string; background: string }>(`(() => {
+    const el = document.querySelector('${T.membersButton}')
+    const r = el.getBoundingClientRect()
+    const s = getComputedStyle(el)
+    return { height: r.height, borderTop: s.borderTopStyle, background: s.backgroundColor }
+  })()`)
+  const entryAria06 = (await js<string>(`document.querySelector('${T.membersButton}')?.getAttribute('aria-label') ?? ''`)).trim()
+  const openInviteName06 = (await i18nText('projectMembers.openMembersAndInvite')).trim()
+  const plusHidden06 = (await js<string>(`document.querySelector('${T.membersEntryPlus}')?.getAttribute('aria-hidden') ?? 'missing'`)).trim()
+  check('[R3-06][U7] 入口 ≥32px、有边框与浅底', entryMetrics06.height >= 32
+    && entryMetrics06.borderTop !== 'none' && entryMetrics06.background !== 'rgba(0, 0, 0, 0)', { entryMetrics06 })
+  check('[R3-06][U7] 入口末尾加号 aria-hidden', plusHidden06 === 'true', { plusHidden06 })
+  check('[R3-06][U7] 入口 accessible name 为「查看成员或邀请同事」', entryAria06 === openInviteName06, { entryAria06, openInviteName06 })
 
   // 服务端搜索：q 过滤页面行，总数不被 q 重算。
   await typeInto(T.membersSearch, '陈')
@@ -4554,6 +6024,16 @@ async function scenarioR3MemberPanelResponsive() {
   host.setSize(1440, 900)
   await delay(350)
 
+  // UB3 (U7)：键盘可达 + 关闭焦点归还——聚焦入口，trusted Enter 打开同一
+  // 总览；面板关闭后焦点回到成员入口按钮。
+  await js<boolean>(`(() => { const el = document.querySelector('${T.membersButton}'); el.focus(); return document.activeElement === el })()`)
+  await pressEnterTrusted()
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersPanel}')`), 8000)
+  check('[R3-06][U7] 键盘 Enter 打开同一总览（键盘可达）', true)
+  await closeMembersPanel()
+  const focusBack06 = ((await js<string>(`document.activeElement?.getAttribute('data-testid') ?? 'missing'`)).trim())
+  check('[R3-06][U7] 关闭后焦点归还成员入口', focusBack06 === 'pc-members-button', { focusBack06 })
+
   // member 角色：同一份名册 + 计数，零管理动作（invite/记录/管理入口全无）。
   // D4: 名册 viewerRole 是 live authority——fixture 名册必须按 member 应答；
   // 角色变更伴随 scope 变更（换账号=换名册作用域），名册才重读新角色。
@@ -4574,6 +6054,61 @@ async function scenarioR3MemberPanelResponsive() {
   await runProgramDirect({ op: 'setR3RosterRole', args: { role: 'manager' } })
   await js<boolean>(`window.__poo196Space.setAccountId('${ACCOUNT_ID}')`)
   await delay(300)
+
+  // ── UB4 (U5)：一次性拉人自动打开 × 角色权限 × 宽窄切型 ──────────────────
+  // 会话宿主（ChatPage，已有历史的恢复落点）同样接住 intent：夹具态注入
+  // ready entry + intent（与 setEntryState 同类的状态注入）→ manager + 宽窗
+  // = push 形态自动打开直落选择页；member = 不弹（intent 保持待定，面板
+  // 不开）；窄窗 = drawer 形态同样自动打开。
+  await js<boolean>(`window.__poo196.setEntryState({ accountId: '${ACCOUNT_ID}', productSpaceId: '${PRODUCT_SPACE_ID}', generation: 901, phase: 'ready', origin: 'create' })`)
+  await js<boolean>(`window.__poo196.setOnboardingIntent({ accountId: '${ACCOUNT_ID}', productSpaceId: '${PRODUCT_SPACE_ID}', generation: 901 })`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersPanel}')`), 12000)
+  check('[R3-06][U5] 注入 intent → 会话宿主自动打开且直落「添加成员」选择页（宽窗 push）',
+    (await js<string>(`document.querySelector('${T.membersPanel}')?.getAttribute('data-mode') ?? 'closed'`)) === 'push'
+    && await js<boolean>(`window.__poo196.q('${T.colleaguesPage}')`)
+    && await js<boolean>(`window.__poo196.q('${T.projectOnboardingSkip}')`)
+    && (await js<unknown>('window.__poo196.onboardingIntent()')) === null)
+  await capture('r3-06-onboarding-push-auto-open')
+  await js<boolean>(`window.__poo196.click('${T.projectOnboardingSkip}')`)
+  await until(async () => !(await js<boolean>(`window.__poo196.q('${T.membersPanel}')`)), 8000)
+  // member：同样注入，无邀请权 → 不弹（intent 不被消费）。
+  await js<boolean>('window.__poo196Space.setRole("member")')
+  await runProgramDirect({ op: 'setR3RosterRole', args: { role: 'member' } })
+  await js<boolean>(`window.__poo196Space.setAccountId('${R3_ACCOUNT_B_ID}')`)
+  await delay(600)
+  await js<boolean>(`window.__poo196.setEntryState({ accountId: '${R3_ACCOUNT_B_ID}', productSpaceId: '${PRODUCT_SPACE_ID}', generation: 902, phase: 'ready', origin: 'create' })`)
+  await js<boolean>(`window.__poo196.setOnboardingIntent({ accountId: '${R3_ACCOUNT_B_ID}', productSpaceId: '${PRODUCT_SPACE_ID}', generation: 902 })`)
+  await delay(900)
+  check('[R3-06][U5] member 注入 intent 不自动打开（无邀请动作、intent 未消费）',
+    !(await js<boolean>(`window.__poo196.q('${T.membersPanel}')`))
+    && (await js<unknown>('window.__poo196.onboardingIntent()')) !== null)
+  await capture('r3-06-onboarding-member-no-open')
+  // 恢复 manager + 窄窗：drawer 形态同样自动打开（切型不是豁免）。
+  await js<boolean>('window.__poo196Space.setRole("manager")')
+  await runProgramDirect({ op: 'setR3RosterRole', args: { role: 'manager' } })
+  await js<boolean>(`window.__poo196Space.setAccountId('${ACCOUNT_ID}')`)
+  await delay(400)
+  host.setSize(720, 900)
+  await delay(350)
+  await js<boolean>(`window.__poo196.setEntryState({ accountId: '${ACCOUNT_ID}', productSpaceId: '${PRODUCT_SPACE_ID}', generation: 903, phase: 'ready', origin: 'create' })`)
+  await js<boolean>(`window.__poo196.setOnboardingIntent({ accountId: '${ACCOUNT_ID}', productSpaceId: '${PRODUCT_SPACE_ID}', generation: 903 })`)
+  await until(() => js<boolean>(`window.__poo196.q('${T.membersPanel}')`), 12000)
+  check('[R3-06][U5] 窄窗 drawer 形态同样自动打开（切型不是豁免）',
+    (await js<string>(`document.querySelector('${T.membersPanel}')?.getAttribute('data-mode') ?? 'closed'`)) === 'drawer'
+    && (await js<string>(`document.querySelector('${T.membersPanel}')?.getAttribute('role') ?? ''`)) === 'dialog'
+    && await js<boolean>(`window.__poo196.q('${T.colleaguesPage}')`)
+    && await js<boolean>(`window.__poo196.q('${T.projectOnboardingSkip}')`))
+  await capture('r3-06-onboarding-drawer-auto-open')
+  await js<boolean>(`window.__poo196.click('${T.projectOnboardingSkip}')`)
+  await until(async () => !(await js<boolean>(`window.__poo196.q('${T.membersPanel}')`)), 8000)
+  host.setSize(1440, 900)
+  await delay(350)
+  // 场景隔离：清掉注入的 entry/intent 残留。
+  await js<boolean>(`window.__poo196.setEntryState({ accountId: null, productSpaceId: null, generation: 0, phase: 'idle', origin: null })`)
+  await js<boolean>('window.__poo196.clearLogs()')
+  await js<boolean>('window.__poo196Space.setRole("manager")')
+  await runProgramDirect({ op: 'setR3RosterRole', args: { role: 'manager' } })
+  await delay(200)
 }
 
 /* ── D12 其余八个场景（本轮 TODO 骨架）：函数已占位、不注册不调用。内容

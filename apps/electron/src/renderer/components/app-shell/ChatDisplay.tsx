@@ -279,11 +279,26 @@ interface ChatDisplayProps {
   connectionUnavailable?: boolean
   /** Blocking account/config/quota state shown above the input */
   inputStatusBanner?: ChatInputStatusBanner | null
+  // POO-196 UB2 (U11): the project entry send gate + notice, forwarded into
+  // the composer's submit path (the gate runs inside FreeFormInput BEFORE
+  // any draft clear / annotation sent-marker / KB commit) and rendered as
+  // the persistent notice above the input. Undefined = the composer behaves
+  // exactly as before (non-project consumers keep the original behavior).
+  submitGate?: () => boolean
+  gateNotice?: string | null
   // POO-196 S-01: present only in an enterprise project session — it turns on
   // the hover "share to project" action on user messages.
   projectShareEnabled?: boolean
   /** Called with the user message the user wants to land in the project library. */
   onShareToProject?: (message: Message) => void
+  /**
+   * POO-196 UB4 (U13): the project-composer presentation (stable placeholder
+   * following the real sendMessageKey preference + the「输入帮助」toolbar
+   * affordance). ChatPage passes its committed-scope authority; when absent
+   * the structural isProjectSession read below decides — non-project sessions
+   * keep the current presentation untouched.
+   */
+  projectComposer?: boolean
 }
 
 import {
@@ -542,8 +557,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Connection unavailable
   connectionUnavailable = false,
   inputStatusBanner,
+  submitGate,
+  gateNotice,
   projectShareEnabled = false,
   onShareToProject,
+  projectComposer,
 }, ref) {
   const { t } = useTranslation()
 
@@ -579,6 +597,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const isProjectSession = !!sessionProductSpaceId
     && isEnterpriseSpace
     && productSpace?.activeProductSpaceId === sessionProductSpaceId
+  // U13: project sessions (and the project empty state, which passes its own
+  // flag) get the stable project composer presentation; the ChatPage prop
+  // (its committed-scope authority) wins when provided, the structural read
+  // backfills for direct mounts.
+  const projectComposerMode = projectComposer ?? isProjectSession
   const projectAssetMention = React.useMemo(() => (
     isProjectSession && session && workspaceId
       ? {
@@ -2127,10 +2150,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             statusBanner={inputStatusBanner}
             inputProps={{
               placeholder,
+              projectComposer: projectComposerMode,
               disabled: isInputDisabled,
               isProcessing: session.isProcessing,
               onAnimatedHeightChange: handleAnimatedHeightChange,
               onSubmit: handleSubmit,
+              submitGate,
+              gateNotice,
               onStop: handleStop,
               textareaRef,
               currentModel,
