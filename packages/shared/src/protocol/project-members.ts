@@ -2,47 +2,56 @@ import { z } from 'zod'
 import {
   CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER,
   CLIENT_ENTERPRISE_PAGE_MAX_LIMIT,
-  clientCreateColleagueInvitationCommandSchema,
-  clientCreateEnterpriseCommandSchema,
-  clientCreateInvitationCommandSchema,
-  clientEnterpriseIdempotencyKeySchema,
   clientEnterpriseListR3ResponseSchema,
   clientPageCursorSchema,
 } from '../admin/client-enterprise-contract'
 import { ListProductSpacesResponseSchema } from '../product-spaces/schemas'
+import {
+  AddProjectMembersInputSchema,
+  CreateProjectInputSchema,
+  PROJECT_ROLES,
+  UpdateProjectInputSchema,
+  type ProjectRole,
+} from '../admin/project-contract'
 
 /**
- * Enterprise project members (POO-196 追加轮, adjudication D-A/D-C) wire
- * contracts — the client side.
+ * Project members & projects (POO-205, supersedes the POO-196 追加轮 surface)
+ * wire contracts — the client side.
  *
- * Membership stays an ADMIN authority: EnterpriseMembership is the only
- * source of truth, so every HTTP DTO the AdminClient exchanges is GENERATED
- * in `../admin/client-enterprise-contract.ts` and re-exported here untouched.
- * This file adds only what the LOCAL_ONLY RPC boundary needs on top:
+ * What changed and why (owner adjudications Q3/Q8/Q10, Spec §3):
+ * - Creating a project is a LIGHTWEIGHT operation inside an organization.
+ *   `pm:createEnterprise` (client-side enterprise creation with payment
+ *   responsibility) is RETIRED — organizations come from the admin console,
+ *   never from the client.
+ * - The targeted invitation flow is RETIRED. Project members are picked from
+ *   the organization colleague roster; project membership ⊆ organization
+ *   membership is enforced server-side (`prj_member_not_in_organization`).
+ * - Projects and their members address the NEW Project entity (admin
+ *   `poo205-contract-r1`), not the enterprise aggregate.
  *
- * - the account-scoped envelope for the two create commands (creating a
- *   project must NOT require a committed enterprise space — the caller may
- *   still be sitting in their personal space);
- * - the committed-space envelope for the roster/invitation commands (these
- *   only ever address the space the fence already committed);
+ * Membership stays an ADMIN authority; the DTO shapes live in
+ * `../admin/project-contract.ts` and are re-exported here untouched. This
+ * file adds only what the LOCAL_ONLY RPC boundary needs:
+ * - the committed-organization scope envelope (these commands only ever run
+ *   while the fence has the organization space committed);
  * - the `pm_*` transport error codes, re-exported for the transport
- *   whitelist in `./types.ts` (same mechanism as PC_LOCAL_ERROR_CODES).
+ *   whitelist in `./types.ts`.
  *
  * Identity is never a free field: the `accountId` in a scope is a consistency
  * assertion the trusted side re-proves against its own session — the server
  * never takes role, enterprise id or membership from the renderer.
  */
 
-// The generated contract is the single source of truth for DTO shapes, page
-// limits and stable error codes.
+// The generated contracts are the single source of truth for DTO shapes,
+// page limits and stable error codes.
 export * from '../admin/client-enterprise-contract'
+export * from '../admin/project-contract'
 
 /**
  * pm_* codes this client raises at its OWN boundary (never returned by the
- * admin wire, so they must not live in the generated
- * CLIENT_ENTERPRISE_ERROR_CODES):
+ * admin wire, so they must not live in the contract error lists):
  *
- * - `pm_unavailable_in_personal` — a roster/invitation command ran while the
+ * - `pm_unavailable_in_personal` — a project/roster command ran while the
  *   committed space is the personal space;
  * - `pm_service_unavailable` — admin unreachable or an unmapped failure;
  * - `pm_signin_required` — no trusted admin session to act through;
@@ -65,12 +74,13 @@ const nonBlank = (maxLength: number) => z.string()
 
 export const PmAccountIdSchema = nonBlank(512)
 export const PmProductSpaceIdSchema = nonBlank(512)
+export const PmEnterpriseIdSchema = nonBlank(512)
+export const PmProjectIdSchema = nonBlank(512)
 
 /**
- * Account-only scope: the create commands act on the signed-in account and
- * must stay reachable from the personal space (D-B 1/4). `accountId` is what
- * the renderer believes is signed in — a mismatch with the trusted session is
- * a stale-renderer race, not an identity.
+ * Account-only scope: commands that act on the signed-in account from any
+ * space. `accountId` is what the renderer believes is signed in — a mismatch
+ * with the trusted session is a stale-renderer race, not an identity.
  */
 export const PmAccountScopeSchema = z.object({
   accountId: PmAccountIdSchema,
@@ -78,96 +88,89 @@ export const PmAccountScopeSchema = z.object({
 export type PmAccountScopeInput = z.output<typeof PmAccountScopeSchema>
 
 /**
- * Committed-space scope: the roster/invitation commands address the space the
- * runtime fence already committed, and re-prove it on every entry (D-C).
+ * Committed-organization scope: the projects/roster commands address the
+ * organization space the runtime fence has committed, and re-prove it on
+ * every entry.
  */
-export const PmSpaceScopeSchema = z.object({
+export const PmOrganizationScopeSchema = z.object({
   accountId: PmAccountIdSchema,
   productSpaceId: PmProductSpaceIdSchema,
+  organizationEnterpriseId: PmEnterpriseIdSchema,
 }).strict()
-export type PmSpaceScopeInput = z.output<typeof PmSpaceScopeSchema>
+export type PmOrganizationScopeInput = z.output<typeof PmOrganizationScopeSchema>
 
-const PmPageQuerySchema = z.object({
-  limit: z.number().int().min(1).max(CLIENT_ENTERPRISE_PAGE_MAX_LIMIT).optional(),
-  cursor: z.string().max(256).optional(),
+/** Organization scope narrowed to one project. */
+export const PmProjectScopeSchema = PmOrganizationScopeSchema.extend({
+  projectId: PmProjectIdSchema,
 }).strict()
+export type PmProjectScopeInput = z.output<typeof PmProjectScopeSchema>
 
 /* ------------------------------------------------------------------ */
-/* Channel input schemas (LOCAL_ONLY RPC payloads)                     */
+/* Project lifecycle channels (POO-205)                                */
 /* ------------------------------------------------------------------ */
 
-/** pm:createEnterprise — explicit submit; the key is generated at submit time. */
-export const PmCreateEnterpriseInputSchema = PmAccountScopeSchema.extend({
-  command: clientCreateEnterpriseCommandSchema,
-  idempotencyKey: clientEnterpriseIdempotencyKeySchema,
+/** pm:listProjects — the caller's projects in the committed organization. */
+export const PmListProjectsInputSchema = PmOrganizationScopeSchema.strict()
+export type PmListProjectsInput = z.output<typeof PmListProjectsInputSchema>
+
+/** pm:createProject — lightweight create (no payer, no payment terms). */
+export const PmCreateProjectInputSchema = PmOrganizationScopeSchema.extend({
+  command: CreateProjectInputSchema,
 }).strict()
-export type PmCreateEnterpriseInput = z.output<typeof PmCreateEnterpriseInputSchema>
+export type PmCreateProjectInput = z.output<typeof PmCreateProjectInputSchema>
 
-/** pm:queryCreateReceipt — the recovery path for a lost create response. */
-export const PmQueryCreateReceiptInputSchema = PmAccountScopeSchema.extend({
-  createRequestKey: clientEnterpriseIdempotencyKeySchema,
+/** pm:updateProject — name/purpose/instructions (owner/manager on the wire). */
+export const PmUpdateProjectInputSchema = PmProjectScopeSchema.extend({
+  command: UpdateProjectInputSchema,
 }).strict()
-export type PmQueryCreateReceiptInput = z.output<typeof PmQueryCreateReceiptInputSchema>
-
-export const PmListMembersInputSchema = PmSpaceScopeSchema.extend(PmPageQuerySchema.shape).strict()
-export type PmListMembersInput = z.output<typeof PmListMembersInputSchema>
-
-export const PmListInvitationsInputSchema = PmSpaceScopeSchema.extend(PmPageQuerySchema.shape).strict()
-export type PmListInvitationsInput = z.output<typeof PmListInvitationsInputSchema>
-
-/** pm:createInvitation — one target per call; the key rides the command. */
-export const PmCreateInvitationInputSchema = PmSpaceScopeSchema.extend({
-  command: clientCreateInvitationCommandSchema,
-}).strict()
-export type PmCreateInvitationInput = z.output<typeof PmCreateInvitationInputSchema>
+export type PmUpdateProjectInput = z.output<typeof PmUpdateProjectInputSchema>
 
 /* ------------------------------------------------------------------ */
-/* R3 channels (POO-196 redesign, adjudication D3–D6)                  */
+/* Project member channels (POO-205; roster-picked, no invitations)    */
 /* ------------------------------------------------------------------ */
 
-/** D3: name search is resolved server-side over the FULL source directory
- * before pagination, so `q` is only a bound-checked parameter here (the admin
- * route trims and re-validates; a cross-query cursor is a server 400). */
-const PmR3QuerySchema = z.object({
+/** pm:listProjectMembers. */
+export const PmListProjectMembersInputSchema = PmProjectScopeSchema.strict()
+export type PmListProjectMembersInput = z.output<typeof PmListProjectMembersInputSchema>
+
+/** pm:addProjectMembers — bulk pick from the organization roster. */
+export const PmAddProjectMembersInputSchema = PmProjectScopeSchema.extend({
+  command: AddProjectMembersInputSchema,
+}).strict()
+export type PmAddProjectMembersInput = z.output<typeof PmAddProjectMembersInputSchema>
+
+/** pm:updateProjectMember — role change. */
+export const PmUpdateProjectMemberInputSchema = PmProjectScopeSchema.extend({
+  targetAccountId: PmAccountIdSchema,
+  role: z.enum(PROJECT_ROLES),
+}).strict()
+export type PmUpdateProjectMemberInput = z.output<typeof PmUpdateProjectMemberInputSchema>
+export type PmProjectRole = ProjectRole
+
+/** pm:removeProjectMember — leaves the project; organization membership untouched. */
+export const PmRemoveProjectMemberInputSchema = PmProjectScopeSchema.extend({
+  targetAccountId: PmAccountIdSchema,
+}).strict()
+export type PmRemoveProjectMemberInput = z.output<typeof PmRemoveProjectMemberInputSchema>
+
+/** pm:listOrganizationColleagues — the roster projects pick members from. */
+export const PmListOrganizationColleaguesInputSchema = PmOrganizationScopeSchema.extend({
   q: z.string().max(128).optional(),
   limit: z.number().int().min(1).max(CLIENT_ENTERPRISE_PAGE_MAX_LIMIT).optional(),
   cursor: clientPageCursorSchema.optional(),
 }).strict()
+export type PmListOrganizationColleaguesInput = z.output<typeof PmListOrganizationColleaguesInputSchema>
 
-/** pm:listColleagueOptions — the restricted colleague directory of the
- * caller's own source organization, projected into the committed project.
- * The source enterprise is derived server-side and is NEVER a wire field. */
-export const PmListColleagueOptionsInputSchema = PmSpaceScopeSchema.extend(
-  PmR3QuerySchema.shape,
-).strict()
-export type PmListColleagueOptionsInput = z.output<typeof PmListColleagueOptionsInputSchema>
-
-/** pm:listCollaborationRoster — the all-role minimal roster of the committed
- * space (D4); `q` filters the page server-side, the total count never does. */
-export const PmListCollaborationRosterInputSchema = PmSpaceScopeSchema.extend(
-  PmR3QuerySchema.shape,
-).strict()
-export type PmListCollaborationRosterInput = z.output<typeof PmListCollaborationRosterInputSchema>
-
-/** pm:createColleagueInvitation — D5 bridge: one selected colleague per call,
- * resolved server-side onto the existing targeted invitation. The ids are
- * resource references awaiting authorization, not caller identity. */
-export const PmCreateColleagueInvitationInputSchema = PmSpaceScopeSchema.extend({
-  command: clientCreateColleagueInvitationCommandSchema,
-}).strict()
-export type PmCreateColleagueInvitationInput = z.output<typeof PmCreateColleagueInvitationInputSchema>
-
-/** pm:queryColleagueInvitation — D5 recovery: the caller's own
- * `createRequestKey`; `unknown` (202) is a success state, not a failure. */
-export const PmQueryColleagueInvitationInputSchema = PmSpaceScopeSchema.extend({
-  createRequestKey: clientEnterpriseIdempotencyKeySchema,
-}).strict()
-export type PmQueryColleagueInvitationInput = z.output<typeof PmQueryColleagueInvitationInputSchema>
+/* ------------------------------------------------------------------ */
+/* R3 channels (POO-196 redesign, adjudication D3–D6 — list only)      */
+/* ------------------------------------------------------------------ */
 
 /** pm:listProductSpacesR3 — D6 negotiated list read (account-scoped: the
  * collection covers the whole account, never just the committed space). The
  * response composes the generated R3 envelope with the client's own strict v1
- * `ListProductSpacesResponseSchema`, so no new schema is declared here. */
+ * `ListProductSpacesResponseSchema`, so no new schema is declared here.
+ * POO-205: after the one-shot migration every enterprise is an organization;
+ * the R3 metadata (purpose/activeMemberCount) remains the switcher's source. */
 export const PmListProductSpacesR3InputSchema = PmAccountScopeSchema.strict()
 export type PmListProductSpacesR3Input = z.output<typeof PmListProductSpacesR3InputSchema>
 

@@ -153,7 +153,7 @@ export function findAllProjectContextFiles(directory: string): string[] {
  * Matching is case-insensitive to support any casing (CLAUDE.md, claude.md, Claude.md, etc.).
  * Returns the content if found, null otherwise.
  */
-export function readProjectContextFile(directory: string): { filename: string; content: string } | null {
+export function readWorkingDirectoryContextFile(directory: string): { filename: string; content: string } | null {
   for (const pattern of CONTEXT_FILE_PATTERNS) {
     // Find the actual filename with case-insensitive matching
     const actualFilename = findFileCaseInsensitive(directory, pattern);
@@ -164,16 +164,16 @@ export function readProjectContextFile(directory: string): { filename: string; c
       const content = readFileSync(filePath, 'utf-8');
       // Cap at max size to avoid huge prompts
       if (content.length > MAX_CONTEXT_FILE_SIZE) {
-        debug(`[readProjectContextFile] ${actualFilename} exceeds max size, truncating`);
+        debug(`[readWorkingDirectoryContextFile] ${actualFilename} exceeds max size, truncating`);
         return {
           filename: actualFilename,
           content: content.slice(0, MAX_CONTEXT_FILE_SIZE) + '\n\n... (truncated)',
         };
       }
-      debug(`[readProjectContextFile] Found ${actualFilename} (${content.length} chars)`);
+      debug(`[readWorkingDirectoryContextFile] Found ${actualFilename} (${content.length} chars)`);
       return { filename: actualFilename, content };
     } catch (error) {
-      debug(`[readProjectContextFile] Error reading ${actualFilename}:`, error);
+      debug(`[readWorkingDirectoryContextFile] Error reading ${actualFilename}:`, error);
       // Continue to next pattern
     }
   }
@@ -186,7 +186,7 @@ export function readProjectContextFile(directory: string): { filename: string; c
  * Returns empty string if no working directory is set.
  *
  * Note: Project context files (CLAUDE.md, AGENTS.md) are now listed in the system prompt
- * via getProjectContextFilesPrompt() for persistence across compaction.
+ * via getWorkingDirectoryContextPrompt() for persistence across compaction.
  *
  * @param workingDirectory - The effective working directory path (where user wants to work)
  * @param isSessionRoot - If true, this is the session folder (not a user-specified project)
@@ -259,7 +259,7 @@ export interface DebugModeConfig {
  * For monorepos, this includes nested package context files.
  * Returns empty string if no working directory or no context files found.
  */
-export function getProjectContextFilesPrompt(workingDirectory?: string): string {
+export function getWorkingDirectoryContextPrompt(workingDirectory?: string): string {
   if (!workingDirectory) {
     return '';
   }
@@ -345,15 +345,32 @@ Use config_validate to verify changes match the expected schema.
  * @param backendName - Backend name for "powered by X" text (default: 'Claude Code')
  */
 /**
- * POO-196 R3 P12-5 — the project's authoritative context metadata (title +
- * optional introduction) as a system-prompt block. Appended by the agent
- * backends on EVERY turn of a project-bound session (first and resumed
- * alike); never sent as a fabricated user message. Deterministic output so
- * acceptance evidence can grep the real model request for the name.
+ * POO-196 R3 P12-5, POO-205 revised — the project's authoritative identity
+ * (name + optional introduction + optional member-editable instructions) as a
+ * system-prompt block. Appended by the agent backends on EVERY turn of a
+ * project-bound session (first and resumed alike); never sent as a fabricated
+ * user message. Instructions are the project's agent identity (Spec Q12):
+ * treat them as standing directives for this project, below platform rules but
+ * above generic defaults. Deterministic output so acceptance evidence can
+ * grep the real model request for the name.
  */
-export function formatProjectContextSystemAppend(projectContext: { name: string; purpose?: string }): string {
+export function formatProjectContextSystemAppend(projectContext: {
+  name: string;
+  purpose?: string;
+  instructions?: string;
+}): string {
   const purposeLine = projectContext.purpose?.trim()
     ? `\nProject introduction: ${projectContext.purpose.trim()}`
+    : '';
+  const instructions = projectContext.instructions?.trim();
+  const instructionsBlock = instructions
+    ? [
+        '',
+        '<project_instructions>',
+        'The project owner authored the following standing instructions for this project. Follow them for every turn in this project; they override generic defaults but never platform safety rules.',
+        instructions,
+        '</project_instructions>',
+      ].join('\n')
     : '';
   return [
     '<project_context>',
@@ -361,7 +378,7 @@ export function formatProjectContextSystemAppend(projectContext: { name: string;
     `Project name: ${projectContext.name}`,
     purposeLine,
     '</project_context>',
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n') + instructionsBlock;
 }
 
 export function getSystemPrompt(
@@ -384,7 +401,7 @@ export function getSystemPrompt(
   const debugContext = debugMode?.enabled ? formatDebugModeContext(debugMode.logFilePath) : '';
 
   // Get project context files for monorepo support (lives in system prompt for persistence across compaction)
-  const projectContextFiles = getProjectContextFilesPrompt(workingDirectory);
+  const projectContextFiles = getWorkingDirectoryContextPrompt(workingDirectory);
 
   // Fall back to the user's current preference when callers don't pin/pass a value,
   // so forgetting the argument can't silently re-enable the co-author trailer (see #576).

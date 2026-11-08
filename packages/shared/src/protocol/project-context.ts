@@ -61,6 +61,10 @@ const nonBlank = (maxLength: number) => z.string()
 
 export const PcWorkspaceIdSchema = nonBlank(512)
 export const PcProductSpaceIdSchema = nonBlank(512)
+// POO-205: the project (not the space) owns its shared-file area — every
+// asset RPC now addresses BOTH the organization space and the project inside
+// it, so a project's files are unreachable from any other project or space.
+export const PcProjectIdSchema = nonBlank(512)
 export const PcAssetIdSchema = nonBlank(128)
 export const PcUploadIdSchema = nonBlank(128)
 
@@ -72,6 +76,7 @@ export type PcIpcWorkspaceScopeInput = z.output<typeof PcIpcWorkspaceScopeSchema
 
 const PcIpcAssetScopeSchema = PcIpcWorkspaceScopeSchema.extend({
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
 }).strict()
 
 const PcOptionalVersionSchema = z.number().int().min(1).optional()
@@ -115,6 +120,7 @@ export type PcGetAssetInput = z.output<typeof PcGetAssetInputSchema>
 export const PcUploadFileInputSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   mode: z.enum(['create', 'replace']),
   filePath: z.string().min(1),
   name: nonBlank(512),

@@ -248,6 +248,42 @@ export class WorkspaceSessionStorage extends FilesystemSessionStorage {
   }
 }
 
+/**
+ * POO-205: per-project session store. A project session's artifacts live in
+ * their own sessions root — `{workspaceRoot}/project-sessions/{projectId}/sessions`
+ * — so project sessions never share a directory with personal sessions or with
+ * another project's sessions. This is the physical half of the space isolation
+ * model; the logical half remains the session record's immutable
+ * `productSpaceId`/`projectId` stamps checked at the RPC boundary.
+ */
+export class ProjectSessionStorage extends WorkspaceSessionStorage {
+  readonly projectId: string
+
+  constructor(projectId: string) {
+    super()
+    this.projectId = sanitizeSessionId(projectId)
+  }
+
+  override getSessionsRoot(workspaceRootPath: string): string {
+    return join(workspaceRootPath, 'project-sessions', this.projectId, 'sessions')
+  }
+}
+
+/** Per-workspace memo of project stores so repeated lookups reuse one instance
+ * (and therefore one persistence queue per project root). */
+const projectSessionStores = new Map<string, ProjectSessionStorage>()
+
+export function sessionStoreForProject(workspaceRootPath: string, projectId?: string): SessionStorage {
+  if (!projectId) return defaultWorkspaceSessionStorage
+  const memoKey = `${workspaceRootPath}\u0000${projectId}`
+  let store = projectSessionStores.get(memoKey)
+  if (!store) {
+    store = new ProjectSessionStorage(projectId)
+    projectSessionStores.set(memoKey, store)
+  }
+  return store
+}
+
 export class RootedSessionStorage extends FilesystemSessionStorage {
   readonly owner = 'cli' as const
   readonly sessionsRoot: string
