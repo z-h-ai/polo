@@ -76,13 +76,14 @@ afterEach(() => {
   menuNewWindow.mockClear()
 })
 
-describe('TopBar brand slot and avatar menu (POO-117, POO-191)', () => {
-  it('POO-191: from Home the corner is the POO-117 brand mark — view controls need the assistant tab', () => {
-    // This file's TabShell mock pins the Home tab as active. Per the POO-191
-    // review decision the view controls only render while the assistant tab
-    // is active; every other tab falls back to the decorative brand mark.
+describe('TopBar corner and avatar menu (POO-117, POO-202)', () => {
+  it('POO-202: from Home the corner is the Home tab — brand mark and view controls are both gone', () => {
+    // This file's TabShell mock pins the Home tab as active. POO-202 moved the
+    // view controls into the assistant shell and dropped the decorative
+    // POO-117 mark with them, so the bar opens with the Home tab everywhere.
     render(tree())
-    expect(screen.queryByTestId('topbar-brand-mark')).not.toBeNull()
+    expect(screen.queryByTestId('topbar-brand-mark')).toBeNull()
+    expect(screen.getByTestId('topbar-home-tab')).not.toBeNull()
     expect(screen.queryByTestId('topbar-sidebar-toggle')).toBeNull()
     expect(screen.queryByTestId('topbar-focus-toggle')).toBeNull()
     // The dropdown trigger of the former AppMenu stays gone.

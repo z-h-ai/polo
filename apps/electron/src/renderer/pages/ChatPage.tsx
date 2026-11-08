@@ -9,7 +9,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18n } from '@polo-ai/shared/i18n'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
-import { AlertCircle, Globe, Copy, RefreshCw, Link2Off, Info } from 'lucide-react'
+import { AlertCircle, Focus, Globe, Copy, RefreshCw, Link2Off, Info } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
@@ -29,6 +29,8 @@ import { decideChatAccessBanner } from '@/lib/chat-access-banner'
 import { formatQuotaResetTime } from '@/lib/quota-reset-time'
 import { useAdminPaymentHandoff } from '@/hooks/useAdminPaymentHandoff'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import { useOptionalActionRegistry } from '@/actions'
+import { workbenchFocusModeAtom } from '@/atoms/workbench-view'
 import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sendFailureAtomFamily, sessionMetaMapAtom } from '@/atoms/sessions'
 import { elementDraftRefsAtomFamily } from '@/atoms/sidebar-browser'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
@@ -703,7 +705,32 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     )
   }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta])
 
-  const headerActions = isCompactMode ? compactInfoButton : shareButton
+  // POO-202: focus mode (沉浸模式) moved here from the TopBar brand slot —
+  // it joins the share/close cluster at the chat window's top-right. Same
+  // registry action as ⌘. and the native menu; compact mode force-hides
+  // sidebar/navigator anyway, so the control would be dead there.
+  const actionRegistry = useOptionalActionRegistry()
+  const isFocusMode = useAtomValue(workbenchFocusModeAtom) === true
+  const focusModeButton = React.useMemo(() => {
+    if (isCompactMode) return undefined
+    return (
+      <PanelHeaderCenterButton
+        icon={<Focus className="h-4 w-4" />}
+        tooltip={t('menu.toggleFocusMode')}
+        aria-pressed={isFocusMode}
+        data-testid="chat-focus-toggle"
+        onClick={() => actionRegistry?.execute('view.toggleFocusMode')}
+        className={isFocusMode ? 'text-accent opacity-100' : undefined}
+      />
+    )
+  }, [isCompactMode, isFocusMode, actionRegistry, t])
+
+  const headerActions = isCompactMode ? compactInfoButton : (
+    <>
+      {focusModeButton}
+      {shareButton}
+    </>
+  )
 
   // Build title menu content for chat sessions using shared SessionMenu.
   // Desktop uses Radix DropdownMenu via PanelHeader; compact mode uses a

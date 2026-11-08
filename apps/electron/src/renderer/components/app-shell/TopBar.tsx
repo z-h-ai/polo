@@ -4,19 +4,15 @@ import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/compon
  * TopBar - The single global workbench bar (frozen POO-41 `.workbench-bar`
  * semantics, unified with the tab strip per the POO-70 hifi prototype).
  *
- * Layout: [traffic-light inset] [workbench view controls (POO-191, assistant
- * tab only) | brand mark] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
+ * Layout: [traffic-light inset] [Home tab + web tabs] [web nav] ... [Runtime] [current ProductSpace identity] [Notifications] [Account]
  *
  * POO-117 moved the former logo menu into the avatar dropdown
  * (`WorkbenchAccountMenu`) and left a decorative brand mark in the corner.
- * POO-191: while the assistant tab is active, that corner becomes the one spot
- * driving the assistant shell's view state from the bar — left sidebar
- * collapse and focus mode — through the action registry, so a click carries
- * the same semantics as ⌘B / ⌘. and the native menu. From any other tab the
- * controls fall back to the decorative brand mark: a visible corner control
- * that hijacks you into another tab reads as surprising (review decision), so
- * the view controls only exist where the shell they drive is on screen. The
- * two buttons leave the titlebar drag region.
+ * POO-191 briefly turned that corner into the assistant shell's view controls
+ * (sidebar collapse + focus mode); POO-202 moved both controls into the shell
+ * itself — sidebar toggle on the navigator (session list) header, focus mode
+ * on the chat header next to share/close — and dropped the decorative mark
+ * too, so the Home tab starts right after the traffic lights on every surface.
  *
  * P70-NAV-01: this bar is the ONLY top navigation — the opened app tabs, the
  * current ProductSpace identity and the account menu live here, and there is no
@@ -33,14 +29,12 @@ import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/compon
  * the new scope's own tabs hydrate (Review R33 fail-closed boundary).
  */
 
-import { useInsertionEffect, useMemo, useRef, type ReactNode } from "react"
+import { useInsertionEffect, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import * as Icons from "lucide-react"
 import { useAtomValue } from "jotai"
 import { sessionMetaMapAtom } from "@/atoms/sessions"
-import { workbenchFocusModeAtom, workbenchSidebarVisibleAtom } from "@/atoms/workbench-view"
-import { useOptionalActionRegistry } from "@/actions"
 import { useOptionalAppShellContext } from "@/context/AppShellContext"
 import { useOptionalClientPage } from "@/context/ClientPageContext"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
@@ -59,13 +53,17 @@ import {
   StyledDropdownMenuItem,
 } from "@/components/ui/styled-dropdown"
 import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
-import { PanelLeftRounded } from "../icons/PanelLeftRounded"
-import { PoloAiSymbol } from "../icons/PoloAiSymbol"
 import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
 import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
 import { localizedTabTitle } from "@/lib/tab-display-name"
 import poloAppIcon from "../../../../resources/icon.png"
 
+/**
+ * POO-202: the brand-slot view controls (POO-191) moved into the assistant
+ * shell itself — the sidebar toggle lives on the navigator (session list)
+ * header, focus mode on the chat header next to share/close. The decorative
+ * POO-117 brand mark went with them, so the corner is the Home tab.
+ */
 const MAX_NOTIFICATION_ITEMS = 6
 
 function TabIcon({ tab }: { tab: TabInstance }) {
@@ -82,46 +80,6 @@ function TabIcon({ tab }: { tab: TabInstance }) {
     return <Icons.Library className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
   }
   return <Icons.Globe2 className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
-}
-
-/**
- * POO-191: one of the two brand-slot view controls. Same icon-button
- * vocabulary as the bar's right-side controls (32px, rounded-[8px]); `active`
- * mirrors the shell state via the workbench-view atoms. `max-md:hidden` —
- * below the mobile threshold the shell force-hides sidebar/navigator
- * (auto-compact), so the controls would be dead buttons there.
- */
-function ViewControlButton({
-  testId,
-  label,
-  active,
-  onExecute,
-  children,
-}: {
-  testId: string
-  label: string
-  active: boolean
-  onExecute: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
-      onClick={onExecute}
-      className={cn(
-        "titlebar-no-drag grid size-[32px] place-items-center rounded-[8px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring max-md:hidden",
-        active
-          ? "bg-foreground/8 text-foreground client-material-card"
-          : "text-foreground/50 hover:bg-foreground/5 client-material-fg-hover hover:text-foreground client-material-fg-muted",
-      )}
-    >
-      {children}
-    </button>
-  )
 }
 
 export function TopBar() {
@@ -216,18 +174,6 @@ export function TopBar() {
   const showNavigation = activeTab.type === "webapp"
   const trafficLightInset = isMac && !isWebUI ? 86 : 8
 
-  // POO-191: pressed state for the brand-slot view controls. The atoms stay
-  // null until the assistant shell mounts (isolated bars render neutral);
-  // the sidebar control reads as off while focus mode owns the corner.
-  const actionRegistry = useOptionalActionRegistry()
-  const workbenchSidebarVisible = useAtomValue(workbenchSidebarVisibleAtom)
-  const workbenchFocusMode = useAtomValue(workbenchFocusModeAtom)
-  const isSidebarControlActive = workbenchSidebarVisible === true && workbenchFocusMode !== true
-  // POO-191 (review decision): the view controls drive the assistant shell, so
-  // they only render while that shell's tab is the active one; any other tab
-  // falls back to the POO-117 decorative brand mark.
-  const isAssistantTabActive = activeTabId === POLO_TAB_ID
-
   // P70-NAV-03 header hairline: the bar's bottom border responds ONLY to the
   // current page's registered MAIN scroll container (ClientPageContext) and
   // starts hidden. Assistant-internal scrollers never register, so opening
@@ -277,50 +223,9 @@ export function TopBar() {
       )}
       style={{ ...workbenchStyle, height: "var(--topbar-height)", paddingLeft: trafficLightInset, paddingRight: 8 }}
     >
-      {/* === LEFT: workbench view controls (POO-191, assistant tab only) ===
-          While the assistant tab is active, the former decorative brand mark
-          spot drives the shell's view state: left sidebar collapse and focus
-          mode (sidebar + navigator hidden). Both execute the registry actions
-          AppShellContent registers, so a click matches ⌘B / ⌘. and the
-          native menu. Other tabs fall back to the POO-117 brand mark — the
-          controls must not yank the user into the assistant tab from a web
-          app or Home (review decision on POO-191).
-          The slot itself is a fixed-width box: the tabs row (flex-1) starts
-          at the same x whether the corner shows the controls or the brand
-          mark, so switching tabs never shifts the rest of the bar (follow-up
-          review concern). w-[68px] = 2 × size-[32px] + gap-[2px] + pl-[2px] —
-          keep in sync with the controls row below. */}
-      <div
-        data-testid="topbar-brand-slot"
-        className="pointer-events-none flex h-[32px] w-[68px] flex-none items-center pl-[2px]"
-      >
-        {isAssistantTabActive ? (
-          <div className="pointer-events-auto flex items-center gap-[2px]">
-            <ViewControlButton
-              testId="topbar-sidebar-toggle"
-              label={t("menu.toggleSidebar")}
-              active={isSidebarControlActive}
-              onExecute={() => actionRegistry?.execute("view.toggleSidebar")}
-            >
-              <PanelLeftRounded className="size-[17px]" />
-            </ViewControlButton>
-            <ViewControlButton
-              testId="topbar-focus-toggle"
-              label={t("menu.toggleFocusMode")}
-              active={workbenchFocusMode === true}
-              onExecute={() => actionRegistry?.execute("view.toggleFocusMode")}
-            >
-              <Icons.Focus className="size-[17px]" strokeWidth={1.5} />
-            </ViewControlButton>
-          </div>
-        ) : (
-          <div aria-hidden data-testid="topbar-brand-mark" className="pointer-events-none flex select-none items-center">
-            <PoloAiSymbol className="h-4 text-accent" />
-          </div>
-        )}
-      </div>
-
-      {/* === Tabs: Home tab + open web tabs === */}
+      {/* === Tabs: Home tab + open web tabs ===
+          POO-202: the decorative POO-117 brand mark is gone — the tab strip
+          starts right after the traffic-light inset on every surface. */}
       <nav
         aria-label={t("topbar.tabs.ariaLabel")}
         className="pointer-events-auto flex h-full min-w-0 flex-1 items-center gap-[4px] overflow-x-auto [scrollbar-width:none] max-md:gap-1"
