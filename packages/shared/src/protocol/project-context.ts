@@ -25,7 +25,7 @@ import {
  *   in `./types.ts` (same mechanism as KB_ERROR_CODES);
  * - the persisted `projectAssetRefs` snapshot and the internal-only
  *   `projectModelContext` that travel with a user message (mirrors
- *   `kbReferences` / `kbModelContext`).
+ *   the project asset references).
  *
  * Bytes never transit the RPC: the renderer hands over a local file path and
  * the trusted main/server side streams it through the short-lived, object-bound
@@ -231,7 +231,7 @@ export const PcRebuildInputSchema = PcIpcAssetScopeSchema.extend({}).strict()
 export type PcRebuildInput = z.output<typeof PcRebuildInputSchema>
 
 /* ------------------------------------------------------------------ */
-/* Message-borne payloads (mirror kbReferences / kbModelContext)       */
+/* Message-borne payloads (project asset references)                  */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -256,7 +256,7 @@ export type ProjectAssetReference = z.output<typeof PcProjectAssetReferenceSchem
 /**
  * Server-assembled project-context injection for this turn — staged by the
  * SessionManager for a ONE-SHOT prompt injection, exactly like
- * `kbModelContext`. Internal only: never persisted, never part of the message
+ * the resolved project model context. Internal only: never persisted, never part of the message
  * record, and a client-supplied value is always dropped.
  */
 export const PcProjectModelContextSchema = z.object({

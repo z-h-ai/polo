@@ -59,7 +59,7 @@ const admin = Bun.serve({ port: 0, async fetch(req) {
   const input = ['POST', 'PATCH'].includes(req.method) ? await req.json() as any : undefined
   if (url.pathname === '/api/me/circles') return Response.json({ circles: [] })
   if (url.pathname === '/api/me/circle-memberships') return Response.json({ memberships: [] })
-  if (/^\/api\/product-spaces\/[^/]+\/catalog$/.test(url.pathname)) return Response.json({ contractVersion: 1, productSpaceId: url.pathname.split('/')[3], catalogRevision: 'fixture-catalog-1', entries: [{ catalogEntryId: 'polo-assistant', kind: 'built_in_app', builtInAppId: 'polo_assistant', name: 'Polo Assistant', description: '', availability: 'available' }] })
+  if (/^\/api\/product-spaces\/[^/]+\/catalog$/.test(url.pathname)) return Response.json({ contractVersion: 1, productSpaceId: url.pathname.split('/')[3], catalogRevision: 'fixture-catalog-1', entries: [] })  // POO-205 Catalog v2: no built-in entries - chat is a base capability.
   if (url.pathname === '/api/auth/validate') return Response.json({ valid: true, user: { id: accountId, username: 'fixture', displayName: 'Fixture', role: 'user', groupIds: [] }, configVersion: 'fixture-1' })
   if (url.pathname === '/api/me/product-spaces') return Response.json({ contractVersion: 1, personalProductSpaceId: personal, productSpaces: [
     { id: personal, kind: 'personal', name: '我的空间', accessMode: 'active', payer: { kind: 'account' } },
