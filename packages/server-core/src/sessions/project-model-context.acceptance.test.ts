@@ -178,7 +178,10 @@ describe('P12-5 project context reaches the real model request (production Pi ch
     sm = new SessionManager({ workspace: { id: 'ws_test', name: 'Test Workspace', rootPath: tmpRoot, createdAt: Date.now() } as never })
     setSyncTrustedProductSpaceAccountId(TEST_ACCOUNT_ID)
     setRuntimeActiveProductSpaceAccount(TEST_ACCOUNT_ID)
-    setRuntimeActiveProductSpace(TEST_SPACE_ID)
+    // POO-205 v2: project context rides ENTERPRISE sessions bound to a
+    // project — the runtime fence must commit the space as enterprise and
+    // every project-bound session must carry its projectId.
+    setRuntimeActiveProductSpace(TEST_SPACE_ID, 'enterprise')
     setTrustedProductSpaceAccountProvider(async () => TEST_ACCOUNT_ID)
     sm.setEventSink((() => {}) as never)
   })
@@ -213,6 +216,9 @@ describe('P12-5 project context reaches the real model request (production Pi ch
     const created = await sm.createSession('ws_test', {
       name: 'p125-a',
       llmConnection: 'p125-fake',
+      // POO-205 v2: an enterprise session MUST carry its project binding;
+      // the context below is the projection of THAT project.
+      projectId: 'project-alpha',
       // EMPTY purpose — the acceptance-critical shape (验收要点 7).
       projectContext: { name: uniqueName, purpose: '' },
     })
@@ -255,6 +261,7 @@ describe('P12-5 project context reaches the real model request (production Pi ch
     const a = await sm.createSession('ws_test', {
       name: 'p125-iso-a',
       llmConnection: 'p125-fake-b',
+      projectId: 'project-iso-a',
       projectContext: { name: nameA, purpose: '' },
     })
     const idA = (a as { id: string }).id
@@ -265,6 +272,7 @@ describe('P12-5 project context reaches the real model request (production Pi ch
     const b = await sm.createSession('ws_test', {
       name: 'p125-iso-b',
       llmConnection: 'p125-fake-b',
+      projectId: 'project-iso-b',
       projectContext: { name: nameB, purpose: '乙项目介绍' },
     })
     const idB = (b as { id: string }).id

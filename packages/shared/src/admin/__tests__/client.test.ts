@@ -1480,13 +1480,21 @@ describe('AdminClient', () => {
       productSpaceId: 'space-a',
       catalogRevision: 'revision-a',
       entries: [
+        // POO-205 v2: built_in_app directory entries are retired — the
+        // assistant rides as an ordinary space-visible app row, keeping a
+        // non-target entry in the fixture so the tuple check is still proven
+        // to key on the exact resolved entry.
         {
-          kind: 'built_in_app',
+          kind: 'app',
           catalogEntryId: 'polo-entry',
-          builtInAppId: 'polo_assistant',
+          artifactInstanceId: 'artifact-polo-assistant',
+          version: { versionId: 'version-polo', version: '1.0.0' },
           name: 'Polo',
           description: '',
           availability: 'available',
+          sources: [{ kind: 'self', name: 'Polo' }],
+          permissions: [],
+          visibility: 'space',
         },
         {
           kind: 'app',
@@ -1498,6 +1506,7 @@ describe('AdminClient', () => {
           availability: 'available',
           sources: [{ kind: 'enterprise_import', name: 'Studio A' }],
           permissions: [],
+          visibility: 'space',
         },
       ],
     } as const;

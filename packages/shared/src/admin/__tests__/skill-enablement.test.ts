@@ -5,7 +5,10 @@ import { ArtifactInstanceIdSchema, ProductSpaceSummarySchema, parseProductSpaceC
 const personal = ProductSpaceSummarySchema.parse({id:'space-p',kind:'personal',name:'我的空间',accessMode:'active',payer:{kind:'account'}})
 const enterprise = ProductSpaceSummarySchema.parse({id:'space-e',kind:'enterprise',enterpriseId:'enterprise-e',name:'Enterprise',role:'member',accessMode:'active',payer:{kind:'enterprise',enterpriseId:'enterprise-e'}})
 const id = ArtifactInstanceIdSchema.parse('skill-k')
-const assistant = {kind:'built_in_app',builtInAppId:'polo_assistant',catalogEntryId:'assistant',name:'Polo',description:'',availability:'available'}
+// POO-205 v2: built_in_app directory entries are retired — the assistant is
+// now an ordinary app row (visibility 'space'), keeping a non-skill entry in
+// the fixture so the enablement consumer is still proven to key on skills.
+const assistant = {kind:'app',catalogEntryId:'assistant',artifactInstanceId:'artifact-assistant',name:'Polo',description:'',availability:'available',version:{versionId:'version-assistant',version:'1.0.0'},sources:[{kind:'self',name:'Polo'}],permissions:[],visibility:'space'}
 function dto(context=personal, enabled=false, present=true) {
  return {contractVersion:1,productSpaceId:context.id,catalogRevision:'fresh-r2',entries:[assistant,...(present?[{kind:'skill',artifactInstanceId:id,catalogEntryId:'entry-k',name:'Research',description:'Research',availability:'available',enabled,version:{versionId:'version-k',version:'1.0.0'},sources:context.kind==='personal'?[{kind:'creator_circle',circleId:'circle-c',name:'Circle'}]:[{kind:'enterprise_import',name:'Enterprise'}],permissions:[]}]:[])]}
 }

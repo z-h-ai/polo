@@ -41,6 +41,10 @@ function entry(overrides: Record<string, unknown> = {}) {
     availability: 'available',
     sources: [{ kind: 'enterprise_import', name: 'Studio A' }],
     permissions: ['camera'],
+    // POO-205 v2: the directory splits entries by visibility. The default
+    // fixture is a space-shared row; member rows additionally require
+    // ownerAccountId (covered by the dedicated v2 scenarios below).
+    visibility: 'space',
     ...overrides,
   }
 }
@@ -337,6 +341,14 @@ describe('ProductSpace Catalog authority', () => {
       entry({ availability: 'sort-of-available' }),
       // non-string description.
       entry({ description: 42 as unknown as string }),
+      // POO-205 v2: the built_in_app directory kind is RETIRED — a raw row
+      // that still claims it must fail the shared schema (never parse).
+      entry({ kind: 'built_in_app', builtInAppId: 'polo_assistant' }),
+      // POO-205 v2: a member-visible row without its owner account poisons
+      // the whole transaction.
+      entry({ visibility: 'member' }),
+      // POO-205 v2: visibility is a strict 'space'|'member' enum.
+      entry({ visibility: 'everyone' }),
     ]
     // Whole-transaction tests run from an EXISTING trusted state: seed an
     // old trusted record whose identity (entry-old/artifact-old/version-old)
@@ -664,7 +676,8 @@ describe('ProductSpace Catalog authority', () => {
           [{ kind: 'app', catalogEntryId: 'entry-restarted', artifactInstanceId: 'artifact-restarted',
              version: { versionId: 'version-restarted', version: '3.0.0' }, name: 'Restarted',
              description: '', availability: 'available',
-             sources: [{ kind: 'enterprise_import', name: 'Studio R' }], permissions: [] }])
+             sources: [{ kind: 'enterprise_import', name: 'Studio R' }], permissions: [],
+             visibility: 'space' }])
         const freshTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
           'account-a', 'space-a', 'entry-restarted', 'artifact-restarted', 'version-restarted', '3.0.0')
         const oldStillUntrusted = mod.hasProductSpaceCatalogAuthorityTuple(
@@ -708,7 +721,8 @@ describe('ProductSpace Catalog authority', () => {
           [{ kind: 'app', catalogEntryId: 'entry-restarted', artifactInstanceId: 'artifact-restarted',
              version: { versionId: 'version-restarted', version: '3.0.0' }, name: 'Restarted',
              description: '', availability: 'available',
-             sources: [{ kind: 'enterprise_import', name: 'Studio R' }], permissions: [] }])
+             sources: [{ kind: 'enterprise_import', name: 'Studio R' }], permissions: [],
+             visibility: 'space' }])
         console.log(JSON.stringify({
           coldTrusted,
           revalidatedTrusted: mod.hasProductSpaceCatalogAuthorityTuple(
@@ -1397,7 +1411,7 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
           [{ kind: 'app', catalogEntryId: 'entry-p3', artifactInstanceId: 'artifact-p3',
              version: { versionId: 'version-p3', version: '9.0.0' }, name: 'P3', description: '',
              availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
-             permissions: [] }])
+             permissions: [], visibility: 'space' }])
       } catch (error) {
         result.commitThrew = true
         result.commitCode = error && error.code ? error.code : String(error)
