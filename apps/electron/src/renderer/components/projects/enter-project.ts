@@ -112,7 +112,7 @@ export function useProjectLightweightEntry() {
   // The assistant tab must be active when the conversation layout lands.
   // enterProjectLightweight has no React context, so the tab activation rides
   // the same atom here, right before the navigation.
-  const enter = useCallback((accountId: string, project: ProjectSummary): Promise<ActiveProjectRef | null> => {
+  const enter = useCallback((accountId: string, project: LightweightProjectInput): Promise<ActiveProjectRef | null> => {
     activateAssistantTab(POLO_APP_DEFINITION)
     const result = enterProjectLightweight(accountId, project)
     void result.catch(() => {

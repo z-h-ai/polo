@@ -218,6 +218,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
       const result = await window.electronAPI.pcSetConfirmed({
         workspaceId: activeScope.workspaceId,
         productSpaceId: activeScope.productSpaceId,
+        projectId: activeScope.projectId,
         assetId: asset.id,
         input: { expectedVersion: asset.current.version, confirmed },
       })
@@ -232,6 +233,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
       const result = await window.electronAPI.pcSetPinned({
         workspaceId: activeScope.workspaceId,
         productSpaceId: activeScope.productSpaceId,
+        projectId: activeScope.projectId,
         assetId: asset.id,
         input: { pinned },
       })
@@ -258,6 +260,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
           const result = await window.electronAPI.pcTrashAsset({
             workspaceId: activeScope.workspaceId,
             productSpaceId: activeScope.productSpaceId,
+            projectId: activeScope.projectId,
             assetId: asset.id,
             expectedRevision: asset.revision,
           })
@@ -293,6 +296,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
           const result = await window.electronAPI.pcRebuild({
             workspaceId: activeScope.workspaceId,
             productSpaceId: activeScope.productSpaceId,
+            projectId: activeScope.projectId,
           })
           // `result.jobId` is the acceptance receipt; the user-facing answer is
           // the toast plus the re-sync that picks up the new projection.
@@ -318,6 +322,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
       const result = await window.electronAPI.pcDownloadAsset({
         workspaceId: activeScope.workspaceId,
         productSpaceId: activeScope.productSpaceId,
+        projectId: activeScope.projectId,
         assetId: asset.id,
         targetPath,
       })
@@ -347,6 +352,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
         const grant = await window.electronAPI.pcGetPreviewUrl({
           workspaceId: activeScope.workspaceId,
           productSpaceId: activeScope.productSpaceId,
+          projectId: activeScope.projectId,
           assetId: asset.id,
         })
         const response = await fetch(grant.url)
@@ -358,6 +364,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
         const read = await window.electronAPI.pcReadAsset({
           workspaceId: activeScope.workspaceId,
           productSpaceId: activeScope.productSpaceId,
+          projectId: activeScope.projectId,
           assetId: asset.id,
         })
         content = read.content
@@ -381,6 +388,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
         await window.electronAPI.pcRestoreAsset({
           workspaceId: activeScope.workspaceId,
           productSpaceId: activeScope.productSpaceId,
+          projectId: activeScope.projectId,
           assetId: asset.id,
           input: { expectedRevision: asset.revision },
         })
@@ -406,6 +414,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
     const result = await window.electronAPI.pcUploadFile({
       workspaceId: activeScope.workspaceId,
       productSpaceId: activeScope.productSpaceId,
+      projectId: activeScope.projectId,
       mode: 'create',
       filePath: input.filePath,
       name: input.name,
@@ -425,7 +434,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
 
   const handleReplaceSubmit = async (input: import('@polo-ai/shared/protocol').PcUploadFileInput) => {
     const activeScope = scopeRef.current
-    const result = await window.electronAPI.pcUploadFile({ ...input, workspaceId: activeScope.workspaceId, productSpaceId: activeScope.productSpaceId })
+    const result = await window.electronAPI.pcUploadFile({ ...input, workspaceId: activeScope.workspaceId, productSpaceId: activeScope.productSpaceId, projectId: activeScope.projectId })
     upsertAsset(result.asset)
     setReplaceAsset(null)
     toast.success(t(result.published ? 'projectContext.toast.replaced' : 'projectContext.toast.replaceProcessing'))

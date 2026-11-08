@@ -219,9 +219,11 @@ describe('HomePage × production useAppCatalog runtime boundary (POO-43 / POO-47
     )
 
     render(tree)
-    // Home rendered on the production hook (Polo assistant entry always).
+    // Home rendered on the production hook (POO-205: the app region title +
+    // the 我的应用 partition mount instead of the retired Polo assistant card).
     await waitFor(() => {
-      if (!screen.getByTestId('home-quick-entry-polo')) throw new Error('Home not mounted')
+      if (!screen.getByTestId('home-apps-title')) throw new Error('Home not mounted')
+      if (!screen.getByTestId('home-my-apps')) throw new Error('my-apps partition not mounted')
     })
     // Zero runtime-status IPC so far (mount + activation).
     expectRuntimeBoundaryIntact()

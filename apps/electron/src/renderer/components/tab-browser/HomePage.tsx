@@ -31,10 +31,10 @@ import {
   type MyAppsErrorCode,
 } from '@/hooks/useMyApps'
 import { HomeSpaceContext, type HomeSpaceCategory } from '@/components/product-space/HomeSpaceContext'
-import { useProjectEntry } from '@/hooks/useProjectEntry'
 import { useProductSpaceAppLaunchHandoff, useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import { enterProjectLightweight } from '@/components/projects/enter-project'
+import { getActiveProjectFor } from '@/components/projects/projects-bus'
 import {
-  readProjectPurpose,
   readProjectVisitOrder,
   rememberProjectPurposes,
   sortProjectDirectory,
@@ -245,26 +245,19 @@ export function projectDirectoryMatchesQuery(
 
 // ─── The page ────────────────────────────────────────────────────────────────
 
-export function HomePage({ onEnterProject: onEnterProjectProp }: {
+export function HomePage({ onEnterProject }: {
   /**
-   * R3 (D13): optional host-provided entry override (isolated test mounts).
-   * Production uses `useProjectEntry()` below — the two-phased switch
-   * transaction → committed scope → most-recent-session routing →
-   * recordProjectVisit, per the adjudication. While absent (tests), the card
-   * click is deliberately inert (a silent no-op, never a fake navigation).
+   * Optional host-provided entry override (isolated test mounts). Production
+   * (POO-205, Spec Q8) enters through the LIGHTWEIGHT path below — publish
+   * the active project, land the conversation layout, open the project home;
+   * never a space-switch transaction. While absent (tests), the card click
+   * is deliberately inert (a silent no-op, never a fake navigation).
    */
   onEnterProject?: (productSpaceId: string) => void
 }) {
   const { t, i18n } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
   const launchHandoff = useProductSpaceAppLaunchHandoff()
-  // R3 (D13) + UB2 (U3): the real entry flow, sharing the ONE module-level
-  // transaction state. The clicked card shows the spinner/「正在进入项目…」face
-  // while its generation is in flight, a failed card keeps a persistent
-  // error +「重新进入」face, and duplicate activations never re-enter (the
-  // shared owner refuses while a transaction is mid-flight).
-  const { enterProject, retryEntry, entryState } = useProjectEntry()
-  const onEnterProject = onEnterProjectProp ?? enterProject
   // R3 (P11): the home project section reaches the EXISTING ProductSpace
   // context instance (the same provider the launch handoff above reads) —
   // never a second one. onOpenCreateProject is hosted by App.
@@ -511,9 +504,35 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
       ? 'min-[1081px]:hidden'
       : 'min-[761px]:hidden'
 
-  const handleEnterProject = useCallback((productSpaceId: string) => {
-    onEnterProject?.(productSpaceId)
-  }, [onEnterProject])
+  /**
+   * POO-205 (Spec Q8): entering a project of the CURRENT committed
+   * organization is a LIGHTWEIGHT navigation — publish the active project,
+   * land the conversation layout, open the project home (detail). Never a
+   * space-switch transaction: the directory only lists the committed
+   * organization's projects, so `onRequestSwitch` has nothing to do here.
+   * The host-provided override (isolated test mounts) keeps its shape.
+   */
+  const [enteringProjectId, setEnteringProjectId] = useState<string | null>(null)
+  const handleEnterProject = useCallback((entry: ProjectDirectoryEntry) => {
+    if (onEnterProject) {
+      onEnterProject(entry.id)
+      return
+    }
+    if (enteringProjectId) return
+    const accountId = projectsAccountId
+    if (!accountId || projectsOrgScope === null) return
+    setEnteringProjectId(entry.id)
+    void enterProjectLightweight(accountId, {
+      id: entry.id,
+      organizationEnterpriseId: projectsOrgScope.organizationEnterpriseId,
+      organizationProductSpaceId: entry.organizationProductSpaceId,
+      name: entry.name,
+      ...(entry.purpose ? { purpose: entry.purpose } : {}),
+      myRole: entry.role,
+    }).finally(() => {
+      setEnteringProjectId(previous => (previous === entry.id ? null : previous))
+    })
+  }, [enteringProjectId, onEnterProject, projectsAccountId, projectsOrgScope])
 
   // H2 shared actions: open / prepare / permission feedback through the SAME
   // trusted flow, driven by the shared catalog instance.
@@ -949,14 +968,16 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
                 <>
                   <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
                     {filteredProjects.map((entry, index) => {
-                      const isCurrent = spaceContext.activeProductSpaceId === entry.id
-                      // U3: the SHARED entry state — only the TARGET card is
-                      // busy (spinner + aria-busy), and only the failed
-                      // target keeps the persistent error face with retry.
-                      const cardEntering = entryState.productSpaceId === entry.id
-                        && (entryState.phase === 'switching' || entryState.phase === 'resuming')
-                      const cardEnterFailed = entryState.productSpaceId === entry.id
-                        && (entryState.phase === 'enter-failed' || entryState.phase === 'history-failed')
+                      // POO-205: a project is "current" when it is the
+                      // ENTERED project (the active-project bus), not when a
+                      // space id matches — projects are no longer spaces.
+                      const isCurrent = projectsOrgScope !== null
+                        && getActiveProjectFor(projectsAccountId ?? '', projectsOrgScope.productSpaceId)?.projectId === entry.id
+                      // Lightweight entry is a quick local navigation: only
+                      // the TARGET card shows the busy face; a failed history
+                      // read still lands the project home (never a dead card),
+                      // so no persistent per-card error face is needed.
+                      const cardEntering = enteringProjectId === entry.id
                       return (
                         <article
                           key={entry.id}
@@ -966,11 +987,11 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
                           tabIndex={0}
                           aria-label={entry.name}
                           aria-busy={cardEntering || undefined}
-                          onClick={() => handleEnterProject(entry.id)}
+                          onClick={() => handleEnterProject(entry)}
                           onKeyDown={event => {
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault()
-                              handleEnterProject(entry.id)
+                              handleEnterProject(entry)
                             }
                           }}
                           className={cardVisibilityClass(index) + ' flex cursor-pointer flex-col gap-[8px] rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs outline-none transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle focus-visible:border-accent'}
@@ -1009,47 +1030,10 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
                               <span>{t('home.projects.entering')}</span>
                             </div>
                           )}
-                          {cardEnterFailed && (
-                            <div
-                              data-testid="home-project-enter-error"
-                              className="flex flex-col gap-[8px] rounded-[12px] bg-[var(--destructive-soft)] px-[12px] py-[10px] text-[12px] leading-[1.5] text-destructive"
-                            >
-                              <span className="flex items-start gap-[6px]">
-                                <Icons.CircleAlert className="mt-[1px] size-[13px] shrink-0" aria-hidden="true" />
-                                <span>{t('home.projects.enterFailed')}</span>
-                              </span>
-                              {entryState.origin === 'create' && (
-                                <span data-testid="home-project-enter-error-created">{t('createProject.created.enterFailed')}</span>
-                              )}
-                              <button
-                                type="button"
-                                data-testid="home-project-enter-retry"
-                                className="inline-flex min-h-[28px] w-fit items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[10px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
-                                // The retry is its own action INSIDE the card
-                                // activation target: stop the event so the
-                                // card's click/Enter does not double-fire.
-                                onClick={event => {
-                                  event.stopPropagation()
-                                  retryEntry(entry.id)
-                                }}
-                                onKeyDown={event => event.stopPropagation()}
-                              >
-                                {t('home.projects.retryEnter')}
-                              </button>
-                            </div>
-                          )}
                           <div className="mt-auto flex flex-wrap items-center gap-[6px] pt-[4px] text-[11px] text-muted-foreground">
                             <span className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] leading-[1.6]">
                               {t(`productSpace.role.${entry.role}`)}
                             </span>
-                            {entry.accessMode === 'read_only' && (
-                              <span
-                                className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] leading-[1.6]"
-                                data-testid="home-project-readonly"
-                              >
-                                {t('home.projects.readOnly')}
-                              </span>
-                            )}
                             {/* P4: member count shows only when the data
                             source actually knows it. */}
                             {typeof entry.memberCount === 'number' && (

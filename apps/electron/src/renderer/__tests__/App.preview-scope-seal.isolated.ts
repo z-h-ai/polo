@@ -180,9 +180,9 @@ const electronApiExplicit: Record<string, unknown> = {
   // Home surface: real useAppCatalog mounts with an EMPTY but SUCCESSFUL
   // unified Catalog (the same channel the switch staging gate re-validates
   // the target space against before committing).
-  // Schema-valid Catalog DTO: notModified + the schema-required built-in
-  // Polo assistant entry (the work-App projection stays empty).
-  // Schema-valid Catalog DTO: the fixture is validated by the AUTHORITATIVE
+  // Schema-valid Catalog DTO (POO-205 Catalog v2: entries are app|skill only
+  // and the built-in Polo assistant retired, so an entry-free Catalog is the
+  // schema-valid vacuum). The fixture is validated by the AUTHORITATIVE
   // zod schema at construction (parse throws on any drift — no `as unknown`
   // escape), so the preview seal test exercises the exact wire contract.
   productSpaceGetCatalog: async () => ({
@@ -190,16 +190,7 @@ const electronApiExplicit: Record<string, unknown> = {
       contractVersion: 1,
       productSpaceId: 'ps-r42-preview',
       catalogRevision: 'rev-r42-preview-1',
-      entries: [
-        {
-          kind: 'built_in_app',
-          builtInAppId: 'polo_assistant',
-          catalogEntryId: 'cat-preview-polo-assistant',
-          name: 'Polo 助手',
-          description: 'Polo 内置助手',
-          availability: 'available',
-        },
-      ],
+      entries: [],
     }),
     success: true as const,
     notModified: false,

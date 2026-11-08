@@ -119,6 +119,7 @@ setupI18n()
 const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
 const { AppShellProvider } = await import('@/context/AppShellContext')
 const { ProjectConversationEmptyState } = await import('../ProjectConversationEmptyState')
+const { setActiveProject } = await import('@/components/projects/projects-bus')
 const atoms = await import('@/atoms/project-entry')
 const { projectEntryAtom, projectEntrySendNoticesAtom, projectOnboardingIntentAtom, emptyDraftKey, PROJECT_ENTRY_IDLE } = atoms
 type ProjectEntryState = import('@/atoms/project-entry').ProjectEntryState
@@ -133,6 +134,17 @@ const SCOPE = {
   enterpriseId: 'ent-1',
 }
 
+/** POO-205: the surface binds to the ENTERED project — the active-project
+ * bus, stamped to this account + committed org space. */
+const ACTIVE_PROJECT = {
+  accountId: SCOPE.accountId,
+  organizationProductSpaceId: SCOPE.productSpaceId,
+  organizationEnterpriseId: SCOPE.enterpriseId,
+  projectId: 'pj-1',
+  name: SCOPE.projectName,
+  myRole: SCOPE.viewerRole,
+}
+
 const jotaiStore = getDefaultStore()
 
 function setEntryState(state: ProjectEntryState) {
@@ -145,41 +157,31 @@ interface EmptyStateHarness {
 }
 
 /** Installs the pm transport stubs and hands back the per-test counters the
- * test's own context closure increments. */
+ * test's own context closure increments. POO-205 contract: the roster reads
+ * the PROJECT members (pm:listProjectMembers); the 添加成员 page reads the
+ * ORGANIZATION roster (pm:listOrganizationColleagues) — no invitations. */
 function makeHarness(options: { viewerRole?: 'owner' | 'manager' | 'member' } = {}): EmptyStateHarness {
   const calls: EmptyStateHarness = { createCalls: 0, sendCalls: 0 }
   const viewerRole = options.viewerRole ?? SCOPE.viewerRole
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      pmListCollaborationRoster: async () => ({
-        productSpaceId: SCOPE.productSpaceId,
-        enterpriseName: SCOPE.projectName,
-        viewerRole,
-        totalActiveMembers: 1,
+      pmListProjectMembers: async () => ({
+        contractVersion: 'poo205-contract-r1',
+        projectId: ACTIVE_PROJECT.projectId,
         members: [
-          { userId: 'u-1', displayName: '李明', avatarUrl: null, role: viewerRole, isSelf: true },
+          { accountId: SCOPE.accountId, displayName: '李明', role: viewerRole, createdAt: '2026-11-08T00:00:00.000Z' },
         ],
-        nextCursor: null,
       }),
       // UB4 (U5): the 添加成员 selection page read (the auto-open and the
-      // invite card both land here — reads only, never an invite write).
-      pmListColleagueOptions: async () => ({
-        sourceState: 'available',
-        source: { enterpriseId: 'ent-1', name: SCOPE.projectName },
-        members: [
-          { userId: 'c-1', displayName: '赵强', avatarUrl: null, projectState: 'available' },
-          { userId: 'c-2', displayName: '钱敏', avatarUrl: null, projectState: 'joined' },
+      // invite card both land here — reads only, never a member write).
+      pmListOrganizationColleagues: async () => ({
+        contractVersion: 'poo205-contract-r1',
+        organizationEnterpriseId: SCOPE.enterpriseId,
+        colleagues: [
+          { accountId: 'c-1', displayName: '赵强', organizationRole: 'member' },
+          { accountId: 'c-2', displayName: '钱敏', organizationRole: 'member' },
         ],
-        nextCursor: null,
-      }),
-      pmListProjectMembers: async () => ({
-        productSpaceId: SCOPE.productSpaceId,
-        enterpriseName: SCOPE.projectName,
-        viewerRole,
-        emailDeliveryAvailable: true,
-        members: [],
-        nextCursor: null,
       }),
       pcSearchAssets: async () => [],
     },
@@ -209,12 +211,16 @@ beforeEach(async () => {
   navigatedTo.length = 0
   composerFocusCalls = 0
   libraryUploadOpens = 0
+  setActiveProject(ACTIVE_PROJECT)
   setEntryState(PROJECT_ENTRY_IDLE)
   jotaiStore.set(projectEntrySendNoticesAtom, [])
   jotaiStore.set(projectOnboardingIntentAtom, null)
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  setActiveProject(null)
+  cleanup()
+})
 
 describe('ProjectConversationEmptyState (POO-196 R3 D14/D15)', () => {
   it('entering renders the real conversation layout with ZERO session creation', () => {
@@ -239,7 +245,7 @@ describe('ProjectConversationEmptyState (POO-196 R3 D14/D15)', () => {
     const contextValue = {
       onCreateSession: async () => {
         calls.createCalls += 1
-        return { id: 'session-1', productSpaceId: SCOPE.productSpaceId, accountId: SCOPE.accountId }
+        return { id: 'session-1', productSpaceId: SCOPE.productSpaceId, accountId: SCOPE.accountId, projectId: ACTIVE_PROJECT.projectId }
       },
       onSendMessage: () => {
         calls.sendCalls += 1
@@ -288,7 +294,7 @@ describe('ProjectConversationEmptyState (POO-196 R3 D14/D15)', () => {
     const contextValue = {
       onCreateSession: async () => {
         calls.createCalls += 1
-        return { id: 'session-2', productSpaceId: 'space-OTHER', accountId: SCOPE.accountId }
+        return { id: 'session-2', productSpaceId: 'space-OTHER', accountId: SCOPE.accountId, projectId: ACTIVE_PROJECT.projectId }
       },
       onSendMessage: () => {
         calls.sendCalls += 1
@@ -324,7 +330,7 @@ describe('ProjectConversationEmptyState 发送准入 (U11)', () => {
     const contextValue = {
       onCreateSession: async () => {
         calls.createCalls += 1
-        return { id: 'session-3', productSpaceId: SCOPE.productSpaceId, accountId: SCOPE.accountId }
+        return { id: 'session-3', productSpaceId: SCOPE.productSpaceId, accountId: SCOPE.accountId, projectId: ACTIVE_PROJECT.projectId }
       },
       onSendMessage: () => {
         calls.sendCalls += 1
@@ -367,7 +373,7 @@ describe('ProjectConversationEmptyState 发送准入 (U11)', () => {
     const contextValue = {
       onCreateSession: async () => {
         calls.createCalls += 1
-        return { id: 'session-4', productSpaceId: SCOPE.productSpaceId, accountId: SCOPE.accountId }
+        return { id: 'session-4', productSpaceId: SCOPE.productSpaceId, accountId: SCOPE.accountId, projectId: ACTIVE_PROJECT.projectId }
       },
       onSendMessage: () => {
         calls.sendCalls += 1
@@ -456,6 +462,11 @@ describe('ProjectConversationEmptyState UB4 三动作卡 + 一次性拉人 (U5)'
     expect(hint.textContent).toContain((i18n.t('project.entry.inviteHint') as string).slice(0, 4))
     // The composer carries the project presentation flag (U13 threading).
     expect(screen.getByTestId('empty-state-composer').getAttribute('data-project-composer')).toBe('true')
+
+    // POO-205: the live add-members authority is the PROJECT member list —
+    // wait for the roster to speak before exercising the authority-gated
+    // directory landing.
+    await waitFor(() => expect(screen.getByTestId('pc-members-button').textContent).toContain('成员 1'))
 
     // Invite card → the members panel opens straight on the 添加成员
     // selection page (never the overview), and NOTHING writes.

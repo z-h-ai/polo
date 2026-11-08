@@ -64,6 +64,7 @@ export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPa
     return window.electronAPI.pcListAssets({
       workspaceId: currentScope.workspaceId,
       productSpaceId: currentScope.productSpaceId,
+      projectId: currentScope.projectId,
       view: 'active',
       pinned: 'true',
       limit: PC_LIST_LIMIT_DEFAULT,
@@ -125,6 +126,7 @@ export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPa
       caps = await window.electronAPI.pcListCapabilities({
         workspaceId: currentScope.workspaceId,
         productSpaceId: currentScope.productSpaceId,
+        projectId: currentScope.projectId,
       })
     } catch (error) {
       capsError = error
@@ -170,6 +172,7 @@ export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPa
     void withBusy(asset, () => window.electronAPI.pcSetPinned({
       workspaceId: activeScope.workspaceId,
       productSpaceId: activeScope.productSpaceId,
+      projectId: activeScope.projectId,
       assetId: asset.id,
       input: { pinned: false },
     }))
@@ -180,6 +183,7 @@ export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPa
     void withBusy(target, () => window.electronAPI.pcSetConfirmed({
       workspaceId: activeScope.workspaceId,
       productSpaceId: activeScope.productSpaceId,
+      projectId: activeScope.projectId,
       assetId: target.id,
       input: { expectedVersion: target.current.version, confirmed },
     }))

@@ -381,15 +381,20 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const sessionProductSpaceId = (session as { productSpaceId?: string } | null)?.productSpaceId
     ?? (sessionMeta as { productSpaceId?: string } | null)?.productSpaceId
     ?? null
+  // POO-205 (Spec Q2): a session's PROJECT binding is the immutable
+  // `projectId` — THAT is what makes a session a project session (the old
+  // "committed space == session space" project-space projection is gone;
+  // enterprise spaces are organizations now).
+  const sessionProjectId = (session as { projectId?: string } | null)?.projectId
+    ?? (sessionMeta as { projectId?: string } | null)?.projectId
+    ?? null
   const activeProductSpace = productSpace?.activeProductSpace
-  const isProjectSession = !!sessionProductSpaceId
-    && activeProductSpace?.kind === 'enterprise'
-    && activeProductSpace.id === sessionProductSpaceId
+  const isProjectSession = !!sessionProjectId && activeProductSpace?.kind === 'enterprise'
   const projectScope = React.useMemo(() => (
-    isProjectSession && activeWorkspaceId && sessionProductSpaceId
-      ? { workspaceId: activeWorkspaceId, productSpaceId: sessionProductSpaceId }
+    isProjectSession && activeWorkspaceId && sessionProductSpaceId && sessionProjectId
+      ? { workspaceId: activeWorkspaceId, productSpaceId: sessionProductSpaceId, projectId: sessionProjectId }
       : null
-  ), [isProjectSession, activeWorkspaceId, sessionProductSpaceId])
+  ), [isProjectSession, activeWorkspaceId, sessionProductSpaceId, sessionProjectId])
   const showProjectTabs = isProjectSession && projectScope !== null
   // POO-196 R3 (P8/D8): the members PANEL is project-level and shared by BOTH
   // ChatPage branches (with-messages and skeleton). The host hook owns the
@@ -399,12 +404,20 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const membersTriggerRef = React.useRef<HTMLButtonElement | null>(null)
   // P9 entry roster: the ALL-ROLES collaboration projection (never the
   // management roster) feeds the header「成员 N」stack and the panel alike.
-  const membersRoster = useCollaborationRoster(showProjectTabs && productSpace && projectScope
-    ? { accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }
+  // POO-205 (Q10): the roster reads the PROJECT's members through the
+  // committed-organization scope.
+  const membersRoster = useCollaborationRoster(showProjectTabs && productSpace && projectScope && activeProductSpace
+    ? {
+      accountId: productSpace.accountId,
+      productSpaceId: projectScope.productSpaceId,
+      organizationEnterpriseId: activeProductSpace.enterpriseId,
+      projectId: projectScope.projectId,
+    }
     : null)
-  // U7 entry authority + UB4 (U5) invite capability: the roster viewerRole is
-  // the live authority; a roster 403 (real lost access) removes the glyph and
-  // the onboarding auto-open whatever the space summary said.
+  // U7 entry authority: the roster's viewer role (derived from the member
+  // list's own row) is the live authority; a roster 403 (real lost access)
+  // removes the glyph and the onboarding auto-open whatever the space
+  // summary said. The space summary role only fills in until the list spoke.
   const membersEntryLostAccess = membersRoster.errorKey === 'projectMembers.error.forbidden'
   const membersEntryRole = membersEntryLostAccess
     ? null
@@ -418,8 +431,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     // UB4 (U5): this ChatPage IS the conversation host for a recovered
     // create whose landing has history (「已有历史的恢复落点也由 ChatPage
     // 接住」) — the one-time intent is consumed HERE when the entry is ready
-    // on the committed target and this viewer may invite; the panel opens
-    // straight on the 添加成员 selection page.
+    // on the committed target and this viewer may add members; the panel
+    // opens straight on the 添加成员 selection page.
     onboardingScope: showProjectTabs && projectScope && productSpace
       ? { accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }
       : null,
@@ -505,42 +518,31 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps -- closePanel identity is stable; the guard keeps the switch scoped to sessionId
   const projectPaneVisible = showProjectTabs && projectTab !== 'messages'
   // (The P9 entry roster feeds the host hook above — declared there once.)
-  // D-C: the controlled external「前往企业管理」handoff — the same fail-closed
-  // click-time check TopBar performs, re-derived from the LIVE scope at click
-  // time; the desktop Bearer never rides the URL.
-  const handleOpenEnterpriseManagement = React.useCallback(async () => {
-    const scope = productSpace
-    const space = scope?.activeProductSpace
-    if (!scope || scope.pendingSwitch || !space || space.kind !== 'enterprise') return
-    if (space.role !== 'owner' && space.role !== 'manager') return
-    try {
-      const status = await window.electronAPI.adminGetStatus()
-      if (!status.loggedIn || !status.adminUrl || status.userId !== scope.accountId) {
-        toast.error(t('topbar.account.enterpriseOpenFailed'), { description: t('homeApps.errors.staleContext') })
-        return
-      }
-      await window.electronAPI.openUrl(
-        createEnterpriseWorkflowUrl(status.adminUrl, space.enterpriseId, 'members'),
-      )
-    } catch {
-      toast.error(t('topbar.account.enterpriseOpenFailed'))
-    }
-  }, [productSpace, t])
+  // POO-205: the external「前往企业管理」handoff retired from the panel —
+  // project membership lives with the project entity (pm:* channels) and the
+  // organization roster stays admin-console-managed; the panel no longer
+  // deep-links the legacy enterprise workflow page.
   // One panel element, rendered inside BOTH return branches so the skeleton
   // (messages-still-loading) session offers the same members entry. The push
   // form sits INSIDE the lane row (a flex sibling); the drawer portals itself.
+  // POO-205: the panel scope is the committed-organization PROJECT scope; the
+  // display name prefers the session's project context snapshot.
+  const projectDisplayName = (session as { projectContext?: { name?: string } } | null)?.projectContext?.name
+    ?? (activeProductSpace?.kind === 'enterprise' ? activeProductSpace.name : '')
   const projectMembersPanel = showProjectTabs && projectScope && productSpace && activeProductSpace?.kind === 'enterprise'
     ? (
       <ProjectMembersPanel
         open={membersPanelHost.open}
         mode={membersPanelHost.mode}
-        scope={{ accountId: productSpace.accountId, productSpaceId: projectScope.productSpaceId }}
-        projectName={activeProductSpace.name}
-        viewerRole={activeProductSpace.role}
-        assertedEnterpriseId={activeProductSpace.enterpriseId}
+        scope={{
+          accountId: productSpace.accountId,
+          productSpaceId: projectScope.productSpaceId,
+          organizationEnterpriseId: activeProductSpace.enterpriseId,
+          projectId: projectScope.projectId,
+        }}
+        projectName={projectDisplayName}
         roster={membersRoster}
         onClose={membersPanelHost.closePanel}
-        onOpenEnterpriseManagement={() => { void handleOpenEnterpriseManagement() }}
         initialDirectory={membersPanelHost.directoryLanding}
         onboardingOpen={membersPanelHost.onboardingAutoOpen}
       />

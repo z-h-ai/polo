@@ -384,11 +384,12 @@ afterEach(() => {
 })
 
 describe('useAppCatalog creator circle relations', () => {
-  it('R31: projects the built-in Polo assistant OUT of the work-App list (assistant-only Catalog hydrates to zero work Apps)', async () => {
-    // A schema-valid Catalog ALWAYS contains exactly one built-in Polo
-    // assistant. The work-App projection must never surface it: an
-    // assistant-only Catalog hydrates to an EMPTY work-App list so All Apps
-    // can show the frozen empty state while Home keeps its fixed Polo card.
+  it('POO-205 Catalog v2: a work-App-free Catalog (built-in apps retired) hydrates to zero work Apps', async () => {
+    // Catalog v2 lists only app/skill entries — the built-in Polo assistant
+    // is no longer a catalog entry (it survives only as an execution/billing
+    // subject identity). A Catalog without app/skill entries therefore
+    // hydrates to an EMPTY work-App list: the projection must neither invent
+    // rows nor treat the vacuum as an error.
     const api = window.electronAPI as any
     api.productSpaceGetCatalog = async () => ({
       success: true as const,
@@ -396,14 +397,7 @@ describe('useAppCatalog creator circle relations', () => {
       catalogRevision: 'rev-assistant-only',
       productSpaceId: 'organization-a',
       accessMode: 'online' as const,
-      entries: [{
-        kind: 'built_in_app',
-        catalogEntryId: 'cat_builtin_polo_assistant',
-        name: 'Polo 助手',
-        description: '内置 Polo 助手',
-        availability: 'available',
-        builtInAppId: 'polo_assistant',
-      }],
+      entries: [],
       withdrawnEntries: [],
     })
 
@@ -856,6 +850,8 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
       name: 'Bound App',
       description: 'Bound to one artifact instance',
       availability: 'available' as const,
+      // POO-205 Catalog v2: every app entry carries visibility.
+      visibility: 'space' as const,
       sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
       permissions: ['camera'],
     }
@@ -1559,6 +1555,8 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
       name: 'Live App',
       description: 'launchable',
       availability: 'available' as const,
+      // POO-205 Catalog v2: every app entry carries visibility.
+      visibility: 'space' as const,
       sources: [{ kind: 'enterprise_import' as const, name: 'Studio L' }],
       permissions: [],
       ...overrides,
@@ -1666,15 +1664,8 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
     const { ProductSpaceCatalogResponseSchema } = await import('@polo-ai/shared/product-spaces')
     // Production fixture: SAME NAME with DISTINCT entry AND artifact ids
     // (both collision-relevant axes) — must be ACCEPTED by the real parser.
+    // POO-205 Catalog v2: no built_in_app entries anymore (kind is app|skill).
     const schemaValidEntries = [
-      {
-        kind: 'built_in_app' as const,
-        builtInAppId: 'polo_assistant' as const,
-        catalogEntryId: 'assistant-entry',
-        name: 'Polo',
-        description: '',
-        availability: 'available' as const,
-      },
       rawEntry({
         catalogEntryId: 'entry-alpha',
         artifactInstanceId: 'artifact-alpha',
@@ -1998,6 +1989,8 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
       name: 'Live App',
       description: 'launchable',
       availability: 'available' as const,
+      // POO-205 Catalog v2: every app entry carries visibility.
+      visibility: 'space' as const,
       sources: [{ kind: 'enterprise_import' as const, name: 'Studio L' }],
       permissions: [],
       ...overrides,
@@ -2108,17 +2101,10 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
 
     // Schema-valid production fixture (ProductSpaceCatalogResponseSchema):
     // same NAME with DISTINCT entry + artifact ids across BOTH collision
-    // axes; validated by the real parser boundary.
+    // axes; validated by the real parser boundary. POO-205 Catalog v2: no
+    // built_in_app entries anymore (kind is app|skill).
     const { ProductSpaceCatalogResponseSchema } = await import('@polo-ai/shared/product-spaces')
     const entries = [
-      {
-        kind: 'built_in_app' as const,
-        builtInAppId: 'polo_assistant' as const,
-        catalogEntryId: 'assistant-entry',
-        name: 'Polo',
-        description: '',
-        availability: 'available' as const,
-      },
       rawEntry({
         catalogEntryId: 'entry-alpha',
         artifactInstanceId: 'artifact-alpha',
@@ -2180,8 +2166,10 @@ describe('raw Catalog payload drives the production Home open/uninstall paths', 
       createElement(MemberCatalogProvider, null, createElement(HomePage)),
     ))
     // The REAL hook syncs on mount; wait for the mapped catalog.
+    // POO-205 Catalog v2: the fixed Polo card is retired from Home — the
+    // 我的应用 partition is the always-present mount marker instead.
     await waitFor(() => {
-      expect(within(view.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
+      expect(within(view.container).getByTestId('home-my-apps')).toBeTruthy()
     })
     // H3: the home IS the complete directory — the mapped rows render
     // directly, with their REAL production identity keys.

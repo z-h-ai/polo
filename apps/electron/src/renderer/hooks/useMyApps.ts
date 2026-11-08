@@ -103,26 +103,28 @@ export function useMyApps(): MyAppsApi {
 
   const refresh = useCallback(async (): Promise<void> => {
     const currentScope = scopeRef.current
-    const api = window.electronAPI?.myAppsList
-    if (!currentScope || typeof api !== 'function') {
-      generationRef.current += 1
+    const generation = ++generationRef.current
+    // The transport member lookup stays INSIDE the guard: a strict fixture
+    // proxy (or a legacy preload) may throw on the property access itself,
+    // and a missing myapps surface must dead the hook, never break the page.
+    try {
+      const api = window.electronAPI?.myAppsList
+      if (!currentScope || typeof api !== 'function') {
+        setState(current => ({
+          ...current,
+          apps: [],
+          loading: false,
+          refreshing: false,
+          errorCode: null,
+        }))
+        return
+      }
       setState(current => ({
         ...current,
-        apps: [],
-        loading: false,
-        refreshing: false,
+        loading: current.apps.length === 0,
+        refreshing: current.apps.length > 0,
         errorCode: null,
       }))
-      return
-    }
-    const generation = ++generationRef.current
-    setState(current => ({
-      ...current,
-      loading: current.apps.length === 0,
-      refreshing: current.apps.length > 0,
-      errorCode: null,
-    }))
-    try {
       const response = await api(currentScope)
       if (generation !== generationRef.current || scopeRef.current !== currentScope) return
       if (response.productSpaceId !== currentScope.productSpaceId) return

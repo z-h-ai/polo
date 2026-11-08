@@ -24,7 +24,7 @@ interface AssetScript {
   calls: number
 }
 
-const SCOPE = { workspaceId: 'ws-pc', productSpaceId: 'ps-1' }
+const SCOPE = { workspaceId: 'ws-pc', productSpaceId: 'ps-1', projectId: 'pj-1' }
 
 const CAPABILITIES = {
   featureEnabled: true,

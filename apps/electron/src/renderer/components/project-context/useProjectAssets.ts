@@ -115,9 +115,13 @@ export function isPcError(error: unknown, code: string): boolean {
   return readRpcErrorCode(error) === code
 }
 
+/** POO-205: the pc* wire scopes every call with the session's PROJECT
+ * (Spec Q2: every enterprise session lives in exactly one project — the
+ * shared library is the project's, not the space's). */
 export interface PcScope {
   workspaceId: string
   productSpaceId: string
+  projectId: string
 }
 
 export interface PcFilters {
@@ -275,6 +279,7 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
     return window.electronAPI.pcListAssets({
       workspaceId: currentScope.workspaceId,
       productSpaceId: currentScope.productSpaceId,
+      projectId: currentScope.projectId,
       view: 'active',
       q: options.q || undefined,
       tag: options.tag ?? undefined,
@@ -349,6 +354,7 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
       const result = await window.electronAPI.pcGetAsset({
         workspaceId: currentScope.workspaceId,
         productSpaceId: currentScope.productSpaceId,
+        projectId: currentScope.projectId,
         assetId,
       })
       next = result.asset
@@ -403,6 +409,7 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
       const caps = await window.electronAPI.pcListCapabilities({
         workspaceId: currentScope.workspaceId,
         productSpaceId: currentScope.productSpaceId,
+        projectId: currentScope.projectId,
       })
       if (seq !== capsSeq.current || scopeRef.current !== currentScope) return false
       const next = capabilityStateOf(caps, null)
@@ -516,6 +523,7 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
       const list = await window.electronAPI.pcListAssets({
         workspaceId: currentScope.workspaceId,
         productSpaceId: currentScope.productSpaceId,
+        projectId: currentScope.projectId,
         view: 'trash',
         limit: PC_LIST_LIMIT_DEFAULT,
       })
@@ -536,6 +544,7 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
       const next = await window.electronAPI.pcListAssets({
         workspaceId: currentScope.workspaceId,
         productSpaceId: currentScope.productSpaceId,
+        projectId: currentScope.projectId,
         view: 'trash',
         limit: PC_LIST_LIMIT_DEFAULT,
         cursor: trash.nextCursor,

@@ -32,7 +32,7 @@
  * upload-flow-owned; generation never pre-writes it).
  */
 
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -263,7 +263,8 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
       // receives its PATH only — bundle bytes never transit the renderer.
       // The renderer hands the path to myapps:create, which re-reads and
       // uploads it server-side (admin re-validates the payload).
-      const tempDir = mkdtempSync(join(tmpdir(), 'polo-myapps-'), { mode: 0o700 })
+      const tempDir = mkdtempSync(join(tmpdir(), 'polo-myapps-'))
+      chmodSync(tempDir, 0o700)
       const bundleTempPath = join(tempDir, 'bundle.zip')
       writeFileSync(bundleTempPath, archive, { mode: 0o600 })
 

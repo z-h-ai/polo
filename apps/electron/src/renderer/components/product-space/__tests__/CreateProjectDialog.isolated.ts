@@ -5,39 +5,31 @@ import { createElement } from 'react'
 import type { ReactElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
-import { clientEnterpriseCreatePresentation } from '@polo-ai/shared/admin/client-enterprise-contract'
 
 /**
- * POO-196 R3 CreateProjectDialog (isolated happy-dom render, same pattern
- * as ProductSpaceSwitcher.interaction.isolated.ts): the D-B interaction
- * contracts — the confirmation checkbox defaults UNCHECKED, the idempotency
- * key is minted only at explicit submit, a lost response offers the receipt
- * query instead of a silent resend, `account_enterprise_exists` routes into
- * the existing project, and a rejected terms version demands a FRESH
- * confirmation instead of a silent replacement — plus the R3 minimal-form
- * contracts (P5/D7): NO standing owner input (the account display name is
- * the automatic owner; the completion field appears only for a blank or
- * over-limit name), an empty purpose is legal end to end, and the local
- * field bounds answer with their specific errors.
+ * POO-205 CreateProjectDialog (isolated happy-dom render; rewritten from the
+ * POO-196 R3 D-B surface — Spec Q1/Q3: a project is a LIGHTWEIGHT entity
+ * inside one organization; the client-side-enterprise surface — payer terms,
+ * phone verification, idempotency keys, receipt queries — is RETIRED).
+ * Proven contracts:
+ *
+ * - the form is name (required) + optional purpose ONLY: no owner input
+ *   (the acting account owns the project by construction), no responsibility
+ *   consent, no receipt channel — every failure is definite and the form
+ *   stays editable;
+ * - the command exists ONLY while an ORGANIZATION space is committed; with
+ *   the personal space committed the dialog renders the guidance face and an
+ *   explicit「前往组织空间」action for the sole organization;
+ * - the wire scope is the committed-organization envelope and the command is
+ *   the honest {name, purpose?} — nothing is derived or padded;
+ * - success hands the PROJECT to the lightweight entry exactly once and
+ *   closes the dialog; reopening offers a fresh form (the draft never
+ *   carries consent-like state, and the created project is never re-created);
+ * - local field bounds answer with their specific errors and never reach the
+ *   server; an IME composition Enter never submits.
  */
 
 mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
-
-// P5/D7 owner-name source: the App shell admin user. The holder lets each
-// case pick the display name the shell would surface (null = shell without a
-// usable display name — the「你的姓名」completion case). `present: false`
-// simulates a host WITHOUT the AppShell owner (U4: no settings navigation →
-// the version guide degrades to the local explanation only).
-const shellState: { displayName: string | null; present: boolean } = { displayName: null, present: true }
-mock.module('@/context/AppShellContext', () => ({
-  useOptionalAppShellContext: () => shellState.present
-    ? {
-        currentAdminUser: shellState.displayName === null
-          ? null
-          : { userId: 'user-1', username: 'wangxy', displayName: shellState.displayName },
-      }
-    : null,
-}))
 
 mock.module('@/components/ui/client-workbench', () => ({
   clientWorkbenchFocusClassName: '',
@@ -58,9 +50,10 @@ const { cleanup, fireEvent, render, screen, waitFor } = await import('@testing-l
 const { ProductSpaceProvider } = await import('@/context/ProductSpaceContext')
 const { CreateProjectDialog } = await import('../CreateProjectDialog')
 
+const ACCOUNT_ID = 'account-create-1'
 const PERSONAL_ID = 'space-personal'
-const EXISTING_ENTERPRISE_ID = 'space-ent-existing'
-const CREATED_SPACE_ID = 'space-created'
+const ORG_ID = 'space-org-current'
+const ORG_ENTERPRISE_ID = 'ent-org-current'
 
 const personalSpace = {
   id: PERSONAL_ID,
@@ -70,43 +63,46 @@ const personalSpace = {
   payer: { kind: 'account' },
 } as unknown as ProductSpaceSummary
 
-const existingEnterprise = {
-  id: EXISTING_ENTERPRISE_ID,
+const orgSpace = {
+  id: ORG_ID,
   kind: 'enterprise',
-  enterpriseId: 'ent-existing',
-  name: '已有企业',
+  enterpriseId: ORG_ENTERPRISE_ID,
+  name: '华东区销售组织',
   role: 'member',
   accessMode: 'active',
-  payer: { kind: 'enterprise', enterpriseId: 'ent-existing' },
+  payer: { kind: 'enterprise', enterpriseId: ORG_ENTERPRISE_ID },
 } as unknown as ProductSpaceSummary
 
-const createdEnterprise = {
-  id: CREATED_SPACE_ID,
-  kind: 'enterprise',
-  enterpriseId: 'ent-created',
+const CREATED_PROJECT = {
+  id: 'pj-created',
+  organizationEnterpriseId: ORG_ENTERPRISE_ID,
+  organizationProductSpaceId: ORG_ID,
   name: '华东区销售资料库',
-  role: 'owner',
-  accessMode: 'active',
-  payer: { kind: 'enterprise', enterpriseId: 'ent-created' },
-} as unknown as ProductSpaceSummary
+  myRole: 'owner' as const,
+  memberCount: 1,
+  contractVersion: 'poo205-contract-r1',
+  purpose: undefined,
+  instructions: undefined,
+  createdByAccountId: ACCOUNT_ID,
+  createdAt: '2026-11-08T00:00:00.000Z',
+  updatedAt: '2026-11-08T00:00:00.000Z',
+}
 
 interface CreateHarness {
   createCalls: Array<Record<string, unknown>>
-  receiptCalls: Array<Record<string, unknown>>
 }
 
 function makeHarness(options: {
   /** One entry per create call: undefined resolves `created`, an object
    * rejects with that code (missing code = transport-level loss). */
   createScript?: Array<{ code?: string } | undefined>
-  receiptState?: 'created' | 'unknown'
 } = {}): CreateHarness {
-  const harness: CreateHarness = { createCalls: [], receiptCalls: [] }
+  const harness: CreateHarness = { createCalls: [] }
   let createIndex = 0
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      pmCreateEnterprise: async (input: Record<string, unknown>) => {
+      pmCreateProject: async (input: Record<string, unknown>) => {
         harness.createCalls.push(input)
         const script = options.createScript ?? [undefined]
         const step = script[createIndex++]
@@ -114,65 +110,29 @@ function makeHarness(options: {
           throw Object.assign(new Error(step.code ?? 'transport lost'), step.code ? { code: step.code } : {})
         }
         return {
-          result: 'created',
-          enterpriseId: 'ent-created',
-          productSpaceId: CREATED_SPACE_ID,
-          viewerRole: 'owner',
-          enterpriseName: String((input.command as Record<string, unknown>).name),
-          createdAt: '2026-11-02T00:00:00.000Z',
+          contractVersion: 'poo205-contract-r1',
+          project: { ...CREATED_PROJECT, name: String((input.command as Record<string, unknown>).name) },
         }
-      },
-      pmQueryCreateReceipt: async (input: Record<string, unknown>) => {
-        harness.receiptCalls.push(input)
-        return options.receiptState === 'unknown'
-          ? { state: 'unknown' }
-          : {
-              state: 'created',
-              enterpriseId: 'ent-created',
-              productSpaceId: CREATED_SPACE_ID,
-              createdAt: '2026-11-02T00:00:00.000Z',
-            }
       },
     },
   })
   return harness
 }
 
-function fillAndConfirm() {
-  fireEvent.change(screen.getByTestId('create-project-name-input'), { target: { value: '华东区销售资料库' } })
-  fireEvent.change(screen.getByTestId('create-project-owner-input'), { target: { value: '李明' } })
-  fireEvent.change(screen.getByTestId('create-project-purpose-input'), { target: { value: '集中管理区域销售资料' } })
-  fireEvent.click(screen.getByTestId('create-project-responsibility').querySelector('input')!)
-}
-
-/** The R3 minimal fill: name + consent only (usable display name → no owner
- * input exists, and the purpose stays EMPTY on purpose). */
-function fillMinimalAndConfirm() {
-  fireEvent.change(screen.getByTestId('create-project-name-input'), { target: { value: '华东区销售资料库' } })
-  fireEvent.click(screen.getByTestId('create-project-responsibility').querySelector('input')!)
-}
-
-function submitForm() {
-  fireEvent.submit(document.getElementById('create-project-form')!)
-}
-
-function renderCreate(options: Parameters<typeof makeHarness>[0] & {
-  accountId?: string
-  onSelectProductSpace?: (id: string) => void
-  onRequestSwitch?: (id: string) => Promise<void>
-  onRefreshProductSpaces?: () => Promise<ProductSpaceSummary[] | null>
-  onVerifyPhone?: () => void
+function renderCreate(options: {
+  harness?: CreateHarness
+  createScript?: Array<{ code?: string } | undefined>
+  activeSpace?: Record<string, unknown>
+  productSpaces?: Array<Record<string, unknown>>
+  onCreated?: (accountId: string, project: Record<string, unknown>) => void
 } = {}) {
-  const harness = makeHarness(options)
-  const accountId = options.accountId ?? 'account-create-1'
+  const harness = options.harness ?? makeHarness({ createScript: options.createScript })
+  const accountId = ACCOUNT_ID
+  const activeSpace = options.activeSpace ?? orgSpace
+  const productSpaces = options.productSpaces ?? [personalSpace, orgSpace]
   const onOpenChange = mock(() => {})
-  const onSelectProductSpace = options.onSelectProductSpace ?? mock(() => {})
-  // R3 D13: the create-success auto-enter rides the project-entry flow, which
-  // issues the awaitable switch primitive (not the fire-and-forget select).
-  const onRequestSwitch = options.onRequestSwitch ?? mock(() => Promise.resolve())
-  const onVerifyPhone = options.onVerifyPhone ?? mock(() => {})
-  const onRefreshProductSpaces = options.onRefreshProductSpaces
-    ?? (async () => [personalSpace, createdEnterprise])
+  const onSelectProductSpace = mock(() => {})
+  const onCreated = options.onCreated ?? mock(() => {})
   const Provider = ProductSpaceProvider as unknown as (props: Record<string, unknown>) => ReactElement
   const Dialog = CreateProjectDialog as unknown as (props: Record<string, unknown>) => ReactElement
   const buildTree = (open: boolean) => createElement(
@@ -183,437 +143,226 @@ function renderCreate(options: Parameters<typeof makeHarness>[0] & {
       {
         value: {
           accountId,
-          activeProductSpaceId: PERSONAL_ID,
-          activeProductSpace: personalSpace,
-          productSpaces: [personalSpace, existingEnterprise],
-          allProductSpaces: [personalSpace, existingEnterprise],
+          activeProductSpaceId: activeSpace.id as string,
+          activeProductSpace: activeSpace,
+          productSpaces,
+          allProductSpaces: productSpaces,
           personalProductSpaceId: PERSONAL_ID,
-          productSpaceContextKey: JSON.stringify(['product-space', 1, accountId, PERSONAL_ID]),
+          productSpaceContextKey: JSON.stringify(['product-space', 1, accountId, activeSpace.id as string]),
           contextVersion: 1,
           pendingSwitch: null,
           onSelectProductSpace,
-          onRequestSwitch,
-          onRefreshProductSpaces,
+          onRequestSwitch: mock(() => Promise.resolve()),
+          onRefreshProductSpaces: async () => productSpaces as unknown as ProductSpaceSummary[],
+          onOpenCreateProject: mock(() => {}),
           onConfirmStopAndSwitch: mock(() => {}),
           onRetryFailedStops: mock(() => {}),
           onRetryTargetLoad: mock(() => {}),
           onCancelSwitch: mock(() => {}),
           onDismissTargetAccessLost: mock(() => {}),
+          onStopSwitchExecution: mock(() => {}),
         },
       },
-      createElement(Dialog, { open, onOpenChange, onVerifyPhone }),
+      createElement(Dialog, { open, onOpenChange, onCreated }),
     ),
   )
   const view = render(buildTree(true))
-  return { harness, onOpenChange, onSelectProductSpace, onRequestSwitch, setOpen: (open: boolean) => view.rerender(buildTree(open)) }
+  return {
+    harness,
+    onOpenChange,
+    onSelectProductSpace,
+    onCreated,
+    setOpen: (open: boolean) => view.rerender(buildTree(open)),
+  }
 }
 
-const checkbox = () => screen.getByTestId('create-project-responsibility').querySelector('input') as HTMLInputElement
+function fillName(name = '华东区销售资料库') {
+  fireEvent.change(screen.getByTestId('create-project-name-input'), { target: { value: name } })
+}
 
-/** The sentence span inside the consent label (U1: a single click target
- * together with the 24px box). The Checkbox's own wrapper is also a direct
- * span child, so pick the direct-child span that carries the sentence. */
-const consentSentence = () => {
-  const label = screen.getByTestId('create-project-responsibility')
-  const span = Array.from(label.querySelectorAll(':scope > span')).find(el => el.textContent?.includes('我确认'))
-  if (!span) throw new Error('consent sentence span missing')
-  return span as HTMLElement
+function fillPurpose(purpose: string) {
+  fireEvent.change(screen.getByTestId('create-project-purpose-input'), { target: { value: purpose } })
+}
+
+function submitForm() {
+  fireEvent.submit(document.getElementById('create-project-form')!)
 }
 
 beforeEach(async () => {
-  shellState.displayName = null
-  shellState.present = true
   await i18n.changeLanguage('zh-Hans')
 })
 
 afterEach(cleanup)
 
-describe('CreateProjectDialog (POO-196 追加轮 D-B)', () => {
-  it('D-B 1: the confirmation defaults UNCHECKED and an unconfirmed submit never reaches the server', async () => {
-    const { harness } = renderCreate()
-    await screen.findByTestId('create-project-dialog')
-
-    expect(checkbox().checked).toBe(false)
-    fillAndConfirm()
-    // Undo just the confirmation: everything else is valid.
-    fireEvent.click(checkbox())
-    submitForm()
-
-    await waitFor(() => expect(screen.getByTestId('create-project-dialog').textContent).toContain('需要先勾选确认'))
-    expect(harness.createCalls).toHaveLength(0)
-  })
-
-  it('D-B 5/7: the key is minted at explicit submit, the command echoes the contract literal, and "created" switches into the space', async () => {
-    const onSelectProductSpace = mock(() => {})
-    const { harness, onOpenChange, onRequestSwitch } = renderCreate({ onSelectProductSpace })
+describe('CreateProjectDialog (POO-205 lightweight create, Spec Q3)', () => {
+  it('the minimal form submits the committed-organization scope with the honest command; success hands the PROJECT to the entry and closes', async () => {
+    const { harness, onCreated, onOpenChange, onSelectProductSpace } = renderCreate()
     await screen.findByTestId('create-project-dialog')
 
     // Nothing left the renderer before the explicit submit.
     expect(harness.createCalls).toHaveLength(0)
-    fillAndConfirm()
+    fillName()
+    fillPurpose('集中管理区域销售资料')
     submitForm()
 
     await waitFor(() => expect(harness.createCalls).toHaveLength(1))
     const call = harness.createCalls[0]!
-    expect(call.idempotencyKey).toMatch(/^pm-create-/)
-    expect(call.accountId).toBe('account-create-1')
-    expect(call.command).toEqual({
-      name: '华东区销售资料库',
-      ownerName: '李明',
-      purpose: '集中管理区域销售资料',
-      paymentResponsibilityAccepted: true,
-      paymentResponsibilityTermsVersion: clientEnterpriseCreatePresentation.termsVersion,
+    // The committed-organization envelope, re-proved by the trusted side.
+    expect(call).toMatchObject({
+      accountId: ACCOUNT_ID,
+      productSpaceId: ORG_ID,
+      organizationEnterpriseId: ORG_ENTERPRISE_ID,
     })
+    // The command is the honest {name, purpose} — no payer facts, no owner
+    // input, no idempotency key, no payment terms.
+    expect(call.command).toEqual({ name: '华东区销售资料库', purpose: '集中管理区域销售资料' })
 
-    // created ≠ entered: refresh → find → CONTROLLED switch; the auto-enter
-    // asks the host to close (and resets the form for the next open).
-    await waitFor(() => expect(onRequestSwitch).toHaveBeenCalledWith(CREATED_SPACE_ID))
+    // Success: the dialog closes and the lightweight entry receives the
+    // created PROJECT (never a space switch here).
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1))
+    expect((onCreated as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls[0]?.[0]).toBe(ACCOUNT_ID)
+    expect((onCreated as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls[0]?.[1]).toMatchObject({ id: 'pj-created', name: '华东区销售资料库' })
     expect(onOpenChange).toHaveBeenCalledWith(false)
+    // NO space switch request rides the create success.
+    expect(onSelectProductSpace).not.toHaveBeenCalled()
   })
 
-  it('D-B 6: a lost response offers the receipt query and never resends; the query reuses the SAME key', async () => {
-    const onSelectProductSpace = mock(() => {})
-    const { harness, onRequestSwitch } = renderCreate({
-      // No `code` = unclassifiable transport failure → unresolved.
-      createScript: [{}],
-      onSelectProductSpace,
+  it('an empty purpose is legal and stays absent from the wire; the project name is required', async () => {
+    const { harness, onCreated } = renderCreate()
+    await screen.findByTestId('create-project-dialog')
+
+    // The name is required: an empty submit never reaches the server.
+    submitForm()
+    await waitFor(() => expect(screen.getByTestId('create-project-dialog').textContent).toContain('请填写项目名称'))
+    expect(harness.createCalls).toHaveLength(0)
+
+    fillName()
+    submitForm()
+    await waitFor(() => expect(harness.createCalls).toHaveLength(1))
+    // P5 (retained): the optional purpose crosses as ABSENT, never padded.
+    expect(harness.createCalls[0]!.command).toEqual({ name: '华东区销售资料库' })
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1))
+  })
+
+  it('local bounds: a 257-char name and a 2001-char purpose each get their specific error and never reach the server', async () => {
+    const { harness } = renderCreate()
+    await screen.findByTestId('create-project-dialog')
+
+    fillName('名'.repeat(257))
+    fillPurpose('介'.repeat(2001))
+    submitForm()
+
+    const dialog = screen.getByTestId('create-project-dialog')
+    expect(dialog.textContent).toContain('项目名称不能超过 256 个字符')
+    expect(dialog.textContent).toContain('介绍不能超过 2000 个字符')
+    expect(harness.createCalls).toHaveLength(0)
+  })
+
+  it('an IME composition Enter never submits', async () => {
+    const { harness } = renderCreate()
+    await screen.findByTestId('create-project-dialog')
+
+    fillName()
+    const form = document.getElementById('create-project-form')!
+    fireEvent.keyDown(form, { key: 'Enter', keyCode: 229, isComposing: true })
+    expect(harness.createCalls).toHaveLength(0)
+  })
+
+  it('every failure is DEFINITE: the form stays editable with the classified copy, and an explicit retry sends a fresh request', async () => {
+    const { harness, onCreated } = renderCreate({
+      createScript: [{ code: 'prj_forbidden' }, undefined],
     })
     await screen.findByTestId('create-project-dialog')
-    fillAndConfirm()
+
+    fillName()
     submitForm()
-
-    expect(await screen.findByTestId('create-project-recovery')).toBeTruthy()
-    expect(harness.createCalls).toHaveLength(1)
-    // The stored key keeps the request queryable across the lost response.
-    fireEvent.click(screen.getByTestId('create-project-query-receipt'))
-
-    await waitFor(() => expect(harness.receiptCalls).toHaveLength(1))
-    expect(harness.receiptCalls[0]!.createRequestKey).toBe(harness.createCalls[0]!.idempotencyKey)
-
-    // The receipt says created → the aggregate lands, still without a resend.
-    await waitFor(() => expect(screen.getByTestId('create-project-dialog').getAttribute('data-phase')).toBe('created'))
-    await waitFor(() => expect(onRequestSwitch).toHaveBeenCalledWith(CREATED_SPACE_ID))
-    expect(harness.createCalls).toHaveLength(1)
-  })
-
-  it('D-B 4: account_enterprise_exists routes into the EXISTING project instead of a second enterprise', async () => {
-    const onSelectProductSpace = mock(() => {})
-    renderCreate({ createScript: [{ code: 'account_enterprise_exists' }], onSelectProductSpace })
-    await screen.findByTestId('create-project-dialog')
-    fillAndConfirm()
-    submitForm()
-
-    expect(await screen.findByTestId('create-project-enterprise-exists')).toBeTruthy()
+    await waitFor(() => expect(harness.createCalls).toHaveLength(1))
+    expect(await screen.findByTestId('create-project-submit-error')).toBeTruthy()
+    expect(screen.getByTestId('create-project-submit-error').textContent).toContain('没有权限')
+    // The form stays editable (no receipt channel exists to wait on).
     expect(screen.getByTestId('create-project-dialog').getAttribute('data-phase')).toBe('form')
+    expect(screen.getByTestId('create-project-name-input')).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByTestId('create-project-enter-existing'))
-    expect(onSelectProductSpace).toHaveBeenCalledWith(EXISTING_ENTERPRISE_ID)
-  })
-
-  it('D-B 3: phone_verification_required hands off to the existing verification flow', async () => {
-    const onVerifyPhone = mock(() => {})
-    const { harness, onRequestSwitch } = renderCreate({
-      accountId: 'account-create-phone',
-      createScript: [{ code: 'phone_verification_required' }],
-      onVerifyPhone,
-    })
-    await screen.findByTestId('create-project-dialog')
-    fillAndConfirm()
+    // An explicit retry sends a FRESH request (no stored key, no replay).
+    fillName()
     submitForm()
-    expect(await screen.findByTestId('create-project-phone-verification')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('create-project-verify-phone'))
-    expect(onVerifyPhone).toHaveBeenCalledTimes(1)
-    expect(harness.createCalls).toHaveLength(1)
-  })
-
-  it('D-B 2: a rejected terms version unchecks the box, demands a fresh confirmation, and resubmits under a NEW key', async () => {
-    const onSelectProductSpace = mock(() => {})
-    const { harness, onRequestSwitch } = renderCreate({ createScript: [{ code: 'validation_error' }, undefined], onSelectProductSpace })
-    await screen.findByTestId('create-project-dialog')
-    fillAndConfirm()
-    submitForm()
-
-    // The server-side rejection reads as a terms mismatch: the acknowledgement
-    // is dropped and the mismatch is announced — never silently replaced.
-    expect(await screen.findByTestId('create-project-version-mismatch')).toBeTruthy()
-    expect(checkbox().checked).toBe(false)
-
-    fireEvent.click(checkbox())
-    expect(screen.queryByTestId('create-project-version-mismatch')).toBeNull()
-    submitForm()
-
     await waitFor(() => expect(harness.createCalls).toHaveLength(2))
-    expect(harness.createCalls[1]!.idempotencyKey).not.toBe(harness.createCalls[0]!.idempotencyKey)
-    // The fresh key lands too: the resubmitted aggregate auto-enters.
-    await waitFor(() => expect(onRequestSwitch).toHaveBeenCalledWith(CREATED_SPACE_ID))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1))
   })
 
-  it('when the refreshed list has no such space, the created page STAYS with a retry — never a re-create', async () => {
-    const onSelectProductSpace = mock(() => {})
-    const { harness, onOpenChange, onRequestSwitch } = renderCreate({
-      onSelectProductSpace,
-      // The refresh deliberately omits the created space (server lag etc).
-      onRefreshProductSpaces: async () => [personalSpace],
-    })
+  it('after the success closes the dialog, reopening offers a FRESH form', async () => {
+    const { harness, onOpenChange, onCreated, setOpen } = renderCreate()
     await screen.findByTestId('create-project-dialog')
 
-    fillAndConfirm()
+    fillName()
     submitForm()
-
-    const dialog = await screen.findByTestId('create-project-dialog')
-    await waitFor(() => expect(dialog.getAttribute('data-phase')).toBe('created'))
-    expect(screen.getByTestId('create-project-title').textContent).toContain('项目已创建')
-    expect(screen.getByTestId('create-project-retry-enter')).toBeTruthy()
-    // No switch happened, and the aggregate was NOT submitted twice.
-    expect(onRequestSwitch).not.toHaveBeenCalled()
-    expect(onOpenChange).not.toHaveBeenCalledWith(false)
-    expect(harness.createCalls).toHaveLength(1)
-  })
-
-  it('after the auto-enter closes the dialog, reopening offers a FRESH form, never the stale created page', async () => {
-    const onSelectProductSpace = mock(() => {})
-    const { harness, onOpenChange, setOpen, onRequestSwitch } = renderCreate({ onSelectProductSpace })
-    await screen.findByTestId('create-project-dialog')
-
-    fillAndConfirm()
-    submitForm()
-    // created → auto-enter succeeds → the dialog asks the host to close.
-    await waitFor(() => expect(onRequestSwitch).toHaveBeenCalledWith(CREATED_SPACE_ID))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1))
     expect(onOpenChange).toHaveBeenCalledWith(false)
 
-    // The host honours the close (the dialog INSTANCE stays mounted — App
-    // pattern), then the entry is used again.
     setOpen(false)
     await waitFor(() => expect(screen.queryByTestId('create-project-dialog')).toBeNull())
     setOpen(true)
 
     const reopened = await screen.findByTestId('create-project-dialog')
-    expect(reopened.getAttribute('data-phase')).toBe('form')
-    expect(screen.getByTestId('create-project-title').textContent).not.toContain('项目已创建')
+    expect((screen.getByTestId('create-project-name-input') as HTMLInputElement).value).toBe('')
     expect(harness.createCalls).toHaveLength(1)
+    expect(reopened.textContent).not.toContain('项目已创建')
   })
 
-  it('renders the zh-Hans strings under the U1 presentation ruling: the POL-79 literals stay bound to the generated contract, the解释性 copy is deliberately overridden', () => {
-    // POL-79 governance surface — still VERBATIM from the contract.
-    expect(i18n.t('createProject.field.nameLabel')).toBe(clientEnterpriseCreatePresentation.fields.projectName.label)
-    expect(i18n.t('createProject.responsibilityConfirm')).toBe(clientEnterpriseCreatePresentation.responsibility.confirmStatement)
-    expect(i18n.t('createProject.responsibilityMismatch')).toBe(clientEnterpriseCreatePresentation.responsibility.versionMismatchHint)
-    expect(clientEnterpriseCreatePresentation.responsibility.confirmDefaultChecked).toBe(false)
-    // U1 (adjudication-usability G1): the explanatory copy is a deliberate
-    // product override of the generated presentation — honest facts about
-    // prepayment/budget scope and a plain invitation line, with no ownership
-    // or member-authorization promises. The nameHint key carries the synced
-    // introduction value (the form itself no longer renders it).
-    expect(i18n.t('createProject.budgetFact')).toBe('创建项目不要求预充值。预算默认关闭，可由负责人开启；创建时无需导入工具或邀请成员。')
-    expect(i18n.t('createProject.description')).toBe('建好项目后，可以邀请同事加入，一起看资料、聊工作。')
-    expect(i18n.t('createProject.field.nameHint')).toBe('建好项目后，可以邀请同事加入，一起看资料、聊工作。')
-    expect(i18n.t('createProject.description')).not.toBe(clientEnterpriseCreatePresentation.responsibility.scopeStatement)
-    expect(i18n.t('createProject.budgetFact')).not.toBe(clientEnterpriseCreatePresentation.budgetFact)
+  it('a transport-level loss is also definite: classified as the generic failure, the form stays editable', async () => {
+    const { harness } = renderCreate({ createScript: [{}] })
+    await screen.findByTestId('create-project-dialog')
+
+    fillName()
+    submitForm()
+    expect(await screen.findByTestId('create-project-submit-error')).toBeTruthy()
+    expect(screen.getByTestId('create-project-dialog').getAttribute('data-phase')).toBe('form')
+    // Exactly ONE request left the renderer (no automatic resend, no
+    // receipt query — the whole POO-196 recovery surface is retired).
+    expect(harness.createCalls).toHaveLength(1)
+    expect(screen.queryByTestId('create-project-recovery')).toBeNull()
+    expect(screen.queryByTestId('create-project-query-receipt')).toBeNull()
   })
 })
 
-describe('CreateProjectDialog (POO-196 R3 minimal form, P5/D7)', () => {
-  it('P5: a usable account display name shows NO owner input; name + empty purpose submit with the display name as owner', async () => {
-    shellState.displayName = '李明'
-    const onSelectProductSpace = mock(() => {})
-    const { harness, onRequestSwitch } = renderCreate({ onSelectProductSpace })
-    await screen.findByTestId('create-project-dialog')
-
-    // The standing owner field is GONE for a usable display name.
-    expect(screen.queryByTestId('create-project-owner-input')).toBeNull()
-    expect(screen.queryByTestId('create-project-owner-sync-hint')).toBeNull()
-
-    // Nothing pre-fills the purpose and nothing derives it from the name.
-    expect((screen.getByTestId('create-project-purpose-input') as HTMLTextAreaElement).value).toBe('')
-    fillMinimalAndConfirm()
-    submitForm()
-
-    await waitFor(() => expect(harness.createCalls).toHaveLength(1))
-    const command = harness.createCalls[0]!.command as Record<string, unknown>
-    expect(command.ownerName).toBe('李明')
-    // D7: the optional purpose crosses the wire as an honest empty string.
-    expect(command.purpose).toBe('')
-    await waitFor(() => expect(onRequestSwitch).toHaveBeenCalledWith(CREATED_SPACE_ID))
-  })
-
-  it('P5/D7: a blank display name surfaces the「你的姓名」completion field with the sync hint; 65 code units do too, 64 do not', async () => {
-    // Blank counts as MISSING.
-    const blank = renderCreate()
-    await screen.findByTestId('create-project-dialog')
-    expect(screen.getByTestId('create-project-owner-input')).toBeTruthy()
-    expect(screen.getByTestId('create-project-owner-sync-hint').textContent).toBe('用于成员识别，将同步到账号显示名')
-    blank.setOpen(false)
-
-    shellState.displayName = 'x'.repeat(65)
-    const over = renderCreate()
-    await screen.findByTestId('create-project-dialog')
-    expect(screen.getByTestId('create-project-owner-input')).toBeTruthy()
-    over.setOpen(false)
-
-    shellState.displayName = 'x'.repeat(64)
-    const exact = renderCreate()
-    await screen.findByTestId('create-project-dialog')
-    expect(screen.queryByTestId('create-project-owner-input')).toBeNull()
-    exact.setOpen(false)
-  })
-
-  it('D7 local bounds: 65-unit owner answer, 129-char name and 513-char purpose each get their specific error and never reach the server', async () => {
-    const { harness } = renderCreate()
-    await screen.findByTestId('create-project-dialog')
-
-    fireEvent.change(screen.getByTestId('create-project-name-input'), { target: { value: '名'.repeat(129) } })
-    fireEvent.change(screen.getByTestId('create-project-owner-input'), { target: { value: '字'.repeat(65) } })
-    fireEvent.change(screen.getByTestId('create-project-purpose-input'), { target: { value: '介'.repeat(513) } })
-    fireEvent.click(screen.getByTestId('create-project-responsibility').querySelector('input')!)
-    submitForm()
-
-    const dialog = screen.getByTestId('create-project-dialog')
-    expect(dialog.textContent).toContain('项目名称不能超过 128 个字符')
-    expect(dialog.textContent).toContain('姓名不能超过 64 个字符')
-    expect(dialog.textContent).toContain('介绍不能超过 512 个字符')
-    expect(harness.createCalls).toHaveLength(0)
-  })
-
-  it('D7: contract_version_unsupported is a definite failure with the service-guide copy — the form stays editable', async () => {
-    renderCreate({ createScript: [{ code: 'contract_version_unsupported' }] })
-    await screen.findByTestId('create-project-dialog')
-    fillAndConfirm()
-    submitForm()
-
-    expect(await screen.findByTestId('create-project-submit-error')).toBeTruthy()
-    expect(screen.getByTestId('create-project-submit-error').textContent)
-      .toContain('当前连接的服务暂不支持此功能，需要管理员检查服务版本。')
-    expect(screen.getByTestId('create-project-dialog').getAttribute('data-phase')).toBe('form')
-    expect(screen.getByTestId('create-project-name-input')).toBeTruthy()
-  })
-
-  it('U4: the version-unsupported face expands/collapses the local guide in place and offers the settings navigation shortcut for a hosted shell', async () => {
-    const { harness } = renderCreate({
-      // Both submits reject the same way — the guide is a pure presentation
-      // surface on top of a repeated definite failure (never a re-send fix).
-      createScript: [{ code: 'contract_version_unsupported' }, { code: 'contract_version_unsupported' }],
+describe('CreateProjectDialog (POO-205 committed-organization gating)', () => {
+  it('with the personal space committed there is NO form — the guidance face offers the sole organization', async () => {
+    const { harness, onSelectProductSpace } = renderCreate({
+      activeSpace: personalSpace,
+      productSpaces: [personalSpace, orgSpace],
     })
     await screen.findByTestId('create-project-dialog')
-    fillAndConfirm()
-    submitForm()
 
-    const guide = await screen.findByTestId('create-project-update-guide')
-    expect(guide.getAttribute('aria-expanded')).toBe('false')
-    expect(guide.textContent).toBe('查看更新指引')
-    expect(screen.queryByTestId('create-project-update-guide-body')).toBeNull()
+    // The face never renders a form that can only fail.
+    expect(screen.queryByTestId('create-project-name-input')).toBeNull()
+    expect(screen.getByTestId('create-project-org-required')).toBeTruthy()
+    expect(screen.getByTestId('create-project-go-organization').textContent).toContain('华东区销售组织')
 
-    // Expand in place: the admin escalation guide + the client-update
-    // shortcut with its honesty note (the shell provides settings nav here).
-    fireEvent.click(guide)
-    const body = screen.getByTestId('create-project-update-guide-body')
-    expect(body.textContent).toContain('请联系单位的 Polo 管理员，告知当前无法使用项目功能，请其检查服务与客户端版本是否兼容。')
-    expect(screen.getByTestId('create-project-client-update').textContent).toBe('检查客户端更新')
-    expect(body.textContent).toContain('客户端更新不等于服务已更新')
-    expect(guide.getAttribute('aria-expanded')).toBe('true')
-    expect(guide.textContent).toBe('收起')
-    // A re-trigger of the SAME error never re-sends; the guide toggle writes
-    // nothing to the wire.
-    const callsAfterError = harness.createCalls.length
-
-    // Keyboard operable: a REAL button (focusable, Enter/Space activatable in
-    // any browser) with the aria-expanded state contract.
-    expect(guide.tagName).toBe('BUTTON')
-    expect(guide.getAttribute('type')).toBe('button')
-    fireEvent.click(guide)
-    expect(screen.queryByTestId('create-project-update-guide-body')).toBeNull()
-    expect(guide.getAttribute('aria-expanded')).toBe('false')
-
-    // Re-expanding after a fresh submit starts collapsed again. The definite
-    // failure keeps the form editable (consent included — the terms-mismatch
-    // uncheck is D-B 2's rule for `validation_error`, not this code).
-    submitForm()
-    await waitFor(() => expect(harness.createCalls.length).toBe(callsAfterError + 1))
-    expect(screen.getByTestId('create-project-update-guide').getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByTestId('create-project-update-guide-body')).toBeNull()
-  })
-
-  it('U4: without a hosting shell the version guide keeps ONLY the local explanation — no settings shortcut, no dead button', async () => {
-    shellState.present = false
-    renderCreate({ createScript: [{ code: 'contract_version_unsupported' }] })
-    await screen.findByTestId('create-project-dialog')
-    // The degraded shell also means no usable display name → the owner
-    // completion field exists again; fill it so the submit passes locally.
-    fillAndConfirm()
-    submitForm()
-
-    await screen.findByTestId('create-project-submit-error')
-    fireEvent.click(screen.getByTestId('create-project-update-guide'))
-    expect(screen.getByTestId('create-project-update-guide-body').textContent)
-      .toContain('请联系单位的 Polo 管理员，告知当前无法使用项目功能，请其检查服务与客户端版本是否兼容。')
-    expect(screen.queryByTestId('create-project-client-update')).toBeNull()
-  })
-})
-
-describe('CreateProjectDialog (POO-196 R3 usability U1 responsibility presentation)', () => {
-  it('U1: the fact line sits ABOVE the consent with the honest budget copy; the full responsibility sentence stays one intact label', async () => {
-    shellState.displayName = '李明'
-    const { harness } = renderCreate()
-    await screen.findByTestId('create-project-dialog')
-
-    const fact = screen.getByTestId('create-project-budget-fact')
-    expect(fact.textContent).toBe('创建项目不要求预充值。预算默认关闭，可由负责人开启；创建时无需导入工具或邀请成员。')
-    const consent = screen.getByTestId('create-project-responsibility')
-    expect(consent.textContent).toBe('我确认成为唯一负责人并承担企业付款责任')
-    // DOM order: the fact line precedes the consent label.
-    expect(fact.compareDocumentPosition(consent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-    // The name field no longer renders the standing hint (the introduction
-    // carries it), and no stray scopeStatement copy survives anywhere.
-    expect(document.getElementById('create-project-name-hint')?.textContent).toBe('')
-    expect(screen.getByTestId('create-project-dialog').textContent).toContain('建好项目后，可以邀请同事加入，一起看资料、聊工作。')
-    expect(screen.getByTestId('create-project-dialog').textContent).not.toContain('唯一负责人；该企业的成员都可访问')
+    // The guidance action is an explicit switch to the organization.
+    fireEvent.click(screen.getByTestId('create-project-go-organization'))
+    expect(onSelectProductSpace).toHaveBeenCalledWith(ORG_ID)
+    // No wire call ever left the renderer.
     expect(harness.createCalls).toHaveLength(0)
   })
 
-  it('U1: the 24px box keeps the whole label as one hit target — clicking the sentence toggles exactly once', async () => {
-    shellState.displayName = '李明'
-    renderCreate()
+  it('with SEVERAL organizations the guidance stays neutral — the dialog never silently picks one', async () => {
+    const orgB = {
+      id: 'space-org-b',
+      kind: 'enterprise',
+      enterpriseId: 'ent-org-b',
+      name: '另一个组织',
+      role: 'member',
+      accessMode: 'active',
+      payer: { kind: 'enterprise', enterpriseId: 'ent-org-b' },
+    }
+    renderCreate({
+      activeSpace: personalSpace,
+      productSpaces: [personalSpace, orgSpace, orgB as unknown as ProductSpaceSummary],
+    })
     await screen.findByTestId('create-project-dialog')
 
-    const input = checkbox()
-    // The Checkbox renders the input inside a sizing wrapper; the 24px box is
-    // the wrapper's size utility (the input fills it). Geometry itself is
-    // pinned in the real-browser harness (happy-dom has no layout).
-    const boxWrapper = input.parentElement as HTMLElement
-    expect(boxWrapper.className).toContain('size-[24px]')
-    expect(boxWrapper.className).not.toContain('size-4')
-    expect(input.className).toContain('size-full')
-
-    // Clicking the SENTENCE (not the box) toggles the native input once.
-    const sentence = consentSentence()
-    fireEvent.click(sentence)
-    expect(input.checked).toBe(true)
-    fireEvent.click(sentence)
-    expect(input.checked).toBe(false)
-    // And the label element itself drives the same single toggle.
-    fireEvent.click(screen.getByTestId('create-project-responsibility'))
-    expect(input.checked).toBe(true)
-  })
-
-  it('U1: the unchecked-submit error carries a ≥12px icon and is wired to the checkbox via aria-describedby', async () => {
-    renderCreate()
-    await screen.findByTestId('create-project-dialog')
-    fireEvent.change(screen.getByTestId('create-project-name-input'), { target: { value: '责任呈现项目' } })
-    submitForm()
-
-    const error = await screen.findByTestId('create-project-responsibility-error')
-    expect(error.textContent).toContain('需要先勾选确认')
-    const icon = error.querySelector('svg')
-    expect(icon).toBeTruthy()
-    // ≥12px error icon (class-pinned here; real geometry pinned in the e2e
-    // harness where layout exists).
-    expect(icon!.getAttribute('class')).toContain('size-[12px]')
-    // The checkbox announces the error as its own description.
-    expect(checkbox().getAttribute('aria-describedby')).toBe('create-project-responsibility-error')
-    expect(checkbox().getAttribute('aria-invalid')).toBe('true')
-    // Re-checking clears the error and the description wiring.
-    fireEvent.click(checkbox())
-    expect(screen.queryByTestId('create-project-responsibility-error')).toBeNull()
-    expect(checkbox().getAttribute('aria-describedby')).toBeNull()
+    expect(screen.getByTestId('create-project-org-required')).toBeTruthy()
+    expect(screen.queryByTestId('create-project-go-organization')).toBeNull()
   })
 })

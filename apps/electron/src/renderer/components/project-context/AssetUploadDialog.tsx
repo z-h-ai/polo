@@ -513,11 +513,12 @@ export function AssetUploadDialog({ open, maxUploadBytes, onClose, onSubmit }: A
 export function replaceUploadInput(
   input: AssetUploadInput,
   asset: PcAssetDto,
-  scope: { workspaceId: string; productSpaceId: string },
+  scope: { workspaceId: string; productSpaceId: string; projectId: string },
 ): PcUploadFileInput {
   return {
     workspaceId: scope.workspaceId,
     productSpaceId: scope.productSpaceId,
+    projectId: scope.projectId,
     mode: 'replace',
     filePath: input.filePath,
     name: input.name,

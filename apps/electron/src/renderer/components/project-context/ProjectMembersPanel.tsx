@@ -150,9 +150,12 @@ export function ProjectMembersPanel({
   // must NOT reset anything (D8: 搜索/多选/焦点保留). An `initialDirectory`
   // open lands straight on the 添加成员 selection page (manager-guarded).
   const wasOpenRef = useRef(false)
+  const landingResolvedRef = useRef(false)
   useEffect(() => {
     if (open && !wasOpenRef.current) {
+      landingResolvedRef.current = false
       if (canManage && initialDirectory) {
+        landingResolvedRef.current = true
         setSelectedIds(new Set())
         setSelectedRole('member')
         setPage('directory')
@@ -167,6 +170,26 @@ export function ProjectMembersPanel({
     }
     wasOpenRef.current = open
   }) // eslint-disable-line react-hooks/exhaustive-deps -- reads the LATEST canManage/initialDirectory on the open edge, like the R3 panel's open effect
+
+  // POO-205: the management authority comes from the PROJECT member list,
+  // which loads asynchronously — the open edge above can fire before the
+  // list has spoken (the live hint may be a stale space-role fallback).
+  // While the host asked for the directory landing and the list then grants
+  // management, promote once; if the list speaks AGAINST management while
+  // the landing page is up, fall back to the honest overview.
+  useEffect(() => {
+    if (!open) return
+    if (page === 'overview' && initialDirectory && canManage && !landingResolvedRef.current) {
+      landingResolvedRef.current = true
+      setSelectedIds(new Set())
+      setSelectedRole('member')
+      setPage('directory')
+      return
+    }
+    if (page === 'directory' && !canManage && !members.loading && !members.errorKey) {
+      setPage('overview')
+    }
+  }, [canManage, initialDirectory, members.errorKey, members.loading, open, page])
 
   // A scope switch resets to the overview and drops every in-page decision.
   useEffect(() => {

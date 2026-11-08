@@ -35,7 +35,7 @@ const { createElement, useEffect, useState } = await import('react')
 const { ShareToProjectDialog } = await import('../ShareToProjectDialog')
 
 const MAX_BYTES = 100 * 1024 * 1024
-const SCOPE = { workspaceId: 'ws-apollo', productSpaceId: 'ps-1' }
+const SCOPE = { workspaceId: 'ws-apollo', productSpaceId: 'ps-1', projectId: 'pj-apollo' }
 
 interface UploadCall {
   filePath: string
@@ -225,7 +225,7 @@ describe('ShareToProjectDialog (POO-196 S-01)', () => {
     expect(await screen.findByTestId('pc-share-item-att:att-1')).toBeTruthy()
     expect(screen.getByTestId('pc-share-item-text:message')).toBeTruthy()
     const sourceInput = screen.getByTestId('pc-share-source') as HTMLInputElement
-    expect(sourceInput.value).toBe('From chat: Apollo kickoff')
+    expect(sourceInput.value).toBe('From conversation: Apollo kickoff')
 
     // Rename the text artifact and add a preset tag: both apply to every item.
     fireEvent.change(screen.getByTestId('pc-share-item-name-text:message'), {
@@ -249,7 +249,7 @@ describe('ShareToProjectDialog (POO-196 S-01)', () => {
     for (const call of harness.uploads) {
       expect(call.mode).toBe('create')
       expect(call.tags).toEqual(['source'])
-      expect(call.source).toEqual({ kind: 'session', note: 'From chat: Apollo kickoff' })
+      expect(call.source).toEqual({ kind: 'session', note: 'From conversation: Apollo kickoff' })
       expect(call.checksumSha256).toMatch(/^[0-9a-f]{64}$/)
     }
     expect(shared[0]!.map((asset) => asset.name).sort()).toEqual(['spec.md', '验收要点.md'])
@@ -279,7 +279,7 @@ describe('ShareToProjectDialog (POO-196 S-01)', () => {
     const attachmentCheck = screen.getByTestId('pc-share-item-check-att:att-1') as HTMLInputElement
     const sourceInput = screen.getByTestId('pc-share-source') as HTMLInputElement
     expect(attachmentCheck.checked).toBe(true)
-    expect(sourceInput.value).toBe('From chat: Apollo kickoff')
+    expect(sourceInput.value).toBe('From conversation: Apollo kickoff')
 
     // The user renames the artifact, drops the attachment, tags it and
     // rewrites the source note while the dialog is open.
@@ -301,7 +301,7 @@ describe('ShareToProjectDialog (POO-196 S-01)', () => {
     act(() => { refreshTarget({ text: '另一条消息正文' }) })
     expect((screen.getByTestId('pc-share-item-name-text:message') as HTMLInputElement).value).toBe('Message text.md')
     expect((screen.getByTestId('pc-share-item-check-att:att-1') as HTMLInputElement).checked).toBe(true)
-    expect((screen.getByTestId('pc-share-source') as HTMLInputElement).value).toBe('From chat: Apollo kickoff')
+    expect((screen.getByTestId('pc-share-source') as HTMLInputElement).value).toBe('From conversation: Apollo kickoff')
     expect(screen.queryByTestId('pc-share-selected-tags')).toBeNull()
   })
 })

@@ -188,12 +188,18 @@ const electronApiExplicit: Record<string, unknown> = {
   // Workspaces
   getWorkspaces: async () => [],
   // Home surface: real useAppCatalog mounts; the fail-closed catalog response
-  // keeps the launcher section (error tile beside the fixed Polo card)
-  // without fixture coupling — the narrow-Home route/layout is the target.
+  // keeps the launcher section (error tile beside the app grid) without
+  // fixture coupling — the narrow-Home route/layout is the target.
   productSpaceGetCatalog: async () => ({
     success: false as const,
     errorCode: 'request_failed',
     message: 'catalog intentionally unavailable in the R33 route probe',
+  }),
+  // POO-205 我的应用 (useMyApps): the list degrades to an honest empty face.
+  myAppsList: async () => ({
+    contractVersion: 1 as const,
+    productSpaceId: 'ps-r33-probe',
+    apps: [],
   }),
   getHomeQuickAccess: async () => [],
   setHomeQuickAccess: async (_contextKey: unknown, apps: unknown[]) => apps,
@@ -435,7 +441,9 @@ function assertGuardMounted(): void {
 
 function assertHomeRestored(): void {
   expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
-  expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+  // POO-205 Catalog v2: the fixed Polo card is retired from Home — the app
+  // region title is the restored-surface marker instead.
+  expect(screen.getByTestId('home-apps-title')).toBeTruthy()
   expect(screen.queryByTestId('window-width-guard')).toBeNull()
 }
 

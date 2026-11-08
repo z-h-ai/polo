@@ -38,7 +38,6 @@ import { useNotifications } from '@/hooks/useNotifications'
 import { useSession } from '@/hooks/useSession'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
-import { readProjectPurpose } from '@/lib/project-directory'
 import { navigate, openGlobalSettings, routes } from './lib/navigate'
 import { DEFAULT_SETTINGS_SUBPAGE } from '../shared/settings-registry'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
@@ -108,6 +107,8 @@ import { useProductSpaceContextState } from '@/hooks/useProductSpaceContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { ProductSpaceSwitchDialog } from '@/components/product-space/ProductSpaceSwitchDialog'
 import { CreateProjectDialog } from '@/components/product-space/CreateProjectDialog'
+import { ProjectHomePanel } from '@/components/projects/ProjectHomePanel'
+import { getActiveProjectFor } from '@/components/projects/projects-bus'
 import { ProductSpaceContractGate } from '@/components/product-space/ProductSpaceContractGate'
 import {
   emitAdminAuthFailure,
@@ -2266,18 +2267,28 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    // POO-196 R3 P12-5: carry the committed project's authoritative context
-    // metadata (title + cached introduction) on creation. The server stores it
-    // ONLY under its own trustedScope space binding, and every spawn/resume of
-    // the session re-injects it into the model request context.
+    // POO-205 (Spec Q2/G4): an entered project rides EVERY creation path —
+    // the immutable projectId plus the authoritative context snapshot the
+    // lightweight entry published (name / purpose / instructions). Personal
+    // spaces (and org sessions without an entered project) carry nothing:
+    // the trusted side owns the default binding. The bus scope-stamps the
+    // active project to this account + committed org space, so a stale read
+    // after a space/account switch answers null here.
     const activeSpace = productSpace.activeProductSpace
-    const projectContext = activeSpace?.kind === 'enterprise' && currentAdminUser?.userId
+    const activeProject = activeSpace?.kind === 'enterprise' && currentAdminUser?.userId
+      ? getActiveProjectFor(currentAdminUser.userId, activeSpace.id)
+      : null
+    const attachedOptions = activeProject
       ? {
-        name: activeSpace.name,
-        purpose: readProjectPurpose(currentAdminUser.userId, activeSpace.id),
+        ...options,
+        projectId: activeProject.projectId,
+        projectContext: {
+          name: activeProject.name,
+          ...(activeProject.purpose ? { purpose: activeProject.purpose } : {}),
+          ...(activeProject.instructions ? { instructions: activeProject.instructions } : {}),
+        },
       }
-      : undefined
-    const attachedOptions = { ...options, ...(projectContext ? { projectContext } : {}) }
+      : options
     const session = await window.electronAPI.createSession(workspaceId, attachedOptions)
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
@@ -3823,17 +3834,11 @@ export default function App() {
               }}
             />
             <ProductSpaceSwitchDialog />
-            <CreateProjectDialog
-              open={createProjectOpen}
-              onOpenChange={setCreateProjectOpen}
-              onVerifyPhone={() => {
-                // D-B 3: the existing sign-in challenge owns phone
-                // verification — hand off and let the user come back to
-                // re-read their identity and re-submit.
-                setCreateProjectOpen(false)
-                handleAdminRelogin()
-              }}
-            />
+            {/* POO-205: NO CreateProjectDialog on the space-select gate —
+            creation is committed-organization scoped (a project is a
+            lightweight entity inside the committed organization), so a gate
+            that runs BEFORE any space is committed has no project scope. The
+            home「项目」区域 remains the only entry, reached after entering. */}
           </MaybeProductSpaceProvider>
         </ModalProvider>
       </DismissibleLayerProvider>
@@ -4170,14 +4175,16 @@ export default function App() {
             </ClientPageProvider>
             </MemberCatalogProvider>
             <ProductSpaceSwitchDialog />
+            {/* POO-205: the lightweight create dialog + the ONE project-page
+            host (nav / detail / settings) — both live outside the TabShell
+            so a project navigation never remounts the shell. The panel owns
+            the active-project hygiene (cleared when the committed scope
+            stops matching its stamp). */}
             <CreateProjectDialog
               open={createProjectOpen}
               onOpenChange={setCreateProjectOpen}
-              onVerifyPhone={() => {
-                setCreateProjectOpen(false)
-                handleAdminRelogin()
-              }}
             />
+            <ProjectHomePanel />
           </MaybeProductSpaceProvider>
           </AppShellProvider>
         </TooltipProvider>

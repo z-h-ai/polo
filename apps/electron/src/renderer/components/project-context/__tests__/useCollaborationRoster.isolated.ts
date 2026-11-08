@@ -1,18 +1,20 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement } from 'react'
-import type { ClientCollaborationRosterResponse } from '@polo-ai/shared/admin/client-enterprise-contract'
+import type { ListProjectMembersResponse } from '@polo-ai/shared/protocol'
 
 /**
- * POO-196 R3 collaboration-roster hook (adjudication D4, B3 gate "hooks 用
- * 例，mock transport"). Proven here against a mocked electronAPI transport:
+ * POO-205 collaboration-roster hook (rewritten from the POO-196 R3 D4
+ * surface; B3 gate "hooks 用例，mock transport"). Proven against a mocked
+ * electronAPI transport:
  *
- * - the committed-space scope auto-loads the SAFE roster; the viewer role,
-   the unfiltered total and isSelf ride the server response verbatim;
- * - search passes `q` THROUGH (server-side filter) — the client never
- *   filters rows locally and never counts rows into the total;
- * - a 403 is a real authority change: the count and viewer role fall back to
- *   unknown/null, never to a stale roster;
+ * - the committed-organization PROJECT scope auto-loads the safe roster;
+ *   the viewer role is derived from the list's OWN row (isSelf) and the
+ *   count is the server snapshot's length — never a fabricated 0;
+ * - search is CLIENT-side (the wire takes no `q`): the full snapshot keeps
+ *   its unfiltered total while `members` narrows;
+ * - a forbidden read is a real authority loss: data clears, count/role fall
+ *   back to unknown — never a stale roster behind the error;
  * - a scope change mid-flight clears everything and DISCARDS the late
  *   response of the previous scope.
  */
@@ -28,42 +30,45 @@ afterEach(() => {
 
 type ProbeRecorder = { current: ReturnType<typeof useCollaborationRoster> | null }
 
-const SCOPE = { accountId: 'account-a', productSpaceId: 'space-project' }
-
-function rosterMember(userId: string, name: string, role: 'owner' | 'manager' | 'member', isSelf: boolean) {
-  return { userId, displayName: name, avatarUrl: null, role, isSelf }
+const SCOPE = {
+  accountId: 'account-a',
+  productSpaceId: 'space-org',
+  organizationEnterpriseId: 'ent-org',
+  projectId: 'pj-1',
 }
 
-function roster(overrides: Partial<ClientCollaborationRosterResponse> = {}): ClientCollaborationRosterResponse {
+function member(accountId: string, name: string, role: 'owner' | 'manager' | 'member') {
+  return { accountId, displayName: name, role, createdAt: '2026-11-08T00:00:00.000Z' }
+}
+
+function rosterResponse(overrides: Partial<ListProjectMembersResponse> = {}): ListProjectMembersResponse {
   return {
-    productSpaceId: SCOPE.productSpaceId,
-    enterpriseName: '华东区销售项目',
-    viewerRole: 'member',
-    totalActiveMembers: 3,
+    contractVersion: 'poo205-contract-r1',
+    projectId: SCOPE.projectId,
     members: [
-      rosterMember('22222222-2222-4222-8222-222222222222', '王芳', 'owner', false),
-      rosterMember('55555555-5555-4555-8555-555555555555', '李明', 'member', true),
+      member('22222222-2222-4222-8222-222222222222', '王芳', 'owner'),
+      // The acting account's OWN row — the viewer-role authority.
+      member('account-a', '李明', 'member'),
     ],
-    nextCursor: null,
     ...overrides,
   }
 }
 
 interface Harness {
   calls: Array<Record<string, unknown>>
-  respond: (input: Record<string, unknown>) => Promise<ClientCollaborationRosterResponse>
+  respond: (input: Record<string, unknown>) => Promise<ListProjectMembersResponse>
 }
 
-function makeHarness(implementation?: (harness: Harness, input: Record<string, unknown>) => Promise<ClientCollaborationRosterResponse>): Harness {
-  const harness: Harness = { calls: [], respond: async () => roster() }
+function makeHarness(implementation?: (harness: Harness, input: Record<string, unknown>) => Promise<ListProjectMembersResponse>): Harness {
+  const harness: Harness = { calls: [], respond: async () => rosterResponse() }
   harness.respond = async (input: Record<string, unknown>) => {
     if (implementation) return implementation(harness, input)
-    return roster()
+    return rosterResponse()
   }
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      pmListCollaborationRoster: async (input: Record<string, unknown>) => {
+      pmListProjectMembers: async (input: Record<string, unknown>) => {
         harness.calls.push(input)
         return harness.respond(input)
       },
@@ -83,101 +88,99 @@ async function mountWith(scope: typeof SCOPE | null, recorder: ProbeRecorder) {
   return view
 }
 
-describe('useCollaborationRoster (POO-196 R3, D4)', () => {
-  it('auto-loads the safe roster and surfaces viewerRole/total/isSelf verbatim', async () => {
+describe('useCollaborationRoster (POO-205, Q10)', () => {
+  it('auto-loads the project roster; the viewer role derives from the own row and the count is the server snapshot', async () => {
     const harness = makeHarness()
     const recorder: ProbeRecorder = { current: null }
     await mountWith(SCOPE, recorder)
 
     expect(harness.calls).toHaveLength(1)
-    expect(harness.calls[0]).toMatchObject({ accountId: SCOPE.accountId, productSpaceId: SCOPE.productSpaceId })
+    expect(harness.calls[0]).toMatchObject({
+      accountId: SCOPE.accountId,
+      productSpaceId: SCOPE.productSpaceId,
+      organizationEnterpriseId: SCOPE.organizationEnterpriseId,
+      projectId: SCOPE.projectId,
+    })
     expect(recorder.current?.viewerRole).toBe('member')
-    expect(recorder.current?.totalActiveMembers).toBe(3)
-    expect(recorder.current?.enterpriseName).toBe('华东区销售项目')
+    expect(recorder.current?.totalActiveMembers).toBe(2)
     expect(recorder.current?.members).toHaveLength(2)
     expect(recorder.current?.members[1]?.isSelf).toBe(true)
+    expect(recorder.current?.members[0]?.isSelf).toBe(false)
     expect(recorder.current?.errorKey).toBeNull()
+    // The wire takes no pagination on this channel.
+    expect(recorder.current?.nextCursor).toBeNull()
   })
 
-  it('passes q through (server-side search) and keeps the server total — no client filtering', async () => {
-    const harness = makeHarness(async (_h, input) => {
-      // The SERVER answers a q-filtered page but the SAME unfiltered total.
-      if (input.q === '芳') {
-        return roster({
-          members: [rosterMember('22222222-2222-4222-8222-222222222222', '王芳', 'owner', false)],
-          nextCursor: 'cursor-q1',
-        })
-      }
-      return roster()
-    })
+  it('a missing own row degrades the viewer role to null — never a guessed authority', async () => {
+    makeHarness(async () => rosterResponse({
+      members: [member('22222222-2222-4222-8222-222222222222', '王芳', 'owner')],
+    }))
     const recorder: ProbeRecorder = { current: null }
     await mountWith(SCOPE, recorder)
 
-    await act(async () => { recorder.current?.search('  芳  '); await new Promise(resolve => setTimeout(resolve, 0)) })
+    expect(recorder.current?.viewerRole).toBeNull()
+    expect(recorder.current?.totalActiveMembers).toBe(1)
+  })
 
-    expect(harness.calls[1]).toMatchObject({ q: '芳' })
-    // One filtered row — the client did NOT merge the previous page's rows.
+  it('search is CLIENT-side: the filtered view narrows while the total keeps the unfiltered snapshot', async () => {
+    const harness = makeHarness(async () => rosterResponse({
+      members: [
+        member('22222222-2222-4222-8222-222222222222', '王芳', 'owner'),
+        member('55555555-5555-4555-8555-555555555555', '李明', 'member'),
+        member('66666666-6666-4666-8666-666666666666', '赵六', 'manager'),
+      ],
+    }))
+    const recorder: ProbeRecorder = { current: null }
+    await mountWith(SCOPE, recorder)
+    expect(harness.calls).toHaveLength(1)
+
+    await act(async () => { recorder.current?.search('  芳  ') })
+
+    // NO second wire call — the filter is local.
+    expect(harness.calls).toHaveLength(1)
     expect(recorder.current?.members).toHaveLength(1)
-    // The total is the server's unfiltered count from the same snapshot.
+    expect(recorder.current?.members[0]?.displayName).toBe('王芳')
+    // The unfiltered total survives the search (never a fabricated count).
     expect(recorder.current?.totalActiveMembers).toBe(3)
-    expect(recorder.current?.nextCursor).toBe('cursor-q1')
-  })
 
-  it('pages through the roster cursor: loadMore appends the next page', async () => {
-    const harness = makeHarness(async (_h, input) => {
-      if (input.cursor === 'cursor-1') {
-        return roster({ members: [rosterMember('44444444-4444-4444-8444-444444444444', '赵六', 'manager', false)], nextCursor: null })
-      }
-      return roster({ nextCursor: 'cursor-1', totalActiveMembers: 3 })
-    })
-    const recorder: ProbeRecorder = { current: null }
-    await mountWith(SCOPE, recorder)
-    expect(recorder.current?.nextCursor).toBe('cursor-1')
+    await act(async () => { recorder.current?.search('不存在') })
+    expect(recorder.current?.members).toHaveLength(0)
+    expect(recorder.current?.totalActiveMembers).toBe(3)
 
-    await act(async () => { recorder.current?.loadMore(); await new Promise(resolve => setTimeout(resolve, 0)) })
-
-    expect(harness.calls[1]).toMatchObject({ cursor: 'cursor-1' })
+    await act(async () => { recorder.current?.search('') })
     expect(recorder.current?.members).toHaveLength(3)
-    expect(recorder.current?.members[2]?.displayName).toBe('赵六')
-    expect(recorder.current?.totalActiveMembers).toBe(3)
   })
 
-  it('treats a 403 as authority loss: count/role fall back to unknown, never stale data', async () => {
-    const harness = makeHarness(async (_h, input) => {
-      if (input.cursor === undefined && harness.calls.length > 1) {
-        throw Object.assign(new Error('forbidden'), { code: 'forbidden' })
-      }
-      return roster({ nextCursor: 'cursor-1' })
+  it('treats a forbidden read as authority loss: data clears, count/role fall back to unknown', async () => {
+    makeHarness(async () => {
+      throw Object.assign(new Error('forbidden'), { code: 'prj_forbidden' })
     })
     const recorder: ProbeRecorder = { current: null }
     await mountWith(SCOPE, recorder)
-    expect(recorder.current?.totalActiveMembers).toBe(3)
-
-    // The member lost access (search re-read hits the 403).
-    await act(async () => { recorder.current?.search('芳'); await new Promise(resolve => setTimeout(resolve, 0)) })
 
     expect(recorder.current?.errorKey).toBe('projectMembers.error.forbidden')
     expect(recorder.current?.totalActiveMembers).toBeNull()
     expect(recorder.current?.viewerRole).toBeNull()
+    expect(recorder.current?.members).toHaveLength(0)
   })
 
   it('clears on scope change and DISCARDS the late response of the previous scope', async () => {
-    // One INDEPENDENT gate per call: releasing the old scope's roster must
-    // never satisfy the new scope's own in-flight read.
-    const gates: Array<(response: ClientCollaborationRosterResponse) => void> = []
-    const harness = makeHarness(async () => new Promise<ClientCollaborationRosterResponse>(resolve => { gates.push(resolve) }))
+    const gates: Array<(response: ListProjectMembersResponse) => void> = []
+    const harness = makeHarness(async () => new Promise<ListProjectMembersResponse>(resolve => { gates.push(resolve) }))
     const recorder: ProbeRecorder = { current: null }
     const view = await mountWith(SCOPE, recorder)
     expect(recorder.current?.loading).toBe(true)
 
-    const otherScope = { accountId: 'account-b', productSpaceId: 'space-project' }
+    const otherScope = { ...SCOPE, accountId: 'account-b' }
     await act(async () => { view.rerender(createElement(Probe, { scope: otherScope, recorder })) })
     expect(recorder.current?.members).toHaveLength(0)
     expect(recorder.current?.totalActiveMembers).toBeNull()
     expect(harness.calls).toHaveLength(2)
 
     await act(async () => {
-      gates[0]!(roster({ members: [rosterMember('99999999-9999-4999-8999-999999999999', '迟到者', 'member', false)] }))
+      gates[0]!(rosterResponse({
+        members: [member('99999999-9999-4999-8999-999999999999', '迟到者', 'member')],
+      }))
       await new Promise(resolve => setTimeout(resolve, 0))
     })
     // The late roster of the PREVIOUS account was discarded, not published.

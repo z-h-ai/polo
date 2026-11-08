@@ -11,7 +11,6 @@ import type {
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
 import {
   BUILTIN_APP_DEFINITIONS,
-  POLO_APP_DEFINITION,
 } from '../../../../shared/tab-browser-types'
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 import { ProductSpaceProvider } from '@/context/ProductSpaceContext'
@@ -376,14 +375,18 @@ function directoryUninstallButton(identityKey: string): HTMLElement {
 }
 
 describe('HomePage complete directory (POO-70 H3)', () => {
-  it('always shows the fixed Polo assistant and opens the Polo tab', async () => {
+  it('POO-205 Catalog v2: renders no built-in cards — no Polo assistant, no knowledge base', async () => {
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
     renderHome()
     await act(async () => {})
 
-    const poloEntry = screen.getByTestId('home-quick-entry-polo')
-    expect(within(poloEntry).getByText('Polo Assistant')).toBeTruthy()
-    fireEvent.click(poloEntry)
-    expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
+    expect(screen.getByTestId('home-apps-title')).toBeTruthy()
+    expect(screen.queryByTestId('home-quick-entry-polo')).toBeNull()
+    expect(screen.queryByTestId('home-quick-entry-knowledge-base')).toBeNull()
+    // The 我的应用 partition is present with its own vacuum (the myapps RPC
+    // is unavailable in this harness, which degrades to an honest empty face).
+    expect(screen.getByTestId('home-my-apps')).toBeTruthy()
+    expect(openApp).not.toHaveBeenCalled()
   })
 
   it('P70-HOME-01: renders the COMPLETE authorized directory with no pinning — more than five work Apps and same-named works all get their own card', async () => {
@@ -472,8 +475,8 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     fireEvent.keyDown(sourceSelect, { key: 'Enter' })
     const list = await screen.findByRole('listbox')
     const options = Array.from(list.querySelectorAll<HTMLElement>('[role=option]')).map(option => option.dataset.value)
-    // Include the real built-in assistant alongside catalog-derived sources.
-    expect(options).toEqual(['all', 'builtin:polo-assistant', 'catalog:Growth App Source', 'catalog:Design Circle', 'catalog:Organization A'])
+    // POO-205 Catalog v2: no built-in source anymore — catalog-derived sources only.
+    expect(options).toEqual(['all', 'catalog:Growth App Source', 'catalog:Design Circle', 'catalog:Organization A'])
 
     fireEvent.click(screen.getByRole('option', { name: 'Design Circle' }))
     await waitFor(() => {
@@ -570,7 +573,7 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     })
   })
 
-  it('P70-HOME-03: keeps Polo visible while the current Catalog is loading or failed, retry stays explicit', async () => {
+  it('P70-HOME-03: keeps the app region visible while the current Catalog is loading or failed, retry stays explicit', async () => {
     appCatalogHook = hookWithCatalog(
       enterpriseCatalogWith([]),
       {},
@@ -578,7 +581,7 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     )
     const loading = renderHome()
     await act(async () => {})
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getByTestId('home-apps-title')).toBeTruthy()
     expect(screen.getByTestId('home-directory-loading')).toBeTruthy()
     loading.unmount()
 
@@ -590,7 +593,7 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     )
     renderHome()
     await act(async () => {})
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getByTestId('home-apps-title')).toBeTruthy()
     expect(screen.getByTestId('home-directory-load-failed')).toBeTruthy()
     expect(screen.getByText('Could not load the Apps of this space')).toBeTruthy()
 
@@ -739,59 +742,18 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     expect(within(hub).getAllByText(/Scroll App G Source/).length).toBeGreaterThan(0)
   })
 
-  it('F082: searching a work App hides the nonmatching assistant, while assistant-only results have no false empty state', async () => {
+  it('F082: searching a work App narrows the grid and the explicit clear restores it', async () => {
     const app = workApp('f082-report', 'Report Builder', 0)
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
     renderHome()
     await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
     const search = screen.getByTestId('home-directory-search')
     fireEvent.change(search, { target: { value: 'Report Builder' } })
-    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
-    fireEvent.change(search, { target: { value: i18n.t('homeApps.home.poloTitle') } })
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
-    expect(screen.queryByTestId('home-directory-no-match') === null).toBe(true)
     fireEvent.change(search, { target: { value: 'no-such-application-f082' } })
-    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
     expect(screen.getByTestId('home-directory-no-match')).toBeTruthy()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
     fireEvent.change(search, { target: { value: '' } })
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
-  })
-
-  it('F082: the built-in source selects only the assistant and keeps its original launch action', async () => {
-    const app = workApp('f082-source', 'Source-filtered App', 0)
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
-    renderHome()
-    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
-    const source = screen.getByTestId('home-directory-source')
-    await chooseOption(source, 'builtin:polo-assistant')
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
-    expect(screen.queryByTestId('home-directory-no-match') === null).toBe(true)
-    expect(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button', { name: i18n.t('productSpaceSkills.title') })).toBeTruthy()
-    fireEvent.click(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button', { name: i18n.t('homeApps.home.openAssistant') }))
-    expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
-    fireEvent.keyDown(source, { key: 'Enter' })
-    const list = await screen.findByRole('listbox')
-    const workSource = Array.from(list.querySelectorAll<HTMLElement>('[role=option]')).find(option => option.dataset.value !== 'all' && option.dataset.value !== 'builtin:polo-assistant')!
-    fireEvent.click(workSource)
-    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
-    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
-  })
-
-  it('F082: a legitimate catalog source named like the built-in key cannot collide with the assistant filter', async () => {
-    const app = workApp('f082-collision', 'Named Source App', 0, { catalogSources: [{ kind: 'enterprise_import', name: 'builtin:polo-assistant' }] })
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
-    renderHome()
-    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
-    const source = screen.getByTestId('home-directory-source')
-    await chooseOption(source, 'builtin:polo-assistant')
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
-    await chooseOption(source, 'catalog:builtin:polo-assistant')
-    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
   })
 
@@ -806,10 +768,8 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
     expect(screen.getByText('Literal All App')).toBeTruthy()
     expect(screen.queryByText('Other Source App') === null).toBe(true)
-    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
     await chooseOption(source, 'all')
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
   })
 
   it('P70-HOME-01 保留本机隐藏恢复: hide moves a work to the hidden section, restore brings it back, and the preference is device-local per context', async () => {
@@ -1131,14 +1091,15 @@ describe('HomePage A→B ProductSpace isolation (R39)', () => {
     })
 
     // FIRST committed target Home layout: no prior-scope App identity,
-    // sources, or Skill metadata may appear.
+    // sources, or Skill metadata may appear, and no built-in card either
+    // (POO-205 Catalog v2 removed them from the home).
     const hub = screen.getByTestId('home-app-hub')
     const firstCommitText = hub.textContent ?? ''
     expect(firstCommitText).not.toContain('Scope A App')
     expect(firstCommitText).not.toContain('Scope A Source')
     expect(firstCommitText).not.toContain('Skill 已启用')
     expect(firstCommitText).not.toContain('skills enabled')
-    expect(firstCommitText).toContain('Built into Polo')
+    expect(screen.queryByTestId('home-quick-entry-polo')).toBeNull()
 
     // Context B's own data lands afterwards: the hydrated B state carries B
     // identity only.
@@ -1233,7 +1194,7 @@ describe('HomePage copy and formatting', () => {
       { code: 'NOT_AUTHORIZED', message: secret },
       'open',
       'enterprise',
-    )).toBe('你的组织已不再提供此 App。')
+    )).toBe('此 App 的授权已结束或已停止分发。')
     expect(catalogStateMessage(
       i18n.t.bind(i18n),
       'NETWORK_ERROR',

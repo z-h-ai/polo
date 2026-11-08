@@ -70,7 +70,7 @@ export interface ShareToProjectTarget {
 
 export interface ShareToProjectDialogProps {
   open: boolean
-  scope: { workspaceId: string; productSpaceId: string }
+  scope: { workspaceId: string; productSpaceId: string; projectId: string }
   /** The session the shared copy comes from (attachment writes need it). */
   sessionId: string
   target: ShareToProjectTarget | null
@@ -193,6 +193,7 @@ export function ShareToProjectDialog({
     window.electronAPI.pcListCapabilities({
       workspaceId: scope.workspaceId,
       productSpaceId: scope.productSpaceId,
+      projectId: scope.projectId,
     }).then((capabilities) => {
       if (cancelled) return
       setMaxUploadBytes(capabilities.limits.maxUploadBytes)
@@ -290,6 +291,7 @@ export function ShareToProjectDialog({
           const result = await window.electronAPI.pcUploadFile({
             workspaceId: scope.workspaceId,
             productSpaceId: scope.productSpaceId,
+            projectId: scope.projectId,
             mode: 'create',
             filePath: prepared.filePath,
             name: (names[item.id] ?? item.name).trim(),

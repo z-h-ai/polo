@@ -9,8 +9,6 @@ import {
   GENUI_APP_PIN_STATE_EVENT,
   GENUI_APP_PIN_STATE_QUERY_EVENT,
   GENUI_APP_PUBLISH_EVENT,
-  GENUI_APP_PUBLISH_TARGET_EVENT,
-  GENUI_APP_PUBLISH_TARGET_QUERY_EVENT,
   GENUI_APP_UNPIN_EVENT,
   buildGenUiAppSrc,
   dispatchGenUiAppCanvasClose,
@@ -22,8 +20,6 @@ import {
   dispatchGenUiAppPinStateQuery,
   dispatchGenUiAppPublish,
   dispatchGenUiAppPublishResult,
-  dispatchGenUiAppPublishTarget,
-  dispatchGenUiAppPublishTargetQuery,
   dispatchGenUiAppUnpin,
   getGenUiAppPartition,
   mergeGenUiAppCalls,
@@ -140,7 +136,7 @@ describe('mergeGenUiAppCalls', () => {
   })
 })
 
-describe('publish bridge events (POO-104)', () => {
+describe('save bridge events (POO-104 names kept for POO-205 保存到我的应用)', () => {
   const globalScope = globalThis as { window?: EventTarget }
   const originalWindow = globalScope.window
   let fakeWindow: EventTarget
@@ -253,7 +249,7 @@ describe('pin/unpin bridge events (POO-154)', () => {
   })
 })
 
-describe('publish target discovery (POO-154)', () => {
+describe('publish target discovery (POO-154) — retired by POO-205', () => {
   const globalScope = globalThis as { window?: EventTarget }
   const originalWindow = globalScope.window
   let fakeWindow: EventTarget
@@ -267,40 +263,6 @@ describe('publish target discovery (POO-154)', () => {
     globalScope.window = originalWindow
   }
 
-  it('a target query carries no payload and the broadcast may report no active target', () => {
-    useFakeWindow()
-    try {
-      let queryDetail: unknown = 'sentinel'
-      let received: unknown = null
-      fakeWindow.addEventListener(GENUI_APP_PUBLISH_TARGET_QUERY_EVENT, (event) => {
-        queryDetail = (event as CustomEvent).detail
-      })
-      fakeWindow.addEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, (event) => {
-        received = (event as CustomEvent).detail
-      })
-      dispatchGenUiAppPublishTargetQuery()
-      dispatchGenUiAppPublishTarget({ hasActiveTarget: false, organizationName: null })
-      expect(queryDetail).toBeNull()
-      expect(received).toEqual({ hasActiveTarget: false, organizationName: null })
-    } finally {
-      restoreWindow()
-    }
-  })
-
-  it('a resolved target carries the organization name', () => {
-    useFakeWindow()
-    try {
-      let received: unknown = null
-      fakeWindow.addEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, (event) => {
-        received = (event as CustomEvent).detail
-      })
-      dispatchGenUiAppPublishTarget({ hasActiveTarget: true, organizationName: 'Acme' })
-      expect(received).toEqual({ hasActiveTarget: true, organizationName: 'Acme' })
-    } finally {
-      restoreWindow()
-    }
-  })
-
   it('publish results carry the stable errorCode class for localization', () => {
     useFakeWindow()
     try {
@@ -308,10 +270,14 @@ describe('publish target discovery (POO-154)', () => {
       const unsubscribe = onGenUiAppPublishResult('r9', (result) => {
         seen.push(result.errorCode)
       })
-      dispatchGenUiAppPublishResult({ requestId: 'r9', ok: false, error: 'No active organization available to publish into', errorCode: 'no-publish-target' })
-      dispatchGenUiAppPublishResult({ requestId: 'r9', ok: true, organizationName: 'Acme' })
+      // POO-205: the card saves into the current space's 我的应用 — the
+      // failure classes are packaging, a missing committed space, and the
+      // generic save failure. There is no publish-target discovery anymore.
+      dispatchGenUiAppPublishResult({ requestId: 'r9', ok: false, error: 'Packaging failed', errorCode: 'packaging-failed' })
+      dispatchGenUiAppPublishResult({ requestId: 'r9', ok: false, error: 'No committed ProductSpace scope', errorCode: 'no-active-space' })
+      dispatchGenUiAppPublishResult({ requestId: 'r9', ok: true })
       unsubscribe()
-      expect(seen).toEqual(['no-publish-target', undefined])
+      expect(seen).toEqual(['packaging-failed', 'no-active-space', undefined])
     } finally {
       restoreWindow()
     }

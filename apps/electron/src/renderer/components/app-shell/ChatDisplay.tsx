@@ -590,11 +590,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // backfills for direct mounts.
   const projectComposerMode = projectComposer ?? isProjectSession
   const projectAssetMention = React.useMemo(() => (
-    isProjectSession && session && workspaceId
+    isProjectSession && session && workspaceId && session.projectId
       ? {
         search: (q: string) => window.electronAPI.pcSearchAssets({
           workspaceId,
           productSpaceId: sessionProductSpaceId!,
+          projectId: session.projectId!,
           q,
           limit: 20,
         }),
