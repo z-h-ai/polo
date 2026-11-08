@@ -49,7 +49,10 @@ export interface PendingAgentResume {
 export const SESSION_PERSISTENT_FIELDS = [
   // Identity
   'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd', 'productSpaceId', 'accountId',
-  // POO-196 R3 P12-5: project context metadata (title + optional purpose)
+  // POO-205: immutable Project binding for enterprise sessions (Spec Q2).
+  'projectId',
+  // POO-196 R3 P12-5, POO-205 revised: project identity snapshot
+  // (name + optional purpose + optional editable instructions)
   'projectContext',
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
@@ -61,8 +64,6 @@ export const SESSION_PERSISTENT_FIELDS = [
   'lastReadMessageId', 'hasUnread',
   // Config
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
-  // Enterprise Knowledge Base session scope (POO-108)
-  'kbCollectionIds',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
   // System prompt preset ('mini' edit-popover sessions must survive restarts

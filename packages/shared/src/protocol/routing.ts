@@ -72,23 +72,6 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // workspaces resolve no local rows and the panel falls back to GET (POO-106 S1).
   RPC_CHANNELS.skills.GET_UNFILTERED,
 
-  // kb — the Enterprise Knowledge Base stores content under the local
-  // workspace's `.polo-kb/` directory (POO-108); a remote server has no
-  // access to this filesystem scope, so every kb channel stays local.
-  RPC_CHANNELS.kb.LIST_COLLECTIONS,
-  RPC_CHANNELS.kb.CREATE_COLLECTION,
-  RPC_CHANNELS.kb.LIST_DOCUMENTS,
-  RPC_CHANNELS.kb.UPLOAD_DOCUMENT,
-  RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW,
-  RPC_CHANNELS.kb.PUBLISH_DOCUMENT,
-  RPC_CHANNELS.kb.REJECT_DOCUMENT,
-  RPC_CHANNELS.kb.REVERT_TO_DRAFT,
-  RPC_CHANNELS.kb.DELETE_DOCUMENT,
-  RPC_CHANNELS.kb.GET_DOCUMENT,
-  RPC_CHANNELS.kb.SEARCH,
-  RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS,
-  RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS,
-
   // pc — Enterprise Project Context (POO-196). Like the KB, this is a device
   // local service domain: asset bytes stream between the local filesystem and
   // object storage over short-lived admin-granted URLs, credentials ride the
@@ -110,26 +93,29 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.projectContext.SEARCH_ASSETS,
   RPC_CHANNELS.projectContext.REBUILD,
 
-  // pm — Enterprise project members (POO-196 追加轮). Creation and targeted
-  // invitations act through the device's trusted Admin session only; the
-  // roster/invitation reads are re-proved against the committed space fence on
-  // every call. There is no remote consumer for an account-scoped membership
-  // command, so every pm channel stays local.
-  RPC_CHANNELS.projectMembers.CREATE_ENTERPRISE,
-  RPC_CHANNELS.projectMembers.QUERY_CREATE_RECEIPT,
-  RPC_CHANNELS.projectMembers.LIST_MEMBERS,
-  RPC_CHANNELS.projectMembers.LIST_INVITATIONS,
-  RPC_CHANNELS.projectMembers.CREATE_INVITATION,
-  // POO-196 R3 (D3–D6): the colleague directory / collaboration roster reads
-  // re-prove the committed space fence; the colleague invitation write and
-  // its recovery query act through the device's trusted Admin session; the
-  // negotiated R3 list read is account-scoped on that same session. None of
-  // it is workspace-server routable.
-  RPC_CHANNELS.projectMembers.LIST_COLLEAGUE_OPTIONS,
-  RPC_CHANNELS.projectMembers.LIST_COLLABORATION_ROSTER,
-  RPC_CHANNELS.projectMembers.CREATE_COLLEAGUE_INVITATION,
-  RPC_CHANNELS.projectMembers.QUERY_COLLEAGUE_INVITATION,
+  // pm — Project members & projects (POO-205). POO-196's enterprise creation
+  // and targeted invitation channels are RETIRED (organizations come from the
+  // admin console; project members are picked from the organization roster).
+  // The remaining account-scoped R3 list read acts through the device's
+  // trusted Admin session; there is no remote consumer, so it stays local.
+  // The new project/member/colleague channels register alongside (pm block).
   RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3,
+  RPC_CHANNELS.projectMembers.LIST_PROJECTS,
+  RPC_CHANNELS.projectMembers.CREATE_PROJECT,
+  RPC_CHANNELS.projectMembers.UPDATE_PROJECT,
+  RPC_CHANNELS.projectMembers.LIST_PROJECT_MEMBERS,
+  RPC_CHANNELS.projectMembers.ADD_PROJECT_MEMBERS,
+  RPC_CHANNELS.projectMembers.UPDATE_PROJECT_MEMBER,
+  RPC_CHANNELS.projectMembers.REMOVE_PROJECT_MEMBER,
+  RPC_CHANNELS.projectMembers.LIST_ORGANIZATION_COLLEAGUES,
+
+  // myapps — Member apps (POO-205, Q7/Q11). Per-space "我的应用" with
+  // publish/withdraw into the committed space; every channel acts through the
+  // device's trusted Admin session and re-proves the committed fence.
+  RPC_CHANNELS.myApps.LIST,
+  RPC_CHANNELS.myApps.CREATE,
+  RPC_CHANNELS.myApps.PUBLISH,
+  RPC_CHANNELS.myApps.WITHDRAW,
 
   // system — local OS info
   RPC_CHANNELS.system.VERSIONS,

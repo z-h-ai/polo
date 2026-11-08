@@ -3,6 +3,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   realpathSync,
   rmSync,
 } from 'node:fs'
@@ -249,39 +250,68 @@ export class WorkspaceSessionStorage extends FilesystemSessionStorage {
 }
 
 /**
- * POO-205: per-project session store. A project session's artifacts live in
- * their own sessions root — `{workspaceRoot}/project-sessions/{projectId}/sessions`
- * — so project sessions never share a directory with personal sessions or with
- * another project's sessions. This is the physical half of the space isolation
- * model; the logical half remains the session record's immutable
+ * POO-205 per-project session stores. A project session's artifacts live in
+ * their own physical root — `{workspaceRoot}/project-sessions/{projectId}/`
+ * addressed with the SAME `{storeRoot}/sessions/{id}` layout by passing the
+ * derived store root as the workspace-root argument to the session helpers.
+ * This is the physical half of the space isolation model (Spec G4/Q13); the
+ * logical half remains the session record's immutable
  * `productSpaceId`/`projectId` stamps checked at the RPC boundary.
  */
-export class ProjectSessionStorage extends WorkspaceSessionStorage {
-  readonly projectId: string
+export function projectSessionStoreRoot(workspaceRootPath: string, projectId: string): string {
+  return join(workspaceRootPath, 'project-sessions', sanitizeSessionId(projectId))
+}
 
-  constructor(projectId: string) {
-    super()
-    this.projectId = sanitizeSessionId(projectId)
-  }
-
-  override getSessionsRoot(workspaceRootPath: string): string {
-    return join(workspaceRootPath, 'project-sessions', this.projectId, 'sessions')
+/** One-level listing of every project store root under a workspace. */
+export function listProjectSessionStoreRoots(workspaceRootPath: string): string[] {
+  const base = join(workspaceRootPath, 'project-sessions')
+  try {
+    if (!existsSync(base)) return []
+    return readdirSync(base, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => join(base, entry.name))
+  } catch {
+    return []
   }
 }
 
-/** Per-workspace memo of project stores so repeated lookups reuse one instance
- * (and therefore one persistence queue per project root). */
-const projectSessionStores = new Map<string, ProjectSessionStorage>()
+interface SessionStoreProbeResult {
+  storeRoot: string
+  storeKind: 'legacy' | 'project'
+  projectId?: string
+}
 
-export function sessionStoreForProject(workspaceRootPath: string, projectId?: string): SessionStorage {
-  if (!projectId) return defaultWorkspaceSessionStorage
-  const memoKey = `${workspaceRootPath}\u0000${projectId}`
-  let store = projectSessionStores.get(memoKey)
-  if (!store) {
-    store = new ProjectSessionStorage(projectId)
-    projectSessionStores.set(memoKey, store)
+/**
+ * Resolve which physical store a session id lives in: the legacy workspace
+ * root first, then every project store (one-level readdir, exact-path probe).
+ * Memoized per (workspace, sessionId) — session stores are immutable once a
+ * session is created, so a resolved answer stays valid for the process.
+ * Returns null when the session directory exists in no store.
+ */
+const sessionStoreProbeCache = new Map<string, SessionStoreProbeResult | null>()
+
+export function probeSessionStoreRoot(workspaceRootPath: string, sessionId: string): SessionStoreProbeResult | null {
+  const memoKey = `${workspaceRootPath}\u0000${sessionId}`
+  if (sessionStoreProbeCache.has(memoKey)) return sessionStoreProbeCache.get(memoKey)!
+  const safeId = sanitizeSessionId(sessionId)
+  const legacyRoot = defaultWorkspaceSessionStorage.getSessionsRoot(workspaceRootPath)
+  let result: SessionStoreProbeResult | null = null
+  if (existsSync(join(legacyRoot, safeId, 'session.jsonl'))) {
+    result = { storeRoot: workspaceRootPath, storeKind: 'legacy' }
+  } else {
+    for (const projectRoot of listProjectSessionStoreRoots(workspaceRootPath)) {
+      if (existsSync(join(projectRoot, 'sessions', safeId, 'session.jsonl'))) {
+        result = {
+          storeRoot: projectRoot,
+          storeKind: 'project',
+          projectId: basename(projectRoot),
+        }
+        break
+      }
+    }
   }
-  return store
+  sessionStoreProbeCache.set(memoKey, result)
+  return result
 }
 
 export class RootedSessionStorage extends FilesystemSessionStorage {

@@ -421,23 +421,6 @@ export const RPC_CHANNELS = {
     LIST_MANAGED: 'skills:listManaged',
     SET_MANAGED_ENABLEMENT: 'skills:setManagedEnablement',
   },
-  // Enterprise Knowledge Base (POO-108): local workspace-scoped file store,
-  // every channel is LOCAL_ONLY (see routing.ts).
-  kb: {
-    LIST_COLLECTIONS: 'kb:listCollections',
-    CREATE_COLLECTION: 'kb:createCollection',
-    LIST_DOCUMENTS: 'kb:listDocuments',
-    UPLOAD_DOCUMENT: 'kb:uploadDocument',
-    SUBMIT_FOR_REVIEW: 'kb:submitForReview',
-    PUBLISH_DOCUMENT: 'kb:publishDocument',
-    REJECT_DOCUMENT: 'kb:rejectDocument',
-    REVERT_TO_DRAFT: 'kb:revertToDraft',
-    DELETE_DOCUMENT: 'kb:deleteDocument',
-    GET_DOCUMENT: 'kb:getDocument',
-    SEARCH: 'kb:search',
-    SET_SESSION_COLLECTIONS: 'kb:setSessionCollections',
-    GET_SESSION_COLLECTIONS: 'kb:getSessionCollections',
-  },
   // Enterprise Project Context (POO-196): admin-owned enterprise project
   // assets consumed through the device's trusted Admin session; every channel
   // is LOCAL_ONLY (see routing.ts) and carries pc_* coded errors.
@@ -463,21 +446,33 @@ export const RPC_CHANNELS = {
   // Every channel is LOCAL_ONLY (see routing.ts) and carries coded errors;
   // none of them is exposed as an agent tool — membership stays an admin
   // authority (adjudication D-A/D-C).
+  // POO-205: enterprise creation and the invitation flow are RETIRED —
+  // organizations come from the admin console and project members are picked
+  // from the organization roster. The remaining channels are the R3 list read
+  // (still the switcher's source) — see project-members.ts.
   projectMembers: {
-    CREATE_ENTERPRISE: 'pm:createEnterprise',
-    QUERY_CREATE_RECEIPT: 'pm:queryCreateReceipt',
-    LIST_MEMBERS: 'pm:listMembers',
-    LIST_INVITATIONS: 'pm:listInvitations',
-    CREATE_INVITATION: 'pm:createInvitation',
-    // POO-196 R3 (D3–D6): the restricted colleague directory, the all-role
-    // collaboration roster, the per-object colleague invitation bridge with
-    // its own recovery query, and the negotiated R3 product-space list read.
-    // All LOCAL_ONLY, same trust boundary as the pm block above.
-    LIST_COLLEAGUE_OPTIONS: 'pm:listColleagueOptions',
-    LIST_COLLABORATION_ROSTER: 'pm:listCollaborationRoster',
-    CREATE_COLLEAGUE_INVITATION: 'pm:createColleagueInvitation',
-    QUERY_COLLEAGUE_INVITATION: 'pm:queryColleagueInvitation',
     LIST_PRODUCT_SPACES_R3: 'pm:listProductSpacesR3',
+    // POO-205: project lifecycle + roster-picked members + colleague roster
+    // (contract poo205-contract-r1). All LOCAL_ONLY, committed-organization
+    // scope re-proved per entry.
+    LIST_PROJECTS: 'pm:listProjects',
+    CREATE_PROJECT: 'pm:createProject',
+    UPDATE_PROJECT: 'pm:updateProject',
+    LIST_PROJECT_MEMBERS: 'pm:listProjectMembers',
+    ADD_PROJECT_MEMBERS: 'pm:addProjectMembers',
+    UPDATE_PROJECT_MEMBER: 'pm:updateProjectMember',
+    REMOVE_PROJECT_MEMBER: 'pm:removeProjectMember',
+    LIST_ORGANIZATION_COLLEAGUES: 'pm:listOrganizationColleagues',
+  },
+  // Member apps (POO-205, Q7/Q11): each space's "我的应用" area. Member-private
+  // uploads (visibility `member`), publish to the current space (enterprise
+  // spaces only) and withdraw back to member-private. LOCAL_ONLY; the trusted
+  // side proves the committed space on every entry.
+  myApps: {
+    LIST: 'myapps:list',
+    CREATE: 'myapps:create',
+    PUBLISH: 'myapps:publish',
+    WITHDRAW: 'myapps:withdraw',
   },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',

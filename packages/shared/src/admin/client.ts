@@ -1587,8 +1587,11 @@ export class AdminClient {
   // AdminError.errorCode via the ADMIN_ERROR_CODES registration above.
   // -------------------------------------------------------------------------
 
-  private projectContextPath(productSpaceId: string, suffix: string): string {
-    return `/api/project-context/${encodeURIComponent(productSpaceId)}${suffix}`;
+  private projectContextPath(productSpaceId: string, suffix: string, projectId?: string): string {
+    // POO-205 PC v2: the project (inside the organization space) owns the
+    // asset scope; the admin route validates project ⊆ organization ⊕ membership.
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    return `/api/project-context/${encodeURIComponent(productSpaceId)}${suffix}${query}`;
   }
 
   private static projectContextQuery(
@@ -1603,18 +1606,18 @@ export class AdminClient {
   }
 
   /** GET /api/project-context/{id}/capabilities — feature gate, role and limits. */
-  async getProjectContextCapabilities(accessToken: string, productSpaceId: string): Promise<PcCapabilitiesResponse> {
+  async getProjectContextCapabilities(accessToken: string, productSpaceId: string, projectId: string): Promise<PcCapabilitiesResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, '/capabilities'),
+      this.projectContextPath(productSpaceId, '/capabilities', projectId),
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, PcCapabilitiesResponseSchema);
   }
 
   /** GET /api/project-context/{id}/summary — bounded project overview. */
-  async getProjectContextSummary(accessToken: string, productSpaceId: string): Promise<PcSummaryResponse> {
+  async getProjectContextSummary(accessToken: string, productSpaceId: string, projectId: string): Promise<PcSummaryResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, '/summary'),
+      this.projectContextPath(productSpaceId, '/summary', projectId),
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, PcSummaryResponseSchema);
@@ -1624,6 +1627,7 @@ export class AdminClient {
   async listProjectContextAssets(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     query: {
       view?: string;
       tag?: string;
@@ -1645,7 +1649,7 @@ export class AdminClient {
       cursor: query.cursor,
     });
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets${suffix}`),
+      this.projectContextPath(productSpaceId, `/assets${suffix}`, projectId),
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, PcAssetListResponseSchema);
@@ -1655,10 +1659,11 @@ export class AdminClient {
   async createProjectContextAsset(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     input: PcCreateAssetInput,
   ): Promise<PcUploadGrantResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, '/assets'),
+      this.projectContextPath(productSpaceId, '/assets', projectId),
       { method: 'POST', accessToken, body: PcCreateAssetInputSchema.parse(input) },
     );
     return this.readSuccessResponse(response, PcUploadGrantResponseSchema);
@@ -1668,11 +1673,12 @@ export class AdminClient {
   async createProjectContextUpload(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     input: PcCreateUploadInput,
   ): Promise<PcUploadGrantResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/uploads`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/uploads`, projectId),
       { method: 'POST', accessToken, body: PcCreateUploadInputSchema.parse(input) },
     );
     return this.readSuccessResponse(response, PcUploadGrantResponseSchema);
@@ -1682,11 +1688,12 @@ export class AdminClient {
   async completeProjectContextUpload(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     uploadId: string,
   ): Promise<PcCompleteUploadResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/uploads/${encodeURIComponent(uploadId)}/complete`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/uploads/${encodeURIComponent(uploadId)}/complete`, projectId),
       { method: 'POST', accessToken, body: {} },
     );
     return this.readSuccessResponse(response, PcCompleteUploadResponseSchema);
@@ -1696,10 +1703,11 @@ export class AdminClient {
   async getProjectContextAsset(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
   ): Promise<PcMutationResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`, projectId),
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, PcMutationResponseSchema);
@@ -1709,11 +1717,12 @@ export class AdminClient {
   async updateProjectContextAsset(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     input: PcUpdateAssetInput,
   ): Promise<PcMutationResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`, projectId),
       { method: 'PATCH', accessToken, body: PcUpdateAssetInputSchema.parse(input) },
     );
     return this.readSuccessResponse(response, PcMutationResponseSchema);
@@ -1723,11 +1732,12 @@ export class AdminClient {
   async setProjectContextConfirmed(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     input: PcSetConfirmedInput,
   ): Promise<PcMutationResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/confirmed`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/confirmed`, projectId),
       { method: 'POST', accessToken, body: PcSetConfirmedInputSchema.parse(input) },
     );
     return this.readSuccessResponse(response, PcMutationResponseSchema);
@@ -1737,11 +1747,12 @@ export class AdminClient {
   async setProjectContextPinned(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     input: PcSetPinnedInput,
   ): Promise<PcMutationResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/pinned`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/pinned`, projectId),
       { method: 'POST', accessToken, body: PcSetPinnedInputSchema.parse(input) },
     );
     return this.readSuccessResponse(response, PcMutationResponseSchema);
@@ -1751,11 +1762,12 @@ export class AdminClient {
   async trashProjectContextAsset(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     expectedRevision: number,
   ): Promise<PcMutationResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}`, projectId),
       { method: 'DELETE', accessToken, body: { expectedRevision } },
     );
     return this.readSuccessResponse(response, PcMutationResponseSchema);
@@ -1765,11 +1777,12 @@ export class AdminClient {
   async restoreProjectContextAsset(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     input: PcRestoreInput,
   ): Promise<PcMutationResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/restore`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/restore`, projectId),
       { method: 'POST', accessToken, body: PcRestoreInputSchema.parse(input) },
     );
     return this.readSuccessResponse(response, PcMutationResponseSchema);
@@ -1779,12 +1792,13 @@ export class AdminClient {
   async getProjectContextDownload(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     version?: number,
   ): Promise<PcDownloadResponse> {
     const suffix = AdminClient.projectContextQuery({ version });
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/download${suffix}`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/download${suffix}`, projectId),
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, PcDownloadResponseSchema);
@@ -1794,12 +1808,13 @@ export class AdminClient {
   async getProjectContextRead(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     version?: number,
   ): Promise<PcReadResponse> {
     const suffix = AdminClient.projectContextQuery({ version });
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/read${suffix}`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/read${suffix}`, projectId),
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, PcReadResponseSchema);
@@ -1809,12 +1824,13 @@ export class AdminClient {
   async getProjectContextPreview(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     assetId: string,
     version?: number,
   ): Promise<PcPreviewResponse> {
     const suffix = AdminClient.projectContextQuery({ version });
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/preview${suffix}`),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/preview${suffix}`, projectId),
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, PcPreviewResponseSchema);
@@ -1824,6 +1840,7 @@ export class AdminClient {
   async searchProjectContextAssets(
     accessToken: string,
     productSpaceId: string,
+    projectId: string,
     query: { q: string; tag?: string; limit?: number },
   ): Promise<PcSearchResponse> {
     const suffix = AdminClient.projectContextQuery({
@@ -1832,16 +1849,16 @@ export class AdminClient {
       limit: query.limit,
     });
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/search${suffix}`),
+      this.projectContextPath(productSpaceId, `/search${suffix}`, projectId),
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, PcSearchResponseSchema);
   }
 
   /** POST /api/project-context/{id}/rebuild — schedules the index rebuild job. */
-  async rebuildProjectContext(accessToken: string, productSpaceId: string): Promise<PcRebuildResponse> {
+  async rebuildProjectContext(accessToken: string, productSpaceId: string, projectId: string): Promise<PcRebuildResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, '/rebuild'),
+      this.projectContextPath(productSpaceId, '/rebuild', projectId),
       { method: 'POST', accessToken, body: {} },
     );
     return this.readSuccessResponse(response, PcRebuildResponseSchema);

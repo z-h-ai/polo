@@ -9,7 +9,6 @@ import {
   LOCAL_APP_INSTALL_RPC_TIMEOUT_MS,
   type LocalAppErrorCode,
 } from './local-apps'
-import { KB_ERROR_CODES, type KbErrorCode } from './knowledge-base'
 import { PC_ERROR_CODES, PC_LOCAL_ERROR_CODES, type PcErrorCode } from './project-context'
 import {
   CLIENT_ENTERPRISE_ERROR_CODES,
@@ -106,7 +105,6 @@ export type ErrorCode =
   | 'BROWSER_REMOTE_UPLOAD_NOT_SUPPORTED'
   | 'BROWSER_REMOTE_EVALUATE_BLOCKED'
   | LocalAppErrorCode
-  | KbErrorCode
   | PcErrorCode
   | ClientEnterpriseErrorCode
   | PmLocalErrorCode
@@ -116,8 +114,8 @@ export type ErrorCode =
  * lock-step with the `ErrorCode` union above: a union member missing here is
  * silently rewritten to `HANDLER_ERROR` on the wire, which erases exactly the
  * distinction the receiver's error mapping branches on (POO-108 review fix
- * round B9 — the KB codes and the previously missing LocalApp members are the
- * live examples). Domain unions (`LocalAppErrorCode`, `KbErrorCode`,
+ * round B9 — the previously missing LocalApp members are the live example).
+ * Domain unions (`LocalAppErrorCode`,
  * `PcErrorCode`) are spread in so the two can never drift apart again.
  */
 const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<string>([
@@ -142,7 +140,6 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   // LocalAppErrorCode, spelled out for the pre-union members the set carried
   // before it; the union-only members follow via the spread below.
   ...LOCAL_APP_ERROR_CODES,
-  ...KB_ERROR_CODES,
   // PcErrorCode (POO-196): the project-context channels carry these pc_* codes
   // to the renderer; without the spread the transport would rewrite them all
   // to HANDLER_ERROR.

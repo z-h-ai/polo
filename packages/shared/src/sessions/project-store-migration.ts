@@ -29,7 +29,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { ProjectSessionStorage } from './session-storage.ts';
+import { projectSessionStoreRoot } from './session-storage.ts';
 
 /**
  * The JSONL first line serializes the full SessionConfig (superset of the
@@ -135,8 +135,8 @@ export function planProjectStoreMigration(options: ProjectStoreMigrationOptions)
       skipped.push({ sessionId, reason: 'unmappable' });
       continue;
     }
-    const store = new ProjectSessionStorage(projectId);
-    const target = store.getSessionPath(workspaceRootPath, sessionId);
+    const storeRoot = projectSessionStoreRoot(workspaceRootPath, projectId);
+    const target = join(storeRoot, 'sessions', sessionId);
     if (existsSync(target)) {
       skipped.push({ sessionId, reason: 'target_exists' });
       continue;
@@ -156,7 +156,9 @@ export function commitProjectStoreMigration(options: ProjectStoreMigrationOption
   const plan = planProjectStoreMigration(options);
   if (options.dryRun) return plan;
   for (const move of plan.moves) {
-    mkdirSync(move.toPath, { recursive: true });
+    // Ensure the project store's sessions dir exists, but never pre-create the
+    // session directory itself — rename is the atomic handoff.
+    mkdirSync(join(move.toPath, '..'), { recursive: true });
     // Directory rename within the same workspace volume: artifacts travel
     // byte-identical; only their address changes.
     renameSync(move.fromPath, move.toPath);
