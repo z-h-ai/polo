@@ -352,8 +352,6 @@ export interface SessionHeader {
   hasUnread?: boolean;
   /** Per-session source selection (source slugs) */
   enabledSourceSlugs?: string[];
-  /** Per-session Enterprise Knowledge Base scope (POO-108, collection IDs) */
-  kbCollectionIds?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
   /** SDK cwd for session storage - set once at creation, never changes */

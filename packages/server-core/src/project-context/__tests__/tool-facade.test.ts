@@ -37,6 +37,7 @@ import type { ISessionManager } from '../../handlers/session-manager-interface'
 
 const ACCOUNT_ID = 'account-1'
 const SPACE_ID = 'space-1'
+const PROJECT_ID = 'project-1'
 const WORKSPACE_ID = 'ws-1'
 const SESSION_ID = 'session-1'
 
@@ -55,6 +56,7 @@ const ENTERPRISE_SPACE = {
 interface SessionRecordLike {
   id: string
   productSpaceId?: string
+  projectId?: string
   workspaceId?: string
 }
 
@@ -105,9 +107,21 @@ describe('createProjectContextToolFacade — fail-closed construction', () => {
     expect(facade).toBeNull()
   })
 
+  it('returns null when the session carries no projectId binding (POO-205)', () => {
+    // POO-205: the project — inside the organization space — owns the asset
+    // scope; a space-bound session without the immutable projectId can never
+    // address one, so the facade must not exist at all.
+    const facade = createProjectContextToolFacade({
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      sessionId: SESSION_ID,
+      workspaceId: WORKSPACE_ID,
+    })
+    expect(facade).toBeNull()
+  })
+
   it('returns null when the session is bound to a DIFFERENT space than the committed one', () => {
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: 'space-other', workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: 'space-other', projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: SESSION_ID,
       workspaceId: WORKSPACE_ID,
     })
@@ -116,7 +130,7 @@ describe('createProjectContextToolFacade — fail-closed construction', () => {
 
   it('returns null when the session does not exist', () => {
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: 'session-unknown',
       workspaceId: WORKSPACE_ID,
     })
@@ -126,7 +140,7 @@ describe('createProjectContextToolFacade — fail-closed construction', () => {
   it('returns null when no committed fence exists', () => {
     setRuntimeActiveProductSpace(null)
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: SESSION_ID,
       workspaceId: WORKSPACE_ID,
     })
@@ -138,7 +152,7 @@ describe('createProjectContextToolFacade — fail-closed construction', () => {
     // workspace binding is enforced per call inside requireProjectContextScope
     // (getBoundWorkspace) — the facade exists but every call fails closed.
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: SESSION_ID,
       workspaceId: 'ws-other',
     })
@@ -158,7 +172,7 @@ describe('createProjectContextToolFacade — fail-closed construction', () => {
 describe('createProjectContextToolFacade — authorized project session', () => {
   it('builds a facade for a session bound to the committed space', () => {
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: SESSION_ID,
       workspaceId: WORKSPACE_ID,
     })
@@ -179,16 +193,16 @@ describe('createProjectContextToolFacade — authorized project session', () => 
         },
       ],
     }
-    const searches: Array<{ productSpaceId: string; query: { q: string; tag?: string; limit?: number } }> = []
+    const searches: Array<{ productSpaceId: string; projectId: string; query: { q: string; tag?: string; limit?: number } }> = []
     setProjectContextAdminForTests({
-      search: async (productSpaceId: string, query: { q: string; tag?: string; limit?: number }) => {
-        searches.push({ productSpaceId, query })
+      search: async (productSpaceId: string, projectId: string, query: { q: string; tag?: string; limit?: number }) => {
+        searches.push({ productSpaceId, projectId, query })
         return adminSearchResponse
       },
     } as unknown as ProjectContextAdmin)
 
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: SESSION_ID,
       workspaceId: WORKSPACE_ID,
     })
@@ -199,9 +213,10 @@ describe('createProjectContextToolFacade — authorized project session', () => 
     expect(result.hits).toHaveLength(1)
     expect(result.hits[0]?.assetId).toBe('asset-1')
     expect(result.hits[0]?.version).toBe(2)
-    // The admin call addressed the session's OWN committed space.
+    // The admin call addressed the session's OWN committed space + project.
     expect(searches).toHaveLength(1)
     expect(searches[0]?.productSpaceId).toBe(SPACE_ID)
+    expect(searches[0]?.projectId).toBe(PROJECT_ID)
     expect(searches[0]?.query.q).toBe('定稿')
     expect(searches[0]?.query.limit).toBe(5)
   })
@@ -213,16 +228,16 @@ describe('createProjectContextToolFacade — authorized project session', () => 
       content: 'SHARED BODY',
       truncated: true,
     }
-    const reads: Array<{ productSpaceId: string; assetId: string; version?: number }> = []
+    const reads: Array<{ productSpaceId: string; projectId: string; assetId: string; version?: number }> = []
     setProjectContextAdminForTests({
-      getRead: async (productSpaceId: string, assetId: string, version?: number) => {
-        reads.push({ productSpaceId, assetId, version })
+      getRead: async (productSpaceId: string, projectId: string, assetId: string, version?: number) => {
+        reads.push({ productSpaceId, projectId, assetId, version })
         return adminReadResponse
       },
     } as unknown as ProjectContextAdmin)
 
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: SESSION_ID,
       workspaceId: WORKSPACE_ID,
     })
@@ -235,7 +250,9 @@ describe('createProjectContextToolFacade — authorized project session', () => 
       expect(result.version).toBe(3)
       expect(result.truncated).toBe(true)
     }
-    expect(reads).toEqual([{ productSpaceId: SPACE_ID, assetId: 'asset-1', version: 3 }])
+    expect(reads).toEqual([
+      { productSpaceId: SPACE_ID, projectId: PROJECT_ID, assetId: 'asset-1', version: 3 },
+    ])
   })
 
   it('read maps an admin 404 onto ok:false error="pc_not_found"', async () => {
@@ -246,7 +263,7 @@ describe('createProjectContextToolFacade — authorized project session', () => 
     } as unknown as ProjectContextAdmin)
 
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: SESSION_ID,
       workspaceId: WORKSPACE_ID,
     })
@@ -266,7 +283,7 @@ describe('createProjectContextToolFacade — authorized project session', () => 
       },
     } as unknown as ProjectContextAdmin)
     const facade = createProjectContextToolFacade({
-      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }]),
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
       sessionId: SESSION_ID,
       workspaceId: WORKSPACE_ID,
     })

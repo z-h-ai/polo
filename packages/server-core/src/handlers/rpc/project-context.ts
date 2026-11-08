@@ -29,8 +29,11 @@ import { z } from 'zod'
  * Every channel is LOCAL_ONLY and gated by the trusted enterprise scope in
  * the service layer — the handler bodies are thin: parse the shared schema,
  * delegate, map failures to stable pc_* codes. The scope gate re-proves the
- * committed fence on EVERY entry (never once per session), and the
- * requested productSpaceId must equal the committed space.
+ * committed fence on EVERY entry (never once per session), the requested
+ * productSpaceId must equal the committed space, and (POO-205) a non-blank
+ * projectId rides every payload: the project — inside the organization
+ * space — owns the asset scope, and the admin route re-validates
+ * project ⊆ organization ⊕ membership.
  */
 
 /** Manifest of every channel this module registers (registration coverage
@@ -56,6 +59,9 @@ export const PROJECT_CONTEXT_HANDLED_CHANNELS = [
 const WorkspaceScopeSchema = z.object({
   workspaceId: z.string().min(1).max(512),
   productSpaceId: z.string().min(1).max(128),
+  // POO-205: the project is the asset scope key — required on EVERY channel
+  // (extend chains below carry it to the asset-level payloads too).
+  projectId: z.string().min(1).max(128),
 }).strict()
 
 const AssetIdSchema = WorkspaceScopeSchema.extend({
@@ -84,6 +90,7 @@ const SearchQuerySchema = WorkspaceScopeSchema.extend({
 const UploadFileSchema = z.object({
   workspaceId: z.string().min(1).max(512),
   productSpaceId: z.string().min(1).max(128),
+  projectId: z.string().min(1).max(128),
   mode: z.enum(['create', 'replace']),
   filePath: z.string().min(1).max(4_096),
   name: z.string().min(1).max(512),

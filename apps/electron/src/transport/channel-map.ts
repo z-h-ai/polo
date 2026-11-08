@@ -365,26 +365,8 @@ export const CHANNEL_MAP = {
   creatorSkillIgnoreVersion: invoke(RPC_CHANNELS.creatorSkills.IGNORE_VERSION),
   onCreatorSkillProgress: listener(RPC_CHANNELS.creatorSkills.PROGRESS),
 
-  // Enterprise Knowledge Base (POO-108). codedErrors: the renderer's error
-  // mapping branches on the KB codes, which the context bridge erases from
-  // rejected Errors — these channels carry the code in the message instead
-  // (see shared/rpc-error-bridge.ts).
-  kbListCollections: invokeCoded(RPC_CHANNELS.kb.LIST_COLLECTIONS),
-  kbCreateCollection: invokeCoded(RPC_CHANNELS.kb.CREATE_COLLECTION),
-  kbListDocuments: invokeCoded(RPC_CHANNELS.kb.LIST_DOCUMENTS),
-  kbUploadDocument: invokeCoded(RPC_CHANNELS.kb.UPLOAD_DOCUMENT),
-  kbSubmitForReview: invokeCoded(RPC_CHANNELS.kb.SUBMIT_FOR_REVIEW),
-  kbPublishDocument: invokeCoded(RPC_CHANNELS.kb.PUBLISH_DOCUMENT),
-  kbRejectDocument: invokeCoded(RPC_CHANNELS.kb.REJECT_DOCUMENT),
-  kbRevertToDraft: invokeCoded(RPC_CHANNELS.kb.REVERT_TO_DRAFT),
-  kbDeleteDocument: invokeCoded(RPC_CHANNELS.kb.DELETE_DOCUMENT),
-  kbGetDocument: invokeCoded(RPC_CHANNELS.kb.GET_DOCUMENT),
-  kbSearch: invokeCoded(RPC_CHANNELS.kb.SEARCH),
-  kbSetSessionCollections: invokeCoded(RPC_CHANNELS.kb.SET_SESSION_COLLECTIONS),
-  kbGetSessionCollections: invokeCoded(RPC_CHANNELS.kb.GET_SESSION_COLLECTIONS),
-
-  // Enterprise Project Context (POO-196). codedErrors for the same reason as
-  // the kb block: the renderer's error mapping branches on the stable pc_*
+  // Enterprise Project Context (POO-196). codedErrors: the renderer's error
+  // mapping branches on the stable pc_*
   // codes, which the context bridge would otherwise erase. The upload is a
   // single RPC (pc:uploadFile) — the renderer hands over a local file path
   // and never sees a transfer URL.
@@ -404,28 +386,27 @@ export const CHANNEL_MAP = {
   pcSearchAssets: invokeCoded(RPC_CHANNELS.projectContext.SEARCH_ASSETS),
   pcRebuild: invokeCoded(RPC_CHANNELS.projectContext.REBUILD),
 
-  // Enterprise project members (POO-196 追加轮). codedErrors for the same
-  // reason as the pc block: the renderer's recovery copy branches on the
-  // stable contract codes (phone_verification_required,
-  // account_enterprise_exists, forbidden …) which the context bridge would
-  // otherwise erase. No transfer URL and no invitation link ever rides the
-  // channel map — links live in the renderer's dialog state only.
-  pmCreateEnterprise: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_ENTERPRISE),
-  pmQueryCreateReceipt: invokeCoded(RPC_CHANNELS.projectMembers.QUERY_CREATE_RECEIPT),
-  pmListProjectMembers: invokeCoded(RPC_CHANNELS.projectMembers.LIST_MEMBERS),
-  pmListProjectInvitations: invokeCoded(RPC_CHANNELS.projectMembers.LIST_INVITATIONS),
-  pmCreateProjectInvitation: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_INVITATION),
+  // Projects & project members (POO-205). codedErrors for the same reason as
+  // the pc block: the renderer's recovery copy branches on the stable
+  // contract codes (prj_forbidden, prj_not_found,
+  // prj_member_not_in_organization, prj_last_owner …) which the context
+  // bridge would otherwise erase. Enterprise creation and every invitation
+  // flow are RETIRED — projects are lightweight inside the committed
+  // organization and members are picked from the organization roster; the
+  // committed-organization scope is re-proved in the service on every call.
+  pmListProjects: invokeCoded(RPC_CHANNELS.projectMembers.LIST_PROJECTS),
+  pmCreateProject: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_PROJECT),
+  pmUpdateProject: invokeCoded(RPC_CHANNELS.projectMembers.UPDATE_PROJECT),
+  pmListProjectMembers: invokeCoded(RPC_CHANNELS.projectMembers.LIST_PROJECT_MEMBERS),
+  pmAddProjectMembers: invokeCoded(RPC_CHANNELS.projectMembers.ADD_PROJECT_MEMBERS),
+  pmUpdateProjectMember: invokeCoded(RPC_CHANNELS.projectMembers.UPDATE_PROJECT_MEMBER),
+  pmRemoveProjectMember: invokeCoded(RPC_CHANNELS.projectMembers.REMOVE_PROJECT_MEMBER),
+  pmListOrganizationColleagues: invokeCoded(RPC_CHANNELS.projectMembers.LIST_ORGANIZATION_COLLEAGUES),
 
-  // POO-196 R3 (D3–D6). Same codedErrors discipline: the colleague/roster
-  // recovery copy branches on the stable contract codes
-  // (colleague_source_unavailable, colleague_target_unavailable,
-  // contract_version_unsupported, forbidden …) which the context bridge
-  // would otherwise erase. The colleague invitation stays strictly
-  // per-object on the wire — no batch channel exists.
-  pmListColleagueOptions: invokeCoded(RPC_CHANNELS.projectMembers.LIST_COLLEAGUE_OPTIONS),
-  pmListCollaborationRoster: invokeCoded(RPC_CHANNELS.projectMembers.LIST_COLLABORATION_ROSTER),
-  pmCreateColleagueInvitation: invokeCoded(RPC_CHANNELS.projectMembers.CREATE_COLLEAGUE_INVITATION),
-  pmQueryColleagueInvitation: invokeCoded(RPC_CHANNELS.projectMembers.QUERY_COLLEAGUE_INVITATION),
+  // POO-196 R3 (D6, retained). Same codedErrors discipline: the negotiated
+  // list read's recovery copy branches on the stable contract codes
+  // (contract_version_unsupported, forbidden …) which the context bridge
+  // would otherwise erase.
   pmListProductSpacesR3: invokeCoded(RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3),
 
   // Statuses

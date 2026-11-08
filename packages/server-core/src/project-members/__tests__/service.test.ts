@@ -1,20 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { AdminError } from '@polo-ai/shared/admin'
-import type {
-  ClientCreateEnterpriseCommand,
-  ClientCreateInvitationCommand,
-} from '@polo-ai/shared/admin/client-enterprise-contract'
-import type {
-  ClientCreateEnterpriseResponse,
-  ClientMemberRosterResponse,
+import {
+  PROJECT_CONTRACT_VERSION,
+  type ListOrganizationColleaguesResponse,
+  type ListProjectMembersResponse,
+  type ListProjectsResponse,
+  type ProjectMutationResponse,
+  type ProjectSummary,
+  type UpdateProjectMemberResponse,
 } from '@polo-ai/shared/protocol'
 import {
   PM_PRODUCT_SPACE_CONTEXT_REQUIRED,
-  pmCreateEnterprise,
-  pmCreateProjectInvitation,
-  pmListProjectInvitations,
+  pmAddProjectMembers,
+  pmCreateProject,
+  pmListOrganizationColleagues,
+  pmListProductSpacesR3,
   pmListProjectMembers,
-  pmQueryCreateReceipt,
+  pmListProjects,
+  pmRemoveProjectMember,
+  pmUpdateProject,
+  pmUpdateProjectMember,
   resetProjectMembersActiveProductSpaceReaderForTests,
   resetProjectMembersAdminForTests,
   setProjectMembersActiveProductSpaceReaderForTests,
@@ -34,28 +39,32 @@ import {
 import type { TrustedProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 
 /**
- * POO-196 追加轮 project-members service tests (adjudication D-A/D-B/D-C).
+ * POO-205 project-members service tests.
  *
  * The service seams (setProjectMembersAdminForTests /
  * setProjectMembersActiveProductSpaceReaderForTests) plus the runtime fence
  * and trusted-account setters stand in for the real session state, so the
- * requireAccountScope / requireMemberScope gates and the cross-await CAS run
- * for real inside every call.
+ * requireOrganizationScope gate (committed enterprise space + matching
+ * organization id) and the cross-await CAS run for real inside every call.
+ * Authority is never decided locally — the admin adapter seam returns or
+ * throws the frozen contract's stable codes.
  */
 
 const ACCOUNT_ID = 'account-1'
 const ACCOUNT_ID_OTHER = 'account-2'
 const PERSONAL_SPACE_ID = 'space-personal'
 const SPACE_ID = 'space-1'
+const ORG_ID = 'ent-1'
+const PROJECT_ID = 'proj-1'
 
 const ENTERPRISE_SPACE = {
   id: SPACE_ID,
   kind: 'enterprise',
-  enterpriseId: 'ent-1',
-  name: 'Test Project',
-  role: 'member',
+  enterpriseId: ORG_ID,
+  name: '华东区组织',
+  role: 'owner',
   accessMode: 'active',
-  payer: { kind: 'enterprise', enterpriseId: 'ent-1' },
+  payer: { kind: 'enterprise', enterpriseId: ORG_ID },
 } as unknown as TrustedProductSpaceSummary
 
 const PERSONAL_SPACE = {
@@ -66,29 +75,94 @@ const PERSONAL_SPACE = {
   payer: { kind: 'account', accountId: ACCOUNT_ID },
 } as unknown as TrustedProductSpaceSummary
 
-const CREATE_COMMAND = {
-  name: '华东区销售资料库',
-  ownerName: '李明',
-  purpose: '集中管理区域销售资料',
-  paymentResponsibilityAccepted: true as const,
-  paymentResponsibilityTermsVersion: 'POL-79-payment-responsibility-v1' as const,
+/** The committed-organization scope the renderer asserts (re-proved on every entry). */
+const ORG_SCOPE = {
+  accountId: ACCOUNT_ID,
+  productSpaceId: SPACE_ID,
+  organizationEnterpriseId: ORG_ID,
 }
 
-const CREATE_RESPONSE: ClientCreateEnterpriseResponse = {
-  result: 'created',
-  enterpriseId: '11111111-1111-4111-8111-111111111111',
-  productSpaceId: SPACE_ID,
-  viewerRole: 'owner',
-  enterpriseName: '华东区销售资料库',
-  createdAt: '2026-11-02T00:00:00.000Z',
+const CREATE_COMMAND = {
+  name: '华东区销售项目',
+  purpose: '集中管理区域销售资料',
+  instructions: '优先整理本季度数据',
+}
+
+const UPDATE_COMMAND = {
+  name: '华东区销售项目（2026）',
+}
+
+const ADD_COMMAND = {
+  accountIds: ['user-1', 'user-2'],
+  role: 'member' as const,
+}
+
+const PROJECT_SUMMARY: ProjectSummary = {
+  id: PROJECT_ID,
+  organizationEnterpriseId: ORG_ID,
+  organizationProductSpaceId: SPACE_ID,
+  name: '华东区销售项目',
+  createdByAccountId: ACCOUNT_ID,
+  createdAt: '2026-11-08T00:00:00.000Z',
+  updatedAt: '2026-11-08T00:00:00.000Z',
+  myRole: 'owner',
+  memberCount: 1,
+}
+
+const MUTATION_RESPONSE: ProjectMutationResponse = {
+  contractVersion: PROJECT_CONTRACT_VERSION,
+  project: PROJECT_SUMMARY,
+}
+
+const MEMBERS_RESPONSE: ListProjectMembersResponse = {
+  contractVersion: PROJECT_CONTRACT_VERSION,
+  projectId: PROJECT_ID,
+  members: [{
+    accountId: ACCOUNT_ID,
+    displayName: '李明',
+    role: 'owner',
+    createdAt: '2026-11-08T00:00:00.000Z',
+  }],
+}
+
+const COLLEAGUES_RESPONSE: ListOrganizationColleaguesResponse = {
+  contractVersion: PROJECT_CONTRACT_VERSION,
+  organizationEnterpriseId: ORG_ID,
+  colleagues: [
+    { accountId: 'user-1', displayName: '王芳', organizationRole: 'member' },
+    { accountId: 'user-2', displayName: null, organizationRole: 'manager' },
+  ],
+}
+
+const PROJECTS_LIST_RESPONSE: ListProjectsResponse = {
+  contractVersion: PROJECT_CONTRACT_VERSION,
+  organizationEnterpriseId: ORG_ID,
+  projects: [PROJECT_SUMMARY],
 }
 
 function errCodeOf(error: unknown): string {
   return ((error ?? {}) as Record<string, unknown>).code as string
 }
 
-/** Commits a personal-space fence for ACCOUNT_ID (the create command's
- * precondition: NO enterprise membership required — D-B). */
+/** An adapter whose every method fails loudly unless stubbed for the case. */
+function unusedAdmin(): ProjectMembersAdmin {
+  const boom = () => {
+    throw new Error('not used in this test')
+  }
+  return {
+    listProjects: boom,
+    createProject: boom,
+    updateProject: boom,
+    listProjectMembers: boom,
+    addProjectMembers: boom,
+    updateProjectMember: boom,
+    removeProjectMember: boom,
+    listOrganizationColleagues: boom,
+    listProductSpacesR3: boom,
+  }
+}
+
+/** Commits a personal-space fence (the R3 list is deliberately reachable here). */
 function commitPersonalFence(accountId = ACCOUNT_ID): void {
   setRuntimeActiveProductSpace(PERSONAL_SPACE_ID, 'personal')
   setRuntimeActiveProductSpaceAccount(accountId)
@@ -100,7 +174,7 @@ function commitPersonalFence(accountId = ACCOUNT_ID): void {
   })
 }
 
-/** Commits the committed ENTERPRISE fence (roster/invitation precondition). */
+/** Commits the committed ENTERPRISE (organization) fence (project precondition). */
 function commitEnterpriseFence(accountId = ACCOUNT_ID): void {
   setRuntimeActiveProductSpace(SPACE_ID, 'enterprise')
   setRuntimeActiveProductSpaceAccount(accountId)
@@ -113,7 +187,7 @@ function commitEnterpriseFence(accountId = ACCOUNT_ID): void {
 }
 
 beforeEach(() => {
-  commitPersonalFence()
+  commitEnterpriseFence()
 })
 
 afterEach(() => {
@@ -124,201 +198,29 @@ afterEach(() => {
   setTrustedProductSpaceAccountProvider(async () => null)
 })
 
-describe('pmCreateEnterprise — account-scoped create (D-B)', () => {
-  it('creates through the admin surface without any committed enterprise space', async () => {
-    const calls: Array<Record<string, unknown>> = []
+describe('pmListProjects — committed-organization gate', () => {
+  it('serves the list inside the committed organization, forwarding the re-proved org id', async () => {
+    const calls: string[] = []
     setProjectMembersAdminForTests({
-      createEnterprise: async (input: ClientCreateEnterpriseCommand & { idempotencyKey: string }) => {
-        calls.push(input)
-        return CREATE_RESPONSE
+      ...unusedAdmin(),
+      listProjects: async (organizationEnterpriseId: string) => {
+        calls.push(organizationEnterpriseId)
+        return PROJECTS_LIST_RESPONSE
       },
-    } as unknown as ProjectMembersAdmin)
-
-    const response = await pmCreateEnterprise({
-      accountId: ACCOUNT_ID,
-      idempotencyKey: 'pm-create-abc',
-      command: CREATE_COMMAND,
     })
-    expect(response).toEqual(CREATE_RESPONSE)
-    // The command rides with the key — the admin header contract.
-    expect(calls[0]).toMatchObject({ idempotencyKey: 'pm-create-abc', name: CREATE_COMMAND.name })
-  })
 
-  it('rejects a renderer account that is not the trusted account', async () => {
-    setProjectMembersAdminForTests({
-      createEnterprise: async () => CREATE_RESPONSE,
-    } as unknown as ProjectMembersAdmin)
-    try {
-      await pmCreateEnterprise({
-        accountId: ACCOUNT_ID_OTHER,
-        idempotencyKey: 'pm-create-abc',
-        command: CREATE_COMMAND,
-      })
-      expect.unreachable()
-    } catch (error) {
-      expect(errCodeOf(error)).toBe('pm_scope_changed')
-    }
-  })
-
-  it('fails closed with pm_signin_required when no trusted session exists', async () => {
-    setSyncTrustedProductSpaceAccountId(null)
-    setTrustedProductSpaceAccountProvider(async () => null)
-    try {
-      await pmCreateEnterprise({
-        accountId: ACCOUNT_ID,
-        idempotencyKey: 'pm-create-abc',
-        command: CREATE_COMMAND,
-      })
-      expect.unreachable()
-    } catch (error) {
-      expect(errCodeOf(error)).toBe('pm_signin_required')
-    }
-  })
-
-  it('discards the response when an account transition lands mid-flight (race)', async () => {
-    // The admin call resolves ONLY after the transition has begun: the
-    // cross-await CAS must discard the aggregate instead of publishing it
-    // into the replaced account.
-    let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
-    setProjectMembersAdminForTests({
-      createEnterprise: async () => {
-        await gate
-        return CREATE_RESPONSE
-      },
-    } as unknown as ProjectMembersAdmin)
-
-    const pending = pmCreateEnterprise({
-      accountId: ACCOUNT_ID,
-      idempotencyKey: 'pm-create-race',
-      command: CREATE_COMMAND,
-    })
-    const epoch = beginAccountTransition()
-    release()
-    try {
-      await pending
-      expect.unreachable()
-    } catch (error) {
-      expect(errCodeOf(error)).toBe('pm_scope_changed')
-    } finally {
-      settleAccountTransition(epoch, 'commit')
-    }
-  })
-
-  it('maps admin unavailability to stable pm_* codes (signed out vs unreachable)', async () => {
-    setProjectMembersAdminForTests({
-      createEnterprise: async () => {
-        throw new ProjectMembersAdminUnavailableError('pm_signed_out', 'no session')
-      },
-    } as unknown as ProjectMembersAdmin)
-    try {
-      await pmCreateEnterprise({ accountId: ACCOUNT_ID, idempotencyKey: 'k', command: CREATE_COMMAND })
-      expect.unreachable()
-    } catch (error) {
-      expect(errCodeOf(error)).toBe('pm_signin_required')
-    }
-
-    setProjectMembersAdminForTests({
-      createEnterprise: async () => {
-        throw new ProjectMembersAdminUnavailableError('pm_admin_unreachable', 'down')
-      },
-    } as unknown as ProjectMembersAdmin)
-    try {
-      await pmCreateEnterprise({ accountId: ACCOUNT_ID, idempotencyKey: 'k', command: CREATE_COMMAND })
-      expect.unreachable()
-    } catch (error) {
-      expect(errCodeOf(error)).toBe('pm_service_unavailable')
-    }
-  })
-
-  it('passes contract error codes through and maps legacy uppercase aliases back', async () => {
-    setProjectMembersAdminForTests({
-      createEnterprise: async () => {
-        throw new AdminError('phone required', 'phone_verification_required')
-      },
-    } as unknown as ProjectMembersAdmin)
-    try {
-      await pmCreateEnterprise({ accountId: ACCOUNT_ID, idempotencyKey: 'k', command: CREATE_COMMAND })
-      expect.unreachable()
-    } catch (error) {
-      expect(errCodeOf(error)).toBe('phone_verification_required')
-    }
-
-    // Single-membership eligibility arrives verbatim in the contract spelling.
-    setProjectMembersAdminForTests({
-      createEnterprise: async () => {
-        throw new AdminError('exists', 'account_enterprise_exists')
-      },
-    } as unknown as ProjectMembersAdmin)
-    try {
-      await pmCreateEnterprise({ accountId: ACCOUNT_ID, idempotencyKey: 'k', command: CREATE_COMMAND })
-      expect.unreachable()
-    } catch (error) {
-      expect(errCodeOf(error)).toBe('account_enterprise_exists')
-    }
-
-    // The admin client's alias table normalizes FORBIDDEN to the uppercase
-    // legacy spelling; the service maps it back to ONE contract vocabulary.
-    setProjectMembersAdminForTests({
-      createEnterprise: async () => {
-        throw new AdminError('no', 'FORBIDDEN')
-      },
-    } as unknown as ProjectMembersAdmin)
-    try {
-      await pmCreateEnterprise({ accountId: ACCOUNT_ID, idempotencyKey: 'k', command: CREATE_COMMAND })
-      expect.unreachable()
-    } catch (error) {
-      expect(errCodeOf(error)).toBe('forbidden')
-    }
-  })
-})
-
-describe('pmQueryCreateReceipt — recovery query (D-B 6)', () => {
-  it('queries the original request with the stored key', async () => {
-    const keys: string[] = []
-    setProjectMembersAdminForTests({
-      queryMyCreateReceipt: async (createRequestKey: string) => {
-        keys.push(createRequestKey)
-        return {
-          state: 'created',
-          enterpriseId: CREATE_RESPONSE.enterpriseId,
-          productSpaceId: SPACE_ID,
-          createdAt: CREATE_RESPONSE.createdAt,
-        }
-      },
-    } as unknown as ProjectMembersAdmin)
-
-    const receipt = await pmQueryCreateReceipt({ accountId: ACCOUNT_ID, createRequestKey: 'pm-create-lost' })
-    expect(receipt.state).toBe('created')
-    expect(keys).toEqual(['pm-create-lost'])
-  })
-})
-
-describe('member-scope commands — committed-space gate (D-C)', () => {
-  const ROSTER: ClientMemberRosterResponse = {
-    productSpaceId: SPACE_ID,
-    enterpriseName: 'Test Project',
-    viewerRole: 'owner',
-    members: [],
-    nextCursor: null,
-  }
-
-  it('serves the roster inside the committed enterprise space (no local role gate)', async () => {
-    commitEnterpriseFence()
-    setProjectMembersAdminForTests({
-      listProjectMembers: async () => ROSTER,
-    } as unknown as ProjectMembersAdmin)
-
-    // A plain member's surface never calls this in the UI, but the SERVICE
-    // gate itself is admin-authoritative: no local role cache denies it.
-    const response = await pmListProjectMembers({ accountId: ACCOUNT_ID, productSpaceId: SPACE_ID })
-    expect(response).toEqual(ROSTER)
+    const response = await pmListProjects(ORG_SCOPE)
+    expect(response.projects).toHaveLength(1)
+    expect(response.projects[0]?.id).toBe(PROJECT_ID)
+    // The org id is the TRUSTED one read off the committed space, never the
+    // renderer's assertion.
+    expect(calls).toEqual([ORG_ID])
   })
 
   it('rejects a space that is not the committed one (renderer cannot probe a foreign id)', async () => {
-    commitEnterpriseFence()
+    setProjectMembersAdminForTests(unusedAdmin())
     try {
-      await pmListProjectMembers({ accountId: ACCOUNT_ID, productSpaceId: 'space-foreign' })
+      await pmListProjects({ ...ORG_SCOPE, productSpaceId: 'space-foreign' })
       expect.unreachable()
     } catch (error) {
       expect(errCodeOf(error)).toBe('forbidden')
@@ -326,9 +228,10 @@ describe('member-scope commands — committed-space gate (D-C)', () => {
   })
 
   it('refuses the personal space with pm_unavailable_in_personal', async () => {
-    // beforeEach committed the personal fence.
+    commitPersonalFence()
+    setProjectMembersAdminForTests(unusedAdmin())
     try {
-      await pmListProjectMembers({ accountId: ACCOUNT_ID, productSpaceId: PERSONAL_SPACE_ID })
+      await pmListProjects({ ...ORG_SCOPE, productSpaceId: PERSONAL_SPACE_ID })
       expect.unreachable()
     } catch (error) {
       expect(errCodeOf(error)).toBe('pm_unavailable_in_personal')
@@ -337,41 +240,61 @@ describe('member-scope commands — committed-space gate (D-C)', () => {
 
   it('requires a committed space at all (PRODUCT_SPACE_CONTEXT_REQUIRED)', async () => {
     setRuntimeActiveProductSpace(null)
+    setProjectMembersAdminForTests(unusedAdmin())
     try {
-      await pmListProjectMembers({ accountId: ACCOUNT_ID, productSpaceId: SPACE_ID })
+      await pmListProjects(ORG_SCOPE)
       expect.unreachable()
     } catch (error) {
       expect(errCodeOf(error)).toBe(PM_PRODUCT_SPACE_CONTEXT_REQUIRED)
     }
   })
 
-  it('surfaces the admin 403 verbatim for a member probing the roster', async () => {
-    commitEnterpriseFence()
-    setProjectMembersAdminForTests({
-      listProjectMembers: async () => {
-        throw new AdminError('member', 'FORBIDDEN')
-      },
-    } as unknown as ProjectMembersAdmin)
+  it('rejects an organizationEnterpriseId that is not the committed space\'s enterprise', async () => {
+    setProjectMembersAdminForTests(unusedAdmin())
     try {
-      await pmListProjectMembers({ accountId: ACCOUNT_ID, productSpaceId: SPACE_ID })
+      await pmListProjects({ ...ORG_SCOPE, organizationEnterpriseId: 'ent-stale' })
       expect.unreachable()
     } catch (error) {
-      expect(errCodeOf(error)).toBe('forbidden')
+      expect(errCodeOf(error)).toBe('pm_scope_changed')
     }
   })
 
-  it('discards roster results when the space switches mid-flight (race)', async () => {
-    commitEnterpriseFence()
+  it('rejects a renderer account that is not the trusted account', async () => {
+    setProjectMembersAdminForTests(unusedAdmin())
+    try {
+      await pmListProjects({ ...ORG_SCOPE, accountId: ACCOUNT_ID_OTHER })
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('pm_scope_changed')
+    }
+  })
+
+  it('fails closed with pm_signin_required when the trusted session resolver disagrees', async () => {
+    // The sync mirror still names the account (so the scope token captures),
+    // but the live session resolver returns nobody — no Admin session to act
+    // through.
+    setTrustedProductSpaceAccountProvider(async () => null)
+    setProjectMembersAdminForTests(unusedAdmin())
+    try {
+      await pmListProjects(ORG_SCOPE)
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('pm_signin_required')
+    }
+  })
+
+  it('discards the response when an account transition lands mid-flight (race)', async () => {
     let release!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })
     setProjectMembersAdminForTests({
-      listProjectMembers: async () => {
+      ...unusedAdmin(),
+      listProjects: async (): Promise<ListProjectsResponse> => {
         await gate
-        return ROSTER
+        return { contractVersion: PROJECT_CONTRACT_VERSION, organizationEnterpriseId: ORG_ID, projects: [] }
       },
-    } as unknown as ProjectMembersAdmin)
+    })
 
-    const pending = pmListProjectMembers({ accountId: ACCOUNT_ID, productSpaceId: SPACE_ID })
+    const pending = pmListProjects(ORG_SCOPE)
     const epoch = beginAccountTransition()
     release()
     try {
@@ -383,56 +306,257 @@ describe('member-scope commands — committed-space gate (D-C)', () => {
       settleAccountTransition(epoch, 'commit')
     }
   })
+})
 
-  it('passes invitations list + create through with the committed-space gate', async () => {
-    commitEnterpriseFence()
-    const invitation = {
-      invitationId: '22222222-2222-4222-8222-222222222222',
-      status: 'active',
-      maskedPhone: '138****0000',
-      maskedEmail: null,
-      expiresAt: '2026-11-09T00:00:00.000Z',
-      createdAt: '2026-11-02T00:00:00.000Z',
-      acceptedAt: null,
-    }
+describe('pmCreateProject / pmUpdateProject — lightweight lifecycle', () => {
+  it('creates with the command verbatim and no payer/payment fields', async () => {
+    const calls: Array<{ orgId: string; command: unknown }> = []
     setProjectMembersAdminForTests({
-      listProjectInvitations: async () => ({
-        productSpaceId: SPACE_ID,
-        viewerRole: 'owner',
-        invitations: [invitation],
-        nextCursor: null,
-      }),
-      createProjectInvitation: async (_productSpaceId: string, command: ClientCreateInvitationCommand) => ({
-        result: 'created',
-        invitation,
-        invitationUrl: `https://admin.example.com/invite/${command.createRequestKey}`,
-      }),
-    } as unknown as ProjectMembersAdmin)
-
-    const list = await pmListProjectInvitations({ accountId: ACCOUNT_ID, productSpaceId: SPACE_ID })
-    expect(list.invitations).toHaveLength(1)
-
-    const created = await pmCreateProjectInvitation({
-      accountId: ACCOUNT_ID,
-      productSpaceId: SPACE_ID,
-      command: { createRequestKey: 'pm-invite-1', targetPhone: '13800000000' },
+      ...unusedAdmin(),
+      createProject: async (organizationEnterpriseId: string, command) => {
+        calls.push({ orgId: organizationEnterpriseId, command: { ...command } })
+        return MUTATION_RESPONSE
+      },
     })
-    expect(created.result).toBe('created')
-    // Only the caller's own created/replayed invitation carries a link.
-    if (created.result !== 'created' && created.result !== 'replayed') throw new Error('unexpected result')
-    expect(created.invitationUrl).toContain('/invite/')
+
+    const response = await pmCreateProject({ ...ORG_SCOPE, command: CREATE_COMMAND })
+    expect(response).toEqual(MUTATION_RESPONSE)
+    expect(calls).toEqual([{ orgId: ORG_ID, command: CREATE_COMMAND }])
+    // The wire never carries payer/payment responsibility (retired surface).
+    expect(JSON.stringify(calls[0])).not.toContain('paymentResponsibility')
   })
 
-  it('keeps the create commands reachable from the personal fence (D-B: no enterprise gate)', async () => {
-    // beforeEach committed the PERSONAL fence; the create must still run.
+  it('updates with PATCH semantics — only the present fields ride the command', async () => {
+    const calls: Array<{ orgId: string; projectId: string; command: unknown }> = []
     setProjectMembersAdminForTests({
-      createEnterprise: async () => CREATE_RESPONSE,
-    } as unknown as ProjectMembersAdmin)
-    const response = await pmCreateEnterprise({
-      accountId: ACCOUNT_ID,
-      idempotencyKey: 'pm-create-personal',
-      command: CREATE_COMMAND,
+      ...unusedAdmin(),
+      updateProject: async (organizationEnterpriseId: string, projectId: string, command) => {
+        calls.push({ orgId: organizationEnterpriseId, projectId, command: { ...command } })
+        return MUTATION_RESPONSE
+      },
     })
-    expect(response.result).toBe('created')
+
+    const response = await pmUpdateProject({ ...ORG_SCOPE, projectId: PROJECT_ID, command: UPDATE_COMMAND })
+    expect(response).toEqual(MUTATION_RESPONSE)
+    expect(calls).toEqual([{ orgId: ORG_ID, projectId: PROJECT_ID, command: UPDATE_COMMAND }])
+  })
+})
+
+describe('project member commands — roster-picked, admin-authoritative', () => {
+  it('lists members inside the committed organization', async () => {
+    const calls: Array<{ orgId: string; projectId: string }> = []
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      listProjectMembers: async (organizationEnterpriseId: string, projectId: string) => {
+        calls.push({ orgId: organizationEnterpriseId, projectId })
+        return MEMBERS_RESPONSE
+      },
+    })
+
+    const response = await pmListProjectMembers({ ...ORG_SCOPE, projectId: PROJECT_ID })
+    expect(response.members).toHaveLength(1)
+    expect(calls).toEqual([{ orgId: ORG_ID, projectId: PROJECT_ID }])
+  })
+
+  it('adds roster members in bulk and surfaces prj_member_not_in_organization verbatim', async () => {
+    const calls: Array<{ orgId: string; projectId: string; command: unknown }> = []
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      addProjectMembers: async (organizationEnterpriseId: string, projectId: string, command) => {
+        calls.push({ orgId: organizationEnterpriseId, projectId, command: { ...command } })
+        return MEMBERS_RESPONSE
+      },
+    })
+
+    const response = await pmAddProjectMembers({ ...ORG_SCOPE, projectId: PROJECT_ID, command: ADD_COMMAND })
+    expect(response).toEqual(MEMBERS_RESPONSE)
+    expect(calls).toEqual([{ orgId: ORG_ID, projectId: PROJECT_ID, command: ADD_COMMAND }])
+
+    // Membership ⊆ organization is enforced admin-side; the frozen code must
+    // survive the mapping untouched.
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      addProjectMembers: async () => {
+        throw new AdminError('not a colleague', 'prj_member_not_in_organization')
+      },
+    })
+    try {
+      await pmAddProjectMembers({ ...ORG_SCOPE, projectId: PROJECT_ID, command: ADD_COMMAND })
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('prj_member_not_in_organization')
+    }
+  })
+
+  it('changes a member role and surfaces prj_last_owner verbatim', async () => {
+    const calls: Array<{ orgId: string; projectId: string; accountId: string; role: string }> = []
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      updateProjectMember: async (
+        organizationEnterpriseId: string,
+        projectId: string,
+        accountId: string,
+        input,
+      ): Promise<UpdateProjectMemberResponse> => {
+        calls.push({ orgId: organizationEnterpriseId, projectId, accountId, role: input.role })
+        return {
+          contractVersion: PROJECT_CONTRACT_VERSION,
+          member: { ...MEMBERS_RESPONSE.members[0]!, role: 'manager' },
+        }
+      },
+    })
+
+    const response = await pmUpdateProjectMember({
+      ...ORG_SCOPE,
+      projectId: PROJECT_ID,
+      targetAccountId: 'user-1',
+      role: 'manager',
+    })
+    expect(response.member.role).toBe('manager')
+    expect(calls).toEqual([{ orgId: ORG_ID, projectId: PROJECT_ID, accountId: 'user-1', role: 'manager' }])
+
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      updateProjectMember: async () => {
+        throw new AdminError('last owner', 'prj_last_owner')
+      },
+    })
+    try {
+      await pmUpdateProjectMember({
+        ...ORG_SCOPE,
+        projectId: PROJECT_ID,
+        targetAccountId: ACCOUNT_ID,
+        role: 'member',
+      })
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('prj_last_owner')
+    }
+  })
+
+  it('removes a member from the project only and maps prj_not_found verbatim', async () => {
+    const calls: Array<{ orgId: string; projectId: string; accountId: string }> = []
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      removeProjectMember: async (organizationEnterpriseId: string, projectId: string, accountId: string) => {
+        calls.push({ orgId: organizationEnterpriseId, projectId, accountId })
+        return { ok: true as const }
+      },
+    })
+
+    const response = await pmRemoveProjectMember({
+      ...ORG_SCOPE,
+      projectId: PROJECT_ID,
+      targetAccountId: 'user-1',
+    })
+    expect(response).toEqual({ ok: true })
+    expect(calls).toEqual([{ orgId: ORG_ID, projectId: PROJECT_ID, accountId: 'user-1' }])
+
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      removeProjectMember: async () => {
+        throw new AdminError('gone', 'prj_not_found')
+      },
+    })
+    try {
+      await pmRemoveProjectMember({ ...ORG_SCOPE, projectId: PROJECT_ID, targetAccountId: 'user-x' })
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('prj_not_found')
+    }
+  })
+
+  it('lists organization colleagues (the only roster) and folds legacy aliases back', async () => {
+    const calls: string[] = []
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      listOrganizationColleagues: async (organizationEnterpriseId: string) => {
+        calls.push(organizationEnterpriseId)
+        return COLLEAGUES_RESPONSE
+      },
+    })
+
+    const response = await pmListOrganizationColleagues(ORG_SCOPE)
+    expect(response.colleagues).toHaveLength(2)
+    expect(calls).toEqual([ORG_ID])
+
+    // The admin alias table normalizes session-level 403 to the uppercase
+    // legacy spelling; the service folds it back onto ONE vocabulary.
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      listOrganizationColleagues: async () => {
+        throw new AdminError('no', 'FORBIDDEN')
+      },
+    })
+    try {
+      await pmListOrganizationColleagues(ORG_SCOPE)
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('forbidden')
+    }
+  })
+
+  it('maps admin unavailability to stable pm_* codes (signed out vs unreachable)', async () => {
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      listProjects: async () => {
+        throw new ProjectMembersAdminUnavailableError('pm_signed_out', 'no session')
+      },
+    })
+    try {
+      await pmListProjects(ORG_SCOPE)
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('pm_signin_required')
+    }
+
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      listProjects: async () => {
+        throw new ProjectMembersAdminUnavailableError('pm_admin_unreachable', 'down')
+      },
+    })
+    try {
+      await pmListProjects(ORG_SCOPE)
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('pm_service_unavailable')
+    }
+  })
+})
+
+describe('pmListProductSpacesR3 — retained account-scoped read (D6)', () => {
+  it('is ACCOUNT-scoped: reachable from the personal fence (no enterprise gate)', async () => {
+    commitPersonalFence()
+    let calls = 0
+    setProjectMembersAdminForTests({
+      ...unusedAdmin(),
+      listProductSpacesR3: async () => {
+        calls += 1
+        return {
+          contractVersion: 'poo196-contract-r3',
+          spaces: {
+            contractVersion: '2025-11-27',
+            personalProductSpaceId: PERSONAL_SPACE_ID,
+            productSpaces: [PERSONAL_SPACE],
+          },
+          enterpriseSummaries: [],
+        } as unknown as Awaited<ReturnType<ProjectMembersAdmin['listProductSpacesR3']>>
+      },
+    })
+
+    const response = await pmListProductSpacesR3({ accountId: ACCOUNT_ID })
+    expect(calls).toBe(1)
+    expect(response.enterpriseSummaries).toHaveLength(0)
+  })
+
+  it('rejects a renderer account that is not the trusted account', async () => {
+    setProjectMembersAdminForTests(unusedAdmin())
+    try {
+      await pmListProductSpacesR3({ accountId: ACCOUNT_ID_OTHER })
+      expect.unreachable()
+    } catch (error) {
+      expect(errCodeOf(error)).toBe('pm_scope_changed')
+    }
   })
 })

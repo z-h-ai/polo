@@ -41,7 +41,9 @@ import {
  * Every entry derives its authorization from the SAME trusted-scope fence as
  * the KB surface (admin session + committed enterprise ProductSpace + bound
  * workspace), enforces that the requested `productSpaceId` IS the committed
- * space (a renderer cannot probe a foreign space id), and maps every admin
+ * space and that a non-blank `projectId` rides the call (POO-205: the
+ * project — not the space — owns the shared-file area; the admin route
+ * re-validates project ⊆ organization ⊕ membership), and maps every admin
  * outcome onto the stable pc_* wire codes. The admin API is the ONLY
  * authority: no client-side cache ever decides membership or role (D7), and
  * no project credential or transfer capability ever reaches the renderer —
@@ -188,8 +190,12 @@ function assertScopeCurrent(scope: ProjectContextScope): void {
 export function isProjectSessionAuthorizedNow(input: {
   workspaceId: string
   sessionProductSpaceId: string | null | undefined
+  sessionProjectId?: string | null | undefined
 }): boolean {
   if (!input.sessionProductSpaceId) return false
+  // POO-205: without the session's immutable project binding nothing can
+  // address the project asset scope — fail closed at construction time.
+  if (!input.sessionProjectId || input.sessionProjectId.trim().length === 0) return false
   const token = captureCompleteTrustedSessionScopeToken(input.workspaceId)
   if (!token || !isTrustedSessionScopeTokenCurrent(token)) return false
   const activeProductSpaceId = getRuntimeActiveProductSpace()
@@ -203,6 +209,19 @@ export function isProjectSessionAuthorizedNow(input: {
 function assertRequestedSpace(scope: ProjectContextScope, productSpaceId: string): void {
   if (productSpaceId !== scope.space.id) {
     throw pcError('pc_forbidden', 'The requested project is not the active one')
+  }
+}
+
+/**
+ * POO-205: every asset call must name the project inside the committed space.
+ * Only the non-blank bound is checked here (the wire schema already bounds
+ * the format); the admin route re-validates project ⊆ organization ⊕
+ * membership, so no local remote call duplicates that judgment — this is the
+ * transport-consistency passthrough for direct (non-RPC) callers.
+ */
+function assertRequestedProject(projectId: string): void {
+  if (typeof projectId !== 'string' || projectId.trim().length === 0) {
+    throw pcError('VALIDATION_ERROR', 'A non-blank projectId is required for project assets')
   }
 }
 
@@ -228,12 +247,13 @@ export function parsePcInput<T>(schema: { safeParse(input: unknown): { success: 
 export async function pcCapabilities(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string },
+  input: { workspaceId: string; productSpaceId: string; projectId: string },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   try {
-    const result = await theAdmin().capabilities(input.productSpaceId)
+    const result = await theAdmin().capabilities(input.productSpaceId, input.projectId)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -244,12 +264,13 @@ export async function pcCapabilities(
 export async function pcSummary(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string },
+  input: { workspaceId: string; productSpaceId: string; projectId: string },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   try {
-    const result = await theAdmin().summary(input.productSpaceId)
+    const result = await theAdmin().summary(input.productSpaceId, input.projectId)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -263,6 +284,7 @@ export async function pcListAssets(
   input: {
     workspaceId: string
     productSpaceId: string
+    projectId: string
     view?: string
     tag?: string
     pinned?: string
@@ -274,8 +296,9 @@ export async function pcListAssets(
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   try {
-    const result = await theAdmin().listAssets(input.productSpaceId, {
+    const result = await theAdmin().listAssets(input.productSpaceId, input.projectId, {
       view: input.view,
       tag: input.tag,
       pinned: input.pinned,
@@ -294,12 +317,13 @@ export async function pcListAssets(
 export async function pcGetAsset(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   try {
-    const result = await theAdmin().getAsset(input.productSpaceId, input.assetId)
+    const result = await theAdmin().getAsset(input.productSpaceId, input.projectId, input.assetId)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -310,6 +334,7 @@ export async function pcGetAsset(
 export interface PcUploadFileInput {
   workspaceId: string
   productSpaceId: string
+  projectId: string
   mode: 'create' | 'replace'
   filePath: string
   name: string
@@ -335,11 +360,12 @@ export async function pcUploadFile(
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   assertWritable(scope)
   const mime = input.mime ?? 'application/octet-stream'
   try {
     const grant = input.mode === 'create'
-      ? await theAdmin().createAsset(input.productSpaceId, parsePcInput(PcCreateAssetInputSchema, {
+      ? await theAdmin().createAsset(input.productSpaceId, input.projectId, parsePcInput(PcCreateAssetInputSchema, {
         name: input.name,
         tags: input.tags,
         source: input.source,
@@ -349,6 +375,7 @@ export async function pcUploadFile(
       }))
       : await theAdmin().createUpload(
         input.productSpaceId,
+        input.projectId,
         input.assetId ?? '',
         parsePcInput(PcCreateUploadInputSchema, {
           expectedRevision: input.expectedRevision ?? 0,
@@ -358,7 +385,7 @@ export async function pcUploadFile(
         }),
       )
     await putProjectContextFile({ grant, filePath: input.filePath })
-    const result = await theAdmin().completeUpload(input.productSpaceId, grant.assetId, grant.uploadId)
+    const result = await theAdmin().completeUpload(input.productSpaceId, input.projectId, grant.assetId, grant.uploadId)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -375,14 +402,15 @@ export async function pcUploadFile(
 export async function pcUpdateAsset(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string; input: unknown },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string; input: unknown },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   assertWritable(scope)
   const payload = parsePcInput(PcUpdateAssetInputSchema, input.input)
   try {
-    const result = await theAdmin().updateAsset(input.productSpaceId, input.assetId, payload)
+    const result = await theAdmin().updateAsset(input.productSpaceId, input.projectId, input.assetId, payload)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -393,14 +421,15 @@ export async function pcUpdateAsset(
 export async function pcSetConfirmed(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string; input: unknown },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string; input: unknown },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   assertWritable(scope)
   const payload = parsePcInput(PcSetConfirmedInputSchema, input.input)
   try {
-    const result = await theAdmin().setConfirmed(input.productSpaceId, input.assetId, payload)
+    const result = await theAdmin().setConfirmed(input.productSpaceId, input.projectId, input.assetId, payload)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -411,14 +440,15 @@ export async function pcSetConfirmed(
 export async function pcSetPinned(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string; input: unknown },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string; input: unknown },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   assertWritable(scope)
   const payload = parsePcInput(PcSetPinnedInputSchema, input.input)
   try {
-    const result = await theAdmin().setPinned(input.productSpaceId, input.assetId, payload)
+    const result = await theAdmin().setPinned(input.productSpaceId, input.projectId, input.assetId, payload)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -429,13 +459,14 @@ export async function pcSetPinned(
 export async function pcTrashAsset(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string; expectedRevision: number },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string; expectedRevision: number },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   assertWritable(scope)
   try {
-    const result = await theAdmin().trashAsset(input.productSpaceId, input.assetId, input.expectedRevision)
+    const result = await theAdmin().trashAsset(input.productSpaceId, input.projectId, input.assetId, input.expectedRevision)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -446,14 +477,15 @@ export async function pcTrashAsset(
 export async function pcRestoreAsset(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string; input: unknown },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string; input: unknown },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   assertWritable(scope)
   const payload = parsePcInput(PcRestoreInputSchema, input.input)
   try {
-    const result = await theAdmin().restoreAsset(input.productSpaceId, input.assetId, payload)
+    const result = await theAdmin().restoreAsset(input.productSpaceId, input.projectId, input.assetId, payload)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -464,12 +496,13 @@ export async function pcRestoreAsset(
 export async function pcDownloadAsset(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string; version?: number; targetPath: string },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string; version?: number; targetPath: string },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   try {
-    const grant = await theAdmin().getDownload(input.productSpaceId, input.assetId, input.version)
+    const grant = await theAdmin().getDownload(input.productSpaceId, input.projectId, input.assetId, input.version)
     const savedPath = await downloadProjectContextFile({ url: grant.url, targetPath: input.targetPath })
     assertScopeCurrent(scope)
     return { savedPath }
@@ -489,12 +522,13 @@ export async function pcDownloadAsset(
 export async function pcReadAsset(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string; version?: number },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string; version?: number },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   try {
-    const result = await theAdmin().getRead(input.productSpaceId, input.assetId, input.version)
+    const result = await theAdmin().getRead(input.productSpaceId, input.projectId, input.assetId, input.version)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -505,12 +539,13 @@ export async function pcReadAsset(
 export async function pcGetPreviewUrl(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; assetId: string; version?: number },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string; version?: number },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   try {
-    const result = await theAdmin().getPreview(input.productSpaceId, input.assetId, input.version)
+    const result = await theAdmin().getPreview(input.productSpaceId, input.projectId, input.assetId, input.version)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -521,12 +556,13 @@ export async function pcGetPreviewUrl(
 export async function pcSearchAssets(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string; q: string; tag?: string; limit?: number },
+  input: { workspaceId: string; productSpaceId: string; projectId: string; q: string; tag?: string; limit?: number },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   try {
-    const result = await theAdmin().search(input.productSpaceId, { q: input.q, tag: input.tag, limit: input.limit })
+    const result = await theAdmin().search(input.productSpaceId, input.projectId, { q: input.q, tag: input.tag, limit: input.limit })
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -537,13 +573,14 @@ export async function pcSearchAssets(
 export async function pcRebuild(
   deps: HandlerDeps,
   ctx: RequestContext,
-  input: { workspaceId: string; productSpaceId: string },
+  input: { workspaceId: string; productSpaceId: string; projectId: string },
 ): Promise<unknown> {
   const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
   assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
   assertWritable(scope)
   try {
-    const result = await theAdmin().rebuild(input.productSpaceId)
+    const result = await theAdmin().rebuild(input.productSpaceId, input.projectId)
     assertScopeCurrent(scope)
     return result
   } catch (error) {
@@ -627,6 +664,12 @@ function buildProjectModelContextBlock(input: {
  * - the whole resolution is raced against one wall clock and NEVER blocks a
  *   send longer than its budget: on timeout the references still persist
  *   (marked per outcome) and the header is skipped.
+ *
+ * POO-205: the asset scope is 「organization space + projectId」 — the
+ * session's immutable project binding rides in as `sessionProjectId` (the
+ * caller reads it off the session record). A session without the binding
+ * cannot address any project asset, so the resolution fails closed exactly
+ * like a lost fence: nothing is injected and no references persist.
  */
 export async function resolveSessionProjectContext(
   deps: HandlerDeps<ISessionManager>,
@@ -634,13 +677,18 @@ export async function resolveSessionProjectContext(
   assetRefs: Array<{ assetId: string; version: number; name: string }> | undefined,
   callerWorkspaceId?: string | null,
   entryScopeToken?: TrustedSessionScopeToken | null,
+  sessionProjectId?: string | null,
 ): Promise<ResolvedSessionProjectContext | undefined> {
   try {
     const indexed = deps.sessionManager
       .getSessions()
       .find(candidate => candidate.id === sessionId)
     const sessionSpaceId = indexed?.productSpaceId ?? null
+    const projectId = typeof sessionProjectId === 'string' && sessionProjectId.trim().length > 0
+      ? sessionProjectId
+      : null
     const normalizedRefs = (assetRefs ?? []).slice(0, PC_REFS_PER_SEND_MAX)
+    if (!projectId) return undefined
     if (!sessionSpaceId && normalizedRefs.length === 0) return undefined
 
     const token = entryScopeToken
@@ -662,7 +710,7 @@ export async function resolveSessionProjectContext(
 
     // The bounded header (one admin call, skipped on timeout/failure).
     const headerPromise = (async (): Promise<string[]> => {
-      const summary = await admin.summary(sessionSpaceId as string)
+      const summary = await admin.summary(sessionSpaceId as string, projectId)
       return [
         `项目：${summary.assetCount} 个共享文件，其中 ${summary.confirmedCount} 个已确认结论`,
         summary.overview,
@@ -674,7 +722,7 @@ export async function resolveSessionProjectContext(
       const resolved: Array<ProjectAssetReference & { content?: string }> = []
       for (const ref of normalizedRefs) {
         try {
-          const read = await admin.getRead(sessionSpaceId as string, ref.assetId, ref.version)
+          const read = await admin.getRead(sessionSpaceId as string, projectId, ref.assetId, ref.version)
           resolved.push({
             assetId: ref.assetId,
             version: ref.version,

@@ -3,53 +3,61 @@ import { getAdminUrl } from '@polo-ai/shared/config'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import {
   CLIENT_ENTERPRISE_ERROR_CODES,
-  type ClientColleagueInvitationReceipt,
-  type ClientColleagueOptionsResponse,
-  type ClientCollaborationRosterResponse,
-  type ClientCreateColleagueInvitationCommand,
-  type ClientCreateColleagueInvitationResponse,
-  type ClientCreateEnterpriseCommand,
-  type ClientCreateEnterpriseResponse,
-  type ClientCreateInvitationCommand,
-  type ClientCreateInvitationResponse,
-  type ClientCreateReceipt,
   type ClientEnterpriseErrorCode,
-  type ClientInvitationListResponse,
-  type ClientMemberRosterResponse,
 } from '@polo-ai/shared/admin/client-enterprise-contract'
-import type { PmProductSpacesListR3Response } from '@polo-ai/shared/protocol'
+import type {
+  AddProjectMembersInput,
+  CreateProjectInput,
+  ListOrganizationColleaguesResponse,
+  ListProjectMembersResponse,
+  ListProjectsResponse,
+  PmProductSpacesListR3Response,
+  ProjectMutationResponse,
+  UpdateProjectInput,
+  UpdateProjectMemberInput,
+  UpdateProjectMemberResponse,
+} from '@polo-ai/shared/protocol'
+import { PROJECT_ERROR_CODES, type ProjectErrorCode } from '@polo-ai/shared/protocol'
 
 /**
- * The project-members admin adapter (POO-196 追加轮, adjudication D-A).
+ * The project-members admin adapter (POO-205; supersedes the POO-196 追加轮
+ * surface).
  *
  * Same shape as the project-context adapter: the desktop never holds
  * enterprise administration credentials — it rides the signed-in member's
- * admin session through the narrow client Bearer surface admin exposed for
- * this round. Failure shape: admin-unreachable / signed-out resolve per-call
- * and the service turns them into stable pm_* codes; nothing here invents
- * fallbacks.
+ * admin session through the narrow client Bearer surface. Failure shape:
+ * admin-unreachable / signed-out resolve per-call and the service turns them
+ * into stable pm_* codes; nothing here invents fallbacks.
  *
- * POO-196 R3 (D3–D6): the colleague directory / collaboration roster reads,
- * the per-object colleague invitation bridge with its recovery query, and the
- * negotiated R3 product-space list read ride the same adapter.
+ * POO-205: the control plane is the organization-scoped project/entity
+ * (`poo205-contract-r1`). Project lifecycle and membership address the NEW
+ * Project entity keyed by (organizationEnterpriseId, projectId) — project
+ * members ⊆ organization members is enforced admin-side
+ * (`prj_member_not_in_organization`). Enterprise creation, receipts and every
+ * invitation flow are RETIRED. The POO-196 R3 negotiated product-space list
+ * read remains (still the space switcher's source).
  */
 
 const PM_REQUEST_TIMEOUT_MS = 15_000
 
 export interface ProjectMembersAdmin {
-  createEnterprise(input: ClientCreateEnterpriseCommand & { idempotencyKey: string }): Promise<ClientCreateEnterpriseResponse>
-  queryMyCreateReceipt(createRequestKey: string): Promise<ClientCreateReceipt>
-  listProjectMembers(productSpaceId: string, query: { limit?: number; cursor?: string }): Promise<ClientMemberRosterResponse>
-  listProjectInvitations(productSpaceId: string, query: { limit?: number; cursor?: string }): Promise<ClientInvitationListResponse>
-  createProjectInvitation(productSpaceId: string, input: ClientCreateInvitationCommand): Promise<ClientCreateInvitationResponse>
-  /** R3 (D3): the caller's own organization projected into the target project. */
-  listColleagueOptions(productSpaceId: string, query: { q?: string; limit?: number; cursor?: string }): Promise<ClientColleagueOptionsResponse>
-  /** R3 (D4): the all-role minimal roster of the target project. */
-  listCollaborationRoster(productSpaceId: string, query: { q?: string; limit?: number; cursor?: string }): Promise<ClientCollaborationRosterResponse>
-  /** R3 (D5): one selected colleague per call, resolved server-side. */
-  createColleagueInvitation(productSpaceId: string, input: ClientCreateColleagueInvitationCommand): Promise<ClientCreateColleagueInvitationResponse>
-  /** R3 (D5): recovery query for the caller's own createRequestKey. */
-  queryColleagueInvitation(productSpaceId: string, createRequestKey: string): Promise<ClientColleagueInvitationReceipt>
+  /** GET /api/client/organizations/{orgId}/projects — the caller's projects. */
+  listProjects(organizationEnterpriseId: string): Promise<ListProjectsResponse>
+  /** POST /api/client/organizations/{orgId}/projects — lightweight create. */
+  createProject(organizationEnterpriseId: string, input: CreateProjectInput): Promise<ProjectMutationResponse>
+  /** PATCH /api/client/organizations/{orgId}/projects/{projectId} — name/purpose/instructions. */
+  updateProject(organizationEnterpriseId: string, projectId: string, input: UpdateProjectInput): Promise<ProjectMutationResponse>
+  /** GET .../projects/{projectId}/members. */
+  listProjectMembers(organizationEnterpriseId: string, projectId: string): Promise<ListProjectMembersResponse>
+  /** POST .../projects/{projectId}/members — bulk pick from the organization roster. */
+  addProjectMembers(organizationEnterpriseId: string, projectId: string, input: AddProjectMembersInput): Promise<ListProjectMembersResponse>
+  /** PATCH .../projects/{projectId}/members/{accountId} — role change. */
+  updateProjectMember(organizationEnterpriseId: string, projectId: string, accountId: string, input: UpdateProjectMemberInput): Promise<UpdateProjectMemberResponse>
+  /** DELETE .../projects/{projectId}/members/{accountId} — leaves the project only. */
+  removeProjectMember(organizationEnterpriseId: string, projectId: string, accountId: string): Promise<{ ok: true }>
+  /** GET /api/client/organizations/{orgId}/colleagues — the ONLY roster a
+   * project may pick members from. */
+  listOrganizationColleagues(organizationEnterpriseId: string): Promise<ListOrganizationColleaguesResponse>
   /** R3 (D6): negotiated R3 product-space list for the signed-in account. */
   listProductSpacesR3(): Promise<PmProductSpacesListR3Response>
 }
@@ -64,13 +72,27 @@ export class ProjectMembersAdminUnavailableError extends Error {
 }
 
 /** The admin error's stable client-enterprise wire code, when one rode the
- * response. Codes the admin client's alias table normalized to a legacy
- * uppercase spelling are NOT returned here — the service maps those. */
+ * response (still reachable through the retained R3 list read). Codes the
+ * admin client's alias table normalized to a legacy uppercase spelling are
+ * NOT returned here — the service maps those. */
 export function clientEnterpriseErrorCodeOf(error: unknown): ClientEnterpriseErrorCode | null {
   if (error instanceof AdminError) {
     const code = (error as unknown as { errorCode?: unknown }).errorCode
     if (typeof code === 'string' && (CLIENT_ENTERPRISE_ERROR_CODES as readonly string[]).includes(code)) {
       return code as ClientEnterpriseErrorCode
+    }
+  }
+  return null
+}
+
+/** The admin error's stable poo205-contract-r1 wire code (`prj_*` /
+ * `myapps_*`), when one rode the response. These pass through verbatim so the
+ * renderer's recovery copy can branch on the frozen contract vocabulary. */
+export function projectErrorCodeOf(error: unknown): ProjectErrorCode | null {
+  if (error instanceof AdminError) {
+    const code = (error as unknown as { errorCode?: unknown }).errorCode
+    if (typeof code === 'string' && (PROJECT_ERROR_CODES as readonly string[]).includes(code)) {
+      return code as ProjectErrorCode
     }
   }
   return null
@@ -97,24 +119,22 @@ async function withAdmin<T>(run: (client: AdminClient, accessToken: string) => P
 /** The live adapter used by the RPC handlers. */
 export function getProjectMembersAdmin(): ProjectMembersAdmin {
   return {
-    createEnterprise: input =>
-      withAdmin((client, token) => client.createEnterprise(token, input)),
-    queryMyCreateReceipt: createRequestKey =>
-      withAdmin((client, token) => client.queryMyCreateReceipt(token, createRequestKey)),
-    listProjectMembers: (productSpaceId, query) =>
-      withAdmin((client, token) => client.listProjectMembers(token, productSpaceId, query)),
-    listProjectInvitations: (productSpaceId, query) =>
-      withAdmin((client, token) => client.listProjectInvitations(token, productSpaceId, query)),
-    createProjectInvitation: (productSpaceId, input) =>
-      withAdmin((client, token) => client.createProjectInvitation(token, productSpaceId, input)),
-    listColleagueOptions: (productSpaceId, query) =>
-      withAdmin((client, token) => client.listColleagueOptions(token, productSpaceId, query)),
-    listCollaborationRoster: (productSpaceId, query) =>
-      withAdmin((client, token) => client.listCollaborationRoster(token, productSpaceId, query)),
-    createColleagueInvitation: (productSpaceId, input) =>
-      withAdmin((client, token) => client.createColleagueInvitation(token, productSpaceId, input)),
-    queryColleagueInvitation: (productSpaceId, createRequestKey) =>
-      withAdmin((client, token) => client.queryColleagueInvitation(token, productSpaceId, createRequestKey)),
+    listProjects: organizationEnterpriseId =>
+      withAdmin((client, token) => client.listProjects(token, organizationEnterpriseId)),
+    createProject: (organizationEnterpriseId, input) =>
+      withAdmin((client, token) => client.createProject(token, organizationEnterpriseId, input)),
+    updateProject: (organizationEnterpriseId, projectId, input) =>
+      withAdmin((client, token) => client.updateProject(token, organizationEnterpriseId, projectId, input)),
+    listProjectMembers: (organizationEnterpriseId, projectId) =>
+      withAdmin((client, token) => client.listProjectMembers(token, organizationEnterpriseId, projectId)),
+    addProjectMembers: (organizationEnterpriseId, projectId, input) =>
+      withAdmin((client, token) => client.addProjectMembers(token, organizationEnterpriseId, projectId, input)),
+    updateProjectMember: (organizationEnterpriseId, projectId, accountId, input) =>
+      withAdmin((client, token) => client.updateProjectMember(token, organizationEnterpriseId, projectId, accountId, input)),
+    removeProjectMember: (organizationEnterpriseId, projectId, accountId) =>
+      withAdmin((client, token) => client.removeProjectMember(token, organizationEnterpriseId, projectId, accountId)),
+    listOrganizationColleagues: organizationEnterpriseId =>
+      withAdmin((client, token) => client.listOrganizationColleagues(token, organizationEnterpriseId)),
     listProductSpacesR3: () =>
       withAdmin((client, token) => client.listProductSpacesR3(token)),
   }

@@ -30,7 +30,6 @@ export type {
   MessageAttachment,
   StoredAttachment,
   ContentBadge,
-  KbReference,
   WebElementReference,
   AnnotationAuthor,
   AnnotationBody,

@@ -14,9 +14,10 @@ import {
  *
  * The factory runs the cheap SYNCHRONOUS session-authorization pre-check once
  * (session exists + bound to a project + that project IS the committed active
- * space for the trusted account) and returns null otherwise — the host then
- * never registers the tools' backing facade. EVERY search/read re-runs the
- * FULL `requireProjectContextScope` gate (fresh trusted token, fence binding,
+ * space for the trusted account + the session carries its immutable projectId
+ * binding, POO-205) and returns null otherwise — the host then never
+ * registers the tools' backing facade. EVERY search/read re-runs the FULL
+ * `requireProjectContextScope` gate (fresh trusted token, fence binding,
  * account resolution, workspace binding, requested-space equality) plus the
  * post-call scope CAS — no cached authorization anywhere (D7). Failures never
  * throw through: search degrades to "no hits", read reports a stable pc_*
@@ -47,6 +48,17 @@ function facadeRequestContext(workspaceId: string): RequestContext {
   return { clientId: 'session-tool-project-context', workspaceId, webContentsId: null }
 }
 
+/**
+ * POO-205: the immutable project binding the runtime session record carries
+ * (stamped by the SessionManager at creation). Read structurally until the
+ * protocol Session DTO catches up with the SessionManager wiring.
+ */
+type ProjectBoundSessionRecord = {
+  id: string
+  productSpaceId?: string
+  projectId?: string
+}
+
 export interface ProjectContextToolFacadeInput {
   deps: HandlerDeps<ISessionManager>
   sessionId: string
@@ -66,10 +78,11 @@ export function createProjectContextToolFacade(input: ProjectContextToolFacadeIn
   // inside every pcSearchAssets/pcReadAsset call below).
   const session = deps.sessionManager
     .getSessions()
-    .find(candidate => candidate.id === sessionId)
+    .find(candidate => candidate.id === sessionId) as ProjectBoundSessionRecord | undefined
   if (!isProjectSessionAuthorizedNow({
     workspaceId,
     sessionProductSpaceId: session?.productSpaceId ?? null,
+    sessionProjectId: session?.projectId ?? null,
   })) {
     return null
   }
@@ -77,18 +90,20 @@ export function createProjectContextToolFacade(input: ProjectContextToolFacadeIn
   return {
     async search({ query, tag, limit }): Promise<{ degraded: boolean; hits: ProjectContextSearchHit[] }> {
       try {
-        // Re-read the session so a rebinding mid-turn is honored: the space
-        // addressed is the session's CURRENT productSpaceId, and the service
-        // gate (`assertRequestedSpace`) refuses anything but the committed
-        // active space.
+        // Re-read the session so a rebinding mid-turn is honored: the space +
+        // project addressed are the session's CURRENT bindings, and the
+        // service gate (`assertRequestedSpace`) refuses anything but the
+        // committed active space.
         const current = deps.sessionManager
           .getSessions()
-          .find(candidate => candidate.id === sessionId)
+          .find(candidate => candidate.id === sessionId) as ProjectBoundSessionRecord | undefined
         const productSpaceId = current?.productSpaceId
-        if (!productSpaceId) return { degraded: true, hits: [] }
+        const projectId = current?.projectId
+        if (!productSpaceId || !projectId) return { degraded: true, hits: [] }
         const result = await pcSearchAssets(deps, facadeRequestContext(workspaceId), {
           workspaceId,
           productSpaceId,
+          projectId,
           q: query,
           tag,
           limit,
@@ -115,12 +130,14 @@ export function createProjectContextToolFacade(input: ProjectContextToolFacadeIn
       try {
         const current = deps.sessionManager
           .getSessions()
-          .find(candidate => candidate.id === sessionId)
+          .find(candidate => candidate.id === sessionId) as ProjectBoundSessionRecord | undefined
         const productSpaceId = current?.productSpaceId
-        if (!productSpaceId) return { ok: false, error: 'pc_service_unavailable' }
+        const projectId = current?.projectId
+        if (!productSpaceId || !projectId) return { ok: false, error: 'pc_service_unavailable' }
         const result = await pcReadAsset(deps, facadeRequestContext(workspaceId), {
           workspaceId,
           productSpaceId,
+          projectId,
           assetId,
           version,
         }) as PcReadResponse

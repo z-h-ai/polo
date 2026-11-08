@@ -962,8 +962,6 @@ interface ManagedSession {
   hasUnread?: boolean
   // Per-session source selection (slugs of enabled sources)
   enabledSourceSlugs?: string[]
-  // Per-session Enterprise Knowledge Base scope (POO-108, collection IDs)
-  kbCollectionIds?: string[]
   // Labels applied to this session (additive tags, many-per-session)
   labels?: string[]
   // Working directory for this session (used by agent for bash commands)
@@ -1178,18 +1176,8 @@ interface ManagedSession {
    * Bounded per session; oldest entries are dropped on overflow.
    */
   pendingGenUiModelContext?: Array<{ cardId: string; context: string; at: number }>
-  /**
-   * POO-108 v4 D-B: the bounded KB knowledge context resolved by the
-   * SEND_MESSAGE handler for the CURRENT send, staged here for a one-shot
-   * injection at the same effectiveMessage assembly point. Ephemeral — not
-   * persisted, never part of the message record; consumed (cleared) the
-   * moment it is injected. A turn that reaches the model without this
-   * staging (a queued-message replay, which bypasses the SEND handler)
-   * simply injects nothing.
-   */
-  pendingKbModelContext?: { block: string; docs: number; bytes: number }
-  /** POO-196: staged project-context block (header + @ references), same
-   * one-shot runtime-only discipline as `pendingKbModelContext`. */
+  /** POO-196: staged project-context block (header + @ references). One-shot
+   * runtime-only: never persisted, consumed the moment it is injected. */
   pendingProjectModelContext?: { block: string; docs: number; bytes: number }
   /**
    * Runtime-only: Pi SDK message id → Polo AI assistant message id.
@@ -1437,35 +1425,25 @@ export function buildGenUiWidgetStateReminder(
 }
 
 /**
- * POO-108 v4 D-B: a quoted document body must not be able to close — or forge
- * structure inside — the reminder frame, so the marker text itself is
- * stripped. Unlike the GenUI sanitizer this PRESERVES line breaks: the block's
- * per-document sections are meaningful to the model, and only the delimiter
- * text is the threat. The length only shrinks, preserving the 16KB block
- * ceiling guaranteed at assembly time.
+ * A quoted document body must not be able to close — or forge structure
+ * inside — the reminder frame, so the marker text itself is stripped. Unlike
+ * the GenUI sanitizer this PRESERVES line breaks: the block's per-document
+ * sections are meaningful to the model, and only the delimiter text is the
+ * threat. The length only shrinks, preserving the 16KB block ceiling
+ * guaranteed at assembly time.
  */
-function sanitizeKbModelContextBlock(block: string): string {
+function sanitizeModelContextBlock(block: string): string {
   return block.replace(/system-reminder/gi, '')
-}
-
-/**
- * POO-108 v4 D-B: build the one-shot system-reminder block for the staged KB
- * knowledge context (the bounded block assembled by the send-time resolution).
- * Injected at the effectiveMessage assembly point; never persisted, consumed
- * on use.
- */
-export function buildKbModelContextReminder(block: string): string {
-  return `<system-reminder>以下是本会话所勾选企业知识库的参考文档内容（检索于发送时）。回答时请依据这些内容，引用出处标题。\n\n${sanitizeKbModelContextBlock(block)}\n</system-reminder>`
 }
 
 /**
  * POO-196: the one-shot system-reminder block for the staged project context
  * (bounded project header + the resolved @ references). Same runtime-only
- * discipline as the KB reminder; `sanitizeKbModelContextBlock` is a generic
- * fence over reminder-tag injection, so the project block rides it too.
+ * discipline as the other one-shot reminders; `sanitizeModelContextBlock` is
+ * a generic fence over reminder-tag injection, so the project block rides it.
  */
 export function buildProjectModelContextReminder(block: string): string {
-  return `<system-reminder>以下是本项目共享文件区的内容摘录与 @ 引用的文件正文（检索于发送时）。回答时请依据这些内容；@ 引用的文件若标注未成功读取，请如实说明而不是假设其内容。\n\n${sanitizeKbModelContextBlock(block)}\n</system-reminder>`
+  return `<system-reminder>以下是本项目共享文件区的内容摘录与 @ 引用的文件正文（检索于发送时）。回答时请依据这些内容；@ 引用的文件若标注未成功读取，请如实说明而不是假设其内容。\n\n${sanitizeModelContextBlock(block)}\n</system-reminder>`
 }
 
 /**
@@ -3561,7 +3539,6 @@ export class SessionManager implements ISessionManager {
       // loadSessionsFromDisk). Populate from disk only if not already set in
       // memory — a caller may have mutated them via setSessionSources etc.
       if (managed.enabledSourceSlugs === undefined) managed.enabledSourceSlugs = stored.enabledSourceSlugs
-      if (managed.kbCollectionIds === undefined) managed.kbCollectionIds = stored.kbCollectionIds
       if (managed.lastReadMessageId === undefined) managed.lastReadMessageId = stored.lastReadMessageId
       if (managed.hasUnread === undefined) managed.hasUnread = stored.hasUnread
       if (managed.sharedUrl === undefined) managed.sharedUrl = stored.sharedUrl
@@ -4066,7 +4043,6 @@ export class SessionManager implements ISessionManager {
       managed.lastReadMessageId = storedSession.lastReadMessageId
       managed.hasUnread = storedSession.hasUnread  // Explicit unread flag for NEW badge state machine
       managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
-      managed.kbCollectionIds = storedSession.kbCollectionIds
       managed.sharedUrl = storedSession.sharedUrl
       managed.sharedId = storedSession.sharedId
       managed.sharedWriteToken = storedSession.sharedWriteToken
@@ -8798,9 +8774,6 @@ export class SessionManager implements ISessionManager {
         timestamp: this.monotonic(),
         attachments: storedAttachments,
         badges: options?.badges,
-        // The KB reference snapshot rides the message on FIRST persistence —
-        // steer and queue replays must not lose it (review #10).
-        kbReferences: options?.kbReferences,
         // POO-135: picked web element snapshots, same first-persistence rule.
         elementReferences: options?.elementReferences,
       }
@@ -9169,15 +9142,6 @@ export class SessionManager implements ISessionManager {
             timestamp: this.monotonic(),
             attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
             badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
-            // KB reference snapshot resolved by the SEND_MESSAGE handler from
-            // the session's KB scope (POO-108); immutable once persisted. The
-            // agent-turn knowledge injection (POO-108 v4 D-B) is staged from
-            // the SAME send-time resolution — options.kbModelContext arrives
-            // from the identical server-side search that produced these chips
-            // — so what the model reads and what the user sees stay consistent
-            // by construction. Queue replays bypass the SEND_MESSAGE handler
-            // and carry no staged context, so they simply inject nothing.
-            kbReferences: options?.kbReferences,
             // POO-135: picked web element snapshots (queue replays included).
             elementReferences: options?.elementReferences,
           }
@@ -9190,17 +9154,8 @@ export class SessionManager implements ISessionManager {
             taskWakeMessage = userMessage
           }
 
-          // POO-108 v4 D-B: stage the send-time KB knowledge block for a
-          // one-shot injection at the agent turn (consumed before agent.chat).
-          // Runtime-only — never persisted and never part of the message
-          // record above; a queue replay reaching this method directly has no
-          // staged context and injects nothing, keeping replay output
-          // deterministic.
-          if (options?.kbModelContext) {
-            managed.pendingKbModelContext = options.kbModelContext
-          }
-          // POO-196: stage the project-context block the same way (runtime-
-          // only, one-shot, queue replays inject nothing).
+          // POO-196: stage the project-context block (runtime-only, one-shot,
+          // queue replays inject nothing).
           if (options?.projectModelContext) {
             managed.pendingProjectModelContext = options.projectModelContext
           }
@@ -9689,20 +9644,6 @@ export class SessionManager implements ISessionManager {
       if (pendingGenUi && pendingGenUi.length > 0) {
         managed.pendingGenUiModelContext = undefined
         effectiveMessage = `${effectiveMessage}\n\n${buildGenUiWidgetStateReminder(pendingGenUi)}`
-      }
-
-      // POO-108 v4 D-B: one-shot KB knowledge injection. Staged from the same
-      // send-time resolution that produced the user-visible kbReferences chips
-      // (see the user-message creation above), so the model's context and the
-      // user's citation surface come from one snapshot. Consumed here — never
-      // persisted, never part of the stored user message; a queue replay (which
-      // bypasses the SEND_MESSAGE handler) has nothing staged and injects
-      // nothing.
-      const pendingKb = managed.pendingKbModelContext
-      if (pendingKb) {
-        managed.pendingKbModelContext = undefined
-        effectiveMessage = `${effectiveMessage}\n\n${buildKbModelContextReminder(pendingKb.block)}`
-        sessionLog.info(`KB_INJECT_MODEL_CONTEXT docs=${pendingKb.docs} bytes=${pendingKb.bytes}`)
       }
 
       // POO-196: one-shot project-context injection (bounded header + the
@@ -12404,30 +12345,6 @@ export class SessionManager implements ISessionManager {
       // https://github.com/oven-sh/bun/issues/15939
       const watcher = this.configWatchers.get(managed.workspace.rootPath)
       watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
-    }
-  }
-
-  /**
-   * Set the per-session Enterprise Knowledge Base scope (POO-108). The
-   * snapshot is validated and audited by the kb RPC handler before this call;
-   * here it is just durable session state, persisted like labels and
-   * broadcast so every window converges on the persisted value instead of
-   * its own draft (review #11).
-   */
-  async setSessionKbCollections(sessionId: string, collectionIds: string[]): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.kbCollectionIds = collectionIds
-      this.setMetadataWriteGuard(managed)
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      const watcher = this.configWatchers.get(managed.workspace.rootPath)
-      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
-      this.sendEvent({
-        type: 'kb_collections_changed',
-        sessionId: managed.id,
-        collectionIds,
-      }, managed.workspace.id)
     }
   }
 

@@ -9,9 +9,14 @@ import { readRpcErrorCode, stripRpcErrorCodeFromMessage } from '../../shared/rpc
  * POO-108 F2: the electron context bridge re-creates a rejected native Error
  * in the destination context from its MESSAGE alone
  * (`electron_api_context_bridge.cc`), so a server-coded error crosses as a
- * bare `new Error(message)` and the renderer's KB error mapping degraded to
- * the generic text. The KB channels opt into message carriage; these tests
+ * bare `new Error(message)` and the renderer's error mapping degraded to
+ * the generic text. Coded channels opt into message carriage; these tests
  * simulate the crossing exactly and pin the recovered contract.
+ *
+ * POO-205: the Enterprise Knowledge Base was retired in favor of the
+ * project shared-file area, so the assertions now ride the project-context
+ * (pc_*) channels — the surviving consumers of the same mechanism. The final
+ * test pins the retirement: no kb* channel remains in the channel map.
  */
 
 /**
@@ -33,14 +38,14 @@ function rejectingClient(rejection: unknown): RpcClient {
 }
 
 const CODED_FAILURE = Object.assign(
-  new Error('The knowledge base service is temporarily unavailable'),
-  { code: 'kb_service_unavailable' },
+  new Error('The project library is not ready yet'),
+  { code: 'pc_library_not_ready' },
 )
 
 describe('buildClientApi coded-error bridge', () => {
-  it('delivers a KB channel error whose code survives the context bridge', async () => {
+  it('delivers a pc channel error whose code survives the context bridge', async () => {
     const api = buildClientApi(rejectingClient(CODED_FAILURE), CHANNEL_MAP)
-    const bridged = bridgeCross(await api.kbListCollections({ workspaceId: 'ws' }).then(
+    const bridged = bridgeCross(await api.pcListCapabilities({ workspaceId: 'ws', productSpaceId: 'space-1', projectId: 'project-1' }).then(
       () => { throw new Error('expected rejection') },
       error => error,
     )) as Error
@@ -49,17 +54,22 @@ describe('buildClientApi coded-error bridge', () => {
     // carriage is what the renderer reads.
     expect((bridged as { code?: string }).code).toBeUndefined()
     const code = readRpcErrorCode(bridged)
-    expect(code).toBe('kb_service_unavailable')
-    expect(stripRpcErrorCodeFromMessage(bridged.message)).toBe('The knowledge base service is temporarily unavailable')
+    expect(code).toBe('pc_library_not_ready')
+    expect(stripRpcErrorCodeFromMessage(bridged.message)).toBe('The project library is not ready yet')
   })
 
-  it('keeps every KB channel opted in', () => {
+  it('keeps every pc channel opted in', () => {
     for (const [method, entry] of Object.entries(CHANNEL_MAP)) {
-      if (!method.startsWith('kb')) continue
+      if (!method.startsWith('pc')) continue
       expect(entry.type).toBe('invoke')
       expect((entry as { codedErrors?: boolean }).codedErrors).toBe(true)
     }
-    expect(CHANNEL_MAP.kbListCollections.channel).toBe(RPC_CHANNELS.kb.LIST_COLLECTIONS)
+    expect(CHANNEL_MAP.pcListCapabilities.channel).toBe(RPC_CHANNELS.projectContext.LIST_CAPABILITIES)
+  })
+
+  it('POO-205 retires every kb channel from the channel map', () => {
+    const kbMethods = Object.keys(CHANNEL_MAP).filter(method => method.startsWith('kb'))
+    expect(kbMethods).toEqual([])
   })
 
   it('leaves a channel without codedErrors untouched — same error object, no marker', async () => {
@@ -70,13 +80,13 @@ describe('buildClientApi coded-error bridge', () => {
     ) as Error
     // The exact rejection passes through: live code intact, message bare.
     expect(error).toBe(CODED_FAILURE)
-    expect(error.message).toBe('The knowledge base service is temporarily unavailable')
+    expect(error.message).toBe('The project library is not ready yet')
   })
 
   it('leaves a code-less failure on a coded channel unchanged', async () => {
-    const bare = new Error('Request timeout: kb.LIST_COLLECTIONS (30000ms)')
+    const bare = new Error('Request timeout: pc.LIST_CAPABILITIES (30000ms)')
     const api = buildClientApi(rejectingClient(bare), CHANNEL_MAP)
-    const error = await api.kbListCollections({ workspaceId: 'ws' }).then(
+    const error = await api.pcListCapabilities({ workspaceId: 'ws', productSpaceId: 'space-1', projectId: 'project-1' }).then(
       () => { throw new Error('expected rejection') },
       e => e,
     ) as Error

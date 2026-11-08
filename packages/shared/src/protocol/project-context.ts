@@ -140,6 +140,7 @@ export type PcUploadFileInput = z.output<typeof PcUploadFileInputSchema>
 export const PcUpdateAssetIpcSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   assetId: PcAssetIdSchema,
   input: PcUpdateAssetInputSchema,
 }).strict()
@@ -148,6 +149,7 @@ export type PcUpdateAssetIpcInput = z.output<typeof PcUpdateAssetIpcSchema>
 export const PcSetConfirmedIpcSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   assetId: PcAssetIdSchema,
   input: PcSetConfirmedInputSchema,
 }).strict()
@@ -156,6 +158,7 @@ export type PcSetConfirmedIpcInput = z.output<typeof PcSetConfirmedIpcSchema>
 export const PcSetPinnedIpcSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   assetId: PcAssetIdSchema,
   input: PcSetPinnedInputSchema,
 }).strict()
@@ -164,6 +167,7 @@ export type PcSetPinnedIpcInput = z.output<typeof PcSetPinnedIpcSchema>
 export const PcTrashAssetIpcSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   assetId: PcAssetIdSchema,
   expectedRevision: z.number().int().min(1),
 }).strict()
@@ -172,6 +176,7 @@ export type PcTrashAssetIpcInput = z.output<typeof PcTrashAssetIpcSchema>
 export const PcRestoreIpcSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   assetId: PcAssetIdSchema,
   input: PcRestoreInputSchema,
 }).strict()
@@ -185,6 +190,7 @@ export type PcRestoreIpcInput = z.output<typeof PcRestoreIpcSchema>
 export const PcDownloadAssetInputSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   assetId: PcAssetIdSchema,
   version: PcOptionalVersionSchema,
   targetPath: z.string().min(1),
@@ -199,6 +205,7 @@ export type PcDownloadFileOutput = z.output<typeof PcDownloadFileOutputSchema>
 export const PcReadAssetIpcSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   assetId: PcAssetIdSchema,
   version: PcOptionalVersionSchema,
 }).strict()
@@ -207,6 +214,7 @@ export type PcReadAssetIpcInput = z.output<typeof PcReadAssetIpcSchema>
 export const PcGetPreviewUrlIpcSchema = z.object({
   workspaceId: PcWorkspaceIdSchema,
   productSpaceId: PcProductSpaceIdSchema,
+  projectId: PcProjectIdSchema,
   assetId: PcAssetIdSchema,
   version: PcOptionalVersionSchema,
 }).strict()

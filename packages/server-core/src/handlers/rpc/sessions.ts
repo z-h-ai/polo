@@ -12,7 +12,6 @@ import { readBillingErrorClassification } from '../../runtime/assistant-billing'
 import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession, unbindClientActiveSession } from './client-active-session'
-import { resolveSessionKbReferences } from './knowledge-base'
 import { resolveSessionProjectContext } from '../../project-context/service'
 import {
   getRuntimeActiveProductSpace,
@@ -499,34 +498,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // itself registers through the checked reservation protocol before any
     // bootstrap work, so this path can no longer leave an unchecked record.
 
-    // POO-108: resolve the session's KB scope against this message. The
-    // composer's selection rides `kbCollectionIds` and is committed (or
-    // reconciled) with THIS send; hits are persisted on the user message as
-    // its immutable reference snapshot. Any KB failure degrades to "no
-    // references" — never a failed send. The resolution is bounded
-    // (wall-clock + scan budget) so it cannot stall persist/ACK, and it is
-    // bound to THIS caller's complete workspace so a resolution resuming
-    // after its deadline can never commit for a foreign scope (review N1).
-    // The entry token is handed in (review #3): the resolution authorizes
-    // against exactly the token this send was admitted with, never a fresh
-    // capture that a revoke-and-recommit could have re-armed.
-    //
-    // POO-108 v4 D-B: the SAME resolution also returns the bounded
-    // model-context block; it rides `kbModelContext` into the SessionManager,
-    // which stages it for a one-shot injection into THIS turn's prompt.
-    const resolvedKb = await resolveSessionKbReferences(
-      deps,
-      sessionId,
-      message,
-      options?.kbCollectionIds,
-      resolveCallerWorkspaceId(ctx),
-      sendScopeToken,
-    )
-    const kbReferences = resolvedKb?.references
-    // Post-authorization CAS after the awaited KB resolution — the send must
-    // not dispatch for a scope that moved while references were resolved.
-    assertSessionScopeTokenCurrent(sendScopeToken)
-    // POO-196: resolve the session's project context the same bounded way —
+    // POO-196: resolve the session's project context the bounded way —
     // the bounded project header for project sessions and the authoritative
     // resolution of the composer's @ references. Client-supplied
     // `projectAssetRefs`/`projectModelContext` are ALWAYS dropped: only the
@@ -542,16 +514,15 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const projectAssetRefs = resolvedProject?.references
     // Post-authorization CAS after the awaited project resolution.
     assertSessionScopeTokenCurrent(sendScopeToken)
-    // Client-supplied `kbReferences` are ALWAYS dropped (review #13): only
-    // the server-computed snapshot may reach the persisted message, so a
-    // forged title/snippet/docId can never render as a KB citation. The
-    // model-context block is server-computed by the same rule — a client
-    // value can never inject content into the model prompt.
-    const { kbReferences: _clientKbReferences, kbModelContext: _clientKbModelContext, projectAssetRefs: _clientProjectAssetRefs, projectModelContext: _clientProjectModelContext, ...trustedOptions } = options ?? {}
+    // Client-supplied `projectAssetRefs`/`projectModelContext` are ALWAYS
+    // dropped: only the server-computed snapshot may reach the persisted
+    // message, and the injected block is server-computed. (Legacy KB fields a
+    // stale renderer may still send — kbCollectionIds/kbReferences/
+    // kbModelContext — are simply no longer read anywhere downstream; the
+    // plain spread carries them as inert extra keys.)
+    const { projectAssetRefs: _clientProjectAssetRefs, projectModelContext: _clientProjectModelContext, ...trustedOptions } = options ?? {}
     const sendOptions: SendMessageOptions = {
       ...trustedOptions,
-      ...(kbReferences && kbReferences.length > 0 ? { kbReferences } : {}),
-      ...(resolvedKb?.modelContext ? { kbModelContext: resolvedKb.modelContext } : {}),
       ...(projectAssetRefs && projectAssetRefs.length > 0 ? { projectAssetRefs } : {}),
       ...(resolvedProject?.modelContext ? { projectModelContext: resolvedProject.modelContext } : {}),
     }
@@ -840,11 +811,6 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.setSessionSources(sessionId, command.sourceSlugs)
       case 'setLabels':
         return sessionManager.setSessionLabels(sessionId, command.labels)
-      // NOTE: there is deliberately no `setKbCollections` command here. The
-      // KB session scope is a validated, audited enterprise domain write — it
-      // is only reachable through the kb RPC (SET_SESSION_COLLECTIONS or the
-      // send-time draft commit), never through the generic session command
-      // surface (review #9).
       case 'showInFinder': {
         const sessionPath = sessionManager.getSessionPath(sessionId)
         if (sessionPath) {

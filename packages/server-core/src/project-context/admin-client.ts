@@ -43,10 +43,16 @@ import type {
 
 const PC_REQUEST_TIMEOUT_MS = 15_000
 
+/**
+ * POO-205: the project (inside the organization space) owns the asset scope —
+ * every adapter method addresses BOTH the committed organization space and
+ * the `projectId` inside it; the admin route validates
+ * project ⊆ organization ⊕ membership.
+ */
 export interface ProjectContextAdmin {
-  capabilities(productSpaceId: string): Promise<PcCapabilitiesResponse>
-  summary(productSpaceId: string): Promise<PcSummaryResponse>
-  listAssets(productSpaceId: string, query: {
+  capabilities(productSpaceId: string, projectId: string): Promise<PcCapabilitiesResponse>
+  summary(productSpaceId: string, projectId: string): Promise<PcSummaryResponse>
+  listAssets(productSpaceId: string, projectId: string, query: {
     view?: string
     tag?: string
     pinned?: string
@@ -55,20 +61,20 @@ export interface ProjectContextAdmin {
     limit?: number
     cursor?: string
   }): Promise<{ assets: PcMutationResponse['asset'][]; nextCursor?: string; canManage: boolean }>
-  getAsset(productSpaceId: string, assetId: string): Promise<PcMutationResponse>
-  createAsset(productSpaceId: string, input: PcCreateAssetInput): Promise<PcUploadGrantResponse>
-  createUpload(productSpaceId: string, assetId: string, input: PcCreateUploadInput): Promise<PcUploadGrantResponse>
-  completeUpload(productSpaceId: string, assetId: string, uploadId: string): Promise<PcCompleteUploadResponse>
-  updateAsset(productSpaceId: string, assetId: string, input: PcUpdateAssetInput): Promise<PcMutationResponse>
-  setConfirmed(productSpaceId: string, assetId: string, input: PcSetConfirmedInput): Promise<PcMutationResponse>
-  setPinned(productSpaceId: string, assetId: string, input: PcSetPinnedInput): Promise<PcMutationResponse>
-  trashAsset(productSpaceId: string, assetId: string, expectedRevision: number): Promise<PcMutationResponse>
-  restoreAsset(productSpaceId: string, assetId: string, input: PcRestoreInput): Promise<PcMutationResponse>
-  getDownload(productSpaceId: string, assetId: string, version?: number): Promise<PcDownloadResponse>
-  getRead(productSpaceId: string, assetId: string, version?: number): Promise<PcReadResponse>
-  getPreview(productSpaceId: string, assetId: string, version?: number): Promise<PcPreviewResponse>
-  search(productSpaceId: string, query: { q: string; tag?: string; limit?: number }): Promise<PcSearchResponse>
-  rebuild(productSpaceId: string): Promise<{ jobId: string }>
+  getAsset(productSpaceId: string, projectId: string, assetId: string): Promise<PcMutationResponse>
+  createAsset(productSpaceId: string, projectId: string, input: PcCreateAssetInput): Promise<PcUploadGrantResponse>
+  createUpload(productSpaceId: string, projectId: string, assetId: string, input: PcCreateUploadInput): Promise<PcUploadGrantResponse>
+  completeUpload(productSpaceId: string, projectId: string, assetId: string, uploadId: string): Promise<PcCompleteUploadResponse>
+  updateAsset(productSpaceId: string, projectId: string, assetId: string, input: PcUpdateAssetInput): Promise<PcMutationResponse>
+  setConfirmed(productSpaceId: string, projectId: string, assetId: string, input: PcSetConfirmedInput): Promise<PcMutationResponse>
+  setPinned(productSpaceId: string, projectId: string, assetId: string, input: PcSetPinnedInput): Promise<PcMutationResponse>
+  trashAsset(productSpaceId: string, projectId: string, assetId: string, expectedRevision: number): Promise<PcMutationResponse>
+  restoreAsset(productSpaceId: string, projectId: string, assetId: string, input: PcRestoreInput): Promise<PcMutationResponse>
+  getDownload(productSpaceId: string, projectId: string, assetId: string, version?: number): Promise<PcDownloadResponse>
+  getRead(productSpaceId: string, projectId: string, assetId: string, version?: number): Promise<PcReadResponse>
+  getPreview(productSpaceId: string, projectId: string, assetId: string, version?: number): Promise<PcPreviewResponse>
+  search(productSpaceId: string, projectId: string, query: { q: string; tag?: string; limit?: number }): Promise<PcSearchResponse>
+  rebuild(productSpaceId: string, projectId: string): Promise<{ jobId: string }>
 }
 
 export class ProjectContextAdminUnavailableError extends Error {
@@ -119,53 +125,57 @@ export function getProjectContextAdmin(): ProjectContextAdmin {
     return encodedQuery ? `?${encodedQuery}` : ''
   }
   return {
-    capabilities: (productSpaceId) =>
+    capabilities: (productSpaceId, projectId) =>
       withAdmin((client, token) =>
-        client.getProjectContextCapabilities(token, productSpaceId)),
-    summary: (productSpaceId) =>
-      withAdmin((client, token) => client.getProjectContextSummary(token, productSpaceId)),
-    listAssets: (productSpaceId, listQuery) =>
+        client.getProjectContextCapabilities(token, productSpaceId, projectId)),
+    summary: (productSpaceId, projectId) =>
       withAdmin((client, token) =>
-        client.listProjectContextAssets(token, productSpaceId, listQuery)),
-    getAsset: (productSpaceId, assetId) =>
-      withAdmin((client, token) => client.getProjectContextAsset(token, productSpaceId, assetId)),
-    createAsset: (productSpaceId, input) =>
-      withAdmin((client, token) => client.createProjectContextAsset(token, productSpaceId, input)),
-    createUpload: (productSpaceId, assetId, input) =>
+        client.getProjectContextSummary(token, productSpaceId, projectId)),
+    listAssets: (productSpaceId, projectId, listQuery) =>
       withAdmin((client, token) =>
-        client.createProjectContextUpload(token, productSpaceId, assetId, input)),
-    completeUpload: (productSpaceId, assetId, uploadId) =>
+        client.listProjectContextAssets(token, productSpaceId, projectId, listQuery)),
+    getAsset: (productSpaceId, projectId, assetId) =>
       withAdmin((client, token) =>
-        client.completeProjectContextUpload(token, productSpaceId, assetId, uploadId)),
-    updateAsset: (productSpaceId, assetId, input) =>
+        client.getProjectContextAsset(token, productSpaceId, projectId, assetId)),
+    createAsset: (productSpaceId, projectId, input) =>
       withAdmin((client, token) =>
-        client.updateProjectContextAsset(token, productSpaceId, assetId, input)),
-    setConfirmed: (productSpaceId, assetId, input) =>
+        client.createProjectContextAsset(token, productSpaceId, projectId, input)),
+    createUpload: (productSpaceId, projectId, assetId, input) =>
       withAdmin((client, token) =>
-        client.setProjectContextConfirmed(token, productSpaceId, assetId, input)),
-    setPinned: (productSpaceId, assetId, input) =>
+        client.createProjectContextUpload(token, productSpaceId, projectId, assetId, input)),
+    completeUpload: (productSpaceId, projectId, assetId, uploadId) =>
       withAdmin((client, token) =>
-        client.setProjectContextPinned(token, productSpaceId, assetId, input)),
-    trashAsset: (productSpaceId, assetId, expectedRevision) =>
+        client.completeProjectContextUpload(token, productSpaceId, projectId, assetId, uploadId)),
+    updateAsset: (productSpaceId, projectId, assetId, input) =>
       withAdmin((client, token) =>
-        client.trashProjectContextAsset(token, productSpaceId, assetId, expectedRevision)),
-    restoreAsset: (productSpaceId, assetId, input) =>
+        client.updateProjectContextAsset(token, productSpaceId, projectId, assetId, input)),
+    setConfirmed: (productSpaceId, projectId, assetId, input) =>
       withAdmin((client, token) =>
-        client.restoreProjectContextAsset(token, productSpaceId, assetId, input)),
-    getDownload: (productSpaceId, assetId, version) =>
+        client.setProjectContextConfirmed(token, productSpaceId, projectId, assetId, input)),
+    setPinned: (productSpaceId, projectId, assetId, input) =>
       withAdmin((client, token) =>
-        client.getProjectContextDownload(token, productSpaceId, assetId, version)),
-    getRead: (productSpaceId, assetId, version) =>
+        client.setProjectContextPinned(token, productSpaceId, projectId, assetId, input)),
+    trashAsset: (productSpaceId, projectId, assetId, expectedRevision) =>
       withAdmin((client, token) =>
-        client.getProjectContextRead(token, productSpaceId, assetId, version)),
-    getPreview: (productSpaceId, assetId, version) =>
+        client.trashProjectContextAsset(token, productSpaceId, projectId, assetId, expectedRevision)),
+    restoreAsset: (productSpaceId, projectId, assetId, input) =>
       withAdmin((client, token) =>
-        client.getProjectContextPreview(token, productSpaceId, assetId, version)),
-    search: (productSpaceId, searchQuery) =>
+        client.restoreProjectContextAsset(token, productSpaceId, projectId, assetId, input)),
+    getDownload: (productSpaceId, projectId, assetId, version) =>
       withAdmin((client, token) =>
-        client.searchProjectContextAssets(token, productSpaceId, searchQuery)),
-    rebuild: (productSpaceId) =>
-      withAdmin((client, token) => client.rebuildProjectContext(token, productSpaceId)),
+        client.getProjectContextDownload(token, productSpaceId, projectId, assetId, version)),
+    getRead: (productSpaceId, projectId, assetId, version) =>
+      withAdmin((client, token) =>
+        client.getProjectContextRead(token, productSpaceId, projectId, assetId, version)),
+    getPreview: (productSpaceId, projectId, assetId, version) =>
+      withAdmin((client, token) =>
+        client.getProjectContextPreview(token, productSpaceId, projectId, assetId, version)),
+    search: (productSpaceId, projectId, searchQuery) =>
+      withAdmin((client, token) =>
+        client.searchProjectContextAssets(token, productSpaceId, projectId, searchQuery)),
+    rebuild: (productSpaceId, projectId) =>
+      withAdmin((client, token) =>
+        client.rebuildProjectContext(token, productSpaceId, projectId)),
   }
 }
 

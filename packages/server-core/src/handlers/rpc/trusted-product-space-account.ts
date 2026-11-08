@@ -344,14 +344,21 @@ export function captureCompleteTrustedSessionScope(
  * (when the scope carries a caller Workspace) exactly that Workspace.
  * Records without an account binding never match — there is no legacy
  * exception.
+ *
+ * POO-205: the record's optional `projectId` participates as a consistency
+ * assertion, not an authorization grant — a project-bound record must match
+ * the caller-declared project context when one is supplied. Membership and
+ * project validity are admin-side facts checked where the project is
+ * resolved; this comparator only pins the record to one project identity.
  */
 export function trustedScopeMatchesSessionRecord(
-  record: { accountId?: string | null; productSpaceId?: string | null; workspaceId?: string | null },
-  scope: { accountId: string; productSpaceId: string; workspaceId?: string | null },
+  record: { accountId?: string | null; productSpaceId?: string | null; workspaceId?: string | null; projectId?: string | null },
+  scope: { accountId: string; productSpaceId: string; workspaceId?: string | null; projectId?: string | null },
 ): boolean {
   if (!record.accountId || record.accountId !== scope.accountId) return false
   if (!record.productSpaceId || record.productSpaceId !== scope.productSpaceId) return false
   if (scope.workspaceId && record.workspaceId !== scope.workspaceId) return false
+  if (scope.projectId && record.projectId && record.projectId !== scope.projectId) return false
   return true
 }
 

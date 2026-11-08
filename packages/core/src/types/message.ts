@@ -3,24 +3,9 @@
  */
 
 /**
- * Immutable per-message Enterprise Knowledge Base reference snapshot (POO-108).
- * Persisted with the user message when the session had a KB scope at send
- * time; rendered as reference chips. Clearing the session selection never
- * mutates an already-persisted snapshot.
- */
-export interface KbReference {
-  docId: string;
-  collectionId: string;
-  collectionName: string;
-  title: string;
-  snippet: string;
-  score: number;
-}
-
-/**
  * Snapshot of one picked web element attached to a chat message (POO-135).
  * Captured from the live page at pick time and never rewritten by later page
- * changes — the reference is a point-in-time snapshot, like KbReference.
+ * changes — the reference is a point-in-time snapshot.
  * Only user-visible summary fields are collected: no password/hidden field
  * values, no script contents, no whole-page text.
  */
@@ -317,8 +302,6 @@ export interface Message {
   attachments?: StoredAttachment[];
   // Content badges for inline display (sources, skills)
   badges?: ContentBadge[];
-  /** Knowledge Base reference snapshot attached at send time (POO-108) */
-  kbReferences?: KbReference[];
   /** Picked web element reference snapshots attached at send time (POO-135) */
   elementReferences?: WebElementReference[];
   /** Annotation payloads for this message */
@@ -429,8 +412,6 @@ export interface StoredMessage {
   attachments?: StoredAttachment[];
   /** Content badges for inline display (sources, skills) */
   badges?: ContentBadge[];
-  /** Knowledge Base reference snapshot attached at send time (POO-108) */
-  kbReferences?: KbReference[];
   /** Picked web element reference snapshots attached at send time (POO-135) */
   elementReferences?: WebElementReference[];
   /** Annotations persisted at message level */

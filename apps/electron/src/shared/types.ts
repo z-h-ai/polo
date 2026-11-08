@@ -445,8 +445,9 @@ export interface GenUiAppPublishPackageRequest {
 export interface GenUiAppPublishPackageResult {
   ok: boolean
   error?: string
-  /** Upload ZIP, base64. Present only on success. */
-  payloadBase64?: string
+  /** POO-205: the packaged ZIP landed in a Main-owned temp file — the bundle
+   * bytes never transit the renderer. Hand this path to myapps:create. */
+  bundleTempPath?: string
   /** The analyzed static entry for the admin publish chain. */
   entry?: { runtime: 'static'; path: string }
   /** sha256 over the ZIP bytes (hex) — mirrors the upload-chain checksum. */
@@ -1464,21 +1465,6 @@ export interface ElectronAPI {
 
   // Skills change listener (live updates when skills are added/removed/modified)
   onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void
-
-  // Enterprise Knowledge Base (POO-108)
-  kbListCollections(input: import('@polo-ai/shared/protocol').KbListCollectionsInput): Promise<import('@polo-ai/shared/protocol').KbCollectionList>
-  kbCreateCollection(input: import('@polo-ai/shared/protocol').KbCreateCollectionInput): Promise<import('@polo-ai/shared/protocol').KbCollection>
-  kbListDocuments(input: import('@polo-ai/shared/protocol').KbListDocumentsInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary[]>
-  kbUploadDocument(input: import('@polo-ai/shared/protocol').KbUploadDocumentInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
-  kbSubmitForReview(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
-  kbPublishDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
-  kbRejectDocument(input: import('@polo-ai/shared/protocol').KbRejectDocumentInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
-  kbRevertToDraft(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocumentSummary>
-  kbDeleteDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<{ ok: true }>
-  kbGetDocument(input: import('@polo-ai/shared/protocol').KbDocumentRefInput): Promise<import('@polo-ai/shared/protocol').KbDocument | null>
-  kbSearch(input: import('@polo-ai/shared/protocol').KbSearchInput): Promise<import('@polo-ai/shared/protocol').KbSearchHit[]>
-  kbSetSessionCollections(input: import('@polo-ai/shared/protocol').KbSessionCollectionsInput): Promise<{ ok: true; collectionIds: string[] }>
-  kbGetSessionCollections(input: import('@polo-ai/shared/protocol').KbGetSessionCollectionsInput): Promise<{ collectionIds: string[] }>
 
   // Enterprise Project Context (POO-196). pc:uploadFile is the single upload
   // RPC (renderer passes a local file path, never a transfer URL);

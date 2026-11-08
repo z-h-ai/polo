@@ -32,8 +32,9 @@
  * upload-flow-owned; generation never pre-writes it).
  */
 
-import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve, sep } from 'node:path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
@@ -258,6 +259,14 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
       const archive = buildGenUiAppArtifactZip(collected.files)
       const checksum = createHash('sha256').update(archive).digest('hex')
 
+      // POO-205: the payload lands in a Main-owned temp file and the renderer
+      // receives its PATH only — bundle bytes never transit the renderer.
+      // The renderer hands the path to myapps:create, which re-reads and
+      // uploads it server-side (admin re-validates the payload).
+      const tempDir = mkdtempSync(join(tmpdir(), 'polo-myapps-'), { mode: 0o700 })
+      const bundleTempPath = join(tempDir, 'bundle.zip')
+      writeFileSync(bundleTempPath, archive, { mode: 0o600 })
+
       // Audit-first (same contract as the pin): a failed audit write fails
       // the packaging, so no payload is ever produced unrecorded.
       const version = readGenUiAppVersion(appDir)
@@ -281,7 +290,7 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
 
       return {
         ok: true,
-        payloadBase64: Buffer.from(archive).toString('base64'),
+        bundleTempPath,
         // The analyzed entry the admin publish chain expects for a static
         // bundle (CREATOR_APP_CANONICAL_ENTRIES.static).
         entry: { runtime: 'static', path: 'index.html' },

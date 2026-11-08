@@ -202,9 +202,12 @@ export interface CreateSessionOptions {
     productSpaceId?: string;
     /** Immutable trusted Admin account binding assigned at creation time (R32-2) */
     accountId?: string;
-    /** POO-196 R3 P12-5: project title (+ optional introduction) persisted on
-     *  space-bound sessions and re-injected into every model request context. */
-    projectContext?: { name: string; purpose?: string };
+    /** POO-205 (Q2): immutable Project binding for enterprise sessions */
+    projectId?: string;
+    /** POO-196 R3 P12-5, POO-205 revised: project identity snapshot (name +
+     *  optional introduction + optional editable instructions) persisted on
+     *  project sessions and re-injected into every model request context. */
+    projectContext?: { name: string; purpose?: string; instructions?: string };
 }
 
 export async function createSessionWithStorage(
@@ -255,6 +258,7 @@ export async function createSessionWithStorage(
     isFlagged: options?.isFlagged,
     productSpaceId: options?.productSpaceId,
     accountId: options?.accountId,
+    projectId: options?.projectId,
     projectContext: options?.projectContext,
   };
 

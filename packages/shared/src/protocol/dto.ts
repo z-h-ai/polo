@@ -167,13 +167,23 @@ export interface CreateSessionOptions {
   llmConnection?: string
   systemPromptPreset?: 'default' | 'mini' | string
   /**
-   * POO-196 R3 P12-5: the committed project's title (+ optional introduction)
-   * as authoritative context metadata. The server stores it ONLY when the
-   * session binds to an enterprise product space, and every spawn/resume of
-   * that session re-injects it into the model request context (as system
-   * context — never as a fabricated user message).
+   * POO-196 R3 P12-5, POO-205 revised: the committed project's identity
+   * snapshot (name + optional introduction + optional member-editable
+   * instructions). The server stores it ONLY when the session binds to an
+   * enterprise product space, and every spawn/resume of that session
+   * re-injects it into the model request context (as system context — never
+   * as a fabricated user message). Instructions ride live per-send refresh
+   * when the project is reachable.
    */
-  projectContext?: { name: string; purpose?: string }
+  projectContext?: { name: string; purpose?: string; instructions?: string }
+  /**
+   * POO-205 (Q2): the project this session belongs to. REQUIRED for
+   * enterprise-space sessions (chat lives inside a project); rejected for
+   * personal-space sessions. The server stamps it alongside the immutable
+   * space/account bindings and routes the session's physical store to the
+   * project root.
+   */
+  projectId?: string
   hidden?: boolean
   /**
    * Host experience that owns the session. Only the non-privileged values are

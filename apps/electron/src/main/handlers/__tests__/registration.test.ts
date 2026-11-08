@@ -119,7 +119,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     productSpace,
     resources,
     transfer,
-    knowledgeBase,
   ] = await Promise.all([
     import('@polo-ai/server-core/handlers/rpc/auth'),
     import('@polo-ai/server-core/handlers/rpc/automations'),
@@ -140,7 +139,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     import('@polo-ai/server-core/handlers/rpc/product-space'),
     import('@polo-ai/server-core/handlers/rpc/resources'),
     import('@polo-ai/server-core/handlers/rpc/transfer'),
-    import('@polo-ai/server-core/handlers/rpc/knowledge-base'),
   ])
 
   // GUI handler channels (remain in electron)
@@ -174,7 +172,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...productSpace.HANDLED_CHANNELS,
     ...resources.HANDLED_CHANNELS,
     ...transfer.HANDLED_CHANNELS,
-    ...knowledgeBase.HANDLED_CHANNELS,
     ...browser.HANDLED_CHANNELS,
     ...guiSystem.GUI_HANDLED_CHANNELS,
     ...guiWorkspace.GUI_HANDLED_CHANNELS,

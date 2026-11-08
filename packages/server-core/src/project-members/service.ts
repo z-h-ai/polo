@@ -2,27 +2,21 @@ import { AdminError } from '@polo-ai/shared/admin'
 import { getProductSpaceContextStorage } from '@polo-ai/shared/config'
 import type { TrustedProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 import type {
-  ClientColleagueInvitationReceipt,
-  ClientColleagueOptionsResponse,
-  ClientCollaborationRosterResponse,
-  ClientCreateColleagueInvitationResponse,
-  ClientCreateEnterpriseResponse,
-  ClientCreateInvitationResponse,
-  ClientCreateReceipt,
-  ClientEnterpriseErrorCode,
-  ClientInvitationListResponse,
-  ClientMemberRosterResponse,
-  PmCreateColleagueInvitationInput,
-  PmCreateEnterpriseInput,
-  PmCreateInvitationInput,
-  PmListColleagueOptionsInput,
-  PmListCollaborationRosterInput,
-  PmListInvitationsInput,
-  PmListMembersInput,
+  ListOrganizationColleaguesResponse,
+  ListProjectMembersResponse,
+  ListProjectsResponse,
+  PmAddProjectMembersInput,
+  PmCreateProjectInput,
+  PmListOrganizationColleaguesInput,
   PmListProductSpacesR3Input,
+  PmListProjectMembersInput,
+  PmListProjectsInput,
   PmProductSpacesListR3Response,
-  PmQueryColleagueInvitationInput,
-  PmQueryCreateReceiptInput,
+  PmRemoveProjectMemberInput,
+  PmUpdateProjectInput,
+  PmUpdateProjectMemberInput,
+  ProjectMutationResponse,
+  UpdateProjectMemberResponse,
 } from '@polo-ai/shared/protocol'
 import type { TrustedAggregateScopeToken } from '../handlers/rpc/trusted-product-space-account'
 import {
@@ -42,27 +36,31 @@ import {
   ProjectMembersAdminUnavailableError,
   clientEnterpriseErrorCodeOf,
   getProjectMembersAdmin,
+  projectErrorCodeOf,
   type ProjectMembersAdmin,
 } from './admin-client'
 
 /**
- * POO-196 追加轮 project-members service (adjudication D-A/D-B/D-C).
+ * POO-205 project-members service (supersedes the POO-196 追加轮 surface).
  *
- * Two differently-scoped command families share one module:
+ * Project lifecycle and membership are COMMITTED-ORGANIZATION-scoped: they
+ * address the organization space the runtime fence has committed, re-prove it
+ * on EVERY entry, and let polo-admin decide owner/manager authority — the
+ * local role cache never grants or denies a management operation. The scope's
+ * `organizationEnterpriseId` is a consistency assertion the trusted side
+ * re-proves against the committed enterprise space (a stale renderer holding
+ * a foreign/renamed organization id is rejected, never forwarded). Project
+ * membership ⊆ organization membership is enforced admin-side
+ * (`prj_member_not_in_organization`); the local gate adds no role logic.
  *
- * - CREATE / RECEIPT are ACCOUNT-scoped and deliberately do NOT depend on the
- *   enterprise fence: the caller may still be sitting in their personal space
- *   with no enterprise membership at all. They are gated on the trusted Admin
- *   session plus the account/transition/fence generation, so a response can
- *   never be published into a different account than the one that asked.
- * - ROSTER / INVITATIONS are COMMITTED-SPACE-scoped: they address the space
- *   the runtime fence already committed, re-prove it on every entry, and let
- *   polo-admin decide owner/manager authority — the local role cache never
- *   grants or denies a management read (D-C), a plain member is rejected by
- *   the admin surface with `forbidden`.
+ * The retained R3 product-space list read stays ACCOUNT-scoped and
+ * deliberately does NOT depend on an enterprise fence: the caller may still
+ * be sitting in their personal space.
  *
  * Every entry re-validates its scope token after EVERY await (cross-await
- * fence) and maps admin outcomes onto the generated contract's stable codes.
+ * fence) and maps admin outcomes onto the frozen contract's stable codes
+ * (`prj_*` verbatim, legacy uppercase aliases folded back, everything local
+ * expressed in the pm_* vocabulary).
  */
 
 /** Stable business-RPC error for an uncommitted runtime fence (pc/kb 同款). */
@@ -77,9 +75,11 @@ export interface ProjectMembersAccountScope {
   token: TrustedAggregateScopeToken
 }
 
-export interface ProjectMembersSpaceScope {
+export interface ProjectMembersOrganizationScope {
   accountId: string
   productSpaceId: string
+  /** Re-proved against the committed enterprise space on every entry. */
+  organizationEnterpriseId: string
   token: TrustedAggregateScopeToken
 }
 
@@ -121,11 +121,11 @@ function theAdmin(): ProjectMembersAdmin {
 }
 
 /**
- * The legacy spellings the admin client's alias table produces for codes this
- * round's contract also declares. Mapping them back keeps ONE renderer-facing
- * vocabulary (the generated contract's) instead of two spellings per failure.
+ * The legacy spellings the admin client's alias table produces. Mapping them
+ * back keeps ONE renderer-facing vocabulary instead of two spellings per
+ * failure (session-level 401/403 never carry the contract's prj_* spelling).
  */
-const LEGACY_CODE_TO_CONTRACT: Partial<Record<AdminError['errorCode'], ClientEnterpriseErrorCode>> = {
+const LEGACY_CODE_TO_CONTRACT: Partial<Record<AdminError['errorCode'], string>> = {
   UNAUTHORIZED: 'unauthorized',
   TOKEN_EXPIRED: 'unauthorized',
   TOKEN_REVOKED: 'token_revoked',
@@ -137,11 +137,14 @@ const LEGACY_CODE_TO_CONTRACT: Partial<Record<AdminError['errorCode'], ClientEnt
   VALIDATION_ERROR: 'validation_error',
 }
 
-/** Maps any admin-side failure onto the stable client-enterprise / pm_* codes. */
+/** Maps any admin-side failure onto the stable prj_* / client-enterprise /
+ * pm_* codes. */
 function mapAdminFailure(error: unknown): Error {
   if (error instanceof ProjectMembersAdminUnavailableError) {
     return pmError(error.code === 'pm_signed_out' ? 'pm_signin_required' : 'pm_service_unavailable')
   }
+  const prjCode = projectErrorCodeOf(error)
+  if (prjCode) return pmError(prjCode)
   const contractCode = clientEnterpriseErrorCodeOf(error)
   if (contractCode) return pmError(contractCode)
   if (error instanceof AdminError) {
@@ -176,9 +179,9 @@ function assertAccountScopeCurrent(scope: ProjectMembersAccountScope): void {
 }
 
 /**
- * Account gate for the create commands. NO committed enterprise space is
- * required — the personal space fence is enough, because creating a project
- * is exactly the move out of it (D-B 1/4).
+ * Account gate for the R3 list read. NO committed enterprise space is
+ * required — the personal-space fence is enough (the collection covers the
+ * whole signed-in account, never just the committed space).
  */
 async function requireAccountScope(input: { accountId: string }): Promise<ProjectMembersAccountScope> {
   const token = captureTrustedScopeToken()
@@ -194,7 +197,7 @@ async function requireAccountScope(input: { accountId: string }): Promise<Projec
   }
   if (input.accountId !== trustedAccountId) {
     // The renderer asked for a different account than the session proves —
-    // a stale dialog must never create under someone else's identity.
+    // a stale dialog must never act under someone else's identity.
     throw pmError('pm_scope_changed', 'The renderer account is not the trusted account')
   }
   if (!isRuntimeFenceBoundToAccount(trustedAccountId)) {
@@ -204,15 +207,19 @@ async function requireAccountScope(input: { accountId: string }): Promise<Projec
 }
 
 /**
- * Committed-space gate for the roster/invitation commands. The requested
+ * Committed-organization gate for every project command. The requested
  * productSpaceId must BE the committed space (a renderer cannot probe a
- * foreign space id), and it must be an enterprise project. Authority itself
- * is decided by polo-admin, never by the local role cache.
+ * foreign space id), the committed space must be an enterprise space, and the
+ * requested organizationEnterpriseId must be THAT space's enterprise — a
+ * mismatch means the renderer's organization state is stale, and the command
+ * is discarded instead of forwarded. Authority itself is decided by
+ * polo-admin, never by the local role cache.
  */
-async function requireMemberScope(input: {
+async function requireOrganizationScope(input: {
   accountId: string
   productSpaceId: string
-}): Promise<ProjectMembersSpaceScope> {
+  organizationEnterpriseId: string
+}): Promise<ProjectMembersOrganizationScope> {
   const token = captureTrustedScopeToken()
   if (!token) throw pmError(PM_PRODUCT_SPACE_CONTEXT_REQUIRED, 'No trusted caller scope is available')
   const trustedAccountId = await resolveTrustedProductSpaceAccountId()
@@ -230,100 +237,66 @@ async function requireMemberScope(input: {
     throw pmError(PM_PRODUCT_SPACE_CONTEXT_REQUIRED, 'No committed ProductSpace is active for this account')
   }
   if (input.productSpaceId !== activeProductSpaceId) {
-    throw pmError('forbidden', 'The requested project is not the active one')
+    throw pmError('forbidden', 'The requested space is not the committed one')
   }
   const space = activeProductSpaceReader(trustedAccountId, activeProductSpaceId)
   if (!space || space.id !== activeProductSpaceId) {
     throw pmError(PM_PRODUCT_SPACE_CONTEXT_REQUIRED, 'The active ProductSpace is not resolvable for this account')
   }
   if (space.kind !== 'enterprise') {
-    throw pmError('pm_unavailable_in_personal', 'Project members are only available in an enterprise project')
+    throw pmError('pm_unavailable_in_personal', 'Projects are only available in an organization (enterprise) space')
   }
-  return { accountId: trustedAccountId, productSpaceId: space.id, token }
+  if (input.organizationEnterpriseId !== space.enterpriseId) {
+    throw pmError('pm_scope_changed', 'The renderer organization is not the committed organization')
+  }
+  return {
+    accountId: trustedAccountId,
+    productSpaceId: space.id,
+    organizationEnterpriseId: space.enterpriseId,
+    token,
+  }
 }
 
-function assertSpaceScopeCurrent(scope: ProjectMembersSpaceScope): void {
+function assertOrganizationScopeCurrent(scope: ProjectMembersOrganizationScope): void {
   if (!isAccountScopeTokenCurrent(scope.token)) {
     throw pmError('pm_scope_changed', 'The trusted scope changed during the operation')
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* Account-scoped commands (D-B)                                       */
+/* Project lifecycle commands (POO-205)                                */
 /* ------------------------------------------------------------------ */
 
-export async function pmCreateEnterprise(
-  input: PmCreateEnterpriseInput,
-): Promise<ClientCreateEnterpriseResponse> {
-  const scope = await requireAccountScope(input)
+/** pm:listProjects — the committed organization's projects for this caller. */
+export async function pmListProjects(input: PmListProjectsInput): Promise<ListProjectsResponse> {
+  const scope = await requireOrganizationScope(input)
   try {
-    const result = await theAdmin().createEnterprise({
-      ...input.command,
-      idempotencyKey: input.idempotencyKey,
-    })
-    assertAccountScopeCurrent(scope)
+    const result = await theAdmin().listProjects(scope.organizationEnterpriseId)
+    assertOrganizationScopeCurrent(scope)
     return result
   } catch (error) {
     throw mapAdminFailure(error)
   }
 }
 
-export async function pmQueryCreateReceipt(
-  input: PmQueryCreateReceiptInput,
-): Promise<ClientCreateReceipt> {
-  const scope = await requireAccountScope(input)
+/** pm:createProject — lightweight create; billing stays on the organization. */
+export async function pmCreateProject(input: PmCreateProjectInput): Promise<ProjectMutationResponse> {
+  const scope = await requireOrganizationScope(input)
   try {
-    const result = await theAdmin().queryMyCreateReceipt(input.createRequestKey)
-    assertAccountScopeCurrent(scope)
+    const result = await theAdmin().createProject(scope.organizationEnterpriseId, input.command)
+    assertOrganizationScopeCurrent(scope)
     return result
   } catch (error) {
     throw mapAdminFailure(error)
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Committed-space commands (D-C)                                      */
-/* ------------------------------------------------------------------ */
-
-export async function pmListProjectMembers(
-  input: PmListMembersInput,
-): Promise<ClientMemberRosterResponse> {
-  const scope = await requireMemberScope(input)
+/** pm:updateProject — PATCH semantics (absent fields stay unchanged). */
+export async function pmUpdateProject(input: PmUpdateProjectInput): Promise<ProjectMutationResponse> {
+  const scope = await requireOrganizationScope(input)
   try {
-    const result = await theAdmin().listProjectMembers(input.productSpaceId, {
-      limit: input.limit,
-      cursor: input.cursor,
-    })
-    assertSpaceScopeCurrent(scope)
-    return result
-  } catch (error) {
-    throw mapAdminFailure(error)
-  }
-}
-
-export async function pmListProjectInvitations(
-  input: PmListInvitationsInput,
-): Promise<ClientInvitationListResponse> {
-  const scope = await requireMemberScope(input)
-  try {
-    const result = await theAdmin().listProjectInvitations(input.productSpaceId, {
-      limit: input.limit,
-      cursor: input.cursor,
-    })
-    assertSpaceScopeCurrent(scope)
-    return result
-  } catch (error) {
-    throw mapAdminFailure(error)
-  }
-}
-
-export async function pmCreateProjectInvitation(
-  input: PmCreateInvitationInput,
-): Promise<ClientCreateInvitationResponse> {
-  const scope = await requireMemberScope(input)
-  try {
-    const result = await theAdmin().createProjectInvitation(input.productSpaceId, input.command)
-    assertSpaceScopeCurrent(scope)
+    const result = await theAdmin().updateProject(scope.organizationEnterpriseId, input.projectId, input.command)
+    assertOrganizationScopeCurrent(scope)
     return result
   } catch (error) {
     throw mapAdminFailure(error)
@@ -331,96 +304,88 @@ export async function pmCreateProjectInvitation(
 }
 
 /* ------------------------------------------------------------------ */
-/* R3 commands (POO-196 redesign, adjudication D3–D6)                  */
+/* Project member commands (POO-205; roster-picked, no invitations)    */
+/* ------------------------------------------------------------------ */
+
+/** pm:listProjectMembers. */
+export async function pmListProjectMembers(input: PmListProjectMembersInput): Promise<ListProjectMembersResponse> {
+  const scope = await requireOrganizationScope(input)
+  try {
+    const result = await theAdmin().listProjectMembers(scope.organizationEnterpriseId, input.projectId)
+    assertOrganizationScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/** pm:addProjectMembers — bulk pick; membership ⊆ organization is admin-enforced. */
+export async function pmAddProjectMembers(input: PmAddProjectMembersInput): Promise<ListProjectMembersResponse> {
+  const scope = await requireOrganizationScope(input)
+  try {
+    const result = await theAdmin().addProjectMembers(scope.organizationEnterpriseId, input.projectId, input.command)
+    assertOrganizationScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/** pm:updateProjectMember — role change (`prj_last_owner` is admin-side). */
+export async function pmUpdateProjectMember(input: PmUpdateProjectMemberInput): Promise<UpdateProjectMemberResponse> {
+  const scope = await requireOrganizationScope(input)
+  try {
+    const result = await theAdmin().updateProjectMember(
+      scope.organizationEnterpriseId,
+      input.projectId,
+      input.targetAccountId,
+      { role: input.role },
+    )
+    assertOrganizationScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/** pm:removeProjectMember — leaves the project; organization membership untouched. */
+export async function pmRemoveProjectMember(input: PmRemoveProjectMemberInput): Promise<{ ok: true }> {
+  const scope = await requireOrganizationScope(input)
+  try {
+    const result = await theAdmin().removeProjectMember(scope.organizationEnterpriseId, input.projectId, input.targetAccountId)
+    assertOrganizationScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/** pm:listOrganizationColleagues — the ONLY roster a project picks members
+ * from; organization membership itself is admin-console-managed. */
+export async function pmListOrganizationColleagues(
+  input: PmListOrganizationColleaguesInput,
+): Promise<ListOrganizationColleaguesResponse> {
+  const scope = await requireOrganizationScope(input)
+  try {
+    const result = await theAdmin().listOrganizationColleagues(scope.organizationEnterpriseId)
+    assertOrganizationScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* R3 command (POO-196 redesign, adjudication D3–D6 — retained)        */
 /* ------------------------------------------------------------------ */
 
 /**
- * pm:listColleagueOptions — D3 restricted directory. The local gate is the
- * committed-space fence only (target must BE the committed enterprise
- * project); WHO may read the directory (target invite capability + the
- * caller's own unique organization membership as source) is re-authorized by
- * polo-admin on every page — the source enterprise is derived server-side and
- * is never a caller field.
- */
-export async function pmListColleagueOptions(
-  input: PmListColleagueOptionsInput,
-): Promise<ClientColleagueOptionsResponse> {
-  const scope = await requireMemberScope(input)
-  try {
-    const result = await theAdmin().listColleagueOptions(input.productSpaceId, {
-      q: input.q,
-      limit: input.limit,
-      cursor: input.cursor,
-    })
-    assertSpaceScopeCurrent(scope)
-    return result
-  } catch (error) {
-    throw mapAdminFailure(error)
-  }
-}
-
-/**
- * pm:listCollaborationRoster — D4 all-role minimal roster. Every active role
- * (owner/manager/member) reads the same scoped projection; read_only access
- * keeps the read, removal/suspension is the admin's rejection.
- */
-export async function pmListCollaborationRoster(
-  input: PmListCollaborationRosterInput,
-): Promise<ClientCollaborationRosterResponse> {
-  const scope = await requireMemberScope(input)
-  try {
-    const result = await theAdmin().listCollaborationRoster(input.productSpaceId, {
-      q: input.q,
-      limit: input.limit,
-      cursor: input.cursor,
-    })
-    assertSpaceScopeCurrent(scope)
-    return result
-  } catch (error) {
-    throw mapAdminFailure(error)
-  }
-}
-
-/**
- * pm:createColleagueInvitation — D5 bridge. One selected colleague per call:
- * the renderer's multi-select fans out into per-object commands, so the wire
- * never carries a batch and every object keeps its own idempotent outcome.
- */
-export async function pmCreateColleagueInvitation(
-  input: PmCreateColleagueInvitationInput,
-): Promise<ClientCreateColleagueInvitationResponse> {
-  const scope = await requireMemberScope(input)
-  try {
-    const result = await theAdmin().createColleagueInvitation(input.productSpaceId, input.command)
-    assertSpaceScopeCurrent(scope)
-    return result
-  } catch (error) {
-    throw mapAdminFailure(error)
-  }
-}
-
-/** pm:queryColleagueInvitation — D5 recovery for the caller's own key;
- * `unknown` (202) is a success body and never re-creates. */
-export async function pmQueryColleagueInvitation(
-  input: PmQueryColleagueInvitationInput,
-): Promise<ClientColleagueInvitationReceipt> {
-  const scope = await requireMemberScope(input)
-  try {
-    const result = await theAdmin().queryColleagueInvitation(input.productSpaceId, input.createRequestKey)
-    assertSpaceScopeCurrent(scope)
-    return result
-  } catch (error) {
-    throw mapAdminFailure(error)
-  }
-}
-
-/**
- * pm:listProductSpacesR3 — D6 negotiated list read. ACCOUNT-scoped like the
- * create commands: the project collection covers the whole signed-in account
- * (P2), never just the committed space. No committed enterprise space is
- * required — the personal-space fence is enough. The v1+R3 composition is
- * validated inside the AdminClient, so a deployment that ignored the
- * negotiation surfaces here as `contract_version_unsupported`.
+ * pm:listProductSpacesR3 — D6 negotiated list read. ACCOUNT-scoped: the
+ * space collection covers the whole signed-in account, never just the
+ * committed space. No committed enterprise space is required — the
+ * personal-space fence is enough. The v1+R3 composition is validated inside
+ * the AdminClient, so a deployment that ignored the negotiation surfaces
+ * here as `contract_version_unsupported`.
  */
 export async function pmListProductSpacesR3(
   input: PmListProductSpacesR3Input,
