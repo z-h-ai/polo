@@ -245,6 +245,13 @@ const electronApiExplicit: Record<string, unknown> = {
   getAllDrafts: async () => ({}),
   setDraft: async () => {},
   getAppTheme: async () => null,
+  // Home mounts FreeFormInput whose input-settings effect reads these on
+  // mount — deterministic values keep the strict fixture from throwing inside
+  // the composer render (same registrations as the other App journey fixtures).
+  getAutoCapitalisation: async () => false,
+  getSendMessageKey: async () => 'enter',
+  getSpellCheck: async () => false,
+  getHomeDir: async () => '/',
   // Update check: no update available.
   getUpdateInfo: async () => ({ available: false, latestVersion: null }),
   getDismissedUpdateVersion: async () => null,

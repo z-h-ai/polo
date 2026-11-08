@@ -239,6 +239,14 @@ const electronApiExplicit: Record<string, unknown> = {
   getAllDrafts: async () => ({}),
   setDraft: async () => {},
   getAppTheme: async () => null,
+  // POO-203: scenarios that reach Home mount FreeFormInput, whose input-settings
+  // effect reads these on mount — deterministic values keep the strict fixture
+  // from throwing inside the composer render (same registrations as the
+  // FreeFormInput.submit-gate / server-directory-browser fixtures).
+  getAutoCapitalisation: async () => false,
+  getSendMessageKey: async () => 'enter',
+  getSpellCheck: async () => false,
+  getHomeDir: async () => '/',
   getUpdateInfo: async () => ({ available: false, latestVersion: null }),
   getDismissedUpdateVersion: async () => null,
   checkGitBash: async () => ({ platform: 'darwin', found: true, installed: true }),

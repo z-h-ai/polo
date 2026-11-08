@@ -13,15 +13,8 @@ mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined
 GlobalRegistrator.register()
 setupI18n()
 
-function passthrough({ children }: { children?: ReactNode }) {
-  return createElement('div', null, children)
-}
-
 mock.module('@/components/ui/styled-dropdown', () => ({
   DropdownMenuSub: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
-  // workbench-controls re-exports this as WorkbenchMenuContent; without it the
-  // partial module mock fails ESM linking before any test runs.
-  StyledDropdownMenuContent: passthrough,
   StyledDropdownMenuSubTrigger: ({ children, ...props }: { children?: ReactNode }) => createElement('div', props, children),
   DropdownMenuContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   // workbench-controls 静态命名导入这两个（WorkbenchMenuContent/SubContent
