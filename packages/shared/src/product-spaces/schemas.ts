@@ -33,7 +33,12 @@ export const ProductSpaceAccessModeSchema = z.enum(['active', 'read_only'])
 export const ProductSpaceRestrictionCodeSchema = z.enum([
   'billing_restricted', 'governance_suspended', 'enterprise_closing',
 ])
-export const CatalogEntryKindSchema = z.enum(['built_in_app', 'app', 'skill'])
+// POO-205 Catalog v2: built-in apps left the catalog — chat is a base
+// capability, not a directory entry, and the knowledge base retired into the
+// project shared-file area. The directory lists only member-visible things:
+// apps and skills. `built_in_app` survives ONLY as an execution/billing
+// subject identity (ResolvedLaunchSubject below), never as a catalog entry.
+export const CatalogEntryKindSchema = z.enum(['app', 'skill'])
 export const CatalogEntryAvailabilitySchema = z.enum(['available', 'unavailable', 'blocked'])
 export const CatalogEntryUnavailableReasonSchema = z.enum([
   'authorization_ended', 'space_restricted', 'version_unavailable', 'version_blocked',
@@ -123,10 +128,14 @@ const CatalogVersionSummarySchema = z.object({
   version: nonBlankString(512),
   checksum: checksum.optional(),
 }).strict()
+// `self` marks an app created in place by a space member ("my apps"). It is
+// valid in both space kinds; publishing keeps it, so provenance survives the
+// member → space visibility change.
 export const CatalogSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('polo'), name: z.literal('Polo') }).strict(),
   z.object({ kind: z.literal('creator_circle'), circleId: CreatorCircleIdSchema, name: nonBlankString(256) }).strict(),
   z.object({ kind: z.literal('enterprise_import'), name: nonBlankString(256) }).strict(),
+  z.object({ kind: z.literal('self'), name: nonBlankString(256) }).strict(),
 ])
 const CatalogEntryBaseSchema = z.object({
   catalogEntryId: CatalogEntryIdSchema,
@@ -136,16 +145,24 @@ const CatalogEntryBaseSchema = z.object({
   availability: CatalogEntryAvailabilitySchema,
   unavailableReason: CatalogEntryUnavailableReasonSchema.optional(),
 }).strict()
-const BuiltInAppCatalogEntrySchema = CatalogEntryBaseSchema.extend({
-  kind: z.literal('built_in_app'), builtInAppId: z.enum(['polo_assistant', 'enterprise_knowledge']),
-}).strict()
+// POO-205: `visibility` splits the directory into space-shared entries and
+// member-private "my apps" rows. `ownerAccountId` is required for member
+// entries; a `space` entry has no single owner. Member rows only reach the
+// owner's catalog response (server-side filter), never anyone else's.
+export const CatalogAppVisibilitySchema = z.enum(['space', 'member'])
 const AppCatalogEntrySchema = CatalogEntryBaseSchema.extend({
   kind: z.literal('app'),
   artifactInstanceId: ArtifactInstanceIdSchema,
   version: CatalogVersionSummarySchema,
   sources: z.array(CatalogSourceSchema).min(1).max(1_000),
   permissions,
-}).strict()
+  visibility: CatalogAppVisibilitySchema,
+  ownerAccountId: AccountIdSchema.optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.visibility === 'member' && value.ownerAccountId === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['ownerAccountId'], message: 'Member-visible app entries must carry their owner account' })
+  }
+})
 const SkillCatalogEntrySchema = CatalogEntryBaseSchema.extend({
   kind: z.literal('skill'),
   artifactInstanceId: ArtifactInstanceIdSchema,
@@ -155,7 +172,7 @@ const SkillCatalogEntrySchema = CatalogEntryBaseSchema.extend({
   permissions,
 }).strict()
 export const ProductSpaceCatalogEntrySchema = z.discriminatedUnion('kind', [
-  BuiltInAppCatalogEntrySchema, AppCatalogEntrySchema, SkillCatalogEntrySchema,
+  AppCatalogEntrySchema, SkillCatalogEntrySchema,
 ]).superRefine((value, ctx) => {
   if (value.availability === 'available' && value.unavailableReason !== undefined) {
     ctx.addIssue({ code: 'custom', path: ['unavailableReason'], message: 'Available entries cannot include an unavailable reason' })
@@ -170,29 +187,15 @@ export const ProductSpaceCatalogResponseSchema = z.object({
 }).strict().superRefine((value, ctx) => {
   const catalogEntryIds = new Set<string>()
   const artifactInstanceIds = new Set<string>()
-  let builtInAssistantCount = 0
-  let builtInKnowledgeCount = 0
   for (const [index, entry] of value.entries.entries()) {
     if (catalogEntryIds.has(entry.catalogEntryId)) {
       ctx.addIssue({ code: 'custom', path: ['entries', index, 'catalogEntryId'], message: 'Catalog entry IDs must be unique within the ProductSpace' })
     }
     catalogEntryIds.add(entry.catalogEntryId)
-    if (entry.kind !== 'built_in_app') {
-      if (artifactInstanceIds.has(entry.artifactInstanceId)) {
-        ctx.addIssue({ code: 'custom', path: ['entries', index, 'artifactInstanceId'], message: 'Artifact instance IDs must be unique within the ProductSpace' })
-      }
-      artifactInstanceIds.add(entry.artifactInstanceId)
-    } else if (entry.builtInAppId === 'polo_assistant') {
-      builtInAssistantCount += 1
-    } else if (entry.builtInAppId === 'enterprise_knowledge') {
-      builtInKnowledgeCount += 1
+    if (artifactInstanceIds.has(entry.artifactInstanceId)) {
+      ctx.addIssue({ code: 'custom', path: ['entries', index, 'artifactInstanceId'], message: 'Artifact instance IDs must be unique within the ProductSpace' })
     }
-  }
-  if (builtInAssistantCount !== 1) {
-    ctx.addIssue({ code: 'custom', path: ['entries'], message: 'Catalog must contain exactly one Polo assistant entry' })
-  }
-  if (builtInKnowledgeCount > 1) {
-    ctx.addIssue({ code: 'custom', path: ['entries'], message: 'Catalog must contain at most one enterprise knowledge entry' })
+    artifactInstanceIds.add(entry.artifactInstanceId)
   }
 })
 
@@ -396,26 +399,13 @@ function assertCatalogEntrySourcesMatchProductSpace(
   context: TrustedProductSpaceCatalogContext,
 ): void {
   for (const entry of response.entries) {
-    if (entry.kind === 'built_in_app') {
-      // The knowledge base is an enterprise-only built-in app: a catalog for
-      // a personal space that lists it is a scope violation, not an extra row.
-      if (entry.builtInAppId === 'enterprise_knowledge' && context.kind === 'personal') {
-        throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
-      }
-      continue
-    }
-
-    const sourceKinds = new Set(entry.sources.map(source => source.kind))
-    const hasOnlyPersonalSources = [...sourceKinds].every(
-      kind => kind === 'polo' || kind === 'creator_circle',
-    )
-    const hasOnlyEnterpriseImports = sourceKinds.size === 1 && sourceKinds.has('enterprise_import')
-    const hasMixedSources = sourceKinds.size > 1
-    if (
-      hasMixedSources
-      || (context.kind === 'personal' && !hasOnlyPersonalSources)
-      || (context.kind === 'enterprise' && !hasOnlyEnterpriseImports)
-    ) {
+    // POO-205: provenance subsets per space kind. `self` (member-created
+    // "my apps") is valid everywhere; mixing is fine within the allowed set.
+    const sourceKinds = entry.sources.map(source => source.kind)
+    const allowed = context.kind === 'personal'
+      ? new Set(['polo', 'creator_circle', 'self'])
+      : new Set(['enterprise_import', 'self'])
+    if (sourceKinds.length === 0 || sourceKinds.some(kind => !allowed.has(kind))) {
       throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
     }
   }
@@ -476,7 +466,7 @@ function getSkillCatalogEntry(
   expectedArtifactInstanceId: ArtifactInstanceId,
 ): DeepReadonly<z.output<typeof SkillCatalogEntrySchema>> {
   const entry = catalog.entries.find(candidate => (
-    candidate.kind !== 'built_in_app' && candidate.artifactInstanceId === expectedArtifactInstanceId
+    candidate.kind === 'skill' && candidate.artifactInstanceId === expectedArtifactInstanceId
   ))
   if (!entry || entry.kind !== 'skill') {
     throw new ProductSpaceResponsePathError('artifactInstanceId', expectedArtifactInstanceId, '')
@@ -488,13 +478,8 @@ function assertLaunchSubjectMatchesCatalogEntry(
   response: z.output<typeof ResolveLaunchResponseSchema>,
   entry: TrustedProductSpaceCatalogEntry,
 ): void {
-  if (entry.kind === 'built_in_app') {
-    if (
-      response.subject.kind !== 'built_in_app'
-      || response.subject.builtInAppId !== entry.builtInAppId
-    ) throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, response.catalogEntryId)
-    return
-  }
+  // Catalog v2: entries are only artifact-backed (app | skill); the assistant
+  // execution subject never reaches resolve-launch anymore.
   if (
     response.subject.kind !== 'artifact_instance'
     || response.subject.artifactType !== entry.kind

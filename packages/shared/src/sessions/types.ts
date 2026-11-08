@@ -146,14 +146,19 @@ export interface SessionConfig {
   workspaceRootPath: string;
   /** Immutable ProductSpace binding assigned at creation time */
   productSpaceId?: string;
+  /** POO-205: immutable Project binding for enterprise-space sessions.
+   *  Every enterprise session lives in exactly one project (Spec Q2); the
+   *  project owns membership, shared files, sources and the agent identity.
+   *  Absent = personal-space session (chat is a base capability there). */
+  projectId?: string;
   /** Immutable trusted Admin account binding assigned at creation time (R32-2).
    *  Space-bound legacy records without it are quarantined (fail-closed). */
   accountId?: string;
-  /** POO-196 R3 P12-5: the project's authoritative context metadata (title +
-   *  optional introduction) captured at creation for space-bound sessions.
-   *  Persisted so EVERY spawn/resume of this session re-injects it into the
-   *  model request context — never by fabricating a user message. */
-  projectContext?: { name: string; purpose?: string };
+  /** POO-205: the project's authoritative identity snapshot (name, purpose,
+   *  editable instructions) captured at creation for project sessions.
+   *  Spawn/resume re-injects the snapshot into the model request context;
+   *  instructions are refreshed live per send when the project is reachable. */
+  projectContext?: { name: string; purpose?: string; instructions?: string };
   /** Optional user-defined name */
   name?: string;
   createdAt: number;
@@ -181,12 +186,6 @@ export interface SessionConfig {
   hasUnread?: boolean;
   /** Per-session source selection (source slugs) */
   enabledSourceSlugs?: string[];
-  /**
-   * Per-session Enterprise Knowledge Base scope (POO-108): the collection
-   * IDs the assistant reads from for this session. Empty/undefined means
-   * the session does not use the knowledge base.
-   */
-  kbCollectionIds?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
   /** SDK cwd for session storage - set once at creation, never changes. Ensures SDK can find session transcripts regardless of workingDirectory changes. */

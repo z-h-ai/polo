@@ -5,6 +5,7 @@ import type { AppRuntimeStartInput, BillingRuntimeUsageInput, BillingRuntimeFini
 // verbatim — the generated contract (project-context-contract.ts) stays the
 // single source of truth for the code list.
 import type { PcErrorCode } from './project-context-contract.ts';
+import type { ProjectErrorCode } from './project-contract.ts';
 // POO-196 追加轮: the client-enterprise surface puts its own stable codes on
 // the wire (unprefixed, owned by the generated contract). Same registration
 // pattern as `pc_*` — they join the AdminErrorCode union by type so AdminError
@@ -533,7 +534,8 @@ export type AdminErrorCode =
   // POO-196 追加轮 client-enterprise wire codes, owned by the generated
   // contract; SAFE_ADMIN_ERROR_MESSAGES carries no entries for these — the
   // generic fallback is intentional and server-core branches on the code.
-  | ClientEnterpriseErrorCode;
+  | ClientEnterpriseErrorCode
+  | ProjectErrorCode;
 
 export interface AdminErrorDetails {
   retryAfter?: number;

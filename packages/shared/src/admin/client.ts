@@ -38,6 +38,40 @@ import {
   type PcUploadGrantResponse,
 } from './project-context-contract.ts';
 import {
+  PROJECT_CONTRACT_VERSION,
+  PROJECT_ERROR_CODES,
+  AddProjectMembersInputSchema,
+  CreateMyAppInputSchema,
+  CreateProjectInputSchema,
+  ListMyAppsResponseSchema,
+  ListOrganizationColleaguesResponseSchema,
+  ListProjectMembersResponseSchema,
+  ListProjectsResponseSchema,
+  ProjectMutationResponseSchema,
+  PublishMyAppResponseSchema,
+  ProjectMigrationMappingResponseSchema,
+  UpdateProjectInputSchema,
+  UpdateProjectMemberInputSchema,
+  UpdateProjectMemberResponseSchema,
+  WithdrawMyAppResponseSchema,
+  MyAppMutationResponseSchema,
+  type AddProjectMembersInput,
+  type CreateMyAppInput,
+  type CreateProjectInput,
+  type ListMyAppsResponse,
+  type ListOrganizationColleaguesResponse,
+  type ListProjectMembersResponse,
+  type ListProjectsResponse,
+  type ProjectMigrationMappingResponse,
+  type ProjectMutationResponse,
+  type PublishMyAppResponse,
+  type UpdateProjectInput,
+  type UpdateProjectMemberInput,
+  type UpdateProjectMemberResponse,
+  type WithdrawMyAppResponse,
+  type MyAppMutationResponse,
+} from './project-contract.ts';
+import {
   CLIENT_ENTERPRISE_CONTRACT_VERSION,
   CLIENT_ENTERPRISE_ERROR_CODES,
   CLIENT_ENTERPRISE_LIST_CONTRACT_QUERY_PARAMETER,
@@ -308,6 +342,10 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   // (phone_verification_required, account_enterprise_exists, …) pass through
   // verbatim only because they are registered here.
   ...CLIENT_ENTERPRISE_ERROR_CODES,
+  // POO-205: the client-held project contract owns this list; prj_*/myapps_*
+  // codes are lexically distinct from the seven legacy aliases, so they pass
+  // through verbatim and land on AdminError.errorCode unchanged.
+  ...PROJECT_ERROR_CODES,
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -1836,6 +1874,174 @@ export class AdminClient {
     return `/api/client/product-spaces/${encodeURIComponent(productSpaceId)}${suffix}`;
   }
 
+  // -------------------------------------------------------------------------
+  // Projects & my-apps (POO-205) — the organization-scoped project control
+  // plane and the per-space member app surface. Creating a project is a
+  // LIGHTWEIGHT operation (no payer, no payment responsibility): billing
+  // stays on the organization. Project members must already be organization
+  // members; the client never invites outside the organization. All bodies
+  // are validated against the client-held poo205-contract-r1 — an
+  // off-contract response fails closed. prj_*/myapps_* error codes survive
+  // into AdminError.errorCode via the ADMIN_ERROR_CODES registration.
+  // -------------------------------------------------------------------------
+
+  private organizationProjectsPath(organizationEnterpriseId: string, suffix = ''): string {
+    return `/api/client/organizations/${encodeURIComponent(organizationEnterpriseId)}${suffix}`;
+  }
+
+  /** GET /api/client/organizations/{orgId}/projects — projects the caller can see. */
+  async listProjects(accessToken: string, organizationEnterpriseId: string): Promise<ListProjectsResponse> {
+    const response = await this.request<unknown>(
+      this.organizationProjectsPath(organizationEnterpriseId, '/projects'),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, ListProjectsResponseSchema);
+  }
+
+  /** POST /api/client/organizations/{orgId}/projects — lightweight create. */
+  async createProject(
+    accessToken: string,
+    organizationEnterpriseId: string,
+    input: CreateProjectInput,
+  ): Promise<ProjectMutationResponse> {
+    const response = await this.request<unknown>(
+      this.organizationProjectsPath(organizationEnterpriseId, '/projects'),
+      { method: 'POST', accessToken, body: CreateProjectInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, ProjectMutationResponseSchema);
+  }
+
+  /** PATCH /api/client/organizations/{orgId}/projects/{projectId} — rename/purpose/instructions. */
+  async updateProject(
+    accessToken: string,
+    organizationEnterpriseId: string,
+    projectId: string,
+    input: UpdateProjectInput,
+  ): Promise<ProjectMutationResponse> {
+    const response = await this.request<unknown>(
+      this.organizationProjectsPath(organizationEnterpriseId, `/projects/${encodeURIComponent(projectId)}`),
+      { method: 'PATCH', accessToken, body: UpdateProjectInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, ProjectMutationResponseSchema);
+  }
+
+  /** GET /api/client/organizations/{orgId}/projects/{projectId}/members. */
+  async listProjectMembers(
+    accessToken: string,
+    organizationEnterpriseId: string,
+    projectId: string,
+  ): Promise<ListProjectMembersResponse> {
+    const response = await this.request<unknown>(
+      this.organizationProjectsPath(organizationEnterpriseId, `/projects/${encodeURIComponent(projectId)}/members`),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, ListProjectMembersResponseSchema);
+  }
+
+  /** POST .../members — bulk add; every account must already belong to the organization. */
+  async addProjectMembers(
+    accessToken: string,
+    organizationEnterpriseId: string,
+    projectId: string,
+    input: AddProjectMembersInput,
+  ): Promise<ListProjectMembersResponse> {
+    const response = await this.request<unknown>(
+      this.organizationProjectsPath(organizationEnterpriseId, `/projects/${encodeURIComponent(projectId)}/members`),
+      { method: 'POST', accessToken, body: AddProjectMembersInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, ListProjectMembersResponseSchema);
+  }
+
+  /** PATCH .../members/{accountId} — change a member's project role. */
+  async updateProjectMember(
+    accessToken: string,
+    organizationEnterpriseId: string,
+    projectId: string,
+    accountId: string,
+    input: UpdateProjectMemberInput,
+  ): Promise<UpdateProjectMemberResponse> {
+    const response = await this.request<unknown>(
+      this.organizationProjectsPath(organizationEnterpriseId, `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(accountId)}`),
+      { method: 'PATCH', accessToken, body: UpdateProjectMemberInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, UpdateProjectMemberResponseSchema);
+  }
+
+  /** DELETE .../members/{accountId} — remove from the project (organization membership untouched). */
+  async removeProjectMember(
+    accessToken: string,
+    organizationEnterpriseId: string,
+    projectId: string,
+    accountId: string,
+  ): Promise<{ ok: true }> {
+    await this.request<unknown>(
+      this.organizationProjectsPath(organizationEnterpriseId, `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(accountId)}`),
+      { method: 'DELETE', accessToken },
+    );
+    return { ok: true };
+  }
+
+  /** GET /api/client/organizations/{orgId}/colleagues — the ONLY roster a
+   * project may pick members from (organization membership is admin-console
+   * managed; the client never invites outside the organization). */
+  async listOrganizationColleagues(
+    accessToken: string,
+    organizationEnterpriseId: string,
+  ): Promise<ListOrganizationColleaguesResponse> {
+    const response = await this.request<unknown>(
+      this.organizationProjectsPath(organizationEnterpriseId, '/colleagues'),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, ListOrganizationColleaguesResponseSchema);
+  }
+
+  /** GET /api/client/migrations/poo-205/mapping — old project-space → upgraded
+   * organization + project mapping, used by the client's local session rebind. */
+  async getProjectMigrationMapping(accessToken: string): Promise<ProjectMigrationMappingResponse> {
+    const response = await this.request<unknown>(
+      '/api/client/migrations/poo-205/mapping',
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, ProjectMigrationMappingResponseSchema);
+  }
+
+  /** GET /api/client/product-spaces/{spaceId}/my-apps — the caller's own apps in this space. */
+  async listMyApps(accessToken: string, productSpaceId: string): Promise<ListMyAppsResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, '/my-apps'),
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, ListMyAppsResponseSchema);
+  }
+
+  /** POST /api/client/product-spaces/{spaceId}/my-apps — upload a static bundle
+   * as a member-private app (visibility `member`). Publishing is a separate call. */
+  async createMyApp(accessToken: string, productSpaceId: string, input: CreateMyAppInput): Promise<MyAppMutationResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, '/my-apps'),
+      { method: 'POST', accessToken, body: CreateMyAppInputSchema.parse(input) },
+    );
+    return this.readSuccessResponse(response, MyAppMutationResponseSchema);
+  }
+
+  /** POST .../my-apps/{appId}/publish — member → space. Enterprise spaces only. */
+  async publishMyApp(accessToken: string, productSpaceId: string, appId: string): Promise<PublishMyAppResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/my-apps/${encodeURIComponent(appId)}/publish`),
+      { method: 'POST', accessToken, body: {} },
+    );
+    return this.readSuccessResponse(response, PublishMyAppResponseSchema);
+  }
+
+  /** POST .../my-apps/{appId}/withdraw — space → member; member side keeps a tombstone. */
+  async withdrawMyApp(accessToken: string, productSpaceId: string, appId: string): Promise<WithdrawMyAppResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/my-apps/${encodeURIComponent(appId)}/withdraw`),
+      { method: 'POST', accessToken, body: {} },
+    );
+    return this.readSuccessResponse(response, WithdrawMyAppResponseSchema);
+  }
+
   /** POST /api/client/enterprises — creates the enterprise aggregate under the
    * caller's idempotency key; `replayed` means the SAME key + payload already
    * committed. The r3 negotiation header opts THIS client into the r3 contract
@@ -1872,27 +2078,6 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, clientCreateReceiptSchema);
-  }
-
-  /** GET /api/client/product-spaces/{id}/members — owner/manager bounded
-   * roster read; a plain member is rejected before any roster data is read. */
-  async listProjectMembers(
-    accessToken: string,
-    productSpaceId: string,
-    query: { limit?: number; cursor?: string },
-  ): Promise<ClientMemberRosterResponse> {
-    const boundedLimit = query.limit === undefined
-      ? undefined
-      : Math.min(Math.max(1, Math.floor(query.limit)), CLIENT_ENTERPRISE_PAGE_MAX_LIMIT);
-    const suffix = AdminClient.clientEnterpriseQuery({
-      limit: boundedLimit,
-      cursor: query.cursor,
-    });
-    const response = await this.request<unknown>(
-      this.clientEnterpriseSpacePath(productSpaceId, `/members${suffix}`),
-      { method: 'GET', accessToken },
-    );
-    return this.readSuccessResponse(response, clientMemberRosterResponseSchema);
   }
 
   /** GET /api/client/product-spaces/{id}/invitations — owner/manager targeted
