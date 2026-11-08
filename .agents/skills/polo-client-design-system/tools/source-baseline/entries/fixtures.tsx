@@ -106,6 +106,9 @@ export const productSpaceFixture: ProductSpaceContextValue = {
   pendingSwitch: null,
   onSelectProductSpace: () => {},
   onRefreshProductSpaces: () => {},
+  // POO-196: knownSpaces rides the switch transaction so a lagging context
+  // list can't silently drop the entry (requestSwitch guard).
+  onRequestSwitch: () => Promise.resolve(),
   onConfirmStopAndSwitch: () => {},
   onRetryFailedStops: () => {},
   onRetryTargetLoad: () => {},
