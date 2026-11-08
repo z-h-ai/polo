@@ -29,7 +29,19 @@ export {
   WorkspaceSessionStorage,
   RootedSessionStorage,
   defaultWorkspaceSessionStorage,
+  projectSessionStoreRoot,
+  listProjectSessionStoreRoots,
+  probeSessionStoreRoot,
 } from './session-storage.ts';
+
+// POO-205: one-shot legacy → project store migration (beta hard cut).
+export {
+  planProjectStoreMigration,
+  commitProjectStoreMigration,
+  type ProjectStoreMigrationMove,
+  type ProjectStoreMigrationPlan,
+  type ProjectStoreMigrationOptions,
+} from './project-store-migration.ts';
 
 // Storage functions
 export {

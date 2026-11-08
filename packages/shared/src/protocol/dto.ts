@@ -63,6 +63,12 @@ export interface Session {
    * context; space-bound records without it are quarantined.
    */
   accountId?: string
+  /**
+   * POO-205 (Q2): the project this session lives in. Present exactly when
+   * the session is bound to an enterprise space; the renderer uses it to
+   * scope project surfaces (members, shared files, project instructions).
+   */
+  projectId?: string
   /** Preview of first user message (from JSONL header, for lazy-loaded sessions) */
   preview?: string
   lastMessageAt: number

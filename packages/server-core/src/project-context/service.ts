@@ -684,9 +684,11 @@ export async function resolveSessionProjectContext(
       .getSessions()
       .find(candidate => candidate.id === sessionId)
     const sessionSpaceId = indexed?.productSpaceId ?? null
-    const projectId = typeof sessionProjectId === 'string' && sessionProjectId.trim().length > 0
+    // POO-205: the record's immutable projectId decides — a caller-supplied
+    // value is only a consistency assertion, never the source of truth.
+    const projectId = (typeof sessionProjectId === 'string' && sessionProjectId.trim().length > 0
       ? sessionProjectId
-      : null
+      : indexed?.projectId) ?? null
     const normalizedRefs = (assetRefs ?? []).slice(0, PC_REFS_PER_SEND_MAX)
     if (!projectId) return undefined
     if (!sessionSpaceId && normalizedRefs.length === 0) return undefined

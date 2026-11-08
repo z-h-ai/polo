@@ -36,6 +36,7 @@ import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
   getRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpaceKind,
   getRuntimeFenceGeneration,
   getRuntimeActiveProductSpaceScope,
   isRuntimeOfflineReadOnly,
@@ -109,6 +110,9 @@ import {
   type PendingAgentResume,
   pickSessionFields,
   WorkspaceSessionStorage,
+  projectSessionStoreRoot,
+  probeSessionStoreRoot,
+  listProjectSessionStoreRoots,
   type SessionStorage,
 } from '@polo-ai/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@polo-ai/shared/sources'
@@ -899,10 +903,14 @@ interface ManagedSession {
   /** Immutable trusted Admin account bound at creation (R32-2). Space-bound
    *  legacy records without it are quarantined (fail-closed). */
   accountId?: string
-  /** POO-196 R3 P12-5: the project's title (+ optional introduction) captured
-   *  at creation for space-bound sessions; re-sent on EVERY agent spawn so the
+  /** POO-205 (Q2): immutable Project binding for enterprise sessions; routes
+   *  the session's physical store to its project root. */
+  projectId?: string
+  /** POO-196 R3 P12-5, POO-205 revised: the project's identity snapshot
+   *  (name + optional introduction + optional editable instructions) captured
+   *  at creation for project sessions; re-sent on EVERY agent spawn so the
    *  model request context carries it for first and restored sessions alike. */
-  projectContext?: { name: string; purpose?: string }
+  projectContext?: { name: string; purpose?: string; instructions?: string }
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
@@ -1558,7 +1566,13 @@ function managedToSession(
     messages: [],
     isProcessing: m.isProcessing,
     productSpaceId: m.productSpaceId,
-    sessionFolderPath: storage.getSessionPath(m.workspace.rootPath, m.id),
+    projectId: m.projectId,
+    sessionFolderPath: storage.getSessionPath(
+      m.projectId
+        ? projectSessionStoreRoot(m.workspace.rootPath, m.projectId)
+        : m.workspace.rootPath,
+      m.id,
+    ),
     supportsBranching: resolveSupportsBranching(m),
     ...overrides,
   } as Session
@@ -3288,7 +3302,7 @@ export class SessionManager implements ISessionManager {
       enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
     )
     // Pass session path so large API responses can be saved to session folder
-    const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, managed.id)
+    const sessionPath = this.sessionStorage.getSessionPath(this.storeRootForManaged(managed), managed.id)
     const { mcpServers, apiServers } = await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager, managed.agent?.getSummarizeCallback())
     const intendedSlugs = enabledSources.map(s => s.config.slug)
 
@@ -3426,12 +3440,26 @@ export class SessionManager implements ISessionManager {
       // Iterate over each workspace and load its sessions
       for (const workspace of workspaces) {
         const workspaceRootPath = workspace.rootPath
-        const sessionMetadata = this.sessionStorage.list(workspaceRootPath)
+        // POO-205 (G4): sessions live in the legacy root AND in per-project
+        // stores — aggregate both, deduped by id (a session exists in exactly
+        // one store; the guard is belt-and-braces for a crashed migration).
+        const sessionMetadata = [
+          ...this.sessionStorage.list(workspaceRootPath),
+          ...listProjectSessionStoreRoots(workspaceRootPath).flatMap(root =>
+            this.sessionStorage.list(root),
+          ),
+        ]
+        const seenIds = new Set<string>()
+        const dedupedMetadata = sessionMetadata.filter(meta => {
+          if (seenIds.has(meta.id)) return false
+          seenIds.add(meta.id)
+          return true
+        })
         // Load workspace config once per workspace for default working directory
         const wsConfig = loadWorkspaceConfig(workspaceRootPath)
         const wsDefaultWorkingDir = wsConfig?.defaults?.workingDirectory
 
-        for (const meta of sessionMetadata) {
+        for (const meta of dedupedMetadata) {
           if (this.cliAuthority && meta.id !== this.cliAuthority.bootstrap.expectedSessionId) continue
           if (this.cliAuthority && (meta.accountId || meta.productSpaceId)) throw new Error('CLI_EXECUTION_SESSION_REQUIRED')
           // Create managed session from metadata only (messages lazy-loaded on demand)
@@ -3531,7 +3559,7 @@ export class SessionManager implements ISessionManager {
   // queue recovery has already run here.
   private hydrateMessagesForColdPersist(managed: ManagedSession): void {
     sessionLog.debug(`Cold-load triggered for persistSession on ${managed.id}`)
-    const stored = this.sessionStorage.load(managed.workspace.rootPath, managed.id)
+    const stored = this.sessionStorage.load(this.storeRootForManaged(managed), managed.id)
     if (stored) {
       managed.messages = (stored.messages || []).map(storedToMessage)
       managed.tokenUsage = stored.tokenUsage
@@ -3733,7 +3761,7 @@ export class SessionManager implements ISessionManager {
     // Update bridge-mcp-server config/credentials for backends that need it
     if (result.success && result.sourceSlug && managed.agent) {
       const workspaceRootPath = managed.workspace.rootPath
-      const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, managed.id)
+      const sessionPath = this.sessionStorage.getSessionPath(this.storeRootForManaged(managed), managed.id)
       const enabledSlugs = this.cliAuthority?.desktopManaged ? [] : managed.enabledSourceSlugs || []
       const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
       const enabledSources = allSources.filter(s =>
@@ -4036,7 +4064,7 @@ export class SessionManager implements ISessionManager {
    * Internal: Load messages from disk storage into the managed session.
    */
   private async loadMessagesFromDisk(managed: ManagedSession): Promise<void> {
-    const storedSession = this.sessionStorage.load(managed.workspace.rootPath, managed.id)
+    const storedSession = this.sessionStorage.load(this.storeRootForManaged(managed), managed.id)
     if (storedSession) {
       managed.messages = (storedSession.messages || []).map(storedToMessage)
       managed.tokenUsage = storedSession.tokenUsage
@@ -4135,7 +4163,24 @@ export class SessionManager implements ISessionManager {
   getSessionPath(sessionId: string): string | null {
     const managed = this.sessions.get(sessionId)
     if (!managed) return null
-    return this.sessionStorage.getSessionPath(managed.workspace.rootPath, sessionId)
+    return this.sessionStorage.getSessionPath(this.storeRootForManaged(managed), sessionId)
+  }
+
+  /**
+   * POO-205 (G4): the physical store root a managed session lives in. The
+   * record's projectId decides — project sessions live in
+   * `{workspaceRoot}/project-sessions/{projectId}/`, everything else in the
+   * legacy workspace root.
+   */
+  private storeRootForManaged(managed: ManagedSession): string {
+    return managed.projectId
+      ? projectSessionStoreRoot(managed.workspace.rootPath, managed.projectId)
+      : managed.workspace.rootPath
+  }
+
+  /** Store-root resolution for a session addressed only by id (probe). */
+  private storeRootForId(workspaceRootPath: string, sessionId: string): string {
+    return probeSessionStoreRoot(workspaceRootPath, sessionId)?.storeRoot ?? workspaceRootPath
   }
 
   getSessionsRoot(workspaceId: string): string | null {
@@ -4313,7 +4358,7 @@ export class SessionManager implements ISessionManager {
         await this.sessionStorage.flush(sourceManaged.id)
       }
 
-      const sourceSession = this.sessionStorage.load(workspaceRootPath, options.branchFromSessionId)
+      const sourceSession = this.sessionStorage.load(this.storeRootForId(workspaceRootPath, options.branchFromSessionId), options.branchFromSessionId)
       if (!sourceSession) {
         sessionLog.warn('Branch validation failed: source session not found on disk', {
           workspaceId,
@@ -4396,7 +4441,7 @@ export class SessionManager implements ISessionManager {
         ? (sourceManaged?.sdkSessionId || sourceSession.sdkSessionId)
         : undefined
       const branchFromSessionPath = branchContextStrategy === 'sdk-fork'
-        ? this.sessionStorage.getSessionPath(workspaceRootPath, options.branchFromSessionId)
+        ? this.sessionStorage.getSessionPath(this.storeRootForId(workspaceRootPath, options.branchFromSessionId), options.branchFromSessionId)
         : undefined
       // Capture parent's sdkCwd so the child SDK subprocess can find the parent's
       // session file (stored under ~/.claude/projects/{cwd-hash}/).
@@ -4499,8 +4544,30 @@ export class SessionManager implements ISessionManager {
       throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
     }
 
+    // POO-205 (Q2): chat lives inside a project. An enterprise session MUST
+    // carry the project binding; a personal session must never have one.
+    // The renderer's projectId is a routing/consistency assertion, not an
+    // authorization grant — membership is admin-proven where the project is
+    // resolved (project-context send path, member RPCs).
+    const activeSpaceKind = getRuntimeActiveProductSpaceKind()
+    if (trustedScope?.productSpaceId) {
+      if (activeSpaceKind === 'enterprise' && !options?.projectId) {
+        throw new Error('PROJECT_CONTEXT_REQUIRED')
+      }
+      if (activeSpaceKind !== 'enterprise' && options?.projectId) {
+        throw new Error('PROJECT_BINDING_REJECTED_IN_PERSONAL_SPACE')
+      }
+    }
+
+    // POO-205 (G4): a project session's physical store is its project root —
+    // the derived path rides the record as workspaceRootPath, so every later
+    // save (persistence queue) lands in the same store automatically.
+    const createStoreRoot = options?.projectId && trustedScope?.productSpaceId
+      ? projectSessionStoreRoot(workspaceRootPath, options.projectId)
+      : workspaceRootPath
+
     // Use storage layer to create and persist the session
-    const storedSession = await this.sessionStorage.create(workspaceRootPath, {
+    const storedSession = await this.sessionStorage.create(createStoreRoot, {
       name: options?.name,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
@@ -4514,15 +4581,20 @@ export class SessionManager implements ISessionManager {
       isFlagged: options?.isFlagged,
       productSpaceId: trustedScope?.productSpaceId,
       accountId: trustedScope?.accountId,
+      projectId: trustedScope?.productSpaceId && activeSpaceKind === 'enterprise'
+        ? options?.projectId
+        : undefined,
       // P12-5: capture the project's context metadata only for a session the
       // server itself binds to an enterprise space — the renderer-supplied
       // values are a projection of THAT space, never a client-asserted scope.
-      projectContext: trustedScope?.productSpaceId ? options?.projectContext : undefined,
+      projectContext: trustedScope?.productSpaceId && activeSpaceKind === 'enterprise'
+        ? options?.projectContext
+        : undefined,
     })
 
     // Branch: copy messages from source session up to and including the branch point
     if (validatedBranch) {
-      const branchedStored = this.sessionStorage.load(workspaceRootPath, storedSession.id)
+      const branchedStored = this.sessionStorage.load(createStoreRoot, storedSession.id)
       if (!branchedStored) {
         throw new Error(`Failed to load newly created session ${storedSession.id} for branch copy`)
       }
@@ -4533,8 +4605,11 @@ export class SessionManager implements ISessionManager {
       // so they contain absolute paths to the *source* session directory. When saved to the
       // branch session, makeSessionPathPortable uses the *branch* dir — which won't match.
       // Fix: replace source dir paths with branch dir paths so tokenization works on save.
-      const sourceDir = normalizePath(this.sessionStorage.getSessionPath(workspaceRootPath, validatedBranch.sourceSessionId))
-      const branchDir = normalizePath(this.sessionStorage.getSessionPath(workspaceRootPath, storedSession.id))
+      // POO-205: either side may live in a project store — resolve each root.
+      const sourceStoreRoot = probeSessionStoreRoot(workspaceRootPath, validatedBranch.sourceSessionId)?.storeRoot
+        ?? workspaceRootPath
+      const sourceDir = normalizePath(this.sessionStorage.getSessionPath(sourceStoreRoot, validatedBranch.sourceSessionId))
+      const branchDir = normalizePath(this.sessionStorage.getSessionPath(createStoreRoot, storedSession.id))
       if (sourceDir !== branchDir) {
         branchedStored.messages = sourceMessages.map(m => {
           const json = JSON.stringify(m)
@@ -4602,6 +4677,9 @@ export class SessionManager implements ISessionManager {
       llmConnection: targetBackendContext.connection?.managedBy === 'admin' ? targetBackendContext.connection.slug : options?.llmConnection,
       productSpaceId: trustedScope?.productSpaceId,
       accountId: trustedScope?.accountId,
+      projectId: trustedScope?.productSpaceId && activeSpaceKind === 'enterprise'
+        ? options?.projectId
+        : undefined,
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
@@ -4696,7 +4774,12 @@ export class SessionManager implements ISessionManager {
         if (!rollbackFailure) {
           let deleted: boolean
           try {
-            deleted = this.sessionStorage.delete(workspaceRootPath, storedSession.id)
+            deleted = this.sessionStorage.delete(
+              storedSession.projectId
+                ? projectSessionStoreRoot(workspaceRootPath, storedSession.projectId)
+                : workspaceRootPath,
+              storedSession.id,
+            )
           } catch (deleteError) {
             rollbackFailure = `storage delete threw: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`
             deleted = false
@@ -7059,7 +7142,7 @@ export class SessionManager implements ISessionManager {
         // Build server configs for all enabled sources
         const allEnabledSources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs || [])
         // Pass session path so large API responses can be saved to session folder
-        const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, managed.id)
+        const sessionPath = this.sessionStorage.getSessionPath(this.storeRootForManaged(managed), managed.id)
         const { mcpServers, apiServers, errors } = await buildServersFromSources(allEnabledSources, sessionPath, managed.tokenRefreshManager, managed.agent?.getSummarizeCallback())
 
         if (errors.length > 0) {
@@ -12548,7 +12631,7 @@ export class SessionManager implements ISessionManager {
             }
           }
 
-          const sessionPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, sessionId)
+          const sessionPath = this.sessionStorage.getSessionPath(this.storeRootForManaged(managed), sessionId)
 
           // Claude branch-cutoff support: persist message UUID + SDK session lineage in sidecar.
           // Used to guard resumeSessionAt so we only send anchors valid for the parent SDK session.
@@ -12601,7 +12684,7 @@ export class SessionManager implements ISessionManager {
           sessionLog.debug(`pi_turn_anchor for unknown sdkMessageId=${event.sdkMessageId}; ignoring`)
           break
         }
-        const sessionPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, sessionId)
+        const sessionPath = this.sessionStorage.getSessionPath(this.storeRootForManaged(managed), sessionId)
         try {
           await savePiTurnAnchor(sessionPath, poloAiMessageId, event.sdkTurnAnchor)
         } catch (error) {
