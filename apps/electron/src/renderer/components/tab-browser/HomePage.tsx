@@ -479,15 +479,10 @@ export function HomePage() {
         )}
       </div>
 
-      {catalog.productSpace && spaceKind === 'enterprise' && (
-        <HomeSpaceContext
-          spaceName={activeProductSpace?.name
-            || t('homeApps.organization.current')}
-          spaceKind="enterprise"
-          creatorCircles={catalog.creatorCircles}
-          spaceKey={catalog.productSpace.productSpaceContextKey}
-        />
-      )}
+      {/* POO-204: enterprise no longer renders the space-context hint block —
+      the space name already lives in the TopBar's CurrentProductSpaceLabel and
+      the description duplicated the hero lead above. The personal render below
+      (circles card fallback) is the block's only remaining mount. */}
 
       {/* POO-154: 本机固定的画布应用 — the always-available re-open entry for
       pinned canvas apps. Device-local truth, independent of the catalog
