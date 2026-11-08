@@ -409,6 +409,15 @@ export const CHANNEL_MAP = {
   // would otherwise erase.
   pmListProductSpacesR3: invokeCoded(RPC_CHANNELS.projectMembers.LIST_PRODUCT_SPACES_R3),
 
+  // Member apps (POO-205, Q7/Q11): each space's "我的应用". The bundle bytes
+  // never transit the renderer — create hands over a Main-packaged zip path
+  // and the trusted side reads/uploads it. Publish/withdraw act on the
+  // committed space only.
+  myAppsList: invokeCoded(RPC_CHANNELS.myApps.LIST),
+  myAppsCreate: invokeCoded(RPC_CHANNELS.myApps.CREATE),
+  myAppsPublish: invokeCoded(RPC_CHANNELS.myApps.PUBLISH),
+  myAppsWithdraw: invokeCoded(RPC_CHANNELS.myApps.WITHDRAW),
+
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
   reorderStatuses: invoke(RPC_CHANNELS.statuses.REORDER),

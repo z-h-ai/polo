@@ -16,15 +16,15 @@ import {
 
 describe('rpc-error-bridge message carriage', () => {
   it('roundtrips a coded message', () => {
-    const encoded = encodeRpcErrorCodeInMessage('kb_service_unavailable', 'The knowledge base service is temporarily unavailable')
-    expect(encoded).not.toBe('The knowledge base service is temporarily unavailable')
-    expect(decodeRpcErrorCodeFromMessage(encoded)).toBe('kb_service_unavailable')
-    expect(stripRpcErrorCodeFromMessage(encoded)).toBe('The knowledge base service is temporarily unavailable')
+    const encoded = encodeRpcErrorCodeInMessage('pc_library_not_ready', 'The project library is not ready yet')
+    expect(encoded).not.toBe('The project library is not ready yet')
+    expect(decodeRpcErrorCodeFromMessage(encoded)).toBe('pc_library_not_ready')
+    expect(stripRpcErrorCodeFromMessage(encoded)).toBe('The project library is not ready yet')
   })
 
   it('keeps the original text recoverable when the message itself contains separator-like text', () => {
-    const encoded = encodeRpcErrorCodeInMessage('kb_conflict', 'changed under you: v2 > v1')
-    expect(decodeRpcErrorCodeFromMessage(encoded)).toBe('kb_conflict')
+    const encoded = encodeRpcErrorCodeInMessage('pc_revision_conflict', 'changed under you: v2 > v1')
+    expect(decodeRpcErrorCodeFromMessage(encoded)).toBe('pc_revision_conflict')
     expect(stripRpcErrorCodeFromMessage(encoded)).toBe('changed under you: v2 > v1')
   })
 
@@ -36,33 +36,33 @@ describe('rpc-error-bridge message carriage', () => {
     expect(decodeRpcErrorCodeFromMessage('polo-rpc-code:')).toBeNull()
     expect(decodeRpcErrorCodeFromMessage('polo-rpc-code::tail')).toBeNull()
     // A marker mentioned mid-message is not a marker head.
-    expect(decodeRpcErrorCodeFromMessage(`see ${encodeRpcErrorCodeInMessage('kb_conflict', 'x')}`)).toBeNull()
+    expect(decodeRpcErrorCodeFromMessage(`see ${encodeRpcErrorCodeInMessage('pc_revision_conflict', 'x')}`)).toBeNull()
   })
 
   it('reads a live code property first, then the message marker', () => {
-    expect(readRpcErrorCode(Object.assign(new Error('plain'), { code: 'kb_manage_required' }))).toBe('kb_manage_required')
-    expect(readRpcErrorCode(new Error(encodeRpcErrorCodeInMessage('kb_space_read_only', 'read only')))).toBe('kb_space_read_only')
+    expect(readRpcErrorCode(Object.assign(new Error('plain'), { code: 'pc_forbidden' }))).toBe('pc_forbidden')
+    expect(readRpcErrorCode(new Error(encodeRpcErrorCodeInMessage('pc_read_only', 'read only')))).toBe('pc_read_only')
     // Live property wins when both are present.
     expect(readRpcErrorCode(Object.assign(
-      new Error(encodeRpcErrorCodeInMessage('kb_conflict', 'message says conflict')),
-      { code: 'kb_invalid_transition' },
-    ))).toBe('kb_invalid_transition')
+      new Error(encodeRpcErrorCodeInMessage('pc_revision_conflict', 'message says conflict')),
+      { code: 'pc_validation_error' },
+    ))).toBe('pc_validation_error')
     expect(readRpcErrorCode(new Error('no code anywhere'))).toBeNull()
   })
 
   it('rewrites a coded error into a bridge-carriable Error that keeps the code property', () => {
-    const source = Object.assign(new Error('The knowledge base service is temporarily unavailable'), {
-      code: 'kb_service_unavailable',
+    const source = Object.assign(new Error('The project library is not ready yet'), {
+      code: 'pc_library_not_ready',
     })
     const bridged = toBridgeCarriableError(source)
     expect(bridged).toBeInstanceOf(Error)
-    expect((bridged as { code?: string }).code).toBe('kb_service_unavailable')
-    expect(decodeRpcErrorCodeFromMessage(bridged.message)).toBe('kb_service_unavailable')
-    expect(stripRpcErrorCodeFromMessage(bridged.message)).toBe('The knowledge base service is temporarily unavailable')
+    expect((bridged as { code?: string }).code).toBe('pc_library_not_ready')
+    expect(decodeRpcErrorCodeFromMessage(bridged.message)).toBe('pc_library_not_ready')
+    expect(stripRpcErrorCodeFromMessage(bridged.message)).toBe('The project library is not ready yet')
   })
 
   it('passes an error without a code through unchanged — no other surface semantics move', () => {
-    const source = new Error('Request timeout: kb.LIST_COLLECTIONS (30000ms)')
+    const source = new Error('Request timeout: pc.LIST_CAPABILITIES (30000ms)')
     expect(toBridgeCarriableError(source)).toBe(source)
     expect(toBridgeCarriableError('raw string failure').message).toBe('raw string failure')
   })

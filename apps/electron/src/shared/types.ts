@@ -1485,25 +1485,31 @@ export interface ElectronAPI {
   pcSearchAssets(input: import('@polo-ai/shared/protocol').PcSearchAssetsInput): Promise<import('@polo-ai/shared/protocol').PcSearchResponse>
   pcRebuild(input: import('@polo-ai/shared/protocol').PcRebuildInput): Promise<import('@polo-ai/shared/protocol').PcRebuildResponse>
 
-  // Enterprise project members (POO-196 追加轮). The create commands are
-  // account-scoped (reachable from the personal space); the roster and
-  // invitation commands are committed-space scoped and polo-admin decides
-  // owner/manager authority.
-  pmCreateEnterprise(input: import('@polo-ai/shared/protocol').PmCreateEnterpriseInput): Promise<import('@polo-ai/shared/protocol').ClientCreateEnterpriseResponse>
-  pmQueryCreateReceipt(input: import('@polo-ai/shared/protocol').PmQueryCreateReceiptInput): Promise<import('@polo-ai/shared/protocol').ClientCreateReceipt>
-  pmListProjectMembers(input: import('@polo-ai/shared/protocol').PmListMembersInput): Promise<import('@polo-ai/shared/protocol').ClientMemberRosterResponse>
-  pmListProjectInvitations(input: import('@polo-ai/shared/protocol').PmListInvitationsInput): Promise<import('@polo-ai/shared/protocol').ClientInvitationListResponse>
-  pmCreateProjectInvitation(input: import('@polo-ai/shared/protocol').PmCreateInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientCreateInvitationResponse>
+  // Projects & project members (POO-205, supersedes the POO-196 追加轮
+  // surface). Creating a project is lightweight inside the committed
+  // organization (no payer, no payment responsibility); members are picked
+  // from the organization colleague roster — enterprise creation and every
+  // invitation flow are RETIRED. All commands are committed-organization
+  // scoped and polo-admin decides owner/manager authority.
+  pmListProjects(input: import('@polo-ai/shared/protocol').PmListProjectsInput): Promise<import('@polo-ai/shared/protocol').ListProjectsResponse>
+  pmCreateProject(input: import('@polo-ai/shared/protocol').PmCreateProjectInput): Promise<import('@polo-ai/shared/protocol').ProjectMutationResponse>
+  pmUpdateProject(input: import('@polo-ai/shared/protocol').PmUpdateProjectInput): Promise<import('@polo-ai/shared/protocol').ProjectMutationResponse>
+  pmListProjectMembers(input: import('@polo-ai/shared/protocol').PmListProjectMembersInput): Promise<import('@polo-ai/shared/protocol').ListProjectMembersResponse>
+  pmAddProjectMembers(input: import('@polo-ai/shared/protocol').PmAddProjectMembersInput): Promise<import('@polo-ai/shared/protocol').ListProjectMembersResponse>
+  pmUpdateProjectMember(input: import('@polo-ai/shared/protocol').PmUpdateProjectMemberInput): Promise<import('@polo-ai/shared/protocol').UpdateProjectMemberResponse>
+  pmRemoveProjectMember(input: import('@polo-ai/shared/protocol').PmRemoveProjectMemberInput): Promise<{ ok: boolean }>
+  pmListOrganizationColleagues(input: import('@polo-ai/shared/protocol').PmListOrganizationColleaguesInput): Promise<import('@polo-ai/shared/protocol').ListOrganizationColleaguesResponse>
 
-  // Enterprise project members R3 (POO-196 D3–D6). The colleague directory
-  // and collaboration roster are committed-space scoped reads; the colleague
-  // invitation bridge is one object per call with its own recovery query; the
-  // negotiated R3 list read is account-scoped.
-  pmListColleagueOptions(input: import('@polo-ai/shared/protocol').PmListColleagueOptionsInput): Promise<import('@polo-ai/shared/protocol').ClientColleagueOptionsResponse>
-  pmListCollaborationRoster(input: import('@polo-ai/shared/protocol').PmListCollaborationRosterInput): Promise<import('@polo-ai/shared/protocol').ClientCollaborationRosterResponse>
-  pmCreateColleagueInvitation(input: import('@polo-ai/shared/protocol').PmCreateColleagueInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientCreateColleagueInvitationResponse>
-  pmQueryColleagueInvitation(input: import('@polo-ai/shared/protocol').PmQueryColleagueInvitationInput): Promise<import('@polo-ai/shared/protocol').ClientColleagueInvitationReceipt>
+  // Negotiated R3 space list (POO-196 D6, retained) — account-scoped.
   pmListProductSpacesR3(input: import('@polo-ai/shared/protocol').PmListProductSpacesR3Input): Promise<import('@polo-ai/shared/protocol').PmProductSpacesListR3Response>
+
+  // Member apps (POO-205, Q7/Q11): each space's "我的应用". The bundle bytes
+  // never transit the renderer — create hands over a Main-packaged zip path;
+  // publish/withdraw act on the committed space only.
+  myAppsList(input: import('@polo-ai/shared/protocol').MyAppsListInput): Promise<import('@polo-ai/shared/protocol').MyAppsListResponse>
+  myAppsCreate(input: import('@polo-ai/shared/protocol').MyAppsCreateFromFileInput): Promise<import('@polo-ai/shared/protocol').MyAppsMutationResponse>
+  myAppsPublish(input: import('@polo-ai/shared/protocol').MyAppsPublishInput): Promise<import('@polo-ai/shared/protocol').MyAppsPublishResponse>
+  myAppsWithdraw(input: import('@polo-ai/shared/protocol').MyAppsWithdrawInput): Promise<import('@polo-ai/shared/protocol').MyAppsWithdrawResponse>
 
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@polo-ai/shared/statuses').StatusConfig[]>
