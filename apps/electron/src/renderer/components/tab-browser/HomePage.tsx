@@ -699,16 +699,10 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
         )}
       </div>
 
-      {catalog.productSpace && spaceKind === 'enterprise' && (
-        <HomeSpaceContext
-          spaceName={activeProductSpace?.name
-            || t('homeApps.organization.current')}
-          spaceKind="enterprise"
-          spaceCategory={spaceCategory}
-          creatorCircles={catalog.creatorCircles}
-          spaceKey={catalog.productSpace.productSpaceContextKey}
-        />
-      )}
+      {/* POO-204: enterprise no longer renders the space-context hint block —
+      the space name already lives in the TopBar's CurrentProductSpaceLabel and
+      the description duplicated the hero lead above. The personal render below
+      (circles card fallback) is the block's only remaining mount. */}
 
       {/* POO-196 R3 (P1/P2): the「项目」区域 — always present between the hero
       and the fixed canvas, on personal, organization and project homes

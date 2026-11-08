@@ -63,9 +63,9 @@
 
 <h2>生成记录（仅本次构建实际执行的步骤）</h2>
 <table>
-  <tr><td>输入快照（输入最近变化时）</td><td>HEAD <code>6511dcfe452188a80f6ad1efbf9e719ca534f6f4</code><br>2 个输入与该快照 HEAD 不同（未提交/未跟踪，见 manifest.snapshot.head_dirty）：<code>.agents/skills/polo-client-design-system/tools/source-baseline/entries/fixtures.tsx</code><br><code>.agents/skills/polo-client-design-system/tools/source-baseline/entries/scenes.tsx</code><br><span class="meta">快照语义：记录输入最近一次变化时的生成环境；当前性由输入哈希与再生核对证明，不与当前 git 状态机械比对。</span></td></tr>
+  <tr><td>输入快照（输入最近变化时）</td><td>HEAD <code>87c43f417502cd0ad87c82835847dfcd9c0536b7</code><br>1 个输入与该快照 HEAD 不同（未提交/未跟踪，见 manifest.snapshot.head_dirty）：<code>apps/electron/src/renderer/components/tab-browser/HomePage.tsx</code><br><span class="meta">快照语义：记录输入最近一次变化时的生成环境；当前性由输入哈希与再生核对证明，不与当前 git 状态机械比对。</span></td></tr>
   <tr><td>design revision</td><td><code>native-materials-r7-client-design-system-20261101</code></td></tr>
-  <tr><td>输入指纹</td><td>仓库源文件 957 个（含 <code>apps/electron/src/renderer</code> 页面/组件/样式与所维护源，来自真实 vite 模块图）；依赖包 299 个；lockfile 2 个；生成器文件 12 个。指纹：<code>b7789f0d0df1</code></td></tr>
+  <tr><td>输入指纹</td><td>仓库源文件 978 个（含 <code>apps/electron/src/renderer</code> 页面/组件/样式与所维护源，来自真实 vite 模块图）；依赖包 299 个；lockfile 2 个；生成器文件 12 个。指纹：<code>5e19795d91ff</code></td></tr>
   <tr><td>typecheck</td><td>cwd <code>仓库根</code>：<code>node_modules/.bin/tsc --project .agents/skills/polo-client-design-system/tools/source-baseline/tsconfig.json --pretty false</code> → exit 0（本次构建执行）</td></tr>
   <tr><td>场景清单提取</td><td>cwd <code>.agents/skills/polo-client-design-system/tools/source-baseline</code>：<code>../../../../../node_modules/.bin/vite build --config vite.scene-ids.config.mjs</code> + <code>node scene-ids-runner.cjs</code> → exit 0（本次构建执行；对真实场景模块求值，非源码正则）</td></tr>
   <tr><td>浏览器打包</td><td>cwd <code>.agents/skills/polo-client-design-system/tools/source-baseline</code>：<code>../../../../../node_modules/.bin/vite build --config vite.config.mjs</code> → exit 0（本次构建执行；JS/CSS 内联进 <code>entries/baseline.html</code>，file:// 可直接打开，未引用 chunk 不落位）</td></tr>
@@ -75,7 +75,7 @@
 
 <h2>产物文件（SHA-256 前 12 位）</h2>
 <table>
-<tr><td><code>entries/baseline.html</code></td><td><code>df407a037195</code></td></tr>
+<tr><td><code>entries/baseline.html</code></td><td><code>3d361255d9ed</code></td></tr>
 </table>
 
 <p class="meta">fixture 范围：Fixtures replace BACKEND DATA only (playground mock + baseline fixtures); every rendered element comes from the renderer sources consumed by this build. They do not represent real backend behavior.</p>
