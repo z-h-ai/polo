@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { atom, getDefaultStore } from 'jotai'
+import { atom } from 'jotai'
 import { createElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
@@ -38,8 +38,6 @@ const webAppTab: TabInstance = {
 let shellTabs: TabInstance[] = [POLO_TAB, webAppTab]
 let shellActiveTabId = POLO_TAB.id
 
-// Unlike the other TopBar files, this one keeps REAL jotai: the view controls
-// read the workbench-view atoms, so the mock needs a live atom, not a bare Map.
 mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => ({ resolvedMode: 'light', setMode: () => {} }) }))
 mock.module('@/atoms/sessions', () => ({ sessionMetaMapAtom: atom(new Map()) }))
 mock.module('@/context/AppShellContext', () => ({ useOptionalAppShellContext: () => null }))
@@ -71,135 +69,58 @@ mock.module('@/components/app-menu/WorkbenchAccountMenu', () => ({
 
 Object.defineProperty(window, 'electronAPI', { configurable: true, value: {} })
 
-const { render, screen, cleanup, fireEvent, act } = await import('@testing-library/react')
-const { ActionRegistryProvider, useAction } = await import('@/actions')
+const { render, screen, cleanup } = await import('@testing-library/react')
+const { ActionRegistryProvider } = await import('@/actions')
 const { TopBar } = await import('../TopBar')
-const { workbenchFocusModeAtom, workbenchSidebarVisibleAtom } = await import('@/atoms/workbench-view')
-
-// Stands in for the AppShellContent registration (useAssistantViewActions):
-// real shell handlers wrap "activate the assistant tab, then toggle" — the
-// wrapping itself is covered in useAssistantViewActions.isolated.ts. Here we
-// only need the TopBar side to reach exactly these two registry actions.
-const sidebarSpy = mock(() => {})
-const focusSpy = mock(() => {})
-
-function HandlerHarness() {
-  useAction('view.toggleSidebar', sidebarSpy)
-  useAction('view.toggleFocusMode', focusSpy)
-  return null
-}
 
 function tree() {
   return createElement(
     I18nextProvider,
     { i18n },
-    createElement(
-      ActionRegistryProvider,
-      null,
-      createElement(HandlerHarness),
-      createElement(TopBar),
-    ),
+    createElement(ActionRegistryProvider, null, createElement(TopBar)),
   )
-}
-
-function resetAtoms() {
-  const store = getDefaultStore()
-  store.set(workbenchSidebarVisibleAtom, null)
-  store.set(workbenchFocusModeAtom, null)
 }
 
 afterEach(() => {
   cleanup()
-  sidebarSpy.mockClear()
-  focusSpy.mockClear()
   activateTabSpy.mockClear()
   activateHomeSpy.mockClear()
-  resetAtoms()
   shellTabs = [POLO_TAB, webAppTab]
   shellActiveTabId = POLO_TAB.id
 })
 
-describe('TopBar brand-slot view controls (POO-191)', () => {
-  it('P191-01: with the assistant tab active the corner is operable — no brand mark', () => {
+// POO-202: the POO-191 brand-slot view controls (sidebar toggle + focus mode)
+// moved into the assistant shell itself — sidebar toggle on the navigator
+// header, focus mode next to share/close on the chat header. The decorative
+// POO-117 brand mark went with them, so the bar opens with the Home tab.
+describe('TopBar corner is the Home tab (POO-202)', () => {
+  it('P202-01: with the assistant tab active the brand slot is gone — no mark, no view controls', () => {
     render(tree())
+    expect(screen.queryByTestId('topbar-brand-slot')).toBeNull()
     expect(screen.queryByTestId('topbar-brand-mark')).toBeNull()
-    expect(screen.getByTestId('topbar-sidebar-toggle')).not.toBeNull()
-    expect(screen.getByTestId('topbar-focus-toggle')).not.toBeNull()
-  })
-
-  it('P191-06: from a web app tab the corner falls back to the decorative brand mark', () => {
-    // Review decision: a visible corner control that hijacks the user into
-    // the assistant tab reads as surprising, so the view controls only exist
-    // while the shell they drive is on screen.
-    shellActiveTabId = webAppTab.id
-    render(tree())
-    expect(screen.queryByTestId('topbar-brand-mark')).not.toBeNull()
     expect(screen.queryByTestId('topbar-sidebar-toggle')).toBeNull()
     expect(screen.queryByTestId('topbar-focus-toggle')).toBeNull()
   })
 
-  it('P191-07: from Home the corner falls back to the decorative brand mark too', () => {
-    shellActiveTabId = 'home'
-    render(tree())
-    expect(screen.queryByTestId('topbar-brand-mark')).not.toBeNull()
-    expect(screen.queryByTestId('topbar-sidebar-toggle')).toBeNull()
-  })
-
-  it('P191-08: the brand slot keeps one fixed width, so switching tabs never shifts the bar', () => {
-    // The tabs row is flex-1 right after the slot: if the corner changed
-    // width between the controls (66px) and the brand mark (~20px), every
-    // tab switch would visibly shove the tabs sideways. The slot is pinned
-    // to the controls' width in both states.
-    shellActiveTabId = POLO_TAB.id
+  it('P202-02: from a web app tab and from Home the corner stays the Home tab', () => {
+    shellActiveTabId = webAppTab.id
     const { unmount } = render(tree())
-    expect(screen.getByTestId('topbar-brand-slot').className).toContain('w-[68px]')
+    expect(screen.queryByTestId('topbar-brand-mark')).toBeNull()
+    expect(screen.getByTestId('topbar-home-tab')).not.toBeNull()
     unmount()
 
-    shellActiveTabId = webAppTab.id
+    shellActiveTabId = 'home'
     render(tree())
-    expect(screen.getByTestId('topbar-brand-slot').className).toContain('w-[68px]')
-    expect(screen.queryByTestId('topbar-brand-mark')).not.toBeNull()
+    expect(screen.queryByTestId('topbar-brand-mark')).toBeNull()
+    expect(screen.getByTestId('topbar-home-tab')).not.toBeNull()
   })
 
-  it('P191-02: the sidebar control executes the registered view.toggleSidebar handler', () => {
+  it('P202-03: the tab strip is the bar\'s first child, so Home starts right after the traffic lights', () => {
     render(tree())
-    expect(sidebarSpy).toHaveBeenCalledTimes(0)
-    fireEvent.click(screen.getByTestId('topbar-sidebar-toggle'))
-    expect(sidebarSpy).toHaveBeenCalledTimes(1)
-    expect(focusSpy).toHaveBeenCalledTimes(0)
-  })
-
-  it('P191-03: the focus control executes the registered view.toggleFocusMode handler', () => {
-    render(tree())
-    fireEvent.click(screen.getByTestId('topbar-focus-toggle'))
-    expect(focusSpy).toHaveBeenCalledTimes(1)
-    expect(sidebarSpy).toHaveBeenCalledTimes(0)
-  })
-
-  it('P191-04: labels come from the shared menu vocabulary, buttons carry accessible names', () => {
-    render(tree())
-    expect(screen.getByTestId('topbar-sidebar-toggle').getAttribute('aria-label')).toBe(i18n.t('menu.toggleSidebar'))
-    expect(screen.getByTestId('topbar-focus-toggle').getAttribute('aria-label')).toBe(i18n.t('menu.toggleFocusMode'))
-  })
-
-  it('P191-05: pressed state mirrors the shell atoms — focus mode owns the sidebar control', () => {
-    render(tree())
-    // Shell not mounted yet (atoms null): both controls render neutral/off.
-    expect(screen.getByTestId('topbar-sidebar-toggle').getAttribute('aria-pressed')).toBe('false')
-    expect(screen.getByTestId('topbar-focus-toggle').getAttribute('aria-pressed')).toBe('false')
-
-    const store = getDefaultStore()
-    act(() => {
-      store.set(workbenchSidebarVisibleAtom, true)
-    })
-    expect(screen.getByTestId('topbar-sidebar-toggle').getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByTestId('topbar-focus-toggle').getAttribute('aria-pressed')).toBe('false')
-
-    act(() => {
-      store.set(workbenchFocusModeAtom, true)
-    })
-    // Focus mode hides the sidebar too, so the sidebar control reads off.
-    expect(screen.getByTestId('topbar-sidebar-toggle').getAttribute('aria-pressed')).toBe('false')
-    expect(screen.getByTestId('topbar-focus-toggle').getAttribute('aria-pressed')).toBe('true')
+    const bar = screen.getByTestId('app-topbar')
+    const nav = bar.querySelector('nav')
+    expect(nav).not.toBeNull()
+    expect(nav!.previousElementSibling).toBeNull()
+    expect(nav!.firstElementChild?.getAttribute('data-testid')).toBe('topbar-home-tab')
   })
 })

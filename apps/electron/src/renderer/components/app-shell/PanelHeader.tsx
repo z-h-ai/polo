@@ -68,6 +68,15 @@ export interface PanelHeaderProps {
   title?: string
   /** Optional badge element (e.g., agent badge) */
   badge?: React.ReactNode
+  /**
+   * Optional element rendered in the right-hand cluster, before `actions` —
+   * e.g. the navigator's list filter trigger (POO-202). Providing it switches
+   * the desktop header to the symmetric left·center·right layout: the title
+   * sits at the true center between two flex-1 halves instead of trailing the
+   * leading action. Ignored in compact mode (compact owns its own title slot
+   * via `compactTitleMenu` and keeps combined controls in the right cluster).
+   */
+  titleAccessory?: React.ReactNode
   /** Optional dropdown menu content for interactive title (renders chevron when provided) */
   titleMenu?: React.ReactNode
   /**
@@ -104,6 +113,7 @@ export interface PanelHeaderProps {
 export function PanelHeader({
   title,
   badge,
+  titleAccessory,
   titleMenu,
   compactTitleMenu,
   leadingAction: explicitLeadingAction,
@@ -230,6 +240,44 @@ export function PanelHeader({
         <div className="max-w-full overflow-hidden pointer-events-auto">
           {titleNode}
         </div>
+      </div>
+    </>
+  ) : titleAccessory ? (
+    /* POO-202 symmetric left·center·right: the leading control hugs the left
+       edge, the title sits at the true center (two flex-1 halves split the
+       remaining space evenly), and the accessory + action cluster hug the
+       right edge. Only the navigator header (leading + title + filter) runs
+       this branch today; other headers keep the trailing-title layout below. */
+    <>
+      <div className="flex-1 min-w-0 flex items-center">
+        {leadingAction && (
+          <div className="titlebar-no-drag shrink-0">
+            {leadingAction}
+          </div>
+        )}
+      </div>
+      <div className="flex-none max-w-[50%] overflow-hidden select-none">
+        {titleNode}
+      </div>
+      <div className="flex-1 min-w-0 flex items-center justify-end gap-1.5">
+        <div className="titlebar-no-drag shrink-0">
+          {titleAccessory}
+        </div>
+        {centerButton && (
+          <div className="titlebar-no-drag shrink-0">
+            {centerButton}
+          </div>
+        )}
+        {actions && (
+          <div className="titlebar-no-drag shrink-0">
+            {actions}
+          </div>
+        )}
+        {rightSidebarButton && (
+          <div className="titlebar-no-drag shrink-0">
+            {rightSidebarButton}
+          </div>
+        )}
       </div>
     </>
   ) : (

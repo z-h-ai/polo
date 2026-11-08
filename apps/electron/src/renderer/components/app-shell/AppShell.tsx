@@ -36,6 +36,7 @@ import {
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
+import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 import { McpIcon } from "../icons/McpIcon"
 import { cn } from "@/lib/utils"
 import { isMac } from "@/lib/platform"
@@ -2317,36 +2318,9 @@ function AppShellContent({
               onKeyDown={handleSidebarKeyDown}
             >
             <div className="flex h-full flex-col select-none">
-              {/* Sidebar Top Section */}
+              {/* Sidebar Top Section — POO-202: the new-session button moved to
+                  the navigator (session list) header, above the list. */}
               <div className="flex-1 flex flex-col min-h-0">
-                {/* New Session Button - Gmail-style, with context menu for "Open in New Window" */}
-                <div className="px-2 pb-2 shrink-0">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div>
-                        <ContextMenu modal={true}>
-                          <ContextMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              onClick={(e) => handleNewChat(e.metaKey || e.ctrlKey)}
-                              className="w-full justify-start gap-2 py-[7px] px-2 text-[14px] font-normal rounded-[6px] shadow-minimal bg-background"
-                              data-tutorial="new-chat-button"
-                            >
-                              <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />
-                              {t("session.newSession")}
-                            </Button>
-                          </ContextMenuTrigger>
-                          <StyledContextMenuContent>
-                            <ContextMenuProvider>
-                              <SidebarMenu type="newSession" />
-                            </ContextMenuProvider>
-                          </StyledContextMenuContent>
-                        </ContextMenu>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">{newChatHotkey}</TooltipContent>
-                  </Tooltip>
-                </div>
                 {/* Primary Nav: All Sessions (▸ Statuses, Flagged, Archived), Labels | Sources, Skills */}
                 <div className="flex-1 min-h-0">
                 <LeftSidebar
@@ -2604,28 +2578,32 @@ function AppShellContent({
                   </TooltipContent>
                 </Tooltip>
               ) : undefined}
-              actions={
+              leadingAction={
+                /* POO-202: the sidebar collapse control moved here from the
+                   TopBar brand slot (POO-191) — it sits left of the navigator
+                   title, driving the same registry action as ⌘B / the menu.
+                   Auto-compact force-hides the sidebar, so the control would
+                   be dead there. */
+                !isAutoCompact ? (
+                <HeaderIconButton
+                  icon={<PanelLeftRounded className="h-4 w-4" />}
+                  tooltip={t("menu.toggleSidebar")}
+                  aria-label={t("menu.toggleSidebar")}
+                  aria-pressed={isSidebarVisible}
+                  data-testid="navigator-sidebar-toggle"
+                  onClick={handleToggleSidebar}
+                  className={isSidebarVisible ? "bg-foreground/[0.06] text-foreground" : undefined}
+                />
+              ) : undefined}
+              titleAccessory={
                 <>
-                  {/* Filter dropdown - available in ALL chat views.
+                  {/* Filter dropdown — available in ALL chat views.
                       Shows user-added filters (removable) and pinned filters (non-removable, derived from route).
-                      Pinned filters: state views pin a status, label views pin a label, flagged pins the flag. */}
-                  {isSessionsNavigation(navState) && (
-                    isAutoCompact ? (
-                      <CompactSessionListFilter
-                        listFilter={listFilter}
-                        setListFilter={setListFilter}
-                        labelFilter={labelFilter}
-                        setLabelFilter={setLabelFilter}
-                        pinnedFilters={pinnedFilters}
-                        effectiveSessionStatuses={effectiveSessionStatuses}
-                        displayLabelConfigs={displayLabelConfigs}
-                        labelConfigs={labelConfigs}
-                        chatGroupingMode={chatGroupingMode}
-                        setChatGroupingMode={setChatGroupingMode}
-                        isStateSubView={isStateSubView}
-                        onOpenSearch={() => setSearchActive(true)}
-                      />
-                    ) : (
+                      Pinned filters: state views pin a status, label views pin a label, flagged pins the flag.
+                      POO-202: the desktop trigger sits in the right cluster (titleAccessory slot) so the
+                      header reads left·center·right — sidebar toggle, centered title, filter; compact
+                      (mobile) keeps the combined control in the right action cluster below. */}
+                  {isSessionsNavigation(navState) && !isAutoCompact && (
                     <DropdownMenu onOpenChange={(open) => { if (!open) { setFilterDropdownQuery(''); setFilterAltHeld(false) } }}>
                       <DropdownMenuTrigger asChild>
                         <HeaderIconButton
@@ -3188,7 +3166,26 @@ function AppShellContent({
                         )}
                       </StyledDropdownMenuContent>
                     </DropdownMenu>
-                    )
+                  )}
+                </>
+              }
+              actions={
+                <>
+                  {isSessionsNavigation(navState) && isAutoCompact && (
+                    <CompactSessionListFilter
+                      listFilter={listFilter}
+                      setListFilter={setListFilter}
+                      labelFilter={labelFilter}
+                      setLabelFilter={setLabelFilter}
+                      pinnedFilters={pinnedFilters}
+                      effectiveSessionStatuses={effectiveSessionStatuses}
+                      displayLabelConfigs={displayLabelConfigs}
+                      labelConfigs={labelConfigs}
+                      chatGroupingMode={chatGroupingMode}
+                      setChatGroupingMode={setChatGroupingMode}
+                      isStateSubView={isStateSubView}
+                      onOpenSearch={() => setSearchActive(true)}
+                    />
                   )}
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}
                   {isSourcesNavigation(navState) && activeWorkspace && (
@@ -3234,6 +3231,40 @@ function AppShellContent({
                 </>
               }
             />
+            {/* POO-202: the new-session action (moved from the left sidebar's
+                top slot) sits under the navigator header, above the session
+                list. Same Gmail-style button and "Open in New Window" context
+                menu; only on the session list itself (compact mode keeps its
+                FAB instead). */}
+            {isSessionsNavigation(navState) && !isAutoCompact && (
+              <div className="px-2 pb-1.5 shrink-0">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <ContextMenu modal={true}>
+                        <ContextMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            onClick={(e) => handleNewChat(e.metaKey || e.ctrlKey)}
+                            className="w-full justify-start gap-2 py-[7px] px-2 text-[14px] font-normal rounded-[6px] shadow-minimal bg-background"
+                            data-tutorial="new-chat-button"
+                          >
+                            <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />
+                            {t("session.newSession")}
+                          </Button>
+                        </ContextMenuTrigger>
+                        <StyledContextMenuContent>
+                          <ContextMenuProvider>
+                            <SidebarMenu type="newSession" />
+                          </ContextMenuProvider>
+                        </StyledContextMenuContent>
+                      </ContextMenu>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{newChatHotkey}</TooltipContent>
+                </Tooltip>
+              </div>
+            )}
             {/* Content: SessionList, SourcesListPanel, or SettingsNavigator based on navigation state */}
             {isSourcesNavigation(navState) && (
               /* Sources List - filtered by type if sourceFilter is active */
