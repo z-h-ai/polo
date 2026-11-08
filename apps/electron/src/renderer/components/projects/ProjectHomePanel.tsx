@@ -112,7 +112,7 @@ export function ProjectHomePanel() {
         onClick={() => setOpen(false)}
       />
       <div
-        className="relative flex min-h-0 flex-col border-l border-border bg-background shadow-lg"
+        className="relative flex min-h-0 flex-col border-l border-border bg-background shadow-modal-small"
         style={{ width: 'min(480px, calc(100vw - 48px))' }}
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-[14px] py-[10px]">
