@@ -11,6 +11,7 @@ import { useProductSpaceContext } from '../context/ProductSpaceContext'
 import {
   createProductSpaceContextKey,
   resetProductSpaceStorageMemoryForTests,
+  setStoredActiveProductSpaceId,
 } from '../lib/product-space-storage'
 
 // Register only when no window exists yet, and pin a macOS userAgent —
@@ -140,6 +141,9 @@ const electronApiExplicit: Record<string, unknown> = {
   // Startup / lifecycle
   isDebugMode: async () => false,
   getWindowWorkspace: async () => 'ws-r33-fixture',
+  // Route read (routeThroughProductSpace) before the space bootstrap; the
+  // preload fallback shape is `async () => null` — no launch context here.
+  getWindowLaunchContext: async () => null,
   getSetupNeeds: async () => ({
     isFullyConfigured: true,
     needsAdminLogin: false,
@@ -156,6 +160,14 @@ const electronApiExplicit: Record<string, unknown> = {
   }),
   adminValidate: async () => ({ loggedIn: true, user: FIXTURE_USER }),
   adminSyncConnections: async () => ({ success: true }),
+  // Automations / managed-skills inventories and the Creator publish target
+  // read (mounted Home surface): deterministic empty answers keep the
+  // fail-fast fixture complete without coupling the seal probe to them.
+  getAutomations: async () => null,
+  getAutomationLastExecuted: async () => null,
+  getSkillsUnfiltered: async () => [],
+  listManagedSkills: async () => ({ ok: true as const, revision: 0, items: [] }),
+  organizationList: async () => ({ success: true as const, organizations: [] }),
   // Runtime info used at import time by workbench modules.
   getRuntimeEnvironment: () => 'electron',
   getSources: async () => [],
@@ -244,7 +256,33 @@ const electronApiExplicit: Record<string, unknown> = {
   getWindowFocusState: async () => ({ focused: true }),
   // Dock/taskbar badge refresh (render-time registration path).
   refreshBadge: () => {},
-  reportWorkbenchReady: () => {},
+  // Workbench-ready telemetry (useWorkbenchReady chains .catch — must return
+  // a promise, not void).
+  reportWorkbenchReady: async () => {},
+  // POO-172 moved the App-level chat-link callback onto electronAPI.browserPane
+  // (App.tsx useOpenBrowserLink); POO-161 canvas epoch releases retained canvas
+  // state per space-context key. This seal probe never opens a browser or
+  // canvas pane — the stubs only exist so the fail-fast proxy lets App render.
+  browserPane: {
+    list: async () => [],
+    onStateChanged: (_cb: unknown) => () => {},
+    onRemoved: (_cb: unknown) => () => {},
+    onElementPickerEvent: (_cb: unknown) => () => {},
+    create: async () => 'inst-unit',
+    navigate: async () => {},
+    embed: async () => {},
+    detachToPopup: async () => {},
+    unembed: async () => {},
+    focus: async () => {},
+    destroy: async () => false,
+    setElementPicking: async () => {},
+    goBack: async () => {},
+    goForward: async () => {},
+    reload: async () => {},
+  },
+  canvasPane: { release: async () => {} },
+  browserPaneDestroyAll: async () => {},
+  getTabBrowserApps: async () => [],
   // Session/file operations that must never run in this probe — invoked only
   // by explicit user actions that cannot happen here; fail fast if reached.
   createSession: async () => { throw new Error('electronAPI fixture: createSession is not reachable under the narrow-Home route') },
@@ -399,6 +437,8 @@ mock.module('@/components/app-shell/TopBar', () => ({
       createElement('button', {
         'data-testid': 'r35-topbar-probe',
         onClick: () => {
+          // DIAG
+          console.error('[R35-DIAG] click; path=' + openPreviewProbePath + ' onOpenFile=' + typeof onOpenFile)
           if (openPreviewProbePath) onOpenFile?.(openPreviewProbePath)
         },
       }),
@@ -446,6 +486,12 @@ beforeEach(() => {
   narrowViewportActive = false
   installMatchMedia()
   resetProductSpaceStorageMemoryForTests()
+  // POO-203 retired the no-memory first-login default (a fresh device now
+  // commits the first ACTIVE enterprise directly). This regression is about
+  // the A→B keyed switch, not the first-login path, so it declares its own
+  // remembered scope A — the 'stored' restore keeps the login-time
+  // space-select gate this scenario was written against.
+  setStoredActiveProductSpaceId(FIXTURE_ACCOUNT_ID, SPACE_A_ID)
   committedContextKeys.length = 0
   siblingLayoutSnapshots.length = 0
   openPreviewProbePath = null
@@ -495,12 +541,15 @@ describe('App preview scope-seal across A→B keyed switch (Review R34/R35)', ()
     openPreviewProbePath = '/a/secret.png'
     fireEvent.click(screen.getByTestId('r35-topbar-probe'))
 
-    // Sanity: the origin-scope preview IS mounted under scope A.
+    // Sanity: the origin-scope preview IS mounted under scope A. Since POO-159
+    // the image branch renders the @polo-ai/ui ImagePreviewOverlay directly
+    // (no pane-level testid); the overlay header's title attribute carries the
+    // full file path — the stable, production-faithful anchor.
     await waitFor(() => {
-      if (!screen.getByTestId('file-preview-overlay')) throw new Error('origin preview missing')
+      if (!screen.getByTitle('/a/secret.png')) throw new Error('origin preview missing')
     }, { timeout: 10_000 })
     expect(siblingLayoutSnapshots.some(s =>
-      s.scopeKey === A_KEY && s.html.includes('file-preview-overlay'),
+      s.scopeKey === A_KEY && s.html.includes('secret.png'),
     )).toBe(true)
 
     // A→B keyed switch through the PRODUCTION transition: the probe button
@@ -524,7 +573,7 @@ describe('App preview scope-seal across A→B keyed switch (Review R34/R35)', ()
     // explains a clean first B layout.
     const firstScopeBCommit = siblingLayoutSnapshots.find(s => s.scopeKey === B_KEY)
     expect(firstScopeBCommit).toBeDefined()
-    expect(firstScopeBCommit!.html.includes('file-preview-overlay')).toBe(false)
+    expect(firstScopeBCommit!.html.includes('/a/secret.png')).toBe(false)
     expect(firstScopeBCommit!.html.includes('secret.png')).toBe(false)
     // The scope-neutral pre-hydration boundary is present in B's first
     // commit: the keyed provider remounts before its shell restores.
@@ -532,7 +581,7 @@ describe('App preview scope-seal across A→B keyed switch (Review R34/R35)', ()
 
     // After the switch re-render (passive effects flushed): the stale
     // origin-scope preview is gone — no overlay element, no content, no path.
-    expect(screen.queryByTestId('file-preview-overlay')).toBeNull()
+    expect(screen.queryByTitle('/a/secret.png')).toBeNull()
     expect(document.body.innerHTML.includes('secret.png')).toBe(false)
 
     // Hydration completes: the normal scope-B surface restores and the stale
@@ -540,7 +589,7 @@ describe('App preview scope-seal across A→B keyed switch (Review R34/R35)', ()
     await waitFor(() => {
       if (!screen.getByTestId('home-app-hub')) throw new Error('scope B surface not restored')
     }, { timeout: 20_000 })
-    expect(screen.queryByTestId('file-preview-overlay')).toBeNull()
+    expect(screen.queryByTitle('/a/secret.png')).toBeNull()
     expect(document.body.innerHTML.includes('secret.png')).toBe(false)
   }, 60_000)
 })

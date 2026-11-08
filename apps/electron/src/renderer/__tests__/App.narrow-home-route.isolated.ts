@@ -155,6 +155,10 @@ const electronApiExplicit: Record<string, unknown> = {
   // Startup / lifecycle
   isDebugMode: async () => false,
   getWindowWorkspace: async () => 'ws-r33-fixture',
+  // Route read (routeThroughProductSpace) before the space bootstrap; the
+  // preload fallback shape is `async () => null` — no launch context in the
+  // R33 route probe.
+  getWindowLaunchContext: async () => null,
   getSetupNeeds: async () => ({
     isFullyConfigured: true,
     needsAdminLogin: false,
@@ -171,6 +175,9 @@ const electronApiExplicit: Record<string, unknown> = {
   }),
   adminValidate: async () => ({ loggedIn: true, user: FIXTURE_USER }),
   adminSyncConnections: async () => ({ success: true }),
+  // Creator publish bridge target read (mounted Home surface); the probe never
+  // publishes, so the deterministic empty list is the fail-closed answer.
+  organizationList: async () => ({ success: true as const, organizations: [] }),
   // Runtime info used at import time by workbench modules.
   getRuntimeEnvironment: () => 'electron',
   getSources: async () => [],
@@ -215,7 +222,9 @@ const electronApiExplicit: Record<string, unknown> = {
   getWindowFocusState: async () => ({ focused: true }),
   // Dock/taskbar badge refresh (render-time registration path).
   refreshBadge: () => {},
-  reportWorkbenchReady: () => {},
+  // Workbench-ready telemetry (useWorkbenchReady chains .catch — must return
+  // a promise, not void).
+  reportWorkbenchReady: async () => {},
   // Session/file operations that must never run in this probe — invoked only
   // by explicit user actions that cannot happen here; fail fast if reached.
   createSession: async () => { throw new Error('electronAPI fixture: createSession is not reachable under the narrow-Home route') },
@@ -268,6 +277,30 @@ const electronApiExplicit: Record<string, unknown> = {
     getProfile: async () => ({ success: true, profile: { availability: 'upstream_pending', contractGap: 'G3' } }),
     getSupport: async () => ({ success: true, support: { availability: 'upstream_pending', contractGap: 'G4' } }),
   },
+  // POO-172 moved the App-level chat-link callback onto electronAPI.browserPane
+  // (App.tsx useOpenBrowserLink); POO-161 canvas epoch releases retained canvas
+  // state per space-context key. These guard scenarios never open a browser or
+  // canvas pane — the stubs only exist so the fail-fast proxy lets App render.
+  browserPane: {
+    list: async () => [],
+    onStateChanged: (_cb: unknown) => () => {},
+    onRemoved: (_cb: unknown) => () => {},
+    onElementPickerEvent: (_cb: unknown) => () => {},
+    create: async () => 'inst-unit',
+    navigate: async () => {},
+    embed: async () => {},
+    detachToPopup: async () => {},
+    unembed: async () => {},
+    focus: async () => {},
+    destroy: async () => false,
+    setElementPicking: async () => {},
+    goBack: async () => {},
+    goForward: async () => {},
+    reload: async () => {},
+  },
+  canvasPane: { release: async () => {} },
+  browserPaneDestroyAll: async () => {},
+  getTabBrowserApps: async () => [],
 }
 
 // Known event subscriptions: each returns its unsubscribe function.
@@ -393,7 +426,11 @@ function assertGuardMounted(): void {
   expect(screen.queryByTestId('home-app-hub')).toBeNull()
   expect(screen.queryByTestId('polo-app-root')).toBeNull()
   expect(document.querySelector('webview')).toBeNull()
-  expect(screen.queryByTestId('file-preview-overlay')).toBeNull()
+  // Since POO-159 the file preview renders as the ImagePreviewOverlay inside
+  // the right sidebar pane (header title = full path) — assert the REAL
+  // surface is absent, not a retired testid.
+  expect(screen.queryByTitle('/a/secret.png')).toBeNull()
+  expect(document.body.innerHTML.includes('file-preview')).toBe(false)
 }
 
 function assertHomeRestored(): void {

@@ -145,6 +145,32 @@ const electronApiExplicit: Record<string, unknown> = {
   // fallback shape is `async () => null` — without it the fail-fast proxy
   // turns the route read into space-error before any screen can render.
   getWindowLaunchContext: async () => null,
+  // POO-172 moved the App-level chat-link callback onto electronAPI.browserPane
+  // (App.tsx useOpenBrowserLink). This suite never clicks a browser link; the
+  // stub only has to exist so the fail-fast proxy lets App render.
+  browserPane: {
+    list: async () => [],
+    onStateChanged: (_cb: unknown) => () => {},
+    onRemoved: (_cb: unknown) => () => {},
+    onElementPickerEvent: (_cb: unknown) => () => {},
+    create: async () => 'inst-unit',
+    navigate: async () => {},
+    embed: async () => {},
+    detachToPopup: async () => {},
+    unembed: async () => {},
+    focus: async () => {},
+    destroy: async () => false,
+    setElementPicking: async () => {},
+    goBack: async () => {},
+    goForward: async () => {},
+    reload: async () => {},
+  },
+  // POO-161 canvas epoch: App releases retained canvas state per space-context
+  // key; the suites never open a canvas pane.
+  canvasPane: { release: async () => {} },
+  // Chat-link teardown + tab-shell app list reads (POO-172/canvas batches).
+  browserPaneDestroyAll: async () => {},
+  getTabBrowserApps: async () => [],
   getSetupNeeds: async () => ({
     isFullyConfigured: authenticated, needsAdminLogin: !authenticated,
     needsCredentials: false, needsBillingConfig: false,

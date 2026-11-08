@@ -652,8 +652,19 @@ export function useProductSpaceContextState() {
       const storedId = launchContext?.productSpaceId ?? getStoredActiveProductSpaceId(accountId)
       const restored = storedId ? availableById.get(storedId) : undefined
       if (launchContext && (!restored || !isActiveSpace(restored))) throw { code: 'launch_space_unavailable' }
+      // POO-203 (owner adjudication 2026-11-07, 方案 B1): a first login on
+      // this device — no usable memory at all — opens the member's enterprise
+      // DIRECTLY: the first ACTIVE enterprise in server list order, never a
+      // read_only one. With usable memory the restore rule is untouched, and
+      // an unusable memory keeps the confirmation gate in charge (the
+      // bootstrap must not auto-enter on its behalf).
+      const recommendedEnterprise = storedId
+        ? undefined
+        : fetched.list.find(space => space.kind === 'enterprise' && space.accessMode === 'active')
       const computeTarget = (): string => (
-        restored && isActiveSpace(restored) ? restored.id : fetched.personalId
+        restored && isActiveSpace(restored)
+          ? restored.id
+          : (recommendedEnterprise?.id ?? fetched.personalId)
       )
       const target = computeTarget()
       setSpaceSelectionSource(
