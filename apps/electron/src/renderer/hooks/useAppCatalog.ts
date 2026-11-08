@@ -56,6 +56,13 @@ export interface AppCatalogState {
    * derived yet.
    */
   creatorCircles: CreatorCircleRelation[]
+  /**
+   * POO-205: catalogEntryIds of the member-visible "我的应用" app entries in
+   * the CURRENT catalog. The rows themselves stay in `apps` (launch/install/
+   * status flows are identical); this index lets the home directory split
+   * them into their own partition. Reset with the catalog, never merged.
+   */
+  memberCatalogEntryIds: Record<string, true>
   host: {
     platform: 'darwin' | 'win32' | 'linux'
     arch: 'arm64' | 'x64'
@@ -361,6 +368,14 @@ interface ContextSnapshot {
  * Projects a validated ProductSpace Catalog into the home App grid view
  * model. Delivery data is deliberately absent: launching requires a fresh
  * resolve-launch grant, so the projection never carries runnable URLs.
+ *
+ * POO-205 Catalog v2: the directory lists apps AND skills (the built-in apps
+ * left the catalog), and an app entry carries `visibility`: `member` rows are
+ * the owner-private "我的应用" entries — they stay IN the projected apps (the
+ * launch/install/status flows treat them like any other entry) and are ALSO
+ * registered in `memberCatalogEntryIds` so the directory projection can split
+ * them into their own partition. Published "my apps" are ordinary `space`
+ * entries with a `self` source; provenance survives the publish.
  */
 function mapProductSpaceCatalogToCacheEntry(
   productSpaceId: string,
@@ -370,9 +385,10 @@ function mapProductSpaceCatalogToCacheEntry(
     entries: ReadonlyArray<Record<string, unknown>>
     withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
   },
-): AppCatalogCacheEntry {
+): { catalog: AppCatalogCacheEntry; memberCatalogEntryIds: Record<string, true> } {
   const apps: CatalogApp[] = []
   const withdrawnApps: CatalogApp[] = []
+  const memberCatalogEntryIds: Record<string, true> = {}
   const mapEntry = (
     rawEntry: Record<string, unknown>,
     index: number,
@@ -394,8 +410,24 @@ function mapProductSpaceCatalogToCacheEntry(
       sources?: ReadonlyArray<{ kind: string; name?: string }>
       unavailableReason?: string
       permissions?: string[]
+      visibility?: string
+      ownerAccountId?: string
     }
-    if (entry.kind !== 'app' || !entry.catalogEntryId || !entry.name) return null
+    if (
+      (entry.kind !== 'app' && entry.kind !== 'skill')
+      || !entry.catalogEntryId
+      || !entry.name
+    ) return null
+    // POO-205: member-visible app entries are the owner's 我的应用 rows. The
+    // schema guarantees an owner account on member entries; an entry that
+    // only carries an owner account (visibility absent — a stale projection)
+    // is treated as member ONLY when it names THIS account, never another's.
+    const isMemberEntry = entry.kind === 'app'
+      && (entry.visibility === 'member'
+        || (entry.visibility === undefined && entry.ownerAccountId === accountId))
+    if (isMemberEntry && entry.catalogEntryId) {
+      memberCatalogEntryIds[entry.catalogEntryId] = true
+    }
     const effectiveAvailability = entry.availability === 'available'
       ? 'available'
       : availability === 'withdrawn'
@@ -448,15 +480,18 @@ function mapProductSpaceCatalogToCacheEntry(
     if (app) withdrawnApps.push(app)
   }
   return {
-    accountId,
-    organizationId: productSpaceId,
-    appConfigVersion: catalogResult.catalogRevision ?? '',
-    authorizationStatus: 'authorized',
-    syncedAt: Date.now(),
-    apps,
-    trustedReleases: {},
-    warnings: [],
-    withdrawnApps,
+    catalog: {
+      accountId,
+      organizationId: productSpaceId,
+      appConfigVersion: catalogResult.catalogRevision ?? '',
+      authorizationStatus: 'authorized',
+      syncedAt: Date.now(),
+      apps,
+      trustedReleases: {},
+      warnings: [],
+      withdrawnApps,
+    },
+    memberCatalogEntryIds,
   }
 }
 
@@ -485,6 +520,7 @@ export function useAppCatalog() {
     statuses: {},
     installStates: {},
     creatorCircles: [],
+    memberCatalogEntryIds: {},
     host: null,
   })
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
@@ -839,6 +875,7 @@ export function useAppCatalog() {
         statuses: {},
         installStates: {},
         creatorCircles: [],
+        memberCatalogEntryIds: {},
       }))
       return
     }
@@ -924,6 +961,7 @@ export function useAppCatalog() {
             accessMode: 'denied',
             installStates: {},
             creatorCircles: [],
+            memberCatalogEntryIds: {},
           }))
           if (deniedCatalog) {
             await refreshRuntimeStatuses(
@@ -948,6 +986,7 @@ export function useAppCatalog() {
           // A failed refresh invalidates stale circle relations (fail-closed):
           // the relation entry must not re-echo the previous Catalog.
           creatorCircles: [],
+          memberCatalogEntryIds: {},
         }))
         return
       }
@@ -989,12 +1028,14 @@ export function useAppCatalog() {
         }))
         return
       }
+      const projection = mapProductSpaceCatalogToCacheEntry(
+        productSpace.activeProductSpaceId,
+        productSpace.accountId,
+        catalogResult,
+      )
       const result = {
-        catalog: mapProductSpaceCatalogToCacheEntry(
-          productSpace.activeProductSpaceId,
-          productSpace.accountId,
-          catalogResult,
-        ),
+        catalog: projection.catalog,
+        memberCatalogEntryIds: projection.memberCatalogEntryIds,
         accessMode: catalogResult.accessMode ?? 'online',
         warningCode: catalogResult.warningCode ?? null,
       }
@@ -1043,6 +1084,7 @@ export function useAppCatalog() {
           accessMode: result.accessMode,
           statusLoadingScopeKeys,
           creatorCircles,
+          memberCatalogEntryIds: result.memberCatalogEntryIds,
         }
       })
       await refreshRuntimeStatuses(
@@ -1077,6 +1119,7 @@ export function useAppCatalog() {
           accessMode: 'denied',
           installStates: {},
           creatorCircles: [],
+          memberCatalogEntryIds: {},
         }))
         if (deniedCatalog) {
           await refreshRuntimeStatuses(
@@ -1098,6 +1141,7 @@ export function useAppCatalog() {
           errorCode,
           accessMode: catalogRef.current ? 'offline' : null,
           creatorCircles: [],
+          memberCatalogEntryIds: {},
         }))
       }
     }
@@ -1143,6 +1187,7 @@ export function useAppCatalog() {
       statuses: {},
       installStates: {},
       creatorCircles: [],
+      memberCatalogEntryIds: {},
     }))
     void sync()
     return () => {

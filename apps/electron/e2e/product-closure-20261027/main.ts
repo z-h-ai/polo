@@ -153,18 +153,14 @@ async function nail2_tabNames() {
   await host.loadFile(join(BUILD, 'pages', 'tabs.html'), { search: 'lang=zh-Hans' })
   await until(() => js('Boolean(window.__tabs && window.__tabs.ready)'))
 
-  const zh = await js<Record<string, string>>('({polo: document.querySelector("[data-testid=tab-title]").textContent, kb: document.querySelector("[data-testid=tab-title-kb]").textContent, third: document.querySelector("[data-testid=tab-title-third]").textContent})')
-  // kb renders the zh locale value「知识库」, NOT the legacy stored title
-  //「企业知识库」— the mismatch itself proves the id-based override.
+  const zh = await js<Record<string, string>>('({polo: document.querySelector("[data-testid=tab-title]").textContent, third: document.querySelector("[data-testid=tab-title-third]").textContent})')
   check('② zh 历史中文名按 id 覆盖显示(Polo 助手)', zh.polo === 'Polo 助手', zh)
-  check('② zh 历史中文名按 id 覆盖显示(知识库,非存量「企业知识库」)', zh.kb === '知识库', zh)
   check('② zh 第三方名不被改写', zh.third === 'Acme 看板', zh)
 
   await js('window.__tabs.setLang("en")')
   await delay(200)
-  const en = await js<Record<string, string>>('({polo: document.querySelector("[data-testid=tab-title]").textContent, kb: document.querySelector("[data-testid=tab-title-kb]").textContent, third: document.querySelector("[data-testid=tab-title-third]").textContent})')
+  const en = await js<Record<string, string>>('({polo: document.querySelector("[data-testid=tab-title]").textContent, third: document.querySelector("[data-testid=tab-title-third]").textContent})')
   check('② en 切换后内置名跟随(Polo Assistant)', en.polo === 'Polo Assistant', en)
-  check('② en 切换后内置名跟随(Knowledge Base)', en.kb === 'Knowledge Base', en)
   check('② en 第三方名仍不被改写', en.third === 'Acme 看板', en)
   await capture('nail2-tab-names')
 }

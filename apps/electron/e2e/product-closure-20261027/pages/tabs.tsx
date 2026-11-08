@@ -18,7 +18,6 @@ await i18n.changeLanguage(initialLang)
 
 // Persisted tab from an old snapshot: the zh-Hans literal is all it has.
 const LEGACY_TAB = { appId: 'polo-ai', title: 'Polo 助手', type: 'polo' as const }
-const LEGACY_KB = { appId: 'enterprise-knowledge', title: '企业知识库', type: 'knowledge-base' as const }
 const THIRD_PARTY = { appId: 'acme-dashboard', title: 'Acme 看板', type: 'webapp' as const }
 
 function Tabs() {
@@ -39,7 +38,6 @@ function Tabs() {
   return (
     <div style={{ padding: 24 }}>
       <span data-testid="tab-title">{localizedTabTitle(LEGACY_TAB, t)}</span>
-      <span data-testid="tab-title-kb">{localizedTabTitle(LEGACY_KB, t)}</span>
       <span data-testid="tab-title-third">{localizedTabTitle(THIRD_PARTY, t)}</span>
     </div>
   )

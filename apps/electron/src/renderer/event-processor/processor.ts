@@ -21,7 +21,6 @@ import {
   handleTypedError,
   handleSourcesChanged,
   handleLabelsChanged,
-  handleKbCollectionsChanged,
   handleSessionStatusChanged,
   handleSessionFlagged,
   handleSessionUnflagged,
@@ -159,9 +158,6 @@ export function processEvent(
 
     case 'labels_changed':
       return handleLabelsChanged(state, event)
-
-    case 'kb_collections_changed':
-      return handleKbCollectionsChanged(state, event)
 
     case 'session_status_changed':
       return handleSessionStatusChanged(state, event)

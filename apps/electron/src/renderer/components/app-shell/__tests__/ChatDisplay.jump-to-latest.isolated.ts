@@ -49,7 +49,6 @@ mock.module('@/components/ui/scroll-area', () => ({ ScrollArea: ({ viewportRef, 
 mock.module('@/components/app-shell/input', () => ({ ChatInputZone: (props: any) => h('textarea', { 'data-testid': 'composer', onChange: props.inputProps?.onInputChange, 'data-submit': '', onKeyDown: (e: any) => { if (e.key === 'Enter') props.inputProps.onSubmit('sent') } }) }))
 mock.module('@/components/markdown', () => ({ Markdown: () => null, StreamingMarkdown: () => null, CollapsibleMarkdownProvider: ({ children }: any) => children }))
 mock.module('@/components/chat/AuthRequestCard', () => ({ MemoizedAuthRequestCard: () => null }))
-mock.module('@/components/chat/KbReferenceChips', () => ({ KbReferenceChips: () => null }))
 mock.module('@/components/chat/ElementReferenceChips', () => ({ ElementReferenceChips: () => null }))
 mock.module('motion/react', () => ({
   AnimatePresence: ({ children }: any) => children,

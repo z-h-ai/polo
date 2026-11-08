@@ -182,7 +182,6 @@ export function ProjectConversationEmptyState({
     message: string,
     attachments?: FileAttachment[],
     skillSlugs?: string[],
-    kbOptions?: { kbCollectionIds?: string[] },
     elementReferences?: WebElementReference[],
     projectAssetRefs?: ProjectAssetMentionDraft[],
   ) => {
@@ -218,7 +217,6 @@ export function ProjectConversationEmptyState({
             attachments,
             skillSlugs,
             undefined,
-            kbOptions?.kbCollectionIds,
             elementReferences,
             projectAssetRefs,
           )

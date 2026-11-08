@@ -80,7 +80,6 @@ const sendMessageLog: Array<{
   message: string
   projectAssetRefs: Array<{ assetId: string; version: number; name: string }>
   attachments: Array<{ name?: string }>
-  kbCollectionIds: string[]
   elementReferences: Array<{ id?: string }>
 }> = []
 
@@ -425,7 +424,6 @@ function AppShellHost({ children, createProjectOpen, onSetCreateProjectOpen }: {
         attachments?: unknown[],
         _skillSlugs?: string[],
         _badges?: unknown[],
-        kbCollectionIds?: string[],
         elementReferences?: unknown[],
         projectAssetRefs?: Array<{ assetId: string; version: number; name: string }>,
       ) => {
@@ -438,7 +436,6 @@ function AppShellHost({ children, createProjectOpen, onSetCreateProjectOpen }: {
           message,
           projectAssetRefs: projectAssetRefs ?? [],
           attachments: (attachments ?? []).map((a) => ({ name: (a as { name?: string })?.name })),
-          kbCollectionIds: [...(kbCollectionIds ?? [])],
           elementReferences: (elementReferences ?? []).map((r) => ({ id: (r as { id?: string })?.id })),
         })
       },

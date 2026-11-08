@@ -66,7 +66,6 @@ import {
   type AuthRequestTurn,
 } from "@polo-ai/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
-import { KbReferenceChips } from "@/components/chat/KbReferenceChips"
 import { ElementReferenceChips } from "@/components/chat/ElementReferenceChips"
 import { ProjectAssetChip } from "@/components/project-context/ProjectAssetChip"
 import type { ProjectAssetMentionDraft } from "@/atoms/project-context"
@@ -158,7 +157,7 @@ function getTurnKey(turn: Turn): string {
 
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbCollectionIds?: string[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   /** POO-172: dedicated channel for assistant-markdown citation sources
@@ -573,29 +572,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const appShellContext = useAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
 
-  // POO-108: the knowledge-base composer entry and session scope wiring exist
-  // only in enterprise spaces — the prop presence (not the LLM gate) is what
-  // shows/hides the badge, so a personal space simply never wires it.
-  const productSpace = useOptionalProductSpaceContext()
-  const isEnterpriseSpace = productSpace?.activeProductSpace?.kind === 'enterprise'
-  const handleKbCollectionsChange = React.useCallback((collectionIds: string[]) => {
-    if (!isEnterpriseSpace || !session) return
-    // The save promise is handed back to the composer: it keeps the
-    // optimistic selection only on success and reverts with an explicit
-    // error on failure (reviews #11/#16). The authoritative value still
-    // converges through the `kb_collections_changed` session event.
-    return window.electronAPI.kbSetSessionCollections({
-      workspaceId: session.workspaceId,
-      sessionId: session.id,
-      collectionIds,
-    }).then(() => undefined)
-  }, [isEnterpriseSpace, session])
-
   // POO-196: the project-context surface (tab strip data + @ mention) exists
   // only for a session bound to the COMMITTED enterprise space. The session's
   // productSpaceId is read structurally: the field is being added to the
   // shared Session contract, and the structural read keeps this file compiling
   // (and correct at runtime) whether or not the type declaration has landed.
+  const productSpace = useOptionalProductSpaceContext()
+  const isEnterpriseSpace = productSpace?.activeProductSpace?.kind === 'enterprise'
   const sessionProductSpaceId = (session as { productSpaceId?: string } | null)?.productSpaceId
     ?? null
   const isProjectSession = !!sessionProductSpaceId
@@ -1414,8 +1397,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
-  // kbOptions mirrors the FreeFormInput onSubmit 4th parameter shape (POO-108)
-  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], kbOptions?: { kbCollectionIds?: string[] }, elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => {
+  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => {
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
       includeTopSeparator: hasBaseMessage,
@@ -1427,7 +1409,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
-    onSendMessage(normalizedMessage, attachments, skillSlugs, kbOptions?.kbCollectionIds, elementReferences, projectAssetRefs)
+    onSendMessage(normalizedMessage, attachments, skillSlugs, elementReferences, projectAssetRefs)
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
     // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
@@ -2304,8 +2286,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
               onSourcesChange,
-              enabledKbCollectionIds: isEnterpriseSpace ? session.kbCollectionIds : undefined,
-              onKbCollectionsChange: isEnterpriseSpace ? handleKbCollectionsChange : undefined,
               skills,
               workspaceId,
               workingDirectory,
@@ -2628,9 +2608,6 @@ function MessageBubble({
           onFileClick={onOpenFile}
           compactMode={compactMode}
         />
-        {message.kbReferences && message.kbReferences.length > 0 && (
-          <KbReferenceChips references={message.kbReferences} workspaceId={workspaceId} />
-        )}
         {/* POO-196: the persisted @ project-asset snapshot with its per-reference
             outcome; references that did not resolve say so instead of vanishing. */}
         {readMessageProjectAssetRefs(message).length > 0 && (
@@ -2805,7 +2782,6 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.role === next.message.role &&
     prev.sessionId === next.sessionId &&
     prev.workspaceId === next.workspaceId &&
-    prev.message.kbReferences === next.message.kbReferences &&
     prev.message.elementReferences === next.message.elementReferences &&
     readMessageProjectAssetRefs(prev.message) === readMessageProjectAssetRefs(next.message) &&
     prev.compactMode === next.compactMode &&

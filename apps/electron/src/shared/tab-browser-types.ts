@@ -1,5 +1,5 @@
 export type AppDefinitionType = 'builtin' | 'webapp'
-export type TabInstanceType = 'home' | 'polo' | 'knowledge-base' | 'webapp'
+export type TabInstanceType = 'home' | 'polo' | 'webapp'
 
 /**
  * Non-secret, immutable identity handed to the POO-47 Runtime boundary.
@@ -45,11 +45,6 @@ export interface TabInstance {
 export const HOME_TAB_ID = 'home'
 export const POLO_APP_ID = 'polo-ai'
 export const POLO_TAB_ID = 'polo-ai-tab'
-// POO-108: the enterprise knowledge base ships as a second built-in app. The
-// displayed name resolves through i18n at render time; the definition keeps a
-// non-secret fallback for persisted-state debugging.
-export const KNOWLEDGE_BASE_APP_ID = 'enterprise-knowledge'
-export const KNOWLEDGE_BASE_TAB_ID = 'enterprise-knowledge-tab'
 
 export const POLO_APP_DEFINITION: AppDefinition = {
   id: POLO_APP_ID,
@@ -60,18 +55,12 @@ export const POLO_APP_DEFINITION: AppDefinition = {
   order: 0,
 }
 
-export const KNOWLEDGE_BASE_APP_DEFINITION: AppDefinition = {
-  id: KNOWLEDGE_BASE_APP_ID,
-  name: '企业知识库',
-  url: 'poloai://knowledge-base',
-  type: 'builtin',
-  createdAt: 0,
-  order: 1,
-}
-
+// POO-205 (Spec Q5/Q6): chat is a base capability, not a catalog app. The
+// enterprise knowledge base built-in app/tab retired — knowledge now flows
+// through the project shared-file area. The catalog's only built-in entry is
+// the assistant itself.
 export const BUILTIN_APP_DEFINITIONS: AppDefinition[] = [
   POLO_APP_DEFINITION,
-  KNOWLEDGE_BASE_APP_DEFINITION,
 ]
 
 export const BUILTIN_APP_IDS = new Set(BUILTIN_APP_DEFINITIONS.map((a) => a.id))
@@ -88,13 +77,6 @@ export const POLO_TAB: TabInstance = {
   appId: POLO_APP_ID,
   type: 'polo',
   title: 'Polo 助手',
-}
-
-export const KNOWLEDGE_BASE_TAB: TabInstance = {
-  id: KNOWLEDGE_BASE_TAB_ID,
-  appId: KNOWLEDGE_BASE_APP_ID,
-  type: 'knowledge-base',
-  title: '企业知识库',
 }
 
 export function createTabId(prefix = 'tab'): string {

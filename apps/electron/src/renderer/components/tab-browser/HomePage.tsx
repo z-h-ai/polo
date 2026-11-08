@@ -25,10 +25,13 @@ import { useOptionalClientPage } from '@/context/ClientPageContext'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { navigate, routes } from '@/lib/navigate'
 import { useMemberAppActions } from '@/hooks/useMemberAppActions'
+import {
+  useMyApps,
+  correlateMyAppsWithCatalogEntries,
+  type MyAppsErrorCode,
+} from '@/hooks/useMyApps'
 import { HomeSpaceContext, type HomeSpaceCategory } from '@/components/product-space/HomeSpaceContext'
 import { useProjectEntry } from '@/hooks/useProjectEntry'
-import { ProductSpaceSkillsDialog } from '@/components/product-space/ProductSpaceSkillsDialog'
-import { useTabShell } from '@/context/TabShellContext'
 import { useProductSpaceAppLaunchHandoff, useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import {
   readProjectPurpose,
@@ -38,7 +41,6 @@ import {
   type ProjectVisitRecord,
 } from '@/lib/project-directory'
 import { PinnedCanvasApps } from './PinnedCanvasApps'
-import { KNOWLEDGE_BASE_APP_DEFINITION, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
   catalogStateMessage,
   homeAppErrorPresentation,
@@ -79,11 +81,14 @@ export { formatBytes }
  * Since this card the home IS the complete directory: the H1 projection
  * (`selectHomeAppDirectory`) supplies the FULL authorized directory of the
  * active ProductSpace (no frequently-used cap, no pinning, no
- * add/remove-from-home), topped by the fixed Polo assistant card (P70-HOME-02,
- * open action along the existing code). The former quick-access main flow
- * (writer registry, manage dialog, pin/prune, the nested All-Apps view and
- * the page-internal MemberCatalogProvider mount) is retired from this page:
- * the single `useAppCatalog` instance now lives in the App-level
+ * add/remove-from-home). POO-205 Catalog v2: no built-in cards remain — the
+ * Polo assistant is a base capability and the knowledge base retired into the
+ * project shared-file area; the directory splits into the 「我的应用」
+ * partition (the member's own saved apps, with the enterprise-only publish /
+ * withdraw actions) BEFORE the shared app grid. The former quick-access main
+ * flow (writer registry, manage dialog, pin/prune, the nested All-Apps view
+ * and the page-internal MemberCatalogProvider mount) is retired from this
+ * page: the single `useAppCatalog` instance now lives in the App-level
  * `MemberCatalogProvider` (lifted by this card next to ClientPageProvider)
  * and is consumed here through `useMemberCatalog()`.
  *
@@ -198,21 +203,24 @@ export function homeAppMatchesQuery(
   ].some(value => value?.toLocaleLowerCase().includes(normalizedQuery))
 }
 
-// ─── The home project directory (POO-196 R3, consensus P2/P3/P4) ────────────
+// ─── The home project directory (POO-205, Spec Q1/Q3/Q8) ────────────────────
 
 /**
- * The card-minimum contract (P12): stable id, name, current account role and
- * access state, with the optional purpose/member-count facts the D6 r3
- * negotiation carries. Missing facts are OMITTED downstream (P4: 人数未知则
- * 省略该行，never a fabricated 0).
+ * The card-minimum contract: stable PROJECT id (the POO-205 entity, no
+ * longer a product-space id), name, the caller's project role and the
+ * optional purpose/member-count facts pm:listProjects carries. Missing facts
+ * are OMITTED downstream (P4: 人数未知则省略该行，never a fabricated 0).
+ * `organizationProductSpaceId` stamps the owning organization space so the
+ * click can tell the lightweight entry (committed org matches) from the
+ * legacy space-switch transaction.
  */
 export type ProjectDirectoryEntry = {
   id: string
   name: string
   purpose?: string
   role: 'owner' | 'manager' | 'member'
-  accessMode: 'active' | 'read_only'
   memberCount?: number
+  organizationProductSpaceId: string
 }
 
 /**
@@ -247,10 +255,8 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
    */
   onEnterProject?: (productSpaceId: string) => void
 }) {
-  const [skillsOpen, setSkillsOpen] = useState(false)
   const { t, i18n } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
-  const { openApp } = useTabShell()
   const launchHandoff = useProductSpaceAppLaunchHandoff()
   // R3 (D13) + UB2 (U3): the real entry flow, sharing the ONE module-level
   // transaction state. The clicked card shows the spinner/「正在进入项目…」face
@@ -327,6 +333,9 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
       loading: catalog.state.loading,
       errorCode: catalog.state.errorCode,
       accessMode: catalog.state.accessMode,
+      // POO-205: the trusted projection's member-row index splits the
+      // 我的应用 entries into their own partition.
+      memberCatalogEntryIds: new Set(Object.keys(catalog.state.memberCatalogEntryIds ?? {})),
       lostCircleIds,
     }),
     [
@@ -336,31 +345,73 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
       catalog.state.catalog,
       catalog.state.errorCode,
       catalog.state.loading,
+      catalog.state.memberCatalogEntryIds,
       lostCircleIds,
       spaceKind,
     ],
   )
   const phase = directory.phase
 
-  // ── The project directory (R3 P2/P3/D6) ──────────────────────────────────
-  // The r3 negotiated list (pm:listProductSpacesR3) is the authoritative
-  // source: entries are the enterprise spaces whose summary kind is
-  // 'project' — the main organization aggregate is never listed. Loading,
-  // failure and the version-unsupported face are distinct states and NEVER
-  // render as 「还没有项目」 (P4).
+  // ── The project directory (POO-205 Spec Q1/Q3/Q8) ────────────────────────
+  // A project is a LIGHTWEIGHT entity inside ONE organization: the directory
+  // is the CURRENT committed organization's projects (pm:listProjects) —
+  // enterprise spaces are organizations now, and the old "enterprise space
+  // with enterpriseKind==='project'" projection is gone. On a personal home
+  // there is no project scope: the section renders the honest org-required
+  // face instead of a directory that could only fail. Loading, failure and
+  // the version-unsupported face stay distinct states and NEVER render as
+  // 「还没有项目」 (P4).
   const [projectsState, setProjectsState] = useState<ProjectDirectoryState>({ status: 'loading' })
   const [projectEntries, setProjectEntries] = useState<ProjectDirectoryEntry[]>([])
   // U14: the negotiated summary's display kind PER SPACE (`enterpriseKind`),
   // verbatim from the R3 wire type — the identity bar classifies the CURRENT
-  // committed space from this map and NEVER from the name.
+  // committed space from this map and NEVER from the name. (POO-205: after
+  // the one-shot migration every enterprise is an organization; the R3
+  // metadata remains the switcher/identity-bar source.)
   const [spaceKindsById, setSpaceKindsById] = useState<Record<string, 'organization' | 'project'>>({})
   const projectsAccountId = catalog.productSpace?.accountId ?? spaceContext?.accountId ?? null
   const [projectsReloadTick, setProjectsReloadTick] = useState(0)
   const reloadProjects = useCallback(() => setProjectsReloadTick(tick => tick + 1), [])
+  const committedSpace = spaceContext?.activeProductSpace ?? catalog.productSpace?.activeProductSpace ?? null
+  const projectsOrgScope = useMemo(() => (
+    projectsAccountId && committedSpace?.kind === 'enterprise'
+      ? {
+        accountId: projectsAccountId,
+        productSpaceId: committedSpace.id,
+        organizationEnterpriseId: committedSpace.enterpriseId,
+      }
+      : null
+  ), [committedSpace, projectsAccountId])
+  // U14 identity classification keeps its account-scoped negotiated read.
   useEffect(() => {
     if (!projectsAccountId) {
-      setProjectEntries([])
       setSpaceKindsById({})
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await window.electronAPI.pmListProductSpacesR3({ accountId: projectsAccountId })
+        if (cancelled) return
+        const kinds: Record<string, 'organization' | 'project'> = {}
+        for (const summary of response.enterpriseSummaries) {
+          kinds[summary.productSpaceId] = summary.enterpriseKind
+        }
+        setSpaceKindsById(kinds)
+      } catch {
+        if (cancelled) return
+        // Fail closed on the identity classification: a failed read leaves
+        // the committed space UNCLASSIFIED (neutral face), never a stale
+        // guess.
+        setSpaceKindsById({})
+      }
+    })()
+    return () => { cancelled = true }
+  }, [projectsAccountId])
+  // The directory itself: the committed organization's projects.
+  useEffect(() => {
+    if (!projectsOrgScope) {
+      setProjectEntries([])
       setProjectsState({ status: 'ready' })
       return
     }
@@ -368,41 +419,27 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
     setProjectsState({ status: 'loading' })
     void (async () => {
       try {
-        const response = await window.electronAPI.pmListProductSpacesR3({ accountId: projectsAccountId })
+        const response = await window.electronAPI.pmListProjects(projectsOrgScope)
         if (cancelled) return
-        const summariesById = new Map(response.enterpriseSummaries.map(summary => [summary.productSpaceId, summary]))
-        const kinds: Record<string, 'organization' | 'project'> = {}
-        for (const summary of response.enterpriseSummaries) {
-          kinds[summary.productSpaceId] = summary.enterpriseKind
-        }
-        setSpaceKindsById(kinds)
-        const entries = response.spaces.productSpaces.flatMap(space => {
-          if (space.kind !== 'enterprise') return []
-          const summary = summariesById.get(space.id)
-          if (!summary || summary.enterpriseKind !== 'project') return []
-          const entry: ProjectDirectoryEntry = {
-            id: space.id,
-            name: space.name,
-            role: space.role,
-            accessMode: space.accessMode,
-            purpose: summary.purpose,
-            memberCount: summary.activeMemberCount,
-          }
-          return [entry]
-        })
+        const entries: ProjectDirectoryEntry[] = response.projects.map(project => ({
+          id: project.id,
+          name: project.name,
+          role: project.myRole,
+          purpose: project.purpose,
+          memberCount: project.memberCount,
+          organizationProductSpaceId: project.organizationProductSpaceId,
+        }))
         setProjectEntries(entries)
         // P12-5: cache the fetched introductions so the session-creation path
-        // can attach the SAME authoritative purpose to new project sessions.
+        // can attach the SAME authoritative purpose to new project sessions
+        // (POO-205: keyed by the PROJECT id — the sessions' immutable
+        // binding).
         if (projectsAccountId) {
           rememberProjectPurposes(projectsAccountId, entries)
         }
         setProjectsState({ status: 'ready' })
       } catch (error) {
         if (cancelled) return
-        // Fail closed on the identity classification too: a failed read
-        // leaves the committed space UNCLASSIFIED (neutral face), never a
-        // stale guess.
-        setSpaceKindsById({})
         setProjectsState({
           status: 'error',
           reason: readRpcErrorCode(error) === 'contract_version_unsupported' ? 'version' : 'generic',
@@ -410,7 +447,7 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
       }
     })()
     return () => { cancelled = true }
-  }, [projectsAccountId, projectsReloadTick])
+  }, [projectsAccountId, projectsOrgScope, projectsReloadTick])
   // U14: the identity-bar category of the CURRENT committed space. Personal
   // spaces classify from the space kind itself; enterprise spaces classify
   // strictly from the negotiated summary (organization aggregate vs project)
@@ -478,20 +515,6 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
     onEnterProject?.(productSpaceId)
   }, [onEnterProject])
 
-
-  // Skill authorization, personal enablement and native preparation are
-  // managed from the existing assistant card in the current ProductSpace.
-  const openPoloAssistant = () => {
-    openApp(POLO_APP_DEFINITION)
-  }
-
-  // POO-108: the enterprise knowledge base card (enterprise spaces only —
-  // the schema-level invariant keeps the built-in app out of personal
-  // catalogs, and the personal surface has no KB scope).
-  const openKnowledgeBase = () => {
-    openApp(KNOWLEDGE_BASE_APP_DEFINITION)
-  }
-
   // H2 shared actions: open / prepare / permission feedback through the SAME
   // trusted flow, driven by the shared catalog instance.
   const memberActions = useMemberAppActions({
@@ -499,6 +522,12 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
     catalog,
   })
   const prepareTargetApp = memberActions.prepareTarget?.app ?? null
+
+  // POO-205 (Q7/Q11): the CURRENT space's 我的应用 — list/create/publish/
+  // withdraw through the committed-scope myapps_* RPCs. The publish entry is
+  // enterprise-only (a personal space never renders it; the admin wire
+  // refuses it anyway — double safeguard).
+  const myApps = useMyApps()
 
   const usage = useMemo(
     () => new Map(loadHomeAppUsage(usageContextKey)),
@@ -519,17 +548,10 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
     [directory.entries, hiddenApps, hiddenVersion],
   )
   const sourceOptions = useMemo(
-    () => [{ key: 'builtin:polo-assistant', label: t('homeApps.home.poloSource') }, ...collectHomeAppSourceOptions(matchableEntries).map(option => ({ ...option, key: `catalog:${option.key}` }))],
-    [matchableEntries, t],
+    () => collectHomeAppSourceOptions(matchableEntries).map(option => ({ ...option, key: `catalog:${option.key}` })),
+    [matchableEntries],
   )
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const assistantMatchesQuery = !normalizedQuery || [
-    t('homeApps.home.poloTitle'),
-    t('homeApps.home.poloSource'),
-    t('homeApps.home.poloDescription'),
-    t('homeApps.home.openAssistant'),
-  ].join(' ').toLocaleLowerCase().includes(normalizedQuery)
-  const assistantVisible = assistantMatchesQuery && (sourceFilter === 'all' || sourceFilter === 'builtin:polo-assistant')
   const filteredEntries = useMemo(
     () => matchableEntries.filter(entry =>
       homeAppMatchesQuery(entry, normalizedQuery)
@@ -576,6 +598,67 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
     restoreHomeApp(usageContextKeyRef.current, entry.identityKey)
     setHiddenVersion(version => version + 1)
   }, [])
+
+  // ── POO-205 我的应用 partition ────────────────────────────────────────────
+  // Pairs the my-apps list with the catalog's member entries: the published
+  // pairing keys on the authoritative publishedEntryId; an unpublished app
+  // falls back to a UNIQUE name match (ambiguous names wire no mutation
+  // buttons — never a guess about which app to publish).
+  const myAppsCorrelation = useMemo(
+    () => correlateMyAppsWithCatalogEntries(myApps.state.apps),
+    [myApps.state.apps],
+  )
+  const myAppForEntry = useCallback((entry: HomeAppDirectoryEntry) => (
+    (entry.catalogEntryId && myAppsCorrelation.byPublishedEntryId.get(entry.catalogEntryId))
+    || myAppsCorrelation.unpublishedByName.get(entry.app.name.trim())
+    || null
+  ), [myAppsCorrelation])
+
+  /** Localizes a myapps_* failure for toasts (code carries over the bridge). */
+  const myAppsErrorText = useCallback((error: unknown): string => {
+    const code = (error instanceof Error ? error.message : String(error)) as MyAppsErrorCode
+    switch (code) {
+      case 'myapps_signin_required':
+        return t('poo205.myApps.errors.signinRequired')
+      case 'myapps_scope_changed':
+        return t('poo205.myApps.errors.scopeChanged')
+      case 'myapps_service_unavailable':
+        return t('poo205.myApps.errors.serviceUnavailable')
+      case 'myapps_publish_unavailable_in_personal':
+        return t('poo205.myApps.errors.unavailableInPersonal')
+      default:
+        return t('poo205.myApps.errors.generic')
+    }
+  }, [t])
+
+  const handlePublishMyApp = useCallback(async (entry: HomeAppDirectoryEntry) => {
+    const app = myAppForEntry(entry)
+    if (!app) return
+    try {
+      await myApps.publish(app.appId)
+      toast.success(t('poo205.myApps.toast.published', { name: entry.app.name }))
+      // Surface the new shared entry in the space directory immediately.
+      await catalog.sync(true)
+    } catch (error) {
+      toast.error(t('poo205.myApps.errors.publishFailedTitle', { name: entry.app.name }), {
+        description: myAppsErrorText(error),
+      })
+    }
+  }, [catalog, myAppForEntry, myApps, myAppsErrorText, t])
+
+  const handleWithdrawMyApp = useCallback(async (entry: HomeAppDirectoryEntry) => {
+    const app = myAppForEntry(entry)
+    if (!app) return
+    try {
+      await myApps.withdraw(app.appId)
+      toast.success(t('poo205.myApps.toast.withdrawn', { name: entry.app.name }))
+      await catalog.sync(true)
+    } catch (error) {
+      toast.error(t('poo205.myApps.errors.withdrawFailedTitle', { name: entry.app.name }), {
+        description: myAppsErrorText(error),
+      })
+    }
+  }, [catalog, myAppForEntry, myApps, myAppsErrorText, t])
 
   const confirmUninstall = async () => {
     const app = uninstallTarget
@@ -1153,73 +1236,171 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
         </div>
       )}
 
+      {/* POO-205 (Q7/Q11) 「我的应用」分区 — BEFORE the shared directory.
+      The member's own saved canvas apps of THIS space, each with the open
+      action and (enterprise spaces only) the explicit publish / withdraw
+      actions. The partition carries its own title, vacuum and failure faces;
+      a personal space renders the same partition WITHOUT the publish entry. */}
+      {catalog.productSpace && (
+        <section className="mb-[36px]" data-testid="home-my-apps">
+          <div className="mb-[16px] flex flex-wrap items-center justify-between gap-[12px]">
+            <div className="flex min-w-0 items-center gap-[10px]">
+              <h2
+                className="m-0 text-[20px] font-[720] tracking-[-0.03em]"
+                data-testid="home-my-apps-title"
+              >
+                {t('poo205.myApps.title')}
+              </h2>
+              <span className="inline-flex min-h-[20px] items-center rounded-full bg-foreground-5 px-[8px] text-[12px] font-medium text-muted-foreground">
+                {myApps.state.apps.length}
+              </span>
+            </div>
+            <p className="m-0 min-w-0 flex-1 text-[13px] leading-[1.5] text-foreground-60">
+              {t('poo205.myApps.subtitle')}
+            </p>
+          </div>
+          {myApps.state.loading ? (
+            <div
+              className="flex min-h-[120px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface client-material-card"
+              data-testid="home-my-apps-loading"
+            >
+              <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : myApps.state.errorCode ? (
+            <div
+              className="grid justify-items-center gap-[8px] rounded-[20px] border border-dashed border-border px-[20px] py-[24px] text-center"
+              data-testid="home-my-apps-error"
+            >
+              <Icons.CloudOff className="size-[18px] text-muted-foreground" aria-hidden="true" />
+              <p className="m-0 text-[13px] text-muted-foreground">
+                {t('poo205.myApps.loadFailed')}
+              </p>
+              <button
+                type="button"
+                data-testid="home-my-apps-retry"
+                className="inline-flex min-h-[28px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[10px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                onClick={() => { void myApps.refresh() }}
+              >
+                {t('homeApps.actions.tryAgain')}
+              </button>
+            </div>
+          ) : directory.myApps.length === 0 ? (
+            <div
+              className="rounded-[20px] border border-dashed border-border px-[20px] py-[24px] text-center text-[13px] text-muted-foreground"
+              data-testid="home-my-apps-empty"
+            >
+              {t('poo205.myApps.empty')}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
+              {directory.myApps.map((entry) => {
+                const app = myAppForEntry(entry)
+                const publishing = app ? myApps.state.publishingAppIds.has(app.appId) : false
+                const withdrawing = app ? myApps.state.withdrawingAppIds.has(app.appId) : false
+                const published = Boolean(app?.publishedEntryId)
+                const sourceLost = hasOnlyLostCircleSources(entry)
+                return (
+                  <div key={entry.identityKey} className="group relative">
+                    <article
+                      data-testid="home-myapp-card"
+                      data-identity-key={entry.identityKey}
+                      aria-busy={publishing || withdrawing || Boolean(memberActions.operationStates[entry.identityKey]) || undefined}
+                      className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
+                    >
+                      <div className="mb-[18px] flex items-start justify-between gap-[8px]">
+                        <span className="grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[var(--accent-soft)] text-accent">
+                          {entry.app.iconUrl
+                            ? <img src={entry.app.iconUrl} alt="" className="size-full object-cover" />
+                            : <span className="text-[17px] font-semibold">{entry.app.name.slice(0, 1)}</span>}
+                        </span>
+                        {app && (
+                          <span
+                            data-testid={`home-myapp-badge-${entry.identityKey}`}
+                            className={
+                              published
+                                ? 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-success/10 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-success'
+                                : 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-foreground-5 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-muted-foreground'
+                            }
+                          >
+                            {published
+                              ? t('poo205.myApps.badge.published')
+                              : t('poo205.myApps.badge.unpublished')}
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="m-0 text-[16px] font-bold leading-[normal]">{entry.app.name}</h3>
+                      <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
+                        {entry.app.description || t('homeApps.noDescription')}
+                      </p>
+                      {entry.launchBlocked && (
+                        <p className="m-0 mt-[6px] text-[13px] leading-[1.5] text-muted-foreground">
+                          {sourceLost
+                            ? t('poo70.h3.home.sourceLostReason')
+                            : t('homeApps.errors.unavailable')}
+                        </p>
+                      )}
+                      <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+                        {/* Publish (enterprise only) / withdraw — the explicit
+                        shared-directory actions over myapps:publish /
+                        myapps:withdraw. A personal space never renders the
+                        publish entry; an uncorrelated app renders neither. */}
+                        {myApps.canPublish && app && !published && (
+                          <button
+                            type="button"
+                            data-testid={`home-myapp-publish-${entry.identityKey}`}
+                            disabled={publishing}
+                            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-60"
+                            onClick={() => { void handlePublishMyApp(entry) }}
+                          >
+                            {publishing
+                              ? t('poo205.myApps.publishingAction')
+                              : t('poo205.myApps.publishAction')}
+                          </button>
+                        )}
+                        {app && published && (
+                          <button
+                            type="button"
+                            data-testid={`home-myapp-withdraw-${entry.identityKey}`}
+                            disabled={withdrawing}
+                            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-60"
+                            onClick={() => { void handleWithdrawMyApp(entry) }}
+                          >
+                            {withdrawing
+                              ? t('poo205.myApps.withdrawingAction')
+                              : t('poo205.myApps.withdrawAction')}
+                          </button>
+                        )}
+                        {/* Open through the SAME trusted flow as the shared
+                        grid (fresh resolve-launch grant; cached rows never
+                        launch). */}
+                        <button
+                          type="button"
+                          data-testid={`home-myapp-open-${entry.identityKey}`}
+                          disabled={entry.launchBlocked
+                            || Boolean(memberActions.operationStates[entry.identityKey])}
+                          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[13px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                          onClick={() => handleOpenApp(entry)}
+                        >
+                          {memberActions.operationStates[entry.identityKey]
+                            ? t('common.loading')
+                            : t('common.open')}
+                        </button>
+                      </div>
+                    </article>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
       <section>
         <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
-          {/* The assistant stays first among matching results, including
-          when no work App matches the current query/source. */}
-          {assistantVisible && <article
-            data-testid="home-quick-entry-polo"
-            onClick={openPoloAssistant}
-            className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
-          >
-            <span className="mb-[24px] min-[1081px]:mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
-              <Icons.Sparkles className="size-[18px]" aria-hidden="true" />
-            </span>
-            <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
-            <p className="mt-[4px] text-[14px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
-            <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
-              {t('homeApps.home.poloDescription')}
-            </p>
-            <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
-              <button type="button" className={clientWorkbenchButtonClassName} onClick={event => { event.stopPropagation(); setSkillsOpen(true) }}>
-                {t('productSpaceSkills.title', { defaultValue: 'Manage skills' })}
-              </button>
-              {/* Prototype `.home-app-grid .assistant-card
-              .home-primary-action`: solid accent, weight 650, lifts with
-              shadow-middle on hover. */}
-              <button
-                type="button"
-                className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  openPoloAssistant()
-                }}
-              >
-                {t('homeApps.home.openAssistant')}
-              </button>
-            </div>
-          </article>}
-          {skillsOpen && <ProductSpaceSkillsDialog onClose={() => setSkillsOpen(false)} />}
-          {/* POO-108: the enterprise knowledge base ships as a built-in card
-          next to the assistant. Enterprise spaces only — the KB RPC refuses a
-          personal space with an explicit error, so the card never mounts
-          there. */}
-          {spaceKind === 'enterprise' && <article
-            data-testid="home-quick-entry-knowledge-base"
-            onClick={openKnowledgeBase}
-            className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
-          >
-            <span className="mb-[24px] min-[1081px]:mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
-              <Icons.Library className="size-[18px]" aria-hidden="true" />
-            </span>
-            <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('builtinApp.enterpriseKnowledge.name')}</h3>
-            <p className="mt-[4px] text-[14px] leading-[normal] text-muted-foreground">{t('builtinApp.enterpriseKnowledge.source')}</p>
-            <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
-              {t('builtinApp.enterpriseKnowledge.description')}
-            </p>
-            <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
-              <button
-                type="button"
-                className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  openKnowledgeBase()
-                }}
-              >
-                {t('knowledgeBase.actions.open')}
-              </button>
-            </div>
-          </article>}
+          {/* POO-205 Catalog v2: no built-in cards here anymore — the Polo
+          assistant is a base capability (opened from chat) and the enterprise
+          knowledge base retired into the project shared-file area. The grid
+          renders ONLY catalog rows (shared apps/skills). */}
           {phase === 'loading' && !catalog.state.catalog ? (
             <div
               className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface client-material-card"
@@ -1419,7 +1600,23 @@ export function HomePage({ onEnterProject: onEnterProjectProp }: {
             )}
           </div>
         )}
-        {phase === 'ready' && matchableEntries.length > 0 && visibleEntries.length === 0 && !assistantVisible && (
+        {showDirectoryRows && phase === 'ready' && directory.entries.length === 0 && directory.myApps.length > 0 && (
+          /* POO-205: the space holds ONLY member rows — the shared grid is
+          honestly empty while the 我的应用 partition above carries the rows
+          (the phase counts both partitions, so this face must exist). */
+          <div
+            className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-border px-[20px] py-[34px] text-center"
+            data-testid="home-directory-shared-empty"
+          >
+            <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
+              {t('homeApps.allApps.empty')}
+            </h2>
+            <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
+              {t('poo70.h3.home.emptyEnterprise')}
+            </p>
+          </div>
+        )}
+        {phase === 'ready' && matchableEntries.length > 0 && visibleEntries.length === 0 && (
           /* Prototype `[data-library-empty]`: the search/filter vacuum —
           distinct from the directory vacuum above, with the explicit clear
           action. Fully-hidden directories do NOT show this: the restore

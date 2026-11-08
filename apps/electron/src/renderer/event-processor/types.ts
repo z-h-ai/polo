@@ -141,17 +141,6 @@ export interface LabelsChangedEvent {
 }
 
 /**
- * Knowledge-base scope changed event (POO-108): the server's authoritative
- * per-session collection scope, broadcast after every persisted write
- * (explicit save or first-send draft commit) so every window converges.
- */
-export interface KbCollectionsChangedEvent {
-  type: 'kb_collections_changed'
-  sessionId: string
-  collectionIds: string[]
-}
-
-/**
  * Todo state changed event (external metadata change or agent tool)
  */
 export interface SessionStatusChangedEvent {
@@ -528,7 +517,6 @@ export type AgentEvent =
   | CredentialRequestEvent
   | SourcesChangedEvent
   | LabelsChangedEvent
-  | KbCollectionsChangedEvent
   | SessionStatusChangedEvent
   | SessionFlaggedEvent
   | SessionUnflaggedEvent

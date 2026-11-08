@@ -2480,7 +2480,7 @@ export default function App() {
     return lease
   }, [])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], kbCollectionIds?: string[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], elementReferences?: WebElementReference[], projectAssetRefs?: ProjectAssetMentionDraft[]) => {
     // Journey #8: the optimistic bubble's id, hoisted so the catch block can
     // strip exactly that bubble (the send's server receipt is unknown — the
     // failed attempt must not linger as a half-confirmed message).
@@ -2654,14 +2654,6 @@ export default function App() {
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
-        // POO-108: the composer's KB scope rides the SEND_MESSAGE chain; the
-        // handler filters to published collections and persists the session
-        // snapshot before the turn runs. The array is passed through as-is —
-        // an explicit `[]` commits "no collections" with THIS message, so a
-        // failed clear-save can never fall back to the server's stale scope
-        // (review #12). `undefined` (non-composer callers) keeps the stored
-        // scope untouched.
-        kbCollectionIds,
         // POO-135: picked web element references ride the same chain and are
         // persisted on the stored user message.
         elementReferences,

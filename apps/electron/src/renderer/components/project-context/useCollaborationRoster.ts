@@ -1,57 +1,64 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type {
-  ClientCollaborationRosterMember,
-  ClientMemberRole,
-} from '@polo-ai/shared/admin/client-enterprise-contract'
+import type { PmProjectScopeInput, ProjectMember } from '@polo-ai/shared/protocol'
 import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
 import { membersErrorKey } from './useProjectMembers'
 
 /**
- * POO-196 R3 collaboration-roster state hook (adjudication D4).
+ * POO-205 collaboration-roster state hook (rewritten from the POO-196 R3
+ * roster: the safe all-roles projection of ONE project's members, read from
+ * the same `pm:listProjectMembers` wire as the management surface).
  *
- * The single SAFE roster surface every active role reads (owner/manager/
- * member alike — a member 403 is a real authority change, not a success
- * path). The projection carries NO contact and NO governance fields, and
- * `totalActiveMembers` is the server's unfiltered count from the same
- * snapshot as the page: the client never derives a count from the loaded
- * rows and never reports 0 for an empty search match.
+ * The projection carries NO contact and NO governance fields. The member
+ * count is the SERVER's full array length — `pm:listProjectMembers` answers
+ * the complete list (no pagination), so the client counts exactly what the
+ * server sent and never a fabricated 0; the viewer's role is derived from
+ * the list's own row for the acting account. A forbidden read is a real
+ * authority loss: data clears, count and role fall back to unknown — never
+ * a stale roster behind the error (失权即清数据).
  *
- * Name search passes `q` straight through (server-side filter over the full
- * roster); the loaded pages, the viewer role and the total are reset on a
- * query change exactly like on a scope change. Every scope change (account /
- * project) clears everything and bumps the generation, so a roster response
- * from a previous account or project is discarded, never published — 失权即
- * 清数据. Nothing here is persisted; the count a header shows dies with the
- * scope.
+ * Name search is CLIENT-side over the loaded snapshot (the wire takes no `q`
+ * on this channel). Every scope change (account / space / project) clears
+ * everything and bumps the generation, so a late response of the previous
+ * scope is discarded instead of being published into the wrong panel.
+ * Nothing here is persisted; the count a header shows dies with the scope.
  */
 
-export type CollaborationRosterScope = {
+export type CollaborationRosterScope = PmProjectScopeInput
+
+export interface CollaborationRosterMember {
   accountId: string
-  productSpaceId: string
+  displayName: string | null
+  role: 'owner' | 'manager' | 'member'
+  isSelf: boolean
 }
 
 export type CollaborationRosterState = {
-  members: ClientCollaborationRosterMember[]
-  /** The server's unfiltered active-member count; `null` means unknown —
-   * the UI keeps a "members" affordance instead of showing a fabricated 0. */
+  members: CollaborationRosterMember[]
+  /** The server snapshot's member count; `null` means unknown — the UI
+   * keeps a "members" affordance instead of showing a fabricated 0. */
   totalActiveMembers: number | null
-  viewerRole: ClientMemberRole | null
-  enterpriseName: string | null
+  viewerRole: CollaborationRosterMember['role'] | null
   nextCursor: string | null
   loading: boolean
   loadingMore: boolean
-  /** i18n key of the load failure, when the FIRST page failed. */
+  /** i18n key of the load failure. */
   errorKey: string | null
 }
 
-export const ROSTER_PAGE_LIMIT = 20
+function toRosterMembers(items: readonly ProjectMember[], accountId: string): CollaborationRosterMember[] {
+  return items.map(member => ({
+    accountId: member.accountId,
+    displayName: member.displayName,
+    role: member.role,
+    isSelf: member.accountId === accountId,
+  }))
+}
 
 function emptyRoster(): CollaborationRosterState {
   return {
     members: [],
     totalActiveMembers: null,
     viewerRole: null,
-    enterpriseName: null,
     nextCursor: null,
     loading: false,
     loadingMore: false,
@@ -60,111 +67,90 @@ function emptyRoster(): CollaborationRosterState {
 }
 
 export function useCollaborationRoster(scope: CollaborationRosterScope | null) {
-  const scopeKey = scope ? `${scope.accountId}:${scope.productSpaceId}` : null
+  const scopeKey = scope
+    ? `${scope.accountId}:${scope.productSpaceId}:${scope.organizationEnterpriseId}:${scope.projectId}`
+    : null
 
   const [state, setState] = useState<CollaborationRosterState>(emptyRoster)
   const [query, setQuery] = useState('')
   const generationRef = useRef(0)
-  /** The query the CURRENT pages were loaded with (roster cursors are
-   * (normalizedDisplayName,userId) pages of the q-filtered list). */
-  const loadedQueryRef = useRef('')
-  const cursorRef = useRef<string | null>(null)
-  const busyRef = useRef(false)
 
-  const load = useCallback(async (options?: { q?: string; cursor?: string }) => {
+  const load = useCallback(async () => {
     if (!scope) return
-    const q = options?.q ?? ''
     const generation = ++generationRef.current
-    const first = !options?.cursor
-    loadedQueryRef.current = q
-    busyRef.current = true
-    setState(previous => first
-      ? { ...emptyRoster(), loading: true }
-      : { ...previous, loadingMore: true, errorKey: null })
+    setState(previous => ({ ...emptyRoster(), loading: previous.members.length === 0 }))
     try {
-      const response = await window.electronAPI.pmListCollaborationRoster({
-        accountId: scope.accountId,
-        productSpaceId: scope.productSpaceId,
-        ...(q ? { q } : {}),
-        ...(options?.cursor ? { cursor: options.cursor } : {}),
-        limit: ROSTER_PAGE_LIMIT,
-      })
+      const response = await window.electronAPI.pmListProjectMembers({ ...scope })
       if (generation !== generationRef.current) return
-      cursorRef.current = response.nextCursor
-      busyRef.current = false
-      setState(previous => ({
-        members: first ? response.members : [...previous.members, ...response.members],
-        // The count is the server's UNFILTERED total from the same snapshot —
-        // a q-filtered page still reports it; the client never counts rows.
-        totalActiveMembers: response.totalActiveMembers,
-        viewerRole: response.viewerRole,
-        enterpriseName: response.enterpriseName,
-        nextCursor: response.nextCursor,
+      const members = toRosterMembers(response.members, scope.accountId)
+      const mine = members.find(member => member.isSelf)
+      setState({
+        members,
+        totalActiveMembers: members.length,
+        viewerRole: mine?.role ?? null,
+        nextCursor: null,
         loading: false,
         loadingMore: false,
         errorKey: null,
-      }))
+      })
     } catch (error) {
       if (generation !== generationRef.current) return
       // E2-5: pm codes ride the context-bridge message marker; a bare
-      // `.code` read would classify every failure as generic. A failed
-      // CONTINUATION keeps the already-loaded pages. A 403 is a real
-      // authority loss: the pages stay cleared (a failed first page has
-      // none), and the header count falls back to unknown — never a stale
+      // `.code` read would classify every failure as generic. A 403 clears
+      // the pages so the header count falls back to unknown — never a stale
       // roster behind the error.
-      busyRef.current = false
       const code = readRpcErrorCode(error)
-      setState(previous => ({
-        ...previous,
-        loading: false,
-        loadingMore: false,
+      setState({
+        ...emptyRoster(),
         errorKey: membersErrorKey(code),
-        ...(code === 'forbidden' ? { totalActiveMembers: null, viewerRole: null } : {}),
-      }))
+      })
     }
   }, [scope])
 
-  // Scope change (account or project) clears EVERYTHING and rejects the late
-  // responses of the previous scope.
+  // Scope change (account / space / project) clears EVERYTHING and rejects
+  // the late responses of the previous scope.
   useEffect(() => {
     generationRef.current += 1
-    loadedQueryRef.current = ''
-    cursorRef.current = null
-    busyRef.current = false
     setQuery('')
     setState(emptyRoster())
     if (scope) void load()
   }, [scopeKey]) // eslint-disable-line react-hooks/exhaustive-deps -- `load` follows `scope`, captured by scopeKey
 
-  /** Server-side search (D4): a new q restarts from the first page; the
-   * previous pages are invalidated with it. */
+  /** Client-side name search over the loaded snapshot: a new query filters
+   * in place (no re-read — the wire channel has no `q`). */
   const search = useCallback((nextQuery: string) => {
-    const q = nextQuery.trim().slice(0, 128)
-    setQuery(q)
-    if (!scope) return
-    void load({ q })
-  }, [load, scope])
+    setQuery(nextQuery.trim().slice(0, 128))
+  }, [])
 
-  const loadMore = useCallback(() => {
-    if (!scope || busyRef.current) return
-    const cursor = cursorRef.current
-    if (!cursor) return
-    void load({ q: loadedQueryRef.current, cursor })
-  }, [load, scope])
+  /** The full snapshot's filtered view (query applied). Kept separate from
+   * `members` so count surfaces can keep reading the UNFILTERED total. */
+  const visibleMembers = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase()
+    if (!normalized) return state.members
+    return state.members.filter(member =>
+      (member.displayName ?? '').toLocaleLowerCase().includes(normalized))
+  }, [query, state.members])
 
-  /** X2-7-style retry: only meaningful while the FIRST page failed. */
   const retry = useCallback(() => {
-    if (!scope || busyRef.current) return
+    if (!scope) return
     if (!state.errorKey) return
-    void load({ q: loadedQueryRef.current })
+    void load()
   }, [load, scope, state.errorKey])
 
   return useMemo(() => ({
     scopeKey,
     query,
-    ...state,
+    members: visibleMembers,
+    allMembers: state.members,
+    totalActiveMembers: state.totalActiveMembers,
+    viewerRole: state.viewerRole,
+    enterpriseName: null,
+    nextCursor: null,
+    loading: state.loading,
+    loadingMore: false,
+    errorKey: state.errorKey,
     search,
-    loadMore,
+    loadMore: () => {},
     retry,
-  }), [loadMore, query, retry, scopeKey, search, state])
+  }), [retry, scopeKey, search, state.errorKey, state.loading, state.members, state.totalActiveMembers, state.viewerRole, visibleMembers])
 }

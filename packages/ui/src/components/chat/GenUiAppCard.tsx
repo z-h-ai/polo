@@ -11,10 +11,12 @@
  *
  * Pinning opens the same file as a tab-browser web app (plus an audit record
  * written Main-side); the request travels over a CustomEvent so this shared
- * package stays decoupled from the Electron renderer's contexts. POO-104 adds
- * the publish action (发布为 Web App Artifact) on the same pattern: Main
- * packages the session-local bundle and the Electron-side bridge hands it to
- * the existing CreatorArtifact upload chain. POO-154: pinning became a
+ * package stays decoupled from the Electron renderer's contexts. POO-104's
+ * publish action became POO-205's 保存到我的应用 on the same pattern (same
+ * event names): Main packages the session-local bundle and the Electron-side
+ * bridge saves it into the current space's 我的应用 list; publishing it into
+ * the shared directory lives on the home partition, not on this card.
+ * POO-154: pinning became a
  * toggle — the bridge mirrors the installed canvas-app ids back
  * (craft:genui-pin-state) so a remounted card offers 取消固定 instead of a
  * second pin, and an unpin request removes the launcher entry again.
@@ -231,18 +233,19 @@ function createPinRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
 }
 
-// ── Publish bridge (POO-104: 发布为 Web App Artifact) ────────────────────────
+// ── Save bridge (POO-205: 保存到我的应用, ex-POO-104 publish) ─────────────────
 //
-// Same CustomEvent decoupling as pinning: the card asks for a publish, the
-// Electron-side bridge packages the session-local bundle (Main) and hands the
-// payload to the existing CreatorArtifact upload chain. The card never sees
-// organization ids or zip bytes — Main derives the bundle path from the
-// session identity itself, so no path crosses this boundary.
+// Same CustomEvent decoupling as pinning: the card asks to SAVE the app into
+// the current space's 我的应用 list, the Electron-side bridge packages the
+// session-local bundle (Main) and hands the temp file to the myapps:create
+// chain. The card never sees space ids or zip bytes — Main derives the bundle
+// path from the session identity itself, so no path crosses this boundary.
+// Publishing the saved app into the shared directory is a SEPARATE explicit
+// action on the home 我的应用 partition (enterprise spaces only) — never a
+// card-triggered remote publish.
 
 export const GENUI_APP_PUBLISH_EVENT = 'craft:publish-genui-app'
 export const GENUI_APP_PUBLISH_RESULT_EVENT = 'craft:publish-genui-app-result'
-export const GENUI_APP_PUBLISH_TARGET_EVENT = 'craft:genui-publish-target'
-export const GENUI_APP_PUBLISH_TARGET_QUERY_EVENT = 'craft:query-genui-publish-target'
 
 export interface GenUiAppPublishRequest {
   requestId: string
@@ -252,32 +255,17 @@ export interface GenUiAppPublishRequest {
 }
 
 /**
- * Stable failure class of a publish attempt. The card localizes from this —
+ * Stable failure class of a save attempt. The card localizes from this —
  * the raw `error` text stays diagnostics-only (it may be a server message in
  * any language) and travels in the detail tooltip.
  */
-export type GenUiAppPublishErrorCode = 'packaging-failed' | 'no-publish-target' | 'publish-failed'
+export type GenUiAppPublishErrorCode = 'packaging-failed' | 'no-active-space' | 'save-failed'
 
 export interface GenUiAppPublishResult {
   requestId: string
   ok: boolean
   error?: string
   errorCode?: GenUiAppPublishErrorCode
-  /** Display name of the organization the artifact was published into. */
-  organizationName?: string
-}
-
-/**
- * The Electron bridge announces the publish target so a card can gate its
- * publish button: `hasActiveTarget: false` disables it — the bridge
- * deliberately has no inactive-organization fallback, so without an active
- * organization there is nothing to publish into. `hasActiveTarget: true`
- * carries the target's display name for the button title. No announcement
- * (bridge unavailable, RPC failed) means unknown, not absent.
- */
-export interface GenUiAppPublishTarget {
-  hasActiveTarget: boolean
-  organizationName: string | null
 }
 
 export function dispatchGenUiAppPublish(request: GenUiAppPublishRequest): void {
@@ -289,7 +277,7 @@ export function dispatchGenUiAppPublishResult(result: GenUiAppPublishResult): vo
   window.dispatchEvent(new CustomEvent<GenUiAppPublishResult>(GENUI_APP_PUBLISH_RESULT_EVENT, { detail: result }))
 }
 
-/** Subscribe to the publish result for one requestId; returns an unsubscribe. */
+/** Subscribe to the save result for one requestId; returns an unsubscribe. */
 export function onGenUiAppPublishResult(
   requestId: string,
   handler: (result: GenUiAppPublishResult) => void,
@@ -301,16 +289,6 @@ export function onGenUiAppPublishResult(
   }
   window.addEventListener(GENUI_APP_PUBLISH_RESULT_EVENT, listener)
   return () => window.removeEventListener(GENUI_APP_PUBLISH_RESULT_EVENT, listener)
-}
-
-/** A card asking the bridge to (re-)announce the publish target. */
-export function dispatchGenUiAppPublishTargetQuery(): void {
-  window.dispatchEvent(new CustomEvent(GENUI_APP_PUBLISH_TARGET_QUERY_EVENT))
-}
-
-/** Electron-side bridge announces the resolved publish target through this. */
-export function dispatchGenUiAppPublishTarget(target: GenUiAppPublishTarget): void {
-  window.dispatchEvent(new CustomEvent<GenUiAppPublishTarget>(GENUI_APP_PUBLISH_TARGET_EVENT, { detail: target }))
 }
 
 // ── Card registration bridge (POO-103, CustomEvent → Electron bridge) ────────
@@ -675,13 +653,13 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
     })
   }, [appId, pinState, sessionId, t])
 
-  // POO-104 publish: Main packages the bundle and the Electron bridge pushes
-  // it through the CreatorArtifact upload chain. Only a real bundle file in a
-  // real session can publish — the same gating as the pin action — and the
-  // packaging API must actually exist: a structural check (not the global
-  // electronAPI typing, which would leak Electron types into this shared
-  // package) keeps the button out of non-Electron shells (webui) where no
-  // bridge serves the CustomEvent.
+  // POO-205 save: Main packages the bundle and the Electron bridge saves it
+  // into the current space's 我的应用 list (myapps:create). Only a real
+  // bundle file in a real session can save — the same gating as the pin
+  // action — and the packaging API must actually exist: a structural check
+  // (not the global electronAPI typing, which would leak Electron types into
+  // this shared package) keeps the button out of non-Electron shells (webui)
+  // where no bridge serves the CustomEvent.
   const hasElectronPublishBridge = typeof (window as {
     electronAPI?: { packageGenUiAppArtifact?: unknown }
   }).electronAPI?.packageGenUiAppArtifact === 'function'
@@ -690,29 +668,6 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
   const [publishError, setPublishError] = React.useState<string | null>(null)
   /** Raw (possibly server-language) failure text, surfaced as a tooltip only. */
   const [publishErrorDetail, setPublishErrorDetail] = React.useState<string | null>(null)
-  // Publish target from the bridge's announcement: hasActiveTarget=false
-  // disables the button (no active organization — the bridge has no inactive
-  // fallback); null = unknown, the button stays enabled and a click surfaces
-  // the precise error from the bridge.
-  const [publishTarget, setPublishTarget] = React.useState<GenUiAppPublishTarget | null>(null)
-  const [publishedOrg, setPublishedOrg] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    if (!hasElectronPublishBridge) return
-    // Subscribe BEFORE dispatching: the bridge answers the query with a
-    // broadcast, so the replay must land on a registered listener. (The
-    // bridge also announces once per its own mount, but cards mount after
-    // it — the query is what makes the gated state actually reachable.)
-    const listener = (event: Event) => {
-      const detail = (event as CustomEvent<GenUiAppPublishTarget>).detail
-      if (!detail || typeof detail.hasActiveTarget !== 'boolean') return
-      setPublishTarget(detail)
-      if (!detail.hasActiveTarget) setPublishedOrg(null)
-    }
-    window.addEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, listener)
-    dispatchGenUiAppPublishTargetQuery()
-    return () => window.removeEventListener(GENUI_APP_PUBLISH_TARGET_EVENT, listener)
-  }, [hasElectronPublishBridge])
 
   const handlePublish = React.useCallback(() => {
     if (!canPublish || publishState === 'pending') return
@@ -724,19 +679,16 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       unsubscribe()
       if (result.ok) {
         setPublishState('published')
-        // The result's org name is authoritative; the announcement is the
-        // pre-click fallback for the button title.
-        setPublishedOrg(result.organizationName ?? publishTarget?.organizationName ?? null)
       } else {
         setPublishState('error')
         // The raw error text may be a server-language diagnostic; the stable
         // error code localizes, the raw text stays in the tooltip.
         setPublishError(
-          result.errorCode === 'no-publish-target'
-            ? t('genui.app.publishErrorNoTarget')
+          result.errorCode === 'no-active-space'
+            ? t('genui.app.saveErrorNoSpace')
             : result.errorCode === 'packaging-failed'
-              ? t('genui.app.publishErrorPackage')
-              : t('genui.app.publishFailed'),
+              ? t('genui.app.saveErrorPackage')
+              : t('genui.app.saveFailed'),
         )
         if (result.error) setPublishErrorDetail(result.error)
       }
@@ -747,19 +699,9 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
       appId,
       title,
     })
-  }, [appId, canPublish, publishState, publishTarget, sessionId, t, title])
+  }, [appId, canPublish, publishState, sessionId, t, title])
 
-  // Button tooltip: unavailable target explains why the button is disabled;
-  // a known target org is named in both the pre-click hint and the published
-  // result — with several organizations the destination is the visible fact.
-  const publishUnavailable = publishTarget?.hasActiveTarget === false
-  const publishTitle = publishUnavailable
-    ? t('genui.app.publishNoTarget')
-    : publishedOrg
-      ? publishState === 'published'
-        ? t('genui.app.publishedTo', { org: publishedOrg })
-        : t('genui.app.publishHintTo', { org: publishedOrg })
-      : t('genui.app.publishHint')
+  const publishTitle = t('genui.app.saveHint')
 
   // While the pane holds this app the card collapses to a placeholder strip:
   // no second live webview (one per app, always), the name plus where it went
@@ -828,7 +770,6 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
             disabled={
               publishState === 'pending'
               || publishState === 'published'
-              || publishUnavailable
             }
             title={publishTitle}
             className={cn(
@@ -839,7 +780,11 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
             )}
           >
             <Globe className="w-3 h-3" />
-            {publishState === 'published' ? t('genui.app.published') : publishState === 'pending' ? t('genui.app.publishing') : t('genui.app.publish')}
+            {publishState === 'published'
+              ? t('genui.app.savedToMyApps')
+              : publishState === 'pending'
+                ? t('genui.app.savingToMyApps')
+                : t('genui.app.saveToMyApps')}
           </button>
         )}
       </div>
@@ -849,14 +794,6 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
           title={publishErrorDetail ?? undefined}
         >
           {publishError ?? pinError}
-        </div>
-      )}
-      {!pinError && !publishError && publishUnavailable && (
-        // POO-154: a disabled button with only a hover tooltip reads as a dead
-        // control. When the bridge knows there is no publish target, say so
-        // inline — the state must be visible, not merely discoverable.
-        <div className="px-3 py-1.5 text-[14px] text-muted-foreground/80 bg-muted/30 border-b">
-          {t('genui.app.publishNoTargetHint')}
         </div>
       )}
       {loadFailed ? (

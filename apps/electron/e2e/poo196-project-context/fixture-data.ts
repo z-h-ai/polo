@@ -869,13 +869,11 @@ const r3Session = (id: string, productSpaceId: string, name: string, lastMessage
 })
 
 /** The beta recent session carries the UB2 composer-draft seeds (data
- * injection only, no product logic): a KB scope so the composer commits a
- * real selection with a send, and ONE pending follow-up annotation so the
+ * injection only, no product logic): ONE pending follow-up annotation so the
  *「批注未标已发送」pin has a real subject (no `meta.followUp.lastSentAt` =
  * still pending). R3-05's full-draft pin enters the ALREADY-committed beta
  * (same-conversation landing), so the seeds ride this session. */
 const betaRecentSession = r3Session(SESSION_R3_BETA_RECENT, R3_PROJECT_BETA_ID, '北区交付 · 最近会话', Date.parse('2026-11-02T15:00:00+08:00'))
-betaRecentSession.kbCollectionIds = ['kb-col-weekly']
 ;(betaRecentSession.messages[1] as Record<string, unknown>).annotations = [{
   id: 'ann-r3-beta-followup',
   schemaVersion: 1,

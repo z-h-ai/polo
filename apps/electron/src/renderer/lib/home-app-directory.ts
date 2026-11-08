@@ -26,7 +26,12 @@ import {
  *   `useAppCatalog().resolveLaunch` online grant).
  */
 
-export type HomeAppSourceKind = 'polo' | 'creator_circle' | 'enterprise_import'
+/**
+ * POO-205: `self` marks an app created in place by a space member ("我的应
+ * 用"). It is valid in BOTH space kinds — publishing keeps the source, so
+ * provenance survives the member → space visibility change.
+ */
+export type HomeAppSourceKind = 'polo' | 'creator_circle' | 'enterprise_import' | 'self'
 
 export type HomeAppSourceRefusal =
   | 'circle_authorization_lost'
@@ -133,6 +138,16 @@ export interface HomeAppDirectoryContext {
   errorCode?: string | null
   accessMode?: 'online' | 'offline' | 'denied' | null
   /**
+   * POO-205: catalogEntryIds of the member-visible "我的应用" app entries in
+   * this catalog (indexed by the trusted projection — see
+   * `useAppCatalog`'s `memberCatalogEntryIds`). Entries whose id is listed
+   * are split into the `myApps` partition instead of the shared grid.
+   * Absent/empty means no member rows — the split degrades to the shared
+   * grid, which is fail-OPEN for visibility and safe because the server
+   * only ever places member rows in their owner's catalog response.
+   */
+  memberCatalogEntryIds?: ReadonlySet<string> | null
+  /**
    * UPSTREAM-EXPECTED (POO-81 member-circle contract, not landed at the H1
    * pin): circleIds whose authorization the member-circle authority reports
    * as lost. Absent or empty means every recorded circle source stays valid —
@@ -146,10 +161,18 @@ export interface HomeAppDirectoryContext {
 export interface HomeAppDirectory {
   phase: HomeAppDirectoryPhase
   /**
-   * Deduplicated full directory in authoritative Catalog entry order. Empty
+   * Deduplicated SPACE-SHARED directory (member "我的应用" rows excluded —
+   * they live in `myApps` below) in authoritative Catalog entry order. Empty
    * unless the projection is authoritative for the CURRENT space context.
    */
   entries: HomeAppDirectoryEntry[]
+  /**
+   * POO-205: the member-private "我的应用" rows of the CURRENT account —
+   * member-visibility catalog entries, same stable identities and launch
+   * rules as the shared grid, split into their own partition. Never filled
+   * when the projection is not authoritative.
+   */
+  myApps: HomeAppDirectoryEntry[]
   /** Consumer-side refusals, recorded for audit and tests. */
   rejections: HomeAppDirectoryRejection[]
   stats: {
@@ -163,7 +186,10 @@ export interface HomeAppDirectory {
 }
 
 function isHomeAppSourceKind(kind: string): kind is HomeAppSourceKind {
-  return kind === 'polo' || kind === 'creator_circle' || kind === 'enterprise_import'
+  return kind === 'polo'
+    || kind === 'creator_circle'
+    || kind === 'enterprise_import'
+    || kind === 'self'
 }
 
 /**
@@ -181,17 +207,19 @@ export function hasOnlyLostCircleSources(entry: HomeAppDirectoryEntry): boolean 
 }
 
 /**
- * Consumer-side source-kind guard: a personal space is granted by Polo and
- * creator circles only, an enterprise space by enterprise imports only. The
- * trusted Catalog boundary already enforces this server-side; a violation
- * here means a foreign/corrupt projection, which must not inherit sources
- * across space kinds (P70-CATALOG-02: no personal-circle inheritance into
- * enterprise directories).
+ * Consumer-side source-kind guard: a personal space is granted by Polo,
+ * creator circles and the member's own "self" works; an enterprise space by
+ * enterprise imports AND the member's own "self" works (publishing keeps the
+ * `self` provenance). The trusted Catalog boundary already enforces this
+ * server-side; a violation here means a foreign/corrupt projection, which
+ * must not inherit sources across space kinds (P70-CATALOG-02: no
+ * personal-circle inheritance into enterprise directories).
  */
 function spaceKindAllowsSource(
   spaceKind: 'personal' | 'enterprise' | null,
   kind: HomeAppSourceKind,
 ): boolean {
+  if (kind === 'self') return true
   if (spaceKind === 'personal') return kind === 'polo' || kind === 'creator_circle'
   if (spaceKind === 'enterprise') return kind === 'enterprise_import'
   return true
@@ -292,6 +320,7 @@ export function selectHomeAppDirectory(
     return {
       phase: selectDirectoryPhase(null, context, 0),
       entries: [],
+      myApps: [],
       rejections,
       stats,
     }
@@ -307,6 +336,7 @@ export function selectHomeAppDirectory(
     return {
       phase: selectDirectoryPhase(null, context, 0),
       entries: [],
+      myApps: [],
       rejections,
       stats,
     }
@@ -317,6 +347,7 @@ export function selectHomeAppDirectory(
   stats.duplicatesDropped = deduped.duplicatesDropped
 
   const entries: HomeAppDirectoryEntry[] = []
+  const myApps: HomeAppDirectoryEntry[] = []
   for (const app of deduped.apps) {
     if (app.organizationId !== catalog.organizationId) {
       rejections.push({
@@ -348,25 +379,43 @@ export function selectHomeAppDirectory(
       }
     }
     const availability: HomeAppDirectoryAvailability = app.availability ?? 'unavailable'
-    entries.push({
+    // POO-205 display rule: a `self` source's display name IS the entry's own
+    // name — provenance of a member-created work never surfaces as a foreign
+    // label. The RAW `app.catalogSources` above stays untouched (operation
+    // identities seal it); this is a display projection only.
+    const displaySources = sources.map(source => (
+      source.kind === 'self' && source.valid ? { ...source, name: app.name } : source
+    ))
+    const entry: HomeAppDirectoryEntry = {
       identityKey: getCatalogAppIdentityKey(catalog, app),
       catalogEntryId: app.catalogEntryId ?? app.id,
       artifactInstanceId: app.artifactInstanceId ?? null,
       app,
-      sources,
+      sources: displaySources,
       availability,
       rawAvailability: app.rawAvailability ?? null,
       // Cache never grants launch: blocked/unavailable/withdrawn rows and
       // rows without a remaining valid source are not launchable.
       launchBlocked: availability !== 'available' || !sources.some(source => source.valid),
-    })
+    }
+    // Member-visibility rows split into the 我的应用 partition. The index
+    // comes from the trusted projection (server-side filtered to the owner);
+    // an empty/absent index keeps every row in the shared grid.
+    if (entry.catalogEntryId && context.memberCatalogEntryIds?.has(entry.catalogEntryId)) {
+      myApps.push(entry)
+    } else {
+      entries.push(entry)
+    }
   }
 
   return {
     // Phase reflects the CURRENT space's authoritative state; it is computed
-    // from the validated projection, never from a foreign catalog.
-    phase: selectDirectoryPhase(catalog, context, entries.length),
+    // from the validated projection, never from a foreign catalog. Both
+    // partitions count — a space holding only member rows is READY, and each
+    // partition renders its own vacuum.
+    phase: selectDirectoryPhase(catalog, context, entries.length + myApps.length),
     entries,
+    myApps,
     rejections,
     stats,
   }

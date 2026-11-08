@@ -140,7 +140,7 @@ export interface AppShellContextType {
     workspaceId: string,
     options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
   ) => Promise<Session>
-  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@polo-ai/core').ContentBadge[], kbCollectionIds?: string[], elementReferences?: import('@polo-ai/core/types').WebElementReference[], projectAssetRefs?: import('@/atoms/project-context').ProjectAssetMentionDraft[]) => void
+  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@polo-ai/core').ContentBadge[], elementReferences?: import('@polo-ai/core/types').WebElementReference[], projectAssetRefs?: import('@/atoms/project-context').ProjectAssetMentionDraft[]) => void
   /**
    * Locate the Edit Popover session that still owns an active pending
    * question for the given workspace + popover owner (hidden session, not

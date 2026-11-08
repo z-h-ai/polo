@@ -5834,18 +5834,17 @@ async function scenarioR3DirectEntryAndRecentSession() {
   const sendReadyCopy = (await i18nText('project.entry.sendReady')).trim()
   check('[R3-05][U11] 同对话落地 →「项目已打开，请点击发送」引导',
     ((await js<string>(`document.querySelector('${T.projectEntrySendNotice}')?.textContent ?? ''`)).includes(sendReadyCopy.slice(0, 5))))
-  // 用户一次发送 = 一次请求，载荷携带全部草稿字段（文字/附件/引用/KB），
+  // 用户一次发送 = 一次请求，载荷携带全部草稿字段（文字/附件/项目引用），
   // 批注此刻才标记已发送（恰好一条 updateAnnotation）。
   await js<boolean>('window.__poo196.send()')
   await until(async () => (await js<Array<unknown>>('window.__poo196.sendMessageLog')).length === sendMarkFull + 1, 12000)
-  const acceptedSend = (await js<Array<{ sessionId: string; message: string; attachments: Array<{ name?: string }>; kbCollectionIds: string[]; projectAssetRefs: unknown[] }>>('window.__poo196.sendMessageLog'))[sendMarkFull]!
-  check('[R3-05][U11] 一次发送恰一次请求且载荷完整（文字/附件/引用/KB）',
+  const acceptedSend = (await js<Array<{ sessionId: string; message: string; attachments: Array<{ name?: string }>; projectAssetRefs: unknown[] }>>('window.__poo196.sendMessageLog'))[sendMarkFull]!
+  check('[R3-05][U11] 一次发送恰一次请求且载荷完整（文字/附件/项目引用）',
     acceptedSend.sessionId === SESSION_R3_BETA_RECENT
     // ChatDisplay appends the follow-up annotation section after the typed
     // text — the draft text leads the payload verbatim.
     && acceptedSend.message.startsWith('落地前的完整草稿')
     && acceptedSend.attachments.length === 1 && acceptedSend.attachments[0]!.name === 'blocked-draft.txt'
-    && JSON.stringify(acceptedSend.kbCollectionIds) === JSON.stringify(['kb-col-weekly'])
     && JSON.stringify(acceptedSend.projectAssetRefs) === JSON.stringify(betaDraftRefs), { acceptedSend })
   const statsAfterFull = await runProgramDirect<{ annotationCommands: Array<{ annotationId?: string }> }>({ op: 'r3Stats' })
   check('[R3-05][U11] 已发送才标记批注（恰好一条 updateAnnotation）',

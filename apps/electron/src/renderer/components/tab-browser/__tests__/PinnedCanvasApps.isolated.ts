@@ -3,8 +3,8 @@
  *
  * The section only renders when a pinned canvas app exists, and its actions
  * delegate to TabShell (openApp/removeApp). These tests pin the selection and
- * label contracts — the guard that keeps builtin/polo tabs, knowledge-base
- * entries and sideloaded webapps out of the section, and the fallback name
+ * label contracts — the guard that keeps builtin/polo tabs and sideloaded
+ * webapps out of the section, and the fallback name
  * that shows when a pinned entry lost its title.
  */
 import { describe, expect, it, mock } from 'bun:test'
@@ -29,7 +29,7 @@ mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined
 
 const { isPinnedCanvasApp, selectPinnedCanvasApps, pinnedCanvasAppLabel } = await import('../PinnedCanvasApps')
 
-const { KNOWLEDGE_BASE_APP_DEFINITION, POLO_APP_DEFINITION } = await import(
+const { POLO_APP_DEFINITION } = await import(
   '../../../../shared/tab-browser-types'
 )
 
@@ -50,7 +50,6 @@ describe('isPinnedCanvasApp', () => {
 
   it('rejects builtin, sideloaded and prefix-impostor ids', () => {
     expect(isPinnedCanvasApp(POLO_APP_DEFINITION)).toBe(false)
-    expect(isPinnedCanvasApp(KNOWLEDGE_BASE_APP_DEFINITION)).toBe(false)
     expect(isPinnedCanvasApp(app('web-abc', 'Sideloaded'))).toBe(false)
     expect(isPinnedCanvasApp(app('gen-ui-appx-abc', 'Impostor'))).toBe(false)
   })

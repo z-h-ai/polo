@@ -1276,7 +1276,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             <ChatDisplay
               ref={chatDisplayRef}
               session={session}
-              onSendMessage={(message, attachments, skillSlugs, kbCollectionIds, elementReferences, projectAssetRefs) => {
+              onSendMessage={(message, attachments, skillSlugs, elementReferences, projectAssetRefs) => {
                 // D13.1 entry fence (BACKSTOP): the composer's submitGate is
                 // the primary U11 gate and already refused before the draft
                 // cleared; this deep pending check keeps any path that might
@@ -1290,7 +1290,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   // U11: an ACCEPTED send consumes this conversation's
                   // blocked-send notice marker — the guidance did its job.
                   clearSendNotice(session.id)
-                  onSendMessage(session.id, message, attachments, skillSlugs, undefined, kbCollectionIds, elementReferences, projectAssetRefs)
+                  onSendMessage(session.id, message, attachments, skillSlugs, undefined, elementReferences, projectAssetRefs)
                 }
               }}
               submitGate={submitGate}
