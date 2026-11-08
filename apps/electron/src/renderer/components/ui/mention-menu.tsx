@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { FadingText } from '@/components/ui/fading-text'
@@ -288,7 +289,13 @@ export function InlineMentionMenu({
     ? window.innerHeight - Math.round(position.y) + 8
     : 0
 
-  return (
+  // POO-203 inline-menu sweep: the composer panel carries backdrop-filter,
+  // which per CSS makes it the containing block for position:fixed descendants
+  // — the viewport-anchored left/bottom then land relative to the panel and
+  // the menu drifts hundreds of px away from the caret. Portal to <body> so
+  // "fixed" means the viewport again. SSR (renderToStaticMarkup in tests)
+  // has no portal target, so fall back to inline rendering there.
+  const menu = (
     <div
       ref={menuRef}
       data-inline-menu
@@ -384,6 +391,8 @@ export function InlineMentionMenu({
       </div>
     </div>
   )
+  if (typeof document === 'undefined') return menu
+  return createPortal(menu, document.body)
 }
 
 // ============================================================================

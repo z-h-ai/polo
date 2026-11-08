@@ -188,7 +188,10 @@ function configureIpc(): void {
 
 const { renderHook, act, waitFor } = await import('@testing-library/react')
 const { useProductSpaceContextState } = await import('../useProductSpaceContext')
-const { resetProductSpaceStorageMemoryForTests } = await import('@/lib/product-space-storage')
+const {
+  resetProductSpaceStorageMemoryForTests,
+  setStoredActiveProductSpaceId,
+} = await import('@/lib/product-space-storage')
 
 function useHarness() {
   return useProductSpaceContextState()
@@ -365,6 +368,9 @@ describe('useProductSpaceContextState membershipListVerified 状态机 (POO-142 
 
   it('普通刷新失败保留本 scope 的既有已验证事实', async () => {
     const { result } = renderHook(useHarness)
+    // 上次使用的是个人空间（POO-203 后无记忆首登会直达首个 active 企业，
+    // 这里显式声明本用例的起点与首登行为无关）。
+    setStoredActiveProductSpaceId(accountId, personalId)
     expect(await boot(result)).toBe('ready')
     expect(result.current.membershipListVerified).toBe(true)
 

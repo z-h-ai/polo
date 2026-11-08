@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from 'cmdk'
 import { Check, Minimize2 } from 'lucide-react'
@@ -450,7 +451,12 @@ export function InlineSlashCommand({
   // Track current item index across all sections
   let currentItemIndex = 0
 
-  return (
+  // POO-203 inline-menu sweep: portal to <body>. The composer panel carries
+  // backdrop-filter, which makes it the containing block for position:fixed
+  // descendants, so the viewport-anchored left/bottom drift away from the
+  // caret. SSR (renderToStaticMarkup in tests) has no portal target, so fall
+  // back to inline rendering there.
+  const menu = (
     <div
       ref={menuRef}
       data-inline-menu
@@ -522,6 +528,8 @@ export function InlineSlashCommand({
       </div>
     </div>
   )
+  if (typeof document === 'undefined') return menu
+  return createPortal(menu, document.body)
 }
 
 // ============================================================================

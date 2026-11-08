@@ -19,6 +19,9 @@ function passthrough({ children }: { children?: ReactNode }) {
 
 mock.module('@/components/ui/styled-dropdown', () => ({
   DropdownMenuSub: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  // workbench-controls re-exports this as WorkbenchMenuContent; without it the
+  // partial module mock fails ESM linking before any test runs.
+  StyledDropdownMenuContent: passthrough,
   StyledDropdownMenuSubTrigger: ({ children, ...props }: { children?: ReactNode }) => createElement('div', props, children),
   DropdownMenuContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   StyledDropdownMenuSubContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),

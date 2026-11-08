@@ -1242,12 +1242,21 @@ export default function App() {
 
   // M1/SCENE-4: ≥2 available spaces → the space-select gate before Home; a
   // single available space keeps the existing straight-through path (PC-F01).
+  // POO-203 (owner adjudication 2026-11-07, 方案 B1): a FIRST login on this
+  // device ('fresh' — no usable memory) commits the first ACTIVE enterprise
+  // in bootstrap and goes straight through, so an invited member opens their
+  // enterprise without a confirmation step. Every other multi-space login
+  // (returning memory, unusable memory, restricted-only enterprise) still
+  // confirms once (D-PC-15); a read_only enterprise is never auto-entered.
   useEffect(() => {
     const route = spaceRoute
     if (!route) return
     if (productSpace.flowState !== 'ready') return
     setSpaceRoute(null)
-    if (productSpace.productSpaces.length >= 2) {
+    const directEnteredEnterprise = productSpace.spaceSelectionSource === 'fresh'
+      && productSpace.activeProductSpace?.kind === 'enterprise'
+      && productSpace.activeProductSpace.accessMode === 'active'
+    if (productSpace.productSpaces.length >= 2 && !directEnteredEnterprise) {
       setAppState('space-select')
       return
     }

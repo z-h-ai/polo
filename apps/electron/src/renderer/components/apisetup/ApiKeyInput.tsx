@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from "cmdk"
 import { Input } from "@/components/ui/input"
@@ -717,8 +718,13 @@ export function ApiKeyInput({
                   </button>
                 </div>
               ))}
-              {activeTierConfig && tierDropdownPosition && (
-                <>
+              {activeTierConfig && tierDropdownPosition ? createPortal(
+                  <>
+                  {/* POO-203 inline-menu sweep: settings/onboarding render
+                      inside a PanelSlot whose material surface carries
+                      backdrop-filter, so position:fixed would anchor to that
+                      panel instead of the viewport. Portal keeps the
+                      trigger-rect coordinates viewport-true. */}
                   <div
                     className="fixed inset-0 z-floating-backdrop"
                     onClick={() => { setOpenTier(null); setTierFilter('') }}
@@ -774,8 +780,8 @@ export function ApiKeyInput({
                       </CommandPrimitive.List>
                     </CommandPrimitive>
                   </div>
-                </>
-              )}
+                  </>, document.body)
+                : null}
               {modelError && (
                 <p className="text-xs text-destructive">{modelError}</p>
               )}

@@ -285,9 +285,20 @@ afterEach(() => {
   resetProductSpaceStorageMemoryForTests()
 })
 
+/** Boots the hook. By default the device REMEMBERS the personal space as the
+ * last-used one ('stored' restore) — the world nearly every scenario below
+ * assumes. POO-203 retired the "first login commits personal" default: a
+ * NO-memory device now enters the first ACTIVE enterprise directly, so
+ * first-login scenarios opt in explicitly with `{ freshDevice: true }`. A
+ * test that seeds its own unusable memory keeps it (an empty ledger is the
+ * only thing that gets defaulted). */
 async function boot(
   hook: { current: ReturnType<typeof useHarness> },
+  options?: { freshDevice?: boolean },
 ) {
+  if (!options?.freshDevice && !getStoredActiveProductSpaceId(accountId)) {
+    setStoredActiveProductSpaceId(accountId, personalId)
+  }
   let outcome: string | null = null as string | null
   await act(async () => {
     outcome = await hook.current.bootstrap(accountId)
@@ -318,15 +329,68 @@ describe('useProductSpaceContextState bootstrap', () => {
     }
   })
 
-  it('enters the personal space on first login', async () => {
+  it('POO-203: a first login enters the first ACTIVE enterprise directly (no stored memory)', async () => {
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      // Server order: the active enterprise is NOT first — it must still win
+      // over the personal space, and the read_only one must be skipped.
+      productSpaces: [
+        enterpriseSpace('space-ent-ro', '受限企业', { accessMode: 'read_only', restrictionCode: 'billing_restricted' }),
+        personalSpace,
+        enterpriseSpace('space-ent', '北辰智能科技'),
+      ],
+    }
     const { result } = renderHook(useHarness)
-    expect(await boot(result)).toBe('ready')
+    expect(await boot(result, { freshDevice: true })).toBe('ready')
     expect(result.current.flowState).toBe('ready')
-    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(result.current.spaceSelectionSource).toBe('fresh')
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
     expect(result.current.personalProductSpaceId).toBe(personalId)
-    expect(result.current.productSpaceContextKey).toContain(personalId)
+    expect(result.current.productSpaceContextKey).toContain('space-ent')
+    expect(result.current.productSpaces.map(space => space.kind).sort())
+      .toEqual(['enterprise', 'enterprise', 'personal'])
+  })
+
+  it('POO-203: with several ACTIVE enterprises a first login enters the first in server order', async () => {
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        personalSpace,
+        enterpriseSpace('space-ent-b', '乙企业'),
+        enterpriseSpace('space-ent-a', '甲企业'),
+      ],
+    }
+    const { result } = renderHook(useHarness)
+    expect(await boot(result, { freshDevice: true })).toBe('ready')
+    expect(result.current.spaceSelectionSource).toBe('fresh')
+    expect(result.current.activeProductSpaceId).toBe('space-ent-b')
+  })
+
+  it('POO-203: a first login without an active enterprise still enters the personal space', async () => {
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        personalSpace,
+        enterpriseSpace('space-ent-ro', '受限企业', { accessMode: 'read_only', restrictionCode: 'billing_restricted' }),
+      ],
+    }
+    const { result } = renderHook(useHarness)
+    expect(await boot(result, { freshDevice: true })).toBe('ready')
+    expect(result.current.spaceSelectionSource).toBe('fresh')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
     expect(result.current.productSpaces.map(space => space.kind).sort())
       .toEqual(['enterprise', 'personal'])
+  })
+
+  it('POO-203: an unusable stored memory never auto-enters an enterprise (gate decides)', async () => {
+    setStoredActiveProductSpaceId(accountId, 'removed-space')
+    const { result } = renderHook(useHarness)
+    expect(await boot(result)).toBe('ready')
+    expect(result.current.spaceSelectionSource).toBe('memory-invalid')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
   })
 
   it('restores the stored active space for the same account', async () => {
@@ -2174,13 +2238,15 @@ describe('useProductSpaceContextState boot entry & reopen recovery (P70-BOOT-01/
     expect(result.current.activeProductSpaceId).toBeNull()
     expect(restoreOfflineViewCalls).toBe(1)
 
-    // Retry: recovery through the same bootstrap path.
+    // Retry: recovery through the same bootstrap path. The device still has
+    // no memory (the first boot never committed), so POO-203 makes this
+    // first-login retry enter the first ACTIVE enterprise directly.
     listResult = bothSpaces()
     await act(async () => {
       expect(await result.current.retryBootstrap()).toBe('ready')
     })
     expect(result.current.flowState).toBe('ready')
-    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
     expect(listCalls).toBe(2)
     expect(cleanupCalls).toBe(1)
   })

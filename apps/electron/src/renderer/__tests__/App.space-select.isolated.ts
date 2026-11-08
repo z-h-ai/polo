@@ -153,6 +153,32 @@ const electronApiExplicit: Record<string, unknown> = {
   // fallback shape is `async () => null` — without it the fail-fast proxy
   // turns the route read into space-error before any screen can render.
   getWindowLaunchContext: async () => null,
+  // POO-172 moved the App-level chat-link callback onto electronAPI.browserPane
+  // (App.tsx useOpenBrowserLink). These suites never click a browser link; the
+  // stub only has to exist so the fail-fast proxy lets App render.
+  browserPane: {
+    list: async () => [],
+    onStateChanged: (_cb: unknown) => () => {},
+    onRemoved: (_cb: unknown) => () => {},
+    onElementPickerEvent: (_cb: unknown) => () => {},
+    create: async () => 'inst-unit',
+    navigate: async () => {},
+    embed: async () => {},
+    detachToPopup: async () => {},
+    unembed: async () => {},
+    focus: async () => {},
+    destroy: async () => false,
+    setElementPicking: async () => {},
+    goBack: async () => {},
+    goForward: async () => {},
+    reload: async () => {},
+  },
+  // POO-161 canvas epoch: App releases retained canvas state per space-context
+  // key; the suites never open a canvas pane.
+  canvasPane: { release: async () => {} },
+  // Chat-link teardown + tab-shell app list reads (POO-172/canvas batches).
+  browserPaneDestroyAll: async () => {},
+  getTabBrowserApps: async () => [],
   getSetupNeeds: async () => ({
     isFullyConfigured: authenticated, needsAdminLogin: !authenticated,
     needsCredentials: false, needsBillingConfig: false,
@@ -451,9 +477,13 @@ describe('登录后空间选择（space-select 门禁）× 真实 App', () => {
 
   it('活跃 executions 时切换对话框覆盖选择页：对话框内确认后才提交进入 Home', async () => {
     authenticated = true
+    // POO-203 后，选择页带推荐标记且 active 停在个人空间的真实状态是
+    // memory-invalid（首登 fresh 已直达企业）。
+    productSpaceState.spaceSelectionSource = 'memory-invalid'
     productSpaceState.productSpaces = [personalSpace, enterpriseSpace]
     productSpaceState.allProductSpaces = [personalSpace, enterpriseSpace]
     productSpaceState.activeProductSpaceId = PERSONAL_ID
+    productSpaceState.activeProductSpace = { id: PERSONAL_ID, kind: 'personal', name: '我的空间' }
     // 有活跃任务：requestSwitch 停在 confirm 相位，等待对话框内的显式终止确认
     productSpaceState.requestSwitch.mockImplementation(async (targetId: string) => {
       productSpaceState.pendingSwitch = {
@@ -493,15 +523,58 @@ describe('登录后空间选择（space-select 门禁）× 真实 App', () => {
     expect(productSpaceState.confirmStopAndSwitch).toHaveBeenCalledTimes(1)
   })
 
-  it('SCENE-5：首登无本地记忆时推荐企业置顶、带推荐标记并默认选中，确认走切换事务进入企业空间', async () => {
+  it('POO-203：首登无本地记忆时 bootstrap 已提交首个 active 企业，登录直达 Home 不出选择页、零切换事务', async () => {
     authenticated = true
+    // 模拟 POO-203 bootstrap 的首登提交结果：fresh（本机无记忆）且首个
+    // active 企业已提交为 active——App 路由必须跳过选择页。
+    productSpaceState.spaceSelectionSource = 'fresh'
     productSpaceState.productSpaces = [personalSpace, enterpriseSpace]
     productSpaceState.allProductSpaces = [personalSpace, enterpriseSpace]
+    productSpaceState.activeProductSpaceId = ENTERPRISE_ID
+    // 完整 summary 形状（含 accessMode）：App 的直达判定只认 active 企业
+    productSpaceState.activeProductSpace = {
+      id: ENTERPRISE_ID, kind: 'enterprise', name: '星辰传媒', accessMode: 'active',
+    } as unknown as typeof productSpaceState.activeProductSpace
+    armSwitchTransaction()
+    renderAppTree()
+    await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
+    expect(screen.queryByTestId('product-space-select-screen')).toBeNull()
+    expect(productSpaceState.requestSwitch).not.toHaveBeenCalled()
+    expect(productSpaceState.confirmStopAndSwitch).not.toHaveBeenCalled()
+  })
+
+  it('POO-203：首登无 active 企业（仅受限企业）仍停在选择页，默认个人空间不自动进受限空间', async () => {
+    authenticated = true
+    productSpaceState.spaceSelectionSource = 'fresh'
+    productSpaceState.productSpaces = [personalSpace, restrictedEnterpriseSpace]
+    productSpaceState.allProductSpaces = [personalSpace, restrictedEnterpriseSpace]
     productSpaceState.activeProductSpaceId = PERSONAL_ID
+    productSpaceState.activeProductSpace = { id: PERSONAL_ID, kind: 'personal', name: '我的空间' }
     armSwitchTransaction()
     renderAppTree()
     await waitFor(() => expect(screen.getByTestId('product-space-select-screen')).toBeTruthy())
-    expect(screen.getByText('欢迎加入 Polo AI！根据企业邀请，为你推荐要进入的空间。')).toBeTruthy()
+    // 没有 active 企业就没有推荐标记
+    expect(screen.queryByTestId('product-space-select-recommended-tag')).toBeNull()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('product-space-select-confirm'))
+      await new Promise(resolve => setTimeout(resolve, 5))
+    })
+    // 默认选中个人空间（bootstrap 已提交）：确认后零切换事务进入
+    expect(productSpaceState.requestSwitch).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByTestId('home-quick-access-section')).toBeTruthy())
+  })
+
+  it('记忆失效（memory-invalid）时选择页推荐企业置顶、带推荐标记并默认选中，确认走切换事务进入企业空间', async () => {
+    authenticated = true
+    productSpaceState.spaceSelectionSource = 'memory-invalid'
+    productSpaceState.productSpaces = [personalSpace, enterpriseSpace]
+    productSpaceState.allProductSpaces = [personalSpace, enterpriseSpace]
+    productSpaceState.activeProductSpaceId = PERSONAL_ID
+    productSpaceState.activeProductSpace = { id: PERSONAL_ID, kind: 'personal', name: '我的空间' }
+    armSwitchTransaction()
+    renderAppTree()
+    await waitFor(() => expect(screen.getByTestId('product-space-select-screen')).toBeTruthy())
+    expect(screen.getByText('上次使用的空间当前不可用，已为你推荐可进入的空间。')).toBeTruthy()
     const rows = selectItems()
     expect(rows[0]!.getAttribute('data-space-id')).toBe(ENTERPRISE_ID)
     expect(rows[0]!.getAttribute('data-active')).toBe('true')
