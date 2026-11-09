@@ -1,4 +1,6 @@
-import { getDefaultStore, useSetAtom } from 'jotai'
+import { useStore } from 'jotai'
+
+type JotaiStore = ReturnType<typeof useStore>
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -69,14 +71,17 @@ export function selectProjectSessionByProjectId(
 /** Enter a project of the committed organization (lightweight). Returns the
  * published ActiveProjectRef (or null when the caller's scope was incomplete
  * — the click is then a no-op, never a fake navigation). */
-export async function enterProjectLightweight(accountId: string, project: LightweightProjectInput): Promise<ActiveProjectRef | null> {
+export async function enterProjectLightweight(accountId: string, project: LightweightProjectInput, store?: JotaiStore): Promise<ActiveProjectRef | null> {
   if (!accountOk(accountId) || !project.id || !project.organizationProductSpaceId) return null
   const ref = activeProjectRefOf(accountId, project)
   // Spec §10: entering a project OPENS ITS TAB (title = project name). The
   // App-level effect on the active tab re-publishes the active project from
   // the tab payload; this eager setActiveProject keeps the pre-navigation
   // zero-write first send bound even before that effect settles.
-  getDefaultStore().set(openProjectTabAtom, {
+  // The caller's jotai store (useStore) — the app runs inside a Jotai
+  // Provider, so getDefaultStore would be a DIFFERENT store the UI never reads.
+  const jotai = store ?? (() => { throw new Error('project entry requires the jotai store') })()
+  jotai.set(openProjectTabAtom, {
     projectId: project.id,
     name: project.name,
     ...(project.purpose !== undefined ? { purpose: project.purpose } : {}),
@@ -119,15 +124,16 @@ function accountOk(accountId: string): boolean {
  */
 export function useProjectLightweightEntry() {
   const { t } = useTranslation()
-  // The tab-open now lives inside enterProjectLightweight (default store) so
-  // the plain-function callers (HomePage cards) get the same behavior as the
-  // dialog. This hook keeps the toast/error channel only.
+  // The caller's jotai store: the app runs inside a JotaiProvider, so the
+  // project-tab write MUST ride the context store (getDefaultStore would be
+  // a store the UI never reads).
+  const store = useStore()
   const enter = useCallback((accountId: string, project: LightweightProjectInput): Promise<ActiveProjectRef | null> => {
-    const result = enterProjectLightweight(accountId, project)
+    const result = enterProjectLightweight(accountId, project, store)
     void result.catch(() => {
       toast.error(t('project.entry.historyFailed'))
     })
     return result
-  }, [t])
+  }, [store, t])
   return { enterProject: enter }
 }

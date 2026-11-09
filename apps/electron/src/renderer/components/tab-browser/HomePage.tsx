@@ -32,6 +32,7 @@ import {
 } from '@/hooks/useMyApps'
 import { HomeSpaceContext, type HomeSpaceCategory } from '@/components/product-space/HomeSpaceContext'
 import { useProductSpaceAppLaunchHandoff, useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import { useStore } from 'jotai'
 import { enterProjectLightweight } from '@/components/projects/enter-project'
 import { ProjectSettingsView } from '@/components/projects/ProjectSettingsView'
 import { getActiveProjectFor } from '@/components/projects/projects-bus'
@@ -519,6 +520,7 @@ export function HomePage({ onEnterProject }: {
    * organization's projects, so `onRequestSwitch` has nothing to do here.
    * The host-provided override (isolated test mounts) keeps its shape.
    */
+  const jotaiStore = useStore()
   const [enteringProjectId, setEnteringProjectId] = useState<string | null>(null)
   // POO-205 §10: project settings live on the HOME project card now — the
   // project TAB hosts conversations only (the App-level drawer retired).
@@ -540,7 +542,7 @@ export function HomePage({ onEnterProject }: {
       ...(entry.purpose ? { purpose: entry.purpose } : {}),
       ...(entry.instructions ? { instructions: entry.instructions } : {}),
       myRole: entry.role,
-    }).finally(() => {
+    }, jotaiStore).finally(() => {
       setEnteringProjectId(previous => (previous === entry.id ? null : previous))
     })
   }, [enteringProjectId, onEnterProject, projectsAccountId, projectsOrgScope])
