@@ -178,3 +178,16 @@ e2e 验收后 owner 修正项目交互模型：
    会话三栏界面，不再有抽屉。项目设置/成员入口移入项目 Tab 左栏头部。
 4. 项目 Tab 的会话列表只显示**当前项目**的会话（所有对话都属于当前项目）。
 5. 首页项目区「进入项目」= 打开/激活该项目 Tab；Tab 关闭 = 离开项目（回到首页）。
+
+### §10 实现验证（2026-11-09，真实应用 e2e）
+
+本地全栈驱动验证通过（截图 /tmp/poo205-e2e-evidence/80-82）：
+- 顶栏 Tab 条 = `首页 | <项目名 A> | <项目名 B>`，无 Polo 助手 Tab（企业空间）。
+- 进入项目即打开/聚焦该项目 Tab 并落在会话三栏；Tab 关闭钮可回首页。
+- 多项目多 Tab 并存、Tab 间切换正确重绑 activeProject。
+- 项目 Tab 会话列表只显示当前项目会话（AppShell 按 projectId 过滤）。
+
+e2e 过程抓出并修复两个实现 bug：
+1. ProjectHomePanel useSyncExternalStore 快照不稳定 → 进组织即崩（5fe0c4a3）。
+2. 项目 Tab 写 getDefaultStore 而应用运行于 JotaiProvider → Tab 不出现（b4acafbc，
+   修正为调用方 useStore 透传）。
