@@ -97,6 +97,10 @@ function restoreTabs(rawTabs: TabInstance[], apps: AppDefinition[]): TabInstance
   // is silently dropped, so legacy persisted snapshots never restore it.
   const restored = rawTabs.filter((tab) => {
     if (tab.id === POLO_TAB_ID || tab.type === 'polo') return true
+    // POO-205 §10: project tabs persist (title refreshes from the projects
+    // list when the user re-enters; a stale title for a DELETED project is
+    // harmless — the tab just sits until closed).
+    if (tab.type === 'project' && tab.project?.projectId) return true
     if (tab.type !== 'webapp') return false
     return appIds.has(tab.appId)
   })
