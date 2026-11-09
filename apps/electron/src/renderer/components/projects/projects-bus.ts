@@ -18,11 +18,10 @@ import type { ProjectRole } from '@polo-ai/shared/protocol'
  *   never be created into a project of a space the user has left. Memory
  *   only — nothing here persists, and an account switch invalidates it.
  *
- * - the view bus: `openProjectsView` publishes a lightweight navigation
- *   request (nav / detail / settings) that the App-hosted ProjectHomePanel
- *   (ONE instance, like CreateProjectDialog) consumes. A custom-event-free
- *   external store keeps the request addressable across the panel's own
- *   mount effects (no lost request between dispatch and subscription).
+ * Spec §10 (project-tab interaction): the active project is DRIVEN BY THE
+ * ACTIVE TAB — activating a `project` tab publishes it, activating any other
+ * tab clears it. The store stays module-level so AppShell (session list
+ * filter), ChatPage (composer binding) and App (creation) read one source.
  */
 
 /** The project-scoped fact one consumer attaches to a created session. */
@@ -87,6 +86,13 @@ export function getActiveProjectSnapshot(accountId: string, organizationProductS
   return getActiveProjectFor(accountId, organizationProductSpaceId)
 }
 
+/** The UNFENCED snapshot (AppShell session-list filter). The value was
+ * scope-stamped at write time and hygiene-cleared on scope drift, so a raw
+ * read is safe; per-scope reads keep using getActiveProjectFor. */
+export function getActiveProjectRaw(): ActiveProjectRef | null {
+  return activeProject
+}
+
 export function setActiveProject(ref: ActiveProjectRef | null): void {
   activeProject = ref
   for (const listener of activeProjectListeners) listener()
@@ -104,49 +110,4 @@ export function clearActiveProjectIfStale(accountId: string, organizationProduct
   ) return
   activeProject = null
   for (const listener of activeProjectListeners) listener()
-}
-
-/* ── The project-page view bus ──────────────────────────────────────────── */
-
-export type ProjectsViewRequest =
-  | { view: 'nav' }
-  | { view: 'detail'; projectId: string }
-  | { view: 'settings'; projectId: string }
-
-let pendingViewRequest: ProjectsViewRequest | null = null
-let viewRequestSeq = 0
-const viewListeners = new Set<() => void>()
-
-/** Publish a project-page navigation request (lightweight project entry —
- * never a space switch). The App-hosted panel consumes it on its effect;
- * a request published while no panel is mounted simply waits there. */
-export function openProjectsView(request: ProjectsViewRequest): void {
-  pendingViewRequest = request
-  viewRequestSeq += 1
-  projectsViewSnapshot = { request: pendingViewRequest, seq: viewRequestSeq }
-  for (const listener of viewListeners) listener()
-}
-
-export function subscribeProjectsView(listener: () => void): () => void {
-  viewListeners.add(listener)
-  return () => { viewListeners.delete(listener) }
-}
-
-/** The pending request + its sequence (sequence lets the consumer tell a
- * fresh request from an already-consumed one without nulling underfoot).
- * The snapshot object is CACHED and replaced only when the values change —
- * useSyncExternalStore compares snapshots with Object.is on every render,
- * so a fresh literal per call would loop forever (e2e-caught, POO-205). */
-let projectsViewSnapshot: { request: ProjectsViewRequest | null; seq: number } = { request: null, seq: 0 }
-
-export function getProjectsViewSnapshot(): { request: ProjectsViewRequest | null; seq: number } {
-  return projectsViewSnapshot
-}
-
-/** Consume the pending request (one-shot: the panel opened for it). */
-export function consumeProjectsView(seq: number): void {
-  if (seq !== viewRequestSeq) return
-  pendingViewRequest = null
-  projectsViewSnapshot = { request: pendingViewRequest, seq: viewRequestSeq }
-  for (const listener of viewListeners) listener()
 }

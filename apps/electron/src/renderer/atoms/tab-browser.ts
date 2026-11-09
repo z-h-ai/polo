@@ -6,6 +6,7 @@ import {
   POLO_APP_ID,
   POLO_TAB,
   POLO_TAB_ID,
+  projectTabId,
   type AppDefinition,
   type TabInstance,
 } from '../../shared/tab-browser-types'
@@ -32,6 +33,43 @@ export const activeTabAtom = atom<TabInstance | null>((get) => {
 export const setInstalledAppsAtom = atom(null, (_get, set, apps: AppDefinition[]) => {
   set(installedAppsAtom, normalizeInstalledApps(apps))
 })
+
+/** POO-205 Spec §10: open-or-focus the tab hosting ONE project. Entering a
+ * project never routes the Polo tab and never opens a drawer — the tab itself
+ * (title = project name) is the project's assistant workspace. Idempotent per
+ * projectId; re-entering refreshes the carried identity (name/purpose may
+ * have been edited) and focuses the existing tab. */
+export const openProjectTabAtom = atom(
+  null,
+  (get, set, project: NonNullable<TabInstance['project']>) => {
+    const tabId = projectTabId(project.projectId)
+    const tabs = get(openTabsAtom)
+    const existing = tabs.find((tab) => tab.id === tabId)
+    if (existing) {
+      if (existing.title !== project.name
+        || existing.project?.purpose !== project.purpose
+        || existing.project?.instructions !== project.instructions) {
+        set(openTabsAtom, tabs.map(tab => (
+          tab.id === tabId ? { ...tab, title: project.name, project } : tab
+        )))
+      }
+    } else {
+      const tab: TabInstance = {
+        id: tabId,
+        appId: tabId,
+        type: 'project',
+        title: project.name,
+        project,
+      }
+      const poloIndex = tabs.findIndex((tab) => tab.id === POLO_TAB_ID)
+      const insertAt = poloIndex >= 0 ? poloIndex + 1 : 0
+      const next = [...tabs]
+      next.splice(insertAt, 0, tab)
+      set(openTabsAtom, next)
+    }
+    set(activeTabIdAtom, tabId)
+  },
+)
 
 export const openAppTabAtom = atom(
   null,

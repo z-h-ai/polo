@@ -67,7 +67,10 @@ export function TabContent({ renderPolo, onReauthenticateRequest }: TabContentPr
         style={{ paddingTop: 'var(--content-top-offset)' }}
       >
         <div className="relative min-h-0 flex-1">
-          <div className={activeType === 'polo' ? 'flex h-full min-h-0 flex-col' : 'hidden'}>
+          {/* POO-205 §10: a project tab IS the assistant workspace for that
+          project — the same singleton polo surface, rebound by the App-level
+          active-tab effect to the tab's project. */}
+          <div className={activeType === 'polo' || activeType === 'project' ? 'flex h-full min-h-0 flex-col' : 'hidden'}>
             {renderPolo()}
           </div>
 

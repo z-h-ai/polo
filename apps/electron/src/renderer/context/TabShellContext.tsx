@@ -31,6 +31,11 @@ import { GenUiCardRegistryBridge } from '@/components/tab-browser/GenUiCardRegis
 import { GenUiCanvasBridge } from '@/components/tab-browser/GenUiCanvasBridge'
 import { GENUI_PINNED_APP_ID_PREFIX } from '../../shared/types'
 import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
+import {
+  clearActiveProjectIfStale,
+  getActiveProjectRaw,
+  setActiveProject,
+} from '@/components/projects/projects-bus'
 
 export interface WebAppNavigationControls {
   canGoBack: boolean
@@ -297,6 +302,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
   return (
     <TabShellContext.Provider value={value}>
       {liveProductSpace && <ProductSpaceAppLaunchBridge />}
+      {liveProductSpace && <ProjectTabActiveProjectBridge scope={{ accountId: liveProductSpace.accountId, productSpaceId: liveProductSpace.activeProductSpaceId }} />}
       <GenUiAppPinBridge />
       <GenUiAppPublishBridge />
       <GenUiCardRegistryBridge />
@@ -304,6 +310,40 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
       {children}
     </TabShellContext.Provider>
   )
+}
+
+/**
+ * POO-205 Spec §10: the ACTIVE TAB drives the renderer-wide active project.
+ * Activating a `project` tab publishes its project (the conversation layout
+ * and zero-write first sends bind to it); activating any other tab clears
+ * the binding, so "新建会话" can never attach a project the user navigated
+ * away from. The host hygiene (clearActiveProjectIfStale) stays as the
+ * scope-drift backstop.
+ */
+function ProjectTabActiveProjectBridge({ scope }: { scope: { accountId: string; productSpaceId: string } }) {
+  const activeTab = useAtomValue(activeTabAtom)
+  useEffect(() => {
+    if (activeTab?.type === 'project' && activeTab.project) {
+      const project = activeTab.project
+      setActiveProject({
+        accountId: scope.accountId,
+        organizationProductSpaceId: scope.productSpaceId,
+        organizationEnterpriseId: project.organizationEnterpriseId,
+        projectId: project.projectId,
+        name: project.name,
+        ...(project.purpose ? { purpose: project.purpose } : {}),
+        ...(project.instructions ? { instructions: project.instructions } : {}),
+        myRole: project.myRole,
+      })
+      return
+    }
+    // Non-project tab: clear only what a project tab set (same scope) —
+    // enterProjectLightweight's eager pre-navigation binding is replaced by
+    // this authoritative tab-driven value.
+    if (getActiveProjectRaw()) setActiveProject(null)
+    else clearActiveProjectIfStale(scope.accountId, scope.productSpaceId)
+  }, [activeTab, scope.accountId, scope.productSpaceId])
+  return null
 }
 
 export function useTabShell() {

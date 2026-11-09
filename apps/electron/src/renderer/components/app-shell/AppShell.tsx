@@ -1,6 +1,6 @@
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
-import { useRef, useState, useEffect, useCallback, useMemo } from "react"
+import { useRef, useState, useEffect, useCallback, useMemo, useSyncExternalStore } from "react"
 import { useAtomValue, useStore } from "jotai"
 import { motion, AnimatePresence } from "motion/react"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -89,6 +89,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
+import { getActiveProjectRaw, subscribeActiveProject } from "@/components/projects/projects-bus"
 import { workbenchFocusModeAtom, workbenchSidebarVisibleAtom } from "@/atoms/workbench-view"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
@@ -1414,13 +1415,20 @@ function AppShellContent({
   // mounted at the same always-mounted layer so a system-closed popup window
   // reconciles the sidebar even when the pane is not rendered.
   useCanvasPaneSync({ currentSessionId: session.selected ?? null, onPresented: contextValue.onHideFilePreview })
+  // POO-205 §10: while a PROJECT tab is active, the sidebar shows ONLY that
+  // project's conversations — every conversation in the strip belongs to the
+  // project whose name the tab carries. activeProject is null for home /
+  // personal-chat / webapp tabs (driven by ProjectTabActiveProjectBridge).
+  const activeProject = useSyncExternalStore(subscribeActiveProject, getActiveProjectRaw)
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
     if (!activeWorkspaceId) return metas.filter(s => !s.hidden)
     return metas.filter(s =>
-      !s.hidden && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
+      !s.hidden
+      && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
+      && (!activeProject || s.projectId === activeProject.projectId)
     )
-  }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
+  }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId, activeProject])
 
   // Active sessions exclude archived - use this for all counts and filters except archived view
   const activeSessionMetas = useMemo(() => {

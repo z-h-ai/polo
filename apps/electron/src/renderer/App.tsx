@@ -107,7 +107,6 @@ import { useProductSpaceContextState } from '@/hooks/useProductSpaceContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { ProductSpaceSwitchDialog } from '@/components/product-space/ProductSpaceSwitchDialog'
 import { CreateProjectDialog } from '@/components/product-space/CreateProjectDialog'
-import { ProjectHomePanel } from '@/components/projects/ProjectHomePanel'
 import { getActiveProjectFor } from '@/components/projects/projects-bus'
 import { ProductSpaceContractGate } from '@/components/product-space/ProductSpaceContractGate'
 import {
@@ -4184,7 +4183,10 @@ export default function App() {
               open={createProjectOpen}
               onOpenChange={setCreateProjectOpen}
             />
-            <ProjectHomePanel />
+            {/* POO-205 §10: the project-page drawer retired — entering a
+            project opens its TAB (see ProjectTabActiveProjectBridge), which
+            lands directly in the conversation layout. */}
+
           </MaybeProductSpaceProvider>
           </AppShellProvider>
         </TooltipProvider>

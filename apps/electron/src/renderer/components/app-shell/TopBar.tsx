@@ -196,6 +196,15 @@ export function TopBar() {
   const userLabel = user?.displayName || user?.username || ""
   const userInitial = userLabel.trim().charAt(0)
 
+  // POO-205 Spec §10: in an ENTERPRISE committed space the Polo tab retires —
+  // chat lives ONLY inside project tabs (title = project name). The personal
+  // space keeps the assistant tab as its default chat surface.
+  const committedSpaceKind = productSpace?.activeProductSpace?.kind
+  const hidePoloTab = committedSpaceKind === "enterprise"
+  const stripTabs = hidePoloTab
+    ? openTabs.filter((tab) => tab.type !== "polo")
+    : openTabs
+  const projectTabs = stripTabs.filter((tab) => tab.type === "project")
   const openPoloTab = openTabs.find((tab) => tab.type === "polo")
 
   const openSessionFromNotification = (sessionId: string) => {
@@ -244,7 +253,7 @@ export function TopBar() {
           <span className="max-md:hidden">{t("topbar.home")}</span>
         </button>
 
-        {openTabs.map((tab) => {
+        {stripTabs.map((tab) => {
           const active = tab.id === activeTabId
           return (
             <div
@@ -269,7 +278,11 @@ export function TopBar() {
               }}
             >
               <TabIcon tab={tab} />
-              <span className="min-w-0 flex-1 truncate whitespace-nowrap">{localizedTabTitle(tab, t)}</span>
+              <span className="min-w-0 flex-1 truncate whitespace-nowrap">
+                {tab.type === "project"
+                  ? tab.project?.name || tab.title
+                  : localizedTabTitle(tab, t)}
+              </span>
               {/* POO-104: the assistant is a permanent entry — no close
                   control, so a mis-click next door can never yank the
                   workbench back to Home. Regular webapp tabs keep theirs.

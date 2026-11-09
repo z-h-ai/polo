@@ -33,6 +33,7 @@ import {
 import { HomeSpaceContext, type HomeSpaceCategory } from '@/components/product-space/HomeSpaceContext'
 import { useProductSpaceAppLaunchHandoff, useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { enterProjectLightweight } from '@/components/projects/enter-project'
+import { ProjectSettingsView } from '@/components/projects/ProjectSettingsView'
 import { getActiveProjectFor } from '@/components/projects/projects-bus'
 import {
   readProjectVisitOrder,
@@ -218,8 +219,12 @@ export type ProjectDirectoryEntry = {
   id: string
   name: string
   purpose?: string
+  /** POO-205: carried so the settings dialog edits the REAL saved value —
+   * a projection missing it would blank the field and wipe on save. */
+  instructions?: string
   role: 'owner' | 'manager' | 'member'
   memberCount?: number
+  organizationEnterpriseId: string
   organizationProductSpaceId: string
 }
 
@@ -419,7 +424,9 @@ export function HomePage({ onEnterProject }: {
           name: project.name,
           role: project.myRole,
           purpose: project.purpose,
+          instructions: project.instructions,
           memberCount: project.memberCount,
+          organizationEnterpriseId: projectsOrgScope.organizationEnterpriseId,
           organizationProductSpaceId: project.organizationProductSpaceId,
         }))
         setProjectEntries(entries)
@@ -513,6 +520,9 @@ export function HomePage({ onEnterProject }: {
    * The host-provided override (isolated test mounts) keeps its shape.
    */
   const [enteringProjectId, setEnteringProjectId] = useState<string | null>(null)
+  // POO-205 §10: project settings live on the HOME project card now — the
+  // project TAB hosts conversations only (the App-level drawer retired).
+  const [settingsProject, setSettingsProject] = useState<ProjectDirectoryEntry | null>(null)
   const handleEnterProject = useCallback((entry: ProjectDirectoryEntry) => {
     if (onEnterProject) {
       onEnterProject(entry.id)
@@ -528,6 +538,7 @@ export function HomePage({ onEnterProject }: {
       organizationProductSpaceId: entry.organizationProductSpaceId,
       name: entry.name,
       ...(entry.purpose ? { purpose: entry.purpose } : {}),
+      ...(entry.instructions ? { instructions: entry.instructions } : {}),
       myRole: entry.role,
     }).finally(() => {
       setEnteringProjectId(previous => (previous === entry.id ? null : previous))
@@ -1034,6 +1045,19 @@ export function HomePage({ onEnterProject }: {
                             <span className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] leading-[1.6]">
                               {t(`productSpace.role.${entry.role}`)}
                             </span>
+                            {(entry.role === 'owner' || entry.role === 'manager') && (
+                              <button
+                                type="button"
+                                data-testid="home-project-settings"
+                                className="inline-flex items-center whitespace-nowrap rounded-full border border-border px-[7px] py-[1px] font-medium leading-[1.6] text-foreground/70 hover:bg-foreground-5"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setSettingsProject(entry)
+                                }}
+                              >
+                                {t('poo205.settings.title')}
+                              </button>
+                            )}
                             {/* P4: member count shows only when the data
                             source actually knows it. */}
                             {typeof entry.memberCount === 'number' && (
@@ -1753,6 +1777,47 @@ export function HomePage({ onEnterProject }: {
               {t('homeApps.actions.uninstall')}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* POO-205 §10: project settings live on the HOME project card (the
+      project TAB hosts conversations only — the App-level drawer retired). */}
+      <Dialog open={settingsProject !== null} onOpenChange={(open) => { if (!open) setSettingsProject(null) }}>
+        <DialogContent className="max-w-[520px]" data-testid="home-project-settings-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              {settingsProject
+                ? t('poo205.settings.titleNamed', { name: settingsProject.name })
+                : t('poo205.settings.title')}
+            </DialogTitle>
+          </DialogHeader>
+          {settingsProject && (
+            <div className="max-h-[60vh] overflow-y-auto pr-[2px]">
+              <ProjectSettingsView
+                project={{
+                  id: settingsProject.id,
+                  name: settingsProject.name,
+                  purpose: settingsProject.purpose,
+                  instructions: settingsProject.instructions,
+                  myRole: settingsProject.role,
+                  memberCount: settingsProject.memberCount ?? 1,
+                  createdByAccountId: '',
+                  organizationEnterpriseId: settingsProject.organizationEnterpriseId,
+                  organizationProductSpaceId: settingsProject.organizationProductSpaceId,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                }}
+                onSaved={(fresh) => {
+                  setProjectEntries(entries => entries.map(entry => (
+                    entry.id === fresh.id
+                      ? { ...entry, name: fresh.name, purpose: fresh.purpose, instructions: fresh.instructions }
+                      : entry
+                  )))
+                  setSettingsProject(null)
+                }}
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -71,6 +71,9 @@ export interface SessionMeta {
   messageCount?: number
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
+  /** POO-205 §10: the project this session belongs to (enterprise sessions).
+   * The session sidebar filters on it while a project tab is active. */
+  projectId?: string
   /** Whether this session is archived */
   isArchived?: boolean
   /** Timestamp when session was archived (for retention policy) */

@@ -1,12 +1,11 @@
-import { useSetAtom } from 'jotai'
+import { getDefaultStore, useSetAtom } from 'jotai'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { openAppTabAtom } from '@/atoms/tab-browser'
+import { openProjectTabAtom } from '@/atoms/tab-browser'
 import { navigate, routes } from '@/lib/navigate'
 import { recordProjectVisit } from '@/lib/project-directory'
-import { POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
-import { activeProjectRefOf, openProjectsView, setActiveProject, type ActiveProjectRef, type LightweightProjectInput } from './projects-bus'
+import { activeProjectRefOf, setActiveProject, type ActiveProjectRef, type LightweightProjectInput } from './projects-bus'
 
 export type { LightweightProjectInput }
 
@@ -73,6 +72,19 @@ export function selectProjectSessionByProjectId(
 export async function enterProjectLightweight(accountId: string, project: LightweightProjectInput): Promise<ActiveProjectRef | null> {
   if (!accountOk(accountId) || !project.id || !project.organizationProductSpaceId) return null
   const ref = activeProjectRefOf(accountId, project)
+  // Spec §10: entering a project OPENS ITS TAB (title = project name). The
+  // App-level effect on the active tab re-publishes the active project from
+  // the tab payload; this eager setActiveProject keeps the pre-navigation
+  // zero-write first send bound even before that effect settles.
+  getDefaultStore().set(openProjectTabAtom, {
+    projectId: project.id,
+    name: project.name,
+    ...(project.purpose !== undefined ? { purpose: project.purpose } : {}),
+    ...(project.instructions !== undefined ? { instructions: project.instructions } : {}),
+    organizationEnterpriseId: project.organizationEnterpriseId,
+    organizationProductSpaceId: project.organizationProductSpaceId,
+    myRole: project.myRole,
+  })
   setActiveProject(ref)
   // The conversation layout rides the committed org workspace: land on the
   // project's most recent session, or the zero-write empty state (the first
@@ -90,7 +102,6 @@ export async function enterProjectLightweight(accountId: string, project: Lightw
     // still opens, the session list keeps whatever it already shows.
     navigate(routes.view.allSessions(), { skipAutoSelect: true })
   }
-  openProjectsView({ view: 'detail', projectId: project.id })
   recordProjectVisit(accountId, project.id)
   return ref
 }
@@ -102,23 +113,21 @@ function accountOk(accountId: string): boolean {
 /**
  * The React binding: feeds the tab-activation capability + the toast/translate
  * channel the lightweight entry needs, and exposes the enter callback. The
- * App-level host (ProjectHomePanel mount) and the HomePage cards share ONE
+ * HomePage cards share ONE
  * instance through the module store, so the capability stays live wherever
  * this hook is mounted.
  */
 export function useProjectLightweightEntry() {
   const { t } = useTranslation()
-  const activateAssistantTab = useSetAtom(openAppTabAtom)
-  // The assistant tab must be active when the conversation layout lands.
-  // enterProjectLightweight has no React context, so the tab activation rides
-  // the same atom here, right before the navigation.
+  // The tab-open now lives inside enterProjectLightweight (default store) so
+  // the plain-function callers (HomePage cards) get the same behavior as the
+  // dialog. This hook keeps the toast/error channel only.
   const enter = useCallback((accountId: string, project: LightweightProjectInput): Promise<ActiveProjectRef | null> => {
-    activateAssistantTab(POLO_APP_DEFINITION)
     const result = enterProjectLightweight(accountId, project)
     void result.catch(() => {
       toast.error(t('project.entry.historyFailed'))
     })
     return result
-  }, [activateAssistantTab, t])
+  }, [t])
   return { enterProject: enter }
 }

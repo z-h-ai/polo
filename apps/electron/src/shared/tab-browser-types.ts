@@ -1,5 +1,8 @@
 export type AppDefinitionType = 'builtin' | 'webapp'
-export type TabInstanceType = 'home' | 'polo' | 'webapp'
+// POO-205 Spec §10: a project tab IS the project's assistant workspace —
+// its title is the project name, so the user always knows which project
+// they are talking in. One open project = one tab; several projects coexist.
+export type TabInstanceType = 'home' | 'polo' | 'webapp' | 'project'
 
 /**
  * Non-secret, immutable identity handed to the POO-47 Runtime boundary.
@@ -37,6 +40,17 @@ export interface TabInstance {
   url?: string
   /** Ephemeral ProductSpace App tab. Its local UI URL must never be persisted/restored. */
   productSpaceApp?: { accountId: string; productSpaceId: string; contextVersion: number }
+  /** POO-205 §10: the project this tab hosts. Present exactly when
+   * type === 'project'; the tab title mirrors `name` and refreshes with it. */
+  project?: {
+    projectId: string
+    name: string
+    purpose?: string
+    instructions?: string
+    organizationEnterpriseId: string
+    organizationProductSpaceId: string
+    myRole: 'owner' | 'manager' | 'member'
+  }
   runtimeError?: string
   /** Explicit background choice hides the tab while retaining its guest. */
   background?: boolean
@@ -77,6 +91,12 @@ export const POLO_TAB: TabInstance = {
   appId: POLO_APP_ID,
   type: 'polo',
   title: 'Polo 助手',
+}
+
+/** Stable tab id for a project tab — re-entering the same project focuses
+ * the existing tab instead of stacking a duplicate. */
+export function projectTabId(projectId: string): string {
+  return `project-${projectId}`
 }
 
 export function createTabId(prefix = 'tab'): string {
