@@ -500,6 +500,15 @@ app.on('open-url', (event, url) => {
   }
 })
 
+// POO_AI_INSTANCE (scripts/electron-dev.ts multi-instance dev): isolate the
+// single-instance lock per instance. The config dir is instance-scoped but
+// Electron's userData is not, so a second instance would otherwise quit
+// instantly on the shared lock while another worktree's dev app is running.
+const devInstanceNum = process.env.POLO_AI_INSTANCE
+if (devInstanceNum && /^\d+$/.test(devInstanceNum)) {
+  app.setPath('userData', join(app.getPath('userData'), `instance-${devInstanceNum}`))
+}
+
 // Handle deeplink on Windows/Linux (single instance check)
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {

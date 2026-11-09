@@ -123,6 +123,7 @@ const viewListeners = new Set<() => void>()
 export function openProjectsView(request: ProjectsViewRequest): void {
   pendingViewRequest = request
   viewRequestSeq += 1
+  projectsViewSnapshot = { request: pendingViewRequest, seq: viewRequestSeq }
   for (const listener of viewListeners) listener()
 }
 
@@ -132,14 +133,20 @@ export function subscribeProjectsView(listener: () => void): () => void {
 }
 
 /** The pending request + its sequence (sequence lets the consumer tell a
- * fresh request from an already-consumed one without nulling underfoot). */
+ * fresh request from an already-consumed one without nulling underfoot).
+ * The snapshot object is CACHED and replaced only when the values change —
+ * useSyncExternalStore compares snapshots with Object.is on every render,
+ * so a fresh literal per call would loop forever (e2e-caught, POO-205). */
+let projectsViewSnapshot: { request: ProjectsViewRequest | null; seq: number } = { request: null, seq: 0 }
+
 export function getProjectsViewSnapshot(): { request: ProjectsViewRequest | null; seq: number } {
-  return { request: pendingViewRequest, seq: viewRequestSeq }
+  return projectsViewSnapshot
 }
 
 /** Consume the pending request (one-shot: the panel opened for it). */
 export function consumeProjectsView(seq: number): void {
   if (seq !== viewRequestSeq) return
   pendingViewRequest = null
+  projectsViewSnapshot = { request: pendingViewRequest, seq: viewRequestSeq }
   for (const listener of viewListeners) listener()
 }

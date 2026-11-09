@@ -575,8 +575,12 @@ async function main(): Promise<void> {
   // 5. Start Electron (build already verified)
   console.log("🚀 Starting Electron...\n");
 
+  // ELECTRON_EXTRA_ARGS: space-separated extra Chromium/Electron switches for
+  // local driving (e.g. --remote-debugging-port=9222). Never forwarded in
+  // packaged builds; dev orchestration only.
+  const electronExtraArgs = (process.env.ELECTRON_EXTRA_ARGS || "").split(" ").filter(Boolean);
   const electronProc = spawn({
-    cmd: [ELECTRON_BIN, "apps/electron"],
+    cmd: [ELECTRON_BIN, "apps/electron", ...electronExtraArgs],
     cwd: ROOT_DIR,
     stdin: "ignore",
     stdout: "inherit",
