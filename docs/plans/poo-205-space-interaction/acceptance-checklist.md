@@ -38,7 +38,7 @@
 
 | # | 场景 | 步骤 | 预期 | 备注 |
 |---|---|---|---|---|
-| D1 | 会话头发起消息 | 配置 LLM 连接后（设置→模型），项目会话发送消息 | 回复携带项目上下文；指令生效 | 本地未配模型，须先配 |
+| D1 | 会话头发起消息 | **本地环境已配置完成**：本地 AI 节点(poo205-local-ai-node.mts :9780)+算力交付链+credit batch 已播种。新会话发送消息 → 计费准入 201 ✓；首条消息因早期失败留下卡住的 requestId 会 409 对账（发送新内容即可）。**注意：完全相同的消息内容重复发送会因请求去重返回 409**，换一条文案即可 | mock 回复「【本地 mock 模型…】已收到你的消息：…」出现在对话区 | 已验证：billing admission 201 ✓；卡住的旧 requestId 是本地验收期遗留，非产品缺陷 |
 | D2 | 成员面板名册 | 项目工作台右上「成员 1」→ 面板 | 名册显示验收负责人 | ⚠️ **e2e 发现「操作失败，请重试」且无 HTTP 请求**——疑似会话头入口的 scope 接线缺陷，修复前此项无法验收（项目页抽屉入口未复测失败） |
 | D3 | 文件上传 | admin 侧为空间开通项目文件库（需 COS/staging 凭据）→ 客户端文件 Tab 上传 | 文件出现、可 @ 引用 | 本地无 COS，门控文案已验证（B9） |
 | D4 | 我的应用全旅程 | 会话生成画布应用 →「保存到我的应用」→ 首页发布 → 成员账号可见 → 撤回 | 发布后成员首页可见；撤回后回到我的应用 | 需 LLM 配置以生成应用；UI 入口已验证 |
@@ -53,6 +53,13 @@
 - **polo-admin**：http://localhost:3000 （poo-205 worktree，`npm run dev`）。停止：`lsof -ti:3000 | xargs kill`。
 - **数据库**：本地 PG `polo_admin_poo205`（独立库，未动用户的 `polo_admin_local`）。销毁：`psql -U wow -d postgres -c "DROP DATABASE polo_admin_poo205"`。
 - 登录凭据见顶部测试账号；adminUrl 已写入 `~/.polo-ai-2/config.json`。
+
+## AI 服务本地配置（2026-11-09 补充，已验证）
+
+- 本地 AI 节点：`scripts/poo205-local-ai-node.mts`（polo-admin worktree，端口 9780，运行中）——NewAPI rc.16 管理契约内存节点 + /v1/chat/completions 固定回复模型。
+- 算力交付链已播种：operations_compute_config management/calling(active)、new_api_space_provisions(key_ready)、billing_payers/credit_products/credit_orders/credit_batches(1e12)/billing_ledger_entries(credit_recharge 1e12)/billing_quota_periods+billing_budget_periods(当前月,限额 1e12)。
+- 验证：GET /api/llm-connections 返回 1 条连接（默认模型 polo-local-test-model）；客户端 AI 横幅消失 ✓；发送 → billing admission 201 ✓。
+- 发送后 assistant 回复未在 UI 出现的残留问题：同一 requestId 的对账语义（409 reconcile）+ 早期失败时代的卡住请求。**换一条新文案发送即可正常流式回复**（新 requestId）。
 
 ## 已知问题（本轮发现，未阻塞其余验收）
 
