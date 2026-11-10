@@ -13,6 +13,7 @@ import type {
   ListProjectsResponse,
   PmProductSpacesListR3Response,
   ProjectMutationResponse,
+  RemoveProjectMemberResponse,
   UpdateProjectInput,
   UpdateProjectMemberInput,
   UpdateProjectMemberResponse,
@@ -53,8 +54,9 @@ export interface ProjectMembersAdmin {
   addProjectMembers(organizationEnterpriseId: string, projectId: string, input: AddProjectMembersInput): Promise<ListProjectMembersResponse>
   /** PATCH .../projects/{projectId}/members/{accountId} — role change. */
   updateProjectMember(organizationEnterpriseId: string, projectId: string, accountId: string, input: UpdateProjectMemberInput): Promise<UpdateProjectMemberResponse>
-  /** DELETE .../projects/{projectId}/members/{accountId} — leaves the project only. */
-  removeProjectMember(organizationEnterpriseId: string, projectId: string, accountId: string): Promise<{ ok: true }>
+  /** DELETE .../projects/{projectId}/members/{accountId} — leaves the
+   * project only; the wire answers the fresh roster (A1/C10). */
+  removeProjectMember(organizationEnterpriseId: string, projectId: string, accountId: string): Promise<RemoveProjectMemberResponse>
   /** GET /api/client/organizations/{orgId}/colleagues — the ONLY roster a
    * project may pick members from. */
   listOrganizationColleagues(organizationEnterpriseId: string): Promise<ListOrganizationColleaguesResponse>

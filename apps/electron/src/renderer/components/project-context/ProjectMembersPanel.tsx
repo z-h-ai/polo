@@ -77,11 +77,28 @@ export interface ProjectMembersPanelProps {
   /** The one-time onboarding face is active — the panel bottom carries
    * 「先不添加，直接开始」; closing it consumes the offer (host). */
   onboardingOpen?: boolean
+  /** Fired after a successful panel mutation (add / role change / remove) so
+   * the host can reload ITS collaboration-roster projection — the header
+   * 「成员 N」 count and entry avatars follow the panel's writes without
+   * owning a second fetcher (C10). */
+  onMembersChanged?: () => void
 }
 
 type PanelPage = 'overview' | 'directory'
 
-const MANAGEABLE_ROLES: ProjectRole[] = ['member', 'manager', 'owner']
+/** R11 role tiers (admin wire A1: only an OWNER may act on an owner). The
+ * options a viewer may grant (role menus + the batch select): an owner sees
+ * the full ladder; a manager never sees the owner option. */
+function assignableRoles(viewerRole: ProjectRole): ProjectRole[] {
+  return viewerRole === 'owner' ? ['member', 'manager', 'owner'] : ['member', 'manager']
+}
+
+/** Whether the viewer may manage AT ALL on this row (menu / remove button).
+ * An owner acts on any non-self row; a manager is blocked on owner rows —
+ * the panel simply never offers the affordance the wire would 403. */
+function canManageRow(viewerRole: ProjectRole, memberRole: ProjectRole): boolean {
+  return viewerRole === 'owner' ? true : memberRole !== 'owner'
+}
 
 const LOST_ACCESS_KEY = 'projectMembers.error.lostAccess'
 
@@ -113,6 +130,7 @@ export function ProjectMembersPanel({
   onClose,
   initialDirectory = false,
   onboardingOpen = false,
+  onMembersChanged,
 }: ProjectMembersPanelProps) {
   const { t } = useTranslation()
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -145,6 +163,17 @@ export function ProjectMembersPanel({
       organizationEnterpriseId: scope.organizationEnterpriseId,
     }
     : null)
+
+  // The overview list renders the SEARCH RESULT of the panel's OWN server
+  // list, normalized at filter time (C10: the input keeps raw text; a
+  // whitespace-only query matches everything). The header count stays on the
+  // unfiltered list — it is the roster size, not the view size.
+  const normalizedQuery = roster.query.trim().toLocaleLowerCase()
+  const visibleRows = useMemo(() => {
+    if (!normalizedQuery) return members.members
+    return members.members.filter(member =>
+      (member.displayName ?? '').toLocaleLowerCase().includes(normalizedQuery))
+  }, [members.members, normalizedQuery])
 
   // Every open re-enters the overview (fresh list); a MODE switch mid-session
   // must NOT reset anything (D8: 搜索/多选/焦点保留). An `initialDirectory`
@@ -337,24 +366,29 @@ export function ProjectMembersPanel({
       setSelectedRole('member')
       setActionErrorKey(null)
       setPage('overview')
+      // The panel's list already holds the fresh roster from the mutation's
+      // own answer; the HOST projection (header count) reloads to follow.
+      onMembersChanged?.()
     } else {
       setActionErrorKey(result.errorKey)
     }
-  }, [members, scope, selectedIds, selectedRole])
+  }, [members, onMembersChanged, scope, selectedIds, selectedRole])
 
   const confirmRoleChange = useCallback(async (targetAccountId: string, role: ProjectRole) => {
     setRoleMenuFor(null)
     const result = await members.updateMemberRole(targetAccountId, role)
+    if (result.ok) onMembersChanged?.()
     setActionErrorKey(result.ok ? null : result.errorKey)
-  }, [members])
+  }, [members, onMembersChanged])
 
   const confirmRemove = useCallback(async () => {
     const target = removeTarget
     setRemoveTarget(null)
     if (!target) return
     const result = await members.removeMember(target)
+    if (result.ok) onMembersChanged?.()
     setActionErrorKey(result.ok ? null : result.errorKey)
-  }, [members, removeTarget])
+  }, [members, onMembersChanged, removeTarget])
 
   if (!open) return null
 
@@ -467,16 +501,28 @@ export function ProjectMembersPanel({
             </div>
           ) : members.members.length === 0 ? (
             <p className="text-[12px] text-muted-foreground" data-testid="project-members-roster-empty">
-              {roster.query ? t('projectMembers.roster.noMatches') : t('projectMembers.roster.empty')}
+              {t('projectMembers.roster.empty')}
+            </p>
+          ) : visibleRows.length === 0 ? (
+            // Rows exist but the search filters them all out — distinct from
+            // a genuinely empty roster (C10: both branches reachable).
+            <p className="text-[12px] text-muted-foreground" data-testid="project-members-roster-empty">
+              {t('projectMembers.roster.noMatches')}
             </p>
           ) : (
             <ul
               className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[10px] border border-border"
               data-testid="project-members-roster"
             >
-              {members.members.map(member => {
+              {visibleRows.map(member => {
                 const isSelf = member.accountId === scope?.accountId
                 const roleMenuOpen = roleMenuFor === member.accountId
+                // R11: a manager gets NO affordance on an owner row (the wire
+                // would 403 `prj_forbidden` — the panel never offers it).
+                const rowManageable = canManage
+                  && members.viewerRole != null
+                  && !isSelf
+                  && canManageRow(members.viewerRole, member.role)
                 return (
                   <li
                     key={member.accountId}
@@ -501,7 +547,7 @@ export function ProjectMembersPanel({
                       <span className={cn('shrink-0 rounded-full px-[7px] py-[1px] text-[11px] leading-[1.6]', roleBadgeClass(member.role))}>
                         {t(`projectMembers.role.${member.role}`)}
                       </span>
-                      {canManage && !isSelf ? (
+                      {rowManageable ? (
                         <button
                           type="button"
                           data-testid="project-members-row-manage"
@@ -523,7 +569,7 @@ export function ProjectMembersPanel({
                         data-account-id={member.accountId}
                         className="flex flex-col gap-[2px] border-t border-border bg-foreground-5 px-[11px] py-[8px]"
                       >
-                        {MANAGEABLE_ROLES.map(role => (
+                        {(members.viewerRole ? assignableRoles(members.viewerRole) : []).map(role => (
                           <button
                             key={role}
                             type="button"
@@ -689,7 +735,7 @@ export function ProjectMembersPanel({
                   onChange={event => setSelectedRole(event.target.value as ProjectRole)}
                   className="h-8 min-w-0 flex-1 rounded-[8px] border border-border bg-surface px-[8px] text-[12px] text-foreground outline-none focus-visible:border-accent"
                 >
-                  {MANAGEABLE_ROLES.map(role => (
+                  {(members.viewerRole ? assignableRoles(members.viewerRole) : []).map(role => (
                     <option key={role} value={role}>{t(`projectMembers.role.${role}`)}</option>
                   ))}
                 </select>

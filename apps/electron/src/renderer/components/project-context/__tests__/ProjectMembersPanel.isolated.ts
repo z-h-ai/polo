@@ -154,17 +154,24 @@ function makeHarness(options: {
         harness.removeCalls.push(input)
         PmRemoveProjectMemberInputSchema.parse(input)
         if (harness.removeError) throw Object.assign(new Error(harness.removeError.code), { code: harness.removeError.code })
-        return { ok: true }
+        // A1/C10: the DELETE answers the FRESH roster (same shape as the list)
+        // — the panel replaces its state from this response with no re-read.
+        const roster = harness.listResponses[0].members as Array<Record<string, unknown>>
+        return {
+          contractVersion: 'poo205-contract-r1',
+          projectId: SCOPE.projectId,
+          members: roster.filter(row => row.accountId !== input.targetAccountId),
+        }
       },
     },
   })
   return harness
 }
 
-function fakeRoster(viewerRole: 'owner' | 'manager' | 'member' | null) {
+function fakeRoster(viewerRole: 'owner' | 'manager' | 'member' | null, query = '') {
   return {
     scopeKey: 'test',
-    query: '',
+    query,
     members: [],
     allMembers: [],
     totalActiveMembers: null,
@@ -177,6 +184,7 @@ function fakeRoster(viewerRole: 'owner' | 'manager' | 'member' | null) {
     search: () => {},
     loadMore: () => {},
     retry: () => {},
+    reload: async () => {},
   }
 }
 
@@ -184,6 +192,8 @@ function renderPanel(options: Parameters<typeof makeHarness>[0] & {
   open?: boolean
   viewerRole?: 'owner' | 'manager' | 'member' | null
   harness?: Harness
+  rosterQuery?: string
+  onMembersChanged?: () => void
 } = {}) {
   const harness = options.harness ?? makeHarness(options)
   const onClose = mock(() => {})
@@ -192,8 +202,9 @@ function renderPanel(options: Parameters<typeof makeHarness>[0] & {
     mode: 'push',
     scope: SCOPE,
     projectName: '华东区资料库',
-    roster: fakeRoster(options.viewerRole ?? 'owner'),
+    roster: fakeRoster(options.viewerRole ?? 'owner', options.rosterQuery),
     onClose,
+    onMembersChanged: options.onMembersChanged,
   }) as unknown as React.ReactElement) as unknown as React.ReactElement)
   return { harness, onClose, view }
 }
@@ -319,7 +330,7 @@ describe('ProjectMembersPanel (POO-205, Spec Q10)', () => {
     })
   })
 
-  it('removal is an explicit confirm step riding pm:removeProjectMember; the fresh list re-reads', async () => {
+  it('removal is an explicit confirm step riding pm:removeProjectMember; the mutation answer IS the fresh roster (no re-read)', async () => {
     const harness = renderPanel()
     await waitFor(() => expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(2))
 
@@ -339,8 +350,10 @@ describe('ProjectMembersPanel (POO-205, Spec Q10)', () => {
       projectId: SCOPE.projectId,
       targetAccountId: 'owner-1',
     })
-    // removeProjectMember answers a bare {ok} → the panel re-reads the list.
-    await waitFor(() => expect(harness.harness.listCalls).toHaveLength(2))
+    // C10: the DELETE response replaces the state — the panel NEVER issues a
+    // second pm:listProjectMembers for a removal.
+    await waitFor(() => expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(1))
+    expect(harness.harness.listCalls).toHaveLength(1)
   })
 
   it('prj_last_owner surfaces as the action error instead of a silent no-op', async () => {
@@ -359,5 +372,128 @@ describe('ProjectMembersPanel (POO-205, Spec Q10)', () => {
     expect(screen.getByTestId('project-members-action-error').textContent).toContain('最后一位负责人')
     // The member stayed: no re-read was needed and none happened beyond the first.
     expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(2)
+  })
+
+  it('a prj_forbidden WRITE surfaces the dedicated forbiddenAction copy (C10), not the read-lostAccess face', async () => {
+    const harness = renderPanel()
+    await waitFor(() => expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(2))
+
+    fireEvent.click(screen.getAllByTestId('project-members-row-manage')[0]!)
+    await screen.findByTestId('project-members-role-menu')
+    fireEvent.click(screen.getByTestId('project-members-remove-option'))
+    await screen.findByTestId('project-members-remove-confirm')
+
+    harness.harness.removeError = { code: 'prj_forbidden' }
+    fireEvent.click(screen.getByTestId('project-members-remove-confirm-action'))
+
+    await waitFor(() => expect(screen.getByTestId('project-members-action-error')).toBeTruthy())
+    expect(screen.getByTestId('project-members-action-error').textContent).toContain('成员操作')
+    expect(screen.getByTestId('project-members-action-error').textContent).not.toContain('不再有此项目的成员权限')
+    // The roster state is untouched by a failed write.
+    expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(2)
+  })
+
+  it('a manager gets no owner option anywhere and no affordance on an owner row (R11/A1)', async () => {
+    renderPanel({
+      viewerRole: 'manager',
+      members: [
+        member(SCOPE.accountId, '李明', 'manager'),
+        member('owner-1', '王芳', 'owner'),
+        member('member-1', '张三', 'member'),
+      ],
+    })
+    await waitFor(() => expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(3))
+
+    // The owner row carries NO manage button; the member row does.
+    const manageButtons = screen.getAllByTestId('project-members-row-manage')
+    expect(manageButtons).toHaveLength(1)
+    expect(manageButtons[0]!.getAttribute('data-account-id')).toBe('member-1')
+
+    // The member row's role menu offers member/manager only — never owner.
+    fireEvent.click(manageButtons[0]!)
+    const menu = await screen.findByTestId('project-members-role-menu')
+    expect(menu.querySelector('[data-role="owner"]')).toBeNull()
+    expect(menu.querySelector('[data-role="manager"]')).toBeTruthy()
+    expect(menu.querySelector('[data-role="member"]')).toBeTruthy()
+
+    // The batch role select in the directory shows the same two options.
+    fireEvent.click(screen.getByTestId('project-members-invite-action'))
+    await waitFor(() => expect(screen.getByTestId('project-colleagues-page')).toBeTruthy())
+    const options = Array.from(screen.getByTestId('project-colleagues-role-select').querySelectorAll('option'))
+    expect(options.map(option => option.getAttribute('value'))).toEqual(['member', 'manager'])
+  })
+
+  it('search really filters the rendered list; the count stays the roster size (C10)', async () => {
+    renderPanel({
+      rosterQuery: '王芳',
+      members: [
+        member(SCOPE.accountId, '李明', 'owner'),
+        member('owner-1', '王芳', 'member'),
+        member('member-1', '张三', 'member'),
+      ],
+    })
+    await waitFor(() => expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(1))
+    const rows = screen.getAllByTestId('project-members-roster-row')
+    expect(rows[0]?.getAttribute('data-account-id')).toBe('owner-1')
+    // The header count is the UNFILTERED roster size, not the view size.
+    expect(screen.getByTestId('project-members-roster-count').textContent).toContain('3')
+  })
+
+  it('the search input keeps raw text: surrounding spaces still match (trim at filter time)', async () => {
+    renderPanel({
+      rosterQuery: ' 王芳 ',
+      members: [
+        member(SCOPE.accountId, '李明', 'owner'),
+        member('owner-1', '王芳', 'member'),
+      ],
+    })
+    await waitFor(() => expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(1))
+    expect(screen.getAllByTestId('project-members-roster-row')[0]?.getAttribute('data-account-id')).toBe('owner-1')
+    // The raw text survives into the input (the panel never rewrites it).
+    const input = screen.getByTestId('project-members-search') as HTMLInputElement
+    expect(input.value).toBe(' 王芳 ')
+  })
+
+  it('the empty-state branches are distinct and reachable: true-empty vs no-matches', async () => {
+    // A genuinely empty roster says so, even with a query typed.
+    renderPanel({ rosterQuery: '王芳', members: [] })
+    await waitFor(() => expect(screen.getByTestId('project-members-roster-empty')).toBeTruthy())
+    expect(screen.getByTestId('project-members-roster-empty').textContent).toContain('还没有其他成员')
+
+    // Rows exist but the query filters them all out → the no-matches copy.
+    cleanup()
+    const harness = makeHarness({
+      members: [member(SCOPE.accountId, '李明', 'owner'), member('owner-1', '王芳', 'member')],
+    })
+    renderPanel({ harness, rosterQuery: '不存在的人' })
+    await waitFor(() => expect(screen.getByTestId('project-members-roster-empty')).toBeTruthy())
+    expect(screen.getByTestId('project-members-roster-empty').textContent).toContain('没有匹配的成员')
+    expect(screen.queryByTestId('project-members-roster-row')).toBeNull()
+  })
+
+  it('a successful mutation notifies the host via onMembersChanged; a failed one stays silent', async () => {
+    const onMembersChanged = mock(() => {})
+    const harness = renderPanel({ onMembersChanged })
+    await waitFor(() => expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(2))
+
+    fireEvent.click(screen.getAllByTestId('project-members-row-manage')[0]!)
+    await screen.findByTestId('project-members-role-menu')
+    fireEvent.click(screen.getByTestId('project-members-remove-option'))
+    await screen.findByTestId('project-members-remove-confirm')
+    fireEvent.click(screen.getByTestId('project-members-remove-confirm-action'))
+    await waitFor(() => expect(harness.harness.removeCalls).toHaveLength(1))
+    await waitFor(() => expect(onMembersChanged).toHaveBeenCalledTimes(1))
+
+    // A FAILED mutation never notifies the host (nothing changed server-side).
+    // (After the removal only the viewer's own row remains — no manage button
+    // — so the failing write rides the add path instead.)
+    harness.harness.addResponse = Object.assign(new Error('nope'), { code: 'prj_forbidden' })
+    fireEvent.click(screen.getByTestId('project-members-invite-action'))
+    await waitFor(() => expect(screen.getByTestId('project-colleagues-page')).toBeTruthy())
+    // 王芳's removal made her selectable again — pick any first row.
+    fireEvent.click(screen.getAllByTestId('project-colleagues-row-toggle')[0]!)
+    fireEvent.click(screen.getByTestId('project-colleagues-confirm'))
+    await waitFor(() => expect(screen.getByTestId('project-colleagues-compose-error')).toBeTruthy())
+    expect(onMembersChanged).toHaveBeenCalledTimes(1)
   })
 })

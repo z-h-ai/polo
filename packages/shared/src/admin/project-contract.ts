@@ -164,6 +164,12 @@ export const UpdateProjectMemberResponseSchema = z.object({
 }).strict()
 export type UpdateProjectMemberResponse = z.output<typeof UpdateProjectMemberResponseSchema>
 
+/** DELETE .../members/{accountId} answers the FRESH roster (same shape as the
+ * list response) so the renderer can replace its state from the mutation's
+ * own answer — no second pm:listProjectMembers round-trip (POO-205 A1/C10). */
+export const RemoveProjectMemberResponseSchema = ListProjectMembersResponseSchema
+export type RemoveProjectMemberResponse = z.output<typeof RemoveProjectMemberResponseSchema>
+
 /** Organization colleague roster: the ONLY source a project can pick members
  * from (Q10). Organization membership itself is admin-console-managed; the
  * client never invites outside the organization. */

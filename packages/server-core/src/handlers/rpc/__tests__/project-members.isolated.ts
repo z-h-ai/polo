@@ -227,7 +227,8 @@ function recordingAdmin(calls: AdminCalls, overrides: Partial<ProjectMembersAdmi
     },
     removeProjectMember: async (organizationEnterpriseId: string, projectId: string, accountId: string) => {
       calls.removeProjectMember.push({ orgId: organizationEnterpriseId, projectId, accountId })
-      return { ok: true as const }
+      // A1/C10: the DELETE answers the FRESH roster (same shape as the list).
+      return MEMBERS
     },
     listOrganizationColleagues: async (organizationEnterpriseId: string) => {
       calls.listOrganizationColleagues.push(organizationEnterpriseId)
@@ -406,7 +407,7 @@ describe('pm:listProjectMembers / pm:addProjectMembers / pm:updateProjectMember 
     }])
   })
 
-  it('removes a member from the project only', async () => {
+  it('removes a member from the project only — the answer is the fresh roster (A1/C10)', async () => {
     const calls = emptyCalls()
     setProjectMembersAdminForTests(recordingAdmin(calls))
     const { invoke } = createHarness()
@@ -416,7 +417,7 @@ describe('pm:listProjectMembers / pm:addProjectMembers / pm:updateProjectMember 
       projectId: PROJECT_ID,
       targetAccountId: TARGET_ACCOUNT_ID,
     })
-    expect(response).toEqual({ ok: true })
+    expect(response).toEqual(MEMBERS)
     expect(calls.removeProjectMember).toEqual([{ orgId: ORG_ID, projectId: PROJECT_ID, accountId: TARGET_ACCOUNT_ID }])
   })
 

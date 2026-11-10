@@ -140,6 +140,9 @@ describe('useCollaborationRoster (POO-205, Q10)', () => {
     expect(harness.calls).toHaveLength(1)
     expect(recorder.current?.members).toHaveLength(1)
     expect(recorder.current?.members[0]?.displayName).toBe('王芳')
+    // C10: the raw text is stored verbatim (trim happens at MATCH time, never
+    // on the stored query — the input shows what the user typed).
+    expect(recorder.current?.query).toBe('  芳  ')
     // The unfiltered total survives the search (never a fabricated count).
     expect(recorder.current?.totalActiveMembers).toBe(3)
 

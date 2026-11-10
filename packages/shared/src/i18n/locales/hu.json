@@ -2240,6 +2240,7 @@
   "projectMembers.entryCount_one": "{{count}} tag",
   "projectMembers.entryCount_other": "{{count}} tag",
   "projectMembers.error.forbidden": "Csak a felelős vagy a kezelő láthatja a teljes névsort és a meghívásokat.",
+  "projectMembers.error.forbiddenAction": "Nincs jogosultsága ennek a tagműveletnek a végrehajtásához.",
   "projectMembers.error.generic": "Valami nem sikerült. Próbálja újra.",
   "projectMembers.error.lostAccess": "Már nincs taghozzáférése ehhez a projekthez. A panel tartalma törlődött.",
   "projectMembers.error.notFound": "Ez a projekt nem létezik, vagy már nem érhető el.",

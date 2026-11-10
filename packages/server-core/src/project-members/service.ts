@@ -16,6 +16,7 @@ import type {
   PmUpdateProjectInput,
   PmUpdateProjectMemberInput,
   ProjectMutationResponse,
+  RemoveProjectMemberResponse,
   UpdateProjectMemberResponse,
 } from '@polo-ai/shared/protocol'
 import type { TrustedAggregateScopeToken } from '../handlers/rpc/trusted-product-space-account'
@@ -348,8 +349,10 @@ export async function pmUpdateProjectMember(input: PmUpdateProjectMemberInput): 
   }
 }
 
-/** pm:removeProjectMember — leaves the project; organization membership untouched. */
-export async function pmRemoveProjectMember(input: PmRemoveProjectMemberInput): Promise<{ ok: true }> {
+/** pm:removeProjectMember — leaves the project; organization membership
+ * untouched. The admin answer IS the fresh roster (A1/C10): the renderer
+ * replaces its state from this response instead of re-reading the list. */
+export async function pmRemoveProjectMember(input: PmRemoveProjectMemberInput): Promise<RemoveProjectMemberResponse> {
   const scope = await requireOrganizationScope(input)
   try {
     const result = await theAdmin().removeProjectMember(scope.organizationEnterpriseId, input.projectId, input.targetAccountId)

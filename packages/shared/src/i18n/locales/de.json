@@ -2240,6 +2240,7 @@
   "projectMembers.entryCount_one": "{{count}} Mitglieder",
   "projectMembers.entryCount_other": "{{count}} Mitglieder",
   "projectMembers.error.forbidden": "Nur die verantwortliche Person oder die Verwaltung kann die vollständige Liste und Einladungen sehen.",
+  "projectMembers.error.forbiddenAction": "Sie sind nicht berechtigt, diese Mitgliederaktion auszuführen.",
   "projectMembers.error.generic": "Etwas ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
   "projectMembers.error.lostAccess": "Sie haben keine Mitgliedsrechte mehr für dieses Projekt. Der Panelinhalt wurde geleert.",
   "projectMembers.error.notFound": "Dieses Projekt existiert nicht oder ist nicht mehr zugänglich.",

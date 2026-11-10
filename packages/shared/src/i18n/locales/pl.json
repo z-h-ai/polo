@@ -2246,6 +2246,7 @@
   "projectMembers.entryCount_one": "{{count}} członek",
   "projectMembers.entryCount_other": "{{count}} członków",
   "projectMembers.error.forbidden": "Tylko odpowiedzialny lub zarząd może zobaczyć pełną listę i zaproszenia.",
+  "projectMembers.error.forbiddenAction": "Nie masz uprawnień do wykonania tej operacji na członkach.",
   "projectMembers.error.generic": "Coś nie powiodło się. Spróbuj ponownie.",
   "projectMembers.error.lostAccess": "Nie masz już uprawnień członka tego projektu. Panel został wyczyszczony.",
   "projectMembers.error.notFound": "Ten projekt nie istnieje lub nie jest już dostępny.",

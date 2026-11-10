@@ -2240,6 +2240,7 @@
   "projectMembers.entryCount_one": "成员 {{count}}",
   "projectMembers.entryCount_other": "成员 {{count}}",
   "projectMembers.error.forbidden": "只有负责人或管理员可以查看完整名册与邀请记录。",
+  "projectMembers.error.forbiddenAction": "你没有权限执行此成员操作。",
   "projectMembers.error.generic": "操作失败，请重试。",
   "projectMembers.error.lostAccess": "你已不再有此项目的成员权限，面板内容已清空。",
   "projectMembers.error.notFound": "项目不存在或已不可访问。",
