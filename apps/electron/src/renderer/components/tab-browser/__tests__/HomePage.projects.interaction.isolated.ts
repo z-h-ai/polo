@@ -320,8 +320,13 @@ describe('HomePage 项目区域 (POO-205, Spec Q1/Q3/Q8)', () => {
     // First two cards always visible; overflow hides via the grid's
     // responsive classes (index 2-4 only below 761px; index 5+ only ≥1081px).
     expect(card('pj-0').className).not.toContain('hidden')
-    expect(card('pj-2').className).toContain('hidden min-[761px]:block')
-    expect(card('pj-6').className).toContain('hidden min-[761px]:hidden min-[1081px]:block')
+    // C11: the overflow visibility classes must re-declare the CARD's own
+    // display (flex), not `block` — a :block variant overrides the flex-col
+    // card chrome and collapses the card body at ≥761px.
+    expect(card('pj-2').className).toContain('hidden min-[761px]:flex')
+    expect(card('pj-2').className).not.toContain(':block')
+    expect(card('pj-6').className).toContain('hidden min-[761px]:hidden min-[1081px]:flex')
+    expect(card('pj-6').className).not.toContain(':block')
 
     // An active query shows EVERY match over the full authorized set — G
     // sits beyond the second row and still renders — while the expand/
@@ -369,7 +374,8 @@ describe('HomePage 项目区域 (POO-205, Spec Q1/Q3/Q8)', () => {
     const { unmount } = render(homeTree([enterpriseSpace(CURRENT_ORG_ID, '当前组织')]))
     await waitFor(() => expect(screen.getAllByTestId('home-project-card')).toHaveLength(4))
     expect(screen.getByTestId('home-project-expand').parentElement?.className).toContain('min-[761px]:hidden')
-    expect(card('pj-2').className).toContain('hidden min-[761px]:block')
+    expect(card('pj-2').className).toContain('hidden min-[761px]:flex')
+    expect(card('pj-2').className).not.toContain(':block')
     unmount()
 
     const seven = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
@@ -412,15 +418,27 @@ describe('HomePage 项目区域 (POO-205, Spec Q1/Q3/Q8)', () => {
     unmount()
   })
 
-  it('a PERSONAL committed space has no project scope: the honest org-required face instead of a directory that could only fail', async () => {
+  it('C11: a PERSONAL committed space renders NO projects section at all — no header/search/create/empty face and no wire call; the enterprise space keeps it', async () => {
     const personalSpace = { id: PERSONAL_ID, kind: 'personal', name: '我的个人空间', accessMode: 'active', payer: { kind: 'account' } }
     render(homeTree([], undefined, { activeSpace: personalSpace }))
-    await waitFor(() => expect(screen.getByTestId('home-project-empty')).toBeTruthy())
-    // The verified-empty face + the resident search; NO cards and NO wire
-    // call (the pm channel is committed-organization scoped).
+    // The projects scope is committed-organization only; a personal space
+    // gets NO section (C11 trims the whole segment, not just the cards) and
+    // therefore no org-required empty face, no create entry, no search and
+    // NO wire call.
+    await waitFor(() => expect(screen.getByTestId('home-apps-title')).toBeTruthy())
+    expect(screen.queryByTestId('home-projects')).toBeNull()
+    expect(screen.queryByTestId('home-project-empty')).toBeNull()
+    expect(screen.queryByTestId('home-project-create')).toBeNull()
+    expect(screen.queryByTestId('home-project-search')).toBeNull()
     expect(screen.queryAllByTestId('home-project-card')).toHaveLength(0)
     expect(pmListProjects.mock.calls).toHaveLength(0)
+  })
+
+  it('C11: an ENTERPRISE committed space keeps the projects section — header, resident search and the single create entry', async () => {
+    render(homeTree([enterpriseSpace(CURRENT_ORG_ID, '当前组织')]))
+    await waitFor(() => expect(screen.getByTestId('home-projects')).toBeTruthy())
     expect(screen.getByTestId('home-project-search')).toBeTruthy()
+    expect(screen.getByTestId('home-project-create')).toBeTruthy()
   })
 })
 
