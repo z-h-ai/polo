@@ -375,7 +375,9 @@ interface ContextSnapshot {
  * launch/install/status flows treat them like any other entry) and are ALSO
  * registered in `memberCatalogEntryIds` so the directory projection can split
  * them into their own partition. Published "my apps" are ordinary `space`
- * entries with a `self` source; provenance survives the publish.
+ * entries with a `self` source and their owner remembered; the OWNER'S copy
+ * of such a row is indexed the same way (C12) so the shared grid never
+ * duplicates an app its publisher already sees in the 我的应用 partition.
  */
 function mapProductSpaceCatalogToCacheEntry(
   productSpaceId: string,
@@ -425,7 +427,16 @@ function mapProductSpaceCatalogToCacheEntry(
     const isMemberEntry = entry.kind === 'app'
       && (entry.visibility === 'member'
         || (entry.visibility === undefined && entry.ownerAccountId === accountId))
-    if (isMemberEntry && entry.catalogEntryId) {
+    // C12 (R14): a member-PUBLISHED row is an ordinary `space` entry, but the
+    // v2 projection remembers its owner and keeps its `self` source. The
+    // owner reads their own app from myapps:list in the 我的应用 partition —
+    // it must NOT duplicate into the shared grid — so such rows are indexed
+    // alongside member rows and the directory projection splits them out of
+    // `entries` the same way.
+    const isOwnPublishedEntry = entry.kind === 'app'
+      && entry.visibility === 'space'
+      && entry.ownerAccountId === accountId
+    if ((isMemberEntry || isOwnPublishedEntry) && entry.catalogEntryId) {
       memberCatalogEntryIds[entry.catalogEntryId] = true
     }
     const effectiveAvailability = entry.availability === 'available'

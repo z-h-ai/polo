@@ -1510,9 +1510,10 @@ export interface ElectronAPI {
   // never transit the renderer — create hands over a Main-packaged zip path;
   // publish/withdraw act on the committed space only.
   myAppsList(input: import('@polo-ai/shared/protocol').MyAppsListInput): Promise<import('@polo-ai/shared/protocol').MyAppsListResponse>
-  myAppsCreate(input: import('@polo-ai/shared/protocol').MyAppsCreateFromFileInput): Promise<import('@polo-ai/shared/protocol').MyAppsMutationResponse>
+  myAppsCreate(input: import('@polo-ai/shared/protocol').MyAppsCreateFromFileInput & { sourceKey?: string }): Promise<import('@polo-ai/shared/protocol').MyAppsCreateFromFileResponse>
   myAppsPublish(input: import('@polo-ai/shared/protocol').MyAppsPublishInput): Promise<import('@polo-ai/shared/protocol').MyAppsPublishResponse>
   myAppsWithdraw(input: import('@polo-ai/shared/protocol').MyAppsWithdrawInput): Promise<import('@polo-ai/shared/protocol').MyAppsWithdrawResponse>
+  myAppsDelete(input: import('@polo-ai/shared/protocol').MyAppsDeleteInput): Promise<import('@polo-ai/shared/protocol').MyAppsDeleteResponse>
 
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@polo-ai/shared/statuses').StatusConfig[]>

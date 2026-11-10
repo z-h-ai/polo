@@ -1,11 +1,13 @@
 import { z } from 'zod'
 import {
   CreateMyAppInputSchema,
+  DeleteMyAppResponseSchema,
   ListMyAppsResponseSchema,
   MyAppMutationResponseSchema,
   PublishMyAppResponseSchema,
   WithdrawMyAppResponseSchema,
   type CreateMyAppInput,
+  type DeleteMyAppResponse,
   type ListMyAppsResponse,
   type MyAppMutationResponse,
   type PublishMyAppResponse,
@@ -91,9 +93,22 @@ export const MyAppsWithdrawInputSchema = MyAppsSpaceScopeSchema.extend({
 }).strict()
 export type MyAppsWithdrawInput = z.output<typeof MyAppsWithdrawInputSchema>
 
+/** myapps:delete — remove the member app row entirely (POO-205 C12). A
+ * published app is withdrawn in the same admin-side transaction, so the
+ * space catalog loses the shared entry too. */
+export const MyAppsDeleteInputSchema = MyAppsSpaceScopeSchema.extend({
+  appId: MyAppsAppIdSchema,
+}).strict()
+export type MyAppsDeleteInput = z.output<typeof MyAppsDeleteInputSchema>
+
 /** Response re-exports kept concrete for the preload type surface. */
 export type MyAppsListResponse = ListMyAppsResponse
 export type MyAppsMutationResponse = MyAppMutationResponse
+/** The create answer carries the A3b idempotency verdict beside the mutation
+ * body: 201 = a NEW app row, 200 = a NEW VERSION of the sourceKey-addressed
+ * row. Transport metadata from the trusted side — never an admin wire field. */
+export type MyAppsCreateFromFileResponse = MyAppMutationResponse & { status: number }
 export type MyAppsPublishResponse = PublishMyAppResponse
 export type MyAppsWithdrawResponse = WithdrawMyAppResponse
+export type MyAppsDeleteResponse = DeleteMyAppResponse
 export type MyAppsCreateCommand = CreateMyAppInput

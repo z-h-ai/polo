@@ -36,6 +36,9 @@ export const PROJECT_ERROR_CODES = [
   'myapps_payload_too_large',
   'myapps_service_unavailable',
   'myapps_signin_required',
+  // POO-205 A3b: the space write gate (governance suspension, closing,
+  // billing overdue) refuses saves AND publishes with this 409 code.
+  'myapps_space_restricted',
 ] as const
 export type ProjectErrorCode = (typeof PROJECT_ERROR_CODES)[number]
 
@@ -247,6 +250,10 @@ export const CreateMyAppInputSchema = z.object({
   payloadBase64: z.string().min(1),
   /** sha256 of the decoded bytes; server verifies before storing. */
   checksumSha256: checksum64,
+  /** POO-205 A3b save idempotency: a stable canvas identity (session +
+   * canvas, ≤256 chars). The SAME key saves a NEW VERSION of the existing
+   * row (answers 200 instead of 201) instead of duplicating it. */
+  sourceKey: z.string().trim().min(1).max(256).optional(),
 }).strict()
 export type CreateMyAppInput = z.output<typeof CreateMyAppInputSchema>
 
@@ -255,6 +262,25 @@ export const MyAppMutationResponseSchema = z.object({
   app: MyAppSummarySchema,
 }).strict()
 export type MyAppMutationResponse = z.output<typeof MyAppMutationResponseSchema>
+
+/** DELETE .../my-apps/{appId} (POO-205 A3b): deleting a published app
+ * withdraws the shared entry in the same transaction; the answer is a bare
+ * confirmation — the row is gone, not returned. */
+export const DeleteMyAppResponseSchema = z.object({
+  contractVersion: z.literal(PROJECT_CONTRACT_VERSION),
+  appId: z.string().min(1),
+  deleted: z.literal(true),
+}).strict()
+export type DeleteMyAppResponse = z.output<typeof DeleteMyAppResponseSchema>
+
+/** POO-205 A3b: what AdminClient.createMyApp answers — the parsed mutation
+ * body PLUS the raw HTTP status (201 = a NEW app row, 200 = a NEW VERSION of
+ * the row addressed by the request's `sourceKey`). Client-side only; the
+ * status is transport metadata, never part of the admin wire body. */
+export interface MyAppCreateOutcome {
+  status: number
+  response: MyAppMutationResponse
+}
 
 export const PublishMyAppResponseSchema = z.object({
   contractVersion: z.literal(PROJECT_CONTRACT_VERSION),

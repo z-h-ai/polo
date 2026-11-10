@@ -41,6 +41,22 @@ class PublishStepError extends Error {
   }
 }
 
+/** Upper bound the admin wire enforces on `sourceKey` (poo205-contract-r1). */
+const MYAPPS_SOURCE_KEY_MAX_CHARS = 256
+
+/**
+ * POO-205 A3b save idempotency: the stable canvas identity the admin side
+ * keys re-saves on. session id + canvas app id are BOTH stable across
+ * restarts (the card request carries them and nothing derives them from
+ * mutable display state), so the same canvas re-saving lands as a new
+ * VERSION of one row instead of duplicating it. The `genui:` prefix keeps
+ * the namespace legible in admin-side storage.
+ */
+function buildMyAppsSourceKey(sessionId: string, appId: string): string {
+  const key = `genui:${sessionId}:${appId}`
+  return key.length > MYAPPS_SOURCE_KEY_MAX_CHARS ? key.slice(0, MYAPPS_SOURCE_KEY_MAX_CHARS) : key
+}
+
 export function GenUiAppPublishBridge() {
   // The committed scope triple (account + window workspace + active space),
   // read the same way every other renderer caller assembles it. Refs keep
@@ -87,15 +103,21 @@ export function GenUiAppPublishBridge() {
           'no-active-space',
         )
       }
-      await window.electronAPI.myAppsCreate({
+      const saved = await window.electronAPI.myAppsCreate({
         ...scope,
         sourcePath: packaged.bundleTempPath,
         name: request.title,
+        // A3b idempotency: the same canvas re-saves as a new version of one
+        // row (admin answers 200) instead of a duplicate row.
+        sourceKey: buildMyAppsSourceKey(request.sessionId, request.appId),
       })
 
       dispatchGenUiAppPublishResult({
         requestId: request.requestId,
         ok: true,
+        // A3b idempotency verdict: the admin answers 200 for a re-save of a
+        // known sourceKey (new VERSION) and 201 for a new row.
+        savedAsNewVersion: saved.status === 200,
       })
     } catch (error) {
       dispatchGenUiAppPublishResult({

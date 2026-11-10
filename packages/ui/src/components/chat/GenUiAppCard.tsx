@@ -266,6 +266,9 @@ export interface GenUiAppPublishResult {
   ok: boolean
   error?: string
   errorCode?: GenUiAppPublishErrorCode
+  /** POO-205 A3b: the save hit the same sourceKey and landed as a NEW
+   * VERSION of the existing row (HTTP 200), not a brand-new row (201). */
+  savedAsNewVersion?: boolean
 }
 
 export function dispatchGenUiAppPublish(request: GenUiAppPublishRequest): void {
@@ -665,6 +668,8 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
   }).electronAPI?.packageGenUiAppArtifact === 'function'
   const canPublish = Boolean(indexPath && sessionId && hasElectronPublishBridge)
   const [publishState, setPublishState] = React.useState<'idle' | 'pending' | 'published' | 'error'>('idle')
+  /** POO-205 A3b: this save landed as a new VERSION of an existing row. */
+  const [savedAsNewVersion, setSavedAsNewVersion] = React.useState(false)
   const [publishError, setPublishError] = React.useState<string | null>(null)
   /** Raw (possibly server-language) failure text, surfaced as a tooltip only. */
   const [publishErrorDetail, setPublishErrorDetail] = React.useState<string | null>(null)
@@ -673,12 +678,14 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
     if (!canPublish || publishState === 'pending') return
     const requestId = createPinRequestId()
     setPublishState('pending')
+    setSavedAsNewVersion(false)
     setPublishError(null)
     setPublishErrorDetail(null)
     const unsubscribe = onGenUiAppPublishResult(requestId, (result) => {
       unsubscribe()
       if (result.ok) {
         setPublishState('published')
+        setSavedAsNewVersion(Boolean(result.savedAsNewVersion))
       } else {
         setPublishState('error')
         // The raw error text may be a server-language diagnostic; the stable
@@ -781,7 +788,9 @@ export function GenUiAppCard({ appId, title, html, indexPath, version, sessionId
           >
             <Globe className="w-3 h-3" />
             {publishState === 'published'
-              ? t('genui.app.savedToMyApps')
+              ? savedAsNewVersion
+                ? t('genui.app.savedAsNewVersion')
+                : t('genui.app.savedToMyApps')
               : publishState === 'pending'
                 ? t('genui.app.savingToMyApps')
                 : t('genui.app.saveToMyApps')}

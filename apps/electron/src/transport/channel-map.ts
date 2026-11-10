@@ -417,6 +417,7 @@ export const CHANNEL_MAP = {
   myAppsCreate: invokeCoded(RPC_CHANNELS.myApps.CREATE),
   myAppsPublish: invokeCoded(RPC_CHANNELS.myApps.PUBLISH),
   myAppsWithdraw: invokeCoded(RPC_CHANNELS.myApps.WITHDRAW),
+  myAppsDelete: invokeCoded(RPC_CHANNELS.myApps.DELETE),
 
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),

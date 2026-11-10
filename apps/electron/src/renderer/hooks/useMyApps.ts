@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MyAppSummary } from '@polo-ai/shared/protocol'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import { readRpcErrorCode } from '../../shared/rpc-error-bridge'
 
 /**
  * POO-205 (Q7/Q11) — the "我的应用" surface of the ACTIVE ProductSpace.
@@ -32,6 +33,9 @@ export type MyAppsErrorCode =
   | 'myapps_scope_changed'
   | 'myapps_service_unavailable'
   | 'myapps_publish_unavailable_in_personal'
+  // POO-205 A3b: the space write gate (governance suspension, closing,
+  // billing overdue) refuses saves AND publishes with this 409 code.
+  | 'myapps_space_restricted'
   | 'request_failed'
 
 export interface MyAppsState {
@@ -43,6 +47,8 @@ export interface MyAppsState {
   publishingAppIds: ReadonlySet<string>
   /** AppIds with a withdraw in flight (per-card busy state). */
   withdrawingAppIds: ReadonlySet<string>
+  /** AppIds with a delete in flight (per-card busy state). */
+  deletingAppIds: ReadonlySet<string>
 }
 
 export interface MyAppsApi {
@@ -52,28 +58,60 @@ export interface MyAppsApi {
   /** Publish into the CURRENT space is an enterprise-only action. */
   canPublish: boolean
   refresh: () => Promise<void>
-  create: (input: { sourcePath: string; name: string; description?: string }) => Promise<MyAppSummary>
+  /** Saves a bundle into the list; `savedAsNewVersion` distinguishes the
+   * A3b idempotent re-save (same sourceKey → HTTP 200) from a new row (201). */
+  create: (input: {
+    sourcePath: string
+    name: string
+    description?: string
+    sourceKey?: string
+  }) => Promise<{ app: MyAppSummary; savedAsNewVersion: boolean }>
   publish: (appId: string) => Promise<void>
   withdraw: (appId: string) => Promise<void>
+  /** Removes the app row entirely; a published app is withdrawn by the same
+   * server-side transaction (POO-205 C12). */
+  delete: (appId: string) => Promise<void>
 }
 
 function errorCodeOf(error: unknown): MyAppsErrorCode {
-  const code = error instanceof Error ? error.message : String(error)
+  // Coded-RPC failures carry the stable myapps_* code as a live `code`
+  // property (direct path) or inside the bridge marker of the message (the
+  // context bridge preserves only the message — see rpc-error-bridge). A bare
+  // message compare would ALWAYS degrade to generic under the bridge, so the
+  // structured read comes first; the raw-message fallback keeps the direct
+  // (non-bridged) callers working.
+  const structured = readRpcErrorCode(error)
+  if (structured && isMyAppsErrorCode(structured)) return structured
+  const message = error instanceof Error ? error.message : String(error)
+  return isMyAppsErrorCode(message) ? message : 'request_failed'
+}
+
+function isMyAppsErrorCode(code: string): code is MyAppsErrorCode {
   switch (code) {
     case 'myapps_signin_required':
     case 'myapps_scope_changed':
     case 'myapps_service_unavailable':
     case 'myapps_publish_unavailable_in_personal':
-      return code
+    case 'myapps_space_restricted':
+      return true
     default:
-      return 'request_failed'
+      return false
   }
 }
 
 function readErrorCode(error: unknown): MyAppsErrorCode {
-  // Coded-RPC failures carry the stable myapps_* code in the message (the
-  // context bridge preserves only the message — see rpc-error-bridge).
   return errorCodeOf(error instanceof Error ? error : new Error(String(error)))
+}
+
+/**
+ * Primitive scope identity for the in-flight guards: the scope literal is
+ * rebuilt on EVERY render (and a loading/busy setState re-renders mid-flight),
+ * so an object-identity check would drop the hook's own in-flight response and
+ * dead the list. The reload effect keys on primitive identity (:178) — the
+ * response guards must too.
+ */
+function scopeKeyOf(scope: MyAppsScope | null): string {
+  return scope ? `${scope.accountId}\n${scope.workspaceId}\n${scope.productSpaceId}` : ''
 }
 
 export function useMyApps(): MyAppsApi {
@@ -94,6 +132,7 @@ export function useMyApps(): MyAppsApi {
     errorCode: null,
     publishingAppIds: new Set(),
     withdrawingAppIds: new Set(),
+    deletingAppIds: new Set(),
   })
   // Single-flight per context: the latest scope's read wins, an in-flight
   // mutation re-reads afterwards, and a superseded response never commits.
@@ -126,7 +165,7 @@ export function useMyApps(): MyAppsApi {
         errorCode: null,
       }))
       const response = await api(currentScope)
-      if (generation !== generationRef.current || scopeRef.current !== currentScope) return
+      if (generation !== generationRef.current || scopeKeyOf(scopeRef.current) !== scopeKeyOf(currentScope)) return
       if (response.productSpaceId !== currentScope.productSpaceId) return
       setState(current => ({
         ...current,
@@ -136,7 +175,7 @@ export function useMyApps(): MyAppsApi {
         errorCode: null,
       }))
     } catch (error) {
-      if (generation !== generationRef.current || scopeRef.current !== currentScope) return
+      if (generation !== generationRef.current || scopeKeyOf(scopeRef.current) !== scopeKeyOf(currentScope)) return
       setState(current => ({
         ...current,
         apps: [],
@@ -160,6 +199,7 @@ export function useMyApps(): MyAppsApi {
         errorCode: null,
         publishingAppIds: new Set(),
         withdrawingAppIds: new Set(),
+        deletingAppIds: new Set(),
       }))
       return
     }
@@ -173,14 +213,22 @@ export function useMyApps(): MyAppsApi {
     sourcePath: string
     name: string
     description?: string
-  }): Promise<MyAppSummary> => {
+    sourceKey?: string
+  }): Promise<{ app: MyAppSummary; savedAsNewVersion: boolean }> => {
     const currentScope = scopeRef.current
     if (!currentScope) {
       throw new Error('myapps_scope_changed')
     }
     const response = await window.electronAPI.myAppsCreate({ ...currentScope, ...input })
-    if (scopeRef.current === currentScope) void refresh()
-    return response.app
+    if (scopeKeyOf(scopeRef.current) === scopeKeyOf(currentScope)) void refresh()
+    // A3b idempotent save: the trusted side flattens the raw HTTP status into
+    // the answer — 200 = a NEW VERSION of the sourceKey-addressed row, 201 =
+    // a brand-new row. A legacy preload without the field simply reports
+    // "new app".
+    return {
+      app: response.app,
+      savedAsNewVersion: response.status === 200,
+    }
   }, [refresh])
 
   const publish = useCallback(async (appId: string): Promise<void> => {
@@ -201,7 +249,7 @@ export function useMyApps(): MyAppsApi {
         return { ...current, publishingAppIds: next }
       })
     }
-    if (scopeRef.current === currentScope) void refresh()
+    if (scopeKeyOf(scopeRef.current) === scopeKeyOf(currentScope)) void refresh()
   }, [refresh])
 
   const withdraw = useCallback(async (appId: string): Promise<void> => {
@@ -222,7 +270,28 @@ export function useMyApps(): MyAppsApi {
         return { ...current, withdrawingAppIds: next }
       })
     }
-    if (scopeRef.current === currentScope) void refresh()
+    if (scopeKeyOf(scopeRef.current) === scopeKeyOf(currentScope)) void refresh()
+  }, [refresh])
+
+  const deleteApp = useCallback(async (appId: string): Promise<void> => {
+    const currentScope = scopeRef.current
+    if (!currentScope) {
+      throw new Error('myapps_scope_changed')
+    }
+    setState(current => ({
+      ...current,
+      deletingAppIds: new Set([...current.deletingAppIds, appId]),
+    }))
+    try {
+      await window.electronAPI.myAppsDelete({ ...currentScope, appId })
+    } finally {
+      setState(current => {
+        const next = new Set(current.deletingAppIds)
+        next.delete(appId)
+        return { ...current, deletingAppIds: next }
+      })
+    }
+    if (scopeKeyOf(scopeRef.current) === scopeKeyOf(currentScope)) void refresh()
   }, [refresh])
 
   // A scope change during any in-flight command re-proves the fence server-
@@ -236,46 +305,6 @@ export function useMyApps(): MyAppsApi {
     create,
     publish,
     withdraw,
-  }), [canPublish, create, publish, refresh, scope, state, withdraw])
-}
-
-/* ------------------------------------------------------------------ */
-/* Correlation: my-apps rows ↔ catalog member entries                   */
-/* ------------------------------------------------------------------ */
-
-export interface MyAppsCorrelation {
-  /** catalogEntryId → the app powering it (published pairing, exact id). */
-  byPublishedEntryId: ReadonlyMap<string, MyAppSummary>
-  /** Unpublished apps paired to member entries by unique display name. */
-  unpublishedByName: ReadonlyMap<string, MyAppSummary>
-}
-
-/**
- * Pairs the my-apps list with the space catalog's member entries WITHOUT
- * treating a display name as an identity where an id exists:
- *
- * - A published app names its catalog entry explicitly (`publishedEntryId`) —
- *   the only authoritative pairing.
- * - An unpublished app has no entry id on either side, so the fallback keys on
- *   the display name and only commits UNIQUE matches; an ambiguous name wires
- *   no mutation buttons rather than risking the wrong app.
- */
-export function correlateMyAppsWithCatalogEntries(
-  apps: ReadonlyArray<MyAppSummary>,
-): MyAppsCorrelation {
-  const byPublishedEntryId = new Map<string, MyAppSummary>()
-  const unpublishedByName = new Map<string, MyAppSummary>()
-  const ambiguousNames = new Set<string>()
-  for (const app of apps) {
-    if (app.publishedEntryId) {
-      byPublishedEntryId.set(app.publishedEntryId, app)
-      continue
-    }
-    const name = app.name.trim()
-    if (!name) continue
-    if (unpublishedByName.has(name)) ambiguousNames.add(name)
-    else unpublishedByName.set(name, app)
-  }
-  for (const name of ambiguousNames) unpublishedByName.delete(name)
-  return { byPublishedEntryId, unpublishedByName }
+    delete: deleteApp,
+  }), [canPublish, create, deleteApp, publish, refresh, scope, state, withdraw])
 }

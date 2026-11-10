@@ -116,6 +116,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.myApps.CREATE,
   RPC_CHANNELS.myApps.PUBLISH,
   RPC_CHANNELS.myApps.WITHDRAW,
+  RPC_CHANNELS.myApps.DELETE,
 
   // system — local OS info
   RPC_CHANNELS.system.VERSIONS,
