@@ -102,6 +102,16 @@ export interface ClaudeContextOptions {
   getProjectContext?: () => import('@polo-ai/session-tools-core').ProjectContextFacade | null;
   sessionStorage?: SessionStorage;
   workingDirectory?: string;
+  /**
+   * POO-205 C5-fix (§5 X7): the session's ACTUAL store directory when the
+   * host knows it (a project session's `project-sessions/<projectId>/sessions/<id>`
+   * — `BaseAgent.resolveSessionDir()`'s value). When present, `sessionPath`,
+   * `dataPath` and `plansFolderPath` derive from it verbatim instead of the
+   * workspace-root layout, so generate_app artifacts land beside the session's
+   * own session.jsonl and the storage-twin gates in the Electron main find
+   * them. Absent → the legacy `{workspace.rootPath}/sessions/{id}` composition.
+   */
+  sessionDir?: string;
 }
 
 /**
@@ -248,9 +258,21 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     getProjectContext,
     get sourcesPath() { return join(workspacePath, 'sources'); },
     get skillsPath() { return join(workspacePath, 'skills'); },
-    plansFolderPath: sessionStorage.getPlansPath(workspacePath, sessionId),
-    sessionPath: sessionStorage.getSessionPath(workspacePath, sessionId),
-    dataPath: sessionStorage.getDataPath(workspacePath, sessionId),
+    // POO-205 C5-fix (§5 X7): a host-provided sessionDir (the project store)
+    // IS the session directory — every per-session folder derives from it,
+    // mirroring SessionStorage's own composition (`<session>/data`,
+    // `<session>/plans`) rather than re-deriving from the workspace root.
+    ...(options.sessionDir
+      ? {
+          plansFolderPath: join(options.sessionDir, 'plans'),
+          sessionPath: options.sessionDir,
+          dataPath: join(options.sessionDir, 'data'),
+        }
+      : {
+          plansFolderPath: sessionStorage.getPlansPath(workspacePath, sessionId),
+          sessionPath: sessionStorage.getSessionPath(workspacePath, sessionId),
+          dataPath: sessionStorage.getDataPath(workspacePath, sessionId),
+        }),
     // Live generativeUI.inline state for the render_ui handler's call-time
     // re-check (mid-session disable takes effect on the next tool call).
     isRenderUiEnabled: () => isGenerativeUiInlineEnabled(),

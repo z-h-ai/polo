@@ -260,6 +260,15 @@ export interface SessionScopedToolsOptions {
    * cache key so a project turn and a non-project turn never share a toolset.
    */
   allowProjectContext?: boolean;
+  /**
+   * POO-205 C5-fix (§5 X7): the session's ACTUAL store directory (a project
+   * session's `project-sessions/<projectId>/sessions/<id>`). Forwarded to the
+   * tool context verbatim so generate_app artifacts land beside the session's
+   * own session.jsonl instead of the workspace-root layout the twin gates no
+   * longer read. Absent → the legacy composition. Participates in the cache
+   * key: the toolset is keyed by the real session path.
+   */
+  sessionDir?: string;
 }
 
 /**
@@ -277,7 +286,9 @@ export function getSessionScopedTools(
   workingDirectory?: string,
   options?: SessionScopedToolsOptions,
 ): ReturnType<typeof createSdkMcpServer> {
-  const sessionPath = storage.getSessionPath(workspaceRootPath, sessionId);
+  // POO-205 C5-fix (§5 X7): the host-provided store directory IS the session
+  // path when present — the cache key and the context both key off it.
+  const sessionPath = options?.sessionDir ?? storage.getSessionPath(workspaceRootPath, sessionId);
   // The capability flags are part of the cache key: a session switching between
   // desktop and non-desktop turns must rebuild its toolset (P0 contract).
   const allowRequestUserInput = options?.allowRequestUserInput ?? false;
@@ -302,6 +313,9 @@ export function getSessionScopedTools(
       workspaceId: workspaceId || basename(workspaceRootPath) || '',
       sessionStorage: storage,
       workingDirectory,
+      // POO-205 C5-fix (§5 X7): the store directory wins over the workspace
+      // layout — generate_app writes must land beside the session jsonl.
+      ...(options?.sessionDir ? { sessionDir: options.sessionDir } : {}),
       // Tool-call-time generation reader:
       // the handler invokes this SYNCHRONOUSLY at initiation and binds the
       // returned value immutably into the callback chain.

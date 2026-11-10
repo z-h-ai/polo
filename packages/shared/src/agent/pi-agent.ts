@@ -1804,6 +1804,12 @@ export class PiAgent extends BaseAgent {
       workspaceId,
       sessionStorage: this.sessionStorage,
       workingDirectory: this.workingDirectory,
+      // POO-205 C5-fix (§5 X7): session-scoped tools (generate_app's canvas
+      // writes, plan/data folders) must land in the session's ACTUAL store
+      // directory, not the workspace-root layout — project sessions'
+      // genui-apps artifacts were being written beside a session.jsonl that
+      // no longer exists there, so the publish twin gate could not find them.
+      sessionDir: this.resolveSessionDir(),
       // Tool-call-time generation reader:
       // the handler invokes this SYNCHRONOUSLY at initiation and binds the
       // returned value immutably into the callback chain. The ctx itself is
