@@ -56,6 +56,7 @@ import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpac
 import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
 import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
 import { localizedTabTitle } from "@/lib/tab-display-name"
+import { projectScopedUnreadSessions } from "./unread-scope"
 import poloAppIcon from "../../../../resources/icon.png"
 
 /**
@@ -191,11 +192,20 @@ export function TopBar() {
 
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
 
-  const unreadSessions = useMemo(() => (
-    sessionMetas
-      .filter((meta) => meta.hasUnread)
-      .sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0))
-  ), [sessionMetas])
+  // POO-205 C9 (R12): while a PROJECT tab is active the notifications are
+  // PROJECT-SCOPED — the bell dot and the list count only that project's
+  // unread conversations (the workbench lives inside one project at a time;
+  // its sessions' unread never leaks across projects). Every other tab —
+  // Home, the personal Polo tab, webapps — keeps the workspace-wide list.
+  // The active tab comes from the TabShell context (the same source the
+  // strip renders from).
+  const activeProjectTabProjectId = activeTab.type === 'project'
+    ? activeTab.project?.projectId ?? null
+    : null
+  const unreadSessions = useMemo(
+    () => projectScopedUnreadSessions(sessionMetas, activeProjectTabProjectId),
+    [sessionMetas, activeProjectTabProjectId],
+  )
   const visibleUnreadSessions = unreadSessions.slice(0, MAX_NOTIFICATION_ITEMS)
 
   const user = appShell?.currentAdminUser ?? null

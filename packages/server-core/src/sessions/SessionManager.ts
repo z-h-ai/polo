@@ -8410,10 +8410,14 @@ export class SessionManager implements ISessionManager {
   /**
    * Mark all non-hidden, non-archived sessions in a workspace as read.
    * Called from "Mark All Read" context menu on "All Sessions".
+   * POO-205 C9 (R12): `options.projectId` narrows the sweep to ONE project's
+   * sessions (the "mark all read" inside a project tab) — omitted keeps the
+   * workspace-wide behavior byte-for-byte.
    */
   async markAllSessionsRead(
     workspaceId: string,
     scope?: { productSpaceId: string; accountId: string; workspaceId?: string } | null,
+    options?: { projectId?: string },
   ): Promise<void> {
     // R33-1/R35-1: the mutation is bound to the COMPLETE trusted scope
     // (space AND account AND, when provided, the Main-owned caller
@@ -8431,6 +8435,9 @@ export class SessionManager implements ISessionManager {
       // spill into another Workspace's sessions.
       if (effectiveScope.workspaceId && managed.workspace.id !== effectiveScope.workspaceId) continue
       if (managed.workspace.id !== workspaceId) continue
+      // C9 (R12): the project-narrowed sweep skips every session outside the
+      // project — a project tab's "mark all read" never touches the others.
+      if (options?.projectId && managed.projectId !== options.projectId) continue
       if (managed.hidden || managed.isArchived) continue
       if (managed.isProcessing) continue
       if (!managed.hasUnread) continue

@@ -7,11 +7,13 @@ import {
   openAppTabAtom,
   openProjectTabAtom,
   openTabsAtom,
+  updateProjectTabSnapshotAtom,
   visibleTabsAtom,
 } from '../tab-browser'
 import {
   HOME_TAB_ID,
   POLO_TAB_ID,
+  projectTabId,
 } from '../../../shared/tab-browser-types'
 import type { AppDefinition } from '../../../shared/tab-browser-types'
 
@@ -209,5 +211,59 @@ describe('tab browser committed space (POO-205 C4)', () => {
     expect(tabs).toHaveLength(1)
     expect(tabs[0]!.title).toBe('Alpha project (renamed)')
     expect(store.get(activeTabIdAtom)).toBe(tabs[0]!.id)
+  })
+})
+
+// POO-205 C9 (R12): the settings-save refresh path. updateProjectTabSnapshot
+// is openProjectTab's comparison WITHOUT activation or creation — a closed
+// project tab is never reopened, the strip focus never moves, and a no-op
+// save writes nothing (the persistence effect stays quiet).
+describe('updateProjectTabSnapshotAtom (C9 R12 settings-save refresh)', () => {
+  it('refreshes title and the carried project snapshot on an OPEN tab, answering true', () => {
+    const store = createStore()
+    store.set(openProjectTabAtom, project)
+    store.set(activeTabIdAtom, HOME_TAB_ID)
+
+    const changed = store.set(updateProjectTabSnapshotAtom, {
+      ...project,
+      name: 'Alpha project (renamed)',
+      purpose: 'new purpose',
+      instructions: 'new instructions',
+    } as typeof project)
+
+    expect(changed).toBe(true)
+    const tab = store.get(openTabsAtom).find(tab => tab.project?.projectId === 'proj-1')
+    expect(tab!.title).toBe('Alpha project (renamed)')
+    expect(tab!.project?.purpose).toBe('new purpose')
+    expect(tab!.project?.instructions).toBe('new instructions')
+    // Refresh never moves the strip focus.
+    expect(store.get(activeTabIdAtom)).toBe(HOME_TAB_ID)
+  })
+
+  it('answers false and writes NOTHING for a no-op save (identical snapshot)', () => {
+    const store = createStore()
+    store.set(openProjectTabAtom, project)
+    const before = store.get(openTabsAtom)
+
+    const changed = store.set(updateProjectTabSnapshotAtom, { ...project })
+    expect(changed).toBe(false)
+    expect(store.get(openTabsAtom)).toBe(before)
+  })
+
+  it('answers false for a CLOSED project tab — never reopened by a settings save', () => {
+    const store = createStore()
+    expect(store.set(updateProjectTabSnapshotAtom, { ...project, name: 'fresh' } as typeof project)).toBe(false)
+    expect(store.get(openTabsAtom).some(tab => tab.project?.projectId === 'proj-1')).toBe(false)
+  })
+
+  it('activating the tab it refreshes does not change the answer either way', () => {
+    const store = createStore()
+    store.set(openProjectTabAtom, project)
+
+    // Active + identical → still a no-op.
+    expect(store.set(updateProjectTabSnapshotAtom, { ...project })).toBe(false)
+    // Active + changed → refresh, focus untouched.
+    expect(store.set(updateProjectTabSnapshotAtom, { ...project, name: 'renamed again' } as typeof project)).toBe(true)
+    expect(store.get(activeTabIdAtom)).toBe(projectTabId('proj-1'))
   })
 })

@@ -75,6 +75,7 @@ import { skillsAtom } from '@/atoms/skills'
 import { extractBadges } from '@/lib/mentions'
 import { stripFailedOptimisticMessage } from '@/lib/send-failure'
 import { applyEventBillingBlock, applySendBlockedByLatch, applySendFailure } from '@/lib/send-failure-apply'
+import { handleCodedProjectLoss } from '@/components/projects/reconcile'
 import { getDefaultStore } from 'jotai'
 import {
   ShikiThemeProvider,
@@ -2265,6 +2266,16 @@ export default function App() {
     }
   }, [])
 
+  // POO-205 C9 (R12): the server's CREATE/SEND refusals for a project the
+  // user no longer belongs to arrive as the coded `prj_not_found` (C7a). The
+  // renderer closing move is the SAME reconciliation copy as the list
+  // reconciliation: close that project's tab (if open) + toast + the
+  // project-scoped last-selected cleanup. Personal spaces never receive the
+  // code — no space branch needed. Callers keep their own error faces.
+  const handleProjectLostError = useCallback((error: unknown, projectId: string | null | undefined) => {
+    handleCodedProjectLoss(store, { error, projectId, workspaceId: windowWorkspaceId })
+  }, [store, windowWorkspaceId])
+
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
     // POO-205 (Spec Q2/G4): an entered project rides EVERY creation path —
     // the immutable projectId plus the authoritative context snapshot the
@@ -2288,13 +2299,20 @@ export default function App() {
         },
       }
       : options
-    const session = await window.electronAPI.createSession(workspaceId, attachedOptions)
+    let session: Session
+    try {
+      session = await window.electronAPI.createSession(workspaceId, attachedOptions)
+    } catch (error) {
+      // C7a's not-member refusal — the bound project is gone for this user.
+      handleProjectLostError(error, activeProject?.projectId)
+      throw error
+    }
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
 
     return session
-  }, [addSession, currentAdminUser?.userId, productSpace.activeProductSpace, syncSessionOptionsFromSession])
+  }, [addSession, currentAdminUser?.userId, handleProjectLostError, productSpace.activeProductSpace, syncSessionOptionsFromSession])
 
   // Dedicated, trusted creation path for the Edit Popover session: the server
   // stamps the 'edit-popover' origin + owner identity. The generic
@@ -2730,6 +2748,10 @@ export default function App() {
         },
         onBindBillingLease: bindBillingLatchLease,
       })
+      // POO-205 C9 (R12): the C7a turn-start membership re-proof refused this
+      // send — the bound project is gone for the user; close its tab (the
+      // draft already returned through applySendFailure above).
+      handleProjectLostError(error, store.get(sessionMetaMapAtom).get(sessionId)?.projectId)
       updateSessionById(sessionId, (s) => ({
         isProcessing: false,
         messages: optimisticUserMessageId
@@ -2737,7 +2759,7 @@ export default function App() {
           : s.messages,
       }))
     }
-  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, store, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug, captureSendAttempt, resolveSendLease, commitBillingLatch, bindBillingLatchLease])
+  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, handleProjectLostError, llmConnections.length, llmConnectionsLoaded, store, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug, captureSendAttempt, resolveSendLease, commitBillingLatch, bindBillingLatchLease])
 
   // POO-177 QUOTA-01/02: the banner's manual billing refresh. The old U2
   // synchronous latch-clear is replaced by a real read: the canonical Admin
@@ -2843,7 +2865,10 @@ export default function App() {
     // Deep-link sends carry no renderer-side optimistic bubble (the manual
     // path's strip above is manual-only); just clear the processing flag.
     updateSessionById(sessionId, (s) => ({ isProcessing: false }))
-  }, [store, updateSessionById, resolveSendLease, commitBillingLatch, bindBillingLatchLease])
+    // POO-205 C9 (R12): same lost-project close as the manual send path —
+    // the U4 contract keeps all three send entries speaking identical failure.
+    handleProjectLostError(error, store.get(sessionMetaMapAtom).get(sessionId)?.projectId)
+  }, [handleProjectLostError, store, updateSessionById, resolveSendLease, commitBillingLatch, bindBillingLatchLease])
 
   // U4: asked at fire time (the deep-link auto-send runs from a setTimeout —
   // a render closure would be stale) so a latched block stops the send before

@@ -622,7 +622,10 @@ export interface ElectronAPI {
   // Session management
   getSessions(): Promise<Session[]>
   getUnreadSummary(): Promise<UnreadSummary>
-  markAllSessionsRead(workspaceId: string): Promise<void>
+  /** POO-205 C9 (R12): `options.projectId` narrows the sweep to one
+   * project's sessions (the mark-all-read inside a project tab); omitted
+   * keeps the workspace-wide behavior. */
+  markAllSessionsRead(workspaceId: string, options?: { projectId?: string }): Promise<void>
   getSessionMessages(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
   /**

@@ -354,7 +354,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     })
   })
 
-  server.handle(RPC_CHANNELS.sessions.MARK_ALL_READ, async (ctx, workspaceId: string) => {
+  server.handle(RPC_CHANNELS.sessions.MARK_ALL_READ, async (ctx, workspaceId: string, options?: { projectId?: string }) => {
     // R33-1/R35-1: the aggregate mutation is bound to the COMPLETE trusted
     // scope — account AND committed space AND the caller's Main-owned
     // Workspace. A renderer-supplied workspaceId alone can never widen the
@@ -366,7 +366,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     }
     // R38-3: post-await CAS before the aggregate mutation.
     assertSessionScopeTokenCurrent(scopeToken)
-    return sessionManager.markAllSessionsRead(workspaceId, scopeToken)
+    // POO-205 C9 (R12): the optional `{ projectId }` narrows the sweep to one
+    // project (the mark-all-read inside a project tab); omitted = workspace-wide.
+    return sessionManager.markAllSessionsRead(workspaceId, scopeToken, options)
   })
 
   // Get a single session with messages (for lazy loading)

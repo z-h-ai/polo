@@ -69,6 +69,7 @@ export interface ISessionManager {
   markAllSessionsRead(
     workspaceId: string,
     scope?: { productSpaceId: string; accountId: string; workspaceId?: string } | null,
+    options?: { projectId?: string },
   ): Promise<void>
   setActiveViewingSession(sessionId: string | null, workspaceId: string): void
   clearActiveViewingSession(workspaceId: string): void

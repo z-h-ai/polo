@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
   activeTabAtom,
   activeTabIdAtom,
@@ -11,6 +11,7 @@ import {
   openTabsAtom,
   reorderTabsAtom,
   setInstalledAppsAtom,
+  updateProjectTabSnapshotAtom,
   updateTabInfoAtom,
   visibleTabsAtom,
 } from '@/atoms/tab-browser'
@@ -34,10 +35,13 @@ import { GenUiCanvasBridge } from '@/components/tab-browser/GenUiCanvasBridge'
 import { GENUI_PINNED_APP_ID_PREFIX } from '../../shared/types'
 import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
 import {
+  activeProjectRefOf,
   clearActiveProjectIfStale,
   getActiveProjectRaw,
   setActiveProject,
+  subscribeProjectDirectory,
 } from '@/components/projects/projects-bus'
+import { closeProjectTabForLostProject } from '@/components/projects/reconcile'
 
 export interface WebAppNavigationControls {
   canGoBack: boolean
@@ -352,6 +356,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     <TabShellContext.Provider value={value}>
       {liveProductSpace && <ProductSpaceAppLaunchBridge />}
       {liveProductSpace && <ProjectTabActiveProjectBridge scope={{ accountId: liveProductSpace.accountId, productSpaceId: liveProductSpace.activeProductSpaceId }} />}
+      {liveProductSpace && <ProjectDirectoryTabSyncBridge scope={{ accountId: liveProductSpace.accountId, productSpaceId: liveProductSpace.activeProductSpaceId }} />}
       <GenUiAppPinBridge />
       <GenUiAppPublishBridge />
       <GenUiCardRegistryBridge />
@@ -392,6 +397,51 @@ function ProjectTabActiveProjectBridge({ scope }: { scope: { accountId: string; 
     if (getActiveProjectRaw()) setActiveProject(null)
     else clearActiveProjectIfStale(scope.accountId, scope.productSpaceId)
   }, [activeTab, scope.accountId, scope.productSpaceId])
+  return null
+}
+
+/**
+ * POO-205 C9 (R12): a project DIRECTORY event keeps the open project tabs
+ * and the active-project ref consistent with the freshest directory facts.
+ *
+ * - `updated` (a settings save landed): every ALREADY-OPEN tab carrying that
+ *   project refreshes its snapshot + strip title (updateProjectTabSnapshot —
+ *   never opens a tab, never moves focus). When the project is also the
+ *   ACTIVE project, the bus ref is swapped for the fresh one so the C8
+ *   sidebar header re-renders without a tab switch.
+ * - `removed`: the lost-project closing move (close + toast + last-selected
+ *   cleanup). The list reconciliation closes tabs itself; this branch backs
+ *   any direct publisher of the event.
+ *
+ * Scope-stamped like ProjectTabActiveProjectBridge: the swap publishes under
+ * THIS account + committed space only.
+ */
+function ProjectDirectoryTabSyncBridge({ scope }: { scope: { accountId: string; productSpaceId: string } }) {
+  const store = useStore()
+  useEffect(() => subscribeProjectDirectory((event) => {
+    if (event.type === 'updated') {
+      const fresh = event.project
+      const changed = store.set(updateProjectTabSnapshotAtom, {
+        projectId: fresh.id,
+        name: fresh.name,
+        ...(fresh.purpose !== undefined ? { purpose: fresh.purpose } : {}),
+        ...(fresh.instructions !== undefined ? { instructions: fresh.instructions } : {}),
+        organizationEnterpriseId: fresh.organizationEnterpriseId,
+        organizationProductSpaceId: fresh.organizationProductSpaceId,
+        myRole: fresh.myRole,
+      })
+      if (changed && getActiveProjectRaw()?.projectId === fresh.id) {
+        setActiveProject(activeProjectRefOf(scope.accountId, fresh))
+      }
+      return
+    }
+    closeProjectTabForLostProject(store, {
+      projectId: event.projectId,
+      // The last-selected cleanup is workspace-keyed and the event carries no
+      // workspace; the list reconciliation (which knows the workspace) is the
+      // path that normally fires. Tab close + toast stay correct here.
+    })
+  }), [store, scope.accountId, scope.productSpaceId])
   return null
 }
 

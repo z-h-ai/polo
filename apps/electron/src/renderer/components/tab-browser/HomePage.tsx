@@ -35,6 +35,7 @@ import { useProductSpaceAppLaunchHandoff, useOptionalProductSpaceContext } from 
 import { useStore } from 'jotai'
 import { enterProjectLightweight } from '@/components/projects/enter-project'
 import { getActiveProjectFor } from '@/components/projects/projects-bus'
+import { reconcileOpenProjectTabs } from '@/components/projects/reconcile'
 import {
   readProjectVisitOrder,
   rememberProjectPurposes,
@@ -291,6 +292,10 @@ export function HomePage({ onEnterProject }: {
   // provides it (the AppShell context owner). Without it the face keeps just
   // the expandable local guide — never a dead navigation button.
   const settingsNavigationAvailable = useOptionalAppShellContext() !== null
+  // POO-205 C9 (R12): the reconciliation needs the jotai store (tab atoms)
+  // and the workspace scope (the per-project last-selected cleanup). Read
+  // once at the top; the successful directory read below is the authority.
+  const appShellForReconcile = useOptionalAppShellContext()
   // U4: expand/collapse state of the in-place version guide (「查看更新指引」
   // → service/admin explanation + optional client-update shortcut). Local and
   // transient: a fresh error face starts collapsed.
@@ -446,6 +451,14 @@ export function HomePage({ onEnterProject }: {
         if (projectsAccountId) {
           rememberProjectPurposes(projectsAccountId, entries)
         }
+        // POO-205 C9 (R12): a SUCCESSFUL read is the directory authority —
+        // every open project tab the list no longer carries closes here with
+        // one toast (deleted or no-longer-a-member; not distinguished). A
+        // failed read never reaches this, so a network blip cannot strip tabs.
+        reconcileOpenProjectTabs(jotaiStore, {
+          visibleProjects: response.projects,
+          workspaceId: appShellForReconcile?.activeWorkspaceId ?? null,
+        })
         setProjectsState({ status: 'ready' })
       } catch (error) {
         if (cancelled) return

@@ -89,7 +89,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
-import { getActiveProjectRaw, subscribeActiveProject } from "@/components/projects/projects-bus"
+import { getActiveProjectRaw, publishProjectUpdated, subscribeActiveProject } from "@/components/projects/projects-bus"
 import { committedSpaceKindAtom } from "@/atoms/tab-browser"
 import { ProjectTabSidebar, projectTabSidebarItems, isEnterpriseProjectTabLayout } from "./ProjectTabSidebar"
 import { workbenchFocusModeAtom, workbenchSidebarVisibleAtom } from "@/atoms/workbench-view"
@@ -1134,7 +1134,7 @@ function AppShellContent({
   // and plain Tab must fall through to native traversal so the launcher
   // controls (management entry, All Apps, every App action) stay reachable
   // and the dedicated launcher scroll owner advances with focus (R42).
-  const { activeTab: shellActiveTab, updateTabInfo } = useTabShell()
+  const { activeTab: shellActiveTab } = useTabShell()
   const isWorkbenchSurfaceActive = shellActiveTab.type === 'polo'
   useAction('nav.nextZone', () => {
     focusNextZone()
@@ -1436,23 +1436,25 @@ function AppShellContent({
     void navigate(routes.action.newSession())
   }, [])
   const handleProjectSaved = useCallback((fresh: { name: string; purpose?: string; instructions?: string; myRole: 'owner' | 'manager' | 'member' }) => {
-    // C8 (R4): refresh the ACTIVE tab's project payload — the tab bridge
-    // re-publishes the bus, so the header (and later surfaces) read the new
-    // identity. The strip TITLE stays this batch's boundary (C9).
-    const tabId = shellActiveTab.id
-    updateTabInfo({
-      id: tabId,
-      project: {
-        projectId: shellActiveTab.project?.projectId ?? '',
-        name: fresh.name,
-        ...(fresh.purpose ? { purpose: fresh.purpose } : {}),
-        ...(fresh.instructions ? { instructions: fresh.instructions } : {}),
-        organizationEnterpriseId: shellActiveTab.project?.organizationEnterpriseId ?? '',
-        organizationProductSpaceId: shellActiveTab.project?.organizationProductSpaceId ?? '',
-        myRole: fresh.myRole,
-      },
+    // C9 (R12): a successful save BROADCASTS the fresh snapshot — the
+    // directory-event bridge refreshes EVERY open tab carrying the project
+    // (title included, background tabs too) and the active-project ref;
+    // focus never moves, no tab is created. A failed save never reaches this
+    // callback (ProjectSettingsView calls onSaved only on success).
+    // onSaved does not carry the identity fields, so they ride the active
+    // tab's payload — the tab hosting the settings dialog IS that project.
+    const carried = shellActiveTab.project
+    if (!carried?.projectId) return
+    publishProjectUpdated({
+      id: carried.projectId,
+      name: fresh.name,
+      ...(fresh.purpose ? { purpose: fresh.purpose } : {}),
+      ...(fresh.instructions ? { instructions: fresh.instructions } : {}),
+      organizationEnterpriseId: carried.organizationEnterpriseId,
+      organizationProductSpaceId: carried.organizationProductSpaceId,
+      myRole: fresh.myRole,
     })
-  }, [shellActiveTab, updateTabInfo])
+  }, [shellActiveTab])
   /** C8 (R7): the sidebar trim is a no-op everywhere except an enterprise
    * project tab — the unified list passes through untouched there. */
   const trimSidebarForProjectTab = useCallback((items: SidebarEntry[]) => (
@@ -2411,17 +2413,28 @@ function AppShellContent({
                         onConfigureStatuses: openConfigureStatuses,
                         onMarkAllRead: () => {
                           if (!activeWorkspaceId) return
-                          // Optimistic: clear hasUnread on all workspace session metas
+                          // POO-205 C9 (R12): inside an active PROJECT tab the
+                          // sweep is project-scoped — optimistic clear and the
+                          // RPC both stay inside the project; any other tab
+                          // keeps the workspace-wide behavior.
+                          const projectId = isEnterpriseProjectTab && activeProject
+                            ? activeProject.projectId
+                            : null
+                          // Optimistic: clear hasUnread on the swept session metas
                           setSessionMetaMap(prev => {
                             const next = new Map(prev)
                             for (const [id, meta] of next) {
-                              if (meta.workspaceId === activeWorkspaceId && meta.hasUnread) {
+                              if (meta.workspaceId === activeWorkspaceId && meta.hasUnread
+                                && (!projectId || meta.projectId === projectId)) {
                                 next.set(id, { ...meta, hasUnread: false })
                               }
                             }
                             return next
                           })
-                          window.electronAPI.markAllSessionsRead(activeWorkspaceId)
+                          window.electronAPI.markAllSessionsRead(
+                            activeWorkspaceId,
+                            projectId ? { projectId } : undefined,
+                          )
                         },
                       },
                       // Enable flat DnD reorder for status items

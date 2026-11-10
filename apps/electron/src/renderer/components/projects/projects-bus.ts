@@ -98,6 +98,44 @@ export function setActiveProject(ref: ActiveProjectRef | null): void {
   for (const listener of activeProjectListeners) listener()
 }
 
+// ---------------------------------------------------------------------------
+// POO-205 C9 (R12): project DIRECTORY events.
+//
+// The active-project ref above is driven by the ACTIVE TAB, so it only knows
+// about the project the user is looking at. The directory facts (a project
+// was renamed in settings; a project left the user's visible list) need to
+// reach the OTHER holders of a project identity: the already-open project
+// TABS (carried snapshots + strip titles) and this bus's own ref. Events
+// carry the projectId plus the freshest project summary — never a full
+// directory list. Same Set/listener style as subscribeActiveProject.
+// ---------------------------------------------------------------------------
+
+export type ProjectDirectoryEvent =
+  | { type: 'updated'; project: LightweightProjectInput }
+  | { type: 'removed'; projectId: string }
+
+const projectDirectoryListeners = new Set<(event: ProjectDirectoryEvent) => void>()
+
+/** Subscribe to project directory events (updated / removed). */
+export function subscribeProjectDirectory(listener: (event: ProjectDirectoryEvent) => void): () => void {
+  projectDirectoryListeners.add(listener)
+  return () => { projectDirectoryListeners.delete(listener) }
+}
+
+/** A settings save (or any directory refresh) landed a newer snapshot of a
+ * project that may already be open in a tab. Failure paths never publish. */
+export function publishProjectUpdated(project: LightweightProjectInput): void {
+  const event: ProjectDirectoryEvent = { type: 'updated', project }
+  for (const listener of projectDirectoryListeners) listener(event)
+}
+
+/** A project left the visible directory (removed, or the user is no longer
+ * a member — reconciliation does not distinguish). */
+export function publishProjectRemoved(projectId: string): void {
+  const event: ProjectDirectoryEvent = { type: 'removed', projectId }
+  for (const listener of projectDirectoryListeners) listener(event)
+}
+
 /** Host-effect hygiene: drop the active project the moment its scope stamp
  * stops matching the committed account + organization space. Callers pass
  * their CURRENT live scope; a mismatch (or absence) is normalized to null. */

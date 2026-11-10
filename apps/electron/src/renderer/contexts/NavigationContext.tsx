@@ -93,6 +93,7 @@ import {
   shouldLandProject,
   type ProjectFocusedSession,
 } from '@/components/projects/enter-project'
+import { closeProjectTabForLostProject, reconcileOpenProjectTabs } from '@/components/projects/reconcile'
 import { readProjectVisitOrder } from '@/lib/project-directory'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import {
@@ -852,8 +853,13 @@ export function NavigationProvider({
       project = undefined
     }
     if (!project) {
+      // POO-205 C9 (R12): the project left the directory — its tab CLOSES
+      // with the reconciliation copy (the old code left the tab dangling
+      // until manually closed). Home always; when no tab existed nothing
+      // was closed, so the session-entry toast keeps the navigation face.
+      const closed = closeProjectTabForLostProject(store, { projectId, workspaceId })
+      if (!closed) toast.error(t('topbar.chatEntry.sessionProjectUnavailable'))
       store.set(activeTabIdAtom, HOME_TAB_ID)
-      toast.error(t('topbar.chatEntry.sessionProjectUnavailable'))
       return false
     }
     await enterProjectLightweight(scope.accountId, {
@@ -866,7 +872,7 @@ export function NavigationProvider({
       myRole: project.myRole,
     }, store)
     return true
-  }, [store, t, productSpaceContext])
+  }, [store, t, productSpaceContext, workspaceId])
 
   /** POO-205 C4 (R3/R4): the `action/new-session` landing in an ENTERPRISE
    * space — reached from ⌘N/⌘⇧N, the native menu, the account menu and deep
@@ -898,6 +904,10 @@ export function NavigationProvider({
             productSpaceId: activeProductSpaceId,
             organizationEnterpriseId,
           })
+          // POO-205 C9 (R12): this successful read is a directory authority
+          // too — the same reconciliation the home load runs (a failed read
+          // returns [] below and never reconciles).
+          reconcileOpenProjectTabs(store, { visibleProjects: response.projects, workspaceId })
           return response.projects
         } catch {
           return []
@@ -918,7 +928,7 @@ export function NavigationProvider({
       enterProject: candidate => enterProjectLightweight(accountId, candidate, store),
       landEmptyState: landProjectEmptyState,
     })
-  }, [landProjectEmptyState, productSpaceContext, store, t])
+  }, [landProjectEmptyState, productSpaceContext, store, t, workspaceId])
 
   // =========================================================================
   // ACTION NAVIGATION

@@ -89,6 +89,29 @@ export const openProjectTabAtom = atom(
   },
 )
 
+/** POO-205 C9 (R12): refresh an ALREADY-OPEN project tab's carried snapshot
+ * (title included) from a fresh directory read — the openProjectTabAtom
+ * comparison, WITHOUT activation or creation: a closed project tab is never
+ * reopened by a settings save, and the strip focus never moves. Answers
+ * whether anything changed (no-op saves write nothing, so the persistence
+ * effect and the strip stay quiet). */
+export const updateProjectTabSnapshotAtom = atom(
+  null,
+  (get, set, project: NonNullable<TabInstance['project']>): boolean => {
+    const tabId = projectTabId(project.projectId)
+    const tabs = get(openTabsAtom)
+    const existing = tabs.find((tab) => tab.id === tabId)
+    if (!existing) return false
+    if (existing.title === project.name
+      && existing.project?.purpose === project.purpose
+      && existing.project?.instructions === project.instructions) return false
+    set(openTabsAtom, tabs.map(tab => (
+      tab.id === tabId ? { ...tab, title: project.name, project } : tab
+    )))
+    return true
+  },
+)
+
 export const openAppTabAtom = atom(
   null,
   (get, set, app: AppDefinition) => {
