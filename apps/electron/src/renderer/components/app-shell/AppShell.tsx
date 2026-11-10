@@ -74,7 +74,7 @@ import { MainContentPanel } from "./MainContentPanel"
 import { PanelStackContainer } from "./PanelStackContainer"
 import { CompactSessionListFilter } from "./CompactSessionListFilter"
 import type { ChatDisplayHandle } from "./ChatDisplay"
-import { LeftSidebar } from "./LeftSidebar"
+import { LeftSidebar, type SidebarItem as SidebarEntry } from "./LeftSidebar"
 import { useSession } from "@/hooks/useSession"
 import { ensureSessionMessagesLoadedAtom } from "@/atoms/sessions"
 import { AppShellProvider, type AppShellContextType } from "@/context/AppShellContext"
@@ -90,6 +90,8 @@ import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { getActiveProjectRaw, subscribeActiveProject } from "@/components/projects/projects-bus"
+import { committedSpaceKindAtom } from "@/atoms/tab-browser"
+import { ProjectTabSidebar, projectTabSidebarItems, isEnterpriseProjectTabLayout } from "./ProjectTabSidebar"
 import { workbenchFocusModeAtom, workbenchSidebarVisibleAtom } from "@/atoms/workbench-view"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
@@ -1132,7 +1134,7 @@ function AppShellContent({
   // and plain Tab must fall through to native traversal so the launcher
   // controls (management entry, All Apps, every App action) stay reachable
   // and the dedicated launcher scroll owner advances with focus (R42).
-  const { activeTab: shellActiveTab } = useTabShell()
+  const { activeTab: shellActiveTab, updateTabInfo } = useTabShell()
   const isWorkbenchSurfaceActive = shellActiveTab.type === 'polo'
   useAction('nav.nextZone', () => {
     focusNextZone()
@@ -1420,6 +1422,42 @@ function AppShellContent({
   // project whose name the tab carries. activeProject is null for home /
   // personal-chat / webapp tabs (driven by ProjectTabActiveProjectBridge).
   const activeProject = useSyncExternalStore(subscribeActiveProject, getActiveProjectRaw)
+  // POO-205 C8 (R7): an ENTERPRISE project tab re-skins the sidebar as the
+  // PROJECT — the identity header (name/purpose/members/settings/new-session)
+  // replaces the workspace-global rows (sources/skills/automations/settings),
+  // which are workspace data and can never create a session from here. The
+  // personal space (and every other tab) keeps the unified sidebar untouched.
+  const committedSpaceKind = useAtomValue(committedSpaceKindAtom)
+  const isEnterpriseProjectTab = isEnterpriseProjectTabLayout(committedSpaceKind, shellActiveTab)
+  const handleProjectTabNewSession = useCallback(() => {
+    // The EXISTING enterprise routing: the action route lands the project's
+    // zero-write empty state (NavigationContext owns the sequence — arming,
+    // tab activation, landing). No session is created on this path.
+    void navigate(routes.action.newSession())
+  }, [])
+  const handleProjectSaved = useCallback((fresh: { name: string; purpose?: string; instructions?: string; myRole: 'owner' | 'manager' | 'member' }) => {
+    // C8 (R4): refresh the ACTIVE tab's project payload — the tab bridge
+    // re-publishes the bus, so the header (and later surfaces) read the new
+    // identity. The strip TITLE stays this batch's boundary (C9).
+    const tabId = shellActiveTab.id
+    updateTabInfo({
+      id: tabId,
+      project: {
+        projectId: shellActiveTab.project?.projectId ?? '',
+        name: fresh.name,
+        ...(fresh.purpose ? { purpose: fresh.purpose } : {}),
+        ...(fresh.instructions ? { instructions: fresh.instructions } : {}),
+        organizationEnterpriseId: shellActiveTab.project?.organizationEnterpriseId ?? '',
+        organizationProductSpaceId: shellActiveTab.project?.organizationProductSpaceId ?? '',
+        myRole: fresh.myRole,
+      },
+    })
+  }, [shellActiveTab, updateTabInfo])
+  /** C8 (R7): the sidebar trim is a no-op everywhere except an enterprise
+   * project tab — the unified list passes through untouched there. */
+  const trimSidebarForProjectTab = useCallback((items: SidebarEntry[]) => (
+    isEnterpriseProjectTab ? projectTabSidebarItems(items) : items
+  ), [isEnterpriseProjectTab])
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
     if (!activeWorkspaceId) return metas.filter(s => !s.hidden)
@@ -2331,6 +2369,19 @@ function AppShellContent({
               <div className="flex-1 flex flex-col min-h-0">
                 {/* Primary Nav: All Sessions (▸ Statuses, Flagged, Archived), Labels | Sources, Skills */}
                 <div className="flex-1 min-h-0">
+                {/* POO-205 C8 (R7): an ENTERPRISE project tab opens with the
+                    project identity header — name/purpose, the members panel
+                    entry, the settings gear and the project's zero-write
+                    「新建会话」. The workspace-global rows below disappear on
+                    the same condition (sidebar trim); the personal sidebar
+                    never renders this block. */}
+                {isEnterpriseProjectTab && activeProject && (
+                  <ProjectTabSidebar
+                    project={activeProject}
+                    onNewSession={handleProjectTabNewSession}
+                    onProjectSaved={handleProjectSaved}
+                  />
+                )}
                 <LeftSidebar
                   isCollapsed={false}
                   getItemProps={getSidebarItemProps}
@@ -2338,7 +2389,11 @@ function AppShellContent({
                   // POO-103: no bottom-left avatar/user menu. Assistant settings
                   // live in the "Settings" row below Automations; account actions
                   // (logout, spaces) stay in the TopBar account menu.
-                  links={[
+                  // POO-205 C8 (R7): an enterprise project tab keeps ONLY the
+                  // conversation-filter rows (allSessions + labels) — the
+                  // whitelist trim; every other committed space passes the
+                  // unified list through untouched.
+                  links={trimSidebarForProjectTab([
                     // --- Sessions Section ---
                     // All Sessions: expandable with status children (sortable) + Flagged & Archived as trailing items
                     {
@@ -2556,7 +2611,7 @@ function AppShellContent({
                       variant: (isSettingsNavigation(navState) && navState.subpage !== null && getSettingsPageScope(navState.subpage) === 'assistant') ? "default" : "ghost",
                       onClick: handleAssistantSettingsClick,
                     },
-                  ]}
+                  ])}
                 />
                 {/* Agent Tree: Hierarchical list of agents */}
                 {/* Agents section removed */}
