@@ -10,16 +10,19 @@
 import * as React from 'react'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAtomValue } from 'jotai'
 import i18n from 'i18next'
 import { GripHorizontal } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react' // motion used for backdrop only
 import { Popover, PopoverTrigger, PopoverContent } from './popover'
 import { Button } from './button'
 import { ViewportPortal } from './viewport-portal'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@polo-ai/ui'
 import { cn } from '@/lib/utils'
 import { usePlatform } from '@polo-ai/ui'
 import { toast } from 'sonner'
 import type { ContentBadge, Session, CreateSessionOptions } from '../../../shared/types'
+import { committedSpaceKindAtom } from '@/atoms/tab-browser'
 import { useActiveWorkspace, useAppShellContext, useSession, usePendingPermission, usePendingCredential, usePendingQuestion } from '@/context/AppShellContext'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { editorIdentityId } from '@/lib/editor-identity'
@@ -739,6 +742,10 @@ export function EditPopover({
   const { t } = useTranslation()
   const { onOpenFile, onOpenUrl } = usePlatform()
   const workspace = useActiveWorkspace()
+  // POO-205 C6: the popover edits the PERSONAL workspace's config files with
+  // organization compute — it is disabled outright in a committed enterprise
+  // space (the trigger is inert + tooltip; App's creation entry backs it up).
+  const enterpriseBlocked = useAtomValue(committedSpaceKindAtom) === 'enterprise'
 
   // Build placeholder: for inline execution use rotating array, otherwise build descriptive string
   // overridePlaceholder allows contexts like add-source/add-skill to say "add" instead of "change"
@@ -781,6 +788,12 @@ export function EditPopover({
     if (!workspace?.id) {
       throw new Error('[EditPopover] cannot create a session without a workspace')
     }
+    // POO-205 C6: never create the popover session in an enterprise space —
+    // belt-and-braces behind the disabled trigger (App's creation entry
+    // carries the same gate).
+    if (enterpriseBlocked) {
+      throw new Error('[EditPopover] session creation is disabled in an enterprise space')
+    }
     // Trusted creation path: the server stamps the
     // 'edit-popover' origin + owner identity here. The generic
     // onCreateSession can never grant that origin, and no per-turn marker
@@ -795,7 +808,7 @@ export function EditPopover({
       popoverOwner: popoverOwnerId,
     })
     return newSession.id
-  }, [workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, popoverOwnerId, onCreateEditPopoverSession])
+  }, [workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, popoverOwnerId, enterpriseBlocked, onCreateEditPopoverSession])
 
   // Hidden inline session lifecycle (adopt on open / create on first send),
   // with the restoring gate + CAS adoption that closes the "delayed restore
@@ -1062,10 +1075,30 @@ export function EditPopover({
         </AnimatePresence>
       </ViewportPortal>
 
-      <Popover open={open} onOpenChange={setOpen} modal={modal}>
-        <PopoverTrigger asChild className={triggerClassName}>
-          {trigger}
-        </PopoverTrigger>
+      <Popover open={enterpriseBlocked ? false : open} onOpenChange={setOpen} modal={modal}>
+        {enterpriseBlocked ? (
+          // POO-205 C6: enterprise space — the trigger is an inert, dimmed
+          // affordance whose tooltip carries the reason; the popover can
+          // never open (open forced false) and App's creation entry refuses
+          // to build the session as the server-side backstop.
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                aria-disabled
+                data-edit-popover-blocked="enterprise"
+                className={cn('inline-flex cursor-not-allowed opacity-50', triggerClassName)}
+                onClick={e => e.preventDefault()}
+              >
+                {trigger}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{t('editPopover.enterpriseUnsupported')}</TooltipContent>
+          </Tooltip>
+        ) : (
+          <PopoverTrigger asChild className={triggerClassName}>
+            {trigger}
+          </PopoverTrigger>
+        )}
         <PopoverContent
             side={side}
             align={align}

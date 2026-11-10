@@ -2303,13 +2303,22 @@ export default function App() {
     workspaceId: string,
     options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
   ): Promise<Session> => {
+    // POO-205 C6: the popover edits the PERSONAL workspace's config with
+    // organization compute — never allowed in a committed enterprise space.
+    // The EditPopover trigger is disabled there; this is the creation
+    // backstop: no session, the same reason surfaced as a toast.
+    if (productSpace.activeProductSpace?.kind === 'enterprise') {
+      const reason = t('editPopover.enterpriseUnsupported')
+      toast.error(reason)
+      throw new Error(reason)
+    }
     const session = await window.electronAPI.createEditPopoverSession(workspaceId, options)
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
 
     return session
-  }, [addSession, syncSessionOptionsFromSession])
+  }, [addSession, syncSessionOptionsFromSession, productSpace.activeProductSpace, t])
 
   // Deep link navigation is initialized later after handleInputChange is defined
 

@@ -150,7 +150,13 @@ export function SendToWorkspaceDialog({
       onOpenChange(false)
       setSelectedWorkspaceId(null)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
+      // POO-205 C6: a coded project-binding refusal (enterprise target
+      // without a project) shows the per-locale copy — the raw message is
+      // the server's canonical zh-Hans text, not the user's locale.
+      const code = (error as { code?: unknown } | null)?.code
+      const message = code === 'PROJECT_CONTEXT_REQUIRED'
+        ? t('errors.projectContextRequired')
+        : error instanceof Error ? error.message : 'Unknown error'
       toast.error(t('sendToWorkspace.failedToSend', { count }), {
         id: toastId,
         description: message,

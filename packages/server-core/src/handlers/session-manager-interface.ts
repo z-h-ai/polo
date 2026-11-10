@@ -226,11 +226,15 @@ export interface ISessionManager {
    * Import a session bundle into a target workspace.
    * Creates session directory, writes JSONL + files, registers in memory.
    * Returns the new session ID and any compatibility warnings.
+   * POO-205 C6: an enterprise destination must name its project
+   * (`options.projectId`) — the import lands in that project's store; a
+   * personal destination must not carry one (shared creation gate).
    */
   importSession(
     workspaceId: string,
     bundle: SessionBundle,
     mode: DispatchMode,
+    options?: { projectId?: string },
   ): Promise<{ sessionId: string; warnings?: string[] }>
 
   /**

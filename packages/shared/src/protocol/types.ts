@@ -18,6 +18,7 @@ import {
   type PmLocalErrorCode,
   type ProjectErrorCode,
 } from './project-members'
+import { SESSION_PROJECT_ERROR_CODES, type SessionProjectErrorCode } from './session-project'
 
 // ---------------------------------------------------------------------------
 // Message envelope
@@ -115,6 +116,7 @@ export type ErrorCode =
   | ClientEnterpriseErrorCode
   | PmLocalErrorCode
   | ProjectErrorCode
+  | SessionProjectErrorCode
 
 /**
  * Every code the transport preserves across the wire. This set MUST stay in
@@ -176,6 +178,12 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   // per-code recovery copy (prj_last_owner, prj_member_not_in_organization…)
   // can never branch.
   ...PROJECT_ERROR_CODES,
+  // SessionProjectErrorCode (POO-205 C6): the session layer raises these at
+  // its own project-binding gate (create/branch/import). Without the spread
+  // the transport rewrites every one of them to HANDLER_ERROR and the
+  // renderer's per-code recovery copy (project required in enterprise,
+  // project rejected in personal, branch across projects) can never branch.
+  ...SESSION_PROJECT_ERROR_CODES,
 ])
 
 export function isErrorCode(value: unknown): value is ErrorCode {

@@ -358,7 +358,11 @@ export function trustedScopeMatchesSessionRecord(
   if (!record.accountId || record.accountId !== scope.accountId) return false
   if (!record.productSpaceId || record.productSpaceId !== scope.productSpaceId) return false
   if (scope.workspaceId && record.workspaceId !== scope.workspaceId) return false
-  if (scope.projectId && record.projectId && record.projectId !== scope.projectId) return false
+  // POO-205 C6: a scope carrying a project pins the record to EXACTLY that
+  // project — a record without a binding no longer drifts through as a
+  // wildcard (the old `record.projectId &&` guard let unbound records pass
+  // every project-scoped query).
+  if (scope.projectId && record.projectId !== scope.projectId) return false
   return true
 }
 

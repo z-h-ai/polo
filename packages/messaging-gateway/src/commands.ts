@@ -11,6 +11,7 @@
  */
 
 import type { ISessionManager } from '@polo-ai/server-core/handlers'
+import { SESSION_PROJECT_ERROR_MESSAGES } from '@polo-ai/shared/protocol'
 import {
   evaluatePreBindingAccess,
   executeRejection,
@@ -304,7 +305,13 @@ export class Commands {
         threadId: msg.threadId,
       })
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+      // POO-205 C6: the session layer's project-binding gate refuses /new in
+      // an enterprise space without a project — reply the canonical reason
+      // itself instead of the error-class-prefixed message.
+      const coded = (err as { code?: unknown } | null)?.code
+      const errorMsg = coded === 'PROJECT_CONTEXT_REQUIRED'
+        ? SESSION_PROJECT_ERROR_MESSAGES.PROJECT_CONTEXT_REQUIRED
+        : err instanceof Error ? err.message : 'Unknown error'
       this.log.error('failed to create session from chat', {
         event: 'session_create_failed',
         workspaceId: this.workspaceId,

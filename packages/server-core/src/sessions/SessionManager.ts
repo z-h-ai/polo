@@ -116,6 +116,7 @@ import {
   type SessionStorage,
 } from '@polo-ai/shared/sessions'
 import { relocateProjectSessionArtifacts } from './session-store-relocation'
+import { assertSessionProjectBinding, resolveSessionProjectBinding } from './session-project-binding'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@polo-ai/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@polo-ai/shared/config'
 import { getValidClaudeOAuthToken } from '@polo-ai/shared/auth'
@@ -125,7 +126,7 @@ import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { restoreFiles } from '@polo-ai/shared/utils/bundle-files'
 import { getCredentialManager, accountToCredentialId } from '@polo-ai/shared/credentials'
 import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId, GENUI_MODEL_CONTEXT_MAX_QUEUE } from '@polo-ai/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId, GENUI_MODEL_CONTEXT_MAX_QUEUE, CodedError, SESSION_PROJECT_ERROR_MESSAGES } from '@polo-ai/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
 import { perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@polo-ai/shared/utils'
 import { invalidateSkillsCache, type LoadedSkill } from '@polo-ai/shared/skills'
@@ -1958,6 +1959,12 @@ export class SessionManager implements ISessionManager {
       labels: request.labels ?? managed.labels,
       workingDirectory: request.workingDirectory,
       hidden: managed.hidden,
+      // POO-205 C6: a spawned child lives in its parent's project — same
+      // binding, same context, same project store (the shared creation gate
+      // then re-validates; an enterprise parent without a binding fails with
+      // the coded readable reason).
+      projectId: managed.projectId,
+      projectContext: managed.projectContext,
       // Spawned sessions NEVER inherit the Edit Popover grant — the
       // origin is scoped to the exact popover session that earned it
       // (fail closed).
@@ -2013,8 +2020,8 @@ export class SessionManager implements ISessionManager {
    * CURRENT complete Main-owned scope. An out-of-scope managed session
    * (legacy/unbound, replaced account, missing fence, or in-flight
    * fence/account replacement) lists NOTHING — not even itself. In-scope,
-   * only sessions matching the same trusted account, committed ProductSpace
-   * and Workspace are listed.
+   * only sessions matching the same trusted account, committed ProductSpace,
+   * Workspace and — POO-205 C6 — the same project binding are listed.
    */
   private listSessionsInManagedScope(
     managed: ManagedSession,
@@ -2030,7 +2037,11 @@ export class SessionManager implements ISessionManager {
     const offset = options?.offset ?? 0
 
     let sessions = this.getSessions(managed.workspace.id).filter(s => (
-      trustedScopeMatchesSessionRecord(s, scope)
+      // POO-205 C6: the source session's project binding is strict on both
+      // sides — another project's sessions and bound-vs-unbound sessions do
+      // not exist for this listing.
+      (s.projectId ?? null) === (scope.projectId ?? null)
+      && trustedScopeMatchesSessionRecord(s, scope)
     ))
 
     // Filter
@@ -2248,6 +2259,9 @@ export class SessionManager implements ISessionManager {
     accountId: string
     productSpaceId: string
     workspaceId: string
+    /** POO-205 C6: the session's own project binding (absent for an
+     * unbound/personal session) — every Agent tool target must match it. */
+    projectId?: string
   } | null {
     // R37-1: the resolution brackets its reads with the account transition
     // epoch and refuses an in-flight transition outright — a beginEnding
@@ -2266,10 +2280,12 @@ export class SessionManager implements ISessionManager {
       accountId: managed.accountId,
       productSpaceId: managed.productSpaceId,
       workspaceId: managed.workspace.id,
+      projectId: managed.projectId,
     }, {
       accountId: runtimeScope.accountId,
       productSpaceId: runtimeScope.productSpaceId,
       workspaceId: managed.workspace.id,
+      projectId: managed.projectId,
     })) {
       return null
     }
@@ -2284,6 +2300,7 @@ export class SessionManager implements ISessionManager {
       accountId: runtimeScope.accountId,
       productSpaceId: runtimeScope.productSpaceId,
       workspaceId: managed.workspace.id,
+      projectId: managed.projectId,
     }
   }
 
@@ -2391,18 +2408,23 @@ export class SessionManager implements ISessionManager {
    * R35-1/R36-1: resolves a self-management tool TARGET session through the
    * managed session's CURRENT complete Main-owned scope. The managed
    * session and the target — including a SELF target — must both match the
-   * same immutable trusted account, committed ProductSpace and Workspace;
-   * anything else does not exist for this caller (null → fail closed).
+   * same immutable trusted account, committed ProductSpace and Workspace,
+   * and (POO-205 C6) the SAME project: the source session's project binding
+   * is strict on both sides, so a project session cannot even see another
+   * project's sessions and an unbound session cannot see bound ones.
+   * Anything else does not exist for this caller (null → fail closed).
    */
   private managedScopeTarget(managed: ManagedSession, targetId: string): ManagedSession | null {
     const scope = this.managedTrustedScope(managed)
     if (!scope) return null
     const target = this.sessions.get(targetId)
     if (!target) return null
+    if ((target.projectId ?? null) !== (scope.projectId ?? null)) return null
     if (!trustedScopeMatchesSessionRecord({
       accountId: target.accountId,
       productSpaceId: target.productSpaceId,
       workspaceId: target.workspace.id,
+      projectId: target.projectId,
     }, scope)) return null
     return target
   }
@@ -4416,6 +4438,10 @@ export class SessionManager implements ISessionManager {
       branchFromSdkCwd?: string
       branchFromSdkTurnId?: string
       sourceProvider?: 'anthropic' | 'pi'
+      /** POO-205 C6: the branch inherits the source's immutable project
+       * binding and context — a branch lives in the source's project. */
+      sourceProjectId?: string
+      sourceProjectContext?: { name: string; purpose?: string; instructions?: string }
     } | undefined
 
     if (options?.branchFromSessionId || options?.branchFromMessageId) {
@@ -4489,6 +4515,20 @@ export class SessionManager implements ISessionManager {
           activeProductSpaceId,
         })
         throw new Error('Invalid branch request: source session belongs to a different ProductSpace')
+      }
+      // POO-205 C6: the branch inherits the SOURCE session's project binding
+      // (managed record, else the cold header). An explicitly different
+      // projectId is a routing error, never a re-binding — the request may
+      // only confirm the source's own project.
+      const branchSourceProjectId = sourceManaged?.projectId ?? sourceSession.projectId ?? null
+      if (options?.projectId && options.projectId !== branchSourceProjectId) {
+        sessionLog.warn('Branch validation failed: requested project differs from the source session project', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+          requestedProjectId: options.projectId,
+          sourceProjectId: branchSourceProjectId,
+        })
+        throw new CodedError('BRANCH_PROJECT_MISMATCH', SESSION_PROJECT_ERROR_MESSAGES.BRANCH_PROJECT_MISMATCH)
       }
       // R33-1: a cold source's immutable account binding must equally match
       // the current trusted account — an unbound (legacy) or replaced-account
@@ -4635,6 +4675,8 @@ export class SessionManager implements ISessionManager {
         branchFromSdkCwd,
         branchFromSdkTurnId,
         sourceProvider: sourceBackendContext.provider,
+        sourceProjectId: branchSourceProjectId ?? undefined,
+        sourceProjectContext: sourceManaged?.projectContext ?? sourceSession.projectContext ?? undefined,
       }
 
       sessionLog.info('Branch validation succeeded', {
@@ -4658,26 +4700,36 @@ export class SessionManager implements ISessionManager {
       throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
     }
 
-    // POO-205 (Q2): chat lives inside a project. An enterprise session MUST
-    // carry the project binding; a personal session must never have one.
-    // The renderer's projectId is a routing/consistency assertion, not an
-    // authorization grant — membership is admin-proven where the project is
-    // resolved (project-context send path, member RPCs).
+    // POO-205 (Q2) + C6: chat lives inside a project. A branch inherits its
+    // source's project binding; every other creation surface uses the
+    // caller-supplied one. The ONE gate (assertSessionProjectBinding —
+    // shared with importSession so C7a's member validation covers both)
+    // raises coded PROJECT_CONTEXT_REQUIRED / PROJECT_BINDING_REJECTED_IN_
+    // PERSONAL_SPACE with the canonical reason text; automation run records,
+    // the messaging gateway and the renderer all branch on the code.
     const activeSpaceKind = getRuntimeActiveProductSpaceKind()
-    if (trustedScope?.productSpaceId) {
-      if (activeSpaceKind === 'enterprise' && !options?.projectId) {
-        throw new Error('PROJECT_CONTEXT_REQUIRED')
-      }
-      if (activeSpaceKind !== 'enterprise' && options?.projectId) {
-        throw new Error('PROJECT_BINDING_REJECTED_IN_PERSONAL_SPACE')
-      }
-    }
+    const boundProjectId = validatedBranch
+      ? validatedBranch.sourceProjectId
+      : options?.projectId
+    const boundProjectContext = validatedBranch
+      ? validatedBranch.sourceProjectContext
+      : options?.projectContext
+    assertSessionProjectBinding({
+      hasCommittedProductSpace: !!trustedScope?.productSpaceId,
+      activeSpaceKind,
+      projectId: boundProjectId,
+    })
+    const effectiveProjectId = resolveSessionProjectBinding({
+      hasCommittedProductSpace: !!trustedScope?.productSpaceId,
+      activeSpaceKind,
+      projectId: boundProjectId,
+    })
 
     // POO-205 (G4): a project session's physical store is its project root —
     // the derived path rides the record as workspaceRootPath, so every later
     // save (persistence queue) lands in the same store automatically.
-    const createStoreRoot = options?.projectId && trustedScope?.productSpaceId
-      ? projectSessionStoreRoot(workspaceRootPath, options.projectId)
+    const createStoreRoot = effectiveProjectId && trustedScope?.productSpaceId
+      ? projectSessionStoreRoot(workspaceRootPath, effectiveProjectId)
       : workspaceRootPath
 
     // Use storage layer to create and persist the session
@@ -4695,15 +4747,12 @@ export class SessionManager implements ISessionManager {
       isFlagged: options?.isFlagged,
       productSpaceId: trustedScope?.productSpaceId,
       accountId: trustedScope?.accountId,
-      projectId: trustedScope?.productSpaceId && activeSpaceKind === 'enterprise'
-        ? options?.projectId
-        : undefined,
+      projectId: effectiveProjectId,
       // P12-5: capture the project's context metadata only for a session the
       // server itself binds to an enterprise space — the renderer-supplied
-      // values are a projection of THAT space, never a client-asserted scope.
-      projectContext: trustedScope?.productSpaceId && activeSpaceKind === 'enterprise'
-        ? options?.projectContext
-        : undefined,
+      // values are a projection of THAT space, never a client-asserted scope
+      // (a branch carries its SOURCE's context forward, C6).
+      projectContext: effectiveProjectId ? boundProjectContext : undefined,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -4791,9 +4840,7 @@ export class SessionManager implements ISessionManager {
       llmConnection: targetBackendContext.connection?.managedBy === 'admin' ? targetBackendContext.connection.slug : options?.llmConnection,
       productSpaceId: trustedScope?.productSpaceId,
       accountId: trustedScope?.accountId,
-      projectId: trustedScope?.productSpaceId && activeSpaceKind === 'enterprise'
-        ? options?.projectId
-        : undefined,
+      projectId: effectiveProjectId,
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
@@ -13829,8 +13876,9 @@ export class SessionManager implements ISessionManager {
     workspaceId: string,
     bundle: SessionBundle,
     mode: DispatchMode,
+    options?: { projectId?: string },
   ): Promise<{ sessionId: string; warnings?: string[] }> {
-    sessionLog.info(`[import] Starting import: workspaceId=${workspaceId}, mode=${mode}, bundleSessionId=${bundle?.session?.header?.id ?? 'unknown'}, files=${bundle?.files?.length ?? 0}`)
+    sessionLog.info(`[import] Starting import: workspaceId=${workspaceId}, mode=${mode}, bundleSessionId=${bundle?.session?.header?.id ?? 'unknown'}, files=${bundle?.files?.length ?? 0}, projectId=${options?.projectId ?? 'none'}`)
 
     if (!validateBundle(bundle)) {
       throw new Error('Invalid session bundle')
@@ -13858,6 +13906,28 @@ export class SessionManager implements ISessionManager {
     const warnings: string[] = []
     const workspaceRootPath = workspace.rootPath
 
+    // POO-205 C6: the import rides the SAME project-binding gate as session
+    // creation — an enterprise import must name its project (and land in
+    // that project's store), a personal import must never carry one. The
+    // bundle header's own binding is ignored: it belongs to the SOURCE
+    // server's space and is never adopted as the destination's scope.
+    const importSpaceKind = getRuntimeActiveProductSpaceKind()
+    assertSessionProjectBinding({
+      hasCommittedProductSpace: !!importScope.productSpaceId,
+      activeSpaceKind: importSpaceKind,
+      projectId: options?.projectId,
+    })
+    const importedProjectId = resolveSessionProjectBinding({
+      hasCommittedProductSpace: !!importScope.productSpaceId,
+      activeSpaceKind: importSpaceKind,
+      projectId: options?.projectId,
+    })
+    // POO-205 (G4): a project-bound import writes into the project's store
+    // root — reservation, JSONL, files and rollback all target it.
+    const importStoreRoot = importedProjectId && importScope.productSpaceId
+      ? projectSessionStoreRoot(workspaceRootPath, importedProjectId)
+      : workspaceRootPath
+
     // Reserve the public ID atomically. A scan remains useful for a readable
     // candidate, but reserveSession is the cross-process collision authority.
     let sessionId = ''
@@ -13867,7 +13937,7 @@ export class SessionManager implements ISessionManager {
         throw new Error(`Session ${sessionId} already exists in target workspace`)
       }
       try {
-        this.sessionStorage.reserveSession(workspaceRootPath, sessionId)
+        this.sessionStorage.reserveSession(importStoreRoot, sessionId)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
           throw new Error(`Session ${sessionId} already exists in target workspace`)
@@ -13878,7 +13948,7 @@ export class SessionManager implements ISessionManager {
       for (let attempt = 0; attempt < 20; attempt++) {
         const candidate = generateSessionId(workspaceRootPath, this.sessionStorage)
         try {
-          this.sessionStorage.reserveSession(workspaceRootPath, candidate)
+          this.sessionStorage.reserveSession(importStoreRoot, candidate)
           sessionId = candidate
           break
         } catch (error) {
@@ -13890,7 +13960,7 @@ export class SessionManager implements ISessionManager {
       if (!sessionId) throw new Error('Failed to reserve a unique imported session ID')
     }
 
-    const sessionDir = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
+    const sessionDir = this.sessionStorage.getSessionPath(importStoreRoot, sessionId)
     let importCommitted = false
 
     try {
@@ -13898,12 +13968,15 @@ export class SessionManager implements ISessionManager {
       const header = bundle.session.header
       const storedSession: StoredSession = {
         id: sessionId,
-        workspaceRootPath,
+        // POO-205 (G4): the record rides its ACTUAL store root (the project
+        // store for a project-bound import) so every later save lands in the
+        // same store.
+        workspaceRootPath: importStoreRoot,
         sdkSessionId: header.sdkSessionId, // Preserved initially; fork logic below may clear it
         // Always regenerate sdkCwd for the target workspace.
         // The source sdkCwd points to a path on the originating server
         // which doesn't exist here (cross-server transfer).
-        sdkCwd: this.sessionStorage.getSessionPath(workspaceRootPath, sessionId),
+        sdkCwd: this.sessionStorage.getSessionPath(importStoreRoot, sessionId),
         name: header.name,
         createdAt: header.createdAt,
         lastUsedAt: Date.now(),
@@ -13928,6 +14001,10 @@ export class SessionManager implements ISessionManager {
         // never an unbound (quarantined-at-birth) header.
         productSpaceId: importScope.productSpaceId,
         accountId: importScope.accountId,
+        // POO-205 C6: the destination's own project binding (the gate above
+        // guarantees it in an enterprise space) — never the bundle header's
+        // foreign binding.
+        projectId: importedProjectId,
       }
 
       // Fork-specific: set up SDK branching if branchInfo provided
@@ -14044,7 +14121,7 @@ export class SessionManager implements ISessionManager {
         // registered, so any registered record belongs to that owner.
         let rollbackFailure: string | null = null
         if (!this.sessions.has(sessionId)) {
-          const deleted = this.sessionStorage.delete(workspaceRootPath, sessionId)
+          const deleted = this.sessionStorage.delete(importStoreRoot, sessionId)
           if (deleted === false) {
             rollbackFailure = 'storage delete returned false'
           }
@@ -14097,7 +14174,7 @@ export class SessionManager implements ISessionManager {
           const cleanupRollbackFailure: string[] = []
           let deleted: boolean
           try {
-            deleted = this.sessionStorage.delete(workspaceRootPath, sessionId)
+            deleted = this.sessionStorage.delete(importStoreRoot, sessionId)
           } catch (cleanupError) {
             cleanupRollbackFailure.push(`storage delete threw: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
             deleted = false

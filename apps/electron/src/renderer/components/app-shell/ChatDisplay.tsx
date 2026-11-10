@@ -2079,9 +2079,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             navigate(routes.view.allSessions(child.id), { newPanel: resolveBranchNewPanelOption(options) })
                           } catch (error) {
                             const rawMessage = error instanceof Error ? error.message : t('chat.failedToCreateBranch')
+                            // POO-205 C6: coded project-binding errors map to
+                            // their per-locale copy (the transport preserves
+                            // the code; the raw message is the server's
+                            // canonical zh-Hans text, not the user's locale).
+                            const code = (error as { code?: unknown } | null)?.code
                             // Matching stays on the raw server error text; only the
                             // replacement guidance copy is localized.
-                            const message = rawMessage.includes('source and target providers must match')
+                            const message = code === 'BRANCH_PROJECT_MISMATCH'
+                              ? t('errors.branchProjectMismatch')
+                              : rawMessage.includes('source and target providers must match')
                               || rawMessage.includes('same provider/backend')
                               ? t('chat.branchProviderMismatch')
                               : rawMessage

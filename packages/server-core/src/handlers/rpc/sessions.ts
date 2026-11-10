@@ -1141,7 +1141,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // with the committing client's context) can never import into a workspace
   // the caller is not in, and a caller without a resolvable Workspace fails
   // closed before any read or write.
-  const importHandler = async (ctx: RequestContext, targetWorkspaceId: string, bundle: unknown, mode: string) => {
+  const importHandler = async (ctx: RequestContext, targetWorkspaceId: string, bundle: unknown, mode: string, projectId?: string) => {
     if (!getRuntimeActiveProductSpace()) {
       throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
     }
@@ -1157,11 +1157,17 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     assertSessionScopeTokenCurrent(importScopeToken)
     if (!targetWorkspaceId || typeof targetWorkspaceId !== 'string') throw new Error('targetWorkspaceId is required')
     if (mode !== 'move' && mode !== 'fork') throw new Error(`Invalid dispatch mode: ${mode}`)
+    // POO-205 C6: optional project binding for the destination — an
+    // enterprise import must name its project (the session layer's shared
+    // gate enforces it and lands the import in the project store).
+    if (projectId !== undefined && (typeof projectId !== 'string' || !projectId.trim())) {
+      throw new Error('projectId must be a non-empty string when provided')
+    }
 
-    return sessionManager.importSession(targetWorkspaceId, bundle as import('@polo-ai/shared/sessions').SessionBundle, mode)
+    return sessionManager.importSession(targetWorkspaceId, bundle as import('@polo-ai/shared/sessions').SessionBundle, mode, projectId ? { projectId } : undefined)
   }
   server.handle(RPC_CHANNELS.sessions.IMPORT, async (ctx, ...rest: unknown[]) => {
-    return importHandler(ctx, ...(rest as [string, unknown, string]))
+    return importHandler(ctx, ...(rest as [string, unknown, string, string?]))
   })
   // Also register as transferable so chunked transfer can invoke it on commit
   setTransferableHandler(RPC_CHANNELS.sessions.IMPORT, importHandler)
